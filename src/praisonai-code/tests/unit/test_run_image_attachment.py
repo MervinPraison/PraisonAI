@@ -33,7 +33,14 @@ class _RecordingOutput:
 
 
 def _install_fake_praisonai(monkeypatch):
-    """Install a fake PraisonAI that records the args it receives and returns."""
+    """Install a fake PraisonAI that records the args it receives and returns.
+
+    ``--image`` is a wrapper-only feature (it routes through the wrapper's
+    vision ImageHandler via ``handle_direct_prompt``), so these tests exercise
+    the wrapper delegation path: pretend the wrapper is installed so the default
+    run delegates instead of taking the standalone in-process renderer added in
+    #5644.
+    """
     captured = {}
 
     class _FakePraisonAI:
@@ -49,6 +56,9 @@ def _install_fake_praisonai(monkeypatch):
     fake_main = types.ModuleType("praisonai_code.cli.main")
     fake_main.PraisonAI = _FakePraisonAI
     monkeypatch.setitem(sys.modules, "praisonai_code.cli.main", fake_main)
+    monkeypatch.setattr(
+        "praisonai_code._wrapper_bridge.wrapper_available", lambda: True
+    )
     return captured
 
 
@@ -87,10 +97,18 @@ def test_multiple_images_are_comma_joined(monkeypatch):
 
 
 def test_text_only_run_leaves_image_none(monkeypatch):
-    """A run without `--image` keeps `args.image` None (unchanged behaviour)."""
+    """A run without `--image` keeps `args.image` None (unchanged behaviour).
+
+    The subject is the wrapper vision path's ``args`` plumbing, which only runs
+    when the wrapper is installed: since #5644 a standalone text run renders
+    in-process instead of delegating, so this test declares the wrapper present.
+    """
     output = _RecordingOutput()
     monkeypatch.setattr(run_cmd, "get_output_controller", lambda: output)
     monkeypatch.setattr(run_cmd, "_try_attach_runtime", lambda *a, **k: False)
+    monkeypatch.setattr(
+        "praisonai_code._wrapper_bridge.wrapper_available", lambda: True
+    )
 
     captured = _install_fake_praisonai(monkeypatch)
 

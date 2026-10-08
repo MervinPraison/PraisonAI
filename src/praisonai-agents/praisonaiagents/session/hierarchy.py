@@ -571,17 +571,35 @@ class HierarchicalSessionStore(DefaultSessionStore):
             metadata=metadata or {},
         )
         
+        # Persist the child first so the parent never lists a child that was
+        # never written to disk (Issue #5527).
         if not self._save_extended_session(session):
             raise OSError(f"Failed to save session {sid}")
 
-        # Register only after the child exists on disk.
+        # Register only after the child exists on disk. The child is already
+        # persisted, so any parent-registration failure — a ``False`` return or
+        # an ``OSError`` raised while acquiring the parent's lock — must surface
+        # the saved child's ID rather than leak a raw lock error (Issue #5527),
+        # so a retry recovers the existing child instead of creating a duplicate.
         if parent_id:
             def _apply(parent_session: SessionData) -> None:
                 assert isinstance(parent_session, ExtendedSessionData)
                 if sid not in parent_session.children_ids:
                     parent_session.children_ids.append(sid)
-            if not self._modify_session_locked(parent_id, _apply, error_label="update parent children"):
-                raise OSError(f"Session {sid} was saved but registration with parent {parent_id} failed")
+            try:
+                registered = self._modify_session_locked(
+                    parent_id, _apply, error_label="update parent children"
+                )
+            except OSError as exc:
+                raise OSError(
+                    f"Session {sid} was saved; registration with parent {parent_id} "
+                    "raised an error and may already be committed"
+                ) from exc
+            if not registered:
+                raise OSError(
+                    f"Session {sid} was saved but registration with parent "
+                    f"{parent_id} failed"
+                )
         
         return sid
     
@@ -638,6 +656,8 @@ class HierarchicalSessionStore(DefaultSessionStore):
             metadata=copy.deepcopy(parent.metadata),
         )
         
+        # Persist the fork first so the parent never lists a child that was
+        # never written to disk (Issue #5527).
         if not self._save_extended_session(forked):
             raise OSError(f"Failed to save forked session {new_id}")
 
@@ -645,10 +665,25 @@ class HierarchicalSessionStore(DefaultSessionStore):
             if new_id not in parent.children_ids:
                 parent.children_ids.append(new_id)
 
-        if not self._modify_session_locked(
-            session_id, _register_fork, error_label="register forked session"
-        ):
-            raise OSError(f"Forked session {new_id} was saved but registration with parent {session_id} failed")
+        # The fork is already persisted, so any parent-registration failure —
+        # a ``False`` return or an ``OSError`` raised while acquiring the
+        # parent's lock — must surface the saved fork's ID rather than leak a
+        # raw lock error (Issue #5527), so a retry recovers the existing fork
+        # instead of creating a duplicate.
+        try:
+            registered = self._modify_session_locked(
+                session_id, _register_fork, error_label="register forked session"
+            )
+        except OSError as exc:
+            raise OSError(
+                f"Forked session {new_id} was saved; registration with parent {session_id} "
+                "raised an error and may already be committed"
+            ) from exc
+        if not registered:
+            raise OSError(
+                f"Forked session {new_id} was saved but registration with "
+                f"parent {session_id} failed"
+            )
         
         return new_id
     
@@ -665,22 +700,62 @@ class HierarchicalSessionStore(DefaultSessionStore):
     def get_session_tree(self, session_id: str) -> Dict[str, Any]:
         """
         Get the full session tree starting from a session.
-        
+
         Returns a nested dictionary representing the tree structure.
+
+        Uses an explicit traversal stack instead of recursion so deep
+        parent-child chains built via :meth:`create_session` no longer raise
+        ``RecursionError`` once they exceed Python's recursion limit.
+
+        A repeated ID on the current ancestor path is treated as a cycle and
+        rejected with ``ValueError``; a global visited set is intentionally not
+        used so a descendant shared across different branches is preserved.
         """
-        session = self._load_extended_session(session_id)
-        
-        tree = {
-            "session_id": session.session_id,
-            "title": session.title,
-            "message_count": len(session.messages),
-            "children": []
+        root_session = self._load_extended_session(session_id)
+        root = {
+            "session_id": root_session.session_id,
+            "title": root_session.title,
+            "message_count": len(root_session.messages),
+            "children": [],
         }
-        
-        for child_id in session.children_ids:
-            tree["children"].append(self.get_session_tree(child_id))
-        
-        return tree
+
+        # A single active-path set holds the ancestor ids on the branch
+        # currently being descended. Ids are added when a frame is pushed and
+        # removed when it is popped, so the set only ever reflects the current
+        # root-to-node path (O(depth) memory, not O(depth^2)). This still lets a
+        # descendant shared across sibling branches be visited more than once,
+        # while a repeat on the active path is reported as a cycle.
+        path = {root_session.session_id}
+        # Stack items: (node_dict, iterator over child ids, own session id).
+        stack = [(root, iter(root_session.children_ids), root_session.session_id)]
+
+        while stack:
+            node, child_iter, node_id = stack[-1]
+            child_id = next(child_iter, None)
+            if child_id is None:
+                stack.pop()
+                path.discard(node_id)
+                continue
+
+            if child_id in path:
+                raise ValueError(
+                    f"Cycle detected in session tree at '{child_id}'"
+                )
+
+            child_session = self._load_extended_session(child_id)
+            child_node = {
+                "session_id": child_session.session_id,
+                "title": child_session.title,
+                "message_count": len(child_session.messages),
+                "children": [],
+            }
+            node["children"].append(child_node)
+            path.add(child_id)
+            stack.append(
+                (child_node, iter(child_session.children_ids), child_id)
+            )
+
+        return root
     
     def create_snapshot(
         self,
@@ -731,7 +806,8 @@ class HierarchicalSessionStore(DefaultSessionStore):
             session.snapshots.append(snapshot)
 
         # Recording a snapshot must not compact or truncate an imported live
-        # transcript, so skip retention on this write.
+        # transcript, so skip retention on this write. Raise on a failed
+        # durable write instead of returning a success-shaped ID (Issue #5527).
         if not self._modify_session_locked(
             session_id, _record_snapshot, error_label="create snapshot",
             apply_retention=False,
@@ -981,7 +1057,8 @@ class HierarchicalSessionStore(DefaultSessionStore):
         session.forked_from_message_id = None
         
         # Restore the exported record in full, independent of the destination
-        # window. Retention applies to subsequent ordinary writes.
+        # window. Retention applies to subsequent ordinary writes. Raise on a
+        # failed durable write rather than returning a success ID (Issue #5527).
         if not self._save_extended_session(session, apply_retention=False):
             raise OSError(f"Failed to save imported session {session.session_id}")
         return session.session_id

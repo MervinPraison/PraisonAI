@@ -6,8 +6,11 @@ TDD: Tests for parent-child sessions, forking, snapshots, and revert.
 
 import os
 import shutil
+import sys
 import tempfile
 import time
+
+import pytest
 
 from praisonaiagents.session.hierarchy import (
     HierarchicalSessionStore,
@@ -255,7 +258,67 @@ class TestHierarchicalSessionStore:
         child1_tree = next(c for c in tree["children"] if c["session_id"] == child1_id)
         assert len(child1_tree["children"]) == 1
         assert child1_tree["children"][0]["session_id"] == grandchild_id
-    
+
+    def test_get_session_tree_deep_chain(self):
+        """Deep chains built via create_session must not raise RecursionError."""
+        depth = sys.getrecursionlimit() + 20
+        self.store.create_session(session_id="node0")
+        for index in range(1, depth):
+            self.store.create_session(
+                session_id=f"node{index}", parent_id=f"node{index - 1}"
+            )
+
+        tree = self.store.get_session_tree("node0")
+
+        node = tree
+        count = 0
+        while node["children"]:
+            assert len(node["children"]) == 1
+            node = node["children"][0]
+            count += 1
+        assert count == depth - 1
+        assert node["session_id"] == f"node{depth - 1}"
+
+    def test_get_session_tree_self_reference_cycle(self):
+        """A self-referencing child is rejected as a cycle, not RecursionError."""
+        self.store._save_extended_session(
+            ExtendedSessionData(session_id="loop", children_ids=["loop"])
+        )
+        with pytest.raises(ValueError, match="Cycle detected"):
+            self.store.get_session_tree("loop")
+
+    def test_get_session_tree_two_node_cycle(self):
+        """A two-node cycle is rejected as a cycle, not RecursionError."""
+        self.store._save_extended_session(
+            ExtendedSessionData(session_id="a", children_ids=["b"])
+        )
+        self.store._save_extended_session(
+            ExtendedSessionData(session_id="b", children_ids=["a"])
+        )
+        with pytest.raises(ValueError, match="Cycle detected"):
+            self.store.get_session_tree("a")
+
+    def test_get_session_tree_shared_descendant(self):
+        """A descendant shared across sibling branches is preserved, not rejected."""
+        self.store._save_extended_session(
+            ExtendedSessionData(session_id="root", children_ids=["b1", "b2"])
+        )
+        self.store._save_extended_session(
+            ExtendedSessionData(session_id="b1", children_ids=["shared"])
+        )
+        self.store._save_extended_session(
+            ExtendedSessionData(session_id="b2", children_ids=["shared"])
+        )
+        self.store._save_extended_session(
+            ExtendedSessionData(session_id="shared")
+        )
+
+        tree = self.store.get_session_tree("root")
+
+        assert [c["session_id"] for c in tree["children"]] == ["b1", "b2"]
+        for branch in tree["children"]:
+            assert branch["children"][0]["session_id"] == "shared"
+
     def test_create_snapshot(self):
         """Test creating a snapshot."""
         session_id = self.store.create_session(title="Test")
@@ -528,3 +591,215 @@ class TestGlobalHierarchicalStore:
         store2 = get_hierarchical_session_store()
         
         assert store1 is store2
+
+
+class TestCreationPersistenceFailures:
+    """Creation APIs must not return success IDs after failed writes (Issue #5527)."""
+
+    def setup_method(self):
+        self.temp_dir = tempfile.mkdtemp()
+        self.store = HierarchicalSessionStore(session_dir=self.temp_dir)
+
+    def teardown_method(self):
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def _fail_all_writes(self):
+        import unittest.mock as mock
+
+        def _boom(*args, **kwargs):
+            raise OSError("simulated disk failure")
+
+        return mock.patch("os.replace", side_effect=_boom)
+
+    def _fail_write_for(self, target_id):
+        """Fail os.replace only when the destination is target_id's JSON file."""
+        import unittest.mock as mock
+
+        target_path = self.store._get_session_path(target_id)
+        real_replace = os.replace
+
+        def _maybe_boom(src, dst, *args, **kwargs):
+            if os.path.abspath(dst) == os.path.abspath(target_path):
+                raise OSError("simulated disk failure")
+            return real_replace(src, dst, *args, **kwargs)
+
+        return mock.patch("os.replace", side_effect=_maybe_boom)
+
+    def test_create_session_raises_on_write_failure(self):
+        with self._fail_all_writes():
+            try:
+                self.store.create_session(session_id="child")
+                assert False, "expected OSError"
+            except OSError:
+                pass
+
+    def test_fork_session_raises_on_write_failure(self):
+        parent = self.store.create_session(session_id="parent")
+        self.store.add_user_message(parent, "hello")
+        with self._fail_all_writes():
+            try:
+                self.store.fork_session(parent)
+                assert False, "expected OSError"
+            except OSError:
+                pass
+
+    def test_create_snapshot_raises_on_write_failure(self):
+        sid = self.store.create_session(session_id="snap")
+        self.store.add_user_message(sid, "hello")
+        with self._fail_all_writes():
+            try:
+                self.store.create_snapshot(sid, label="x")
+                assert False, "expected OSError"
+            except OSError:
+                pass
+
+    def test_import_session_raises_on_write_failure(self):
+        sid = self.store.create_session(session_id="orig")
+        self.store.add_user_message(sid, "hello")
+        exported = self.store.export_session(sid)
+        with self._fail_all_writes():
+            try:
+                self.store.import_session(exported)
+                assert False, "expected OSError"
+            except OSError:
+                pass
+
+    def test_create_session_child_only_failure_leaves_no_dangling_ref(self):
+        parent = self.store.create_session(session_id="parent")
+        self.store.add_user_message(parent, "seed")
+        with self._fail_write_for("child"):
+            try:
+                self.store.create_session(session_id="child", parent_id=parent)
+                assert False, "expected OSError"
+            except OSError:
+                pass
+        # Parent must not register a child that was never written.
+        assert "child" not in self.store.get_children(parent)
+
+    def test_create_session_parent_only_failure_retains_child(self):
+        parent = self.store.create_session(session_id="parent")
+        self.store.add_user_message(parent, "seed")
+        with self._fail_write_for(parent):
+            try:
+                self.store.create_session(session_id="child", parent_id=parent)
+                assert False, "expected OSError"
+            except OSError as e:
+                # Saved child ID surfaced in the exception; child retained.
+                assert "child" in str(e)
+        assert os.path.exists(self.store._get_session_path("child"))
+
+    def test_create_session_parent_lock_failure_surfaces_child_id(self):
+        """A parent-lock OSError must still report the saved child ID (P1)."""
+        import unittest.mock as mock
+
+        parent = self.store.create_session(session_id="parent")
+        self.store.add_user_message(parent, "seed")
+        real_modify = self.store._modify_session_locked
+
+        def _fail_parent_register(session_id, *args, **kwargs):
+            if session_id == parent:
+                raise OSError("simulated lock failure")
+            return real_modify(session_id, *args, **kwargs)
+
+        with mock.patch.object(
+            self.store, "_modify_session_locked", side_effect=_fail_parent_register
+        ):
+            try:
+                self.store.create_session(session_id="child", parent_id=parent)
+                assert False, "expected OSError"
+            except OSError as e:
+                assert "child" in str(e)
+        # Child was persisted and the parent never listed an unwritten child.
+        assert os.path.exists(self.store._get_session_path("child"))
+        assert "child" not in self.store.get_children(parent)
+
+    def test_fork_session_parent_only_failure_retains_fork(self):
+        """A fork is retained and its ID surfaced when parent registration fails (P2)."""
+        parent = self.store.create_session(session_id="parent")
+        self.store.add_user_message(parent, "seed")
+        fork_ids = []
+        real_save = self.store._save_extended_session
+
+        def _capture(session, *args, **kwargs):
+            fork_ids.append(session.session_id)
+            return real_save(session, *args, **kwargs)
+
+        import unittest.mock as mock
+
+        with mock.patch.object(self.store, "_save_extended_session", _capture):
+            with self._fail_write_for(parent):
+                try:
+                    self.store.fork_session(parent)
+                    assert False, "expected OSError"
+                except OSError as e:
+                    new_id = fork_ids[-1]
+                    # The generated fork ID is surfaced in the exception.
+                    assert new_id in str(e)
+        # Fork persisted to disk; parent must not list it.
+        assert os.path.exists(self.store._get_session_path(new_id))
+        assert new_id not in self.store.get_children(parent)
+
+    def test_fork_session_parent_lock_failure_surfaces_fork_id(self):
+        """A parent-lock OSError on fork still reports the saved fork ID (P1).
+
+        The parent lock is only failed *after* the fork has been saved so the
+        failure lands on the post-save registration lock (the branch that must
+        surface the fork ID) rather than the pre-save reload of the parent.
+        """
+        parent = self.store.create_session(session_id="parent")
+        self.store.add_user_message(parent, "seed")
+        fork_ids = []
+        saved = {"done": False}
+        real_save = self.store._save_extended_session
+
+        def _capture(session, *args, **kwargs):
+            fork_ids.append(session.session_id)
+            result = real_save(session, *args, **kwargs)
+            saved["done"] = True
+            return result
+
+        import unittest.mock as mock
+
+        real_modify = self.store._modify_session_locked
+
+        def _fail_parent_register(session_id, *args, **kwargs):
+            if session_id == parent and saved["done"]:
+                raise OSError("simulated lock failure")
+            return real_modify(session_id, *args, **kwargs)
+
+        with mock.patch.object(self.store, "_save_extended_session", _capture):
+            with mock.patch.object(
+                self.store, "_modify_session_locked", side_effect=_fail_parent_register
+            ):
+                try:
+                    self.store.fork_session(parent)
+                    assert False, "expected OSError"
+                except OSError as e:
+                    new_id = fork_ids[-1]
+                    assert new_id in str(e)
+        assert os.path.exists(self.store._get_session_path(new_id))
+        assert new_id not in self.store.get_children(parent)
+
+    def test_successful_create_returns_string(self):
+        sid = self.store.create_session(session_id="ok")
+        assert isinstance(sid, str) and sid == "ok"
+
+    def test_successful_fork_returns_string(self):
+        parent = self.store.create_session(session_id="p")
+        self.store.add_user_message(parent, "hi")
+        new_id = self.store.fork_session(parent)
+        assert isinstance(new_id, str)
+        assert new_id in self.store.get_children(parent)
+
+    def test_successful_snapshot_returns_string(self):
+        sid = self.store.create_session(session_id="s")
+        self.store.add_user_message(sid, "hi")
+        snap_id = self.store.create_snapshot(sid, label="l")
+        assert isinstance(snap_id, str)
+
+    def test_successful_import_returns_string(self):
+        sid = self.store.create_session(session_id="o")
+        self.store.add_user_message(sid, "hi")
+        exported = self.store.export_session(sid)
+        imported = self.store.import_session(exported)
+        assert isinstance(imported, str)

@@ -392,11 +392,8 @@ class ChatMixin:
             
             cached_prompt = self._cache_get(self._system_prompt_cache, cache_key)
             if cached_prompt is not None:
-                # Path-scoped glob rules are per-turn (they depend on the files
-                # touched so far) so they are appended after the cache, never
-                # baked into the cached base prompt.
-                return self._append_system_prompt_suffix(
-                    self._append_glob_rules_context(cached_prompt)
+                return self._append_system_prompt_turn_context(
+                    cached_prompt, tools=tools,
                 )
         else:
             cache_key = None  # Don't cache when memory is enabled
@@ -479,6 +476,11 @@ Your Goal: {self.goal}"""
         # Session context is per-turn and should not be cached
         if cache_key:
             self._cache_put(self._system_prompt_cache, cache_key, system_prompt)
+
+        return self._append_system_prompt_turn_context(system_prompt, tools=tools)
+
+    def _append_system_prompt_turn_context(self, system_prompt, tools=None):
+        """Append current-turn context to either a fresh or cached base prompt."""
         
         # Add session context (platform awareness) if available - AFTER caching
         try:
@@ -3215,6 +3217,11 @@ Your Goal: {self.goal}"""
         _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         durable_context = None
         durable_token = None
+        previous_run_state = self._get_db_run_state()
+        previous_run_id = self._current_run_id
+        db_started = time.perf_counter()
+        db_output, db_status = None, "error"
+        _cancel = None
         try:
             # C2 - cooperative cancellation: abort early if a pre-set token is given
             cancel_source = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
@@ -3232,7 +3239,16 @@ Your Goal: {self.goal}"""
                 durable_context, durable_token = begin_durable_run(
                     self, prompt if isinstance(prompt, str) else str(prompt)
                 )
+            if self._db is not None:
+                self._init_db_session()
+                self._start_run(prompt if isinstance(prompt, str) else str(prompt))
             result = self._chat_impl(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice, seed=seed, cancel_token=_cancel)
+            db_output = str(result) if result is not None else None
+            # A guardrail-blocked turn returns a non-None refusal string; it must
+            # be recorded as "error", not "completed" (the answer was rejected).
+            db_status = "cancelled" if _cancel is not None and _cancel.was_cancelled() else (
+                "error" if result is None else "completed"
+            )
             if durable_context is not None:
                 outcome = (
                     "cancelled"
@@ -3248,11 +3264,17 @@ Your Goal: {self.goal}"""
                 self.execution.resume_run_id = None
             raise
         except InterruptedError:
+            db_status = "cancelled"
             if durable_context is not None:
                 durable_context.finalize("cancelled")
                 self.execution.resume_run_id = None
             raise
         finally:
+            try:
+                if self._current_run_id is not None and self._current_run_id != previous_run_id:
+                    self._end_run(db_output, db_status, {"duration_ms": (time.perf_counter() - db_started) * 1000})
+            finally:
+                self._restore_db_run_state(previous_run_state)
             if durable_context is not None:
                 from .durable import end_durable_run
 
@@ -3299,10 +3321,10 @@ Your Goal: {self.goal}"""
         # Initialize session store for JSON-based persistence (lazy)
         # This enables automatic session persistence when session_id is provided
         self._init_session_store()
-        
-        # Start a new run for this chat turn
+
+        # The DB run is now started/ended by the public chat() boundary, but the
+        # prompt string is still needed below for hook input and memory.
         prompt_str = prompt if isinstance(prompt, str) else str(prompt)
-        self._start_run(prompt_str)
 
         # Trigger BEFORE_AGENT hook (only build the input if a hook is actually registered)
         from ..hooks import HookEvent, BeforeAgentInput
@@ -3648,6 +3670,10 @@ Your Goal: {self.goal}"""
                 use_native_format=use_native_format,
                 memory_prefetch_context=memory_prefetch_context,
             )
+            if attachments:
+                # Model content includes ephemeral files; history and after-turn
+                # memory must receive only the user's text, including hook edits.
+                original_prompt = prompt
             
 
             # Track messages THIS turn appends so a failure rolls back only our
@@ -3768,7 +3794,10 @@ Your Goal: {self.goal}"""
                                     return self._trigger_after_agent_hook(original_prompt, validated_reasoning, start_time)
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
-                                    # Rollback chat history on guardrail failure
+                                    # Rollback chat history on guardrail failure.
+                                    # The public chat()/achat() finalizer records the
+                                    # blocked turn as "error" (see _guardrail_blocked_message),
+                                    # so the run keeps its output and duration_ms.
                                     self._rollback_chat_history_to(chat_history_length)
                                     return self._guardrail_blocked_message(e)
                             # Apply guardrail to regular response
@@ -3842,13 +3871,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
-                                    self._end_run(validated_response, "completed", {"duration_ms": (time.time() - start_time) * 1000})
                                     return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
                                 except Exception as e:
                                     logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
                                     # Rollback chat history on guardrail failure
                                     self._rollback_chat_history_to(chat_history_length)
-                                    self._end_run(None, "error", {"error": str(e)})
                                     return self._guardrail_blocked_message(e)
 
                             # Check if we've hit max reflections
@@ -4005,6 +4032,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         durable_context = None
         durable_token = None
+        previous_run_state = self._get_db_run_state()
+        previous_run_id = self._current_run_id
+        db_started = time.perf_counter()
+        db_output, db_status = None, "error"
         cancel_source = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
         _cancel = self._turn_cancel_token(
             cancel_source, explicit=cancel_token is not None
@@ -4017,6 +4048,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 durable_context, durable_token = await abegin_durable_run(
                     self, prompt if isinstance(prompt, str) else str(prompt)
                 )
+            if self._db is not None:
+                await self._ainit_db_session()
+                await self._astart_run(prompt if isinstance(prompt, str) else str(prompt))
             result = await self._achat_impl(
                 prompt=prompt, temperature=temperature, tools=tools,
                 output_json=output_json, output_pydantic=output_pydantic,
@@ -4025,6 +4059,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 config=config, force_retrieval=force_retrieval, skip_retrieval=skip_retrieval,
                 attachments=attachments, _trace_emitter=_trace_emitter, tool_choice=tool_choice,
                 seed=seed, cancel_token=_cancel
+            )
+            db_output = str(result) if result is not None else None
+            # A guardrail-blocked turn returns a non-None refusal string; record
+            # it as "error", not "completed" (see sync chat()).
+            db_status = "cancelled" if _cancel is not None and _cancel.was_cancelled() else (
+                "error" if result is None else "completed"
             )
             if durable_context is not None:
                 outcome = (
@@ -4041,23 +4081,31 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 self.execution.resume_run_id = None
             raise
         except (InterruptedError, asyncio.CancelledError):
+            db_status = "cancelled"
             if durable_context is not None:
                 await durable_context.afinalize("cancelled")
                 self.execution.resume_run_id = None
             raise
         finally:
-            if durable_context is not None:
-                from .durable import end_durable_run
-
-                end_durable_run(durable_token)
-                await durable_context.aclose()
             try:
-                _trace_emitter.agent_end(self.name)
+                if self._current_run_id is not None and self._current_run_id != previous_run_id:
+                    await self._aend_run(db_output, db_status, {"duration_ms": (time.perf_counter() - db_started) * 1000})
             finally:
-                if getattr(self, "_active_turn_token", None) is _cancel:
-                    self._active_turn_token = None
-                if _cancel is not None:
-                    _cancel.close()
+                self._restore_db_run_state(previous_run_state)
+                try:
+                    if durable_context is not None:
+                        from .durable import end_durable_run
+
+                        end_durable_run(durable_token)
+                        await durable_context.aclose()
+                finally:
+                    try:
+                        _trace_emitter.agent_end(self.name)
+                    finally:
+                        if getattr(self, "_active_turn_token", None) is _cancel:
+                            self._active_turn_token = None
+                        if _cancel is not None:
+                            _cancel.close()
 
     async def _achat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
         """Internal async chat implementation (extracted for trace wrapping)."""
@@ -5071,6 +5119,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Temporarily disable verbose mode to prevent console output conflicts during streaming
             original_verbose = self.verbose
             self.verbose = False
+            # Initialize persistence so streamed turns reach the session store
+            # incrementally (Issue #5407). chat()/achat() do this already; the
+            # streaming path previously skipped it, so an interrupted stream
+            # persisted nothing at all.
+            self._init_db_session()
+            self._init_session_store()
             memory_prefetch_context = self._prefetch_memory(prompt)
 
             # Ephemeral attachments (images / data URIs) are folded into a
@@ -5134,6 +5188,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         self.chat_history[-1].get("role") == "user" and 
                         self.chat_history[-1].get("content") == normalized_content):
                     self._append_to_chat_history({"role": "user", "content": normalized_content})
+                    # Persist the user turn so a recovered partial assistant turn
+                    # is paired with its prompt on resume (Issue #5407).
+                    self._persist_message("user", normalized_content)
                 
                 try:
                     # Use the new streaming generator from LLM class
@@ -5213,12 +5270,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         **stream_sampling_kwargs
                     ):
                         response_content += chunk
+                        # Flush the growing partial turn so an interrupt mid
+                        # stream retains it in the store (Issue #5407, debounced).
+                        self._persist_assistant_delta(response_content)
                         yield chunk
-                    
+
                     # Add complete response to chat history
                     if response_content:
                         self._append_to_chat_history({"role": "assistant", "content": response_content})
-                        
+                    # Finalize the streamed turn (promotes the partial record or
+                    # falls back to a single terminal write).
+                    self._finalize_assistant_turn(response_content)
+
+                except GeneratorExit:
+                    # Consumer stopped iterating (e.g. Ctrl-C). Keep whatever
+                    # was produced so --continue can recover it (Issue #5407).
+                    self._persist_assistant_delta(response_content, force=True)
+                    raise
                 except ToolExecutionError:
                     self._rollback_chat_history_to(chat_history_length)
                     raise
@@ -5292,6 +5360,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         self.chat_history[-1].get("role") == "user" and 
                         self.chat_history[-1].get("content") == normalized_content):
                     self._append_to_chat_history({"role": "user", "content": normalized_content})
+                    # Persist the user turn so a recovered partial assistant turn
+                    # is paired with its prompt on resume (Issue #5407).
+                    self._persist_message("user", normalized_content)
                 
                 try:
                     # Check if OpenAI client is available
@@ -5367,6 +5438,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     tool_calls_data = []
                     first_token_emitted = False
                     last_content_time = None
+                    # Track the text of the phase currently streaming so a
+                    # GeneratorExit (consumer Ctrl-C) recovers *that* phase's
+                    # answer. Before tools this is response_text; after tools it
+                    # becomes the post-tool follow-up answer. Without this the
+                    # interrupt handler would force a stale (usually empty)
+                    # pre-tool response_text over the real answer (Issue #5407).
+                    active_stream = {"text": "", "after_tools": False}
                     
                     for chunk in completion:
                         delta = chunk.choices[0].delta
@@ -5393,6 +5471,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     content=chunk_content
                                 ))
                             
+                            # Flush the growing partial turn so an interrupt
+                            # mid stream retains it in the store (Issue #5407,
+                            # debounced).
+                            active_stream["text"] = response_text
+                            self._persist_assistant_delta(response_text)
                             yield chunk_content
                         
                         # Handle tool calls (accumulate but don't yield as chunks)
@@ -5428,6 +5511,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # append exactly the assistant tool-call and tool-result
                         # messages onto the original request context below.
                         tool_turn_start = len(self.chat_history)
+                        # Drop any partial record for this turn before writing
+                        # the authoritative tool-call assistant turn below so the
+                        # store never keeps a stale partial (Issue #5407).
+                        self._discard_partial_assistant_turn()
+                        # From here the post-tool answer is the recoverable
+                        # phase; reset the interrupt tracker so a Ctrl-C during
+                        # the follow-up persists that answer, not the pre-tool
+                        # text we just discarded (Issue #5407).
+                        active_stream["after_tools"] = True
+                        active_stream["text"] = ""
                         # Add assistant message with tool calls to chat history
                         assistant_message = {"role": "assistant", "content": response_text}
                         if tool_calls_data:
@@ -5628,6 +5721,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if piece:
                                 followup_text += piece
                                 followup_last_content_time = time_module.perf_counter()
+                                # Flush the post-tool answer incrementally too so
+                                # an interrupt during the follow-up keeps it
+                                # (Issue #5407, debounced).
+                                active_stream["text"] = followup_text
+                                self._persist_assistant_delta(followup_text)
                                 yield piece
                         if followup_last_content_time:
                             self.stream_emitter.emit(StreamEvent(
@@ -5643,6 +5741,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             self._append_to_chat_history(
                                 {"role": "assistant", "content": followup_text}
                             )
+                            # Finalize the post-tool answer so resume sees a
+                            # completed turn, not a dangling partial (Issue
+                            # #5407).
+                            self._finalize_assistant_turn(followup_text)
                         else:
                             # Tools ran and the model then said nothing. Simply
                             # returning here is indistinguishable from a model
@@ -5658,7 +5760,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Add complete response to chat history (text-only response)
                         if response_text:
                             self._append_to_chat_history({"role": "assistant", "content": response_text})
-                        
+                        # Finalize the streamed turn in the store (Issue #5407).
+                        self._finalize_assistant_turn(response_text)
+
+                except GeneratorExit:
+                    # Consumer stopped iterating (e.g. Ctrl-C). Keep whatever
+                    # the *current* phase produced so --continue can recover it.
+                    # After a tool round the recoverable text is the post-tool
+                    # follow-up answer, not the pre-tool response_text that was
+                    # already discarded (Issue #5407).
+                    self._persist_assistant_delta(
+                        active_stream["text"], force=True
+                    )
+                    raise
                 except ToolExecutionError:
                     self._rollback_chat_history_to(chat_history_length)
                     raise
@@ -5716,6 +5830,29 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         cause is not lost.
         """
         import inspect
+
+        # Replay-safety gate (#3860): reissuing chat() after a streaming failure
+        # is still a provider replay. When the turn exposes tools and the
+        # streaming failure is replay-unsafe (a post-dispatch read timeout /
+        # connection reset, possibly wrapped by the LLM path as the cause of a
+        # generic error), a tool call may already have run server-side, so the
+        # turn must not be re-issued. Surface the original failure instead. A
+        # tool-less turn (or a pre-dispatch failure) keeps falling back.
+        request_tools = kwargs.get('tools')
+        instance_tools = getattr(self, 'tools', None)
+        side_effecting = bool(request_tools) or bool(instance_tools)
+        if side_effecting:
+            try:
+                from praisonaiagents.llm.error_classifier import is_replay_unsafe_chain
+            except Exception:  # noqa: BLE001 - never let classification break fallback
+                is_replay_unsafe_chain = None
+            if is_replay_unsafe_chain is not None and is_replay_unsafe_chain(streaming_error):
+                logging.warning(
+                    "Not falling back to non-streaming chat() on a tool turn: the "
+                    "streaming failure is replay-unsafe (post-dispatch); surfacing "
+                    "the original error to avoid re-executing the turn."
+                )
+                raise streaming_error
 
         try:
             parameters = inspect.signature(self.chat).parameters

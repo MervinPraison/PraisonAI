@@ -24,6 +24,8 @@ import hashlib
 import logging
 from praisonaiagents._logging import get_logger
 import threading
+import weakref
+from collections import Counter
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
@@ -37,6 +39,20 @@ else:
     _HAS_FCNTL = False
 
 logger = get_logger(__name__)
+
+_store_locks = weakref.WeakValueDictionary()
+_store_locks_guard = threading.Lock()
+
+
+def _shared_store_lock(path):
+    """Share in-process transactions for instances targeting the same store."""
+    key = os.path.normcase(str(path.resolve()))
+    with _store_locks_guard:
+        lock = _store_locks.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _store_locks[key] = lock
+        return lock
 
 
 @dataclass
@@ -171,7 +187,7 @@ class FileMemory:
         self.config = self._load_config(config)
         
         # Initialize thread-safe memory stores with lock for in-memory data protection
-        self._lock = threading.RLock()  # Reentrant lock for nested operations
+        self._lock = _shared_store_lock(self.user_path)
         self._short_term: List[MemoryItem] = []
         self._long_term: List[MemoryItem] = []
         self._entities: Dict[str, EntityItem] = {}
@@ -450,12 +466,12 @@ class FileMemory:
     def _save_long_term(self):
         """Save long-term memory to file."""
         data = [item.to_dict() for item in self._long_term]
-        self._write_json(self.long_term_file, data)
+        return self._write_json(self.long_term_file, data)
     
     def _save_entities(self):
         """Save entities to file."""
         data = {k: v.to_dict() for k, v in self._entities.items()}
-        self._write_json(self.entities_file, data)
+        return self._write_json(self.entities_file, data)
     
     def _save_summaries(self):
         """Save summaries to file."""
@@ -585,16 +601,30 @@ class FileMemory:
                 importance=importance
             )
             
+            previous_items = self._long_term[:]
             self._long_term.append(item)
             
             # Enforce limit
             limit = self.config["long_term_limit"]
             if len(self._long_term) > limit:
-                # Remove lowest importance items
-                self._long_term.sort(key=lambda x: x.importance, reverse=True)
+                # Remove lowest importance items. Break equal-importance ties by
+                # recency (newer first) so a freshly appended turn is not
+                # discarded in favour of an older equally-weighted one — raw
+                # conversation turns all share the default importance, and a
+                # later agent must still be able to prefetch the newest facts.
+                self._long_term.sort(
+                    key=lambda x: (x.importance, x.created_at), reverse=True
+                )
                 self._long_term = self._long_term[:limit]
             
-            self._save_long_term()
+            try:
+                saved = self._save_long_term()
+            except Exception:
+                self._long_term = previous_items
+                raise
+            if saved is False:
+                self._long_term = previous_items
+                raise OSError("Failed to persist long-term memory")
             self._log(f"Added long-term memory: {content[:50]}...")
             
             # Emit trace event
@@ -641,6 +671,8 @@ class FileMemory:
                 k: EntityItem.from_dict(v)
                 for k, v in self._read_json(self.entities_file, {}).items()
             }
+            from copy import deepcopy
+            previous_entities = deepcopy(self._entities)
             entity_id = self._generate_id(f"{name}:{entity_type}")
             
             # Check if entity exists
@@ -663,7 +695,14 @@ class FileMemory:
                 )
                 self._entities[entity_id] = entity
             
-            self._save_entities()
+            try:
+                saved = self._save_entities()
+            except Exception:
+                self._entities = previous_entities
+                raise
+            if saved is False:
+                self._entities = previous_entities
+                raise OSError("Failed to persist entity memory")
             self._log(f"Added/updated entity: {name} ({entity_type})")
             
             return entity_id
@@ -1062,6 +1101,10 @@ class FileMemory:
             True if memory was found and deleted, False otherwise
         """
         with self._lock:
+            self._short_term = [
+                MemoryItem.from_dict(item)
+                for item in self._read_json(self.short_term_file, [])
+            ]
             for i, item in enumerate(self._short_term):
                 if item.id == memory_id:
                     del self._short_term[i]
@@ -1081,6 +1124,10 @@ class FileMemory:
             True if memory was found and deleted, False otherwise
         """
         with self._lock:
+            self._long_term = [
+                MemoryItem.from_dict(item)
+                for item in self._read_json(self.long_term_file, [])
+            ]
             for i, item in enumerate(self._long_term):
                 if item.id == memory_id:
                     del self._long_term[i]
@@ -1100,6 +1147,10 @@ class FileMemory:
             True if entity was found and deleted, False otherwise
         """
         with self._lock:
+            self._entities = {
+                key: EntityItem.from_dict(value)
+                for key, value in self._read_json(self.entities_file, {}).items()
+            }
             # Find entity by name using existing helper
             entity = self._find_entity_by_name(name)
             if entity:
@@ -1504,24 +1555,31 @@ class FileMemory:
         
         Args:
             llm_func: Optional LLM function for summarization.
-                      Should accept (prompt: str) -> str
-            max_items: Max items to keep after compression
+                      Should accept (prompt: str) -> str. May be called again
+                      if concurrent turnover removes selected records.
+            max_items: Max snapshot items to keep after compression. Records
+                       added while summarizing are also retained.
             
         Returns:
-            The generated summary
+            The persisted summary, or an empty string if no compression commits.
         """
         # Check length and gather content under lock
         with self._lock:
+            self._short_term = [
+                MemoryItem.from_dict(item)
+                for item in self._read_json(self.short_term_file, [])
+            ]
             if len(self._short_term) <= max_items:
                 return ""  # No compression needed
             
             # Gather content to compress while holding lock
-            items_to_compress = self._short_term[:-max_items]
-            content_list = [item.content for item in items_to_compress]
+            items_to_compress = self._short_term[:-max_items] if max_items else self._short_term[:]
         
         # Generate summary OUTSIDE lock (LLM call may be slow)
-        if llm_func:
-            prompt = f"""Summarize the following conversation context into key points.
+        while items_to_compress:
+            content_list = [item.content for item in items_to_compress]
+            if llm_func:
+                prompt = f"""Summarize the following conversation context into key points.
 Preserve important facts, decisions, and context.
 Be concise but comprehensive.
 
@@ -1529,26 +1587,56 @@ Context to summarize:
 {chr(10).join(f'- {c}' for c in content_list)}
 
 Summary:"""
-            summary = llm_func(prompt)
-        else:
-            # Simple concatenation if no LLM
-            summary = "Compressed context: " + " | ".join(content_list[:5]) + "..."
+                summary = llm_func(prompt)
+            else:
+                # Simple concatenation if no LLM
+                summary = "Compressed context: " + " | ".join(content_list) + "..."
         
-        # Add summary as a high-importance long-term memory (add_long_term has its own lock)
-        self.add_long_term(
-            content=f"[Session Summary] {summary}",
-            metadata={"type": "compression_summary", "items_compressed": len(items_to_compress)},
-            importance=0.9
-        )
+            # Commit a still-current snapshot under the shared store lock. The LLM
+            # stays outside it; overlapping calls must not commit duplicate summaries.
+            with self._lock:
+                current = self._read_json(self.short_term_file, [])
+                # A survivor is a selected record still present with unchanged
+                # content. Evicted records (turnover) and same-id replacements
+                # (import_data) are both excluded so we never summarize stale
+                # content and then delete the record that replaced it.
+                available = Counter((item["id"], item["content"]) for item in current)
+                survivors = []
+                for item in items_to_compress:
+                    key = (item.id, item.content)
+                    if available[key]:
+                        survivors.append(item)
+                        available[key] -= 1
+                if len(survivors) != len(items_to_compress):
+                    # Summarize the survivors afresh, never records added during
+                    # this call. Every retry drops at least one record, so retries
+                    # are finite; a peer that consumed the whole snapshot
+                    # produces no duplicate.
+                    items_to_compress = survivors
+                    continue
+                summary_id = self.add_long_term(
+                    content=f"[Session Summary] {summary}",
+                    metadata={"type": "compression_summary", "items_compressed": len(items_to_compress)},
+                    importance=0.9,
+                )
+                retained = self._read_json(self.long_term_file, [])
+                if not any(item["id"] == summary_id for item in retained):
+                    return ""
+                # Remove sources only after verifying their summary survived retention.
+                remaining = Counter((item.id, item.content) for item in items_to_compress)
+                self._short_term = []
+                for item in self._read_json(self.short_term_file, []):
+                    key = (item["id"], item["content"])
+                    if remaining[key]:
+                        remaining[key] -= 1
+                    else:
+                        self._short_term.append(MemoryItem.from_dict(item))
+                self._save_short_term()
         
-        # Keep only recent items under lock
-        with self._lock:
-            self._short_term = self._short_term[-max_items:]
-            self._save_short_term()
+            self._log(f"Compressed {len(items_to_compress)} items into summary")
         
-        self._log(f"Compressed {len(items_to_compress)} items into summary")
-        
-        return summary
+            return summary
+        return ""
     
     def auto_compress_if_needed(
         self,
@@ -1597,7 +1685,8 @@ Summary:"""
         checkpoints_path = self.user_path / "checkpoints"
         checkpoints_path.mkdir(parents=True, exist_ok=True)
         
-        checkpoint_id = name or f"checkpoint_{int(time.time())}"
+        from uuid import uuid4
+        checkpoint_id = name or f"checkpoint_{int(time.time())}_{uuid4().hex}"
         checkpoint_file = checkpoints_path / f"{checkpoint_id}.json"
         
         checkpoint_data = {

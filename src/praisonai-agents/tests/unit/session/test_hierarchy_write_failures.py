@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from praisonaiagents.session.hierarchy import HierarchicalSessionStore
+from praisonaiagents.session.store import FileLock
 
 
 @pytest.fixture
@@ -98,3 +99,66 @@ def test_self_parent_is_rejected_before_any_session_write(store, session_id):
     assert parent_path.read_bytes() == before
     assert not store.session_exists("new")
     assert store.get_session_tree("parent")["children"] == []
+
+
+@pytest.mark.parametrize("operation", ["create", "fork"])
+def test_parent_lock_failure_reports_durable_child(store, monkeypatch, operation):
+    """A lock-acquisition exception identifies the already saved child."""
+    import praisonaiagents.session.hierarchy as hierarchy
+
+    child_path = Path(store.session_dir) / "child.json"
+    acquire = FileLock.acquire
+
+    def fail_registration(lock):
+        if Path(lock.filepath).name == "parent.json" and child_path.exists():
+            return False
+        return acquire(lock)
+
+    monkeypatch.setattr(FileLock, "acquire", fail_registration)
+    monkeypatch.setattr(hierarchy.uuid, "uuid4", lambda: "child")
+    with pytest.raises(OSError) as caught:
+        if operation == "create":
+            store.create_session("child", parent_id="parent")
+        else:
+            store.fork_session("parent")
+    assert "child" in str(caught.value)
+    assert "parent" in str(caught.value)
+    assert "was saved" in str(caught.value)
+    assert isinstance(caught.value.__cause__, OSError)
+    assert child_path.exists()
+    monkeypatch.setattr(FileLock, "acquire", acquire)
+    reopened = HierarchicalSessionStore(session_dir=store.session_dir)
+    assert reopened.get_parent("child") == "parent"
+    assert reopened.get_children("parent") == []
+
+
+@pytest.mark.parametrize("operation", ["create", "fork"])
+def test_parent_release_error_preserves_committed_registration(store, monkeypatch, operation):
+    """A post-write lock error must not claim the parent update failed."""
+    import praisonaiagents.session.hierarchy as hierarchy
+
+    child_path = Path(store.session_dir) / "child.json"
+    release = FileLock.release
+
+    def fail_after_release(lock):
+        """Release the real lock before reporting a parent cleanup error."""
+        release(lock)
+        if Path(lock.filepath).name == "parent.json" and child_path.exists():
+            raise OSError("injected parent lock cleanup failure")
+
+    monkeypatch.setattr(FileLock, "release", fail_after_release)
+    monkeypatch.setattr(hierarchy.uuid, "uuid4", lambda: "child")
+    with pytest.raises(OSError) as caught:
+        if operation == "create":
+            store.create_session("child", parent_id="parent")
+        else:
+            store.fork_session("parent")
+    message = str(caught.value)
+    assert "child" in message and "parent" in message
+    assert "may already be committed" in message
+    assert "failed" not in message
+    assert isinstance(caught.value.__cause__, OSError)
+    monkeypatch.setattr(FileLock, "release", release)
+    reopened = HierarchicalSessionStore(session_dir=store.session_dir)
+    assert reopened.get_parent("child") == "parent"
+    assert reopened.get_children("parent") == ["child"]

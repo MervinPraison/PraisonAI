@@ -4,7 +4,8 @@
  */
 
 import { EXIT_CODES } from '../spec/cli-spec';
-import { formatError } from './json';
+import { formatError, outputJson } from './json';
+import * as pretty from './pretty';
 
 export const ERROR_CODES = {
   // General errors
@@ -93,4 +94,16 @@ export function normalizeError(error: unknown): CLIError {
 
 export function formatCLIError(error: CLIError) {
   return formatError(error.code, error.message, error.details);
+}
+
+/**
+ * Report an uncaught command error (JSON error object or pretty message) and exit.
+ */
+export async function handleCommandError(outputFormat: string, error: unknown): Promise<never> {
+  if (outputFormat === 'json') {
+    outputJson(formatError(ERROR_CODES.UNKNOWN, error instanceof Error ? error.message : String(error)));
+  } else {
+    await pretty.error(error instanceof Error ? error.message : String(error));
+  }
+  process.exit(EXIT_CODES.RUNTIME_ERROR);
 }

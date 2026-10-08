@@ -152,6 +152,17 @@ class BackoffPolicy:
 MULTIMODAL_IMAGE_BYTE_LIMIT = 5_000_000
 
 
+def _memory_prompt_text(prompt: Any) -> str:
+    """Match text-only conversation history without retaining attachment parts."""
+    if isinstance(prompt, list):
+        return "\n".join(
+            part["text"] for part in prompt
+            if isinstance(part, dict) and part.get("type") == "text"
+            and isinstance(part.get("text"), str)
+        )
+    return prompt if isinstance(prompt, str) else str(prompt)
+
+
 def _content_part_to_data_uri(part: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     """Convert a structured content part into an OpenAI-style message part.
 
@@ -1719,8 +1730,18 @@ class ToolExecutionMixin:
                         if isinstance(result, dict):
                             max_field_chars = getattr(self, 'tool_output_limit', DEFAULT_TOOL_OUTPUT_LIMIT) if not self.context_manager else None
                             result = self._truncate_dict_fields(result, function_name, max_field_chars, tool_call_id)
-                            # Add artifact reference to dict result if available
-                            if artifact_ref:
+                            # Per-field truncation only shortens individual fields
+                            # that each exceed the field limit; a dict of many
+                            # medium-sized fields (e.g. 50 search snippets each
+                            # just under the limit) stays unbounded and can still
+                            # overflow the context. Enforce a total-size budget:
+                            # if the serialised dict is still over the limit, fall
+                            # back to the already-computed head/tail string (which
+                            # carries the artifact reference for full retrieval).
+                            if len(str(result)) > limit:
+                                result = truncated
+                            elif artifact_ref:
+                                # Add artifact reference to dict result if available
                                 result["_artifact_ref"] = artifact_ref.to_dict()
                         else:
                             result = truncated
@@ -1940,7 +1961,7 @@ class ToolExecutionMixin:
             execution_time_ms=(time.time() - start_time) * 1000
         )
 
-    def _after_agent_side_effects(self, prompt, response):
+    def _after_agent_side_effects(self, prompt, response, *, process_auto_memory=True):
         """Run loop-agnostic after-agent side effects (no ``await`` inside).
 
         Covers auto-memory extraction, auto-learning extraction, and the
@@ -1949,18 +1970,18 @@ class ToolExecutionMixin:
         boundary.
         """
         # Auto-memory extraction (opt-in via MemoryConfig(auto_memory=True))
-        if response:
-            prompt_str = prompt if isinstance(prompt, str) else str(prompt)
+        if response and process_auto_memory:
+            prompt_str = _memory_prompt_text(prompt)
             if getattr(self, "_auto_memory", False):
                 self._process_auto_memory(prompt_str, str(response))
-            else:
-                # When memory is enabled but auto_memory extraction is off, still
-                # persist the raw turn so a later Agent sharing the same memory
-                # (e.g. memory={"user_id": uid}) can recall it. Without this the
-                # sync chat/run/start path wrote nothing and cross-session recall
-                # silently returned empty (issue #5595). Mirrors the write already
-                # done on the async unified path.
-                self._persist_memory_turn(prompt_str, str(response))
+            # Persist the raw turn whenever memory is enabled so a later Agent
+            # sharing the same store (e.g. memory={"user_id": uid}) can recall it.
+            # Runs even with auto_memory on: the pattern extractor is best-effort
+            # and misses arbitrary facts (e.g. "codename ORANGE-PANDA"), so it
+            # must augment — not replace — durable turn storage. Without this,
+            # cross-instance recall silently returned empty (issues #5595, #5667).
+            # No-op when _memory_instance is None.
+            self._persist_memory_turn(prompt_str, str(response))
 
         # Auto-learning extraction (opt-in via LearnConfig(mode=LearnMode.AGENTIC))
         self._process_auto_learning()
@@ -2057,7 +2078,13 @@ class ToolExecutionMixin:
             after_agent_input = self._build_after_agent_input(prompt, response, start_time, tools_used)
             await self._hook_runner.execute(HookEvent.AFTER_AGENT, after_agent_input)
 
-        self._after_agent_side_effects(prompt, response)
+        if response and getattr(self, '_memory_instance', None):
+            prompt_str = _memory_prompt_text(prompt)
+            if getattr(self, '_auto_memory', False):
+                await asyncio.to_thread(self._process_auto_memory, prompt_str, str(response))
+            else:
+                await asyncio.to_thread(self._persist_memory_turn, prompt_str, str(response))
+        self._after_agent_side_effects(prompt, response, process_auto_memory=False)
 
         # Autonomous skill self-improvement loop (opt-in via self_improve=True).
         # In "background" mode the review runs off the hot path on the core

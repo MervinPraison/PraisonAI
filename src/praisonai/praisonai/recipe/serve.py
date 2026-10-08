@@ -987,6 +987,20 @@ def serve(
         )
         return
 
+    if reload:
+        # Uvicorn needs an import string (not a live app object) to enable
+        # reload; passing the instance silently drops reload. Reuse the same
+        # app-factory + env-var config pattern as the multi-worker path above.
+        os.environ[_SERVE_CONFIG_ENV] = json.dumps(dict(config or {}))
+        uvicorn.run(
+            "praisonai.recipe.serve:_app_factory",
+            host=host,
+            port=port,
+            reload=True,
+            factory=True,
+        )
+        return
+
     uvicorn.run(create_app(config), host=host, port=port, reload=reload)
 
 

@@ -110,6 +110,89 @@ class TestImagesCapabilities:
         assert len(results) == 1
         assert results[0].url == "https://example.com/image.png"
 
+    @patch('litellm.image_generation')
+    def test_image_generate_drops_response_format_for_gpt_image(self, mock_image_generation):
+        """response_format must NOT be forwarded to gpt-image-* (they reject it).
+
+        Regression for #5339: LiteLLM's drop_params does not strip
+        response_format for these models, so the wrapper must omit it itself.
+        drop_params is still scoped for any other unsupported params.
+        """
+        from praisonai.capabilities.images import image_generate
+
+        mock_response = Mock()
+        mock_response.data = []
+        mock_image_generation.return_value = mock_response
+
+        image_generate("green pixel", model="gpt-image-2.5-flare")
+
+        captured = mock_image_generation.call_args.kwargs
+        assert 'response_format' not in captured
+        assert captured.get('drop_params') is True
+        assert captured['model'] == "gpt-image-2.5-flare"
+        assert captured['prompt'] == "green pixel"
+
+    @patch('litellm.image_generation')
+    def test_image_generate_drops_response_format_for_dalle3(self, mock_image_generation):
+        """response_format must NOT be forwarded to the current dall-e-3 route.
+
+        Regression for #5339: OpenAI's dall-e-3 images endpoint returns HTTP 400
+        'Unknown parameter: response_format'.
+        """
+        from praisonai.capabilities.images import image_generate
+
+        mock_response = Mock()
+        mock_response.data = []
+        mock_image_generation.return_value = mock_response
+
+        image_generate("green pixel", model="dall-e-3")
+
+        captured = mock_image_generation.call_args.kwargs
+        assert 'response_format' not in captured
+
+    @patch('litellm.image_generation')
+    def test_image_generate_keeps_response_format_for_dalle2(self, mock_image_generation):
+        """dall-e-2 still accepts response_format, so it must be preserved."""
+        from praisonai.capabilities.images import image_generate
+
+        mock_response = Mock()
+        mock_response.data = []
+        mock_image_generation.return_value = mock_response
+
+        image_generate("green pixel", model="dall-e-2", response_format="b64_json")
+
+        captured = mock_image_generation.call_args.kwargs
+        assert captured.get('response_format') == "b64_json"
+
+    @patch('litellm.image_generation')
+    def test_image_generate_respects_explicit_drop_params(self, mock_image_generation):
+        """An explicit drop_params override must be preserved."""
+        from praisonai.capabilities.images import image_generate
+
+        mock_response = Mock()
+        mock_response.data = []
+        mock_image_generation.return_value = mock_response
+
+        image_generate("green pixel", model="dall-e-3", drop_params=False)
+
+        captured = mock_image_generation.call_args.kwargs
+        assert captured.get('drop_params') is False
+
+    @patch('litellm.image_edit')
+    def test_image_edit_drops_response_format_for_gpt_image(self, mock_image_edit):
+        """image_edit must also drop response_format for gpt-image-* and scope drop_params."""
+        from praisonai.capabilities.images import image_edit
+
+        mock_response = Mock()
+        mock_response.data = []
+        mock_image_edit.return_value = mock_response
+
+        image_edit(b"imgbytes", "make it blue", model="gpt-image-2.5-flare")
+
+        captured = mock_image_edit.call_args.kwargs
+        assert 'response_format' not in captured
+        assert captured.get('drop_params') is True
+
 
 class TestFilesCapabilities:
     """Tests for file management capabilities."""
@@ -593,7 +676,27 @@ class TestNewCapabilities:
         )
         
         assert session.id == "realtime-abc123"
-    
+
+    def test_realtime_connect_defaults_to_gpt_realtime(self):
+        """Default model must be the GA (non-deprecated) gpt-realtime id."""
+        from praisonai.capabilities.realtime import realtime_connect
+
+        session = realtime_connect(api_base="wss://api.openai.com")
+
+        assert session.model == "gpt-realtime"
+        assert "model=gpt-realtime" in session.url
+
+    def test_arealtime_connect_defaults_to_gpt_realtime(self):
+        """Async default model must match the sync GA gpt-realtime id."""
+        import asyncio
+
+        from praisonai.capabilities.realtime import arealtime_connect
+
+        session = asyncio.run(arealtime_connect(api_base="wss://api.openai.com"))
+
+        assert session.model == "gpt-realtime"
+        assert "model=gpt-realtime" in session.url
+
     def test_mcp_result_dataclass(self):
         """Test MCPResult dataclass."""
         from praisonai.capabilities.mcp import MCPResult

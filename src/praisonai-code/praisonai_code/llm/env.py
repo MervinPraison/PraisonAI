@@ -101,6 +101,39 @@ def _load_model_catalogue():
         return None
 
 
+def _best_available_for_key(key_var: str, representative: str) -> str:
+    """Return the best-ranked model for the provider behind ``key_var``.
+
+    Ranks the provider's catalogued models by capability (tool-use, context,
+    …) so a zero-config run lands on a *capable* default instead of the fixed,
+    often-weak representative. The ranked bare id is re-prefixed to match the
+    runtime routing of the representative (e.g. ``anthropic/<id>``). Returns the
+    original ``representative`` unchanged if ranking yields nothing or errors,
+    so behaviour degrades to today's fixed default rather than failing.
+    """
+    try:
+        from praisonai_code.llm.catalogue import (
+            ModelCatalogue,
+            provider_for_model,
+        )
+
+        provider = provider_for_model(representative)
+        if not provider:
+            return representative
+        best = ModelCatalogue().best_available(provider)
+        if not best:
+            return representative
+        # Preserve the representative's provider prefix so runtime routing is
+        # unchanged; the catalogue stores bare ids (e.g. ``gpt-4o``), while the
+        # representative may be prefixed (e.g. ``anthropic/claude-...``).
+        prefix = representative[: -len(representative.split("/", 1)[-1])]
+        if prefix and not best.startswith(prefix):
+            return prefix + best.split("/", 1)[-1]
+        return best
+    except Exception:
+        return representative
+
+
 def default_model_for_available_provider(
     *, validate: bool = False
 ) -> str:
@@ -108,14 +141,17 @@ def default_model_for_available_provider(
     Choose a default model that matches an available provider credential.
 
     Inspects the same credential environment variables that ``is_configured``
-    knows about and returns a provider-appropriate default model. When no
-    supported provider credential is present, falls back to ``_DEFAULT_MODEL``.
+    knows about and returns a provider-appropriate default model. For the first
+    provider whose credential is present, the best-ranked (most capable) model
+    is chosen over the fixed representative. When no supported provider
+    credential is present, falls back to ``_DEFAULT_MODEL``.
     """
     catalogue = _load_model_catalogue() if validate else None
 
     for key_var, model in _PROVIDER_DEFAULTS:
         if not os.environ.get(key_var):
             continue
+        model = _best_available_for_key(key_var, model)
         if catalogue is not None:
             bare = model.split("/", 1)[-1]
             try:
@@ -141,6 +177,18 @@ def has_provider_credential() -> bool:
             continue
         if os.environ.get(key_var):
             return True
+    # A discovered (Python-registered / entry-point) provider's conventional
+    # ``<PROVIDER>_API_KEY`` also counts as a cloud credential, so a first run
+    # configured only with a plugin provider's key is not misreported as keyless
+    # and pushed to the local/OpenAI fallback.
+    try:
+        from praisonai_code.llm.catalogue import discovered_providers
+
+        for pid in discovered_providers():
+            if os.environ.get(f"{pid.upper()}_API_KEY"):
+                return True
+    except Exception:
+        pass
     return False
 
 

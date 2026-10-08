@@ -256,32 +256,63 @@ KNOWN_DEAD_OUT_OF_SCOPE = {
 }
 
 
+def _product_event_references(root):
+    """Index references once across the same non-test Python source scope."""
+    import os
+    from pathlib import Path
+    import re
+
+    references = set()
+    pattern = re.compile(r"(?:HookEvent|PluginHook)\.([A-Za-z_][A-Za-z_0-9]*)")
+    for directory, folders, files in os.walk(root):
+        folders[:] = [name for name in folders if name != "tests"]
+        for name in files:
+            path = Path(directory) / name
+            if path.suffix != ".py" or "hooks/types.py" in path.as_posix():
+                continue
+            references.update(pattern.findall(path.read_text(encoding="utf-8", errors="replace")))
+    return references
+
+
+def test_reference_scan_reads_product_files_once(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    product = tmp_path / "src" / "module.py"
+    product.parent.mkdir()
+    product.write_text("HookEvent.BEFORE_TOOL\nPluginHook.ON_INIT\n", encoding="utf-8")
+    excluded = tmp_path / "tests" / "test_fake.py"
+    excluded.parent.mkdir()
+    excluded.write_text("HookEvent.TEST_ONLY\n", encoding="utf-8")
+    definitions = tmp_path / "src" / "hooks" / "types.py"
+    definitions.parent.mkdir()
+    definitions.write_text("HookEvent.DEFINITION_ONLY\n", encoding="utf-8")
+    reads = []
+    original = Path.read_text
+
+    def read(path, *args, **kwargs):
+        reads.append(path)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", read)
+    assert _product_event_references(tmp_path) == {"BEFORE_TOOL", "ON_INIT"}
+    assert reads == [product]
+
+
 def test_no_new_hook_event_is_declared_without_an_emission_site():
     """Every canonical HookEvent must be referenced by non-test product code."""
-    import subprocess
     from pathlib import Path
 
     # tests/unit/hooks/<file> -> repo root
     root = Path(__file__).resolve().parents[5]
 
-    def _refs(name):
-        hits = []
-        for prefix in ("HookEvent.", "PluginHook."):
-            hits += subprocess.run(
-                ["grep", "-rn", "--include=*.py", f"{prefix}{name}", str(root)],
-                capture_output=True, text=True,
-            ).stdout.splitlines()
-        return [
-            h for h in hits
-            if "/tests/" not in h and "hooks/types.py" not in h
-        ]
+    references = _product_event_references(root)
 
     # Control probe (must be non-zero): a known-live event.
-    assert _refs("BEFORE_TOOL"), "control probe failed - the grep found nothing for a live event"
+    assert "BEFORE_TOOL" in references, "control probe failed - no reference to a live event"
     # Control probe (must be zero): a name that does not exist.
-    assert not _refs("DEFINITELY_NOT_AN_EVENT"), "control probe failed - grep matched a bogus name"
+    assert "DEFINITELY_NOT_AN_EVENT" not in references, "control probe matched a bogus name"
 
-    dead = sorted(m.name for m in HookEvent if not _refs(m.name))
+    dead = sorted(m.name for m in HookEvent if m.name not in references)
     unexpected = sorted(set(dead) - KNOWN_DEAD_OUT_OF_SCOPE)
     assert unexpected == [], (
         "HookEvent members declared with no emission site (registering on one "

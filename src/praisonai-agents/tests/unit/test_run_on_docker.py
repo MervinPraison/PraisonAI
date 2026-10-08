@@ -13,7 +13,6 @@ Everything that needs a live daemon is marked, so it is skipped loudly rather
 than passing quietly when Docker is not running.
 """
 
-import shutil
 import subprocess
 
 import pytest
@@ -308,11 +307,12 @@ def test_a_hosted_backend_reclaims_its_instance_when_collected():
     instance kept billing until the provider's own idle timer noticed, which
     docker and flyio do not have."""
     import gc
-    import time
+    import threading
 
     from praisonai.integrations.compute_managed_agent import ComputeManagedAgent
 
     released = []
+    release_done = threading.Event()
 
     class Fake:
         provider_name = "fake"
@@ -328,6 +328,7 @@ def test_a_hosted_backend_reclaims_its_instance_when_collected():
 
         async def shutdown(self, instance_id):
             released.append(instance_id)
+            release_done.set()
 
     import asyncio
 
@@ -339,12 +340,7 @@ def test_a_hosted_backend_reclaims_its_instance_when_collected():
 
     del backend
     gc.collect()
-    # During live GC the finalizer reclaims fire-and-forget on the shared
-    # AsyncBridge's background loop, so the shutdown lands a beat after
-    # gc.collect() returns. Wait (bounded) for it rather than racing it.
-    deadline = time.monotonic() + 5.0
-    while not released and time.monotonic() < deadline:
-        time.sleep(0.01)
+    assert release_done.wait(5), "the background instance release did not complete"
     assert released == ["inst-1"], "the instance outlived the backend that owned it"
 
 
@@ -368,25 +364,57 @@ def test_release_reclaims_even_on_an_event_loop_thread():
     ever runs, silently leaking the instance -- so _release must bridge the loop
     the way SharedCompute does, not call asyncio.run() directly."""
     import asyncio
-    import time
+    import threading
 
     from praisonai.integrations.compute_managed_agent import _release
 
     released = []
+    release_done = threading.Event()
 
     class Fake:
         async def shutdown(self, instance_id):
             released.append(instance_id)
+            release_done.set()
 
     async def collect_on_the_loop():
         _release(Fake(), "inst-loop", "docker")
+        assert await asyncio.to_thread(release_done.wait, 5), "background release did not complete"
 
     asyncio.run(collect_on_the_loop())
-    # _release routes through the shared AsyncBridge's background loop
-    # fire-and-forget, so the shutdown lands a beat after asyncio.run()
-    # returns. Wait (bounded) for it rather than racing it — the assertion
-    # still fails if _release ever leaks (never schedules the shutdown).
-    deadline = time.monotonic() + 5.0
-    while not released and time.monotonic() < deadline:
-        time.sleep(0.01)
     assert released == ["inst-loop"], "an instance leaked when GC ran on a live loop"
+
+
+def test_release_returns_before_a_slow_provider_finishes():
+    """A live event loop must remain runnable while the cloud teardown waits."""
+    import asyncio
+    import threading
+
+    from praisonai.integrations.compute_managed_agent import _release
+
+    started = threading.Event()
+    allow_completion = threading.Event()
+    completed = threading.Event()
+    released = []
+
+    class Fake:
+        async def shutdown(self, instance_id):
+            started.set()
+            try:
+                assert await asyncio.to_thread(allow_completion.wait, 5)
+                released.append(instance_id)
+            finally:
+                completed.set()
+
+    async def collect_on_the_loop():
+        try:
+            _release(Fake(), "slow-instance", "docker")
+            assert await asyncio.to_thread(started.wait, 5)
+            assert not completed.is_set(), "release blocked the caller until teardown ended"
+            # This caller's loop can still advance before permitting teardown.
+            await asyncio.sleep(0)
+        finally:
+            allow_completion.set()
+            assert await asyncio.to_thread(completed.wait, 5)
+
+    asyncio.run(collect_on_the_loop())
+    assert released == ["slow-instance"]

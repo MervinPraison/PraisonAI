@@ -4,6 +4,7 @@
  */
 
 import { RepoMap, createRepoMap, getRepoTree } from '../features/repo-map';
+import { printPlainHelp } from '../output/help';
 
 export async function execute(args: string[], options: Record<string, unknown>): Promise<void> {
   const subcommand = args[0] || 'tree';
@@ -134,21 +135,9 @@ function showHelp(isJson: boolean): void {
     ]
   };
 
-  if (isJson) {
-    console.log(JSON.stringify(help, null, 2));
-  } else {
-    console.log('Repo Map - Repository visualization\n');
-    console.log('Subcommands:');
-    for (const [cmd, desc] of Object.entries(help.subcommands)) {
-      console.log(`  ${cmd.padEnd(12)} ${desc}`);
-    }
-    console.log('\nFlags:');
-    for (const [flag, desc] of Object.entries(help.flags)) {
-      console.log(`  ${flag.padEnd(12)} ${desc}`);
-    }
-    console.log('\nExamples:');
-    for (const ex of help.examples) {
-      console.log(`  ${ex}`);
-    }
-  }
+  printPlainHelp(isJson, help, 'Repo Map - Repository visualization', [
+    { label: 'Subcommands:', entries: help.subcommands },
+    { label: 'Flags:', entries: help.flags },
+    { label: 'Examples:', items: help.examples }
+  ]);
 }

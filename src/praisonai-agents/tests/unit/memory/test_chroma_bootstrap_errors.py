@@ -47,13 +47,13 @@ def test_native_panic_uses_normal_failure_path(bootstrap, caplog):
         with pytest.raises(RuntimeError, match="Chroma persist failed") as caught:
             initialize()
         assert caught.value.__cause__ is panic
-        assert path in str(caught.value)
+        assert repr(path) in str(caught.value)
         assert "NativePanic" in str(caught.value)
     else:
         memory = initialize()
         assert memory.use_rag is False
         assert "NativePanic" in caplog.text
-        assert path in caplog.text
+        assert repr(path) in caplog.text
 
 
 @pytest.mark.parametrize("signal", [KeyboardInterrupt, SystemExit, GeneratorExit, CancelledError])

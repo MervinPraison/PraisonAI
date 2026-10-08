@@ -8,8 +8,18 @@ import pytest
 from praisonaiagents import Agent
 from praisonaiagents.agent import async_safety
 from praisonaiagents.agent.tool_execution import ToolExecutionMixin
-from praisonaiagents.config import ExecutionConfig
+from praisonaiagents.config import ExecutionConfig, HooksConfig
 from praisonaiagents.escalation.loop_guard import LoopGuard, LoopGuardConfig
+from praisonaiagents.hooks import HookRegistry
+
+
+def _isolated_hooks():
+    """A private hook registry so a leaked global BEFORE_TOOL hook from another
+    test file (xdist ``--dist loadfile`` shares a worker) cannot block the
+    tools these concurrency tests run. Agents default to the *global* registry;
+    pinning a fresh one keeps these tests deterministic without changing what
+    they assert."""
+    return HooksConfig(registry=HookRegistry())
 
 
 def test_standalone_mixin_initializes_one_lock_for_concurrent_callers(monkeypatch):
@@ -47,6 +57,7 @@ def test_executor_lock_allows_tool_bodies_to_run_concurrently(monkeypatch, initi
         tools=[paired_tool],
         output="silent",
         execution=ExecutionConfig(max_retry_limit=0, context_compaction=False),
+        hooks=_isolated_hooks(),
     )
     agent._loop_guard = LoopGuard(LoopGuardConfig(enabled=False))
     assert agent._execute_tool_with_context("paired_tool", {"value": 0}, None) == "0"
@@ -113,6 +124,7 @@ def test_late_timeout_does_not_retire_another_calls_executor(monkeypatch, create
         tools=[blocking_tool, quick_tool],
         output="silent",
         execution=ExecutionConfig(max_retry_limit=0, context_compaction=False),
+        hooks=_isolated_hooks(),
     )
     assert agent._execute_tool_with_context("quick_tool", {}, None) == "ready"
     agent._tool_timeout = 1
@@ -159,6 +171,7 @@ def test_close_detaches_executor_under_lock(monkeypatch):
         instructions="Test tools",
         output="silent",
         execution=ExecutionConfig(max_retry_limit=0, context_compaction=False),
+        hooks=_isolated_hooks(),
     )
 
     class RecordingExecutor(concurrent.futures.ThreadPoolExecutor):

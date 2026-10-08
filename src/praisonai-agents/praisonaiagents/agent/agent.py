@@ -3250,7 +3250,10 @@ Your Goal: {self.goal}
         result = cls.__new__(cls)
         memo[id(self)] = result
         for k, v in self.__dict__.items():
-            if k in ("_Agent__cache_lock",):
+            if k in ("_db_run_context", "_db_session_init_lock"):
+                # A clone starts outside the source agent's active DB turn.
+                continue
+            elif k in ("_Agent__cache_lock",):
                 object.__setattr__(result, k, threading.RLock())
             elif k in ("_cost_lock", "_auto_save_lock"):
                 object.__setattr__(result, k, threading.Lock())
@@ -6230,12 +6233,12 @@ Summary:"""
             for extra in extra_files:
                 self._rules_manager.add_rule_file(extra)
             
-            # Discovery gate: if no rules were found, drop the manager so that
-            # zero-config runs incur no per-run injection cost.
+            # Keep explicit registrations so an initially empty glob can gain
+            # matches on reload. Zero-config runs still avoid injection cost.
             stats = self._rules_manager.get_stats()
             if stats["total_rules"] > 0:
                 logging.debug(f"RulesManager: Discovered {stats['total_rules']} rules")
-            else:
+            elif not extra_files:
                 self._rules_manager = None
         except ImportError:
             logging.debug("RulesManager not available")
@@ -7137,6 +7140,7 @@ Answer:"""
         it stays auditable without reaching the caller. The rejection is also
         exposed programmatically via :attr:`last_guardrail_error`.
         """
+        self._mark_db_run_error()
         reason = str(error) if error else getattr(self, "_last_guardrail_error", None)
         if reason:
             logging.info(f"Agent {self.name}: guardrail block reason: {reason}")

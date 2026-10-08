@@ -41,8 +41,38 @@ class MCPToolRunner(threading.Thread):
         self.start()
         
     def run(self):
-        """Main thread function that processes MCP requests."""
-        asyncio.run(self._run_async())
+        """Main thread function that processes MCP requests.
+
+        On Windows the stdio transport must spawn a child process (e.g. ``npx``)
+        and talk to it over pipes. A non-main thread gets a ``SelectorEventLoop``
+        by default there, which does not support subprocesses and fails with an
+        opaque ``fileno`` error during init (issue #5598). Use a dedicated
+        ``ProactorEventLoop`` on Windows so subprocess stdio works; other
+        platforms keep the standard ``asyncio.run`` behaviour.
+        """
+        if platform.system() == 'Windows':
+            loop = asyncio.ProactorEventLoop()
+            try:
+                asyncio.set_event_loop(loop)
+                loop.run_until_complete(self._run_async())
+            finally:
+                # Mirror asyncio.run()'s graceful teardown so outstanding async
+                # generators and the default executor are finalized before the
+                # loop is closed (the subprocess transport relies on this).
+                try:
+                    loop.run_until_complete(loop.shutdown_asyncgens())
+                except Exception:
+                    pass
+                try:
+                    loop.run_until_complete(loop.shutdown_default_executor())
+                except Exception:
+                    pass
+                try:
+                    loop.close()
+                finally:
+                    asyncio.set_event_loop(None)
+        else:
+            asyncio.run(self._run_async())
         
     async def _run_async(self):
         """Async entry point for MCP operations."""
@@ -798,67 +828,31 @@ class MCP:
 
     def _create_tool_wrapper(self, tool):
         """Create a wrapper function for an MCP tool."""
-        # Determine parameter names from the schema
-        param_names = []
-        param_annotations = {}
-        required_params = []
-        
-        if hasattr(tool, 'inputSchema') and tool.inputSchema:
-            properties = tool.inputSchema.get("properties", {})
-            required = tool.inputSchema.get("required", [])
-            
-            for name, prop in properties.items():
-                param_names.append(name)
-                
-                # Set annotation based on property type
-                prop_type = prop.get("type", "string")
-                if prop_type == "string":
-                    param_annotations[name] = str
-                elif prop_type == "integer":
-                    param_annotations[name] = int
-                elif prop_type == "number":
-                    param_annotations[name] = float
-                elif prop_type == "boolean":
-                    param_annotations[name] = bool
-                elif prop_type == "array":
-                    param_annotations[name] = list
-                elif prop_type == "object":
-                    param_annotations[name] = dict
-                else:
-                    param_annotations[name] = Any
-                
-                if name in required:
-                    required_params.append(name)
-        
-        # Create the function signature
-        # Separate required and optional parameters to ensure proper ordering
-        # (required parameters must come before optional parameters)
-        required_param_objects = []
-        optional_param_objects = []
-        
-        for name in param_names:
-            is_required = name in required_params
-            param = inspect.Parameter(
-                name=name,
-                kind=inspect.Parameter.POSITIONAL_OR_KEYWORD,
-                default=inspect.Parameter.empty if is_required else None,
-                annotation=param_annotations.get(name, Any)
-            )
-            
-            if is_required:
-                required_param_objects.append(param)
-            else:
-                optional_param_objects.append(param)
-        
-        # Combine parameters with required first, then optional
-        params = required_param_objects + optional_param_objects
-        
+        from .mcp_schema_utils import build_tool_signature, build_openai_tool_dict
+
+        input_schema = getattr(tool, 'inputSchema', None) or {}
+        signature = build_tool_signature(input_schema)
+        # Positional arguments map onto the named parameters of the signature,
+        # in declaration order. Non-identifier/keyword property names (``from``,
+        # ``max-results``) are handled through ``**kwargs``, so they are excluded
+        # here to keep positional mapping aligned with the visible parameters.
+        param_names = [
+            name
+            for name, param in signature.parameters.items()
+            if param.kind is not inspect.Parameter.VAR_KEYWORD
+        ]
+        param_annotations = {
+            name: param.annotation
+            for name, param in signature.parameters.items()
+            if param.kind is not inspect.Parameter.VAR_KEYWORD
+        }
+
         # Create function template to be properly decorated
         def template_function(*args, **kwargs):
             return None
         
         # Create a proper function with the correct signature
-        template_function.__signature__ = inspect.Signature(params)
+        template_function.__signature__ = signature
         template_function.__annotations__ = param_annotations
         template_function.__name__ = tool.name
         template_function.__qualname__ = tool.name
@@ -880,8 +874,21 @@ class MCP:
             return self.runner.call_tool(tool.name, all_args)
         
         # Make sure the wrapper has the correct signature for inspection
-        wrapper.__signature__ = inspect.Signature(params)
-        
+        wrapper.__signature__ = signature
+        # Expose the server's original schema so schema builders (e.g.
+        # LLM._generate_tool_definition) surface every property instead of
+        # re-deriving from the signature, which omits ``**kwargs`` names
+        # (JSON Schema allows ``from``/``max-results`` that are not valid Python
+        # parameter names). The schema name tracks the wrapper's current
+        # ``__name__`` so it stays in sync after ``with_tool_prefix``.
+        def get_schema():
+            """Return the OpenAI tool schema built from the server's original inputSchema."""
+            return build_openai_tool_dict(
+                wrapper.__name__, tool.description, input_schema
+            )
+
+        wrapper.get_schema = get_schema
+
         return wrapper
     
     def _initialize_npx_mcp_tools(self, cmd, arguments):

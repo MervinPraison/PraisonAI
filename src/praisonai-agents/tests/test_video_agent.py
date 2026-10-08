@@ -431,6 +431,90 @@ class TestVideoAgentOpenRouterHeaders:
         assert model == "google/veo-3.1"
 
 
+class TestVideoAgentUnsupportedBackend:
+    """Regression tests for issue #5342.
+
+    Providers such as xAI Grok Imagine are listed in LiteLLM's chat/cost
+    catalogue but have no video-generation backend. generate()/agenerate()
+    must turn LiteLLM's opaque 'not supported' provider error into a clear,
+    actionable ValueError naming models that do have a video route.
+    """
+
+    def _raising_module(self):
+        def raise_unsupported(**kwargs):
+            raise RuntimeError(
+                "XaiException - video generation is not supported for xai"
+            )
+        return {"video_generation": raise_unsupported}
+
+    def test_generate_unsupported_backend_raises_valueerror(self):
+        from praisonaiagents import VideoAgent
+
+        agent = VideoAgent(llm="xai/grok-imagine-video-1.5", verbose=False)
+        agent._litellm_video = self._raising_module()
+
+        with pytest.raises(ValueError, match="no LiteLLM video-generation backend"):
+            agent.generate("short test clip")
+
+    def test_error_message_lists_supported_models(self):
+        from praisonaiagents import VideoAgent
+
+        agent = VideoAgent(llm="xai/grok-imagine-video-1.5", verbose=False)
+        agent._litellm_video = self._raising_module()
+
+        with pytest.raises(ValueError) as exc_info:
+            agent.generate("short test clip")
+        message = str(exc_info.value)
+        assert "xai/grok-imagine-video-1.5" in message
+        assert "openai/sora-2" in message
+
+    def test_unrelated_error_is_not_masked(self):
+        """A normal provider error (e.g. auth) must propagate unchanged."""
+        from praisonaiagents import VideoAgent
+
+        def raise_auth(**kwargs):
+            raise RuntimeError("AuthenticationError: API_KEY_INVALID")
+
+        agent = VideoAgent(llm="gemini/veo-3.1-lite-generate-preview", verbose=False)
+        agent._litellm_video = {"video_generation": raise_auth}
+
+        with pytest.raises(RuntimeError, match="API_KEY_INVALID"):
+            agent.generate("test")
+
+    def test_working_backend_bad_request_is_not_masked(self):
+        """A working backend rejecting a bad request must propagate unchanged.
+
+        Greptile P1: an error like "video size is not supported" from a real
+        video backend must NOT be turned into a "no video-generation backend"
+        ValueError — the caller should fix the request, not switch models.
+        """
+        from praisonaiagents import VideoAgent
+
+        def raise_bad_size(**kwargs):
+            raise RuntimeError("BadRequestError: video size is not supported")
+
+        agent = VideoAgent(llm="openai/sora-2", verbose=False)
+        agent._litellm_video = {"video_generation": raise_bad_size}
+
+        with pytest.raises(RuntimeError, match="video size is not supported"):
+            agent.generate("test")
+
+    @pytest.mark.asyncio
+    async def test_agenerate_unsupported_backend_raises_valueerror(self):
+        from praisonaiagents import VideoAgent
+
+        async def raise_unsupported(**kwargs):
+            raise RuntimeError(
+                "XaiException - video generation is not supported for xai"
+            )
+
+        agent = VideoAgent(llm="xai/grok-imagine-video-1.5", verbose=False)
+        agent._litellm_video = {"avideo_generation": raise_unsupported}
+
+        with pytest.raises(ValueError, match="no LiteLLM video-generation backend"):
+            await agent.agenerate("short test clip")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Async Tests
 # ─────────────────────────────────────────────────────────────────────────────

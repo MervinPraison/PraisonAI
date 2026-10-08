@@ -4,8 +4,9 @@
 
 import { outputJson, formatSuccess, formatError } from '../output/json';
 import * as pretty from '../output/pretty';
-import { EXIT_CODES, ENV_VARS } from '../spec/cli-spec';
-import { ERROR_CODES } from '../output/errors';
+import { EXIT_CODES } from '../spec/cli-spec';
+import { ERROR_CODES, handleCommandError } from '../output/errors';
+import { printCommandHelp } from '../output/help';
 
 export interface VectorOptions {
   verbose?: boolean;
@@ -114,12 +115,7 @@ export async function execute(args: string[], options: VectorOptions): Promise<v
         break;
     }
   } catch (error) {
-    if (outputFormat === 'json') {
-      outputJson(formatError(ERROR_CODES.UNKNOWN, error instanceof Error ? error.message : String(error)));
-    } else {
-      await pretty.error(error instanceof Error ? error.message : String(error));
-    }
-    process.exit(EXIT_CODES.RUNTIME_ERROR);
+    await handleCommandError(outputFormat, error);
   }
 }
 
@@ -304,25 +300,12 @@ async function showHelp(outputFormat: string): Promise<void> {
     ]
   };
 
-  if (outputFormat === 'json') {
-    outputJson(formatSuccess(help));
-  } else {
-    await pretty.heading('Vector Command');
-    await pretty.plain(help.description);
-    await pretty.newline();
-    await pretty.plain('Subcommands:');
-    for (const cmd of help.subcommands) {
-      await pretty.plain(`  ${cmd.name.padEnd(25)} ${cmd.description}`);
-    }
-    await pretty.newline();
-    await pretty.plain('Flags:');
-    for (const flag of help.flags) {
-      await pretty.plain(`  ${flag.name.padEnd(20)} ${flag.description}`);
-    }
-    await pretty.newline();
-    await pretty.dim('Examples:');
-    await pretty.dim('  praisonai-ts vector add "Hello world"');
-    await pretty.dim('  praisonai-ts vector search "hello"');
-    await pretty.dim('  praisonai-ts vector stats');
-  }
+  await printCommandHelp(outputFormat, help, {
+    heading: 'Vector Command',
+    examples: [
+      'praisonai-ts vector add "Hello world"',
+      'praisonai-ts vector search "hello"',
+      'praisonai-ts vector stats'
+    ]
+  });
 }

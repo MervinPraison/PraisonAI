@@ -779,6 +779,7 @@ body.studio .inner.studio-wrap{max-width:52rem}
           <p>Create images with DALL·E (OpenAI API key in Settings or ~/.praisonai/.env).</p>
         </div>
         <div class="tcard">
+          <p class="meta">For MiniMax, set MINIMAX_API_KEY in the engine environment.</p>
           <div class="tf">
             <label for="imgPrompt">Prompt</label>
             <textarea id="imgPrompt" rows="3" placeholder="A watercolor lighthouse at sunset"></textarea>
@@ -787,7 +788,8 @@ body.studio .inner.studio-wrap{max-width:52rem}
             <div class="tf">
               <label for="imgModel">Model</label>
               <select id="imgModel"><option value="dall-e-3" selected>dall-e-3</option>
-                <option value="dall-e-2">dall-e-2</option></select>
+                <option value="dall-e-2">dall-e-2</option>
+                <option value="minimax/image-01">MiniMax image-01</option></select>
             </div>
             <div class="tf">
               <label for="imgSize">Size</label>

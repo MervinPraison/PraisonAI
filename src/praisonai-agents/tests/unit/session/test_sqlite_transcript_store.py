@@ -256,6 +256,120 @@ class TestSqliteTranscriptStore:
         ]
 
 
+class TestTranscriptPortability:
+    """Issue #5517: export/import must read/write DB rows, not JSON sidecars."""
+
+    def test_export_all_includes_db_sessions(self, tmp_dir):
+        store = SqliteTranscriptStore(session_dir=tmp_dir)
+        store.add_message("s1", "user", "hello db")
+        store.add_message("s2", "user", "second db")
+        payload = store.export_all()
+        assert payload["version"] == store.PORTABLE_VERSION
+        ids = {s["session_id"] for s in payload["sessions"]}
+        assert ids == {"s1", "s2"}
+
+    def test_export_all_ignores_unrelated_json_sidecars(self, tmp_dir):
+        store = SqliteTranscriptStore(session_dir=tmp_dir)
+        store.add_message("s1", "user", "db only")
+        # Drop an unrelated JSON sidecar next to the DB; it must not leak in.
+        with open(os.path.join(tmp_dir, "stray.json"), "w", encoding="utf-8") as f:
+            f.write('{"session_id": "stray", "messages": []}')
+        payload = store.export_all()
+        ids = {s["session_id"] for s in payload["sessions"]}
+        assert ids == {"s1"}
+
+    def test_export_session_includes_db_lineage(self, tmp_dir):
+        from praisonaiagents.session.store import SessionData
+
+        store = SqliteTranscriptStore(session_dir=tmp_dir)
+        for sid in ("root", "cont"):
+            session = SessionData(session_id=sid, metadata={"lineage_id": "L1"})
+            store._save_session(session)
+        payload = store.export_session("root")
+        ids = {s["session_id"] for s in payload["sessions"]}
+        assert ids == {"root", "cont"}
+
+    def test_import_writes_db_row_over_existing(self, tmp_dir):
+        store = SqliteTranscriptStore(session_dir=tmp_dir)
+        store.add_message("s1", "user", "original")
+
+        payload = {
+            "version": store.PORTABLE_VERSION,
+            "sessions": [
+                {
+                    "session_id": "s1",
+                    "messages": [
+                        {"role": "user", "content": "restored"},
+                    ],
+                }
+            ],
+        }
+        report = store.import_sessions(payload, overwrite=True)
+        assert report.imported == 1
+        # The restore must be visible in the DB, not written to a JSON sidecar.
+        assert store.session_exists("s1")
+        assert not any(f.endswith(".json") for f in os.listdir(tmp_dir))
+        reader = SqliteTranscriptStore(
+            session_dir=tmp_dir, db_path=store.db_path
+        )
+        assert reader.get_chat_history("s1") == [
+            {"role": "user", "content": "restored"}
+        ]
+
+    def test_import_read_only_db_reports_failure(self, tmp_dir):
+        db = os.path.join(tmp_dir, "sessions.db")
+        store = SqliteTranscriptStore(session_dir=tmp_dir, db_path=db)
+        store.add_message("s1", "user", "existing")
+        # Make the live connection read-only; an overwrite must fail, not lie.
+        store._connect().execute("PRAGMA query_only=ON")
+
+        payload = {
+            "version": store.PORTABLE_VERSION,
+            "sessions": [
+                {"session_id": "s1", "messages": [{"role": "user", "content": "x"}]}
+            ],
+        }
+        report = store.import_sessions(payload, overwrite=True)
+        assert report.imported == 0
+        assert report.skipped  # write failure reported, not silent success
+
+    def test_round_trip_to_fresh_store(self, tmp_dir):
+        store = SqliteTranscriptStore(session_dir=tmp_dir, db_path=":memory:")
+        store.add_message("s1", "user", "one")
+        store.add_message("s2", "user", "two")
+        payload = store.export_all()
+
+        dest = SqliteTranscriptStore(session_dir=tmp_dir + "2", db_path=":memory:")
+        report = dest.import_sessions(payload)
+        assert report.imported == 2
+        assert dest.session_exists("s1")
+        assert dest.session_exists("s2")
+
+    def test_import_preserves_history_over_destination_window(self, tmp_dir):
+        # Guards the no-window-truncation restore contract on the SQLite
+        # backend: a destination with a small truncating window must not drop
+        # exported history on import (regression guard if the restore path ever
+        # switched from _save_imported_session to _save_session).
+        src = SqliteTranscriptStore(session_dir=tmp_dir)
+        for i in range(6):
+            src.add_message("s1", "user", f"m{i}")
+        payload = src.export_all()
+
+        db = os.path.join(tmp_dir, "dest.db")
+        dst = SqliteTranscriptStore(
+            session_dir=tmp_dir + "2",
+            db_path=db,
+            active_window=2,
+            retention="truncate",
+        )
+        assert dst.import_sessions(payload).imported == 1
+
+        reader = SqliteTranscriptStore(session_dir=tmp_dir + "2", db_path=db)
+        session = reader.get_session("s1")
+        restored = session.archived_messages + session.messages
+        assert [m.content for m in restored] == [f"m{i}" for i in range(6)]
+
+
 class TestTranscriptArchivedRecall:
     """Issue #5031: transcript store must recall compacted (archived) turns."""
 

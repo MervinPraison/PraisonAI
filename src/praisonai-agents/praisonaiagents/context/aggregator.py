@@ -292,26 +292,13 @@ class ContextAggregator:
         Returns:
             AggregatedContext with merged results
         """
-        try:
-            # Check if we're in an async context
-            try:
-                asyncio.get_running_loop()
-                # We're in an async context - need to run in thread
-                import concurrent.futures
-                
-                def _run_async_in_thread():
-                    """Run async method in new event loop within thread."""
-                    return asyncio.run(self.aggregate(query, sources, max_tokens))
-                
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    future = pool.submit(_run_async_in_thread)
-                    return future.result()
-            except RuntimeError:
-                # No running event loop - safe to use asyncio.run
-                return asyncio.run(self.aggregate(query, sources, max_tokens))
-        except Exception:
-            # Fallback - create new event loop
-            return asyncio.run(self.aggregate(query, sources, max_tokens))
+        # Shared bridge: copies contextvars and surfaces errors unchanged,
+        # whether or not an event loop is already running on this thread.
+        from ..utils.async_bridge import run_coroutine_from_any_context
+
+        return run_coroutine_from_any_context(
+            self.aggregate(query, sources, max_tokens), timeout=None
+        )
 
 def create_aggregator_from_config(
     memory = None,

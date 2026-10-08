@@ -2,10 +2,9 @@
  * Graph RAG command - Graph-based retrieval augmented generation
  */
 
-import { outputJson, formatSuccess, formatError } from '../output/json';
+import { outputJson, formatSuccess } from '../output/json';
 import * as pretty from '../output/pretty';
-import { EXIT_CODES } from '../spec/cli-spec';
-import { ERROR_CODES } from '../output/errors';
+import { handleCommandError } from '../output/errors';
 
 export interface GraphRagOptions {
   verbose?: boolean;
@@ -28,12 +27,7 @@ export async function execute(args: string[], options: GraphRagOptions): Promise
         break;
     }
   } catch (error) {
-    if (outputFormat === 'json') {
-      outputJson(formatError(ERROR_CODES.UNKNOWN, error instanceof Error ? error.message : String(error)));
-    } else {
-      await pretty.error(error instanceof Error ? error.message : String(error));
-    }
-    process.exit(EXIT_CODES.RUNTIME_ERROR);
+    await handleCommandError(outputFormat, error);
   }
 }
 

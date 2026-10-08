@@ -31,14 +31,15 @@ class FakeRedis:
     separate replicas talking to one Redis.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, clock=None) -> None:
         self.store: dict = {}
         self._expiry: dict = {}
         self.eval_calls: list = []
+        self._clock = clock or time.monotonic
 
     def _expire_if_stale(self, key):
         exp = self._expiry.get(key)
-        if exp is not None and time.monotonic() >= exp:
+        if exp is not None and self._clock() >= exp:
             self.store.pop(key, None)
             self._expiry.pop(key, None)
 
@@ -48,7 +49,7 @@ class FakeRedis:
             return None
         self.store[key] = value
         if px is not None:
-            self._expiry[key] = time.monotonic() + (px / 1000.0)
+            self._expiry[key] = self._clock() + (px / 1000.0)
         else:
             self._expiry.pop(key, None)
         return True
@@ -66,7 +67,7 @@ class FakeRedis:
         self._expire_if_stale(key)
         if key not in self.store:
             return 0
-        self._expiry[key] = time.monotonic() + (px / 1000.0)
+        self._expiry[key] = self._clock() + (px / 1000.0)
         return 1
 
     async def eval(self, script, numkeys, key, *args):
@@ -75,7 +76,7 @@ class FakeRedis:
         arg = args[0]
         if "pexpire" in script:
             if self.store.get(key) == arg:
-                self._expiry[key] = time.monotonic() + (int(args[1]) / 1000.0)
+                self._expiry[key] = self._clock() + (int(args[1]) / 1000.0)
                 return 1
             return 0
         # compare-and-del
@@ -89,6 +90,23 @@ class FakeRedis:
 class BoomRedis:
     async def set(self, *a, **k):
         raise RuntimeError("redis down")
+
+
+@pytest.mark.parametrize("ttl", [0, -1, -0.001])
+def test_redis_turn_lock_rejects_nonpositive_ttl(ttl):
+    """Invalid lease lifetimes fail before acquisition or renewal can start."""
+    redis = FakeRedis()
+    with pytest.raises(ValueError, match="ttl must be positive"):
+        RedisTurnLock(redis, ttl=ttl)
+    assert redis.store == {}
+    assert redis.eval_calls == []
+
+
+@pytest.mark.parametrize("ttl", [0.001, 0.03, 0.06, 60])
+def test_redis_turn_lock_preserves_positive_ttl(ttl):
+    """Small positive lifetimes retain the existing configured expiry contract."""
+    lock = RedisTurnLock(FakeRedis(), ttl=ttl)
+    assert lock._ttl == ttl
 
 
 def test_build_turn_lock_local_returns_lockmap():
@@ -171,16 +189,38 @@ async def test_redis_turn_lock_release_leaves_other_owner_key():
 
 
 @pytest.mark.asyncio
-async def test_redis_turn_lock_renews_lease_during_long_turn():
+async def test_redis_turn_lock_renews_lease_during_long_turn(monkeypatch):
     """A turn longer than ttl keeps the lease via owner-checked renewal."""
-    redis = FakeRedis()
+    from types import SimpleNamespace
+    from praisonai_bot.bots import _redis_turn_lock
+
+    now = [0.0]
+    redis = FakeRedis(clock=lambda: now[0])
+
+    async def advance_clock(delay):
+        now[0] += delay
+        await asyncio.sleep(0)
+
+    # Advance only this module's renewal sleeps and the fake Redis TTL clock.
+    # The event loop retains its real clock, so runner pauses cannot expire
+    # a 60 ms test lease before the renewal task gets CPU time.
+    monkeypatch.setattr(_redis_turn_lock, 'asyncio', SimpleNamespace(
+        sleep=advance_clock, ensure_future=asyncio.ensure_future,
+        CancelledError=asyncio.CancelledError,
+    ))
     lock = RedisTurnLock(redis, ttl=0.06, poll_interval=0.01)
     async with lock.get("k"):
         (redis_key,) = list(redis.store)
         first = redis.store[redis_key]
-        # Run well past ttl; without renewal the key would expire and vanish.
-        await asyncio.sleep(0.2)
-        assert redis.store.get(redis_key) == first  # still ours
+
+        async def wait_for_renewals():
+            while len(redis.eval_calls) < 12 or now[0] <= 3 * lock._ttl:
+                await asyncio.sleep(0)
+
+        await asyncio.wait_for(wait_for_renewals(), timeout=5)
+        assert now[0] > 3 * lock._ttl
+        # GET applies expiry too; stale dictionary contents cannot pass.
+        assert await redis.get(redis_key) == first
 
 
 @pytest.mark.asyncio
@@ -195,6 +235,41 @@ async def test_redis_turn_lock_reclaims_expired_lease():
     # b must be able to acquire once the dead holder's lease expires.
     async with b.get("k"):
         assert redis.store.get(redis_key) != "dead-holder"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('ttl,poll_interval', [(0.03, 0.05), (0.03, 0.5), (0.3, 0.05)])
+async def test_renewal_keeps_owner_when_acquisition_poll_is_slow(monkeypatch, ttl, poll_interval):
+    """Waiting replicas' polling cadence must not make the holder renew too late."""
+    import sys
+    from types import SimpleNamespace
+    from praisonai_bot.bots import _redis_turn_lock
+
+    now = [0.0]
+    # Only this fake Redis uses virtual time; the event-loop clock is unchanged.
+    monkeypatch.setattr(sys.modules[__name__], 'time', SimpleNamespace(monotonic=lambda: now[0]))
+    redis = FakeRedis()
+
+    async def advance_clock(delay):
+        now[0] += delay
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr(_redis_turn_lock, 'asyncio', SimpleNamespace(
+        sleep=advance_clock, ensure_future=asyncio.ensure_future,
+        CancelledError=asyncio.CancelledError,
+    ))
+    lock = RedisTurnLock(redis, ttl=ttl, poll_interval=poll_interval)
+    async with lock.get('session'):
+        (key,) = list(redis.store)
+        owner = redis.store[key]
+
+        async def wait_for_renewals():
+            while len(redis.eval_calls) < 12:
+                await asyncio.sleep(0)
+
+        await asyncio.wait_for(wait_for_renewals(), timeout=5)
+        assert now[0] > 3 * ttl
+        assert await redis.get(key) == owner
 
 
 @pytest.mark.asyncio

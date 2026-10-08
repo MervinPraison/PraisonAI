@@ -195,6 +195,168 @@ class TestResponsesAPIParamBuilder:
                 }],
             }])
 
+    def test_text_part_instruction_list_joined(self):
+        """A lone text-part system list must become joined instruction text."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        params = llm._build_responses_params(messages=[
+            {"role": "system", "content": [
+                {"type": "text", "text": "Line one"},
+                {"type": "text", "text": "Line two"},
+            ]},
+            {"role": "user", "content": "hi"},
+        ])
+
+        assert params["instructions"] == "Line one\nLine two"
+
+    def test_mixed_string_then_list_instructions(self):
+        """String instruction followed by a text-part list must concatenate."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        params = llm._build_responses_params(messages=[
+            {"role": "system", "content": "First"},
+            {"role": "developer", "content": [{"type": "text", "text": "Second"}]},
+            {"role": "user", "content": "hi"},
+        ])
+
+        assert params["instructions"] == "First\nSecond"
+
+    def test_mixed_list_then_string_instructions_no_mutation(self):
+        """List instruction then string must concatenate without mutating caller history."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        system_content = [{"type": "text", "text": "First"}]
+        messages = [
+            {"role": "system", "content": system_content},
+            {"role": "developer", "content": "Second"},
+            {"role": "user", "content": "hi"},
+        ]
+        params = llm._build_responses_params(messages=messages)
+
+        assert params["instructions"] == "First\nSecond"
+        assert system_content == [{"type": "text", "text": "First"}]
+
+    def test_unsupported_instruction_part_rejected(self):
+        """Non-text instruction parts must raise, not be silently discarded."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        with pytest.raises(ValueError, match="Unsupported system/developer instruction"):
+            llm._build_responses_params(messages=[
+                {"role": "system", "content": [
+                    {"type": "image_url", "image_url": {"url": "x"}},
+                ]},
+                {"role": "user", "content": "hi"},
+            ])
+
+    def test_assistant_list_content_with_tool_calls(self):
+        """List content alongside tool_calls must convert, not crash on .strip() (issue #5469)."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        messages = [
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Checking"}],
+                "tool_calls": [{
+                    "id": "call_1",
+                    "function": {"name": "add", "arguments": '{"a":1,"b":2}'},
+                }],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "3"},
+        ]
+
+        params = llm._build_responses_params(messages=messages)
+        items = params["input"]
+
+        assert items[0] == {
+            "role": "assistant",
+            "content": [{"type": "input_text", "text": "Checking"}],
+        }
+        assert items[1]["type"] == "function_call"
+        assert items[1]["call_id"] == "call_1"
+        assert items[1]["name"] == "add"
+        assert items[2] == {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "3",
+        }
+
+    def test_assistant_string_content_with_tool_calls_unchanged(self):
+        """String content alongside tool_calls stays a string before the function_call."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        params = llm._build_responses_params(messages=[{
+            "role": "assistant",
+            "content": "Checking",
+            "tool_calls": [{"id": "c1", "function": {"name": "add", "arguments": "{}"}}],
+        }])
+        items = params["input"]
+
+        assert items[0] == {"role": "assistant", "content": "Checking"}
+        assert items[1]["type"] == "function_call"
+
+    def test_assistant_empty_content_with_tool_calls_emits_only_call(self):
+        """Whitespace, None, and empty-list content emit only the function_call."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        for empty in ("   ", None, []):
+            params = llm._build_responses_params(messages=[{
+                "role": "assistant",
+                "content": empty,
+                "tool_calls": [{"id": "c1", "function": {"name": "add", "arguments": "{}"}}],
+            }])
+            items = params["input"]
+
+            assert len(items) == 1, f"content={empty!r} should emit only the call"
+            assert items[0]["type"] == "function_call"
+
+    def test_assistant_sdk_tool_call_object_preserves_name_and_args(self):
+        """SDK ChatCompletionMessageToolCall objects expose name/args under .function."""
+        from praisonaiagents.llm.llm import LLM
+
+        class _Fn:
+            name = "get_weather"
+            arguments = '{"city":"NYC"}'
+
+        class _ToolCall:
+            id = "call_sdk"
+            function = _Fn()
+
+        llm = LLM(model="gpt-4o-mini")
+        params = llm._build_responses_params(messages=[{
+            "role": "assistant",
+            "content": "Checking",
+            "tool_calls": [_ToolCall()],
+        }])
+        items = params["input"]
+
+        assert items[0] == {"role": "assistant", "content": "Checking"}
+        assert items[1]["type"] == "function_call"
+        assert items[1]["call_id"] == "call_sdk"
+        assert items[1]["name"] == "get_weather"
+        assert items[1]["arguments"] == '{"city":"NYC"}'
+
+    def test_assistant_empty_name_tool_call_skipped(self):
+        """Tool calls with an empty function name are skipped — the API rejects them."""
+        from praisonaiagents.llm.llm import LLM
+
+        llm = LLM(model="gpt-4o-mini")
+        params = llm._build_responses_params(messages=[{
+            "role": "assistant",
+            "content": "Checking",
+            "tool_calls": [{"id": "c1", "function": {"name": "", "arguments": "{}"}}],
+        }])
+        items = params["input"]
+
+        assert all(i.get("type") != "function_call" for i in items)
+        assert items == [{"role": "assistant", "content": "Checking"}]
+
 
 class TestResponsesAPIOutputExtraction:
     """Verify _extract_from_responses_output() correctly parses output items."""
@@ -462,6 +624,111 @@ class TestOpenAIClientResponsesAPI:
         # Tools should be in Responses API format (flattened)
         assert params["tools"] == [{"type": "function", "name": "add", "description": "Add", "parameters": {}}]
 
+    def test_build_responses_input_assistant_list_content_with_tool_calls(self):
+        """List content alongside tool_calls must convert, not crash on .strip() (issue #5469)."""
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        messages = [
+            {
+                "role": "assistant",
+                "content": [{"type": "text", "text": "Checking"}],
+                "tool_calls": [{
+                    "id": "call_1",
+                    "function": {"name": "add", "arguments": '{"a":1,"b":2}'},
+                }],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "3"},
+        ]
+
+        params = client._build_responses_input(messages, "gpt-4o-mini")
+        items = params["input"]
+
+        assert items[0] == {
+            "role": "assistant",
+            "content": [{"type": "input_text", "text": "Checking"}],
+        }
+        assert items[1]["type"] == "function_call"
+        assert items[1]["call_id"] == "call_1"
+        assert items[1]["name"] == "add"
+        assert items[2] == {
+            "type": "function_call_output",
+            "call_id": "call_1",
+            "output": "3",
+        }
+
+    def test_build_responses_input_assistant_string_content_with_tool_calls(self):
+        """String content alongside tool_calls stays a string before the function_call."""
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        params = client._build_responses_input([{
+            "role": "assistant",
+            "content": "Checking",
+            "tool_calls": [{"id": "c1", "function": {"name": "add", "arguments": "{}"}}],
+        }], "gpt-4o-mini")
+        items = params["input"]
+
+        assert items[0] == {"role": "assistant", "content": "Checking"}
+        assert items[1]["type"] == "function_call"
+
+    def test_build_responses_input_assistant_empty_content_with_tool_calls(self):
+        """Whitespace, None, and empty-list content emit only the function_call."""
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        for empty in ("   ", None, []):
+            params = client._build_responses_input([{
+                "role": "assistant",
+                "content": empty,
+                "tool_calls": [{"id": "c1", "function": {"name": "add", "arguments": "{}"}}],
+            }], "gpt-4o-mini")
+            items = params["input"]
+
+            assert len(items) == 1, f"content={empty!r} should emit only the call"
+            assert items[0]["type"] == "function_call"
+
+    def test_build_responses_input_sdk_tool_call_object_preserves_name_and_args(self):
+        """SDK ChatCompletionMessageToolCall objects expose name/args under .function."""
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        class _Fn:
+            name = "get_weather"
+            arguments = '{"city":"NYC"}'
+
+        class _ToolCall:
+            id = "call_sdk"
+            function = _Fn()
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        params = client._build_responses_input([{
+            "role": "assistant",
+            "content": "Checking",
+            "tool_calls": [_ToolCall()],
+        }], "gpt-4o-mini")
+        items = params["input"]
+
+        assert items[0] == {"role": "assistant", "content": "Checking"}
+        assert items[1]["type"] == "function_call"
+        assert items[1]["call_id"] == "call_sdk"
+        assert items[1]["name"] == "get_weather"
+        assert items[1]["arguments"] == '{"city":"NYC"}'
+
+    def test_build_responses_input_empty_name_tool_call_skipped(self):
+        """Tool calls with an empty function name are skipped — the API rejects them."""
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        params = client._build_responses_input([{
+            "role": "assistant",
+            "content": "Checking",
+            "tool_calls": [{"id": "c1", "function": {"name": "", "arguments": "{}"}}],
+        }], "gpt-4o-mini")
+        items = params["input"]
+
+        assert all(i.get("type") != "function_call" for i in items)
+        assert items == [{"role": "assistant", "content": "Checking"}]
+
     def test_build_responses_input_maps_chat_multimodal_parts(self):
         from praisonaiagents.llm.openai_client import OpenAIClient
 
@@ -526,6 +793,197 @@ class TestOpenAIClientResponsesAPI:
                     "image_url": {"url": str(missing_path)},
                 }],
             }], "gpt-4o-mini")
+
+    def test_build_responses_input_text_part_instruction_list_joined(self):
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        params = client._build_responses_input([
+            {"role": "system", "content": [
+                {"type": "text", "text": "Line one"},
+                {"type": "text", "text": "Line two"},
+            ]},
+            {"role": "user", "content": "hi"},
+        ], "gpt-4o-mini")
+
+        assert params["instructions"] == "Line one\nLine two"
+
+    def test_build_responses_input_mixed_string_then_list(self):
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        params = client._build_responses_input([
+            {"role": "system", "content": "First"},
+            {"role": "developer", "content": [{"type": "text", "text": "Second"}]},
+            {"role": "user", "content": "hi"},
+        ], "gpt-4o-mini")
+
+        assert params["instructions"] == "First\nSecond"
+
+    def test_build_responses_input_mixed_list_then_string_no_mutation(self):
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        system_content = [{"type": "text", "text": "First"}]
+        params = client._build_responses_input([
+            {"role": "system", "content": system_content},
+            {"role": "developer", "content": "Second"},
+            {"role": "user", "content": "hi"},
+        ], "gpt-4o-mini")
+
+        assert params["instructions"] == "First\nSecond"
+        assert system_content == [{"type": "text", "text": "First"}]
+
+    def test_build_responses_input_unsupported_instruction_part_rejected(self):
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        with pytest.raises(ValueError, match="Unsupported system/developer instruction"):
+            client._build_responses_input([
+                {"role": "system", "content": [
+                    {"type": "image_url", "image_url": {"url": "x"}},
+                ]},
+                {"role": "user", "content": "hi"},
+            ], "gpt-4o-mini")
+
+    def test_normalise_instruction_content_string_passthrough(self):
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        assert OpenAIClient._normalise_instruction_content("plain") == "plain"
+        assert OpenAIClient._normalise_instruction_content(None) == ""
+
+    def test_build_responses_input_drops_orphan_tool_output(self):
+        """A tool result whose call_id has no matching function_call must be
+        dropped so the Responses API does not 400 with "No tool call found for
+        function call output"."""
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        messages = [
+            {"role": "user", "content": "What is 19 + 23?"},
+            {"role": "tool", "tool_call_id": "call_orphan", "content": "42"},
+        ]
+
+        params = client._build_responses_input(messages, "gpt-4o-mini")
+
+        assert not any(
+            item.get("type") == "function_call_output"
+            for item in params["input"]
+        )
+
+    def test_build_responses_input_keeps_paired_tool_output(self):
+        """A tool result with a matching function_call is preserved."""
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        messages = [
+            {"role": "user", "content": "What is 19 + 23?"},
+            {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [{
+                    "id": "call_1",
+                    "function": {"name": "add", "arguments": '{"a":19,"b":23}'},
+                }],
+            },
+            {"role": "tool", "tool_call_id": "call_1", "content": "42"},
+        ]
+
+        params = client._build_responses_input(messages, "gpt-4o-mini")
+
+        call_items = [i for i in params["input"] if i.get("type") == "function_call"]
+        output_items = [i for i in params["input"] if i.get("type") == "function_call_output"]
+        assert len(call_items) == 1 and call_items[0]["call_id"] == "call_1"
+        assert len(output_items) == 1 and output_items[0]["call_id"] == "call_1"
+
+    def test_async_client_rebinds_loop_after_unbound_first_use(self):
+        """A client first read outside any running loop records ``None`` as its
+        loop. The first in-loop use must bind it so a later loop change drops
+        the stale client instead of reusing a transport on a closed loop."""
+        import asyncio
+        import threading
+        from unittest.mock import patch
+
+        from praisonaiagents.llm import openai_client as openai_client_module
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        client.model = "gpt-4o-mini"
+        client.api_key = "sk-test"
+        client.base_url = None
+        client.max_retries = None
+        client._sync_client = None
+        client._async_client = None
+        client._async_client_loop = None
+        client._async_client_owned = False
+        client._async_client_lock = threading.Lock()
+
+        # This test only exercises client/loop bookkeeping — it never sends a
+        # request — so stub the model-request guard. Without this it raises
+        # ModelRequestBlocked under PRAISONAI_ALLOW_MODEL_REQUESTS=0 before the
+        # test can check loop rebinding.
+        with patch.object(openai_client_module, "check_model_request"):
+            _ = client.async_client
+            assert client._async_client_loop is None
+            first_client = client._async_client
+
+            async def _use():
+                got = client.async_client
+                return got, client._async_client_loop
+
+            bound_client, bound_loop = asyncio.run(_use())
+            assert bound_client is first_client
+            assert bound_loop is not None
+
+            second_client, second_loop = asyncio.run(_use())
+            assert second_client is not first_client
+            assert second_loop is not bound_loop
+
+    def test_async_client_never_returns_none_under_concurrency(self):
+        """Concurrent sync callers, each on their own ``asyncio.run`` loop, must
+        always receive a client — never a transient ``None`` from another
+        thread's loop-change drop/rebuild."""
+        import asyncio
+        import threading
+        from unittest.mock import patch
+
+        from praisonaiagents.llm import openai_client as openai_client_module
+        from praisonaiagents.llm.openai_client import OpenAIClient
+
+        client = OpenAIClient.__new__(OpenAIClient)
+        client.model = "gpt-4o-mini"
+        client.api_key = "sk-test"
+        client.base_url = None
+        client.max_retries = None
+        client._sync_client = None
+        client._async_client = None
+        client._async_client_loop = None
+        client._async_client_owned = False
+        client._async_client_lock = threading.Lock()
+
+        results = []
+        errors = []
+
+        def worker():
+            try:
+                got = asyncio.run(_read())
+                results.append(got)
+            except Exception as exc:  # pragma: no cover - failure path
+                errors.append(exc)
+
+        async def _read():
+            return client.async_client
+
+        with patch.object(openai_client_module, "check_model_request"):
+            threads = [threading.Thread(target=worker) for _ in range(8)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+        assert not errors
+        assert len(results) == 8
+        assert all(r is not None for r in results)
 
     def test_responses_to_chat_completion(self):
         from praisonaiagents.llm.openai_client import OpenAIClient

@@ -34,6 +34,50 @@ from typing import List, Optional
 # Operators that separate simple-commands within a compound command.
 _SEPARATORS = ("&&", "||", ";", "|", "&", "\n")
 
+# POSIX wrapper executables that run *another* command passed as their trailing
+# arguments (``sudo rm -rf x`` really runs ``rm``). A deny on ``rm`` must still
+# fire through these, so the wrapper is stripped and the inner command re-parsed
+# as the effective operation. Matched on the basename, so ``/usr/bin/sudo``
+# works too. ``timeout``/``nice`` take a leading non-command operand (a duration
+# / niceness value) which is skipped by ``_skip_wrapper_operands``.
+_POSIX_PREFIX_WRAPPERS = frozenset(
+    {
+        "sudo",
+        "env",
+        "command",
+        "nohup",
+        "nice",
+        "ionice",
+        "stdbuf",
+        "setsid",
+        "time",
+        "timeout",
+        "exec",
+        "busybox",
+        "xargs",
+        "doas",
+    }
+)
+
+# POSIX shells whose ``-c <script>`` argument is an inner command string that
+# must be decomposed so a deny on the inner command still fires.
+_POSIX_SHELLS = frozenset({"sh", "bash", "zsh", "dash", "ksh", "ash"})
+
+# Short option flags that consume the *next* token as their value, per wrapper.
+# ``sudo -u root rm`` must skip ``root`` so the effective command resolves to
+# ``rm`` rather than mis-reading ``root`` as the executable (a fail-open that
+# would let the broad allow match). Only the value-taking flags that appear
+# before the command need listing; unknown flags fall back to being skipped
+# as valueless, which over-approximates safely (the next token is re-parsed as
+# a command and still checked against deny rules).
+_WRAPPER_VALUE_FLAGS = {
+    "sudo": frozenset({"-u", "-g", "-h", "-p", "-C", "-r", "-t", "-U", "-R", "-T"}),
+    "doas": frozenset({"-u", "-C"}),
+    "nice": frozenset({"-n"}),
+    "ionice": frozenset({"-c", "-n", "-p"}),
+    "env": frozenset({"-u", "-C", "-S"}),
+}
+
 # Shell *parameter* expansion that bash resolves at runtime, invisibly to the
 # static tokenizer. ``rm${IFS}-rf${IFS}/`` tokenizes as one opaque token here
 # but bash word-splits it into ``rm -rf /`` when executed, so a broad allow
@@ -63,6 +107,23 @@ def has_unresolvable_expansion(cmd: str) -> bool:
     if not cmd:
         return False
     return _UNSAFE_EXPANSION_RE.search(cmd) is not None
+
+def has_parse_error(cmd: str) -> bool:
+    """Return ``True`` if *cmd* cannot be safely tokenized by ``shlex``.
+
+    An unbalanced quote (``echo 'x; rm -rf x``) makes ``shlex.split`` raise,
+    after which the fallback splitter mis-tokenizes the command and a specific
+    deny rule can no longer be verified against the real sub-operations. The
+    caller escalates such commands to ``ASK`` rather than allowing them.
+    """
+    if not cmd or not cmd.strip():
+        return False
+    try:
+        shlex.split(cmd, comments=False, posix=True)
+        return False
+    except ValueError:
+        return True
+
 
 # Redirection operators that truncate/overwrite or append to a file.
 # These produce an additional ``write:<path>`` sub-target.
@@ -560,6 +621,167 @@ def _unwrap_shell_wrapper(segment: str) -> Optional[List[ShellOp]]:
     return parse_command(inner, dialect=dialect)
 
 
+def _basename(executable: str) -> str:
+    """Return the basename of *executable* (``/bin/rm`` -> ``rm``)."""
+    return executable.rsplit("/", 1)[-1]
+
+
+# Standard system binary directories. An absolute executable under one of these
+# is a normal PATH-resolvable command (``/usr/bin/rm``), so stripping the prefix
+# to match a command deny rule is safe. Executables elsewhere (``/tmp/tool``)
+# keep their path so the workspace-boundary gate still gates them.
+_STANDARD_BIN_DIRS = (
+    "/bin/",
+    "/sbin/",
+    "/usr/bin/",
+    "/usr/sbin/",
+    "/usr/local/bin/",
+    "/usr/local/sbin/",
+    "/opt/homebrew/bin/",
+)
+
+
+def _is_standard_bin_path(executable: str) -> bool:
+    """Return ``True`` if *executable* is a direct child of a system bindir.
+
+    A plain string prefix is insufficient: ``/bin/../../tmp/tool`` starts with
+    ``/bin/`` yet resolves outside the bindir, so stripping the prefix to a bare
+    name would hide a path-shaped external executable from the workspace gate.
+    Require that, after the bindir prefix, the remainder is a single path
+    component (no ``/`` and no ``..``) so only genuine ``/bin/rm``-style paths
+    are reduced; anything with further separators or traversal keeps its path.
+    """
+    for prefix in _STANDARD_BIN_DIRS:
+        if executable.startswith(prefix):
+            remainder = executable[len(prefix):]
+            if remainder and "/" not in remainder and remainder not in ("..", "."):
+                return True
+            return False
+    return False
+
+
+def _skip_wrapper_operands(name: str, rest: List[str]) -> List[str]:
+    """Drop a wrapper's own flags/operands, returning the inner argv.
+
+    ``rest`` is the argument list following the wrapper executable. Leading
+    ``VAR=val`` assignments (``env FOO=bar cmd``) and option flags are dropped.
+    ``timeout``/``nice``/``ionice`` take a leading non-flag operand (a duration
+    or priority value) before the real command, which is also skipped.
+    """
+    i = 0
+    n = len(rest)
+    # ``env``/``command`` leading ``VAR=val`` assignments precede the command.
+    while i < n and "=" in rest[i] and not rest[i].startswith("-") \
+            and rest[i].split("=", 1)[0].isidentifier():
+        i += 1
+    # Skip wrapper option flags (``sudo -u root``, ``env -i``). Flags that take
+    # a separate value token (``sudo -u <user>``) consume the following token so
+    # the real command is not mistaken for the value.
+    value_flags = _WRAPPER_VALUE_FLAGS.get(name, frozenset())
+    while i < n and rest[i].startswith("-"):
+        # ``--`` ends option parsing: everything after is the command.
+        if rest[i] == "--":
+            i += 1
+            break
+        flag = rest[i]
+        i += 1
+        # ``-u=root`` carries its value inline; ``-u root`` consumes the next
+        # token. Unknown flags are treated as valueless (safe over-approx).
+        if "=" not in flag and flag in value_flags and i < n:
+            i += 1
+    # ``timeout 5 cmd`` / ``timeout 5s cmd`` / ``nice -n 5 cmd``: skip a single
+    # leading duration/priority operand. ``timeout`` durations may carry a unit
+    # suffix (``s``/``m``/``h``/``d``), so ``5s`` must still be recognised as the
+    # operand rather than mistaken for the command (which would let a broad allow
+    # match while the specific ``rm`` deny never fires).
+    if name in ("timeout", "nice", "ionice") and i < n:
+        if _is_duration_operand(rest[i], allow_unit=(name == "timeout")):
+            i += 1
+    return rest[i:]
+
+
+def _is_duration_operand(token: str, *, allow_unit: bool) -> bool:
+    """Return ``True`` if *token* is a numeric duration/priority operand.
+
+    ``nice``/``ionice`` take a bare number; ``timeout`` additionally accepts a
+    single-character unit suffix (``5s``, ``1.5m``, ``2h``, ``1d``).
+    """
+    if not token:
+        return False
+    core = token
+    if allow_unit and token[-1] in "smhd" and len(token) > 1:
+        core = token[:-1]
+    return core.replace(".", "", 1).isdigit()
+
+
+def _is_external_path(executable: str) -> bool:
+    """Return ``True`` if *executable* is a path-shaped external program.
+
+    A bare name (``rm``) is PATH-resolved; a path under a standard bindir
+    (``/bin/rm``) is a normal command. Anything else that carries a path
+    separator (``/tmp/sudo``, ``../tool``, ``/bin/../x``) runs code from outside
+    the trusted bindirs and must keep its path so the workspace-boundary gate
+    still prompts for it.
+    """
+    if "/" not in executable and not executable.startswith(("~", "$")):
+        return False
+    return not _is_standard_bin_path(executable)
+
+
+def _normalize_posix_argv(tokens: List[str]) -> List["ShellOp"]:
+    """Resolve POSIX wrapper prefixes to the effective inner operation(s).
+
+    ``sudo rm -rf x`` / ``/bin/rm -rf x`` / ``env FOO=1 rm x`` all reduce to an
+    ``rm`` operation so a ``rm`` deny still fires. ``bash -c '<script>'`` recurses
+    into the quoted script, preserving the inner operations' redirect
+    ``write_targets`` so a deny on an inner ``> /protected`` write still fires.
+
+    When a *wrapper* is itself invoked by an external path (``/tmp/sudo cmd`` or
+    ``/tmp/bash -c '…'``), the path is preserved as an extra guard op so the
+    workspace-boundary gate still requires approval for running that external
+    executable — unwrapping must never let an out-of-bindir program escape the
+    gate.
+
+    Returns a list of :class:`ShellOp`; an empty list means nothing could be
+    resolved and the caller should treat the original tokens as a single op.
+    """
+    argv = list(tokens)
+    guard = 0
+    guard_ops: List["ShellOp"] = []
+    while argv and guard < 32:
+        guard += 1
+        name = _basename(argv[0])
+        is_shell = name in _POSIX_SHELLS and "-c" in argv[1:]
+        is_wrapper = name in _POSIX_PREFIX_WRAPPERS
+        if (is_shell or is_wrapper) and _is_external_path(argv[0]):
+            # The wrapper/shell binary itself lives outside the trusted bindirs;
+            # keep it as a path-shaped op so the workspace gate still prompts.
+            guard_ops.append(ShellOp(executable=argv[0]))
+        if is_shell:
+            idx = argv.index("-c", 1)
+            if idx + 1 < len(argv):
+                inner_ops = list(parse_command(argv[idx + 1]))
+                return guard_ops + inner_ops
+            return guard_ops + [ShellOp(executable=argv[0], args=list(argv[1:]))]
+        if is_wrapper:
+            inner = _skip_wrapper_operands(name, argv[1:])
+            if not inner:
+                # Wrapper with no residual command (``sudo -v``): keep as-is.
+                return guard_ops + [ShellOp(executable=argv[0], args=list(argv[1:]))]
+            argv = inner
+            continue
+        break
+    # Strip a *standard system* directory prefix so ``/bin/rm`` matches a ``rm``
+    # deny rule. Executables under arbitrary/external paths (``/tmp/tool``,
+    # ``../tool``) are left intact so the workspace-boundary gate still sees a
+    # path-shaped executable and requires approval.
+    if argv and argv[0] != _basename(argv[0]) and _is_standard_bin_path(argv[0]):
+        argv = [_basename(argv[0]), *argv[1:]]
+    if not argv:
+        return guard_ops
+    return guard_ops + [ShellOp(executable=argv[0], args=list(argv[1:]))]
+
+
 def _parse_segment(segment: str, dialect: str = DIALECT_POSIX) -> List[ShellOp]:
     """Parse a single simple-command segment into ShellOp(s).
 
@@ -661,6 +883,25 @@ def _parse_segment(segment: str, dialect: str = DIALECT_POSIX) -> List[ShellOp]:
             args.append(tok)
 
     op.args = args
+
+    # POSIX wrapper/path normalization: ``sudo rm``/``/bin/rm``/``env FOO=1 rm``/
+    # ``bash -c '…'`` all reduce to the effective inner command(s) so a deny on
+    # the real executable fires instead of matching a broad allow on the wrapper.
+    if posix_mode and op.executable:
+        resolved = _normalize_posix_argv([op.executable, *op.args])
+        if resolved and [
+            [o.executable, *o.args] for o in resolved
+        ] != [[op.executable, *op.args]]:
+            resolved_ops = [o for o in resolved if o.executable or o.write_targets]
+            for i, inner_op in enumerate(resolved_ops):
+                inner_op.dialect = dialect
+                # Keep the segment's own redirect targets on the first resolved
+                # op (unless it already carries inner redirects from ``-c``).
+                if i == 0 and op.write_targets:
+                    inner_op.write_targets = op.write_targets + inner_op.write_targets
+                ops.append(inner_op)
+            if ops:
+                return ops
 
     if op.executable or op.write_targets:
         ops.append(op)

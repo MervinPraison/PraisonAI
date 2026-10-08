@@ -391,6 +391,19 @@ class OpenAIClient:
         # Initialize clients lazily
         self._sync_client = None
         self._async_client = None
+        # Event loop the cached async client is bound to. A cached AsyncOpenAI
+        # keeps an httpx transport tied to the loop that first used it; reusing
+        # it from a different/closed loop raises "Event loop is closed", so we
+        # recreate the client when the running loop changes.
+        self._async_client_loop = None
+        # Whether the cached async client was created by ``async_client`` itself.
+        # Externally injected clients (e.g. a stubbed transport in tests) are
+        # never dropped on a loop change, since we did not bind them to a loop.
+        self._async_client_owned = False
+        # Guards the loop-change drop/rebuild of the async client so concurrent
+        # sync callers (each on its own ``asyncio.run`` loop) cannot observe a
+        # half-swapped client or a transient ``None``.
+        self._async_client_lock = threading.Lock()
         
         # Set up logging
         self.logger = get_logger(__name__)
@@ -444,13 +457,53 @@ class OpenAIClient:
                 via ``praisonaiagents.model_harness.allow_model_requests(False)``.
         """
         check_model_request(getattr(self, "model", None), "openai.chat.completions")
-        if self._async_client is None:
-            _, AsyncOpenAI = _get_openai_classes()
-            client_kwargs = {"api_key": self.api_key, "base_url": self.base_url}
-            if self.max_retries is not None:
-                client_kwargs["max_retries"] = self.max_retries
-            self._async_client = AsyncOpenAI(**client_kwargs)
-        return self._async_client
+        try:
+            running_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            running_loop = None
+        # Serialise the drop/rebuild so concurrent sync callers (each on their
+        # own ``asyncio.run`` loop) cannot observe a transient ``None`` or a
+        # half-swapped client. Clients built via ``__new__`` in tests may lack
+        # the lock, so fall back to a throwaway lock.
+        lock = getattr(self, "_async_client_lock", None)
+        if lock is None:
+            lock = threading.Lock()
+            self._async_client_lock = lock
+        with lock:
+            # Drop a client bound to a different (often already closed) loop so
+            # we never call into a transport whose loop is gone. Only clients we
+            # built here are loop-bound; an externally injected client (e.g. a
+            # stubbed transport in tests) is left untouched.
+            if (
+                self._async_client is not None
+                and self._async_client_owned
+                and running_loop is not None
+                and self._async_client_loop is not None
+                and self._async_client_loop is not running_loop
+            ):
+                self._async_client = None
+            if self._async_client is None:
+                _, AsyncOpenAI = _get_openai_classes()
+                client_kwargs = {"api_key": self.api_key, "base_url": self.base_url}
+                if self.max_retries is not None:
+                    client_kwargs["max_retries"] = self.max_retries
+                self._async_client = AsyncOpenAI(**client_kwargs)
+                self._async_client_loop = running_loop
+                self._async_client_owned = True
+            elif (
+                self._async_client_owned
+                and running_loop is not None
+                and self._async_client_loop is None
+            ):
+                # The client was first built with no running loop (e.g.
+                # sync-path construction). Bind it to the first loop that
+                # actually uses it so a later loop change is detected and the
+                # stale client is dropped.
+                self._async_client_loop = running_loop
+            # Return a local reference taken under the lock so a concurrent
+            # drop on another thread cannot turn the caller's result into None.
+            client = self._async_client
+        return client
     
     def build_messages(
         self, 
@@ -720,7 +773,10 @@ class OpenAIClient:
         if not self._supports_responses_api(model):
             return False
         try:
-            return hasattr(self.sync_client, 'responses')
+            responses = getattr(self.sync_client, "responses", None)
+            return responses is not None and callable(
+                getattr(responses, "create", None)
+            )
         except Exception:
             return False
 
@@ -746,28 +802,39 @@ class OpenAIClient:
         # ── Extract system instructions ──────────────────────────────────
         instructions = None
         input_items: List[Dict[str, Any]] = []
+        # Track call_ids emitted as function_call items so function_call_output
+        # items without a matching call stay out of the payload — orphaned
+        # outputs make the Responses API reject the request with a 400
+        # "No tool call found for function call output with call_id ...".
+        emitted_call_ids: set = set()
         for msg in messages:
             role = msg.get("role", "")
             if role in ("system", "developer"):
-                content = msg.get("content", "")
+                content = self._normalise_instruction_content(msg.get("content", ""))
                 if instructions is None:
                     instructions = content
                 else:
-                    instructions += "\n" + content
+                    instructions = instructions + "\n" + content
             else:
                 # Handle Chat Completions → Responses API format transforms
                 if role == "assistant" and msg.get("tool_calls"):
                     content = msg.get("content")
-                    if content and content.strip():
+                    if isinstance(content, list):
+                        converted = self._build_responses_content(content)
+                        if converted:
+                            input_items.append({"role": "assistant", "content": converted})
+                    elif content and content.strip():
                         input_items.append({"role": "assistant", "content": content})
                     for tc in msg["tool_calls"]:
-                        fn = tc.get("function", tc) if isinstance(tc, dict) else tc
+                        fn = tc.get("function", tc) if isinstance(tc, dict) else getattr(tc, "function", tc)
                         fn_name = fn.get("name", "") if isinstance(fn, dict) else getattr(fn, "name", "")
                         fn_args = fn.get("arguments", "{}") if isinstance(fn, dict) else getattr(fn, "arguments", "{}")
                         tc_id = tc.get("id", "") if isinstance(tc, dict) else getattr(tc, "id", "")
                         # Skip items with empty name — API rejects them
                         if not fn_name:
                             continue
+                        if tc_id:
+                            emitted_call_ids.add(tc_id)
                         input_items.append({
                             "type": "function_call",
                             "call_id": tc_id,
@@ -775,9 +842,15 @@ class OpenAIClient:
                             "arguments": fn_args if isinstance(fn_args, str) else json.dumps(fn_args),
                         })
                 elif role == "tool":
+                    call_id = msg.get("tool_call_id", "")
+                    # Drop orphan outputs whose call_id has no matching
+                    # function_call in this payload; the Responses API 400s on
+                    # them and forces an unnecessary Chat Completions fallback.
+                    if not call_id or call_id not in emitted_call_ids:
+                        continue
                     input_items.append({
                         "type": "function_call_output",
-                        "call_id": msg.get("tool_call_id", ""),
+                        "call_id": call_id,
                         "output": msg.get("content", ""),
                     })
                 else:
@@ -841,6 +914,42 @@ class OpenAIClient:
             raise ValueError(f"Unsupported local image type: {image_path}")
         encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
         return f"data:{mime_type};base64,{encoded}"
+
+    @staticmethod
+    def _normalise_instruction_content(content: Any) -> str:
+        """Normalise system/developer content into a plain instruction string.
+
+        Accepts a plain string or a Chat Completions-style list of text parts
+        (``[{"type": "text", "text": "..."}]`` or ``input_text``) and returns
+        the concatenated text. Non-text parts are rejected explicitly rather
+        than silently discarded. The caller-owned content is never mutated.
+        """
+        if content is None:
+            return ""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            texts: List[str] = []
+            for part in content:
+                if (
+                    isinstance(part, dict)
+                    and part.get("type") in ("text", "input_text")
+                    and isinstance(part.get("text"), str)
+                ):
+                    texts.append(part["text"])
+                else:
+                    raise ValueError(
+                        "Unsupported system/developer instruction: "
+                        "System/developer instructions must contain text parts; "
+                        f"unsupported content part: {part!r}. Only plain strings "
+                        "or text parts ({'type': 'text', 'text': ...}) are supported."
+                    )
+            return "\n".join(texts)
+        raise ValueError(
+            "Unsupported system/developer instruction: "
+            "System/developer instructions must be text or a list of text parts; "
+            f"unsupported content: {content!r}"
+        )
 
     @classmethod
     def _build_responses_content(cls, content: Any) -> Any:
@@ -2128,7 +2237,7 @@ class OpenAIClient:
                         history_sink=deferred_history_sink,
                     )
                     try:
-                        results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
+                        results_str = json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
                     except (TypeError, ValueError):
                         tool_result = {"result": str(tool_result)}
                         results_str = json.dumps(tool_result)
@@ -2502,7 +2611,7 @@ class OpenAIClient:
                         history_sink=deferred_history_sink,
                     )
                     try:
-                        results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
+                        results_str = json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
                     except (TypeError, ValueError):
                         tool_result = {"result": str(tool_result)}
                         results_str = json.dumps(tool_result)
@@ -2731,7 +2840,7 @@ class OpenAIClient:
                         # sync/async non-streaming loops' (TypeError, ValueError)
                         # fallback.
                         try:
-                            results_str = json.dumps(tool_result) if tool_result else "Function returned an empty output"
+                            results_str = json.dumps(tool_result) if tool_result is not None else "Function returned an empty output"
                         except (TypeError, ValueError):
                             tool_result = {"result": str(tool_result)}
                             results_str = json.dumps(tool_result)

@@ -14,16 +14,20 @@ from praisonaiagents.secrets import (
     MISSING,
     UNAVAILABLE,
     DefaultSecretResolver,
+    EgressGuardProtocol,
     OutboundRedactor,
     SecretRef,
     SecretResolution,
     SecretResolver,
+    desentinelize,
+    has_sentinel,
     is_secret_ref,
     redact_outbound,
     redact_secrets,
     register_resolver,
     register_secret_for_redaction,
     resolve_secret,
+    sentinelize,
 )
 
 
@@ -206,3 +210,95 @@ def test_outbound_redactor_protocol_is_runtime_checkable():
         pass
 
     assert not isinstance(_NotR(), OutboundRedactor)
+
+
+# ── Secret sentinelisation (Issue #5722) ──────────────────────────────────
+
+
+def test_sentinelize_replaces_plaintext_with_opaque_token():
+    secret = "super-secret-egress-value-5722"
+    token = sentinelize(secret)
+    assert token != secret
+    assert secret not in token
+    assert token.startswith("oc-sent-")
+
+
+def test_sentinelize_is_stable_per_process():
+    secret = "stable-token-secret-5722"
+    assert sentinelize(secret) == sentinelize(secret)
+
+
+def test_sentinelize_hides_short_secrets_too():
+    # A short PIN/password must be hidden just like a long key — the opaque,
+    # random token never collides with ordinary text, so there is no minimum
+    # length. Only empty / non-string values pass through verbatim.
+    for short in ("1", "ab", "pin"):
+        token = sentinelize(short)
+        assert token != short
+        assert token.startswith("oc-sent-")
+        assert has_sentinel(f"x={token}") is True
+        assert desentinelize(f"x={token}") == f"x={short}"
+    assert sentinelize("") == ""
+
+
+def test_desentinelize_only_touches_tokens_in_the_text():
+    # Minting many secrets must not slow a request that carries just one token:
+    # desentinelize looks up only the token shapes present in the input.
+    kept = [sentinelize(f"many-secret-{i}-5722") for i in range(50)]
+    one = sentinelize("just-this-one-secret-5722")
+    out = desentinelize(f"Authorization: Bearer {one}")
+    assert out == "Authorization: Bearer just-this-one-secret-5722"
+    # Unrelated tokens are not substituted into the text.
+    for other in kept:
+        assert other not in out
+
+
+def test_desentinelize_ignores_unknown_token_shaped_strings():
+    forged = "oc-sent-" + "0" * 32
+    assert desentinelize(f"k={forged}") == f"k={forged}"
+    assert has_sentinel(f"k={forged}") is False
+
+
+def test_desentinelize_round_trips_only_on_egress():
+    secret = "round-trip-secret-5722"
+    token = sentinelize(secret)
+    # Model-visible text carries only the sentinel.
+    model_text = f"Authorization: Bearer {token}"
+    assert secret not in model_text
+    # Egress guard substitutes the real value back on the wire.
+    assert desentinelize(model_text) == f"Authorization: Bearer {secret}"
+
+
+def test_desentinelize_leaves_text_without_sentinel_unchanged():
+    assert desentinelize("no sentinel here") == "no sentinel here"
+    assert desentinelize("") == ""
+    assert desentinelize(None) is None
+
+
+def test_has_sentinel_detects_minted_token():
+    token = sentinelize("detect-me-secret-5722")
+    assert has_sentinel(f"k={token}") is True
+    assert has_sentinel("k=plain-value") is False
+    assert has_sentinel("") is False
+
+
+def test_sentinelized_secret_is_registered_for_redaction():
+    secret = "redact-via-sentinel-5722"
+    sentinelize(secret)
+    assert redact_secrets(f"leaked {secret} here") == "leaked [REDACTED] here"
+
+
+def test_egress_guard_protocol_is_runtime_checkable():
+    class _Guard:
+        def sentinel_for(self, ref):
+            return "oc-sent-x"
+
+        def allow_egress(self, host, ref):
+            return True
+
+    assert isinstance(_Guard(), EgressGuardProtocol)
+
+    class _NotGuard:
+        pass
+
+    assert not isinstance(_NotGuard(), EgressGuardProtocol)

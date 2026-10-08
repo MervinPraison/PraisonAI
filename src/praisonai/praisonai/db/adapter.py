@@ -1294,6 +1294,8 @@ class PraisonAIDB:
                         metadata=m.metadata or {},
                         timestamp=m.created_at or time.time(),
                         id=m.id,
+                        tool_calls=getattr(m, "tool_calls", None),
+                        tool_call_id=getattr(m, "tool_call_id", None),
                     )
                     for m in (raw or [])
                 ]

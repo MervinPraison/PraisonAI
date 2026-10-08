@@ -109,6 +109,11 @@ def __getattr__(name: str):
         _module_cache[name] = PortableSessionStoreProtocol
         return PortableSessionStoreProtocol
 
+    if name == "IncrementalSessionStoreProtocol":
+        from .protocols import IncrementalSessionStoreProtocol
+        _module_cache[name] = IncrementalSessionStoreProtocol
+        return IncrementalSessionStoreProtocol
+
     if name == "ImportReport":
         from .protocols import ImportReport
         _module_cache[name] = ImportReport
@@ -218,6 +223,7 @@ __all__ = [
     "SearchableSessionStoreProtocol",
     "SessionMirrorProtocol",
     "PortableSessionStoreProtocol",
+    "IncrementalSessionStoreProtocol",
     "ImportReport",
     "SessionHit",
     "SessionSummary",

@@ -4,6 +4,7 @@
  */
 
 import { CostTracker, createCostTracker, MODEL_PRICING, formatCost } from '../features/cost-tracker';
+import { printPlainHelp } from '../output/help';
 
 let tracker: CostTracker | null = null;
 
@@ -137,17 +138,8 @@ function showHelp(isJson: boolean): void {
     ]
   };
 
-  if (isJson) {
-    console.log(JSON.stringify(help, null, 2));
-  } else {
-    console.log('Cost - Token usage and cost tracking\n');
-    console.log('Subcommands:');
-    for (const [cmd, desc] of Object.entries(help.subcommands)) {
-      console.log(`  ${cmd.padEnd(12)} ${desc}`);
-    }
-    console.log('\nExamples:');
-    for (const ex of help.examples) {
-      console.log(`  ${ex}`);
-    }
-  }
+  printPlainHelp(isJson, help, 'Cost - Token usage and cost tracking', [
+    { label: 'Subcommands:', entries: help.subcommands },
+    { label: 'Examples:', items: help.examples }
+  ]);
 }

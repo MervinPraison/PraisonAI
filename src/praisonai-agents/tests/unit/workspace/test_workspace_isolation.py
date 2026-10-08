@@ -52,7 +52,12 @@ def test_no_isolation_shares_root(tmp_path):
     adapter.remove("a")
 
 
-def test_git_worktree_degrades_when_not_a_repo(tmp_path):
+def test_git_worktree_degrades_when_not_a_repo(tmp_path, monkeypatch):
+    # A temporary directory can have a repository ancestor (including /).
+    # Keep this negative fixture outside that ancestor's discovery scope.
+    monkeypatch.setenv("GIT_CEILING_DIRECTORIES", str(tmp_path.parent))
+    monkeypatch.delenv("GIT_DIR", raising=False)
+    monkeypatch.delenv("GIT_WORK_TREE", raising=False)
     adapter = GitWorktreeAdapter(root=tmp_path)
     assert adapter.available is False
     assert adapter.create("run") == str(tmp_path.resolve())

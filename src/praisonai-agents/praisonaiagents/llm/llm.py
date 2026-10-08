@@ -564,12 +564,12 @@ Respond with ONLY a valid JSON tool call in this format:
         self._stop_reason_active_var = contextvars.ContextVar("stop_reason_active", default=None)
         self._last_stop_reason_fallback = (None, "completed")
         self._idle_timeout_breaker = IdleTimeoutBreaker()  # Circuit breaker for idle timeouts
-        self.chat_history = []
         # Optional Agent-supplied thread-safe append for deferred re-injection.
-        # When an Agent owns this LLM it wires its own history append here so a
-        # background-resolved defer(...) result lands on the list follow-up
-        # turns actually replay (the LLM's own chat_history has no readers in
-        # that case). Left None for standalone LLM usage.
+        # When an Agent owns this LLM it wires its own locked, bounded history
+        # append here so a background-resolved defer(...) result replays on a
+        # follow-up turn. The LLM layer itself is stateless w.r.t. conversation
+        # history (it has no readers of its own list), so no list is kept here.
+        # Left None for standalone LLM usage.
         self._agent_history_append = None
         self.verbose = extra_settings.get('verbose', True)
         self.markdown = extra_settings.get('markdown', True)
@@ -622,9 +622,10 @@ Respond with ONLY a valid JSON tool call in this format:
         # by several concurrently-running agents (gateway channels, asyncio.gather),
         # so a plain attribute would let one agent's set_current_agent() clobber
         # another's mid-await and misattribute token spend (issues #5052/#3933).
-        # A ContextVar keeps the value isolated per asyncio task / thread.
+        # A ContextVar keeps each task's value isolated; the ``current_agent_name``
+        # property below preserves the historical attribute-style read/write API.
         self._current_agent_name_var: contextvars.ContextVar[Optional[str]] = (
-            contextvars.ContextVar("current_agent_name", default=None)
+            contextvars.ContextVar("praison_llm_current_agent_name", default=None)
         )
         self._current_agent_id_var: contextvars.ContextVar[Optional[str]] = (
             contextvars.ContextVar("current_agent_id", default=None)
@@ -741,7 +742,23 @@ Respond with ONLY a valid JSON tool call in this format:
             return "anthropic"
         if provider_prefix in {"gemini", "google"} and "gemini" in model_lower:
             return "gemini"
-        
+
+        # A custom/plugin provider registered via ``add_provider_adapter`` or
+        # the ``praisonai.providers`` entry-point group, addressed explicitly as
+        # ``myprovider/model``, must route to its own adapter rather than silently
+        # falling through to "openai". Lazy + failure-tolerant: discovery never
+        # breaks detection, and built-ins are handled above so this only ever
+        # matches a genuinely custom prefix.
+        if provider_prefix:
+            try:
+                from .adapters import _provider_adapters, load_provider_entry_points
+                if provider_prefix not in _provider_adapters:
+                    load_provider_entry_points()
+                if provider_prefix in _provider_adapters:
+                    return provider_prefix
+            except Exception:  # noqa: BLE001 - detection must never raise
+                pass
+
         # Use existing robust Ollama detection logic first
         if self._is_ollama_provider():
             return "ollama"
@@ -2397,11 +2414,10 @@ Respond with ONLY a valid JSON tool call in this format:
             def _reinject(handle_id: str, value: Any, session_id: Optional[str]) -> None:
                 # Best-effort: this closure is invoked from a background worker
                 # thread. When driven by an Agent, follow-up turns replay the
-                # Agent's own history (passed as a parameter into
-                # _build_messages), not this LLM's ``chat_history`` — so we
-                # append via the Agent's thread-safe callback when one has been
-                # wired, and fall back to the LLM's own list only for standalone
-                # LLM usage.
+                # Agent's own locked, bounded history (passed as a parameter into
+                # _build_messages) via the thread-safe callback wired here. For
+                # standalone LLM usage no history is kept, so this is a no-op —
+                # the LLM layer is stateless w.r.t. conversation history.
                 message = {
                     "role": "tool",
                     "tool_call_id": tool_call_id,
@@ -2410,8 +2426,6 @@ Respond with ONLY a valid JSON tool call in this format:
                 history_append = getattr(self, "_agent_history_append", None)
                 if history_append is not None:
                     history_append(message)
-                else:
-                    self.chat_history.append(message)
 
             # Atomic: only register when not already pending, so a gateway that
             # registered its own resolver for this handle first is never
@@ -4313,9 +4327,6 @@ Respond with ONLY a valid JSON tool call in this format:
             
             # Handle output formatting
             if output_json or output_pydantic:
-                self.chat_history.append({"role": "user", "content": original_prompt})
-                self.chat_history.append({"role": "assistant", "content": response_text})
-                
                 if verbose and not interaction_displayed:
                     _get_display_functions()['display_interaction'](original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=self.console,
@@ -4937,23 +4948,170 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # message plus one tool reply per call).
                         messages = self._manage_context_in_loop(messages)
 
-                        # Continue conversation after tool execution - get follow-up response
+                        # Continue conversation after tool execution. The model
+                        # may answer the follow-up with *another* tool call (any
+                        # multi-step task): the previous single-shot follow-up
+                        # only read `content`, so that second call was silently
+                        # dropped, nothing was executed, and nothing was yielded.
+                        # Loop the follow-up, executing any further tool calls,
+                        # until the model returns plain content -- matching the
+                        # sync/async non-streaming loops. The follow-up stays
+                        # non-streaming so the assembled tool_calls are read
+                        # directly off the completed message.
                         try:
-                            follow_up_response = self._completion_with_retry(
-                                **self._build_completion_params(
-                                    messages=messages,
-                                    tools=formatted_tools,
-                                    temperature=temperature,
-                                    stream=False,
-                                    **kwargs
+                            follow_up_iterations = 0
+                            max_follow_up = kwargs.get("max_iterations", getattr(self, "max_iter", 20))
+                            # The guardrail must bound the *total* tools executed
+                            # across every follow-up batch, not each batch alone;
+                            # otherwise several sub-limit batches together run more
+                            # (repeated side-effecting) calls than configured. Seed
+                            # with the first streamed batch already executed above.
+                            total_tool_calls_executed = len(tool_calls)
+                            while follow_up_iterations < max_follow_up:
+                                follow_up_iterations += 1
+                                if _stream_is_cancelled():
+                                    yield f"Task interrupted: {_stream_cancel_reason()}"
+                                    return
+
+                                follow_up_response = self._completion_with_retry(
+                                    **self._build_completion_params(
+                                        messages=messages,
+                                        tools=formatted_tools,
+                                        temperature=temperature,
+                                        stream=False,
+                                        **kwargs
+                                    )
                                 )
-                            )
-                            
-                            if follow_up_response and follow_up_response.choices:
-                                follow_up_content = follow_up_response.choices[0].message.content
-                                if follow_up_content:
-                                    # Yield the follow-up response after tool execution
-                                    yield follow_up_content
+
+                                if not (follow_up_response and follow_up_response.choices):
+                                    break
+                                follow_message = follow_up_response.choices[0].message
+                                follow_content = getattr(follow_message, "content", None)
+                                follow_tool_calls = getattr(follow_message, "tool_calls", None)
+
+                                # Terminal turn: no further tool calls. Yield the
+                                # final answer and stop.
+                                if not (follow_tool_calls and execute_tool_fn):
+                                    if follow_content:
+                                        yield follow_content
+                                    break
+
+                                if (total_tool_calls_executed + len(follow_tool_calls)
+                                        > max_tool_calls_per_turn):
+                                    logging.warning(
+                                        f"Tool call limit reached ({max_tool_calls_per_turn}). "
+                                        "Stopping to prevent infinite loop.")
+                                    if follow_content:
+                                        yield follow_content
+                                    break
+                                total_tool_calls_executed += len(follow_tool_calls)
+
+                                # Any prose emitted alongside the calls is part
+                                # of the answer.
+                                if follow_content:
+                                    yield follow_content
+
+                                # Record the assistant turn, then execute the new
+                                # tool calls with the same executor path as the
+                                # first turn.
+                                if is_ollama:
+                                    messages.append({"role": "assistant", "content": follow_content or ""})
+                                else:
+                                    messages.append({
+                                        "role": "assistant",
+                                        "content": follow_content or "",
+                                        "tool_calls": self._serialize_tool_calls(follow_tool_calls),
+                                    })
+
+                                follow_batch = []
+                                follow_parse_errors = []
+                                for tool_call in follow_tool_calls:
+                                    function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
+                                    if self._tool_arguments_parse_failed(arguments):
+                                        follow_parse_errors.append(
+                                            self._tool_parse_error_message(function_name, tool_call_id))
+                                        continue
+                                    if is_ollama:
+                                        arguments = self._resolve_ollama_chained_args(
+                                            arguments, ollama_tool_result_mapping, function_name, tools)
+                                    if is_ollama and tools:
+                                        arguments = self._validate_and_filter_ollama_arguments(
+                                            function_name, arguments, tools)
+                                    follow_batch.append(ToolCall(
+                                        function_name=function_name,
+                                        arguments=arguments,
+                                        tool_call_id=tool_call_id,
+                                        is_ollama=is_ollama,
+                                        iteration_index=0,
+                                    ))
+
+                                if is_ollama and not parallel_tool_calls:
+                                    # Mirror the first streamed batch: an Ollama
+                                    # follow-up batch can also contain a call whose
+                                    # argument names an earlier call in the *same*
+                                    # batch. Execute one at a time so each result is
+                                    # recorded before the next call's args are
+                                    # resolved; otherwise the dependent call runs
+                                    # with an unresolved placeholder.
+                                    follow_results = []
+                                    for _tool_call in follow_batch:
+                                        _tool_call.arguments = self._resolve_ollama_chained_args(
+                                            _tool_call.arguments, ollama_tool_result_mapping,
+                                            _tool_call.function_name, tools,
+                                        )
+                                        _tool_call.arguments = self._filter_ollama_dispatch_arguments(
+                                            _tool_call.function_name,
+                                            _tool_call.arguments,
+                                            tools,
+                                        )
+                                        _result = executor.execute_batch(
+                                            [_tool_call], execute_tool_fn,
+                                            timeout_ms=self.tool_timeout_ms,
+                                            cancel_token=cancel_token,
+                                        )
+                                        follow_results.extend(_result)
+                                        if _result and _result[0].error is None:
+                                            self._record_ollama_tool_result(
+                                                ollama_tool_result_mapping,
+                                                _tool_call.function_name,
+                                                _result[0].result,
+                                            )
+                                    for tool_result in follow_results:
+                                        self._register_deferred_if_any(tool_result)
+                                        messages.append(self._create_tool_message(
+                                            tool_result.function_name,
+                                            tool_result.result,
+                                            tool_result.tool_call_id,
+                                            tool_result.is_ollama,
+                                        ))
+                                else:
+                                    follow_results = executor.execute_batch(
+                                        follow_batch, execute_tool_fn,
+                                        timeout_ms=self.tool_timeout_ms,
+                                        cancel_token=cancel_token,
+                                    )
+                                    for tool_result in follow_results:
+                                        self._register_deferred_if_any(tool_result)
+                                        if is_ollama and tool_result.error is None:
+                                            self._record_ollama_tool_result(
+                                                ollama_tool_result_mapping,
+                                                tool_result.function_name,
+                                                tool_result.result,
+                                            )
+                                        messages.append(self._create_tool_message(
+                                            tool_result.function_name,
+                                            tool_result.result,
+                                            tool_result.tool_call_id,
+                                            tool_result.is_ollama,
+                                        ))
+                                for _err_msg in follow_parse_errors:
+                                    messages.append(_err_msg)
+
+                                messages = self._manage_context_in_loop(messages)
+                            else:
+                                logging.warning(
+                                    f"Follow-up iteration limit reached ({max_follow_up}) "
+                                    "on the streaming path.")
                         except Exception as e:
                             import time
                             error_ref = f"followup-{int(time.time() * 1000)}"
@@ -4976,6 +5134,26 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         logging.warning(f"Streaming failed due to connection issues: {e}")
                     else:
                         logging.error(f"Streaming failed with unexpected error: {e}")
+
+                    # Replay-safety gate (#3860): switching response mode is still
+                    # a provider replay. The retry driver already surfaces a
+                    # post-dispatch failure (read timeout, connection reset
+                    # mid-response) on a side-effecting turn rather than replaying
+                    # it — a tool call may already have run server-side. Reissuing
+                    # the same request with stream=False here would silently bypass
+                    # that decision. The streaming path re-raises wrapping the
+                    # cause (raise Exception(...) from read_timeout), so inspect
+                    # the whole chain. Only block when the turn exposes tools; a
+                    # pure text turn (or a pre-dispatch failure) stays falling back.
+                    from .error_classifier import is_replay_unsafe_chain
+                    side_effecting = bool(formatted_tools) or execute_tool_fn is not None
+                    if side_effecting and is_replay_unsafe_chain(e):
+                        logging.warning(
+                            "Not falling back to non-streaming on a tool turn: the "
+                            "streaming failure is replay-unsafe (post-dispatch); "
+                            "surfacing the original error to avoid re-executing the turn."
+                        )
+                        raise
                     
                     # Fall back to non-streaming if streaming fails
                     use_streaming = False
@@ -5166,11 +5344,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             logging.error(f"Error in get_response_stream: {e}")
             raise
 
-    def _is_gemini_model(self) -> bool:
+    def _is_gemini_model(self, model: Optional[str] = None) -> bool:
         """Check if the model is a Gemini model."""
-        if not self.model:
+        model = self.model if model is None else model
+        if not model:
             return False
-        return any(prefix in self.model.lower() for prefix in ['gemini', 'gemini/', 'google/gemini'])
+        return any(prefix in model.lower() for prefix in ['gemini', 'gemini/', 'google/gemini'])
     
     def _is_anthropic_model(self) -> bool:
         """Check if the model is an Anthropic Claude model."""
@@ -6070,8 +6249,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
             # Handle output formatting
             if output_json or output_pydantic:
-                self.chat_history.append({"role": "user", "content": original_prompt})
-                self.chat_history.append({"role": "assistant", "content": response_text})
                 if verbose and not interaction_displayed:
                     _get_display_functions()['display_interaction'](original_prompt, response_text, markdown=markdown,
                                      generation_time=time.time() - start_time, console=self.console,
@@ -6682,7 +6859,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         for key, value in self.__dict__.items():
             if key == "_current_agent_name_var":
                 clone.__dict__[key] = contextvars.ContextVar(
-                    "current_agent_name", default=None
+                    "praison_llm_current_agent_name", default=None
                 )
                 continue
             if key == "_last_stop_reason_var":
@@ -6794,21 +6971,21 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Set max_tokens here; for reasoning models this is normalized to
             # max_completion_tokens after per-call override_params are merged.
             params["max_tokens"] = self.max_tokens
-        if self.top_p:
+        if self.top_p is not None:
             params["top_p"] = self.top_p
-        if self.presence_penalty:
+        if self.presence_penalty is not None:
             params["presence_penalty"] = self.presence_penalty
-        if self.frequency_penalty:
+        if self.frequency_penalty is not None:
             params["frequency_penalty"] = self.frequency_penalty
         if self.logit_bias:
             params["logit_bias"] = self.logit_bias
         if self.response_format:
             params["response_format"] = self.response_format
-        if self.seed:
+        if self.seed is not None:
             params["seed"] = self.seed
-        if self.logprobs:
+        if self.logprobs is not None:
             params["logprobs"] = self.logprobs
-        if self.top_logprobs:
+        if self.top_logprobs is not None:
             params["top_logprobs"] = self.top_logprobs
         if self.stop_phrases:
             params["stop"] = self.stop_phrases
@@ -6874,7 +7051,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         effort = override_params.get('reasoning_effort', self.reasoning_effort)
         if effort is not None:
             from ..thinking.effort import resolve_reasoning_params
-            reasoning_params = resolve_reasoning_params(effort, self.model)
+            reasoning_params = resolve_reasoning_params(effort, params['model'])
             # Don't clobber an explicit native param the caller already set.
             for key, value in reasoning_params.items():
                 params.setdefault(key, value)
@@ -6884,7 +7061,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Normalize here (after override_params merge) so per-call overrides
         # like max_tokens/temperature cannot reintroduce rejected params.
         from .model_capabilities import is_reasoning_model
-        if is_reasoning_model(self.model):
+        if is_reasoning_model(params['model']):
             # Map max_tokens -> max_completion_tokens unless the caller already
             # provided max_completion_tokens explicitly (which takes precedence).
             if 'max_tokens' in params:
@@ -6899,11 +7076,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             schema_model = output_json or output_pydantic
             
             # Check if model supports structured outputs
-            if supports_structured_outputs(self.model):
+            if supports_structured_outputs(params['model']):
                 # Check if this is a Gemini model (uses different params)
-                if self._is_gemini_model():
-                    if schema_model and hasattr(schema_model, 'model_json_schema'):
-                        schema = schema_model.model_json_schema()
+                if self._is_gemini_model(params['model']):
+                    schema = schema_model.model_json_schema() if hasattr(schema_model, 'model_json_schema') else schema_model
+                    if isinstance(schema, dict):
                         # Gemini uses response_mime_type and response_schema
                         params['response_mime_type'] = 'application/json'
                         params['response_schema'] = schema
@@ -7092,12 +7269,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         for msg in messages:
             role = msg.get("role", "")
             if role in ("system", "developer"):
-                # Accumulate system / developer messages as instructions
-                content = msg.get("content", "")
+                # Accumulate system / developer messages as instructions.
+                # Normalise Chat Completions-style text-part content into a
+                # plain string before combining so we never mutate the
+                # caller-owned list nor send raw parts as instructions.
+                from .openai_client import OpenAIClient
+                content = OpenAIClient._normalise_instruction_content(
+                    msg.get("content", "")
+                )
                 if instructions is None:
                     instructions = content
                 else:
-                    instructions += "\n" + content
+                    instructions = instructions + "\n" + content
             else:
                 # user / assistant / tool messages become input items
                 # Special handling for Chat Completions→Responses API format:
@@ -7105,13 +7288,21 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Assistant message with tool_calls → emit text (if any)
                     # then emit function_call items for each tool call
                     content = msg.get("content")
-                    if content and content.strip():
+                    if isinstance(content, list):
+                        from .openai_client import OpenAIClient
+                        converted = OpenAIClient._build_responses_content(content)
+                        if converted:
+                            input_items.append({"role": "assistant", "content": converted})
+                    elif content and content.strip():
                         input_items.append({"role": "assistant", "content": content})
                     for tc in msg["tool_calls"]:
-                        fn = tc.get("function", tc) if isinstance(tc, dict) else tc
+                        fn = tc.get("function", tc) if isinstance(tc, dict) else getattr(tc, "function", tc)
                         fn_name = fn.get("name", "") if isinstance(fn, dict) else getattr(fn, "name", "")
                         fn_args = fn.get("arguments", "{}") if isinstance(fn, dict) else getattr(fn, "arguments", "{}")
                         tc_id = tc.get("id", "") if isinstance(tc, dict) else getattr(tc, "id", "")
+                        # Skip items with empty name — API rejects them
+                        if not fn_name:
+                            continue
                         input_items.append({
                             "type": "function_call",
                             "call_id": tc_id,
@@ -7172,11 +7363,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 params["tool_choice"] = "auto"
 
         # ── Scalar params ───────────────────────────────────────────────
+        if temperature is None:
+            temperature = self.temperature
         if temperature is not None:
             params["temperature"] = temperature
         if self.max_tokens:
             params["max_output_tokens"] = self.max_tokens
-        if self.top_p:
+        if self.top_p is not None:
             params["top_p"] = self.top_p
         if self.base_url:
             params["base_url"] = self.base_url
@@ -7204,13 +7397,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         schema_model = output_json or output_pydantic
         if schema_model:
             from .model_capabilities import supports_structured_outputs
-            if supports_structured_outputs(self.model):
-                if hasattr(schema_model, 'model_json_schema'):
-                    schema = schema_model.model_json_schema()
+            request_model = kwargs.get('model') if kwargs.get('model') is not None else params['model']
+            if supports_structured_outputs(request_model):
+                schema = schema_model.model_json_schema() if hasattr(schema_model, 'model_json_schema') else schema_model
+                if isinstance(schema, dict):
                     params['text'] = {
                         "format": {
                             "type": "json_schema",
-                            "name": getattr(schema_model, '__name__', 'response'),
+                            "name": getattr(schema_model, '__name__', 'structured_output' if isinstance(schema_model, dict) else 'response'),
                             "schema": schema,
                             "strict": True,
                         }
@@ -7230,6 +7424,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         for k, v in kwargs.items():
             if k not in _internal and v is not None:
                 params[k] = v
+
+        # Match Chat Completions after merging overrides: reasoning models
+        # must not regain unsupported sampling parameters through either path.
+        from .model_capabilities import is_reasoning_model
+        if is_reasoning_model(params["model"]):
+            for param in ('temperature', 'top_p', 'presence_penalty',
+                          'frequency_penalty', 'logit_bias'):
+                params.pop(param, None)
 
         return params
 
@@ -7666,22 +7868,74 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def _process_tool_calls_from_stream(self, delta, tool_calls: List[Dict]) -> List[Dict]:
         """Process tool calls from streaming delta chunks.
-        
-        This handles the accumulation of tool call data from streaming chunks,
-        building up the complete tool call information incrementally.
+
+        Accumulates tool-call fragments across chunks, keyed by the provider's
+        ``index``. Three hardening points over the naive version:
+
+        - A first-seen ``index`` larger than the current list is grown with
+          placeholder slots instead of indexing past the end (previously an
+          ``IndexError``).
+        - A ``name``/``id`` that only arrives in a later chunk is filled in
+          rather than ignored (the ``id`` is otherwise never updated).
+        - When a *different* non-empty ``id`` reuses an already-populated index
+          (some providers reuse ``index=0`` for distinct parallel calls), a new
+          slot is started instead of concatenating two calls' arguments into one
+          invalid-JSON blob. Once an index has been re-pointed to that new slot,
+          later *id-less* argument chunks carrying the same index are routed to
+          the new slot too (via ``_stream_index_route``) rather than reopening
+          the first call and corrupting its JSON.
         """
-        if hasattr(delta, 'tool_calls') and delta.tool_calls:
-            for tc in delta.tool_calls:
-                if tc.index >= len(tool_calls):
-                    tool_calls.append({
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {"name": "", "arguments": ""}
-                    })
-                if tc.function.name:
-                    tool_calls[tc.index]["function"]["name"] = tc.function.name
-                if tc.function.arguments:
-                    tool_calls[tc.index]["function"]["arguments"] += tc.function.arguments
+        # Per-accumulation routing: maps a provider ``index`` to the latest
+        # appended slot when that index has been reused for a new call. Reset
+        # whenever a fresh (empty) ``tool_calls`` list begins a new stream so the
+        # map never leaks across turns.
+        route_key = id(tool_calls)
+        index_route = getattr(self, "_stream_index_route", None)
+        if index_route is None or not isinstance(index_route, dict):
+            index_route = {}
+            self._stream_index_route = index_route
+        if not tool_calls:
+            index_route.pop(route_key, None)
+        routes: Dict[int, int] = index_route.setdefault(route_key, {})
+
+        for tc in getattr(delta, "tool_calls", None) or []:
+            idx = getattr(tc, "index", None)
+            if idx is None:
+                idx = len(tool_calls)
+            while len(tool_calls) <= idx:
+                tool_calls.append({
+                    "id": None,
+                    "type": "function",
+                    "function": {"name": "", "arguments": ""},
+                })
+            # Honour an earlier re-point for this index so continuation chunks
+            # land on the new call rather than the original slot.
+            slot_idx = routes.get(idx, idx)
+            if slot_idx >= len(tool_calls):
+                slot_idx = idx
+            slot = tool_calls[slot_idx]
+
+            tc_id = getattr(tc, "id", None)
+            # A different, non-empty id at an already-identified slot means the
+            # provider is reusing the index for a new parallel call: start a new
+            # slot so arguments are not merged across calls.
+            if tc_id and slot["id"] and tc_id != slot["id"]:
+                slot = {
+                    "id": None,
+                    "type": "function",
+                    "function": {"name": "", "arguments": ""},
+                }
+                tool_calls.append(slot)
+                routes[idx] = len(tool_calls) - 1
+            if tc_id and not slot["id"]:
+                slot["id"] = tc_id
+
+            fn = getattr(tc, "function", None)
+            if fn is not None:
+                if getattr(fn, "name", None):
+                    slot["function"]["name"] = fn.name
+                if getattr(fn, "arguments", None):
+                    slot["function"]["arguments"] += fn.arguments
         return tool_calls
 
     def _create_tool_message(self, function_name: str, result: Any,

@@ -127,16 +127,23 @@ class DocsManager:
         remaining = content
         
         # Check for YAML frontmatter
-        if content.startswith("---"):
-            parts = content.split("---", 2)
-            if len(parts) >= 3:
+        lines = content.splitlines(keepends=True)
+        if lines and lines[0].rstrip("\r\n \t") == "---":
+            for end in range(1, len(lines)):
+                if lines[end].rstrip("\r\n \t") != "---":
+                    continue
                 try:
                     import yaml
-                    frontmatter = yaml.safe_load(parts[1]) or {}
-                    remaining = parts[2].strip()
+                    parsed = yaml.safe_load("".join(lines[1:end]))
+                    if parsed is None:
+                        parsed = {}
+                    if isinstance(parsed, dict):
+                        frontmatter = parsed
+                        remaining = "".join(lines[end + 1:]).strip()
                 except Exception:
                     # If YAML parsing fails, use content as-is
                     pass
+                break
         
         return frontmatter, remaining
     
@@ -179,6 +186,11 @@ class DocsManager:
                         self._docs[key] = doc
                         self._log(f"Loaded doc: {key}")
     
+    @staticmethod
+    def _effective_priority(priority: int, scope: str) -> int:
+        """Apply the same global-document offset on creation and reload."""
+        return priority - 1000 if scope == "global" else priority
+
     def _load_all_docs(self):
         """Load all docs from global and workspace directories."""
         self._docs.clear()
@@ -188,7 +200,7 @@ class DocsManager:
             self._load_docs_from_dir(self.global_docs_path, "global")
             for key, doc in self._docs.items():
                 if key.startswith("global:"):
-                    doc.priority = doc.priority - 1000  # Lower priority for global
+                    doc.priority = self._effective_priority(doc.priority, "global")
         
         # 2. Load workspace docs
         workspace_docs_dir = self.workspace_path / self.DOCS_DIR_NAME.replace("/", os.sep)
@@ -307,17 +319,22 @@ class DocsManager:
             
             section = f"{header}\n{doc_text}\n"
             
-            if total_chars + len(section) <= max_chars:
+            # The join separator is part of the output budget too.
+            remaining = max_chars - total_chars - 1
+            if len(section) <= remaining:
                 parts.append(section)
-                total_chars += len(section)
+                total_chars += 1 + len(section)
             else:
-                # Truncate last doc
-                remaining = max_chars - total_chars
-                if remaining > 100:
-                    parts.append(section[:remaining] + "\n... (truncated)")
+                # Preserve the complete header and truncation notice.
+                marker = "\n... (truncated)"
+                prefix = f"{header}\n"
+                body_budget = remaining - len(prefix) - len(marker)
+                if body_budget > 0:
+                    parts.append(prefix + doc_text[:body_budget] + marker)
                 break
         
-        return "\n".join(parts)
+        # A heading without a documentation section is not useful context.
+        return "\n".join(parts) if len(parts) > 1 else ""
     
     def create_doc(
         self,
@@ -352,14 +369,19 @@ class DocsManager:
         file_path = docs_dir / f"{name}.md"
         
         # Build frontmatter
+        import yaml
+
         frontmatter_lines = ["---"]
         if description:
-            frontmatter_lines.append(f'description: "{description}"')
-        if priority != 0:
-            frontmatter_lines.append(f"priority: {priority}")
+            frontmatter_lines.append(yaml.safe_dump(
+                {"description": description}, allow_unicode=False
+            ).rstrip("\n"))
+        # Persist explicit zero instead of reloading the workspace default (100).
+        frontmatter_lines.append(f"priority: {priority}")
         if tags:
-            tags_str = ", ".join(f'"{t}"' for t in tags)
-            frontmatter_lines.append(f"tags: [{tags_str}]")
+            frontmatter_lines.append(yaml.safe_dump(
+                {"tags": tags}, allow_unicode=False
+            ).rstrip("\n"))
         frontmatter_lines.append("---")
         frontmatter_lines.append("")
         
@@ -372,7 +394,7 @@ class DocsManager:
             name=name,
             content=content,
             description=description,
-            priority=priority,
+            priority=self._effective_priority(priority, scope),
             tags=tags or [],
             file_path=str(file_path)
         )

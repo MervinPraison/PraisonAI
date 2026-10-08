@@ -73,7 +73,6 @@ __all__ = [
     'ThinkingHandler',
     'CompactionHandler',
     'OutputStyleHandler',
-    'OllamaHandler',
     'CapabilitiesHandler',
     'PerformanceHandler',
     'BenchmarkHandler',

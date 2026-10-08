@@ -25,6 +25,7 @@ import json
 import copy
 import time
 import logging
+import collections
 from praisonaiagents._logging import get_logger
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable, Tuple, Union
@@ -46,6 +47,19 @@ DEFAULT_MAX_PARALLEL_WORKERS = 3
 # worth its cost. Below this, the cheaper truncation fallback is used since the
 # summarisation request consumes roughly as many tokens as it saves.
 MIN_BRANCHES_FOR_LLM_SUMMARY = 3
+
+import contextvars
+
+# Generation of the run a branch belongs to. A fail_fast/timeout Parallel block
+# abandons still-running branches (threads cannot be force-killed in Python); if
+# that branch later fails it must NOT scribble "failed" onto a *subsequent* run's
+# shared status. Each run() stamps its generation here; branches capture it via
+# contextvars (propagated into the ThreadPoolExecutor by copy_context_to_callable)
+# and status writes are suppressed once the owning run has moved on. None means
+# "no active run" (e.g. a bare _execute_single_step_internal call in tests).
+_run_generation: "contextvars.ContextVar[Optional[int]]" = contextvars.ContextVar(
+    "praisonai_workflow_run_generation", default=None
+)
 
 from .._run_lock import ensure_run_lock
 
@@ -87,6 +101,113 @@ class _WriteTrackingDict(dict):
         if key not in self:
             self.written_keys.add(key)
         return super().setdefault(key, default)
+
+def _isolate_value(value: Any, memo: dict) -> Any:
+    """Deep-copy ``value`` but degrade to sharing by reference where it can't.
+
+    This is ``copy.deepcopy`` with two differences that matter for a parallel
+    scope:
+
+    * **Shared memo.** All values in one scope are copied with the *same* ``memo``
+      so cross-variable aliasing survives: if ``variables['records']`` and
+      ``variables['state']['records']`` are the same list, the branch still sees
+      one shared list, exactly as the old whole-scope ``copy.deepcopy`` did. A
+      write through one name is visible through the other within the branch.
+    * **Granular fallback.** A value that cannot be deep-copied (thread lock,
+      DB/HTTP/LLM client, open file, a live Agent, generator, ...) would abort the
+      whole run with a pickling ``TypeError`` even when no branch touches it. Only
+      the *exact* un-copyable node is shared by reference; the containers around it
+      are still copied, so an ordinary mutable sibling (``{'client': c, 'rows': []}``
+      -> ``rows``) stays isolated and an in-place mutation cannot leak to a sibling
+      branch or loop iteration.
+    """
+    # Already isolated under this scope (cross-variable alias): reuse the copy.
+    if id(value) in memo:
+        return memo[id(value)]
+
+    pre_existing = set(memo)
+    try:
+        return copy.deepcopy(value, memo)
+    except Exception:
+        pass
+    # ``copy.deepcopy`` failed somewhere inside ``value``. A failed deepcopy can
+    # leave *unfinished* copies in ``memo`` (e.g. an empty dict for a container it
+    # had started but not populated before the un-copyable leaf raised). Reusing
+    # those would silently drop nested seed data, so discard everything this
+    # attempt added and rebuild the known container types node-by-node. The
+    # un-copyable leaves are shared by reference; everything around them is still
+    # isolated, and container subclasses (namedtuple, defaultdict, OrderedDict,
+    # subclassed list/set/tuple) keep their type and behaviour.
+    for key in set(memo) - pre_existing:
+        del memo[key]
+    return _rebuild_isolated(value, memo)
+
+
+def _rebuild_isolated(value: Any, memo: dict) -> Any:
+    """Node-by-node fallback copy that shares only the un-copyable leaves.
+
+    Used by :func:`_isolate_value` after a whole-value ``copy.deepcopy`` fails.
+    Rebuilds ``dict``/``list``/``set``/``tuple`` (and their subclasses, so a
+    ``defaultdict`` keeps its factory and a ``namedtuple`` keeps its fields),
+    recursing through :func:`_isolate_value` so each nested child first gets a
+    clean ``deepcopy`` attempt and only genuinely un-copyable nodes are shared.
+    """
+    if id(value) in memo:
+        return memo[id(value)]
+
+    if isinstance(value, dict):
+        try:
+            copied = value.__class__()  # preserves defaultdict/OrderedDict/...
+        except Exception:
+            copied = {}
+        if isinstance(value, collections.defaultdict):
+            copied.default_factory = value.default_factory
+        memo[id(value)] = copied
+        for k, v in value.items():
+            copied[_isolate_value(k, memo)] = _isolate_value(v, memo)
+        return copied
+    if isinstance(value, list):
+        try:
+            copied = value.__class__()  # preserves a list subclass where possible
+        except Exception:
+            copied = []  # subclass constructor requires args: fall back to list
+        memo[id(value)] = copied
+        copied.extend(_isolate_value(v, memo) for v in value)
+        return copied
+    if isinstance(value, set):
+        try:
+            copied = value.__class__()  # preserves a set subclass where possible
+        except Exception:
+            copied = set()  # subclass constructor requires args: fall back to set
+        memo[id(value)] = copied
+        for v in value:
+            copied.add(_isolate_value(v, memo))
+        return copied
+    if isinstance(value, tuple):
+        items = [_isolate_value(v, memo) for v in value]
+        if hasattr(value, "_fields"):  # namedtuple keeps its type and fields
+            try:
+                return value.__class__(*items)
+            except Exception:
+                return tuple(items)
+        return tuple(items)
+    # Unknown/atomic object that could not be deep-copied: share by reference as
+    # a last resort (read-only intent).
+    return value
+
+
+def _isolate_scope(variables: dict) -> dict:
+    """Give a parallel branch/iteration its own copy of the variable scope.
+
+    A branch needs its own container so concurrent writes are not a data race,
+    and mutable data (lists/dicts) is deep-copied so a sibling cannot observe
+    another branch's in-place mutation. Values are copied with one shared
+    ``memo`` so cross-variable aliasing is preserved, and any value that cannot
+    be deep-copied degrades to a by-reference share of only the un-copyable node
+    rather than crashing the run. See ``_isolate_value``.
+    """
+    memo: dict = {}
+    return {k: _isolate_value(v, memo) for k, v in variables.items()}
 
 class WorkflowStepError(Exception):
     """Exception raised when workflow step execution fails."""
@@ -232,6 +353,7 @@ class StepResult:
     output: str = ""  # Step output content
     stop_workflow: bool = False  # If True, stop the entire workflow early
     variables: Dict[str, Any] = field(default_factory=dict)  # Variables to add/update
+    skipped: bool = False  # Completion observer outcome when no handler ran
 
 # Aliases for backward compatibility
 StepInput = WorkflowContext
@@ -278,21 +400,54 @@ class Parallel:
     - "partial_ok": Continue with partial results if some branches fail (default)
     - "fail_fast": Cancel remaining branches and fail immediately on first error
     - "fail_all": Wait for all branches to complete, then fail if any failed
+
+    timeout: optional per-Parallel wall-clock bound (seconds). Must be a positive
+    number, or None for no bound (a non-positive value raises ValueError rather
+    than silently disabling the limit). The clock starts when the block begins,
+    including any context-preparation work. If branches are still running after it
+    elapses the block raises WorkflowStepError instead of hanging forever. Threads
+    running user code cannot be force-killed in Python, so a timed-out/cancelled
+    branch may keep running in the background, but the caller is no longer blocked
+    on it and its late failure cannot corrupt a later run's status.
+
+    Context strategies (how the upstream step's output reaches each branch):
+    - "full": Pass the exact upstream output to every branch (default, no data loss)
+    - "truncate": Excerpt head+tail to save tokens (lossy; opt-in)
+    - "summarize": LLM-summarise for large fan-outs, else truncate (lossy; opt-in)
     """
     steps: List = field(default_factory=list)
     max_workers: Optional[int] = None  # None = use system default
     on_failure: str = "partial_ok"  # "partial_ok" | "fail_fast" | "fail_all"
-    
-    def __init__(self, steps: List, max_workers: Optional[int] = None, on_failure: str = "partial_ok"):
+    timeout: Optional[float] = None  # None = no wall-clock bound
+    context: str = "full"  # "full" | "truncate" | "summarize"
+
+    def __init__(self, steps: List, max_workers: Optional[int] = None, on_failure: str = "partial_ok", timeout: Optional[float] = None, context: str = "full"):
         valid_on_failure = {"partial_ok", "fail_fast", "fail_all"}
         if on_failure not in valid_on_failure:
             raise ValueError(
                 f"Invalid on_failure='{on_failure}'. Must be one of {valid_on_failure}. "
                 "See Parallel docstring for semantics."
             )
+        # Reject a non-positive timeout: `timeout=0`/negatives are truthiness-false
+        # and would silently disable the bound, letting a hung branch wait forever
+        # even though the caller explicitly asked for a limit. `None` is the only
+        # way to mean "no bound".
+        if timeout is not None and timeout <= 0:
+            raise ValueError(
+                f"Invalid timeout={timeout!r}. Must be a positive number of seconds, "
+                "or None for no wall-clock bound."
+            )
+        valid_context = {"full", "truncate", "summarize"}
+        if context not in valid_context:
+            raise ValueError(
+                f"Invalid context='{context}'. Must be one of {valid_context}. "
+                "See Parallel docstring for semantics."
+            )
         self.steps = steps
         self.max_workers = max_workers
         self.on_failure = on_failure
+        self.timeout = timeout
+        self.context = context
 
 @dataclass
 class Loop:
@@ -343,7 +498,8 @@ class Loop:
     parallel: bool = False  # Execute iterations in parallel
     max_workers: Optional[int] = None  # Max parallel workers (None = unlimited)
     output_variable: Optional[str] = None  # Store loop results in this variable name
-    
+    context: str = "full"  # "full" | "truncate" — how previous_output reaches parallel iterations
+
     def __init__(
         self, 
         step: Any = None,
@@ -354,7 +510,8 @@ class Loop:
         var_name: str = "item",
         parallel: bool = False,
         max_workers: Optional[int] = None,
-        output_variable: Optional[str] = None
+        output_variable: Optional[str] = None,
+        context: str = "full"
     ):
         # Validation: cannot have both step and steps
         if step is not None and steps is not None:
@@ -365,6 +522,11 @@ class Loop:
         # Validation: steps cannot be empty
         if steps is not None and len(steps) == 0:
             raise ValueError("Loop 'steps' cannot be empty")
+        valid_context = {"full", "truncate"}
+        if context not in valid_context:
+            raise ValueError(
+                f"Invalid context='{context}'. Must be one of {valid_context}."
+            )
         
         self.step = step
         self.steps = steps
@@ -375,6 +537,7 @@ class Loop:
         self.parallel = parallel
         self.max_workers = max_workers
         self.output_variable = output_variable
+        self.context = context
 
 class Discussion:
     """N agents take turns on the same thread until a criterion is met.
@@ -460,6 +623,8 @@ def parallel(
     steps: List,
     max_workers: Optional[int] = None,
     on_failure: str = "partial_ok",
+    timeout: Optional[float] = None,
+    context: str = "full",
 ) -> Parallel:
     """Execute steps in parallel.
 
@@ -468,14 +633,19 @@ def parallel(
         max_workers: Optional cap on ThreadPoolExecutor workers. When unset,
             defaults to min(DEFAULT_MAX_PARALLEL_WORKERS, len(steps)).
         on_failure: Failure strategy — "partial_ok" (default), "fail_fast", or "fail_all".
+        timeout: Optional per-Parallel wall-clock bound (seconds); must be positive
+            (or None for no bound). Raises instead of hanging if branches are still
+            running when it elapses.
+        context: How the upstream output reaches each branch — "full" (default,
+            exact pass-through, no data loss), "truncate", or "summarize".
     """
-    return Parallel(steps=steps, max_workers=max_workers, on_failure=on_failure)
+    return Parallel(steps=steps, max_workers=max_workers, on_failure=on_failure, timeout=timeout, context=context)
 
 def loop(step: Any = None, steps: Optional[List[Any]] = None,
          over: Optional[str] = None, from_csv: Optional[str] = None, 
          from_file: Optional[str] = None, var_name: str = "item",
          parallel: bool = False, max_workers: Optional[int] = None,
-         output_variable: Optional[str] = None) -> Loop:
+         output_variable: Optional[str] = None, context: str = "full") -> Loop:
     """Loop over items executing step(s) for each.
     
     Args:
@@ -488,13 +658,15 @@ def loop(step: Any = None, steps: Optional[List[Any]] = None,
         parallel: If True, execute iterations in parallel (default: False)
         max_workers: Max parallel workers when parallel=True (default: None = unlimited)
         output_variable: Variable name to store all loop outputs (default: None = "loop_outputs")
+        context: How previous_output reaches parallel iterations — "full" (default,
+            exact pass-through, no data loss) or "truncate" (lossy; opt-in)
     
     Returns:
         Loop object configured for iteration
     """
     return Loop(step=step, steps=steps, over=over, from_csv=from_csv, from_file=from_file, 
                 var_name=var_name, parallel=parallel, max_workers=max_workers,
-                output_variable=output_variable)
+                output_variable=output_variable, context=context)
 
 def repeat(step: Any, until: Optional[Callable[[WorkflowContext], bool]] = None,
            max_iterations: int = 10) -> Repeat:
@@ -783,6 +955,49 @@ class AgentFlow:
     # Guards per-run mutable state (status/step_statuses/_handoff_chain) so a
     # shared Workflow instance cannot be corrupted by concurrent run() calls.
     _run_lock: Optional[Any] = field(default=None, repr=False, compare=False)
+    # Monotonic id of the currently-executing run. Bumped at each run() so an
+    # abandoned fail_fast/timeout Parallel branch can tell it outlived its run
+    # and must not mutate a later run's shared status (see _begin_run_generation
+    # and _is_current_run_generation).
+    _current_run_generation: int = field(default=0, repr=False, compare=False)
+    # Reset token for the _run_generation contextvar captured at run() start and
+    # consumed in run()'s finally to restore the caller's generation (nested runs).
+    _run_generation_token: Any = field(default=None, repr=False, compare=False)
+
+    def _begin_run_generation(self) -> Any:
+        """Stamp a fresh generation for the run starting now and publish it to the
+        current context so branches submitted by this run capture it.
+
+        Returns the contextvar reset token for the *previous* generation. The
+        caller MUST pass it to :meth:`_end_run_generation` in a ``finally`` so a
+        nested ``Workflow.run()`` (e.g. an ``Include`` step launching another
+        flow) restores the outer run's generation on the way out instead of
+        leaving its own value stamped on the outer thread's context -- otherwise
+        a later task in the outer flow would be judged against the wrong
+        generation and have its failure silently suppressed.
+        """
+        self._current_run_generation += 1
+        return _run_generation.set(self._current_run_generation)
+
+    def _end_run_generation(self, token: Any) -> None:
+        """Restore the generation the context carried before :meth:`_begin_run_generation`.
+
+        A no-op when ``token`` is None so callers can guard unconditionally.
+        """
+        if token is not None:
+            _run_generation.reset(token)
+
+    def _is_current_run_generation(self) -> bool:
+        """True if the caller still belongs to the instance's live run.
+
+        A branch abandoned by a previous fail_fast/timeout Parallel block carries
+        an older generation (captured via the _run_generation contextvar), so this
+        returns False for it and its late status writes are suppressed. A bare
+        internal call outside any run (generation None) is treated as current to
+        preserve existing single-step behaviour.
+        """
+        gen = _run_generation.get()
+        return gen is None or gen == self._current_run_generation
 
     @property
     def _execution_lock(self):
@@ -1262,6 +1477,11 @@ class AgentFlow:
                 finally:
                     self._active_shared_compute = None
         finally:
+            # Restore the generation the caller's context carried before this
+            # run stamped its own, so a nested Workflow.run() (Include) does not
+            # leave a stale generation on the outer run's thread.
+            token, self._run_generation_token = self._run_generation_token, None
+            self._end_run_generation(token)
             self._execution_lock.release()
 
     def to_mermaid(self) -> str:
@@ -1437,6 +1657,14 @@ class AgentFlow:
         
         # Update workflow status
         self.status = "running"
+        # Stamp a fresh generation for this run so a still-running branch from a
+        # previous fail_fast/timeout Parallel block (which cannot be force-killed)
+        # cannot write "failed" onto this run's status. Branches capture this via
+        # the _run_generation contextvar at submit time. The reset token is kept
+        # on the instance so run()'s finally can restore the context the caller
+        # had -- critical for nested Workflow.run() (Include), which must not
+        # leave its own generation stamped on the outer run's thread.
+        self._run_generation_token = self._begin_run_generation()
         
         # Set YAML-approved tools only when caller allows dangerous tools
         _approval_token = None
@@ -1602,17 +1830,52 @@ class AgentFlow:
                 variables=all_variables.copy()
             )
 
-            # Step-result cache (opt-in via cache=). This linear path invokes
-            # handlers INLINE rather than through _execute_single_step_internal,
-            # which the pattern paths use -- so both are wrapped. Caching only
-            # one would make the feature work or not depending on whether a step
-            # happened to sit inside a Parallel or an If, which is worse than
-            # not having it.
+            # Start a step attempt before notifying lifecycle observers. The
+            # attempt may finish as skipped or from cache without a handler call.
+            if hasattr(step, 'status'):
+                step.status = "running"
+            self.step_statuses[step.name] = "running"
+
+            # Preserve the preparation hook before the gate: it may populate
+            # context variables used by should_run, including on cached runs.
+            if self.on_step_start:
+                try:
+                    self.on_step_start(step.name, context)
+                except Exception as e:
+                    logger.error(f"on_step_start callback failed: {e}")
+
+            # Check should_run condition
+            if step.should_run:
+                try:
+                    if not step.should_run(context):
+                        if verbose:
+                            print(f"⏭️ Skipped: {step.name}")
+                        if hasattr(step, 'status'):
+                            step.status = "skipped"
+                        self.step_statuses[step.name] = "skipped"
+                        if self.on_step_complete:
+                            try:
+                                self.on_step_complete(step.name, StepResult(output="", skipped=True))
+                            except Exception as e:
+                                logger.error(f"on_step_complete callback failed: {e}")
+                        i += 1
+                        continue
+                except Exception as e:
+                    logger.error(f"should_run failed for {step.name}: {e}")
+
+            # Cache only the result, never the decision to run. A condition can
+            # observe external state that is absent from the cache key, so it
+            # must be evaluated even when identical inputs have a cached result.
             _step_cache = getattr(self, "_step_cache", None)
             _cache_key = None
             if _step_cache is not None:
                 from .step_cache import make_step_key
-                _cache_key = make_step_key(step, previous_output, input, all_variables)
+                if step.handler:
+                    _cache_key = make_step_key(step, context.previous_result, context.input, context.variables)
+                else:
+                    # Agent prompts and attachments consume workflow inputs,
+                    # not the handler context prepared by lifecycle hooks.
+                    _cache_key = make_step_key(step, previous_output, input, all_variables)
                 try:
                     _cached = copy.deepcopy(_step_cache.get(_cache_key))
                 except Exception:
@@ -1640,38 +1903,22 @@ class AgentFlow:
                         step.status = cached_record["status"]
                     if _cached.get("variables"):
                         all_variables.update(_cached["variables"])
+                    if self.on_step_complete:
+                        try:
+                            self.on_step_complete(
+                                step.name, StepResult(
+                                    output=previous_output or "",
+                                    stop_workflow=bool(_cached.get("stop")),
+                                ),
+                            )
+                        except Exception as e:
+                            logger.error(f"on_step_complete callback failed: {e}")
                     if _cached.get("stop"):
                         if verbose:
                             print(f"🛑 Workflow stopped at: {step.name}")
                         break
                     i += 1
                     continue
-            
-            # Update step status
-            if hasattr(step, 'status'):
-                step.status = "running"
-            self.step_statuses[step.name] = "running"
-            
-            # Call on_step_start callback
-            if self.on_step_start:
-                try:
-                    self.on_step_start(step.name, context)
-                except Exception as e:
-                    logger.error(f"on_step_start callback failed: {e}")
-            
-            # Check should_run condition
-            if step.should_run:
-                try:
-                    if not step.should_run(context):
-                        if verbose:
-                            print(f"⏭️ Skipped: {step.name}")
-                        if hasattr(step, 'status'):
-                            step.status = "skipped"
-                        self.step_statuses[step.name] = "skipped"
-                        i += 1
-                        continue
-                except Exception as e:
-                    logger.error(f"should_run failed for {step.name}: {e}")
             
             # Gap 3c: Check for cross-step handoff cycles
             self._check_handoff_cycle(step)
@@ -2206,6 +2453,9 @@ class AgentFlow:
                 step_result_internal = self._execute_single_step_internal(
                     step, previous_output, input, all_variables, model, verbose, i, stream
                 )
+                if step_result_internal.get("skipped"):
+                    results.append({"step": step_name, "output": None, "status": "skipped"})
+                    continue
                 output = step_result_internal.get("output", "")
                 stop = step_result_internal.get("stop", False)
                 step_vars = step_result_internal.get("variables", {})
@@ -2729,6 +2979,38 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         depth: int = 0
     ) -> Dict[str, Any]:
         """Cache wrapper. The uncached body is _execute_single_step_uncached."""
+        # Patterns are control flow, not deterministic leaf results. Re-enter
+        # them on every run so their conditions and nested Task gates execute;
+        # their individual leaves can still reuse cached results.
+        if isinstance(step, (Loop, Parallel, Route, Repeat, Discussion, If, Include)):
+            return self._execute_single_step_uncached(
+                step, previous_output, input, all_variables, model, verbose, index,
+                stream=stream, depth=depth,
+            )
+        if depth > MAX_NESTING_DEPTH:
+            raise ValueError(
+                f"Maximum nesting depth ({MAX_NESTING_DEPTH}) exceeded. "
+                "Simplify your workflow or reduce pattern nesting."
+            )
+        step = self._normalize_single_step(step, index)
+        if step.should_run:
+            context = WorkflowContext(
+                input=input,
+                previous_result=str(previous_output) if previous_output else None,
+                current_step=step.name, variables=all_variables.copy(),
+            )
+            try:
+                should_run = step.should_run(context)
+            except Exception as e:
+                logger.error(f"should_run failed for {step.name}: {e}")
+                should_run = True  # Preserve the linear executor's error policy.
+            if not should_run:
+                step.status = "skipped"
+                self.step_statuses[step.name] = "skipped"
+                return {
+                    "step": step.name, "output": previous_output,
+                    "stop": False, "skipped": True, "variables": {},
+                }
         cache = getattr(self, "_step_cache", None)
         if cache is None:
             return self._execute_single_step_uncached(
@@ -2745,6 +3027,14 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         if hit is not None:
             if verbose:
                 print(f"↩︎  cache hit: {getattr(step, 'name', getattr(step, '__name__', step))}")
+            # A cache hit means the gated-in step is being served a prior result,
+            # so its status is "completed" -- not whatever a previous run left in
+            # step_statuses. Without this reset, a step that was gated OUT on an
+            # earlier run ("skipped") and is now gated IN would still report
+            # "skipped" to callers even though its cached output is returned.
+            if hasattr(step, "status"):
+                step.status = "completed"
+            self.step_statuses[step.name] = "completed"
             # Copy: a caller mutating a returned result must not edit the cache.
             return dict(hit)
         result = self._execute_single_step_uncached(
@@ -2986,8 +3276,12 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         if step_error is not None:
             if hasattr(normalized, 'status'):
                 normalized.status = "failed"
-            self.step_statuses[normalized.name] = "failed"
-            self.status = "failed"
+            # Suppress shared-status writes from a branch that outlived its run: a
+            # fail_fast/timeout Parallel block abandons still-running branches, and
+            # a late failure from one must not corrupt a *subsequent* run's status.
+            if self._is_current_run_generation():
+                self.step_statuses[normalized.name] = "failed"
+                self.status = "failed"
             if getattr(normalized, 'on_error', 'stop') == 'stop':
                 if verbose:
                     print(f"🛑 Step '{normalized.name}' failed (on_error='stop'): {step_error}")
@@ -3425,37 +3719,50 @@ CONCISE SUMMARY:"""
         
         results = []
         outputs = []
-        
+
+        # Start the wall-clock bound *before* any preparation work. The context
+        # summarisation below can make a blocking litellm.completion call, so a
+        # deadline started only at submission time would let a Parallel(timeout=N)
+        # block wait far longer than N before its clock even begins.
+        timeout = getattr(parallel_step, "timeout", None)
+        deadline = (time.monotonic() + timeout) if timeout else None
+
         if verbose:
             print(f"⚡ Running {len(parallel_step.steps)} steps in parallel...")
         
-        # Optimize: Use LLM-based summarization before distributing to parallel branches
-        # This prevents rate limits and reduces token waste
+        # Context distribution: by default every branch sees the exact upstream
+        # output (context="full", no data loss). Token-saving excerpting is opt-in
+        # via context="truncate"/"summarize" because silently handing downstream
+        # steps a smaller payload than the upstream produced is a correctness hazard.
         optimized_previous = previous_output
         num_branches = len(parallel_step.steps)
-        if previous_output and len(previous_output) > 3000:
+        context_mode = getattr(parallel_step, "context", "full")
+        if context_mode != "full" and previous_output and len(previous_output) > 3000:
             from ..context.tokens import estimate_tokens_heuristic
             tokens = estimate_tokens_heuristic(previous_output)
             if tokens > 1000:
-                # LLM summarisation only pays off for larger fan-outs; for small
-                # branch counts the extra call costs roughly what it saves, so use
-                # the cheaper truncation fallback instead.
-                if num_branches >= MIN_BRANCHES_FOR_LLM_SUMMARY:
-                    # Try LLM-based summarization first, fall back to truncation
+                if context_mode == "summarize" and num_branches >= MIN_BRANCHES_FOR_LLM_SUMMARY:
+                    # LLM summarisation only pays off for larger fan-outs; for small
+                    # branch counts the extra call costs roughly what it saves, so use
+                    # the cheaper truncation fallback instead.
                     try:
                         optimized_previous = self._llm_summarize_for_parallel(previous_output, num_branches, model, verbose)
                     except Exception:
                         # Fallback to truncation-based summarization
                         optimized_previous = self._truncate_context_for_branches(previous_output, num_branches)
-                elif tokens >= 1500:
-                    # Only truncate above the same threshold the LLM summariser uses;
-                    # below it, previous behaviour passed context through unchanged.
+                else:
                     optimized_previous = self._truncate_context_for_branches(previous_output, num_branches)
-                
-                if verbose and optimized_previous != previous_output:
+
+                if optimized_previous != previous_output:
                     new_tokens = estimate_tokens_heuristic(optimized_previous)
                     saved = tokens - new_tokens
-                    print(f"  📦 Optimized context for {num_branches} parallel branches: {tokens:,} → {new_tokens:,} tokens (saved {saved:,} per branch)")
+                    logger.warning(
+                        f"Parallel context='{context_mode}' reduced upstream output for "
+                        f"{num_branches} branches: {len(previous_output):,} → {len(optimized_previous):,} chars "
+                        f"({tokens:,} → {new_tokens:,} tokens). Middle content is dropped."
+                    )
+                    if verbose:
+                        print(f"  📦 Optimized context for {num_branches} parallel branches: {tokens:,} → {new_tokens:,} tokens (saved {saved:,} per branch)")
         
         # Use ThreadPoolExecutor for parallel execution
         from ..trace.context_events import copy_context_to_callable, get_context_emitter
@@ -3465,8 +3772,19 @@ CONCISE SUMMARY:"""
         # Determine effective workers based on user configuration
         user_max = getattr(parallel_step, 'max_workers', None)
         effective_workers = self._effective_workers(user_max, len(parallel_step.steps), label="Parallel")
-        with concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers) as executor:
-            futures = []
+
+        # Index-keyed collectors so branches can be consumed in *completion*
+        # order (fail_fast must raise as soon as any branch fails, not after
+        # every earlier-declared branch finishes) while the final merge below
+        # still rebuilds results/outputs/branch_deltas in declaration order -
+        # so parallel_outputs[idx] alignment and fail_all ordering are unchanged.
+        succeeded = {}   # idx -> {"result": {...}, "delta": {...}, "stop": bool}
+        failed = {}      # idx -> {"error": e, "delta": {...} | None, "stop": bool}
+        parallel_stopped = False
+
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers)
+        try:
+            future_to_idx = {}
             for idx, step in enumerate(parallel_step.steps):
                 # Wrap execution to propagate context and set branch_id for parallel tracking
                 # Each branch writes into its OWN deep copy: concurrent writes to
@@ -3476,7 +3794,7 @@ CONCISE SUMMARY:"""
                 # output_variable writes are not thrown away, and untouched keys are
                 # not merged as per-branch clones. Keys present at construction seed
                 # the scope and are not counted as writes.
-                branch_vars = _WriteTrackingDict(copy.deepcopy(all_variables))
+                branch_vars = _WriteTrackingDict(_isolate_scope(all_variables))
 
                 def execute_with_branch(step=step, idx=idx, opt_prev=optimized_previous, branch_vars=branch_vars):
                     emitter = get_context_emitter()
@@ -3487,85 +3805,141 @@ CONCISE SUMMARY:"""
                         )
                     finally:
                         emitter.clear_branch()
-                
+
                 future = executor.submit(copy_context_to_callable(execute_with_branch))
-                futures.append((idx, future))
-            
-            errors = []
-            parallel_stopped = False
-            for idx, future in futures:
-                try:
-                    step_result = future.result()
-                except Exception as e:
-                    # A branch that raised before _apply_step_policies could catch
-                    # it (e.g. a pattern-level error). Treat like a branch failure.
-                    branch_error = e
-                    step_result = None
-                else:
-                    # A nested step that failed now surfaces its error via the
-                    # result dict instead of raising (so on_error can be honored),
-                    # so the future resolves successfully. Detect that here so the
-                    # Parallel on_failure modes still fire instead of silently
-                    # treating the exception text as a real branch output.
-                    branch_error = step_result.get("error")
-                    # A branch step with on_error="stop" (Task default) requests a
-                    # workflow-wide halt. Capture it so the enclosing workflow stops
-                    # after this parallel block, matching Loop/Route/Repeat/If.
-                    if step_result.get("stop"):
-                        parallel_stopped = True
+                future_to_idx[future] = idx
 
-                if branch_error is None:
-                    results.append({"step": step_result["step"], "output": step_result["output"]})
-                    outputs.append(step_result["output"])
-                    branch_deltas.append(
-                        (idx, self._branch_variable_delta(step_result.get("variables")))
-                    )
-                    continue
-
-                logger.error(f"Parallel branch {idx} failed: {branch_error}")
-                errors.append({"step": idx, "error": branch_error})
-                # The whole run has a failed branch regardless of on_failure mode.
-                self.status = "failed"
-                if parallel_step.on_failure == "fail_fast":
-                    # Cancel remaining futures
-                    for _, f in futures:
+            pending = set(future_to_idx)
+            fail_fast_error = None  # (idx, branch_error) of the first fail_fast failure
+            while pending:
+                remaining = None if deadline is None else max(0.0, deadline - time.monotonic())
+                done, pending = concurrent.futures.wait(
+                    pending, timeout=remaining,
+                    return_when=concurrent.futures.FIRST_COMPLETED,
+                )
+                if not done:
+                    # Timed out with branches still running. Cancel what we can and
+                    # stop blocking the caller on threads that cannot be interrupted.
+                    for f in pending:
                         f.cancel()
-                    # Only chain a real exception; nested steps surface the error
-                    # as a string, so guard against `raise ... from <str>` which
-                    # would itself raise TypeError and mask the failure.
-                    cause = branch_error if isinstance(branch_error, BaseException) else None
+                    self.status = "failed"
                     raise WorkflowStepError(
-                        f"Parallel branch {idx} failed", cause=cause, errors=errors
-                    ) from cause
-                elif parallel_step.on_failure == "partial_ok":
-                    # Record the failure but continue with other branches. Do not
-                    # fold the exception text into outputs as if it were data.
-                    results.append({"step": f"parallel_{idx}", "output": None, "error": str(branch_error)})
-                    # "partial_ok" means partial results are kept, so the variables
-                    # the branch's *completed* steps wrote are kept too. (The failed
-                    # step itself never reaches the output_variable write, so nothing
-                    # from it can leak in here.) fail_fast/fail_all raise instead, so
-                    # nothing from a failed branch is merged under those modes.
-                    if step_result is not None:
-                        branch_deltas.append(
-                            (idx, self._branch_variable_delta(step_result.get("variables")))
-                        )
-                    # Keep `outputs` index-aligned with parallel_step.steps so a
-                    # downstream reader of parallel_outputs[idx] cannot silently
-                    # receive a later branch's result once an earlier one fails.
-                    outputs.append(None)
-                    # A failed branch whose step requested on_error="stop" halts the
-                    # enclosing workflow even under partial_ok.
-                    if step_result is not None and step_result.get("stop"):
-                        parallel_stopped = True
-            
-            # Check if we should fail after all branches completed
-            if errors and parallel_step.on_failure == "fail_all":
-                first_error = errors[0]["error"]
-                cause = first_error if isinstance(first_error, BaseException) else None
+                        f"{len(pending)} parallel branch(es) timed out after {timeout}s",
+                        errors=[{"step": future_to_idx[f], "error": "timeout"} for f in pending],
+                    )
+
+                for future in done:
+                    idx = future_to_idx[future]
+                    try:
+                        step_result = future.result()
+                    except Exception as e:
+                        # A branch that raised before _apply_step_policies could catch
+                        # it (e.g. a pattern-level error). Treat like a branch failure.
+                        branch_error = e
+                        step_result = None
+                    else:
+                        # A nested step that failed now surfaces its error via the
+                        # result dict instead of raising (so on_error can be honored),
+                        # so the future resolves successfully. Detect that here so the
+                        # Parallel on_failure modes still fire instead of silently
+                        # treating the exception text as a real branch output.
+                        branch_error = step_result.get("error")
+
+                    branch_stop = bool(step_result and step_result.get("stop"))
+
+                    if branch_error is None:
+                        if step_result.get("skipped"):
+                            # A gated-out branch produced no output. Record it as
+                            # skipped and keep its index aligned, but merge no
+                            # variables and feed nothing into the combined output
+                            # (the executor returns the prior context as "output",
+                            # which must not be duplicated into sibling results).
+                            succeeded[idx] = {
+                                "result": {"step": step_result["step"], "output": None, "status": "skipped"},
+                                "output": None,
+                                "delta": None,
+                                "stop": branch_stop,
+                            }
+                            continue
+                        succeeded[idx] = {
+                            "result": {"step": step_result["step"], "output": step_result["output"]},
+                            "output": step_result["output"],
+                            "delta": self._branch_variable_delta(step_result.get("variables")),
+                            "stop": branch_stop,
+                        }
+                        continue
+
+                    logger.error(f"Parallel branch {idx} failed: {branch_error}")
+                    # The whole run has a failed branch regardless of on_failure mode.
+                    self.status = "failed"
+                    failed[idx] = {
+                        "error": branch_error,
+                        # partial_ok keeps the variables the branch's *completed*
+                        # steps wrote; fail_fast/fail_all raise, so nothing from a
+                        # failed branch is merged under those modes.
+                        "delta": self._branch_variable_delta(step_result.get("variables")) if step_result is not None else None,
+                        "stop": branch_stop,
+                    }
+                    if parallel_step.on_failure == "fail_fast":
+                        # Record the first failure, stop waiting, cancel the rest,
+                        # and raise immediately without blocking on running threads.
+                        fail_fast_error = (idx, branch_error)
+                        for f in pending:
+                            f.cancel()
+                        pending = set()
+                        break
+
+            if fail_fast_error is not None:
+                idx, branch_error = fail_fast_error
+                # Only chain a real exception; nested steps surface the error
+                # as a string, so guard against `raise ... from <str>` which
+                # would itself raise TypeError and mask the failure.
+                cause = branch_error if isinstance(branch_error, BaseException) else None
                 raise WorkflowStepError(
-                    f"{len(errors)} parallel branches failed", errors=errors, cause=cause
+                    f"Parallel branch {idx} failed", cause=cause,
+                    errors=[{"step": idx, "error": branch_error}],
                 ) from cause
+        finally:
+            # Do not block the caller on branches that cannot be interrupted.
+            # shutdown(wait=True) (the `with` default) is what held the fail_fast
+            # raise until the slowest sibling finished.
+            executor.shutdown(wait=False)
+
+        # Rebuild results/outputs/branch_deltas in declaration order so
+        # parallel_outputs[idx] alignment and fail_all ordering are preserved
+        # regardless of the order branches completed in.
+        errors = []
+        for idx in range(len(parallel_step.steps)):
+            if idx in succeeded:
+                info = succeeded[idx]
+                results.append(info["result"])
+                outputs.append(info["output"])
+                # A skipped branch carries delta=None: it wrote nothing, so it
+                # must not contribute a merge entry (the failed path guards the
+                # same way).
+                if info["delta"] is not None:
+                    branch_deltas.append((idx, info["delta"]))
+                if info["stop"]:
+                    parallel_stopped = True
+            elif idx in failed:
+                info = failed[idx]
+                errors.append({"step": idx, "error": info["error"]})
+                # partial_ok: record the failure but keep going; fold neither the
+                # exception text into outputs nor skip the index alignment.
+                results.append({"step": f"parallel_{idx}", "output": None, "error": str(info["error"])})
+                if info["delta"] is not None:
+                    branch_deltas.append((idx, info["delta"]))
+                outputs.append(None)
+                if info["stop"]:
+                    parallel_stopped = True
+
+        # Check if we should fail after all branches completed
+        if errors and parallel_step.on_failure == "fail_all":
+            first_error = errors[0]["error"]
+            cause = first_error if isinstance(first_error, BaseException) else None
+            raise WorkflowStepError(
+                f"{len(errors)} parallel branches failed", errors=errors, cause=cause
+            ) from cause
         
         # Merge each branch's variable writes back into the shared scope. Without
         # this every `output_variable` set inside a Parallel block was written to a
@@ -3573,7 +3947,7 @@ CONCISE SUMMARY:"""
         self._merge_branch_variables(all_variables, branch_deltas)
 
         # Combine outputs
-        combined_output = "\n---\n".join(str(o) for o in outputs)
+        combined_output = "\n---\n".join(str(o) for o in outputs if o is not None)
         all_variables["parallel_outputs"] = outputs
         
         if verbose:
@@ -3643,19 +4017,27 @@ CONCISE SUMMARY:"""
                 step_info = f" ({len(steps_to_run)} steps each)" if is_multi_step else ""
                 print(f"⚡🔁 Parallel looping over {num_items} items{step_info} (max_workers={max_workers})...")
             
-            # Optimize: Aggressively summarize large previous_output before distributing to parallel branches
-            # This reduces token waste and prevents rate limit issues
+            # Context distribution: by default each iteration sees the exact upstream
+            # output (context="full", no data loss). Token-saving excerpting is opt-in
+            # via context="truncate".
             optimized_previous = previous_output
-            if previous_output and len(previous_output) > 3000:
+            context_mode = getattr(loop_step, "context", "full")
+            if context_mode != "full" and previous_output and len(previous_output) > 3000:
                 from ..context.tokens import estimate_tokens_heuristic
                 tokens = estimate_tokens_heuristic(previous_output)
                 # Target: max 800 tokens per branch to stay well under rate limits
                 if tokens > 1000:
                     optimized_previous = self._truncate_context_for_branches(previous_output, num_items)
-                    if verbose and optimized_previous != previous_output:
+                    if optimized_previous != previous_output:
                         new_tokens = estimate_tokens_heuristic(optimized_previous)
                         saved = tokens - new_tokens
-                        print(f"  📦 Optimized context for {num_items} parallel branches: {tokens:,} → {new_tokens:,} tokens (saved {saved:,} per branch)")
+                        logger.warning(
+                            f"Loop context='{context_mode}' reduced upstream output for "
+                            f"{num_items} branches: {len(previous_output):,} → {len(optimized_previous):,} chars "
+                            f"({tokens:,} → {new_tokens:,} tokens). Middle content is dropped."
+                        )
+                        if verbose:
+                            print(f"  📦 Optimized context for {num_items} parallel branches: {tokens:,} → {new_tokens:,} tokens (saved {saved:,} per branch)")
             
             # Use copy_context_to_callable to propagate contextvars (needed for trace emission)
             from ..trace.context_events import copy_context_to_callable, get_context_emitter
@@ -3679,7 +4061,7 @@ CONCISE SUMMARY:"""
                     # variables are seeded at construction time and are therefore
                     # deliberately not counted as writes.
                     control = self._loop_control_variables(loop_step, item, idx)
-                    seed = copy.deepcopy(all_variables)
+                    seed = _isolate_scope(all_variables)
                     seed.update(control)
                     loop_vars = _WriteTrackingDict(seed)
                     
@@ -4297,6 +4679,7 @@ CONCISE SUMMARY:"""
             
             # Load tools from the recipe's tools.py if present (opt-in only)
             tool_registry = {}
+            tools_snapshot = None
             tools_py = recipe_path / "tools.py"
             if tools_py.exists():
                 try:
@@ -4311,7 +4694,10 @@ CONCISE SUMMARY:"""
                         import importlib.util
                         spec = importlib.util.spec_from_file_location("recipe_tools", tools_py)
                         recipe_module = importlib.util.module_from_spec(spec)
-                        spec.loader.exec_module(recipe_module)
+                        # Execute and cache the same source snapshot, bypassing stale pyc files.
+                        tools_content = tools_py.read_bytes()
+                        exec(compile(tools_content, str(tools_py), "exec"), recipe_module.__dict__)
+                        tools_snapshot = (str(tools_py.resolve()), tools_content)
                     else:
                         logger.warning(
                             "Skipping included recipe tools.py: set PRAISONAI_ALLOW_LOCAL_TOOLS "
@@ -4347,7 +4733,18 @@ CONCISE SUMMARY:"""
             # Parse and execute the included workflow
             from .yaml_parser import YAMLWorkflowParser
             parser = YAMLWorkflowParser(tool_registry=tool_registry)
-            included_workflow = parser.parse_file(str(recipe_yaml))
+            # Match parse_file's decoding policy, but read only once: the cache
+            # namespace must describe the same snapshot that the parser saw.
+            with open(recipe_yaml, 'r') as recipe_file:
+                recipe_content = recipe_file.read()
+            included_workflow = parser.parse_string(recipe_content)
+            parent_cache = getattr(self, "_step_cache", None)
+            if parent_cache is not None:
+                from .step_cache import _ScopedStepCache
+                included_workflow._step_cache = _ScopedStepCache(
+                    parent_cache,
+                    f"{recipe_yaml.resolve()}:{recipe_content}:{tools_snapshot!r}"
+                )
             
             # Merge parent variables into included workflow
             included_workflow.variables.update(all_variables)

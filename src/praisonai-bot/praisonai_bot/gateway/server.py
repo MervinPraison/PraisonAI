@@ -1995,6 +1995,9 @@ class WebSocketGateway:
             auth_err = _check_auth(request)
             if auth_err:
                 return auth_err
+            scope_err = _require_scope(request, OperatorScope.APPROVALS)
+            if scope_err:
+                return scope_err
 
             peer_ip = request.client.host if request.client else "unknown"
             client_ip = _client_subject(peer_ip, request.headers)

@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional, List
 
 import typer
 
-from ..output.console import get_output_controller
+from ..output.console import get_output_controller, OutputMode
 from ..state.identifiers import get_current_context
 from ..configuration.resolver import resolve_config
 from ..utils.env_utils import scopes_no_plugins
@@ -180,7 +180,27 @@ def _run_block_reason(agent: Any) -> Optional[str]:
     return reason if reason in _BLOCK_REASON_MESSAGES else None
 
 
-def _report_run_blocked(output: Any, result: Any, reason: str) -> None:
+def _emit_json_outcome(json_stdout: bool, status: str, value: Any) -> None:
+    """Print the one-line ``{result, status}`` envelope for a ``--output json`` run.
+
+    ``json_stdout`` is the run-scoped decision that stdout belongs to this
+    envelope rather than to human output. It is threaded through rather than
+    recomputed so the exception handler shares one definition with the normal
+    result path, which is the only way every outcome is covered by construction.
+    """
+    if not json_stdout:
+        return
+    import json
+
+    print(json.dumps({
+        "result": str(value) if value else None,
+        "status": status,
+    }))
+
+
+def _report_run_blocked(
+    output: Any, result: Any, reason: str, *, suppress_human: bool = False
+) -> None:
     """Report a provider-blocked/refused/truncated run distinctly and exit 2.
 
     Mirrors ``_report_run_truncated``: any partial text is preserved in the
@@ -188,6 +208,9 @@ def _report_run_blocked(output: Any, result: Any, reason: str) -> None:
     consumers and CI can branch on *why* nothing usable came back. Exits with
     code 2 (an incomplete run), distinct from a hard failure (exit 1) and a
     clean completion (exit 0).
+
+    ``suppress_human`` keeps the human notice off stdout when the caller has
+    already printed a machine-readable envelope there.
     """
     message, remediation = _BLOCK_REASON_MESSAGES[reason]
     text = str(result) if result else None
@@ -195,18 +218,23 @@ def _report_run_blocked(output: Any, result: Any, reason: str) -> None:
         message=message,
         data={"status": reason, "result": text},
     )
-    if not getattr(output, "is_json_mode", False):
+    if not suppress_human and not getattr(output, "is_json_mode", False):
         output.print_warning(f"{message} {remediation}")
     raise typer.Exit(2)
 
 
-def _report_run_failure(output: Any) -> None:
+def _report_run_failure(output: Any, *, suppress_human: bool = False) -> None:
     """Report an agent-run failure and exit non-zero.
 
     Mirrors the existing arg-error exit convention (``typer.Exit(1)``) but for a
     *run* failure: emits a machine-readable outcome under ``--output json`` and
     prints a human-facing error, so CI/scripts can branch on the exit code and
     the JSON ``status`` instead of scraping stderr.
+
+    ``suppress_human`` sends the human error to stderr instead of
+    ``output.print_error``. That controller renders a Rich panel onto **stdout**
+    whenever Rich is available, which would leave a script parsing
+    ``run --output json`` with a panel behind the envelope.
     """
     message = "Run failed: the agent did not produce a result."
     output.emit_result(
@@ -214,18 +242,28 @@ def _report_run_failure(output: Any) -> None:
         data={"status": "failed", "result": None},
     )
     output.emit_error(message=message, data={"status": "failed"})
-    output.print_error(
-        message,
-        code="run_failed",
-        remediation=(
+    if suppress_human:
+        typer.echo(message, err=True)
+        typer.echo(
             "Re-run with --verbose to see the underlying error, "
-            "or check credentials with: praisonai setup"
-        ),
-    )
+            "or check credentials with: praisonai setup",
+            err=True,
+        )
+    else:
+        output.print_error(
+            message,
+            code="run_failed",
+            remediation=(
+                "Re-run with --verbose to see the underlying error, "
+                "or check credentials with: praisonai setup"
+            ),
+        )
     raise typer.Exit(1)
 
 
-def _report_run_truncated(output: Any, result: Any) -> None:
+def _report_run_truncated(
+    output: Any, result: Any, *, suppress_human: bool = False
+) -> None:
     """Report a step-limit-truncated run distinctly from a genuine completion.
 
     The finalisation summary is a real (non-empty) answer, so it is preserved in
@@ -234,13 +272,16 @@ def _report_run_truncated(output: Any, result: Any) -> None:
     one-line stderr notice tells an interactive user the answer is a wrap-up, not
     a finished task. Exits with code 2 to distinguish truncation (exit 2) from a
     hard failure (exit 1) and a clean completion (exit 0).
+
+    ``suppress_human`` keeps that notice off stdout when the caller has already
+    printed a machine-readable envelope there.
     """
     text = str(result) if result else None
     output.emit_result(
         message="Run truncated: hit the step/iteration limit before completing.",
         data={"status": "truncated", "result": text},
     )
-    if not getattr(output, "is_json_mode", False):
+    if not suppress_human and not getattr(output, "is_json_mode", False):
         output.print_warning(
             "Run hit the step/iteration limit; the answer above is a summary of "
             "partial progress, not a completed task. Raise the budget with "
@@ -265,9 +306,33 @@ def _is_yaml_file(target: Optional[str]) -> bool:
     )
 
 
+# Structured modes and the core Agent output preset each one uses. Only
+# ``actions`` maps onto a core preset: its status module prints the final content
+# to stdout itself. The others keep the agent display silent because the CLI owns
+# their wire format, and the core presets that look like a match are not usable
+# here — the core ``json`` preset routes its JSONL to stderr
+# (praisonaiagents.output.status defaults to sys.stderr "to not interfere with
+# agent output"), and the core ``stream`` preset makes ``Agent.start()`` return a
+# generator that nothing in this path consumes.
+_STRUCTURED_AGENT_PRESETS = {
+    "actions": "actions",
+    "json": "silent",
+    "stream": "silent",
+    "stream-json": "silent",
+}
+
 # Structured output modes always run in-process via the Agent path, so they
-# never need the wrapper's handle_direct_prompt.
-_IN_PROCESS_OUTPUT_MODES = ("actions", "json", "stream", "stream-json")
+# never need the wrapper's handle_direct_prompt. Derived from the preset map so
+# the two lists cannot drift.
+_IN_PROCESS_OUTPUT_MODES = tuple(_STRUCTURED_AGENT_PRESETS)
+
+# Human-readable text output modes: the CLI default plus explicit selectors.
+_TEXT_OUTPUT_MODES = (None, "plain", "verbose", "silent")
+
+# Text modes whose Agent preset leaves the agent itself silent, so the CLI
+# prints the final answer (mirrors the wrapper text path's ``print(result)``).
+# ``verbose`` renders the response through the agent's own display instead.
+_SILENT_STYLE_TEXT_MODES = (None, "plain", "silent")
 
 
 def _direct_prompt_needs_wrapper(
@@ -277,37 +342,102 @@ def _direct_prompt_needs_wrapper(
     command: Optional[str],
     output_mode: Optional[str],
 ) -> bool:
-    """True when a text prompt run uses the wrapper-only handle_direct_prompt path.
+    """True when a text prompt run takes the wrapper's handle_direct_prompt path.
 
     Structured modes (``_IN_PROCESS_OUTPUT_MODES``) always run in-process via the
     Agent path, so they never need the wrapper. Human-readable text modes
     (``plain``/``verbose``/``silent``/default) delegate to the wrapper's
-    ``handle_direct_prompt``; on a standalone install this gates with an install
-    hint (see ``_require_wrapper_for_default_run``) to keep the C7 hot path free
-    of the heavy Agent import for default runs.
+    ``handle_direct_prompt`` **when the wrapper is installed**; on a standalone
+    install they render in-process instead (see
+    ``_text_run_renders_in_process`` and ``_require_wrapper_for_default_run``).
     """
     if agent or command or not target or _is_yaml_file(target):
         return False
     return output_mode not in _IN_PROCESS_OUTPUT_MODES
 
 
+def _text_run_renders_in_process(
+    output_mode: Optional[str],
+    *,
+    image: Optional[List[str]],
+) -> bool:
+    """True when a human-readable text run renders in-process (issue #5644).
+
+    Text modes delegate to the wrapper's ``handle_direct_prompt`` when the
+    wrapper is installed (unchanged). On a standalone install they render
+    in-process from the same Agent loop the structured modes already use, so
+    ``pip install praisonai-code`` alone yields a working default run. The
+    ``praisonaiagents`` import is function-local, exactly like the structured
+    modes, so the C7 hot-path import gate is unaffected.
+
+    ``--image`` is the one wrapper-only feature of this path (the vision
+    handling lives in the wrapper), so an image run keeps its targeted gate.
+    """
+    if output_mode not in _TEXT_OUTPUT_MODES:
+        return False
+    if image:
+        return False
+    from praisonai_code._wrapper_bridge import wrapper_available
+
+    return not wrapper_available()
+
+
+def _agent_text_preset(output_mode: Optional[str]) -> str:
+    """Map a human-readable text mode to the core Agent output preset."""
+    if output_mode == "verbose":
+        return "verbose"
+    # default/plain/silent are silent-style: the agent prints nothing itself,
+    # so the CLI prints the final text (see ``_prints_final_text``).
+    return "minimal"
+
+
+def _prints_final_text(output_mode: Optional[str]) -> bool:
+    """True when the CLI must print the final answer itself.
+
+    Silent-style text presets leave the agent silent, so the final text is
+    printed by the CLI (as the wrapper text path does). The structured modes
+    other than ``actions`` also keep the agent silent (see
+    ``_STRUCTURED_AGENT_PRESETS``) and reach here through the same print, while
+    ``actions`` renders via the core status module and ``verbose`` via the agent
+    display.
+    """
+    return output_mode in _SILENT_STYLE_TEXT_MODES or (
+        output_mode in _STRUCTURED_AGENT_PRESETS and output_mode != "actions"
+    )
+
+
+def _structured_agent_preset(output_mode: str) -> str:
+    """Map a structured output mode to the core Agent output preset."""
+    return _STRUCTURED_AGENT_PRESETS[output_mode]
+
+
 def _require_wrapper_for_default_run(
     target: Optional[str],
     *,
-    agent: Optional[str],
-    command: Optional[str],
-    output_mode: Optional[str],
+    agent: Optional[str] = None,
+    command: Optional[str] = None,
+    output_mode: Optional[str] = None,
+    image: Optional[List[str]] = None,
 ) -> None:
-    """Fail fast with an install hint before credential/setup checks.
+    """Fail fast with a targeted hint before credential/setup checks.
 
-    Human-readable text runs (default/plain/verbose/silent) delegate to the
-    wrapper's ``handle_direct_prompt``. On a standalone install the wrapper is
-    absent, so gate here with an install hint that points standalone users to
-    the in-process ``--output actions`` alternative.
+    Text runs (default/plain/verbose/silent) render in-process when the wrapper
+    is absent (issue #5644), so they no longer gate here. The wrapper's vision
+    path (``--image``) is the remaining wrapper-only feature of the
+    direct-prompt flow; on a standalone install it gates with a hint that
+    points to the in-process ``--output actions`` alternative.
+
+    Every image run that can reach here needs the wrapper: the combinations that
+    are rejected outright (``--agent``, ``--profile``, a YAML target) fail
+    earlier with their own error, and what remains — a direct prompt or a
+    ``--command`` prompt, under any output mode — falls through to the wrapper's
+    vision handling because the in-process Agent path cannot carry an
+    attachment. Gating on ``image`` alone keeps that hint reachable for all of
+    them; the predicate that used to guard it excluded the structured modes and
+    ``--command``, whose runs then failed with the bare wrapper import error
+    instead.
     """
-    if not _direct_prompt_needs_wrapper(
-        target, agent=agent, command=command, output_mode=output_mode
-    ):
+    if not image:
         return
     from praisonai_code._wrapper_bridge import wrapper_available
 
@@ -315,11 +445,102 @@ def _require_wrapper_for_default_run(
         return
     output = get_output_controller()
     output.print_error(
-        "Default run mode requires the praisonai wrapper. "
+        "--image requires the praisonai wrapper. "
         "Install with: pip install praisonai\n"
         "Standalone alternative: praisonai-code run --output actions \"your prompt\""
     )
     raise typer.Exit(1)
+
+
+def _wire_run_agent_config(
+    agent_config: Dict[str, Any],
+    *,
+    model: Optional[str],
+    max_tokens: Optional[int],
+    tools: Optional[str],
+    toolset: Optional[str],
+    mcp: Optional[str],
+    mcp_env: Optional[str],
+    mcp_servers: Optional[List[dict]],
+    memory: bool = False,
+    approval: Optional[str],
+    approve_all_tools: bool,
+    approval_timeout: Optional[str],
+    permissions_config: Optional[dict],
+    session_id: Optional[str],
+    auto_save_name: Optional[str],
+    no_rules: bool,
+    instructions: Optional[List[str]],
+    verbose: Any,
+) -> None:
+    """Wire the shared agent surface (tools/MCP/session/instructions/approval).
+
+    Shared by the ``--output actions`` fast path and the standalone text run
+    (both served by the same in-process Agent branch of ``_run_prompt``) so a
+    standalone ``praisonai-code`` install reaches full parity: ``--tools``/
+    ``--toolset``, configured MCP servers, ``--session``/``--continue``
+    continuity, and explicitly selected ``--instructions`` all reach the agent
+    instead of being silently dropped.
+    """
+    from ..state.project_sessions import build_cli_memory_config
+
+    agent_config["llm"] = _llm_spec_with_max_tokens(
+        agent_config.get("llm") or model, model, max_tokens
+    )
+
+    # Resolve approval backend if specified. A permission policy
+    # (--allow/--deny/--permissions) with no explicit --approval derives the
+    # console backend so the patterns are enforced instead of silently dropped
+    # (same derivation the YAML path makes).
+    effective_approval = approval
+    implicit_console = False
+    if effective_approval is None and permissions_config:
+        effective_approval = "console"
+        implicit_console = True
+    if effective_approval:
+        import sys as _sys
+        from praisonai_code.cli.features._approval_bridge import resolve_approval_config
+        # When the console backend is derived implicitly (no explicit
+        # --approval) on a non-TTY, fail closed: an unmatched ``ask`` rule must
+        # deny rather than block on input()/read a piped stdin as if it were
+        # operator consent. An explicit --approval is left to the backend's own
+        # interactive handling.
+        non_interactive = implicit_console and not _sys.stdin.isatty()
+        agent_config["approval"] = resolve_approval_config(
+            effective_approval, all_tools=approve_all_tools, timeout=approval_timeout,
+            non_interactive=non_interactive,
+            permissions_config=permissions_config,
+        )
+
+    memory_cfg = build_cli_memory_config(session_id=session_id, auto_save=auto_save_name)
+    if memory_cfg is not None:
+        agent_config["memory"] = memory_cfg
+    elif memory:
+        # --memory without session flags: honour it as a plain cross-session
+        # memory rather than silently dropping the flag (the wrapper text path
+        # sets MemoryConfig for it).
+        agent_config["memory"] = True
+
+    if mcp or mcp_servers:
+        mcp_tools = _build_mcp_tools(mcp, mcp_env, mcp_servers, verbose=verbose)
+        if mcp_tools:
+            agent_config["tools"] = list(agent_config.get("tools", [])) + mcp_tools
+
+    selected_tools = _resolve_tools_arg(tools, verbose=verbose)
+    if toolset:
+        from praisonai_code.tool_resolver import resolve_toolsets as _resolve_toolsets
+        toolset_names = [t.strip() for t in toolset.split(",") if t.strip()]
+        if toolset_names:
+            selected_tools.extend(_resolve_toolsets(toolset_names))
+    selected_tools.extend(
+        _auto_discover_project_tools(selected_tools, verbose=verbose)
+    )
+    if selected_tools:
+        agent_config["tools"] = list(agent_config.get("tools", [])) + selected_tools
+
+    _wire_subtree_context_hook(
+        agent_config, no_rules=no_rules, instructions=instructions
+    )
 
 
 def _parse_permissions(allow: Optional[List[str]], deny: Optional[List[str]], permissions_file: Optional[str], default: Optional[str]) -> Optional[dict]:
@@ -1369,7 +1590,7 @@ def run_main(
         approval = "plan"
 
     _require_wrapper_for_default_run(
-        target, agent=agent, command=command, output_mode=output_mode
+        target, agent=agent, command=command, output_mode=output_mode, image=image
     )
 
     # Validate session options before any model/credential resolution so an
@@ -1713,17 +1934,42 @@ def run_main(
         )
         return
     
-    # Emit start event
+    # `--output stream-json` names the NDJSON wire format, but ``emit_start``
+    # only *frames* ``start``/``run.start`` on stdout when the controller is
+    # already in STREAM_JSON mode (otherwise the events are merely recorded).
+    # ``_run_prompt`` performs that mode switch, but only *after* this point —
+    # so a direct-prompt run selected purely via the per-command selector would
+    # emit its lead-in event to a TEXT controller and the NDJSON stream would
+    # lose its documented first event and target metadata. Frame the start event
+    # here by switching the mode across just the ``emit_start`` call, then
+    # restore immediately so ``_run_prompt`` owns the mode for the run itself
+    # (and its own restore). The guard mirrors ``_run_prompt``'s — only the
+    # neutral TEXT controller is upgraded, so an explicit global
+    # quiet/verbose/screen-reader/json keeps winning, and only the direct-prompt
+    # path (which reaches ``_run_prompt``) is affected.
     from ..output.event_bridge import SCHEMA_VERSION
-    output.emit_start(
-        message=f"Starting run: {target[:50]}..." if len(target) > 50 else f"Starting run: {target}",
-        data={
-            "schema_version": SCHEMA_VERSION,
-            "target": target,
-            "model": model,
-            "framework": framework,
-        }
+    _frame_start_as_ndjson = (
+        output_mode == "stream-json"
+        and not _is_yaml_file(target)
+        and not (agent or command)
+        and output.mode == OutputMode.TEXT
     )
+    if _frame_start_as_ndjson:
+        output.mode = OutputMode.STREAM_JSON
+    try:
+        # Emit start event
+        output.emit_start(
+            message=f"Starting run: {target[:50]}..." if len(target) > 50 else f"Starting run: {target}",
+            data={
+                "schema_version": SCHEMA_VERSION,
+                "target": target,
+                "model": model,
+                "framework": framework,
+            }
+        )
+    finally:
+        if _frame_start_as_ndjson:
+            output.mode = OutputMode.TEXT
     
     # Check if target is a file or prompt (case-insensitive extension, shared
     # with the stdin-ingestion gate above so both decisions stay consistent).
@@ -1757,6 +2003,8 @@ def run_main(
     if profile or profile_deep:
         if is_file:
             # Profiling for YAML file execution
+            file_permissions = _parse_permissions(allow, deny, permissions, permission_default)
+            _, _, file_permissions, _ = _apply_config_defaults(None, None, file_permissions)
             _run_from_file_profiled(
                 target,
                 model=model,
@@ -1772,6 +2020,7 @@ def run_main(
                 approval_timeout=approval_timeout,
                 output_mode=output_mode,
                 max_tokens=max_tokens,
+                permissions_config=file_permissions,
             )
         else:
             # Profiling for direct prompt
@@ -1999,6 +2248,8 @@ def _run_from_file(
             args._max_tokens_explicit = max_tokens is not None
             if effective_approval:
                 args.approval = effective_approval
+            if permissions_config:
+                args.permissions_config = permissions_config
             if approve_all_tools:
                 args.approve_all_tools = approve_all_tools
             if approval_timeout is not None:
@@ -2073,7 +2324,48 @@ def _run_prompt(
 ):
     """Run a direct prompt."""
     output = get_output_controller()
-    
+
+    # `--output stream-json` names the NDJSON wire format, so make the neutral
+    # controller mode match: the event bridge only writes stdout in STREAM_JSON
+    # mode, and without this the mode is reachable solely through the global
+    # `--output-format stream-json`, leaving a user who typed the per-command
+    # selector with a plain-text answer. Only the neutral TEXT mode is replaced
+    # — app.py already resolves quiet/verbose/screen-reader above output_format,
+    # so an explicit global preference keeps winning here too. The prior mode is
+    # restored below, because the controller is process-wide and an embedded
+    # caller making a second run must not inherit NDJSON framing.
+    _prev_mode = None
+    if output_mode == "stream-json" and output.mode == OutputMode.TEXT:
+        _prev_mode = output.mode
+        output.mode = OutputMode.STREAM_JSON
+
+    # `--output json` is a scripting surface, so the machine-readable envelope is
+    # decided before anything else runs: the session footer and the terminal
+    # hosts further down both print human notices to stdout, and a notice in
+    # front of the envelope makes stdout invalid as a single JSON document.
+    # The condition is the same one the envelope uses, expressed without the
+    # event bridge so it is available at the top of the function — an attached
+    # bridge means the controller is in STREAM_JSON mode, where it frames its own
+    # result event instead. `actions` is excluded because its core status module
+    # renders the answer itself, and QUIET is excluded because it is an explicit
+    # request for no stdout at all: the per-command selector replaces human TEXT
+    # output with machine output, it does not override "be silent". A plain run
+    # under `--output-format json` is likewise left alone — the controller's
+    # JSON-mode finalisation is a pre-existing gap shared by every command, not
+    # something a routing fix should redefine.
+    _json_stdout = (
+        output_mode in _STRUCTURED_AGENT_PRESETS
+        and output_mode != "actions"
+        and (
+            output_mode == "json"
+            or getattr(output, "mode", None) == OutputMode.JSON
+        )
+        and getattr(output, "mode", None) not in (
+            OutputMode.STREAM_JSON,
+            OutputMode.QUIET,
+        )
+    )
+
     # Note: Credential check already done in run_main() entry point
 
     # Scope the --allow-local-tools grant to this run so the opt-in never leaks
@@ -2195,66 +2487,68 @@ def _run_prompt(
             return
 
         # An --image attachment is handled by the vision path in
-        # handle_direct_prompt (ImageHandler); the "actions" fast path builds a
+        # handle_direct_prompt (ImageHandler); the in-process path builds a
         # bare Agent and would silently drop it, so fall through when set.
-        if output_mode == "actions" and not image:
+        # Every structured mode (actions/json/stream/stream-json) and, on a
+        # standalone install, the human-readable text modes
+        # (`_text_run_renders_in_process`, issue #5644) run in-process: a
+        # standalone install gets a working run instead of the wrapper install
+        # gate, and a wrapper-installed environment keeps its delegation.
+        #
+        # `--verbose` is a separate flag from `--output`, and the wrapper text
+        # path folds it into the Agent preset when no explicit mode was
+        # selected (praisonai.cli.legacy.direct_prompt). Mirror that here or the
+        # same command renders differently depending on whether the wrapper
+        # happens to be installed.
+        agent_text_mode = (
+            "verbose" if verbose and output_mode is None else output_mode
+        )
+        if (
+            output_mode in _IN_PROCESS_OUTPUT_MODES
+            or _text_run_renders_in_process(output_mode, image=image)
+        ) and not image:
             from praisonaiagents import Agent
-            from ..state.project_sessions import build_cli_memory_config, apply_cli_session_continuity
+            from ..state.project_sessions import apply_cli_session_continuity
 
             agent_config = {
                 "name": "RunAgent",
-                "role": "Assistant", 
+                "role": "Assistant",
                 "goal": "Complete the task",
-                "output": "actions",  # Use actions preset
+                # Structured actions events; text modes map to their
+                # human-readable preset.
+                "output": (
+                    _structured_agent_preset(output_mode)
+                    if output_mode in _STRUCTURED_AGENT_PRESETS
+                    else _agent_text_preset(agent_text_mode)
+                ),
             }
             if model:
                 agent_config["llm"] = model
-            agent_config["llm"] = _llm_spec_with_max_tokens(
-                agent_config.get("llm"), model, max_tokens
-            )
-            
-            # Resolve approval backend if specified
-            if approval:
-                from praisonai_code.cli.features._approval_bridge import resolve_approval_config
-                agent_config["approval"] = resolve_approval_config(
-                    approval, all_tools=approve_all_tools, timeout=approval_timeout,
-                    permissions_config=permissions_config,
-                )
-            
-            # Add session support to Agent if needed
-            # NOTE: build_cli_memory_config / apply_cli_session_continuity are
-            # imported above from ..state.project_sessions. Do NOT re-import them
-            # from ..utils.project here — that stale version lacks the auto_save
-            # kwarg and would shadow the correct implementation.
-            memory_cfg = build_cli_memory_config(session_id=session_id, auto_save=auto_save_name)
-            if memory_cfg is not None:
-                agent_config["memory"] = memory_cfg
-
-            # Wire all configured MCP servers (ad-hoc --mcp + config local/remote).
-            if mcp or mcp_servers:
-                mcp_tools = _build_mcp_tools(mcp, mcp_env, mcp_servers, verbose=verbose)
-                if mcp_tools:
-                    agent_config["tools"] = list(agent_config.get("tools", [])) + mcp_tools
-
-            # Wire --tools (names or file) and --toolset so actions mode reaches
-            # parity with the default/YAML/Python surfaces (previously dropped).
-            selected_tools = _resolve_tools_arg(tools, verbose=verbose)
-            if toolset:
-                from praisonai_code.tool_resolver import resolve_toolsets as _resolve_toolsets
-                toolset_names = [t.strip() for t in toolset.split(",") if t.strip()]
-                if toolset_names:
-                    selected_tools.extend(_resolve_toolsets(toolset_names))
-            # Auto-discover project-local .praisonai/tools/*.py (additive;
-            # explicit --tools take precedence). Gated by the shared
-            # PRAISONAI_ALLOW_LOCAL_TOOLS opt-in in the safe loader.
-            selected_tools.extend(
-                _auto_discover_project_tools(selected_tools, verbose=verbose)
-            )
-            if selected_tools:
-                agent_config["tools"] = list(agent_config.get("tools", [])) + selected_tools
-
-            _wire_subtree_context_hook(
-                agent_config, no_rules=no_rules, instructions=instructions
+            # Wire the shared agent surface (llm/tools/--toolset/MCP, session
+            # memory, approval, --instructions) via _wire_run_agent_config.
+            # This single branch serves both the structured --output modes and
+            # the standalone text run (wrapper absent), so a standalone
+            # praisonai-code install reaches the same parity instead of
+            # silently dropping these inputs.
+            _wire_run_agent_config(
+                agent_config,
+                model=model,
+                max_tokens=max_tokens,
+                tools=tools,
+                toolset=toolset,
+                mcp=mcp,
+                mcp_env=mcp_env,
+                mcp_servers=mcp_servers,
+                memory=memory,
+                approval=approval,
+                approve_all_tools=approve_all_tools,
+                approval_timeout=approval_timeout,
+                permissions_config=permissions_config,
+                session_id=session_id,
+                auto_save_name=auto_save_name,
+                no_rules=no_rules,
+                instructions=instructions,
+                verbose=verbose,
             )
             agent = Agent(**agent_config)
             # Reasoning effort applied via the property setter (not a
@@ -2291,24 +2585,74 @@ def _run_prompt(
                 bridge.emit_run_result(
                     result, ok=succeeded and not truncated and not block_reason
                 )
-            _record_session_usage(session_id or auto_save_name, model, output)
+            _record_session_usage(
+                session_id or auto_save_name,
+                model,
+                output,
+                suppress_info=_json_stdout,
+            )
+
+            # `--output json` is a scripting surface, so *every* terminal outcome
+            # gets one single-line `{result, status}` envelope on stdout, not
+            # just a clean completion: the reporters below exit before the
+            # success-only path, so a failure would otherwise carry no
+            # machine-readable status at all. The exception handler below shares
+            # the same definition so an unexpected raise is covered too.
+            def _emit(status: str, value: Any) -> None:
+                _emit_json_outcome(_json_stdout, status, value)
+
+            # `--output stream` renders only on the clean-completion path below,
+            # which the exit-2 reporters jump over. Print the partial answer here
+            # so a blocked/truncated stream run still surfaces its wrap-up text
+            # (the json envelope is covered by ``_emit``; stream-json keeps its
+            # NDJSON framing, so neither prints raw text).
+            def _emit_partial(value: Any) -> None:
+                if (
+                    output_mode == "stream"
+                    and value
+                    and not output.is_json_mode
+                    and not output.is_quiet
+                ):
+                    print(value)
+
             # A provider block/refusal/truncation wins over a generic empty-result
             # failure so the specific, actionable reason is not masked.
+            # The reporters below raise typer.Exit, so surface the mode-specific
+            # stdout payload *first* — otherwise a `--output json | script`
+            # consumer gets empty stdout and a `--output stream` user loses the
+            # partial answer on an exit-2 run (blocked/truncated). Skipped for a
+            # hard failure (no usable result to print; keep stdout clean).
             if block_reason:
-                _report_run_blocked(output, result, block_reason)
+                _emit(block_reason, result)
+                _emit_partial(result)
+                _report_run_blocked(
+                    output, result, block_reason, suppress_human=_json_stdout
+                )
             if not succeeded:
-                _report_run_failure(output)
+                _emit("failed", result)
+                _report_run_failure(output, suppress_human=_json_stdout)
             # Report the truncated run distinctly (exit 2 + status "truncated")
             # so CI/users don't mistake wrapped-up partial work for a completed
             # task.
             if truncated:
-                _report_run_truncated(output, result)
+                _emit("truncated", result)
+                _emit_partial(result)
+                _report_run_truncated(
+                    output, result, suppress_human=_json_stdout
+                )
             output.emit_result(
                 message="Prompt completed",
                 data={"result": str(result) if result else None}
             )
 
-            # Don't print result again - actions mode already shows output
+            # Silent-style modes don't render the final answer themselves, so
+            # print it here (the wrapper text path does the same). Actions mode
+            # already shows its output, and so does the event bridge when it is
+            # active, so skip the bare print there and let the framing stand.
+            if _json_stdout:
+                _emit("ok", result)
+            elif _prints_final_text(agent_text_mode) and result and not output.is_json_mode:
+                print(result)
             return
         
         # Use handle_direct_prompt for other modes
@@ -2365,19 +2709,33 @@ def _run_prompt(
         args.no_tools = False
         args.approval = approval
         args.thinking_budget = thinking_budget
-        
+        # Carry the remaining standalone-render inputs so the in-process renderer
+        # reaches parity with the wrapper/actions paths (explicit --instructions
+        # and the full approval surface would otherwise be dropped).
+        args.instructions = instructions
+        args.approve_all_tools = approve_all_tools
+        args.approval_timeout = approval_timeout
+        args.permissions_config = permissions_config
+
         praison.args = args
 
+        # This fallback is only reached when the wrapper is installed (a
+        # standalone text run is served in-process by the branch above, and a
+        # standalone ``--image`` run is gated earlier by
+        # ``_require_wrapper_for_default_run``), so delegate to the wrapper's
+        # richer ``handle_direct_prompt`` (full feature surface incl. vision) —
+        # existing users see no change.
         result = praison.handle_direct_prompt(prompt)
-        
+
         _record_session_usage(session_id or auto_save_name, model, output)
-        if not _run_succeeded(result):
+        succeeded = _run_succeeded(result)
+        if not succeeded:
             _report_run_failure(output)
         output.emit_result(
             message="Prompt completed",
             data={"result": str(result) if result else None}
         )
-        
+
         if result and not output.is_json_mode:
             print(result)
     
@@ -2387,7 +2745,17 @@ def _run_prompt(
         from ..output.event_bridge import StreamEventBridge
         StreamEventBridge(output).emit_run_error(str(e))
         output.emit_error(message=str(e))
-        output.print_error(str(e))
+        # An unexpected raise is a terminal outcome too, so it gets the same
+        # envelope: the script reading stdout must not lose `status` because the
+        # failure happened during setup or inside the agent rather than being
+        # reported by the run itself.
+        _emit_json_outcome(_json_stdout, "failed", None)
+        if _json_stdout:
+            # Same reason as _report_run_failure: a Rich error panel would land
+            # on stdout next to the envelope.
+            typer.echo(str(e), err=True)
+        else:
+            output.print_error(str(e))
         raise typer.Exit(1)
     finally:
         # Restore the prior opt-in state so the grant is strictly per-invocation.
@@ -2395,14 +2763,21 @@ def _run_prompt(
             _os.environ.pop(_ALLOW_LOCAL_TOOLS_ENV, None)
         else:
             _os.environ[_ALLOW_LOCAL_TOOLS_ENV] = _prev_allow_local_tools
+        # Restore the run-scoped output mode for the same reason: the controller
+        # is process-wide, so the NDJSON framing must not outlive this run.
+        if _prev_mode is not None:
+            output.mode = _prev_mode
 
 
-def _record_session_usage(session_id, model, output) -> None:
+def _record_session_usage(session_id, model, output, *, suppress_info: bool = False) -> None:
     """Accumulate this run's token/cost usage into the active session and show
     a compact running total footer (Issue #2421).
 
     Best-effort: never let usage accounting break a completed run. Stays quiet
-    in JSON mode so machine-readable output is unaffected.
+    in JSON mode so machine-readable output is unaffected. ``suppress_info``
+    extends that to ``run --output json``, where the per-command selector is the
+    scripting contract but the controller is a human-facing one, so its
+    ``is_json_mode`` alone would not catch the footer.
     """
     if not session_id:
         return
@@ -2426,7 +2801,7 @@ def _record_session_usage(session_id, model, output) -> None:
 
     if not usage or not usage.get("total_tokens"):
         return
-    if output is not None and getattr(output, "is_json_mode", False):
+    if suppress_info or (output is not None and getattr(output, "is_json_mode", False)):
         return
     try:
         footer = format_usage_footer(usage)
@@ -2453,6 +2828,7 @@ def _run_from_file_profiled(
     approval_timeout: Optional[str] = None,
     output_mode: Optional[str] = None,
     max_tokens: Optional[int] = None,
+    permissions_config: Optional[dict] = None,
 ):
     """Run agents from a YAML file with profiling enabled."""
     from praisonai_code.cli.features.cli_profiler import (
@@ -2520,7 +2896,10 @@ def _run_from_file_profiled(
     # the same ``args`` the legacy YAML path reads, so a profiled YAML run is
     # permission-gated identically to the non-profiled path instead of silently
     # dropping the deny policy.
-    if session_id or auto_save_name or approval or approve_all_tools or output_mode or max_tokens is not None:
+    effective_approval = approval
+    if effective_approval is None and permissions_config:
+        effective_approval = "console"
+    if session_id or auto_save_name or effective_approval or approve_all_tools or output_mode or max_tokens is not None:
         class Args:
             pass
         
@@ -2531,8 +2910,10 @@ def _run_from_file_profiled(
         args.output = output_mode
         args.max_tokens = max_tokens
         args._max_tokens_explicit = max_tokens is not None
-        if approval:
-            args.approval = approval
+        if effective_approval:
+            args.approval = effective_approval
+        if permissions_config:
+            args.permissions_config = permissions_config
         if approve_all_tools:
             args.approve_all_tools = approve_all_tools
         if approval_timeout is not None:
@@ -2543,9 +2924,26 @@ def _run_from_file_profiled(
     profiler.mark_init_end()
     
     # Execution phase
-    profiler.mark_exec_start()
-    result = praison.run()
-    profiler.mark_exec_end()
+    # Re-entrancy guard: like the non-profiled ``_run_from_file`` path, the
+    # legacy ``PraisonAI.run()`` re-parses ``sys.argv`` and, for a YAML target,
+    # would otherwise dispatch back into this modern Typer ``run`` app and
+    # recurse forever. Set the sentinel so the legacy ``run`` branch executes
+    # the YAML directly, and always restore the prior value afterwards so the
+    # suppression never leaks into a later in-process invocation.
+    import os as _os_guard
+    _prev_in_run = _os_guard.environ.get(_IN_MODERN_RUN_ENV)
+    _os_guard.environ[_IN_MODERN_RUN_ENV] = "1"
+    try:
+        profiler.mark_exec_start()
+        try:
+            result = praison.run()
+        finally:
+            profiler.mark_exec_end()
+    finally:
+        if _prev_in_run is None:
+            _os_guard.environ.pop(_IN_MODERN_RUN_ENV, None)
+        else:
+            _os_guard.environ[_IN_MODERN_RUN_ENV] = _prev_in_run
     
     _record_session_usage(session_id or auto_save_name, model, None)
     

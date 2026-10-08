@@ -11,6 +11,7 @@ import {
   CodexCliAgent,
   AiderAgent
 } from '../features/external-agents';
+import { printPlainHelp } from '../output/help';
 
 export async function execute(args: string[], options: Record<string, unknown>): Promise<void> {
   const subcommand = args[0] || 'help';
@@ -161,25 +162,10 @@ function showHelp(isJson: boolean): void {
     ]
   };
 
-  if (isJson) {
-    console.log(JSON.stringify(help, null, 2));
-  } else {
-    console.log('External Agents - AI CLI tool integration\n');
-    console.log('Subcommands:');
-    for (const [cmd, desc] of Object.entries(help.subcommands)) {
-      console.log(`  ${cmd.padEnd(12)} ${desc}`);
-    }
-    console.log('\nSupported Agents:');
-    for (const [agent, desc] of Object.entries(help.agents)) {
-      console.log(`  ${agent.padEnd(12)} ${desc}`);
-    }
-    console.log('\nFlags:');
-    for (const [flag, desc] of Object.entries(help.flags)) {
-      console.log(`  ${flag.padEnd(12)} ${desc}`);
-    }
-    console.log('\nExamples:');
-    for (const ex of help.examples) {
-      console.log(`  ${ex}`);
-    }
-  }
+  printPlainHelp(isJson, help, 'External Agents - AI CLI tool integration', [
+    { label: 'Subcommands:', entries: help.subcommands },
+    { label: 'Supported Agents:', entries: help.agents },
+    { label: 'Flags:', entries: help.flags },
+    { label: 'Examples:', items: help.examples }
+  ]);
 }

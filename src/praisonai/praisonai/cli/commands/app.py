@@ -78,7 +78,11 @@ def app_command(
     if agents:
         console.print(f"[dim]Agents: {len(agents)}[/dim]")
     if reload:
-        console.print("[yellow]Auto-reload enabled (development mode)[/yellow]")
+        console.print(
+            "[yellow]--reload requested; note auto-reload is not supported for a "
+            "programmatically-built AgentOS (the reload worker runs in a separate "
+            "process). Serving without reload.[/yellow]"
+        )
     console.print()
     
     try:
