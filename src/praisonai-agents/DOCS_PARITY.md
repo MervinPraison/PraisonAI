@@ -18,7 +18,7 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 577 |
-| ✅ Agent | 22 | 59 | 19085 |
+| ✅ Agent | 22 | 60 | 19240 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 701 |
 | ✅ Approval | 1 | 8 | 4028 |
@@ -27,7 +27,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Autonomy | 3 | 7 | 2808 |
 | ✅ Bots | 7 | 39 | 16336 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 124 | 39310 |
+| ✅ CLI | 5 | 124 | 39314 |
 | ✅ Chunking | 2 | 2 | 435 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 5022 |
@@ -36,7 +36,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Context Management | 16 | 37 | 14687 |
 | ✅ Deep Research | 8 | 2 | 591 |
 | ✅ Display | 6 | 3 | 844 |
-| ✅ Embeddings | 6 | 23 | 2051 |
+| ✅ Embeddings | 6 | 23 | 2074 |
 | ✅ Evaluation | 1 | 9 | 3637 |
 | ✅ Events | 1 | 2 | 782 |
 | ✅ Execution | 3 | 4 | 1694 |
@@ -57,7 +57,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Observability | 2 | 23 | 2859 |
 | ✅ Optimizer | 1 | 2 | 792 |
 | ✅ Output | 3 | 5 | 1289 |
-| ✅ Parallel Execution | 3 | 2 | 532 |
+| ✅ Parallel Execution | 3 | 2 | 543 |
 | ✅ Planning | 6 | 7 | 1827 |
 | ✅ Plugins | 8 | 5 | 4112 |
 | ✅ Prompts | 2 | 9 | 2043 |
@@ -81,7 +81,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Video | 2 | 10 | 1303 |
 | ✅ Vision | 2 | 1 | 329 |
 | ✅ Web | 3 | 10 | 2822 |
-| ✅ Workflows | 5 | 21 | 9036 |
+| ✅ Workflows | 5 | 21 | 9127 |
 
 ## Documentation Without Features
 
