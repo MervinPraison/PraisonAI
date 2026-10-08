@@ -88,6 +88,25 @@ class _WriteTrackingDict(dict):
             self.written_keys.add(key)
         return super().setdefault(key, default)
 
+def _isolate_scope(variables: dict) -> dict:
+    """Shallow-copy the variable scope, deep-copying only values that allow it.
+
+    A parallel branch/iteration needs its own container so concurrent writes are
+    not a data race, and mutable data (lists/dicts) is still deep-copied so a
+    sibling cannot observe another branch's in-place mutation. But a value that
+    cannot be deep-copied (thread lock, DB/HTTP/LLM client, open file, a live
+    Agent, generator, ...) would otherwise abort the whole run with a pickling
+    TypeError even when no branch touches it. Fall back to sharing such values by
+    reference (read-only intent) instead of crashing.
+    """
+    scope = {}
+    for k, v in variables.items():
+        try:
+            scope[k] = copy.deepcopy(v)
+        except Exception:
+            scope[k] = v
+    return scope
+
 class WorkflowStepError(Exception):
     """Exception raised when workflow step execution fails."""
     def __init__(self, message: str, cause: Exception = None, errors: List = None):
@@ -3476,7 +3495,7 @@ CONCISE SUMMARY:"""
                 # output_variable writes are not thrown away, and untouched keys are
                 # not merged as per-branch clones. Keys present at construction seed
                 # the scope and are not counted as writes.
-                branch_vars = _WriteTrackingDict(copy.deepcopy(all_variables))
+                branch_vars = _WriteTrackingDict(_isolate_scope(all_variables))
 
                 def execute_with_branch(step=step, idx=idx, opt_prev=optimized_previous, branch_vars=branch_vars):
                     emitter = get_context_emitter()
@@ -3679,7 +3698,7 @@ CONCISE SUMMARY:"""
                     # variables are seeded at construction time and are therefore
                     # deliberately not counted as writes.
                     control = self._loop_control_variables(loop_step, item, idx)
-                    seed = copy.deepcopy(all_variables)
+                    seed = _isolate_scope(all_variables)
                     seed.update(control)
                     loop_vars = _WriteTrackingDict(seed)
                     
