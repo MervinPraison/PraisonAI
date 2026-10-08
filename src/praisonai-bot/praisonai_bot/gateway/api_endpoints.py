@@ -138,9 +138,10 @@ class GatewayApiEndpoints:
             canonical = repr(body)
         return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
-    def _idem_scope_key(self, request: Any, key: str) -> str:
-        """Scope a client ``Idempotency-Key`` to the caller so keys never collide
-        across tenants/operators sharing one gateway.
+    def _idem_scope_key(self, request: Any, key: str, route: str) -> str:
+        """Scope a client ``Idempotency-Key`` to the caller *and route* so keys
+        never collide across tenants/operators or across endpoints sharing one
+        gateway.
 
         Stable identities (a session header or bearer token) scope the key to
         that tenant/operator. Anonymous callers (auth disabled, no session
@@ -148,36 +149,95 @@ class GatewayApiEndpoints:
         defeat replay; since they cannot re-identify anyway, the client's own
         ``Idempotency-Key`` is the only stable handle, so it scopes itself —
         matching the open posture the no-auth transport already grants ``/v1/*``.
+
+        The ``route`` component ensures a key reused across ``/v1/responses`` and
+        ``/v1/chat/completions`` (both accept a body carrying ``messages``/
+        ``input``) never replays the other route's response shape — a
+        ``chat.completion`` must never be returned for a ``response`` request and
+        vice-versa (Greptile P1).
         """
         caller = self._caller_key(request)
         if caller.startswith("anon:"):
-            return f"anon\x00{key}"
-        return f"{caller}\x00{key}"
+            caller = "anon"
+        return f"{route}\x00{caller}\x00{key}"
 
-    def _idem_lookup(self, request: Any, body: Any):
-        """Resolve a prior run for this caller's ``Idempotency-Key``.
+    def _idem_lookup(self, request: Any, body: Any, route: str):
+        """Resolve a prior run for this caller's ``Idempotency-Key`` on ``route``.
 
         Returns ``(key, verdict, entry)`` where ``verdict`` is:
           - ``None``  — no header; caller opted out (unchanged behaviour).
-          - ``"new"`` — first use of this key; caller should proceed then call
-            ``_idem_record``.
+          - ``"new"`` — first use of this key; caller reserved it and should
+            proceed, then call ``_idem_record`` (or ``_idem_release`` on error).
           - ``"reuse"`` — same key + equivalent body; ``entry`` is the stored
             run and its response must be returned unchanged.
           - ``"conflict"`` — same key, materially different body; a 409 is due.
+          - ``"inflight"`` — same key + equivalent body, but the first run has
+            not finished yet; ``entry`` carries the in-flight reservation whose
+            future the caller must await rather than starting a second run
+            (Greptile P1 — overlapping retries must not duplicate the run).
+
+        A ``"new"`` verdict *atomically reserves* the key (records an in-flight
+        placeholder) before returning, so a concurrent retry arriving while the
+        first run is still working sees ``"inflight"`` instead of ``"new"`` and
+        joins the original run.
         """
         raw = request.headers.get("idempotency-key") or request.headers.get(
             "Idempotency-Key"
         )
         if not raw:
             return None, None, None
-        scoped = self._idem_scope_key(request, raw)
+        scoped = self._idem_scope_key(request, raw, route)
         fp = self._fingerprint(body)
         existing = self._idem.get(scoped)
         if existing is None:
+            # Reserve the key before dispatch so overlapping retries join this
+            # run instead of starting their own.
+            self._idem_evict_if_full()
+            self._idem[scoped] = {
+                "fingerprint": fp,
+                "response_id": None,
+                "payload": None,
+                "status_code": None,
+                "pending": asyncio.get_running_loop().create_future(),
+            }
             return scoped, "new", None
         if existing.get("fingerprint") != fp:
             return scoped, "conflict", None
+        if existing.get("pending") is not None:
+            return scoped, "inflight", existing
         return scoped, "reuse", existing
+
+    def _idem_evict_if_full(self) -> None:
+        """Drop the oldest *settled* idempotency entry when the store is full.
+
+        An entry is settled once its reservation future has resolved (i.e. the
+        first run reached a terminal commit). In-flight reservations (a pending
+        future) are never evicted so an overlapping retry can always find the
+        run it must join; if every entry is still pending, nothing is evicted.
+        """
+        while len(self._idem) >= self._idem_max:
+            victim = None
+            for k, e in self._idem.items():
+                if e.get("pending") is None:
+                    victim = k
+                    break
+            if victim is None:
+                break
+            del self._idem[victim]
+
+    def _idem_release(self, key: Optional[str]) -> None:
+        """Abandon a reservation whose run failed before it could be recorded.
+
+        Drops the in-flight placeholder (resolving any waiters so they retry)
+        so a transient failure never wedges the key as permanently in-flight.
+        """
+        if not key:
+            return
+        entry = self._idem.pop(key, None)
+        if entry is not None:
+            pending = entry.get("pending")
+            if pending is not None and not pending.done():
+                pending.set_result(None)
 
     def _idem_record(
         self,
@@ -187,41 +247,58 @@ class GatewayApiEndpoints:
         payload: dict,
         status_code: int = 200,
     ) -> None:
-        """Commit the run produced for a first-use ``Idempotency-Key``.
+        """Commit the run produced for a reserved ``Idempotency-Key``.
 
         The stored ``payload`` is the exact response object so a retry replays
         the first response verbatim, and ``response_id`` lets retention check
-        the live run's terminal state. Bounded like ``_responses``: when full,
-        the oldest entry whose referenced run is terminal (or already evicted)
-        is dropped first so a long-running run is never evicted mid-flight; if
-        every entry is still live, nothing is evicted.
+        the live run's terminal state. Resolves the reservation future so any
+        retry that joined the in-flight run is released with the committed
+        result.
         """
         if not key:
             return
-        while len(self._idem) >= self._idem_max:
-            victim = None
-            for k, e in self._idem.items():
-                run = self._responses.get(e.get("response_id"))
-                status = run.get("status") if run else "completed"
-                if status in ("completed", "cancelled", "failed"):
-                    victim = k
-                    break
-            if victim is None:
-                break
-            del self._idem[victim]
-        self._idem[key] = {
-            "fingerprint": self._fingerprint(body),
-            "response_id": response_id,
-            "payload": payload,
-            "status_code": status_code,
-        }
+        entry = self._idem.get(key)
+        if entry is None:
+            # Reservation was dropped (e.g. evicted while in-flight): recreate.
+            entry = {}
+            self._idem[key] = entry
+        pending = entry.get("pending")
+        # Mutate the reserved entry in place so any waiter that captured it in
+        # ``_idem_await_inflight`` sees the committed payload after awaiting.
+        entry["fingerprint"] = self._fingerprint(body)
+        entry["response_id"] = response_id
+        entry["payload"] = payload
+        entry["status_code"] = status_code
+        entry["pending"] = None
+        if pending is not None and not pending.done():
+            pending.set_result(True)
+
+    async def _idem_await_inflight(self, entry: dict):
+        """Await a concurrent first run then replay its committed response.
+
+        Called when an overlapping retry resolves to ``"inflight"``: it waits on
+        the reservation future (resolved by ``_idem_record``/``_idem_release``)
+        then returns the same response the first request produced, so the second
+        POST never starts a duplicate run (Greptile P1).
+        """
+        pending = entry.get("pending")
+        if pending is not None:
+            try:
+                await pending
+            except Exception:  # noqa: BLE001 - never let a waiter hang on error
+                pass
+        return self._idem_reuse_response(entry)
 
     def _idem_reuse_response(self, entry: dict):
         """Return the stored first response for a reused ``Idempotency-Key``.
 
         A background/stored run is replayed from its *current* persisted state
         (so a completed run returns its result, not the original ``queued``);
-        a synchronous run replays its stored payload verbatim.
+        a synchronous run replays its stored payload verbatim. If the linked run
+        was evicted from ``_responses`` after completing, the committed payload
+        is the stored fallback — which for background runs is refreshed to the
+        terminal result at completion (never the stale ``queued`` snapshot,
+        Greptile P1).
         """
         from starlette.responses import JSONResponse
 
@@ -229,7 +306,7 @@ class GatewayApiEndpoints:
         if run is not None:
             return self._stored_response_json(run)
         return JSONResponse(
-            entry.get("payload") or {}, status_code=entry.get("status_code", 200)
+            entry.get("payload") or {}, status_code=entry.get("status_code") or 200
         )
 
     def _idem_conflict(self):
@@ -570,14 +647,24 @@ class GatewayApiEndpoints:
 
         # Client idempotency (Issue #5726): a retried/LB-duplicated POST with the
         # same ``Idempotency-Key`` returns the first completion instead of
-        # starting a second run; a reused key with a different body is a 409.
-        idem_key, verdict, idem_entry = self._idem_lookup(request, body)
+        # starting a second run; a reused key with a different body is a 409. An
+        # overlapping retry while the first run is still working joins that run
+        # rather than starting a second (Greptile P1).
+        idem_key, verdict, idem_entry = self._idem_lookup(
+            request, body, "chat.completions"
+        )
         if verdict == "reuse":
             return self._idem_reuse_response(idem_entry)
+        if verdict == "inflight":
+            return await self._idem_await_inflight(idem_entry)
         if verdict == "conflict":
             return self._idem_conflict()
 
-        reply, usage = await self._dispatch(session, agent, content)
+        try:
+            reply, usage = await self._dispatch(session, agent, content)
+        except BaseException:
+            self._idem_release(idem_key)
+            raise
         obj = {
             "id": completion_id,
             "object": "chat.completion",
@@ -713,11 +800,14 @@ class GatewayApiEndpoints:
 
         # Client idempotency (Issue #5726): a retried/LB-duplicated POST with
         # the same ``Idempotency-Key`` returns the first run instead of starting
-        # a second; a reused key with a different body is a 409. No header →
-        # unchanged behaviour.
-        idem_key, verdict, idem_entry = self._idem_lookup(request, body)
+        # a second; a reused key with a different body is a 409; an overlapping
+        # retry while the first run is still working joins that run (Greptile
+        # P1). No header → unchanged behaviour.
+        idem_key, verdict, idem_entry = self._idem_lookup(request, body, "responses")
         if verdict == "reuse":
             return self._idem_reuse_response(idem_entry)
+        if verdict == "inflight":
+            return await self._idem_await_inflight(idem_entry)
         if verdict == "conflict":
             return self._idem_conflict()
 
@@ -733,13 +823,21 @@ class GatewayApiEndpoints:
         # synchronous path below is unchanged and stays the default (Issue
         # #5335), so existing clients see no behaviour change.
         if body.get("background") or body.get("store"):
-            resp, response_id = self._start_background_response(
-                agent_id, agent, session, content, caller
-            )
+            try:
+                resp, response_id = self._start_background_response(
+                    agent_id, agent, session, content, caller, idem_key, body
+                )
+            except BaseException:
+                self._idem_release(idem_key)
+                raise
             self._idem_record(idem_key, body, response_id, _body_of(resp), 202)
             return resp
 
-        reply, usage = await self._dispatch(session, agent, content)
+        try:
+            reply, usage = await self._dispatch(session, agent, content)
+        except BaseException:
+            self._idem_release(idem_key)
+            raise
         obj = self._response_object(agent_id, "completed", reply, usage)
         self._idem_record(idem_key, body, obj.get("id", ""), obj, 200)
         return JSONResponse(obj)
@@ -812,7 +910,9 @@ class GatewayApiEndpoints:
             # Insertion order == submission order (dict preserves it): oldest first.
             del self._responses[terminal[0]]
 
-    def _start_background_response(self, agent_id, agent, session, content, caller):
+    def _start_background_response(
+        self, agent_id, agent, session, content, caller, idem_key=None, idem_body=None
+    ):
         """Spawn a background turn, persist a Response object, return ``queued``.
 
         The run is driven on the event loop as an ``asyncio.Task``; its
@@ -824,6 +924,13 @@ class GatewayApiEndpoints:
         The entry records the submitting ``caller`` so retrieval/cancel can be
         scoped to the owner, and a stable ``message_id`` so repeated retrievals
         of a completed run return the same output-message identity.
+
+        When an ``idem_key`` is supplied, the background turn refreshes that
+        key's committed idempotency payload to the *terminal* response once it
+        finishes. This guarantees that if the run is later evicted from
+        ``_responses`` (e.g. by a flood of unkeyed submissions), a retry of the
+        key still replays the final result instead of the stale ``queued``
+        snapshot that was recorded at submission time (Greptile P1).
 
         Returns ``(response, response_id)`` so the caller can record the minted
         id against a client ``Idempotency-Key`` (Issue #5726).
@@ -856,6 +963,28 @@ class GatewayApiEndpoints:
         }
         self._responses[response_id] = entry
 
+        def _refresh_idem() -> None:
+            # Once the background run reaches a terminal state, overwrite the
+            # idempotency key's committed fallback payload with the final
+            # response so a retry replays the real result even if the run is
+            # later evicted from ``_responses`` (Greptile P1).
+            if not idem_key:
+                return
+            stored = self._idem.get(idem_key)
+            if stored is None or stored.get("response_id") != response_id:
+                return
+            stored["payload"] = self._response_object(
+                entry["agent_id"],
+                entry["status"],
+                entry["reply"],
+                entry["usage"],
+                response_id=entry["id"],
+                created_at=entry["created_at"],
+                error=entry["error"],
+                message_id=entry.get("message_id"),
+            )
+            stored["status_code"] = 200
+
         async def _run() -> None:
             rejected: dict = {}
             try:
@@ -884,6 +1013,8 @@ class GatewayApiEndpoints:
             except Exception as exc:  # noqa: BLE001 - surface as failed status
                 entry["status"] = "failed"
                 entry["error"] = str(exc)
+            finally:
+                _refresh_idem()
 
         try:
             entry["task"] = asyncio.ensure_future(_run())

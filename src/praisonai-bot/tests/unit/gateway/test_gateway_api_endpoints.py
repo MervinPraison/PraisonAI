@@ -1280,3 +1280,102 @@ def test_chat_idempotency_key_conflict_on_different_body():
     )
     assert conflict.status_code == 409
     assert gw._agent.calls == 1
+
+
+def test_responses_idempotency_key_inflight_retry_joins_first_run():
+    # An overlapping retry arriving while the first run is still working must
+    # join that run (return its result) rather than starting a second (Greptile
+    # P1 — reserve the key before dispatch, not after).
+    release = asyncio.Event()
+
+    class _GatedAgent(_CountingAgent):
+        async def achat(self, content):
+            self.calls += 1
+            await release.wait()
+            return f"echo:{content}"
+
+    class _GatedGateway(_CountingGateway):
+        def __init__(self):
+            super().__init__()
+            self._agent = _GatedAgent()
+
+    gw = _GatedGateway()
+    ep = GatewayApiEndpoints(gw)
+    body = {"model": "assistant", "input": "ping"}
+    headers = {"idempotency-key": "ovl"}
+
+    async def _flow():
+        first = asyncio.ensure_future(
+            ep.openai_responses(_FakeReq(body, headers=headers))
+        )
+        # Let the first request reserve the key and begin dispatching.
+        await asyncio.sleep(0)
+        second = asyncio.ensure_future(
+            ep.openai_responses(_FakeReq(body, headers=headers))
+        )
+        await asyncio.sleep(0)
+        release.set()
+        return await first, await second
+
+    first, second = asyncio.run(_flow())
+    # Exactly one agent run despite two overlapping POSTs; both share the id.
+    assert gw._agent.calls == 1
+    assert _body(first)["id"] == _body(second)["id"]
+    assert _body(second)["output_text"] == "echo:ping"
+
+
+def test_idempotency_key_scoped_per_route():
+    # The same key + a body valid for both endpoints must not replay one route's
+    # response shape on the other (Greptile P1). /v1/responses must return a
+    # ``response``; /v1/chat/completions must return a ``chat.completion``.
+    gw = _CountingGateway()
+    ep = GatewayApiEndpoints(gw)
+    body = {
+        "model": "assistant",
+        "input": "ping",
+        "messages": [{"role": "user", "content": "ping"}],
+    }
+    headers = {"idempotency-key": "shared"}
+
+    resp = asyncio.run(ep.openai_responses(_FakeReq(body, headers=headers)))
+    chat = asyncio.run(ep.openai_chat(_FakeReq(body, headers=headers)))
+
+    # Distinct routes -> two independent runs, each its own shape.
+    assert gw._agent.calls == 2
+    assert _body(resp)["object"] == "response"
+    assert "output" in _body(resp)
+    assert _body(chat)["object"] == "chat.completion"
+    assert "choices" in _body(chat)
+
+
+def test_background_idempotency_key_survives_run_eviction():
+    # After a keyed background run completes, a flood of unkeyed background
+    # submissions can evict its entry from ``_responses``. A later retry of the
+    # key must still replay the terminal result, never the stale ``queued``
+    # snapshot recorded at submission time (Greptile P1).
+    gw = _CountingGateway()
+    ep = GatewayApiEndpoints(gw)
+    ep._responses_max = 4  # tiny cap so eviction is cheap to trigger
+    body = {"model": "assistant", "input": "ping", "background": True}
+    headers = {"idempotency-key": "bgx"}
+
+    async def _flow():
+        first = await ep.openai_responses(_FakeReq(body, headers=headers))
+        rid = _body(first)["id"]
+        await ep._responses[rid]["task"]
+        # Flood with unkeyed background runs to evict the keyed run.
+        for _ in range(ep._responses_max * 2):
+            r = await ep.openai_responses(
+                _FakeReq({"model": "assistant", "input": "x", "background": True})
+            )
+            t = ep._responses.get(_body(r)["id"], {}).get("task")
+            if t is not None:
+                await t
+        assert rid not in ep._responses  # keyed run was evicted
+        return await ep.openai_responses(_FakeReq(body, headers=headers))
+
+    second = asyncio.run(_flow())
+    # Only the original keyed run; the retry replays its completed result.
+    assert gw._agent.calls == ep._responses_max * 2 + 1
+    assert _body(second)["status"] == "completed"
+    assert _body(second)["output_text"] == "echo:ping"
