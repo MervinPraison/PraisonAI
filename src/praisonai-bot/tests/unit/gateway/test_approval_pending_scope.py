@@ -86,9 +86,12 @@ def test_denied_polling_does_not_exhaust_approval_budget(monkeypatch, tmp_path):
 def test_generated_report_requires_approval_scope(monkeypatch, tmp_path):
     from praisonaiagents import Agent
 
+    model = os.getenv("PRAISONAI_TEST_MODEL")
+    if not model:
+        pytest.skip("Set PRAISONAI_TEST_MODEL to select the live test provider")
     agent = Agent(
         name="report-planner", instructions="Write a short report for operator review.",
-        model={"model": os.getenv("PRAISONAI_TEST_MODEL", "gpt-4o-mini"), "max_tokens": 96},
+        model={"model": model, "max_tokens": 96},
         reflection=False, rules=False, output="silent",
     )
     report = agent.start("Write one sentence about a proposed deployment.")
