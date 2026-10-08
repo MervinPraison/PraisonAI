@@ -507,7 +507,8 @@ class HTTPStreamMCPClient:
             raise ImportError(
                 "The installed 'mcp' package does not provide the Streamable HTTP "
                 "client (mcp.client.streamable_http.streamablehttp_client). "
-                "Upgrade it with: pip install -U 'mcp'"
+                "This transport was removed in mcp 2.x; install a compatible "
+                "version with: pip install \"mcp<2\""
             )
 
         # Use the server URL exactly as provided. The official
@@ -573,7 +574,8 @@ class HTTPStreamMCPClient:
             raise ImportError(
                 "The installed 'mcp' package does not provide "
                 "mcp.client.streamable_http.streamablehttp_client. "
-                "Upgrade it with: pip install -U 'mcp'"
+                "This transport was removed in mcp 2.x; install a compatible "
+                "version with: pip install \"mcp<2\""
             )
 
         headers = self.options.get('headers') or None
