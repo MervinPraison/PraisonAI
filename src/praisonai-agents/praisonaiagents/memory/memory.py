@@ -382,8 +382,15 @@ class Memory(SearchMixin, MemoryCoreMixin):
         # per-user store paths derived in _get_adapter_config (explicit paths win).
         suffix = self._path_safe_suffix(self.cfg.get("user_id"))
 
-        self.short_db = self.cfg.get("short_db", os.path.join(project_data, f"short_term{suffix}.db"))
-        self.long_db = self.cfg.get("long_db", os.path.join(project_data, f"long_term{suffix}.db"))
+        # Honor the ``db_path`` single-file alias here too so the legacy direct
+        # connections (_get_stm_conn/_get_ltm_conn) point at the caller-supplied
+        # file, matching _get_adapter_config. Explicit short_db/long_db still win.
+        db_path = self.cfg.get("db_path")
+        default_short = db_path or os.path.join(project_data, f"short_term{suffix}.db")
+        default_long = db_path or os.path.join(project_data, f"long_term{suffix}.db")
+
+        self.short_db = self.cfg.get("short_db", default_short)
+        self.long_db = self.cfg.get("long_db", default_long)
         
         # Only create separate SQLite adapter if primary adapter is not SQLite
         if self.provider != "sqlite":

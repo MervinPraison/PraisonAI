@@ -320,6 +320,31 @@ class TestSqliteDbPathAlias(unittest.TestCase):
             self.assertEqual(adapter_cfg["short_db"], f"{tmpdir}/short.db")
             self.assertEqual(adapter_cfg["long_db"], f"{tmpdir}/long.db")
 
+    def test_db_path_maps_to_legacy_direct_connection_paths(self):
+        """``db_path`` must also drive the legacy direct-SQLite connection
+        attributes (``self.short_db``/``self.long_db``) used by
+        ``_get_stm_conn``/``_get_ltm_conn``. Otherwise a caller using the legacy
+        connection helpers would silently hit the default per-user file instead
+        of the shared ``db_path`` — the same bug this PR fixes, left half-done.
+        An explicit ``short_db``/``long_db`` still wins.
+        """
+        from praisonaiagents.memory import Memory
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            shared = f"{tmpdir}/mem.db"
+            mem = Memory(config={"provider": "sqlite", "db_path": shared})
+            self.assertEqual(mem.short_db, shared)
+            self.assertEqual(mem.long_db, shared)
+
+            explicit = Memory(config={
+                "provider": "sqlite",
+                "db_path": f"{tmpdir}/ignored.db",
+                "short_db": f"{tmpdir}/short.db",
+                "long_db": f"{tmpdir}/long.db",
+            })
+            self.assertEqual(explicit.short_db, f"{tmpdir}/short.db")
+            self.assertEqual(explicit.long_db, f"{tmpdir}/long.db")
+
     def test_db_path_persists_and_recalls_across_instances(self):
         """A turn stored through a shared ``db_path`` is recalled by a second
         Memory pointed at the same file — the end-to-end cross-instance path.
