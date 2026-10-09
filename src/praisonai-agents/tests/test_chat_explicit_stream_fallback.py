@@ -143,6 +143,63 @@ def test_unrelated_valueerror_is_not_swallowed():
     assert stub.calls == [True]
 
 
+def test_public_agent_chat_stream_true_returns_text_via_real_extraction():
+    """End-to-end public path: ``Agent.chat(stream=True)`` returns text.
+
+    The unit tests above drive ``_chat_completion`` with a mocked retry helper
+    that returns a bare string, so they never exercise ``chat()``'s real
+    ``response.choices[0].message.content`` extraction (greptile finding on
+    PR #5739). This test builds a real ``Agent`` and mocks only the lowest
+    dispatch seam (``_execute_unified_chat_completion``) so the whole public
+    return path runs: it raises the sync-adapter ``ValueError`` on the explicit
+    streaming attempt and returns a realistic completion object (with
+    ``choices[0].message.content``) on the non-streaming fallback. A broken
+    public return would surface here as ``None`` or the wrong text.
+    """
+    import os
+    import types
+
+    os.environ.setdefault("OPENAI_API_KEY", "sk-test-key-for-reproduction")
+
+    from praisonaiagents import Agent
+
+    agent = Agent(instructions="Reply with exactly the requested text")
+
+    completion = types.SimpleNamespace(
+        choices=[
+            types.SimpleNamespace(
+                message=types.SimpleNamespace(
+                    content="fallback text", tool_calls=None
+                ),
+                finish_reason="stop",
+            )
+        ],
+        usage=types.SimpleNamespace(prompt_tokens=1, completion_tokens=2),
+    )
+
+    seen_streams = []
+
+    def fake_execute(self, messages, temperature=None, tools=None, stream=None,
+                     *args, **kwargs):
+        seen_streams.append(stream)
+        if stream:
+            raise ValueError(
+                "Streaming is not supported in sync OpenAIAdapter. "
+                "Use achat_completion() for streaming support."
+            )
+        return completion
+
+    agent._execute_unified_chat_completion = types.MethodType(fake_execute, agent)
+
+    result = agent.chat("hi", stream=True)
+
+    assert result is not None
+    assert result == "fallback text"
+    # Explicit streaming attempt happened, then non-streaming fallback.
+    assert True in seen_streams
+    assert False in seen_streams
+
+
 if __name__ == "__main__":
     import sys
     sys.exit(pytest.main([__file__, "-v"]))
