@@ -270,6 +270,7 @@ runs:
         INPUT_DISALLOWED_TOOLS: ${{ inputs.disallowed_tools }}
         INPUT_TIMEOUT_MINUTES: ${{ inputs.timeout_minutes }}
         CLAUDE_CODE_SUBAGENT_MODEL: inherit
+        ANTHROPIC_DEFAULT_OPUS_MODEL: claude-opus-5-5
         ANTHROPIC_DEFAULT_SONNET_MODEL: claude-sonnet-4-6
       run: |
         echo "🚀 Running Claude Code with GitHub context..."
