@@ -29,13 +29,24 @@ from pydantic import BaseModel
 class DummyModel(BaseModel):
     pass
 
+# Sentinel returned by a mocked capability ranking, so tests assert the
+# zero-config default comes from ModelCatalogue.best_available().
+_RANKED_OPENAI = "gpt-ranked-test"
+
+
+def _patch_best_available():
+    return patch(
+        "praisonai_code.llm.catalogue.ModelCatalogue.best_available",
+        lambda self, provider: _RANKED_OPENAI if provider == "openai" else None,
+    )
+
 class TestAutoGeneratorDefaultModel:
     """Test suite for default model configuration."""
     
     def test_default_model_is_gpt4o_mini(self):
         """Zero-config OpenAI default is capability-ranked (not gpt-4o-mini)."""
         # Clear environment variables to test defaults
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {}, clear=True), _patch_best_available():
             # Set required API key
             os.environ['OPENAI_API_KEY'] = 'test-key'
             
@@ -44,9 +55,7 @@ class TestAutoGeneratorDefaultModel:
                 framework="praisonai"
             )
             
-            model = generator.config_list[0]['model']
-            assert model != 'gpt-4o-mini'
-            assert 'mini' not in model.lower()
+            assert generator.config_list[0]['model'] == _RANKED_OPENAI
     
     def test_model_from_environment_variable(self):
         """Test that MODEL_NAME environment variable is respected."""
@@ -258,16 +267,14 @@ class TestWorkflowAutoGenerator:
     
     def test_default_model_is_gpt4o_mini(self):
         """Zero-config OpenAI default is capability-ranked (not gpt-4o-mini)."""
-        with patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {}, clear=True), _patch_best_available():
             os.environ['OPENAI_API_KEY'] = 'test-key'
             
             generator = WorkflowAutoGenerator(
                 topic="Test workflow"
             )
             
-            model = generator.config_list[0]['model']
-            assert model != 'gpt-4o-mini'
-            assert 'mini' not in model.lower()
+            assert generator.config_list[0]['model'] == _RANKED_OPENAI
     
     def test_lazy_loading(self):
         """Test that OpenAI client uses lazy loading."""
