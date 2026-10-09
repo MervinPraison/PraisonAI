@@ -296,11 +296,12 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           CLAUDE_CODE_SUBAGENT_MODEL: inherit
+          ANTHROPIC_DEFAULT_OPUS_MODEL: claude-opus-5-5
           ANTHROPIC_DEFAULT_SONNET_MODEL: claude-sonnet-4-6
         with:
           claude_code_oauth_token: ${{ steps.oauth.outputs.token }}
           github_token: ${{ steps.app-token.outputs.token }}
-          model: claude-opus-4-8
+          model: claude-opus-5-5
           trigger_phrase: '@claude-merge-gate-internal'
           direct_prompt: |
             You are the MERGE GATE reviewer for PraisonAI PR #${{ matrix.pr_number }}.
@@ -319,12 +320,13 @@ jobs:
             1. Read AGENTS.md and the PR diff on the current branch.
             2. Read all PR comments and reviews (FINAL architecture reviewer / Lead Engineer must have run).
             3. Confirm SDK value gate: change strengthens the relevant SDK (Python: praisonaiagents/praisonai; TypeScript: src/praisonai-ts/) — no scope creep. The aim is a LIGHTWEIGHT AND POWERFUL package — BLOCK changes that add params/modules/exports duplicating existing Agent capabilities (instructions/backstory/tools/hooks/memory), or add knobs/fields with no live consumer, i.e. scope creep for the sake of it. FINAL architecture review must include the Phase 1 table with an explicit **SDK value** row.
-            4. Repo routing: BLOCK if agent-callable tools (→ PraisonAI-Tools), lifecycle plugins (→ PraisonAI-Plugins), or optional sandbox backends (→ PraisonAI-Plugins via `praisonai.sandbox`) were added to praisonaiagents/ instead of the external repo.
+            4. Repo routing: BLOCK if agent-callable tools (→ PraisonAI-Tools), lifecycle plugins (→ PraisonAI-Plugins), or optional sandbox backends (→ PraisonAI-Plugins via `praisonai.sandbox`) were added to praisonaiagents/ instead of the external repo. BLOCK if the PR adds a new `src/praisonai-agents/praisonaiagents/tools/*_tools.py` vendor module (unless `maintainer-accept-core-tools`); existing Tavily/Exa-style files in core are not precedent.
             5. Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.
             6. If agent.py adds >100 lines or new Agent __init__ params, respond MERGE_GATE_VERDICT: BLOCK (manual review required).
             7. BLOCK if labels security/breaking-change/needs-manual-review/release, sensitive paths (.github/workflows, auth, pyproject.toml), secrets in diff, PR >800 lines or >30 files, or SDK changes without tests. Label `merge-gate-ci-only` exempts CI-only changes under `.github/workflows/`, `.github/actions/`, or merge-gate scripts.
             8. Confirm no CHANGES_REQUESTED reviews and CI green on HEAD ${{ matrix.head_sha }}.
-            9. If ready to merge: MERGE_GATE_VERDICT: APPROVE. Otherwise: MERGE_GATE_VERDICT: BLOCK with reasons.
+            9. Author policy: MERGE_GATE_VERDICT: BLOCK if the PR author is a first-time contributor (`author_association: FIRST_TIME_CONTRIBUTOR`) or any human not on the auto-merge allowlist (app/praisonai-triage-agent, MervinPraison, github-actions[bot] CI-only). Fork PRs and external contributors always require maintainer manual merge — never APPROVE for gate auto-merge.
+            10. If ready to merge: MERGE_GATE_VERDICT: APPROVE. Otherwise: MERGE_GATE_VERDICT: BLOCK with reasons.
 
             Do not approve or merge via GitHub UI/API — only post the verdict comment.
           disallowed_tools: |

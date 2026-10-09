@@ -170,6 +170,18 @@ def resolve(
 # Array Resolution
 # =============================================================================
 
+def _match_preset_key(value: str, presets: Dict[str, Any]) -> Optional[str]:
+    """Canonical preset lookup for the array forms (``[preset]`` /
+    ``[preset, {overrides}]``), mirroring the string form in ``_resolve_string``
+    and the closed-set guard in ``validate_preset_string``: case-insensitive,
+    whitespace-tolerant, ``-``/``_`` interchangeable.
+    """
+    from .parse_utils import canonical_preset_key
+
+    key = canonical_preset_key(value)
+    return next((k for k in presets if canonical_preset_key(k) == key), None)
+
+
 def _resolve_array(
     value: Union[list, tuple],
     param_name: str,
@@ -232,10 +244,26 @@ def _resolve_array(
                 if scheme and scheme in url_schemes:
                     return _resolve_url(single_value, config_class, url_schemes)
             # Check if single item is a preset
-            if isinstance(single_value, str) and presets and single_value in presets:
-                return _apply_preset(single_value, presets, config_class)
+            matched = (
+                _match_preset_key(single_value, presets)
+                if isinstance(single_value, str) and presets
+                else None
+            )
+            if matched:
+                return _apply_preset(matched, presets, config_class)
             # Single non-preset string - try as URL or return as-is
             if isinstance(single_value, str):
+                # Mirror the string branch: an unsupported scheme must raise
+                # rather than fall through to config_class(). For memory= that
+                # default is the local file backend, so ["redis://..."] used to
+                # silently store to a file the caller never asked for.
+                scheme = detect_url_scheme(single_value)
+                if scheme and url_schemes and scheme not in url_schemes:
+                    valid_schemes = ", ".join(sorted(url_schemes.keys()))
+                    raise ValueError(
+                        f"Unsupported URL scheme '{scheme}' for {param_name}. "
+                        f"Supported: {valid_schemes}"
+                    )
                 if config_class:
                     return config_class()
                 return single_value
@@ -255,9 +283,10 @@ def _resolve_array(
         
         # First item should be a preset string
         if isinstance(first, str):
+            matched = _match_preset_key(first, presets) if presets else None
             # Get base config from preset
-            if presets and first in presets:
-                base_config = _apply_preset(first, presets, config_class)
+            if matched:
+                base_config = _apply_preset(matched, presets, config_class)
             elif presets:
                 # Invalid preset
                 raise make_preset_error(param_name, first, presets.keys())

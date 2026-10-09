@@ -46,6 +46,29 @@ def test_url_scheme_without_adapter_raises():
                 url_schemes=MEMORY_URL_SCHEMES, array_mode=ArrayMode.SINGLE_OR_LIST)
 
 
+def test_url_scheme_without_adapter_raises_in_array_form():
+    """memory=["redis://..."] must raise exactly like memory="redis://...".
+
+    The array branch used to reach its "single non-preset string" fallback and
+    return MemoryConfig(), i.e. the local file backend, so a caller asking for
+    redis silently got file storage instead.
+    """
+    with pytest.raises(ValueError, match="Unsupported URL scheme 'redis'"):
+        resolve(value=["redis://localhost:6379/0"], param_name="memory",
+                config_class=MemoryConfig, presets=MEMORY_PRESETS,
+                url_schemes=MEMORY_URL_SCHEMES, array_mode=ArrayMode.SINGLE_OR_LIST)
+
+
+def test_supported_url_scheme_in_array_form_still_resolves():
+    """The fix must not disturb array-form URLs that do have an adapter."""
+    result = resolve(value=["sqlite:///tmp/probe.db"], param_name="memory",
+                     config_class=MemoryConfig, presets=MEMORY_PRESETS,
+                     url_schemes=MEMORY_URL_SCHEMES,
+                     array_mode=ArrayMode.SINGLE_OR_LIST)
+    assert result.backend == "sqlite"
+    assert result.config == {"url": "sqlite:///tmp/probe.db"}
+
+
 def test_registered_custom_backend_is_honoured():
     """register_memory_adapter() is the supported escape hatch."""
     class MyRedisAdapter(InMemoryAdapter):

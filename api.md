@@ -947,8 +947,9 @@ export { DeepResearchAgent, Provider, createDeepResearchAgent } from "./agent/re
 export { RetryBackoffConfig, interruptibleSleep, jitteredBackoff } from "./agent/retry-utils";
 export type { JitteredBackoffOptions, RetryBackoffConfigOptions } from "./agent/retry-utils";
 export { RouterAgent, createRouter, routeConditions } from "./agent/router";
-export { AGENT_RUN_STATUSES, AgentRunOutcome, PROVIDER_BLOCK_REASONS, RunOutcome, TERMINAL_REASON_PRECEDENCE, TERMINATION_TO_RUN_STATUS, TerminationReason, classifyFinishReason, terminationToRunStatus, termination_to_run_status, validateDecisionString, validate_decision_string } from "./agent/run-outcome";
-export type { AgentRunOutcomeFailureOptions, AgentRunOutcomeInit, AgentRunOutcomeOptions, AgentRunStatus, RunOutcomeInit, TerminalReason } from "./agent/run-outcome";
+export { // Canonical terminal-outcome contract (praisonaiagents/run_outcome.py)
+  RunTerminal, AGENT_RUN_STATUSES, AgentRunOutcome, PROVIDER_BLOCK_REASONS, RunOutcome, TERMINAL_REASON_PRECEDENCE, TERMINATION_TO_RUN_STATUS, TerminationReason, classifyFinishReason, collapse, isSticky, is_sticky, mergeRunTerminal, merge_run_terminal, terminationToRunStatus, termination_to_run_status, validateDecisionString, validate_decision_string } from "./agent/run-outcome";
+export type { AgentRunOutcomeFailureOptions, AgentRunOutcomeInit, AgentRunOutcomeOptions, AgentRunStatus, RunOutcomeInit, RunTerminalInit, TerminalKind, TerminalReason, TerminalSource } from "./agent/run-outcome";
 export { reviewTaskOutput } from "./agent/task-review";
 export { // Agent loop
   createAgentLoop, // DevTools

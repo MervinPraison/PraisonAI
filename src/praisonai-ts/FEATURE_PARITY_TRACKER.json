@@ -1,18 +1,18 @@
 {
   "version": "1.7.6",
-  "lastUpdated": "2026-10-07",
+  "lastUpdated": "2026-10-08",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
     "pythonCoreFeatures": 433,
     "pythonWrapperFeatures": 20,
-    "typescriptFeatures": 2106,
-    "gapCount": 7,
+    "typescriptFeatures": 2115,
+    "gapCount": 3,
     "stubCount": 0,
     "priorityP0": 0,
     "priorityP1": 0,
     "priorityP2": 0,
-    "priorityP3": 7
+    "priorityP3": 3
   },
   "pythonCoreSDK": {
     "path": "src/praisonai-agents/praisonaiagents",
@@ -1356,6 +1356,7 @@
       "Run",
       "RunOutcome",
       "RunStatus",
+      "RunTerminal",
       "RuntimeRegistry",
       "RuntimeRegistryEntry",
       "RuntimeRegistryError",
@@ -1505,6 +1506,7 @@
       "codeMode",
       "coerceBool",
       "coerceChoice",
+      "collapse",
       "commandPrefix",
       "compactionStrategyToOptimizerStrategy",
       "composeMiddleware",
@@ -1917,11 +1919,13 @@
       "isRecoverableHealthReason",
       "isRuntimeAvailable",
       "isSlashCommand",
+      "isSticky",
       "isTelemetryEnabled",
       "isToolGuardrailDenial",
       "isUrl",
       "is_path_like",
       "is_policy_string",
+      "is_sticky",
       "jitteredBackoff",
       "lengthCriterion",
       "listAgentTools",
@@ -1955,6 +1959,8 @@
       "memory",
       "mergeConfig",
       "mergeRanges",
+      "mergeRunTerminal",
+      "merge_run_terminal",
       "modelRequestsAllowed",
       "noHarmfulContentCriterion",
       "noModelRequests",
@@ -2290,6 +2296,8 @@
         "RouterConfig",
         "RunOutcome",
         "RunOutcomeInit",
+        "RunTerminal",
+        "RunTerminalInit",
         "SimpleAgentConfig",
         "SimpleRouteConfig",
         "SimpleRouterConfig",
@@ -2300,7 +2308,9 @@
         "TaskCallback",
         "TaskGuardrail",
         "TaskOnError",
+        "TerminalKind",
         "TerminalReason",
+        "TerminalSource",
         "TerminationReason",
         "VideoAgent",
         "VideoAgentConfig",
@@ -2312,6 +2322,7 @@
         "VisionResult",
         "WebSearchCall",
         "classifyFinishReason",
+        "collapse",
         "createAudioAgent",
         "createCodeAgent",
         "createContextAgent",
@@ -2332,8 +2343,12 @@
         "handoffToolName",
         "handoff_filters",
         "interruptibleSleep",
+        "isSticky",
+        "is_sticky",
         "jitteredBackoff",
         "listAgentTools",
+        "mergeRunTerminal",
+        "merge_run_terminal",
         "parallelHandoffs",
         "parallel_handoffs",
         "parseHeartbeatSchedule",
@@ -6953,10 +6968,10 @@
       {
         "feature": "RunTerminal",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "high",
-        "status": "TODO",
+        "status": "DONE",
         "category": "other"
       },
       {
@@ -7369,10 +7384,10 @@
       {
         "feature": "collapse",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "other"
       },
       {
@@ -7714,10 +7729,10 @@
       {
         "feature": "is_sticky",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "other"
       },
       {
@@ -7768,10 +7783,10 @@
       {
         "feature": "merge_run_terminal",
         "python": true,
-        "typescript": false,
+        "typescript": true,
         "priority": "P3",
         "effort": "low",
-        "status": "TODO",
+        "status": "DONE",
         "category": "other"
       },
       {

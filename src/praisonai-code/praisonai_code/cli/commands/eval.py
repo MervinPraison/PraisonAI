@@ -4,9 +4,131 @@ Eval command group for PraisonAI CLI.
 Provides evaluation commands.
 """
 
+import json
+
 import typer
 
 app = typer.Typer(help="Evaluation and testing")
+
+
+def _load_trace_spans(trace_path):
+    """Load trace events from a JSON or JSONL trace artifact.
+
+    Returns a list of event dicts. Raises ValueError on malformed content.
+    """
+    text = trace_path.read_text(encoding="utf-8").strip()
+    if not text:
+        return []
+    # JSON array form
+    if text[0] == "[":
+        data = json.loads(text)
+        if not isinstance(data, list):
+            raise ValueError("trace JSON must be a list of events")
+        return data
+    # JSONL form (one event per line)
+    events = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        events.append(json.loads(line))
+    return events
+
+
+def _spans_to_harness_trace(events):
+    """Map trace events to the HarnessEvaluator trace shape.
+
+    Counts one tool call per ``tool_start`` event (the start of each
+    invocation) so repeated calls to the same tool are preserved and
+    start/end pairs are not double-counted. Falls back to ``tool_end``
+    only when a trace emits ends without starts.
+    """
+    starts = [
+        {"name": ev["tool_name"]}
+        for ev in events
+        if isinstance(ev, dict)
+        and ev.get("event_type") == "tool_start"
+        and ev.get("tool_name")
+    ]
+    if starts:
+        return {"tool_calls": starts}
+    ends = [
+        {"name": ev["tool_name"]}
+        for ev in events
+        if isinstance(ev, dict)
+        and ev.get("event_type") == "tool_end"
+        and ev.get("tool_name")
+    ]
+    return {"tool_calls": ends}
+
+
+@app.command("last-trace")
+def eval_last_trace(
+    min_tool_calls: int = typer.Option(
+        1,
+        "--min-tool-calls",
+        help="Minimum number of tool calls required to pass (default 1; 0 disables the gate)",
+    ),
+    json_out: bool = typer.Option(False, "--json", help="Emit result as JSON to stdout"),
+):
+    """Evaluate the last completed traced run.
+
+    Loads the pointer written by a traced run and grades it with the existing
+    harness evaluator. Exits 0 on pass, 1 on fail, 2 when no completed traced
+    run is found.
+
+    Examples:
+        praisonai eval last-trace
+        praisonai eval last-trace --min-tool-calls 1 --json
+    """
+    try:
+        from praisonaiagents.trace import load_last_run_pointer
+        from praisonaiagents.eval import HarnessEvaluator
+    except ImportError:
+        typer.echo("Error: praisonaiagents package required. Install with: pip install praisonaiagents")
+        raise typer.Exit(1)
+
+    from pathlib import Path
+
+    pointer = load_last_run_pointer()
+    if pointer is None:
+        typer.echo(
+            "Error: No completed traced run found. "
+            "Re-run with a trace sink (e.g. output='actions' / trace config) first."
+        )
+        raise typer.Exit(2)
+
+    trace_path = Path(pointer["path"])
+    if not trace_path.exists():
+        typer.echo(f"Error: Trace file no longer exists: {trace_path}")
+        raise typer.Exit(2)
+
+    try:
+        events = _load_trace_spans(trace_path)
+    except (OSError, ValueError) as exc:
+        typer.echo(f"Error: Malformed trace file: {exc}")
+        raise typer.Exit(1)
+
+    harness_trace = _spans_to_harness_trace(events)
+    evaluator = HarnessEvaluator(
+        trace=harness_trace,
+        min_tool_calls=min_tool_calls,
+        name="last-trace",
+    )
+    result = evaluator.run(print_summary=not json_out)
+
+    if json_out:
+        typer.echo(
+            json.dumps(
+                {
+                    "passed": result.passed,
+                    "score": result.score,
+                    "tool_call_count": result.tool_call_count,
+                }
+            )
+        )
+
+    raise typer.Exit(0 if result.passed else 1)
 
 
 @app.command("accuracy")
