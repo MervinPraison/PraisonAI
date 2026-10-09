@@ -265,9 +265,8 @@ def gateway_start(
         except ValueError:
             port = 8765
 
-    # --pure / --no-plugins / --safe-mode: the gateway is one long-lived
-    # process, so set PRAISONAI_NO_PLUGINS for its lifetime. The core
-    # PluginManager and the gateway's inbound-hook loader both honour it (#5747).
+    # Set before the --verify-turn pre-flight below so its agent turn also
+    # skips plugins; handler.start persists it for ``restart`` (#5747).
     if pure:
         os.environ["PRAISONAI_NO_PLUGINS"] = "1"
 
@@ -434,6 +433,7 @@ def gateway_start(
             if isinstance(trusted_proxy, (list, tuple))
             else None
         ),
+        safe_mode=True if pure else None,
     )
     raise typer.Exit(code if isinstance(code, int) else 0)
 

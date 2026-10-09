@@ -49,6 +49,7 @@ def test_cli_flag_sets_env(monkeypatch):
             import os
 
             seen["env"] = os.environ.get("PRAISONAI_NO_PLUGINS")
+            seen["safe_mode"] = kwargs.get("safe_mode")
             return 0
 
     monkeypatch.setattr(
@@ -59,3 +60,12 @@ def test_cli_flag_sets_env(monkeypatch):
     )
     assert result.exit_code == 0, result.output
     assert seen["env"] == "1"
+    assert seen["safe_mode"] is True
+
+
+def test_safe_mode_persisted_for_restart(monkeypatch, tmp_path):
+    from praisonai_bot.cli.features import gateway as feat
+
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+    feat._persist_start_flags("127.0.0.1", 8765, {"safe_mode": True})
+    assert feat.load_start_flags("127.0.0.1", 8765) == {"safe_mode": True}
