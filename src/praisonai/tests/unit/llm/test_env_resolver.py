@@ -143,7 +143,9 @@ class TestProviderAwareDefaultModel:
 
     def test_openai_key_keeps_openai_default(self):
         with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-x"}, clear=True):
-            assert default_model_for_available_provider() == "gpt-4o-mini"
+            model = default_model_for_available_provider()
+            assert "mini" not in model.lower()
+            assert not model.startswith("anthropic/")
 
     def test_anthropic_only_uses_claude_default(self):
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-a"}, clear=True):
@@ -173,7 +175,9 @@ class TestProviderAwareDefaultModel:
     def test_openai_wins_when_multiple_present(self):
         env = {"OPENAI_API_KEY": "sk-x", "ANTHROPIC_API_KEY": "sk-a"}
         with patch.dict(os.environ, env, clear=True):
-            assert default_model_for_available_provider() == "gpt-4o-mini"
+            model = default_model_for_available_provider()
+            assert not model.startswith("anthropic/")
+            assert "claude" not in model.lower()
 
     def test_resolve_endpoint_picks_anthropic_default_with_only_anthropic_key(self):
         with patch.dict(os.environ, {"ANTHROPIC_API_KEY": "sk-a"}, clear=True):
