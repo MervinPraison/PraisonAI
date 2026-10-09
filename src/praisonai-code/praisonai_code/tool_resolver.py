@@ -226,6 +226,32 @@ def _coerce_source(obj: Any) -> "ToolSource":
     )
 
 
+def _yaml_role_configs(yaml_config: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Agent configs from the legacy ``roles`` or canonical ``agents`` shape."""
+    roles = yaml_config.get('roles') or yaml_config.get('agents') or {}
+    return [cfg for cfg in roles.values() if isinstance(cfg, dict)]
+
+
+def _yaml_tool_names(yaml_config: Dict[str, Any]) -> set:
+    """Every tool name referenced in a parsed YAML config.
+
+    Single owner of which keys carry tool names (``roles[*].tools`` and
+    ``roles[*].tasks[*].tools``) so building and validating cannot drift (#5753).
+    """
+    names: set = set()
+    for role_cfg in _yaml_role_configs(yaml_config):
+        tasks = role_cfg.get('tasks') or {}
+        # Handle both dict and list formats for tasks
+        task_list = tasks.values() if isinstance(tasks, dict) else tasks if isinstance(tasks, list) else []
+        sources = [role_cfg] + [t for t in task_list if isinstance(t, dict)]
+        for cfg in sources:
+            tools = cfg.get('tools') or []
+            if not isinstance(tools, list):
+                continue
+            names.update(t.strip() for t in tools if isinstance(t, str) and t.strip())
+    return names
+
+
 class ToolResolver:
     """Resolves tool names to callables from multiple sources.
     
@@ -817,26 +843,9 @@ class ToolResolver:
         Returns:
             List of tool/toolset names that could not be resolved (empty if all valid)
         """
-        missing = []
-        
-        roles = yaml_config.get('roles', {})
-        # Also support 'agents' key for canonical format
-        if not roles:
-            roles = yaml_config.get('agents', {})
-        
-        for role_name, role_config in roles.items():
-            if not isinstance(role_config, dict):
-                continue
-            
-            # Validate tools
-            tools = role_config.get('tools', [])
-            if isinstance(tools, list):
-                for tool_name in tools:
-                    if not tool_name or not isinstance(tool_name, str):
-                        continue
-                    if not self.has_tool(tool_name.strip()):
-                        missing.append(tool_name)
-            
+        missing = [name for name in _yaml_tool_names(yaml_config) if not self.has_tool(name)]
+
+        for role_config in _yaml_role_configs(yaml_config):
             # Validate toolsets
             toolsets = role_config.get('toolsets', [])
             if toolsets:
@@ -1068,33 +1077,7 @@ class ToolResolver:
         tools/ contents. Returns a {name: callable} dict ready for the adapter.
         """
         tools_dict: Dict[str, Callable] = {}
-        needed: set[str] = set()
-        # Accept both the legacy ``roles`` shape and the canonical ``agents``
-        # shape (mirrors validate_yaml_tools) so tools resolve consistently.
-        role_configs = yaml_config.get('roles') or yaml_config.get('agents') or {}
-        for role_cfg in role_configs.values():
-            if not isinstance(role_cfg, dict):
-                continue
-            for t in role_cfg.get('tools') or []:
-                if isinstance(t, str) and t.strip():
-                    needed.add(t.strip())
-            tasks = role_cfg.get('tasks') or {}
-            # Handle both dict and list formats for tasks
-            if isinstance(tasks, dict):
-                task_list = tasks.values()
-            elif isinstance(tasks, list):
-                task_list = tasks
-            else:
-                task_list = []
-            
-            for task_cfg in task_list:
-                if not isinstance(task_cfg, dict):
-                    continue
-                for t in task_cfg.get('tools') or []:
-                    if isinstance(t, str) and t.strip():
-                        needed.add(t.strip())
-
-        for name in needed:
+        for name in _yaml_tool_names(yaml_config):
             resolved = self.resolve(name)
             if resolved is None:
                 logger.warning("Tool %r not found", name)

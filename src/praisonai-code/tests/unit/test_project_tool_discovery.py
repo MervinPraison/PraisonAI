@@ -465,3 +465,33 @@ class TestResolveAllFromYamlDiscovery:
             lambda: tmp_path,
         )
         assert self._resolver().resolve_all_from_yaml({}) == {}
+
+
+class TestYamlToolKeysShared:
+    """Building and validating walk the same tool-bearing YAML keys (#5753)."""
+
+    CONFIG = {
+        "agents": {
+            "researcher": {
+                "tools": ["agent_tool"],
+                "tasks": {"t1": {"tools": [" task_tool "]}},
+            }
+        }
+    }
+
+    def test_validate_reports_task_level_tools(self, monkeypatch):
+        from praisonai_code.tool_resolver import ToolResolver
+
+        resolver = ToolResolver()
+        monkeypatch.setattr(resolver, "has_tool", lambda name: name == "agent_tool")
+        assert resolver.validate_yaml_tools(self.CONFIG) == ["task_tool"]
+
+    def test_build_resolves_agent_and_task_tools(self, tmp_path, monkeypatch):
+        from praisonai_code.tool_resolver import ToolResolver
+
+        monkeypatch.chdir(tmp_path)
+        resolver = ToolResolver()
+        requested = []
+        monkeypatch.setattr(resolver, "resolve", lambda name: requested.append(name))
+        resolver.resolve_all_from_yaml(self.CONFIG)
+        assert sorted(requested) == ["agent_tool", "task_tool"]
