@@ -134,6 +134,18 @@ class TestLLMEndpointDataclass:
         assert hasattr(ep, "api_key")
 
 
+@pytest.fixture
+def _no_ranking():
+    """Disable capability ranking so the fixed per-provider representative is
+    asserted, independent of the installed litellm catalogue (see #5749)."""
+    with patch(
+        "praisonai_code.llm.catalogue.ModelCatalogue.best_available",
+        return_value=None,
+    ):
+        yield
+
+
+@pytest.mark.usefixtures("_no_ranking")
 class TestProviderAwareDefaultModel:
     """Tests for default_model_for_available_provider() and its use as fallback."""
 
