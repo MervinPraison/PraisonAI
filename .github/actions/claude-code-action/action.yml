@@ -66,7 +66,31 @@ runs:
   steps:
     - name: Install Claude Code
       shell: bash
-      run: npm install -g @anthropic-ai/claude-code
+      run: |
+        set -euo pipefail
+        # Opus 5.5+ requires Claude Code >= 2.1.280 (bundled @beta action ships 1.0.x).
+        npm install -g @anthropic-ai/claude-code@latest
+        INSTALLED=$(claude --version 2>&1 | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+        export INSTALLED
+        echo "Claude Code version: ${INSTALLED}"
+        node -e "
+          const installed = process.env.INSTALLED;
+          const min = '2.1.280';
+          const parts = (v) => v.split('.').map(Number);
+          const gte = (a, b) => {
+            const A = parts(a); const B = parts(b);
+            for (let i = 0; i < 3; i++) {
+              if (A[i] > B[i]) return true;
+              if (A[i] < B[i]) return false;
+            }
+            return true;
+          };
+          if (!installed || !gte(installed, min)) {
+            console.error('Claude Code ' + installed + ' is below minimum ' + min);
+            process.exit(1);
+          }
+          console.log('Claude Code ' + installed + ' OK (>= ' + min + ')');
+        "
 
     - name: Install GitHub MCP Server
       shell: bash
