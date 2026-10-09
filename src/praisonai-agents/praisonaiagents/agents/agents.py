@@ -1060,6 +1060,18 @@ class AgentTeam(SpawnAnnounceProtocol):
                     "Please install with: pip install \"praisonaiagents[memory]\""
                 )
 
+        # Validate the tasks container before anything iterates it.
+        if isinstance(tasks, str):
+            raise TypeError(
+                "AgentTeam.tasks must be a list of Task instances, not str. "
+                "Wrap the description in Task(description=...) or pass tasks=None "
+                "to auto-generate tasks from agents."
+            )
+        if tasks is not None and not isinstance(tasks, (list, tuple)):
+            raise TypeError(
+                f"AgentTeam.tasks must be a list of Task instances, not {type(tasks).__name__}"
+            )
+
         if not agents:
             # Handler-only tasks (task.handler with no agent) don't need an agent,
             # mirroring the Workflow engine. Allow a team built solely from them.
@@ -1181,8 +1193,25 @@ class AgentTeam(SpawnAnnounceProtocol):
                 tasks.append(task)
             logger.info(f"Auto-generated {len(tasks)} tasks from agents")
         else:
+            if isinstance(tasks, (str, bytes)):
+                raise TypeError(
+                    "tasks must be a sequence of Task instances, not "
+                    f"{type(tasks).__name__}. Pass tasks=None to auto-generate from "
+                    "agents, or tasks=[Task(...)]."
+                )
+            try:
+                tasks = list(tasks)
+            except TypeError:
+                raise TypeError(
+                    f"tasks must be a sequence of Task instances, got {type(tasks).__name__}"
+                )
             if not tasks:
                 raise ValueError("If tasks are provided, at least one task must be present")
+            for i, item in enumerate(tasks):
+                if not isinstance(item, Task):
+                    raise TypeError(
+                        f"tasks[{i}] must be a Task instance, got {type(item).__name__}"
+                    )
             logger.info(f"Using {len(tasks)} provided tasks")
         
         # Add tasks and set their status

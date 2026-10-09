@@ -174,6 +174,51 @@ class ChatMixin:
         return scope
 
     @staticmethod
+    def _memory_prefetch_search_queries(query: str) -> List[str]:
+        """Build LIKE-friendly search terms from a natural-language user turn.
+
+        SQLite and other substring backends match the full query string. A recall
+        question such as "What is my project codename?" does not LIKE-match a
+        stored turn that only mentions "ORANGE-PANDA", so we fall back to
+        significant tokens when the verbatim query returns nothing (#5667).
+        """
+        q = (query or "").strip()
+        if not q:
+            return []
+
+        seen: set[str] = set()
+        ordered: List[str] = []
+
+        def _add(term: str) -> None:
+            term = term.strip()
+            if not term:
+                return
+            key = term.casefold()
+            if key not in seen:
+                seen.add(key)
+                ordered.append(term)
+
+        _add(q)
+        stop = frozenset(
+            {
+                "what", "is", "my", "the", "a", "an", "your", "please", "tell",
+                "me", "how", "do", "does", "can", "you", "with", "for", "this",
+                "that", "are", "was", "were", "should", "would", "could", "have",
+                "has", "had", "will", "about", "from", "when", "where", "who",
+                "why", "which", "reply", "only", "exactly", "once", "say",
+            }
+        )
+        words = re.findall(r"[A-Za-z][A-Za-z0-9_-]*", q)
+        significant = [w for w in words if w.casefold() not in stop and len(w) >= 3]
+        if significant:
+            _add(" ".join(significant))
+        for word in significant:
+            if len(word) >= 5 or "-" in word or word[:1].isupper():
+                _add(word)
+        # Cap search calls so a long pasted prompt cannot trigger many scans.
+        return ordered[:5]
+
+    @staticmethod
     def _memory_prefetch_query(prompt: Any) -> str:
         """Return the user-authored text used for turn-start memory lookup."""
         if isinstance(prompt, str):
@@ -270,12 +315,17 @@ class ChatMixin:
             if not limit or not budget:
                 return ""
             scope = self._memory_prefetch_scope()
-            if hasattr(memory, "search_long_term"):
-                results = memory.search_long_term(query, limit=limit, **scope)
-            elif hasattr(memory, "search"):
-                results = memory.search(query, limit=limit, **scope)
-            else:
-                return ""
+            results: List[Any] = []
+            for term in self._memory_prefetch_search_queries(query):
+                if hasattr(memory, "search_long_term"):
+                    batch = memory.search_long_term(term, limit=limit, **scope)
+                elif hasattr(memory, "search"):
+                    batch = memory.search(term, limit=limit, **scope)
+                else:
+                    return ""
+                if batch:
+                    results = list(batch)
+                    break
             return self._format_memory_prefetch(results, limit, budget)
         except Exception as exc:
             logging.debug("Memory prefetch failed; continuing without recalled context: %s", exc)
@@ -298,9 +348,14 @@ class ChatMixin:
             budget = max(0, int(getattr(config, "prefetch_token_budget", 512)))
             if not limit or not budget:
                 return ""
-            results = await self.asearch_memory(
-                query, memory_type="long_term", limit=limit
-            )
+            results: List[Any] = []
+            for term in self._memory_prefetch_search_queries(query):
+                batch = await self.asearch_memory(
+                    term, memory_type="long_term", limit=limit
+                )
+                if batch:
+                    results = list(batch)
+                    break
             return self._format_memory_prefetch(results, limit, budget)
         except Exception as exc:
             logging.debug("Async memory prefetch failed; continuing without recalled context: %s", exc)
@@ -753,6 +808,34 @@ Your Goal: {self.goal}"""
         
         return None
 
+    def _raise_if_stream_replay_unsafe(self, error: BaseException, tools) -> None:
+        """Re-raise ``error`` if falling back to non-streaming could re-run a tool."""
+        if not (tools or getattr(self, "tools", None)):
+            return
+        from ..llm.error_classifier import is_replay_unsafe_chain
+        if is_replay_unsafe_chain(error):
+            raise error
+
+    def _structured_output_from_message(self, message, schema_model, response_text: str, original_text=None):
+        """Resolve a Pydantic ``output_pydantic`` from an LLM message or JSON text.
+
+        When ``original_text`` is given, ``message.parsed`` is only trusted if the
+        guardrail left the response unchanged; otherwise the guardrail-approved
+        text wins.
+        """
+        if schema_model is None:
+            return response_text
+        parsed = getattr(message, "parsed", None) if message is not None else None
+        if parsed is not None and (original_text is None or response_text == original_text):
+            if isinstance(parsed, schema_model):
+                return parsed
+            if hasattr(schema_model, "model_validate"):
+                try:
+                    return schema_model.model_validate(parsed)
+                except Exception:
+                    pass
+        return self._coerce_structured_output(response_text, schema_model)
+
     def _coerce_structured_output(self, response_text, schema_model):
         """Parse a string response into the requested Pydantic model.
 
@@ -766,21 +849,43 @@ Your Goal: {self.goal}"""
         """
         if not schema_model or not isinstance(response_text, str):
             return response_text
-        if not hasattr(schema_model, 'model_validate_json'):
+        if not hasattr(schema_model, "model_validate_json"):
             return response_text
 
         candidate = response_text.strip()
-        try:
-            return schema_model.model_validate_json(candidate)
-        except Exception:
-            pass
+
+        def _try_validate(payload: str):
+            try:
+                return schema_model.model_validate_json(payload)
+            except Exception:
+                pass
+            if hasattr(schema_model, "model_validate"):
+                try:
+                    return schema_model.model_validate(json.loads(payload))
+                except Exception:
+                    pass
+            return None
+
+        validated = _try_validate(candidate)
+        if validated is not None:
+            return validated
 
         # Strip a surrounding markdown code fence (```json ... ```) if present
         fenced = re.search(r"```(?:json)?\s*(.*?)\s*```", candidate, re.DOTALL)
         if fenced:
+            validated = _try_validate(fenced.group(1).strip())
+            if validated is not None:
+                return validated
+
+        # Last resort: first complete JSON object embedded in prose
+        start = candidate.find("{")
+        if start != -1:
             try:
-                return schema_model.model_validate_json(fenced.group(1).strip())
-            except Exception:
+                obj, _ = json.JSONDecoder().raw_decode(candidate, start)
+                validated = _try_validate(json.dumps(obj))
+                if validated is not None:
+                    return validated
+            except ValueError:
                 pass
 
         logging.warning(
@@ -1976,8 +2081,10 @@ Your Goal: {self.goal}"""
 
         # Smart fallback for streaming: try streaming first, fall back to non-streaming if unsupported
         streaming_response = None
-        if stream is None:
-            # Auto-detect: prefer streaming for better UX, fallback if adapter doesn't support it
+        if stream is None or stream is True:
+            # Auto-detect (stream=None) and explicit stream=True both attempt streaming
+            # first; sync adapters raise "Streaming is not supported", which must not
+            # surface as chat(stream=True) -> None (#5737).
             try:
                 # First attempt: try with streaming enabled for better user experience
                 stream_callback = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
@@ -2012,6 +2119,8 @@ Your Goal: {self.goal}"""
                 # Don't retry if it's an LLMError that has exhausted retries
                 if isinstance(e, LLMError):
                     raise  # Re-raise LLMErrors immediately to avoid double retry
+                # Never replay a tool turn after a post-dispatch failure (#3860)
+                self._raise_if_stream_replay_unsafe(e, formatted_tools)
                 # For any other exception, fall back to non-streaming
                 logging.debug(f"{self.name}: Streaming attempt failed, falling back to non-streaming")
                 stream = False  # Set for the main execution below
@@ -2025,20 +2134,44 @@ Your Goal: {self.goal}"""
             if streaming_response is not None:
                 final_response = streaming_response
             else:
-                final_response = self._chat_completion_with_retry(
-                    cancel_token=cancel_token,
-                    messages=messages,
-                    temperature=temperature,
-                    tools=formatted_tools,
-                    stream=stream,
-                    reasoning_steps=reasoning_steps,
-                    task_name=task_name,
-                    task_description=task_description,
-                    task_id=task_id,
-                    response_format=response_format,
-                    stream_callback=stream_callback,
-                    emit_events=True,
-                )
+                try:
+                    final_response = self._chat_completion_with_retry(
+                        cancel_token=cancel_token,
+                        messages=messages,
+                        temperature=temperature,
+                        tools=formatted_tools,
+                        stream=stream,
+                        reasoning_steps=reasoning_steps,
+                        task_name=task_name,
+                        task_description=task_description,
+                        task_id=task_id,
+                        response_format=response_format,
+                        stream_callback=stream_callback,
+                        emit_events=True,
+                    )
+                except ValueError as e:
+                    # Explicit stream=True against a sync adapter that cannot
+                    # stream must not bubble up as None (see issue #5737). Fall
+                    # back to non-streaming so chat() still returns text, the
+                    # same way the stream=None auto-detect path above does.
+                    if stream and "Streaming is not supported" in str(e):
+                        logging.debug(f"{self.name}: Streaming not supported by adapter, falling back to non-streaming")
+                        final_response = self._chat_completion_with_retry(
+                            cancel_token=cancel_token,
+                            messages=messages,
+                            temperature=temperature,
+                            tools=formatted_tools,
+                            stream=False,
+                            reasoning_steps=reasoning_steps,
+                            task_name=task_name,
+                            task_description=task_description,
+                            task_id=task_id,
+                            response_format=response_format,
+                            stream_callback=stream_callback,
+                            emit_events=True,
+                        )
+                    else:
+                        raise
 
             # Emit LLM response trace event with token usage
             _duration_ms = (time.time() - start_time) * 1000
@@ -2514,8 +2647,9 @@ Your Goal: {self.goal}"""
             self._unified_dispatcher = dispatcher
         
         # Smart fallback for streaming: try streaming first, fall back to non-streaming if unsupported
-        if stream is None:
-            # Auto-detect: prefer streaming for better UX, fallback if adapter doesn't support it
+        if stream is None or stream is True:
+            # Auto-detect (stream=None) and explicit stream=True both attempt streaming
+            # first; sync adapters raise "Streaming is not supported", which must fall back.
             try:
                 # First attempt: try with streaming enabled for better user experience
                 if stream_callback is None and hasattr(self, 'stream_emitter'):
@@ -2556,7 +2690,9 @@ Your Goal: {self.goal}"""
                     stream = False  # Set for the main execution below
                 else:
                     raise  # Re-raise if it's a different ValueError
-            except Exception:
+            except Exception as e:
+                # Never replay a tool turn after a post-dispatch failure (#3860)
+                self._raise_if_stream_replay_unsafe(e, tools)
                 # For any other exception, fall back to non-streaming
                 logging.debug(f"Agent: Streaming attempt failed, falling back to non-streaming")
                 stream = False  # Set for the main execution below
@@ -3627,7 +3763,9 @@ Your Goal: {self.goal}"""
                         # must stay a string for backward-compatible downstream
                         # JSON parsing (task parsing, workflow results).
                         if output_pydantic:
-                            validated_response = self._coerce_structured_output(validated_response, output_pydantic)
+                            validated_response = self._coerce_structured_output(
+                                validated_response, output_pydantic
+                            )
                         # Execute callback and display after validation
                         self._execute_callback_and_display(prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                         return self._trigger_after_agent_hook(prompt, validated_response, start_time)
@@ -3750,8 +3888,18 @@ Your Goal: {self.goal}"""
                             return None
 
                         # Handle None content (can happen with tool calls or empty responses)
-                        content = response.choices[0].message.content
+                        message = response.choices[0].message
+                        content = message.content
                         response_text = content.strip() if content else ""
+                        if output_pydantic and not response_text:
+                            parsed_only = getattr(message, "parsed", None)
+                            if parsed_only is not None:
+                                if hasattr(parsed_only, "model_dump_json"):
+                                    response_text = parsed_only.model_dump_json()
+                                elif isinstance(parsed_only, (dict, list)):
+                                    response_text = json.dumps(parsed_only)
+                                else:
+                                    response_text = str(parsed_only)
 
                         # Handle output_json or output_pydantic if specified
                         if output_json or output_pydantic:
@@ -3767,7 +3915,9 @@ Your Goal: {self.goal}"""
                                 # get a validated instance, not a raw JSON string.
                                 # output_json intentionally stays a string (backward compat).
                                 if output_pydantic:
-                                    validated_response = self._coerce_structured_output(validated_response, output_pydantic)
+                                    validated_response = self._structured_output_from_message(
+                                        message, output_pydantic, validated_response, response_text
+                                    )
                                 # Execute callback after validation
                                 self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                 return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
