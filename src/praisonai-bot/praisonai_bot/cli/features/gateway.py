@@ -109,7 +109,7 @@ _START_FLAG_KEYS = (
     "agent_file", "config_file", "drain_timeout", "max_concurrent_runs",
     "queue_depth", "overflow_policy", "reliability", "openai_api", "mcp",
     "identity_store", "scale_to_zero", "idle_minutes", "drain_marker",
-    "watchdog", "watchdog_timeout", "trusted_proxies",
+    "watchdog", "watchdog_timeout", "trusted_proxies", "safe_mode",
 )
 
 
@@ -314,6 +314,7 @@ class GatewayHandler:
         watchdog: Optional[bool] = None,
         watchdog_timeout: Optional[float] = None,
         trusted_proxies: Optional[list] = None,
+        safe_mode: Optional[bool] = None,
     ) -> int:
         """Start the gateway server.
 
@@ -351,6 +352,9 @@ class GatewayHandler:
                 link-map JSON (#3020). Enables one continuous session + memory
                 per paired/linked user across channels. Overrides the
                 ``identity:`` block in the YAML; ``None`` falls back to it.
+            safe_mode: Skip external plugins and inbound YAML hooks (#5747)
+                by setting ``PRAISONAI_NO_PLUGINS`` for this process. Persisted
+                so a direct ``restart`` stays in safe mode.
         """
         # Ensure INFO-level logs surface to bot-stdout.log / bot-stderr.log
         # when running under launchd / systemd. Many key lifecycle events
@@ -370,6 +374,13 @@ class GatewayHandler:
         # Load ~/.praisonai/.env BEFORE any config parsing or ${VAR}
         # substitution — daemons don't inherit shell env.
         _load_praisonai_env_file()
+
+        # --pure / --no-plugins / --safe-mode: the gateway is one long-lived
+        # process, so set PRAISONAI_NO_PLUGINS for its lifetime. The core
+        # PluginManager and the gateway's inbound-hook loader both honour it.
+        # Set here too so a replayed ``restart`` stays in safe mode (#5747).
+        if safe_mode:
+            os.environ["PRAISONAI_NO_PLUGINS"] = "1"
 
         # Snapshot the CLI-only runtime flags this process was launched with so a
         # later direct ``gateway restart`` can replay the exact posture (durable
@@ -396,6 +407,7 @@ class GatewayHandler:
             "watchdog": watchdog,
             "watchdog_timeout": watchdog_timeout,
             "trusted_proxies": trusted_proxies,
+            "safe_mode": safe_mode,
         }
 
         def _commit_start_flags() -> None:

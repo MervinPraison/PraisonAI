@@ -34,10 +34,12 @@ def _source(name):
 
 
 def test_stream_path_now_filters_arguments():
-    """Both stream dispatch points guard before calling the tool."""
+    """Every stream dispatch point guards before calling the tool."""
     src = _source("get_response_stream")
-    assert src.count("_validate_and_filter_ollama_arguments") == 2, (
-        "expected the filter at both the streaming and fallback dispatch points"
+    dispatch_points = src.count("_extract_tool_call_info(")
+    assert dispatch_points >= 2, "expected the streaming and fallback dispatch points"
+    assert src.count("_validate_and_filter_ollama_arguments") == dispatch_points, (
+        "expected the filter at every stream dispatch point"
     )
 
 

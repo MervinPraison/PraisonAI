@@ -228,6 +228,12 @@ def gateway_start(
         "reverse proxy this keeps per-IP rate-limits and the operator id keyed "
         "on the real client; unattributable proxies fail closed (#5312)",
     ),
+    pure: bool = typer.Option(
+        False, "--pure", "--no-plugins", "--safe-mode",
+        help="Safe mode for incident triage: skip external plugins and inbound "
+        "YAML hooks so only the core agent + channels serve (equivalent to "
+        "PRAISONAI_NO_PLUGINS=1); config is not modified (#5747)",
+    ),
 ):
     """Start the gateway server.
 
@@ -246,6 +252,7 @@ def gateway_start(
         praisonai gateway start --config gateway.yaml --openai-api --mcp
         praisonai gateway start --config gateway.yaml --reliability production
         praisonai gateway start --config gateway.yaml --max-concurrent-runs 8 --queue-depth 32
+        praisonai gateway start --config gateway.yaml --safe-mode
         GATEWAY_PORT=9000 praisonai gateway start
     """
     import os
@@ -257,6 +264,11 @@ def gateway_start(
             port = int(os.environ.get("GATEWAY_PORT", "8765"))
         except ValueError:
             port = 8765
+
+    # Set before the --verify-turn pre-flight below so its agent turn also
+    # skips plugins; handler.start persists it for ``restart`` (#5747).
+    if pure:
+        os.environ["PRAISONAI_NO_PLUGINS"] = "1"
 
     # Resolve one canonical gateway config shared with onboard/doctor (#3880).
     # Without this, no --config silently started WebSocket-only with NO channels
@@ -421,6 +433,7 @@ def gateway_start(
             if isinstance(trusted_proxy, (list, tuple))
             else None
         ),
+        safe_mode=True if pure else None,
     )
     raise typer.Exit(code if isinstance(code, int) else 0)
 

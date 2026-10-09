@@ -1193,8 +1193,25 @@ class AgentTeam(SpawnAnnounceProtocol):
                 tasks.append(task)
             logger.info(f"Auto-generated {len(tasks)} tasks from agents")
         else:
+            if isinstance(tasks, (str, bytes)):
+                raise TypeError(
+                    "tasks must be a sequence of Task instances, not "
+                    f"{type(tasks).__name__}. Pass tasks=None to auto-generate from "
+                    "agents, or tasks=[Task(...)]."
+                )
+            try:
+                tasks = list(tasks)
+            except TypeError:
+                raise TypeError(
+                    f"tasks must be a sequence of Task instances, got {type(tasks).__name__}"
+                )
             if not tasks:
                 raise ValueError("If tasks are provided, at least one task must be present")
+            for i, item in enumerate(tasks):
+                if not isinstance(item, Task):
+                    raise TypeError(
+                        f"tasks[{i}] must be a Task instance, got {type(item).__name__}"
+                    )
             logger.info(f"Using {len(tasks)} provided tasks")
         
         # Add tasks and set their status
