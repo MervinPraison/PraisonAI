@@ -63,6 +63,16 @@ def test_rank_models_excludes_non_chat_mode():
     assert cat.best_available("openai") == "gpt-5"
 
 
+def test_best_available_none_when_only_non_chat_mode():
+    # A provider exposing only Responses-only models must yield ``None`` so the
+    # caller uses its fixed fallback rather than an uncallable model.
+    cat = _catalogue_with([
+        ModelInfo(id="gpt-5-pro", provider="openai", max_context=400000,
+                  supports_tools=True, mode="responses"),
+    ])
+    assert cat.best_available("openai") is None
+
+
 def test_rank_models_prefers_stable_over_dated_snapshot():
     cat = _catalogue_with([
         ModelInfo(id="gpt-5-2025-08-07", provider="openai", max_context=272000,

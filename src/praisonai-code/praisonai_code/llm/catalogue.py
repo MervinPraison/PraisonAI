@@ -390,11 +390,8 @@ def _is_chat_model(model: "ModelInfo") -> bool:
 
     Keeps embeddings/rerankers/speech/image/moderation models out of the
     zero-config chat-default ranking so selection never lands on a model the
-    runtime cannot actually chat with. Models litellm tags with a non-chat
-    ``mode`` (e.g. Responses-API-only ``gpt-5-pro``) are excluded too.
+    runtime cannot actually chat with.
     """
-    if model.mode and model.mode != "chat":
-        return False
     mid = (model.id or "").lower()
     return not any(marker in mid for marker in _NON_CHAT_MARKERS)
 
@@ -637,6 +634,10 @@ class ModelCatalogue:
             if "gemini" in wanted or "google" in wanted:
                 wanted |= {"gemini", "google"}
             models = [m for m in models if (m.provider or "").lower() in wanted]
+        # A litellm non-chat ``mode`` is authoritative: never fall back to such
+        # models, so ``best_available`` returns ``None`` and callers use their
+        # fixed fallback instead of an uncallable (e.g. Responses-only) model.
+        models = [m for m in models if not m.mode or m.mode == "chat"]
         chat_models = [m for m in models if _is_chat_model(m)]
         if chat_models:
             models = chat_models
