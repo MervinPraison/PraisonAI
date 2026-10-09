@@ -2025,20 +2025,44 @@ Your Goal: {self.goal}"""
             if streaming_response is not None:
                 final_response = streaming_response
             else:
-                final_response = self._chat_completion_with_retry(
-                    cancel_token=cancel_token,
-                    messages=messages,
-                    temperature=temperature,
-                    tools=formatted_tools,
-                    stream=stream,
-                    reasoning_steps=reasoning_steps,
-                    task_name=task_name,
-                    task_description=task_description,
-                    task_id=task_id,
-                    response_format=response_format,
-                    stream_callback=stream_callback,
-                    emit_events=True,
-                )
+                try:
+                    final_response = self._chat_completion_with_retry(
+                        cancel_token=cancel_token,
+                        messages=messages,
+                        temperature=temperature,
+                        tools=formatted_tools,
+                        stream=stream,
+                        reasoning_steps=reasoning_steps,
+                        task_name=task_name,
+                        task_description=task_description,
+                        task_id=task_id,
+                        response_format=response_format,
+                        stream_callback=stream_callback,
+                        emit_events=True,
+                    )
+                except ValueError as e:
+                    # Explicit stream=True against a sync adapter that cannot
+                    # stream must not bubble up as None (see issue #5737). Fall
+                    # back to non-streaming so chat() still returns text, the
+                    # same way the stream=None auto-detect path above does.
+                    if stream and "Streaming is not supported" in str(e):
+                        logging.debug(f"{self.name}: Streaming not supported by adapter, falling back to non-streaming")
+                        final_response = self._chat_completion_with_retry(
+                            cancel_token=cancel_token,
+                            messages=messages,
+                            temperature=temperature,
+                            tools=formatted_tools,
+                            stream=False,
+                            reasoning_steps=reasoning_steps,
+                            task_name=task_name,
+                            task_description=task_description,
+                            task_id=task_id,
+                            response_format=response_format,
+                            stream_callback=stream_callback,
+                            emit_events=True,
+                        )
+                    else:
+                        raise
 
             # Emit LLM response trace event with token usage
             _duration_ms = (time.time() - start_time) * 1000
