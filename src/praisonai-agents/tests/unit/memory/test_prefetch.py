@@ -96,6 +96,26 @@ def test_prefetch_injects_deduplicated_system_context_before_user_message():
     }
 
 
+def test_prefetch_falls_back_to_significant_tokens_when_verbatim_misses():
+    agent = _agent(MemoryConfig(prefetch=True, user_id="user-8"))
+    backend = MagicMock()
+    backend.search_long_term.side_effect = [
+        [],
+        [{"text": "User: codename ORANGE-PANDA\nAssistant: ORANGE-PANDA"}],
+    ]
+    agent._memory_instance = backend
+
+    recalled = agent._prefetch_memory("What is my project codename?")
+
+    assert "ORANGE-PANDA" in recalled
+    assert backend.search_long_term.call_count == 2
+    backend.search_long_term.assert_any_call(
+        "What is my project codename?",
+        limit=5,
+        user_id="user-8",
+    )
+
+
 def test_prefetch_extracts_default_file_memory_search_shape():
     agent = _agent(MemoryConfig(prefetch=True))
     backend = MagicMock()

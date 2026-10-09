@@ -45,6 +45,26 @@ def test_markdown_fenced_json_returns_model():
     assert out.city == "Paris"
 
 
+def test_embedded_json_object_in_prose_returns_model():
+    prose = 'Here is the answer:\n{"city": "Paris", "country": "France"}\nThanks.'
+    out = _mixin()._coerce_structured_output(prose, Pair)
+    assert isinstance(out, Pair)
+    assert out.city == "Paris"
+
+
+def test_structured_output_from_message_parsed():
+    class Answer(BaseModel):
+        value: int
+
+    message = SimpleNamespace(
+        parsed=Answer(value=42),
+        content=None,
+    )
+    out = _mixin()._structured_output_from_message(message, Answer, "")
+    assert isinstance(out, Answer)
+    assert out.value == 42
+
+
 def test_prose_falls_back_to_raw_string():
     out = _mixin()._coerce_structured_output(
         "The capital of France is Paris.", Pair
