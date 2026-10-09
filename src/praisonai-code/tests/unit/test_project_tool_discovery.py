@@ -479,9 +479,10 @@ class TestYamlToolKeysShared:
         }
     }
 
-    def test_validate_reports_task_level_tools(self, monkeypatch):
+    def test_validate_reports_task_level_tools(self, tmp_path, monkeypatch):
         from praisonai_code.tool_resolver import ToolResolver
 
+        monkeypatch.chdir(tmp_path)
         resolver = ToolResolver()
         monkeypatch.setattr(resolver, "has_tool", lambda name: name == "agent_tool")
         assert resolver.validate_yaml_tools(self.CONFIG) == ["task_tool"]
@@ -495,3 +496,15 @@ class TestYamlToolKeysShared:
         monkeypatch.setattr(resolver, "resolve", lambda name: requested.append(name))
         resolver.resolve_all_from_yaml(self.CONFIG)
         assert sorted(requested) == ["agent_tool", "task_tool"]
+
+    def test_validate_accepts_task_only_local_tool(self, tmp_path, monkeypatch):
+        """A task tool the build supplies from local sources is not 'missing'."""
+        from praisonai_code.tool_resolver import ToolResolver
+
+        monkeypatch.chdir(tmp_path)
+        resolver = ToolResolver()
+        monkeypatch.setattr(resolver, "has_tool", lambda name: name == "agent_tool")
+        monkeypatch.setattr(
+            resolver, "_discover_praisonai_dir_tools", lambda: {"task_tool": len}
+        )
+        assert resolver.validate_yaml_tools(self.CONFIG) == []

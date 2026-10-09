@@ -844,6 +844,12 @@ class ToolResolver:
             List of tool/toolset names that could not be resolved (empty if all valid)
         """
         missing = [name for name in _yaml_tool_names(yaml_config) if not self.has_tool(name)]
+        if missing:
+            # Accept the same local sources the build merges in, so a tool that
+            # only lives in tools.py / tools/ / .praisonai/tools/ is not
+            # falsely reported missing. Only scanned when something is unresolved.
+            local_names = set().union(*self._yaml_local_tool_sources())
+            missing = [name for name in missing if name not in local_names]
 
         for role_config in _yaml_role_configs(yaml_config):
             # Validate toolsets
@@ -1084,16 +1090,10 @@ class ToolResolver:
                 continue
             tools_dict[name] = resolved() if inspect.isclass(resolved) else resolved
 
-        # Restore original mutual exclusion: tools.py OR tools/ directory, not both.
-        # Honor this resolver's bound tools.py path so explicit/custom locations
-        # are respected instead of always assuming CWD.
-        tools_py_path = Path(self._tools_py_path)
-        tools_dir = tools_py_path.parent / 'tools'
-
         # Local class-based tools (path B semantics) are layered on top of the
         # chain result. Surface any name collision so a silent override of a
         # chain-resolved tool by a same-named local class is debuggable.
-        def _merge_local(local_tools: Dict[str, Any]) -> None:
+        for local_tools in self._yaml_local_tool_sources():
             for name in local_tools:
                 if name in tools_dict:
                     logger.warning(
@@ -1101,16 +1101,28 @@ class ToolResolver:
                         "the resolution chain", name,
                     )
             tools_dict.update(local_tools)
+        return tools_dict
+
+    def _yaml_local_tool_sources(self) -> List[Dict[str, Any]]:
+        """Local tool dicts merged into YAML builds, in precedence order.
+
+        Shared by :meth:`resolve_all_from_yaml` and :meth:`validate_yaml_tools`
+        so validation accepts exactly the local tools the build supplies.
+        """
+        # Restore original mutual exclusion: tools.py OR tools/ directory, not both.
+        # Honor this resolver's bound tools.py path so explicit/custom locations
+        # are respected instead of always assuming CWD.
+        tools_py_path = Path(self._tools_py_path)
+        tools_dir = tools_py_path.parent / 'tools'
+        sources: List[Dict[str, Any]] = []
 
         # Mutual exclusion: prefer tools.py when it exists, otherwise tools/.
         if tools_py_path.is_file():
-            local_tools = self.get_local_tool_classes()
-            if local_tools:
-                _merge_local(local_tools)
+            sources.append(self.get_local_tool_classes())
             logger.debug("%s exists. Loading tools.py and skipping tools folder.", tools_py_path)
         # Otherwise load from tools/ directory if it exists
         elif tools_dir.is_dir():
-            _merge_local(self.get_local_tool_classes_from_dir(tools_dir))
+            sources.append(self.get_local_tool_classes_from_dir(tools_dir))
             logger.debug("tools folder exists in the root directory")
 
         # Additively merge project-local .praisonai/tools/*.py @tool functions,
@@ -1119,8 +1131,8 @@ class ToolResolver:
         # tools.py / tools/ paths above rather than replacing them, so a
         # @tool-decorated function dropped into .praisonai/tools/ is available
         # to YAML-defined agents by its tool name.
-        _merge_local(self._discover_praisonai_dir_tools())
-        return tools_dict
+        sources.append(self._discover_praisonai_dir_tools())
+        return sources
 
     def _discover_praisonai_dir_tools(self) -> Dict[str, Any]:
         """Discover @tool functions from the ``.praisonai/tools/`` convention.
