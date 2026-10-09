@@ -134,3 +134,21 @@ def test_after_agent_hook_receives_string_for_pydantic(monkeypatch):
     assert isinstance(payload.response, str)
     # to_dict() performs the [:500] slice that would otherwise raise on a model
     assert isinstance(payload.to_dict()["response"], str)
+
+
+def test_embedded_json_uses_first_complete_object():
+    out = _mixin()._coerce_structured_output(
+        'Answer: {"city": "Paris", "country": "France"}. Metadata: {"ok": true}', Pair
+    )
+    assert isinstance(out, Pair)
+    assert out.city == "Paris"
+
+
+def test_parsed_ignored_when_guardrail_changed_response():
+    # message.parsed must not override a guardrail-approved replacement answer.
+    message = SimpleNamespace(parsed=Pair(city="Paris", country="France"))
+    approved = '{"city": "Lyon", "country": "France"}'
+    out = _mixin()._structured_output_from_message(message, Pair, approved, "original")
+    assert out.city == "Lyon"
+    same = _mixin()._structured_output_from_message(message, Pair, "x", "x")
+    assert same.city == "Paris"

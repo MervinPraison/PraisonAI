@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from praisonaiagents import Agent, MemoryConfig
+from praisonaiagents.agent.chat_mixin import ChatMixin
 from praisonaiagents.context.tokens import estimate_tokens_heuristic
 
 
@@ -114,6 +115,22 @@ def test_prefetch_falls_back_to_significant_tokens_when_verbatim_misses():
         limit=5,
         user_id="user-8",
     )
+
+
+def test_prefetch_caps_fallback_search_calls():
+    terms = ChatMixin._memory_prefetch_search_queries(" ".join(f"Word{i}xx" for i in range(50)))
+    assert len(terms) <= 5
+
+
+@pytest.mark.asyncio
+async def test_async_prefetch_falls_back_to_significant_tokens():
+    agent = _agent(MemoryConfig(prefetch=True, user_id="user-8"))
+    agent.asearch_memory = AsyncMock(side_effect=[[], [{"text": "ORANGE-PANDA"}]])
+
+    recalled = await agent._aprefetch_memory("What is my project codename?")
+
+    assert "ORANGE-PANDA" in recalled
+    assert agent.asearch_memory.await_count == 2
 
 
 def test_prefetch_extracts_default_file_memory_search_shape():

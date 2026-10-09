@@ -23,3 +23,8 @@ def test_agentteam_auto_tasks_none():
     writer = Agent(name="W", role="W", goal="g", instructions="i")
     team = AgentTeam(agents=[writer], tasks=None)
     assert len(team.tasks) >= 1
+
+
+def test_agentteam_rejects_non_list_tasks_without_agents():
+    with pytest.raises(TypeError, match="AgentTeam.tasks"):
+        AgentTeam(agents=[], tasks=42)

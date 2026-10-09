@@ -215,7 +215,8 @@ class ChatMixin:
         for word in significant:
             if len(word) >= 5 or "-" in word or word[:1].isupper():
                 _add(word)
-        return ordered
+        # Cap search calls so a long pasted prompt cannot trigger many scans.
+        return ordered[:5]
 
     @staticmethod
     def _memory_prefetch_query(prompt: Any) -> str:
@@ -347,9 +348,14 @@ class ChatMixin:
             budget = max(0, int(getattr(config, "prefetch_token_budget", 512)))
             if not limit or not budget:
                 return ""
-            results = await self.asearch_memory(
-                query, memory_type="long_term", limit=limit
-            )
+            results: List[Any] = []
+            for term in self._memory_prefetch_search_queries(query):
+                batch = await self.asearch_memory(
+                    term, memory_type="long_term", limit=limit
+                )
+                if batch:
+                    results = list(batch)
+                    break
             return self._format_memory_prefetch(results, limit, budget)
         except Exception as exc:
             logging.debug("Async memory prefetch failed; continuing without recalled context: %s", exc)
@@ -802,12 +808,25 @@ Your Goal: {self.goal}"""
         
         return None
 
-    def _structured_output_from_message(self, message, schema_model, response_text: str):
-        """Resolve a Pydantic ``output_pydantic`` from an LLM message or JSON text."""
+    def _raise_if_stream_replay_unsafe(self, error: BaseException, tools) -> None:
+        """Re-raise ``error`` if falling back to non-streaming could re-run a tool."""
+        if not (tools or getattr(self, "tools", None)):
+            return
+        from ..llm.error_classifier import is_replay_unsafe_chain
+        if is_replay_unsafe_chain(error):
+            raise error
+
+    def _structured_output_from_message(self, message, schema_model, response_text: str, original_text=None):
+        """Resolve a Pydantic ``output_pydantic`` from an LLM message or JSON text.
+
+        When ``original_text`` is given, ``message.parsed`` is only trusted if the
+        guardrail left the response unchanged; otherwise the guardrail-approved
+        text wins.
+        """
         if schema_model is None:
             return response_text
         parsed = getattr(message, "parsed", None) if message is not None else None
-        if parsed is not None:
+        if parsed is not None and (original_text is None or response_text == original_text):
             if isinstance(parsed, schema_model):
                 return parsed
             if hasattr(schema_model, "model_validate"):
@@ -842,8 +861,6 @@ Your Goal: {self.goal}"""
                 pass
             if hasattr(schema_model, "model_validate"):
                 try:
-                    import json
-
                     return schema_model.model_validate(json.loads(payload))
                 except Exception:
                     pass
@@ -860,12 +877,16 @@ Your Goal: {self.goal}"""
             if validated is not None:
                 return validated
 
-        # Last resort: first JSON object embedded in prose
-        embedded = re.search(r"\{[\s\S]*\}", candidate)
-        if embedded:
-            validated = _try_validate(embedded.group(0).strip())
-            if validated is not None:
-                return validated
+        # Last resort: first complete JSON object embedded in prose
+        start = candidate.find("{")
+        if start != -1:
+            try:
+                obj, _ = json.JSONDecoder().raw_decode(candidate, start)
+                validated = _try_validate(json.dumps(obj))
+                if validated is not None:
+                    return validated
+            except ValueError:
+                pass
 
         logging.warning(
             f"Agent {self.name}: output_pydantic={getattr(schema_model, '__name__', schema_model)} "
@@ -2098,6 +2119,8 @@ Your Goal: {self.goal}"""
                 # Don't retry if it's an LLMError that has exhausted retries
                 if isinstance(e, LLMError):
                     raise  # Re-raise LLMErrors immediately to avoid double retry
+                # Never replay a tool turn after a post-dispatch failure (#3860)
+                self._raise_if_stream_replay_unsafe(e, formatted_tools)
                 # For any other exception, fall back to non-streaming
                 logging.debug(f"{self.name}: Streaming attempt failed, falling back to non-streaming")
                 stream = False  # Set for the main execution below
@@ -2643,7 +2666,9 @@ Your Goal: {self.goal}"""
                     stream = False  # Set for the main execution below
                 else:
                     raise  # Re-raise if it's a different ValueError
-            except Exception:
+            except Exception as e:
+                # Never replay a tool turn after a post-dispatch failure (#3860)
+                self._raise_if_stream_replay_unsafe(e, tools)
                 # For any other exception, fall back to non-streaming
                 logging.debug(f"Agent: Streaming attempt failed, falling back to non-streaming")
                 stream = False  # Set for the main execution below
@@ -3845,11 +3870,12 @@ Your Goal: {self.goal}"""
                         if output_pydantic and not response_text:
                             parsed_only = getattr(message, "parsed", None)
                             if parsed_only is not None:
-                                response_text = (
-                                    parsed_only.model_dump_json()
-                                    if hasattr(parsed_only, "model_dump_json")
-                                    else str(parsed_only)
-                                )
+                                if hasattr(parsed_only, "model_dump_json"):
+                                    response_text = parsed_only.model_dump_json()
+                                elif isinstance(parsed_only, (dict, list)):
+                                    response_text = json.dumps(parsed_only)
+                                else:
+                                    response_text = str(parsed_only)
 
                         # Handle output_json or output_pydantic if specified
                         if output_json or output_pydantic:
@@ -3866,7 +3892,7 @@ Your Goal: {self.goal}"""
                                 # output_json intentionally stays a string (backward compat).
                                 if output_pydantic:
                                     validated_response = self._structured_output_from_message(
-                                        message, output_pydantic, validated_response
+                                        message, output_pydantic, validated_response, response_text
                                     )
                                 # Execute callback after validation
                                 self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
