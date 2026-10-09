@@ -5818,6 +5818,18 @@ class WebSocketGateway:
             self._hook_idem = None  # rebuild lazily under the new backend
 
         self._hooks.clear()
+        if entries and os.environ.get(
+            "PRAISONAI_NO_PLUGINS", ""
+        ).strip().lower() in ("true", "1", "yes"):
+            # Safe mode (--pure / --no-plugins / --safe-mode; #5747): serve the
+            # core agent + channels only so a fault can be attributed to the
+            # gateway core vs. an extension in one restart.
+            logger.warning(
+                "SAFE MODE: %d inbound hook(s) disabled; external plugins "
+                "skipped (PRAISONAI_NO_PLUGINS)",
+                len(entries),
+            )
+            return
         if entries:
             self._register_hooks_from_config(entries)
 
