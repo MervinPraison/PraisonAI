@@ -1060,6 +1060,18 @@ class AgentTeam(SpawnAnnounceProtocol):
                     "Please install with: pip install \"praisonaiagents[memory]\""
                 )
 
+        # Validate the tasks container before anything iterates it.
+        if isinstance(tasks, str):
+            raise TypeError(
+                "AgentTeam.tasks must be a list of Task instances, not str. "
+                "Wrap the description in Task(description=...) or pass tasks=None "
+                "to auto-generate tasks from agents."
+            )
+        if tasks is not None and not isinstance(tasks, (list, tuple)):
+            raise TypeError(
+                f"AgentTeam.tasks must be a list of Task instances, not {type(tasks).__name__}"
+            )
+
         if not agents:
             # Handler-only tasks (task.handler with no agent) don't need an agent,
             # mirroring the Workflow engine. Allow a team built solely from them.

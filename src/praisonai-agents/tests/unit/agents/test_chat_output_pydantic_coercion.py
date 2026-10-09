@@ -45,6 +45,26 @@ def test_markdown_fenced_json_returns_model():
     assert out.city == "Paris"
 
 
+def test_embedded_json_object_in_prose_returns_model():
+    prose = 'Here is the answer:\n{"city": "Paris", "country": "France"}\nThanks.'
+    out = _mixin()._coerce_structured_output(prose, Pair)
+    assert isinstance(out, Pair)
+    assert out.city == "Paris"
+
+
+def test_structured_output_from_message_parsed():
+    class Answer(BaseModel):
+        value: int
+
+    message = SimpleNamespace(
+        parsed=Answer(value=42),
+        content=None,
+    )
+    out = _mixin()._structured_output_from_message(message, Answer, "")
+    assert isinstance(out, Answer)
+    assert out.value == 42
+
+
 def test_prose_falls_back_to_raw_string():
     out = _mixin()._coerce_structured_output(
         "The capital of France is Paris.", Pair
@@ -114,3 +134,21 @@ def test_after_agent_hook_receives_string_for_pydantic(monkeypatch):
     assert isinstance(payload.response, str)
     # to_dict() performs the [:500] slice that would otherwise raise on a model
     assert isinstance(payload.to_dict()["response"], str)
+
+
+def test_embedded_json_uses_first_complete_object():
+    out = _mixin()._coerce_structured_output(
+        'Answer: {"city": "Paris", "country": "France"}. Metadata: {"ok": true}', Pair
+    )
+    assert isinstance(out, Pair)
+    assert out.city == "Paris"
+
+
+def test_parsed_ignored_when_guardrail_changed_response():
+    # message.parsed must not override a guardrail-approved replacement answer.
+    message = SimpleNamespace(parsed=Pair(city="Paris", country="France"))
+    approved = '{"city": "Lyon", "country": "France"}'
+    out = _mixin()._structured_output_from_message(message, Pair, approved, "original")
+    assert out.city == "Lyon"
+    same = _mixin()._structured_output_from_message(message, Pair, "x", "x")
+    assert same.city == "Paris"
