@@ -143,7 +143,7 @@ def test_unrelated_valueerror_is_not_swallowed():
     assert stub.calls == [True]
 
 
-def test_public_agent_chat_stream_true_returns_text_via_real_extraction():
+def test_public_agent_chat_stream_true_returns_text_via_real_extraction(monkeypatch):
     """End-to-end public path: ``Agent.chat(stream=True)`` returns text.
 
     The unit tests above drive ``_chat_completion`` with a mocked retry helper
@@ -156,10 +156,11 @@ def test_public_agent_chat_stream_true_returns_text_via_real_extraction():
     ``choices[0].message.content``) on the non-streaming fallback. A broken
     public return would surface here as ``None`` or the wrong text.
     """
-    import os
     import types
 
-    os.environ.setdefault("OPENAI_API_KEY", "sk-test-key-for-reproduction")
+    # Use monkeypatch so pytest restores the original environment afterwards
+    # and the fake key never leaks into later tests in the same process.
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-key-for-reproduction")
 
     from praisonaiagents import Agent
 
