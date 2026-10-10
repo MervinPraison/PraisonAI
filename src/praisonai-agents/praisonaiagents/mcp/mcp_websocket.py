@@ -26,6 +26,7 @@ from typing import Any, Dict, Optional, List
 logger = get_logger("mcp-websocket")
 
 # Import shared utilities for thread-safe event loop and schema fixing
+from ..trace.redact import redact_string
 from .mcp_schema_utils import ThreadLocalEventLoop, build_openai_tool_dict, build_tool_signature, get_running_loop_or_none
 
 def is_websocket_url(url: str) -> bool:
@@ -168,7 +169,7 @@ class WebSocketTransport:
                     ),
                     timeout=self.timeout
                 )
-                logger.debug(f"WebSocket connected to {self.url}")
+                logger.debug(f"WebSocket connected to {redact_string(self.url)}")
                 
                 # Start background receive task
                 self._receive_task = asyncio.create_task(self._receive_loop())
@@ -395,7 +396,7 @@ class WebSocketMCPClient:
     
     async def _async_initialize(self):
         """Asynchronously initialize connection and discover tools."""
-        logger.debug(f"Connecting to MCP server at {self.server_url}")
+        logger.debug(f"Connecting to MCP server at {redact_string(self.server_url)}")
         
         # Lazy import mcp package
         try:
