@@ -336,7 +336,9 @@ class ApprovalRegistry:
         if isinstance(current, dict):
             fresh = {k: s for k, s in current.items() if s not in dead} if dead else dict(current)
         else:  # tolerate a plain set written by older code or tests
-            fresh = {k: k.split(":", 1)[0] for k in current}
+            # Keys are "{scope}:{tool}:{hash}" and scope ids themselves contain
+            # a colon ("{name}:{uuid}"), so strip the last two fields.
+            fresh = {k: k.rsplit(":", 2)[0] for k in current}
         fresh.pop(key, None)
         fresh[key] = scope
         overflow = len(fresh) - self._MAX_CONTEXT_APPROVALS

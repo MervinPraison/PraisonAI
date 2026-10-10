@@ -1401,7 +1401,7 @@ class MCP:
                 if not getattr(self.runner, "is_alive", lambda: False)():
                     self.runner = None
         
-        self._close_transport_clients()
+        self._close_transport_clients(wait=not from_finalizer)
 
         # Drop this server from the process-level registry now that its
         # connections are gone, so skills' CapabilityValidator stops reporting
@@ -1409,8 +1409,11 @@ class MCP:
         # once the transports above have actually been torn down.
         self._release_registered_names(blocking=not from_finalizer)
 
-    def _close_transport_clients(self) -> None:
-        """Close SSE / HTTP-stream / WebSocket clients (best effort)."""
+    def _close_transport_clients(self, wait: bool = True) -> None:
+        """Close SSE / HTTP-stream / WebSocket clients (best effort).
+
+        ``wait=False`` (finalizer path) schedules the WebSocket close instead of
+        waiting up to 5 s for it on the transport's event loop."""
         # Shutdown SSE client if present
         if hasattr(self, 'sse_client') and self.sse_client is not None:
             try:
@@ -1437,7 +1440,10 @@ class MCP:
                 if hasattr(self.websocket_client, 'shutdown'):
                     self.websocket_client.shutdown()
                 elif hasattr(self.websocket_client, 'close'):
-                    self.websocket_client.close()
+                    if wait:
+                        self.websocket_client.close()
+                    else:
+                        self.websocket_client.close(wait=False)
             except Exception:
                 pass
     

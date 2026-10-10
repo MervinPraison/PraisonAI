@@ -73,3 +73,23 @@ def test_explicit_shutdown_still_joins_and_releases():
     m.shutdown()
     assert runner.joined
     assert "fin-d" not in MCP.list_active_server_names()
+
+
+def test_finalizer_does_not_wait_for_the_websocket_close():
+    import asyncio
+    from praisonaiagents.mcp.mcp_websocket import WebSocketMCPClient
+
+    loop = asyncio.new_event_loop()   # never run, so a waiting close() would hang
+    ws = WebSocketMCPClient.__new__(WebSocketMCPClient)
+    ws._closed = False
+    ws.transport = None
+    m = _bare_mcp(("fin-e",))
+    m.websocket_client = ws
+    try:
+        from unittest import mock
+        with mock.patch("praisonaiagents.mcp.mcp_websocket.get_event_loop", return_value=loop):
+            assert _run_with_timeout(m.__del__, seconds=2.0), "MCP.__del__ waited on the WebSocket close"
+    finally:
+        loop.run_until_complete(asyncio.sleep(0.01))   # let the scheduled aclose() finish
+        loop.close()
+    assert "fin-e" not in MCP.list_active_server_names()

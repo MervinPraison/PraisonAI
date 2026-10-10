@@ -99,3 +99,11 @@ def test_unclosed_agents_in_a_long_lived_context_do_not_accumulate(registry):
     # Every dead agent's key is pruned by the next agent's write; at most the
     # last one remains.
     assert len(registry._approved_context.get()) <= 1
+
+
+def test_legacy_set_keys_keep_their_full_scope_id(registry):
+    scope = f"Agent:{uuid.uuid4().hex}"
+    registry._approved_context.set({registry._approval_cache_key("t", {"a": 1}, scope_id=scope)})
+    registry.mark_approved("other", {}, scope_id="*")   # converts the set to a dict
+    registry.release_scope(scope)
+    assert not registry.is_already_approved("t", {"a": 1}, scope_id=scope)
