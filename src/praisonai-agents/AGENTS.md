@@ -607,7 +607,25 @@ class MyTool(BaseTool):
 > **Agents only recognize parameters.** When creating tools, always expose all options as function parameters—agents cannot discover env vars or config files.
 
 > [!IMPORTANT]
-> **Vendor / third-party API tools:** New integrations (external APIs, datasets, SaaS wrappers) belong in **[PraisonAI-Tools](https://github.com/MervinPraison/PraisonAI-Tools)** as optional pip plugins — **not** as new `praisonaiagents/tools/*_tools.py` files in this repo. Core `praisonaiagents/tools/` holds SDK primitives (decorator, registry, schedule, shell, trust, subagent) and a small set of **legacy** bundled tools kept for backward compatibility. Do not treat legacy search tools (e.g. Tavily/Exa) as precedent for adding new vendor modules here.
+> **Vendor / third-party API tools:** New integrations (external APIs, datasets, SaaS wrappers) belong in **[PraisonAI-Tools](https://github.com/MervinPraison/PraisonAI-Tools)** as optional pip plugins — **not** as new `praisonaiagents/tools/*_tools.py` files in this repo. Core `praisonaiagents/tools/` holds SDK primitives (decorator, registry, schedule, shell, trust, subagent) and a small set of **legacy** bundled tools kept for backward compatibility. Do not treat legacy search tools (e.g. Tavily/Exa) as precedent for adding new vendor modules here. See §6.1.1 for the full routing test.
+
+#### 6.1.1 Tool routing — third-party connectors → PraisonAI-Tools (MUST)
+
+New agent-callable third-party connectors (external HTTP/API, SaaS, DB) go to **[PraisonAI-Tools](https://github.com/MervinPraison/PraisonAI-Tools)**, NOT `praisonaiagents/tools/`. Core keeps only tool *protocols, base classes, decorator, registry, resolver, trust/fencing* — not connectors.
+
+**Decision test** (categories are **alternatives**, not cumulative):
+
+| Keep in core `praisonaiagents/tools/` | Route to PraisonAI-Tools |
+|---|---|
+| Local-state only (filesystem, shell, Python, AST, todo, schedule) **or** framework plumbing (delegation, subagent, session, artifact, memory, clarify) | Calls a third-party/remote API or SaaS |
+| …using only stdlib or already-required core deps | Needs service-specific auth or SDK; is a vendor connector (search, data, CRM, DB, messaging) |
+
+A macro/FX data client (e.g. FXMacroData) → **PraisonAI-Tools**, even on stdlib `urllib`, because it depends on an external service + credentials.
+
+> [!WARNING]
+> Legacy in-repo connectors (`tavily_tools.py`, `exa_tools.py`, `github_tools.py`, etc.) are backward-compat precedent, **not** a licence to add more. "Same shape as Tavily/Exa" is a *consistency* check, not a *routing* one — do not approve a new connector into core on precedent alone.
+
+Connectors in PraisonAI-Tools are used via `Agent(tools=[...])`. Placement/registration alone does **not** fence results — fencing requires the tool name in `EXTERNAL_TOOL_NAMES` or `ToolTrustLevel.EXTERNAL`. Register with `add_external_tool(tool_name)` to fence untrusted results.
 
 ### 6.2 Hooks & Middleware
 
