@@ -22,6 +22,7 @@ except ImportError:
 logger = get_logger("mcp-sse")
 
 # Import shared utilities for thread-safe event loop and schema fixing
+from ..trace.redact import redact_string
 from .mcp_schema_utils import ThreadLocalEventLoop, build_openai_tool_dict, build_tool_signature, get_running_loop_or_none
 
 # Thread-local event loop for async operations (thread-safe)
@@ -139,7 +140,7 @@ class SSEMCPClient:
     
     async def _async_initialize(self):
         """Asynchronously initialize the connection and tools."""
-        logger.debug(f"Connecting to MCP server at {self.server_url}")
+        logger.debug(f"Connecting to MCP server at {redact_string(self.server_url)}")
         
         # Create SSE client
         self._streams_context = sse_client(url=self.server_url)

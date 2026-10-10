@@ -66,6 +66,11 @@ _REDACT_KV_PATTERN = re.compile(
     re.IGNORECASE
 )
 
+# URL-borne secrets: userinfo (``scheme://user:pass@host``) and bot-token
+# path segments (``/bot<id>:<token>/``) carry credentials with no key name.
+_URL_USERINFO_PATTERN = re.compile(r"\b([a-zA-Z][a-zA-Z0-9+.\-]*://)[^/?#\s@]+@")
+_URL_BOT_TOKEN_PATTERN = re.compile(r"/bot\d+:[A-Za-z0-9_\-]+")
+
 REDACTED_VALUE = "[REDACTED]"
 
 
@@ -230,7 +235,9 @@ def redact_string(text: str, enabled: bool = True) -> str:
     Redact potential secrets from a string.
     
     This is a best-effort function that looks for common patterns
-    like "api_key=xxx" or "password: xxx" in strings.
+    like "api_key=xxx" or "password: xxx" in strings, plus secrets carried
+    in URLs (``scheme://user:pass@host`` userinfo, ``?token=xxx`` query
+    params and ``/bot<id>:<token>/`` path segments).
     
     Args:
         text: String to redact
@@ -242,5 +249,7 @@ def redact_string(text: str, enabled: bool = True) -> str:
     if not enabled or not text:
         return text
     
-    # Use pre-compiled pattern for better performance
+    # Use pre-compiled patterns for better performance
+    text = _URL_USERINFO_PATTERN.sub(r'\1[REDACTED]@', text)
+    text = _URL_BOT_TOKEN_PATTERN.sub('/bot[REDACTED]', text)
     return _REDACT_KV_PATTERN.sub(r'\1\2\3[REDACTED]', text)
