@@ -278,7 +278,6 @@ jobs:
           -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere"
           -q --tb=line --disable-warnings
           --timeout=60 -n 2 --dist loadfile
-          --timeout-method=thread -o faulthandler_timeout=75 -rfE --durations=25
           --ignore=tests/fixtures
           --ignore=tests/e2e
           --ignore=tests/live
