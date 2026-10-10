@@ -9,6 +9,12 @@ def test_userinfo_password_redacted():
     assert out == "postgres://[REDACTED]@db.internal:5432/app"
 
 
+def test_userinfo_password_with_at_sign_fully_redacted():
+    out = redact_string("connecting https://svc:p@ssword@mcp.example.com/sse")
+    assert "ssword" not in out
+    assert out == "connecting https://[REDACTED]@mcp.example.com/sse"
+
+
 def test_userinfo_token_only_redacted():
     out = redact_string("cloning https://ghp_abc123@github.com/o/r.git")
     assert "ghp_abc123" not in out

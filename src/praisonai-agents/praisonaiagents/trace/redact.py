@@ -68,7 +68,7 @@ _REDACT_KV_PATTERN = re.compile(
 
 # URL-borne secrets: userinfo (``scheme://user:pass@host``) and bot-token
 # path segments (``/bot<id>:<token>/``) carry credentials with no key name.
-_URL_USERINFO_PATTERN = re.compile(r"\b([a-zA-Z][a-zA-Z0-9+.\-]*://)[^/?#\s@]+@")
+_URL_USERINFO_PATTERN = re.compile(r"\b([a-zA-Z][a-zA-Z0-9+.\-]*://)[^/?#\s]+@")
 _URL_BOT_TOKEN_PATTERN = re.compile(r"/bot\d+:[A-Za-z0-9_\-]+")
 
 REDACTED_VALUE = "[REDACTED]"
