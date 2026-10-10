@@ -58,13 +58,28 @@ def test_mark_approved_never_mutates_the_set_it_read(registry):
     assert registry.is_already_approved("t", {}, scope_id="s")
 
 
-def test_release_scope_without_context_eviction_leaves_the_contextvar_alone(registry):
+def test_release_scope_from_finalizer_leaves_the_contextvar_alone(registry):
     registry.mark_approved("t", {}, scope_id="dead")
     seen = registry._approved_context.get()
 
-    registry.release_scope("dead", evict_context_cache=False)
+    registry.release_scope("dead", from_finalizer=True)
 
     assert registry._approved_context.get() is seen
+
+
+def test_release_scope_from_finalizer_never_blocks_on_a_held_lock(registry):
+    # GC can fire on the thread that already holds the non-reentrant lock.
+    registry.auto_approve_tool("t", "dead")
+    registry.auto_approve_tool("t", "live")
+    with registry._scope_lock:
+        registry.release_scope("dead", from_finalizer=True)
+        assert registry.is_auto_approved("t", "dead")
+
+    registry.release_scope("other")
+
+    assert not registry.is_auto_approved("t", "dead")
+    assert registry.is_auto_approved("t", "live")
+    assert registry._pending_scope_releases == []
 
 
 def test_release_scope_still_evicts_by_default(registry):

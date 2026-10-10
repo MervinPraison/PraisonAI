@@ -8144,18 +8144,16 @@ Answer:"""
     def _release_approval_scope(self, *, from_finalizer: bool = False) -> None:
         """Drop this agent's approval-registry grants (best-effort).
 
-        From ``__del__`` only the process-global grants are released: the
-        per-context approval cache is a ContextVar, and a GC finalizer must not
-        write one (see ``ApprovalRegistry.release_scope``).
+        From ``__del__`` only the process-global grants are released, without
+        blocking on the registry lock: a GC finalizer must neither write a
+        ContextVar nor wait on a lock (see ``ApprovalRegistry.release_scope``).
         """
         scope_id = getattr(self, '_approval_scope_id', None)
         if not scope_id:
             return
         try:
             from ..approval import get_approval_registry
-            get_approval_registry().release_scope(
-                scope_id, evict_context_cache=not from_finalizer
-            )
+            get_approval_registry().release_scope(scope_id, from_finalizer=from_finalizer)
         except Exception as e:
             logger.warning(f"Approval scope cleanup failed: {e}")
     
