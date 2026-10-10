@@ -493,8 +493,8 @@ class WebSocketMCPClient:
         except Exception:
             pass
     
-    def close(self):
-        """Synchronous cleanup."""
+    def close(self, wait: bool = True):
+        """Synchronous cleanup. ``wait=False`` only schedules it (finalizers)."""
         if self._closed:
             return
         
@@ -502,7 +502,8 @@ class WebSocketMCPClient:
             loop = get_event_loop()
             if not loop.is_closed():
                 future = asyncio.run_coroutine_threadsafe(self.aclose(), loop)
-                future.result(timeout=5)
+                if wait:
+                    future.result(timeout=5)
         except Exception:
             self._closed = True
     
@@ -510,6 +511,6 @@ class WebSocketMCPClient:
         """Cleanup on garbage collection."""
         try:
             if not self._closed:
-                self.close()
+                self.close(wait=False)
         except Exception:
             pass

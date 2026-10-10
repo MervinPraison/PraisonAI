@@ -373,6 +373,10 @@ class MCP:
     # skill requirement, once the last client holding it lets go (issue #5135).
     _active_server_names: dict = {}
     _active_server_names_lock = threading.Lock()
+    # Registrations a GC finalizer could not release because the lock was busy
+    # (possibly held by the frame the collector interrupted). ``list.append``
+    # is atomic; the next holder of the lock applies them.
+    _pending_name_releases: list = []
 
     # Default init/tool-call timeout (seconds). Used when the caller does not
     # pass an explicit ``timeout``.
@@ -391,7 +395,14 @@ class MCP:
     def list_active_server_names(cls) -> set:
         """Return the set of MCP server names currently registered this run."""
         with cls._active_server_names_lock:
+            cls._drain_pending_name_releases()
             return {name for name, count in cls._active_server_names.items() if count > 0}
+
+    @classmethod
+    def _drain_pending_name_releases(cls) -> None:
+        """Apply releases deferred by finalizers. Caller holds the lock."""
+        while cls._pending_name_releases:
+            cls._adjust_server_name_counts(cls._pending_name_releases.pop(), -1)
 
     @classmethod
     def _adjust_server_name_counts(cls, names: tuple, delta: int) -> None:
@@ -414,6 +425,7 @@ class MCP:
         previous names after they have been handed over and release them twice.
         """
         with type(self)._active_server_names_lock:
+            type(self)._drain_pending_name_releases()
             previous = getattr(self, "_registered_server_names", None)
             if previous == names:
                 return
@@ -423,20 +435,36 @@ class MCP:
                 type(self)._adjust_server_name_counts(names, 1)
             self._registered_server_names = names or None
 
-    def _release_registered_names(self) -> None:
+    def _release_registered_names(self, *, blocking: bool = True) -> None:
         """Release this instance's registration, decrementing it exactly once.
 
         Claiming the names and decrementing them share one critical section, so
         concurrent lifecycle calls on the same instance (explicit
         ``shutdown()``, context-manager exit, agent cleanup, ``__del__``) cannot
         each consume a shared client's count.
+
+        ``blocking=False`` is for ``__del__``: the lock is non-reentrant and the
+        collector may have interrupted a frame on this thread that holds it.
+        If it is busy the claimed names are queued for the next lock holder.
+        Claiming without the lock is safe there because nothing else can still
+        reach an object that is being finalized.
         """
-        with type(self)._active_server_names_lock:
+        lock = type(self)._active_server_names_lock
+        if not lock.acquire(blocking=blocking):
+            names = getattr(self, "_registered_server_names", None)
+            if names:
+                self._registered_server_names = None
+                type(self)._pending_name_releases.append(names)
+            return
+        try:
+            type(self)._drain_pending_name_releases()
             names = getattr(self, "_registered_server_names", None)
             if not names:
                 return
             self._registered_server_names = None
             type(self)._adjust_server_name_counts(names, -1)
+        finally:
+            lock.release()
 
     @classmethod
     def _is_cold_start_launcher(cls, cmd) -> bool:
@@ -1343,6 +1371,13 @@ class MCP:
         Call this method when done using the MCP instance to ensure
         all background threads and connections are properly cleaned up.
         """
+        self._shutdown(from_finalizer=False)
+
+    def _shutdown(self, *, from_finalizer: bool) -> None:
+        """Shared teardown. ``from_finalizer`` never blocks: it signals the
+        stdio runner instead of joining it (a join can wait up to the operation
+        timeout inside the garbage collector) and releases the server-name
+        registration without waiting on its lock."""
         # Shutdown stdio runner if present
         if hasattr(self, 'runner') and self.runner is not None:
             try:
@@ -1352,18 +1387,33 @@ class MCP:
             # Join the daemon thread (and terminate its stdio subprocess) so
             # long-lived processes don't leak one child per MCP server. Plain
             # shutdown() only enqueues a sentinel; stop() also joins the thread.
-            try:
-                if hasattr(self.runner, "stop"):
-                    self.runner.stop()
-            except Exception:
-                pass  # Best effort cleanup
-            # Only drop the reference once the thread has actually exited so a
-            # later shutdown() can retry the join if an in-flight call kept the
-            # runner alive past the join timeout. The thread is a daemon, so a
-            # surviving runner never blocks interpreter exit.
-            if not getattr(self.runner, "is_alive", lambda: False)():
-                self.runner = None
+            # Not from a finalizer: the sentinel above lets the daemon exit.
+            if not from_finalizer:
+                try:
+                    if hasattr(self.runner, "stop"):
+                        self.runner.stop()
+                except Exception:
+                    pass  # Best effort cleanup
+                # Only drop the reference once the thread has actually exited so a
+                # later shutdown() can retry the join if an in-flight call kept the
+                # runner alive past the join timeout. The thread is a daemon, so a
+                # surviving runner never blocks interpreter exit.
+                if not getattr(self.runner, "is_alive", lambda: False)():
+                    self.runner = None
         
+        self._close_transport_clients(wait=not from_finalizer)
+
+        # Drop this server from the process-level registry now that its
+        # connections are gone, so skills' CapabilityValidator stops reporting
+        # it as available (issue #5135). Runs last so the registry only shrinks
+        # once the transports above have actually been torn down.
+        self._release_registered_names(blocking=not from_finalizer)
+
+    def _close_transport_clients(self, wait: bool = True) -> None:
+        """Close SSE / HTTP-stream / WebSocket clients (best effort).
+
+        ``wait=False`` (finalizer path) schedules the WebSocket close instead of
+        waiting up to 5 s for it on the transport's event loop."""
         # Shutdown SSE client if present
         if hasattr(self, 'sse_client') and self.sse_client is not None:
             try:
@@ -1390,15 +1440,12 @@ class MCP:
                 if hasattr(self.websocket_client, 'shutdown'):
                     self.websocket_client.shutdown()
                 elif hasattr(self.websocket_client, 'close'):
-                    self.websocket_client.close()
+                    if wait:
+                        self.websocket_client.close()
+                    else:
+                        self.websocket_client.close(wait=False)
             except Exception:
                 pass
-
-        # Drop this server from the process-level registry now that its
-        # connections are gone, so skills' CapabilityValidator stops reporting
-        # it as available (issue #5135). Runs last so the registry only shrinks
-        # once the transports above have actually been torn down.
-        self._release_registered_names()
     
     def __del__(self):
         """Clean up resources when the object is garbage collected.
@@ -1408,6 +1455,6 @@ class MCP:
         pattern or call shutdown() explicitly.
         """
         try:
-            self.shutdown()
+            self._shutdown(from_finalizer=True)
         except Exception:
             pass  # Best effort cleanup in __del__

@@ -8152,10 +8152,23 @@ Answer:"""
         if not scope_id:
             return
         try:
-            from ..approval import get_approval_registry
-            get_approval_registry().release_scope(scope_id, from_finalizer=from_finalizer)
+            if from_finalizer:
+                # No locks and no imports here: get_approval_registry() takes a
+                # non-reentrant module lock that GC may have interrupted on this
+                # very thread. Read the singleton directly; if no registry was
+                # ever built, this agent recorded no grants.
+                import sys as _sys
+                _approval = _sys.modules.get("praisonaiagents.approval")
+                registry = getattr(_approval, "_registry", None)
+                if registry is None:
+                    return
+            else:
+                from ..approval import get_approval_registry
+                registry = get_approval_registry()
+            registry.release_scope(scope_id, from_finalizer=from_finalizer)
         except Exception as e:
-            logger.warning(f"Approval scope cleanup failed: {e}")
+            if not from_finalizer:
+                logger.warning(f"Approval scope cleanup failed: {e}")
     
     async def aclose(self) -> None:
         """Async version of close() for async context managers."""
