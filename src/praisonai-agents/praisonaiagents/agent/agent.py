@@ -8141,14 +8141,19 @@ Answer:"""
         # Always set closed flag
         self._closed = True
 
-    def _release_approval_scope(self) -> None:
-        """Drop this agent's approval-registry grants (best-effort)."""
+    def _release_approval_scope(self, *, from_finalizer: bool = False) -> None:
+        """Drop this agent's approval-registry grants (best-effort).
+
+        From ``__del__`` only the process-global grants are released, without
+        blocking on the registry lock: a GC finalizer must neither write a
+        ContextVar nor wait on a lock (see ``ApprovalRegistry.release_scope``).
+        """
         scope_id = getattr(self, '_approval_scope_id', None)
         if not scope_id:
             return
         try:
             from ..approval import get_approval_registry
-            get_approval_registry().release_scope(scope_id)
+            get_approval_registry().release_scope(scope_id, from_finalizer=from_finalizer)
         except Exception as e:
             logger.warning(f"Approval scope cleanup failed: {e}")
     
@@ -8327,8 +8332,9 @@ Answer:"""
 
                 # Evict this agent's process-global approval grants so a
                 # per-request/session agent that is only ever GC'd (never
-                # close()'d) does not leak registry entries forever.
-                self._release_approval_scope()
+                # close()'d) does not leak registry entries forever. Never the
+                # per-context cache: this may run inside the garbage collector.
+                self._release_approval_scope(from_finalizer=True)
             except Exception as exc:  # noqa: BLE001 - finalizers must not raise
                 import contextlib
                 with contextlib.suppress(Exception):

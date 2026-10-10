@@ -122,6 +122,10 @@ class ApprovalRegistry:
         # agent's grant that is being written at the same time. Only wraps these
         # small in-memory mutations, so it adds no hot-path cost.
         self._scope_lock = threading.Lock()
+        # Scope ids whose release a GC finalizer could not apply because
+        # ``_scope_lock`` was held (possibly by the very frame the collector
+        # interrupted). Drained by the next ``release_scope``.
+        self._pending_scope_releases: List[str] = []
 
         # Per-agent, per-tool auto-approval (G-A fix)
         self._agent_tool_auto_approve: Dict[tuple[str, str], bool] = {}
@@ -304,9 +308,13 @@ class ApprovalRegistry:
         agent_name: Optional[str] = None,
         scope_id: Optional[str] = None,
     ) -> None:
+        # Copy-on-write: ``contextvars.copy_context()`` copies the mapping, not
+        # this set, so adding in place would leak an approval granted in a
+        # child context (worker thread, task) into its parent and siblings.
+        key = self._approval_cache_key(tool_name, arguments or {}, agent_name, scope_id)
         approved = self._approved_context.get(set())
-        approved.add(self._approval_cache_key(tool_name, arguments or {}, agent_name, scope_id))
-        self._approved_context.set(approved)
+        if key not in approved:
+            self._approved_context.set(approved | {key})
 
     def is_already_approved(
         self,
@@ -443,7 +451,7 @@ class ApprovalRegistry:
         with self._scope_lock:
             self._session_scoped_targets.clear()
 
-    def release_scope(self, scope_id: str) -> None:
+    def release_scope(self, scope_id: str, *, from_finalizer: bool = False) -> None:
         """Drop all grants recorded under a per-instance approval scope id.
 
         ``auto_approve_tool`` (skill ``allowed-tools`` pre-approval),
@@ -455,6 +463,14 @@ class ApprovalRegistry:
         ``Agent.close()``/``aclose()``/``__del__`` to reclaim a dead agent's
         entries without touching any other agent's grants.
 
+        ``from_finalizer=True`` must be used from a garbage-collection
+        finalizer, which runs in whichever thread and context the collector
+        fires in, possibly in the middle of a ContextVar update or while this
+        thread already holds ``_scope_lock``. It therefore never writes the
+        ContextVar (the "current" context there is not the agent's anyway) and
+        never blocks on the lock: if the lock is busy the release is queued and
+        applied by the next ``release_scope`` call.
+
         Mutates the shared collections **in place under ``_scope_lock``** (rather
         than rebuilding-and-replacing) so a concurrent writer's grant for a
         *different* scope can never be lost to a read-modify-write race, and
@@ -462,11 +478,22 @@ class ApprovalRegistry:
         """
         if not scope_id:
             return
-        with self._scope_lock:
-            for key in [k for k in self._agent_tool_auto_approve if k[0] == scope_id]:
+        if from_finalizer:
+            if not self._scope_lock.acquire(blocking=False):
+                self._pending_scope_releases.append(scope_id)
+                return
+        else:
+            self._scope_lock.acquire()
+        try:
+            scopes = {scope_id}
+            while self._pending_scope_releases:
+                scopes.add(self._pending_scope_releases.pop())
+            for key in [k for k in self._agent_tool_auto_approve if k[0] in scopes]:
                 self._agent_tool_auto_approve.pop(key, None)
-            for entry in [t for t in self._session_scoped_targets if t[0] == scope_id]:
+            for entry in [t for t in self._session_scoped_targets if t[0] in scopes]:
                 self._session_scoped_targets.discard(entry)
+        finally:
+            self._scope_lock.release()
 
         # Evict this scope's per-context approval-cache keys. ``mark_approved``
         # stores ``"{scope_id}:{tool}:{hash}"`` entries in the ``_approved_context``
@@ -474,6 +501,8 @@ class ApprovalRegistry:
         # agents would otherwise retain one key per approved call forever. This
         # only touches the *current* context's set (ContextVars are per
         # coroutine/thread), which is the context the closing agent ran in.
+        if from_finalizer:
+            return
         prefix = f"{scope_id}:"
         try:
             approved = self._approved_context.get(set())
