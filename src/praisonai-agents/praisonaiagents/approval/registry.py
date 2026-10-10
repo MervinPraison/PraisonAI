@@ -304,9 +304,13 @@ class ApprovalRegistry:
         agent_name: Optional[str] = None,
         scope_id: Optional[str] = None,
     ) -> None:
+        # Copy-on-write: ``contextvars.copy_context()`` copies the mapping, not
+        # this set, so adding in place would leak an approval granted in a
+        # child context (worker thread, task) into its parent and siblings.
+        key = self._approval_cache_key(tool_name, arguments or {}, agent_name, scope_id)
         approved = self._approved_context.get(set())
-        approved.add(self._approval_cache_key(tool_name, arguments or {}, agent_name, scope_id))
-        self._approved_context.set(approved)
+        if key not in approved:
+            self._approved_context.set(approved | {key})
 
     def is_already_approved(
         self,
@@ -443,7 +447,7 @@ class ApprovalRegistry:
         with self._scope_lock:
             self._session_scoped_targets.clear()
 
-    def release_scope(self, scope_id: str) -> None:
+    def release_scope(self, scope_id: str, *, evict_context_cache: bool = True) -> None:
         """Drop all grants recorded under a per-instance approval scope id.
 
         ``auto_approve_tool`` (skill ``allowed-tools`` pre-approval),
@@ -454,6 +458,12 @@ class ApprovalRegistry:
         request/session grows these dicts/sets without bound. Called from
         ``Agent.close()``/``aclose()``/``__del__`` to reclaim a dead agent's
         entries without touching any other agent's grants.
+
+        ``evict_context_cache=False`` skips the per-context cache eviction and
+        must be used from a garbage-collection finalizer: a finalizer runs in
+        whichever thread and context the collector fires in, possibly in the
+        middle of another ContextVar update, so it has no business writing a
+        ContextVar (and the "current" context there is not the agent's).
 
         Mutates the shared collections **in place under ``_scope_lock``** (rather
         than rebuilding-and-replacing) so a concurrent writer's grant for a
@@ -474,6 +484,8 @@ class ApprovalRegistry:
         # agents would otherwise retain one key per approved call forever. This
         # only touches the *current* context's set (ContextVars are per
         # coroutine/thread), which is the context the closing agent ran in.
+        if not evict_context_cache:
+            return
         prefix = f"{scope_id}:"
         try:
             approved = self._approved_context.get(set())
