@@ -6,6 +6,7 @@ and graceful fallback when litellm is not available.
 """
 
 import os
+import re
 import json
 import time
 import difflib
@@ -29,6 +30,7 @@ class ModelInfo:
     supports_reasoning: bool = False
     supports_streaming: bool = True
     notes: Optional[str] = None
+    mode: Optional[str] = None  # litellm endpoint mode, e.g. "chat", "responses"
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -379,6 +381,8 @@ _UNSTABLE_MODEL_MARKERS = (
     "preview", "experimental", "-exp", "beta", "alpha", "/auto", "auto-",
     "-auto", "snapshot", "nightly", "draft",
 )
+# Dated snapshot suffixes such as ``-2025-08-07`` or ``-20241022``.
+_DATED_SNAPSHOT_RE = re.compile(r"-\d{4}-?\d{2}-?\d{2}$")
 
 
 def _is_chat_model(model: "ModelInfo") -> bool:
@@ -402,7 +406,10 @@ def _rank_score(model: "ModelInfo") -> tuple:
     """
     mid = (model.id or "").lower()
     is_weak = any(marker in mid for marker in _WEAK_MODEL_MARKERS)
-    is_unstable = any(marker in mid for marker in _UNSTABLE_MODEL_MARKERS)
+    is_unstable = (
+        any(marker in mid for marker in _UNSTABLE_MODEL_MARKERS)
+        or bool(_DATED_SNAPSHOT_RE.search(mid))
+    )
     return (
         1 if model.supports_tools else 0,
         0 if is_unstable else 1,
@@ -487,6 +494,7 @@ class ModelCatalogue:
                     supports_tools=supports_tools,
                     supports_vision=supports_vision,
                     supports_reasoning=supports_reasoning,
+                    mode=info.get("mode"),
                 ))
             
             # Merge with fallback models to ensure completeness
@@ -626,6 +634,10 @@ class ModelCatalogue:
             if "gemini" in wanted or "google" in wanted:
                 wanted |= {"gemini", "google"}
             models = [m for m in models if (m.provider or "").lower() in wanted]
+        # A litellm non-chat ``mode`` is authoritative: never fall back to such
+        # models, so ``best_available`` returns ``None`` and callers use their
+        # fixed fallback instead of an uncallable (e.g. Responses-only) model.
+        models = [m for m in models if not m.mode or m.mode == "chat"]
         chat_models = [m for m in models if _is_chat_model(m)]
         if chat_models:
             models = chat_models
