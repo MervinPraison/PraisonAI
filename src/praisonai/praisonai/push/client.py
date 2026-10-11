@@ -17,6 +17,9 @@ from praisonaiagents.push.protocols import PushTransportProtocol
 
 logger = logging.getLogger(__name__)
 
+# Max seconds disconnect() waits for in-flight ACKs/callbacks before cancelling.
+_DRAIN_TIMEOUT = 5.0
+
 # Type alias for channel message callbacks
 MessageCallback = Callable[[ChannelMessage], Coroutine[Any, Any, None]]
 
@@ -118,12 +121,18 @@ class PushClient:
                 pass
 
         # Drain in-flight ACKs / callbacks before closing the transport.
-        if self._pending_tasks:
-            await asyncio.gather(*list(self._pending_tasks), return_exceptions=True)
-
-        if self._transport:
-            await self._transport.disconnect()
-            self._transport = None
+        # Exclude the calling task (a callback may call disconnect()) and bound
+        # the wait so callbacks awaiting replies cannot block shutdown.
+        pending = self._pending_tasks - {asyncio.current_task()}
+        try:
+            if pending:
+                _, still_running = await asyncio.wait(pending, timeout=_DRAIN_TIMEOUT)
+                for task in still_running:
+                    task.cancel()
+        finally:
+            if self._transport:
+                await self._transport.disconnect()
+                self._transport = None
 
         self._closed_event.set()
         logger.info("PushClient disconnected")

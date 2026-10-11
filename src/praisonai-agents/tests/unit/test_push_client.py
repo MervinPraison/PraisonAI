@@ -239,3 +239,28 @@ class TestPushClientPresence:
         ]
         assert len(hb_msgs) == 1
         assert hb_msgs[0]["status"] == "idle"
+
+
+class TestPushClientDisconnectDrain:
+    @pytest.mark.asyncio
+    async def test_disconnect_from_callback_does_not_deadlock(self, client, mock_transport):
+        done = asyncio.Event()
+
+        async def cb(msg):
+            await client.disconnect()
+            done.set()
+
+        client._spawn(cb(None))
+        await asyncio.wait_for(done.wait(), timeout=2)
+        assert mock_transport._closed
+
+    @pytest.mark.asyncio
+    async def test_disconnect_cancels_stuck_callbacks(self, client, mock_transport, monkeypatch):
+        import praisonai.push.client as push_client_mod
+        monkeypatch.setattr(push_client_mod, "_DRAIN_TIMEOUT", 0.05)
+
+        task = client._spawn(asyncio.Event().wait())
+        await asyncio.wait_for(client.disconnect(), timeout=2)
+        await asyncio.sleep(0)
+        assert task.cancelled()
+        assert mock_transport._closed
