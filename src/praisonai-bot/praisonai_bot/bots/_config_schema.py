@@ -1087,6 +1087,22 @@ class GatewayConfigSchema(BaseModel):
     gateway: Optional[Dict[str, Any]] = None
     hooks: Optional[List[Dict[str, Any]]] = None
 
+    @field_validator("rooms")
+    @classmethod
+    def validate_rooms(
+        cls, v: Optional[Dict[str, Dict[str, Any]]]
+    ) -> Optional[Dict[str, Dict[str, Any]]]:
+        """Reject an unbuildable room at load time, naming it (Issue #5768)."""
+        if v:
+            from praisonaiagents.rooms import RoomConfig
+
+            for name, data in v.items():
+                try:
+                    RoomConfig.from_dict(str(name), data or {})
+                except (TypeError, ValueError) as e:
+                    raise ValueError(f"rooms.{name}: {e}") from e
+        return v
+
     @field_validator("unknown_user_policy")
     @classmethod
     def validate_top_level_unknown_user_policy(

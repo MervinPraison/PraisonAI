@@ -17,10 +17,12 @@ class FakeAgent:
         self.mention = mention
         self.chat_history = ["own-history"]
         self.prompts = []
+        self.tools = []
 
-    def chat(self, prompt, **_):
+    def chat(self, prompt, attachments=None, cancel_token=None):
         assert self.chat_history == []  # member runs on a clean slate
         self.prompts.append(prompt)
+        self.seen = {"attachments": attachments, "tools": list(self.tools)}
         reply = f"{self.name} says hi"
         if self.mention and len(self.prompts) == 1:
             reply += f" @{self.mention}"
@@ -41,10 +43,9 @@ def test_room_runs_bounded_turns_and_records_transcript():
     # Round 0: everyone once; round 1: only the @-mentioned critic.
     assert out.count("**researcher**") == 1
     assert out.count("**critic**") == 2
-    assert [m.get("name") for m in room.chat_history] == [
-        None, "researcher", "critic", "critic"
+    assert [m["content"].split(":")[0] for m in room.chat_history] == [
+        "plan the release", "researcher", "critic", "critic"
     ]
-    assert room.chat_history[-1]["round"] == 1
     # Member history restored, and the critic saw the shared transcript.
     assert agents["critic"].chat_history == ["own-history"]
     assert "researcher: researcher says hi @critic" in agents["critic"].prompts[0]
@@ -97,7 +98,7 @@ def test_room_through_session_manager_persists_transcript():
     assert room.chat_history == []
     # ...and persisted it under the user's session for the next turn/restart.
     history = mgr._load_history("u1")
-    assert any(m.get("name") == "critic" for m in history)
+    assert any(m["content"].startswith("critic: ") for m in history)
 
 
 def test_gateway_registers_room_route():
@@ -118,3 +119,82 @@ def test_schema_accepts_rooms_block():
         "channels": {"telegram": {"token": "x", "routes": {"group": "room:standup"}}},
     })
     assert cfg.rooms["standup"]["agents"] == ["a", "b"]
+
+
+def test_room_transcript_survives_real_session_store(tmp_path):
+    """Store drops extra keys; the speaker must survive in role/content."""
+    from praisonaiagents.session.store import DefaultSessionStore
+
+    from praisonai_bot.bots._session import BotSessionManager
+
+    room, _ = _room()
+    mgr = BotSessionManager(platform="test", store=DefaultSessionStore(session_dir=str(tmp_path)))
+    asyncio.run(mgr.chat(room, "u1", "first"))
+
+    fresh, agents = _room()
+    mgr2 = BotSessionManager(platform="test", store=DefaultSessionStore(session_dir=str(tmp_path)))
+    asyncio.run(mgr2.chat(fresh, "u1", "second"))
+    assert "researcher: researcher says hi" in agents["critic"].prompts[0]
+
+
+def test_human_and_summary_ids_never_collide_with_roster():
+    agents = {n: FakeAgent(n) for n in ("user", "human")}
+    room = GatewayRoom(RoomConfig(name="r", roster=["user", "human"]), agents)
+    room.chat_history = [{"role": "system", "content": "Earlier: shipped v1"}]
+    out = room.chat("hi")
+    assert "**user**" in out and "**human**" in out
+    assert "Earlier: shipped v1" in agents["user"].prompts[0]
+
+
+def test_route_tool_policy_scopes_member_tools():
+    from praisonaiagents.gateway.protocols import ToolPolicy
+
+    from praisonai_bot.bots._session import BotSessionManager
+
+    def safe():
+        pass
+
+    def shell():
+        pass
+
+    room, agents = _room(max_rounds=1)
+    agents = room.agents
+    agents["researcher"].tools = [safe, shell]
+    mgr = BotSessionManager(platform="test")
+    asyncio.run(mgr.chat(room, "u1", "go", tool_policy=ToolPolicy(deny_tools=["shell"])))
+    assert agents["researcher"].seen["tools"] == [safe]
+    assert agents["researcher"].tools == [safe, shell]  # restored
+    assert room._allowed_tools is None
+
+
+def test_room_forwards_attachments_and_stops_on_cancel():
+    room, agents = _room(max_rounds=1)
+    room.chat("look", attachments=["/tmp/a.png"])
+    assert agents["critic"].seen["attachments"] == ["/tmp/a.png"]
+
+    class Stop:
+        def is_set(self):
+            return True
+
+    with pytest.raises(InterruptedError):
+        room.chat("again", cancel_token=Stop())
+
+
+def test_room_clones_members_that_support_it():
+    class Cloneable(FakeAgent):
+        def clone_for_channel(self):
+            return Cloneable(self.name)
+
+    shared = Cloneable("researcher")
+    room = GatewayRoom(RoomConfig(name="r", roster=["researcher"]), {"researcher": shared})
+    assert room.agents["researcher"] is not shared
+
+
+def test_schema_rejects_invalid_room():
+    from praisonai_bot.bots._config_schema import validate_gateway_config
+
+    with pytest.raises(Exception, match="rooms.standup"):
+        validate_gateway_config({
+            "agents": {"a": {}},
+            "rooms": {"standup": {"agents": ["a"], "max_rounds": 0}},
+        })

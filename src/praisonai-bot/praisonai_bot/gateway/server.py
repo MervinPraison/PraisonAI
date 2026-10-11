@@ -10511,6 +10511,7 @@ class WebSocketGateway:
                     guardrails_cfg=guardrails_cfg,
                     durable_runs=durable_runs,
                 )
+                self._register_rooms_from_config(prev_cfg.get("rooms"))
             prev_channels_cfg = prev_cfg.get("channels", {})
             if prev_channels_cfg:
                 await self.start_channels(prev_channels_cfg)
@@ -10572,6 +10573,7 @@ class WebSocketGateway:
                         guardrails_cfg=guardrails_cfg,
                         durable_runs=durable_runs,
                     )
+                    self._register_rooms_from_config(new_cfg.get("rooms"))
 
                 # Register inbound trigger hooks (Issue #2281).
                 self._apply_hooks_from_config(new_cfg)
@@ -10690,6 +10692,7 @@ class WebSocketGateway:
                         guardrails_cfg=guardrails_cfg,
                         durable_runs=durable_runs,
                     )
+                    self._register_rooms_from_config(new_cfg.get("rooms"))
                 logger.info("Agents reloaded")
             
             # Restart specific channels

@@ -19,6 +19,7 @@ today — ``routes: {group: room:standup}``, ``Bot(agent=room)`` or
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from typing import Any, Dict, List, Mapping, Optional
 
@@ -35,7 +36,9 @@ class GatewayRoom:
     Args:
         config: Room roster + planner caps (``RoomConfig``).
         agents: Mapping of agent id -> Agent. Roster ids missing here are
-            recorded as a pass by the core runtime.
+            recorded as a pass by the core runtime. Agents exposing
+            ``clone_for_channel`` are cloned so a member shared with another
+            room or route never has its history/tools swapped concurrently.
 
     Example::
 
@@ -48,38 +51,66 @@ class GatewayRoom:
 
     def __init__(self, config: RoomConfig, agents: Mapping[str, Any]) -> None:
         self.config = config
-        self.agents = dict(agents)
+        self.agents = {aid: _private(a) for aid, a in agents.items()}
         self.name = f"{ROOM_ROUTE_PREFIX}{config.name}"
         # Swapped in/out per session by BotSessionManager (durable transcript).
         self.chat_history: List[Dict[str, Any]] = []
-        roster = set(config.roster)
-        self._human = "user" if "user" not in roster else "human"
+        # Speaker ids for non-roster events; never collide with a member id.
+        self._human = _outsider("user", config.roster)
+        self._system = _outsider("summary", config.roster)
+        # Route tool policy narrowing (see ``tools``); ``None`` = unrestricted.
+        self._allowed_tools: Optional[set] = None
+
+    # ── route tool policy (BotSessionManager._apply_tool_policy) ────────
+    @property
+    def tools(self) -> List[Any]:
+        """Union of member tools, so a route ``tool_policy`` can scope them."""
+        out: List[Any] = []
+        for agent in self.agents.values():
+            out.extend(getattr(agent, "tools", None) or [])
+        if self._allowed_tools is not None:
+            out = [t for t in out if id(t) in self._allowed_tools]
+        return out
+
+    @tools.setter
+    def tools(self, value: List[Any]) -> None:
+        # The session assigns the filtered subset for one turn, then restores
+        # the full list; a full list clears the restriction.
+        allowed = {id(t) for t in value or []}
+        everything = {
+            id(t) for a in self.agents.values() for t in (getattr(a, "tools", None) or [])
+        }
+        self._allowed_tools = None if everything <= allowed else allowed
 
     # ── transcript <-> chat_history ─────────────────────────────────────
+    # Members are stored as ``{"role": "assistant", "content": "<id>: <text>"}``
+    # because session stores persist only role/content (extra keys are dropped).
     def _to_events(self, history: List[Dict[str, Any]]) -> List[RoomEvent]:
         roster = set(self.config.roster)
         events: List[RoomEvent] = []
         for msg in history or []:
             if not isinstance(msg, dict):
                 continue
-            speaker = msg.get("name")
-            if speaker in roster:
-                events.append(
-                    RoomEvent(
-                        speaker=speaker,
-                        content=str(msg.get("content") or ""),
-                        round=int(msg.get("round", 0) or 0),
-                        passed=bool(msg.get("passed", False)),
-                    )
-                )
-            elif msg.get("role") == "user":
-                events.append(
-                    RoomEvent(speaker=self._human, content=str(msg.get("content") or ""))
-                )
+            role = msg.get("role")
+            content = str(msg.get("content") or "")
+            if role == "assistant":
+                speaker, sep, text = content.partition(": ")
+                if sep and speaker in roster:
+                    events.append(RoomEvent(speaker=speaker, content=text))
+            elif role == "user":
+                events.append(RoomEvent(speaker=self._human, content=content))
+            elif role == "system" and content:
+                # Compaction summary: context for members, not a human turn
+                # (the planner only reacts to the trailing human message).
+                events.append(RoomEvent(speaker=self._system, content=content))
         return events
 
-    def _speaker(self, agent_id: str, agent: Any, blocking: bool):
+    def _speaker(self, agent_id: str, agent: Any, blocking: bool, opts: Dict[str, Any]):
+        cancel_token = opts.get("cancel_token")
+
         async def reply(transcript: str) -> str:
+            if cancel_token is not None and cancel_token.is_set():
+                raise InterruptedError(f"room {self.config.name!r} run cancelled")
             prompt = (
                 f"You are @{agent_id} in the multi-agent room "
                 f"'{self.config.name}' with {', '.join('@' + a for a in self.config.roster)}. "
@@ -91,58 +122,102 @@ class GatewayRoom:
             saved = getattr(agent, "chat_history", None)
             if saved is not None:
                 agent.chat_history = []
+            saved_tools = getattr(agent, "tools", None)
+            if self._allowed_tools is not None and saved_tools:
+                agent.tools = [t for t in saved_tools if id(t) in self._allowed_tools]
             try:
                 if blocking or not hasattr(agent, "achat"):
                     # Sync path: already on an executor thread (see ``chat``),
                     # so call ``agent.chat`` directly rather than binding the
                     # member's async clients to a throwaway event loop.
-                    out = agent.chat(prompt)
+                    out = agent.chat(prompt, **_supported(agent.chat, opts))
                 else:
-                    out = await agent.achat(prompt)
+                    out = await agent.achat(prompt, **_supported(agent.achat, opts))
             finally:
                 if saved is not None:
                     agent.chat_history = saved
+                if self._allowed_tools is not None and saved_tools:
+                    agent.tools = saved_tools
             return "" if out is None else str(getattr(out, "output", out))
 
         return reply
 
     # ── agent-shaped surface consumed by BotSessionManager ──────────────
-    async def achat(self, prompt: str, **_: Any) -> str:
-        return await self._run(prompt, blocking=False)
+    async def achat(
+        self,
+        prompt: str,
+        attachments: Optional[List[str]] = None,
+        cancel_token: Any = None,
+        **_: Any,
+    ) -> str:
+        return await self._run(prompt, False, attachments, cancel_token)
 
-    async def _run(self, prompt: str, blocking: bool) -> str:
+    async def _run(
+        self, prompt: str, blocking: bool, attachments: Any, cancel_token: Any
+    ) -> str:
+        opts = {k: v for k, v in (("attachments", attachments), ("cancel_token", cancel_token)) if v}
         room = Room(
             self.config,
-            {aid: self._speaker(aid, a, blocking) for aid, a in self.agents.items()},
+            {aid: self._speaker(aid, a, blocking, opts) for aid, a in self.agents.items()},
         )
         room.transcript = self._to_events(self.chat_history)
         turns = await room.on_message(RoomEvent(speaker=self._human, content=prompt))
 
+        spoken = [t for t in turns if t.content and not t.passed]
         history = list(self.chat_history or [])
         history.append({"role": "user", "content": prompt})
-        for t in turns:
-            history.append(
-                {
-                    "role": "assistant",
-                    "name": t.speaker,
-                    "content": t.content,
-                    "round": t.round,
-                    "passed": t.passed,
-                }
-            )
+        history.extend(
+            {"role": "assistant", "content": f"{t.speaker}: {t.content}"} for t in spoken
+        )
         self.chat_history = history
-        spoken = [t for t in turns if t.content and not t.passed]
         return "\n\n".join(f"**{t.speaker}**: {t.content}" for t in spoken)
 
     async def astart(self, prompt: str, **kwargs: Any) -> str:
         return await self.achat(prompt, **kwargs)
 
-    def chat(self, prompt: str, **kwargs: Any) -> str:
+    def chat(
+        self,
+        prompt: str,
+        attachments: Optional[List[str]] = None,
+        cancel_token: Any = None,
+        **_: Any,
+    ) -> str:
         """Sync entry point (the session runs this in an executor thread)."""
-        return asyncio.run(self._run(prompt, blocking=True))
+        return asyncio.run(self._run(prompt, True, attachments, cancel_token))
 
     def start(self, prompt: str, **kwargs: Any) -> str:
         return self.chat(prompt, **kwargs)
+
+
+def _outsider(base: str, roster: List[str]) -> str:
+    """Return ``base`` suffixed until it is not a roster id."""
+    while base in roster:
+        base += "_"
+    return base
+
+
+def _private(agent: Any) -> Any:
+    """Give the room its own member copy so shared agents are never mutated."""
+    clone = getattr(agent, "clone_for_channel", None)
+    if callable(clone):
+        try:
+            return clone()
+        except Exception as e:  # pragma: no cover - defensive
+            logger.warning("Room member clone failed; sharing instance: %s", e)
+    return agent
+
+
+def _supported(fn: Any, opts: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep only the options ``fn`` accepts (named or via ``**kwargs``)."""
+    if not opts:
+        return {}
+    try:
+        params = inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return {}
+    if any(p.kind == p.VAR_KEYWORD for p in params.values()):
+        return dict(opts)
+    return {k: v for k, v in opts.items() if k in params}
 
 
 def build_rooms(
