@@ -13,11 +13,22 @@ import json
 import logging
 from praisonaiagents._logging import get_logger
 from ..errors import BudgetExceededError, ToolExecutionError
+from .tool_execution import _active_turn_cancel
 
 # Shared lazy display helpers (cached, thread-safe; avoid circular imports)
 from ._lazy_display import _get_console, _get_live, _get_display_functions
 
 logger = logging.getLogger(__name__)
+
+
+def _reset_turn_cancel(ctx_token):
+    """Restore the per-context turn cancel token set by ``chat``/``achat``."""
+    if ctx_token is None:
+        return
+    try:
+        _active_turn_cancel.reset(ctx_token)
+    except (ValueError, LookupError):
+        _active_turn_cancel.set(None)
 
 
 
@@ -3358,6 +3369,7 @@ Your Goal: {self.goal}"""
         db_started = time.perf_counter()
         db_output, db_status = None, "error"
         _cancel = None
+        _cancel_ctx = None
         try:
             # C2 - cooperative cancellation: abort early if a pre-set token is given
             cancel_source = cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None)
@@ -3365,6 +3377,7 @@ Your Goal: {self.goal}"""
                 cancel_source, explicit=cancel_token is not None
             )
             self._active_turn_token = _cancel
+            _cancel_ctx = _active_turn_cancel.set((self, _cancel))
             if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
                 reason = getattr(_cancel, "reason", None) or "cancelled before LLM call"
                 raise InterruptedError(f"Agent chat cancelled: {reason}")
@@ -3421,6 +3434,7 @@ Your Goal: {self.goal}"""
             finally:
                 if getattr(self, "_active_turn_token", None) is _cancel:
                     self._active_turn_token = None
+                _reset_turn_cancel(_cancel_ctx)
                 if _cancel is not None:
                     _cancel.close()
 
@@ -3429,6 +3443,12 @@ Your Goal: {self.goal}"""
         # Reset the per-turn tool buffer so the self-improve review policy only
         # sees tools used in this turn (not during a nested skill-review turn).
         self._reset_turn_tools()
+        # Per-turn loop-guard limits (time/count/no-progress) must not accumulate
+        # across turns of a long-lived agent. Don't force-create it here.
+        _guard = getattr(self, "_loop_guard", None)
+        if _guard is not None:
+            _guard.reset_turn()
+        self._last_stop_reason = "completed"
         # Apply rate limiter if configured (before any LLM call)
         if self._rate_limiter is not None:
             self._rate_limiter.acquire()
@@ -3777,6 +3797,7 @@ Your Goal: {self.goal}"""
                 except ToolExecutionError:
                     raise
                 except Exception as e:
+                    self._last_stop_reason = "error"
                     # Rollback chat history if LLM call fails
                     self._rollback_chat_history_to(chat_history_length)
                     _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
@@ -3784,6 +3805,7 @@ Your Goal: {self.goal}"""
             except ToolExecutionError:
                 raise
             except Exception as e:
+                self._last_stop_reason = "error"
                 _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
                 return None
             finally:
@@ -4086,6 +4108,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             except ToolExecutionError:
                 raise
             except Exception as e:
+                self._last_stop_reason = "error"
                 # Catch any exceptions that escape the while loop
                 _get_display_functions()['display_error'](f"Unexpected error in chat: {e}", console=self.console)
                 # Rollback chat history
@@ -4191,6 +4214,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             cancel_source, explicit=cancel_token is not None
         )
         self._active_turn_token = _cancel
+        _cancel_ctx = _active_turn_cancel.set((self, _cancel))
         try:
             if getattr(getattr(self, "execution", None), "durable", False):
                 from .durable import abegin_durable_run
@@ -4254,6 +4278,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     finally:
                         if getattr(self, "_active_turn_token", None) is _cancel:
                             self._active_turn_token = None
+                        _reset_turn_cancel(_cancel_ctx)
                         if _cancel is not None:
                             _cancel.close()
 
@@ -4265,6 +4290,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Reset the per-turn tool buffer so the self-improve review policy only
         # sees tools used in this turn (not during a nested skill-review turn).
         self._reset_turn_tools()
+        # Per-turn loop-guard limits (time/count/no-progress) must not accumulate
+        # across turns of a long-lived agent. Don't force-create it here.
+        _guard = getattr(self, "_loop_guard", None)
+        if _guard is not None:
+            _guard.reset_turn()
+        self._last_stop_reason = "completed"
         # Apply rate limiter if configured (before any LLM call) - async parity
         # with the sync path in _chat_impl; without this, async bursts (astart,
         # async_execution=True) would fire with zero throttling.
@@ -4491,6 +4522,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 except ToolExecutionError:
                     raise
                 except Exception as e:
+                    self._last_stop_reason = "error"
                     # Rollback chat history if LLM call fails
                     self._rollback_chat_history_to(chat_history_length)
                     _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
@@ -4988,6 +5020,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 except ToolExecutionError:
                     raise
                 except Exception as e:
+                    self._last_stop_reason = "error"
                     _get_display_functions()['display_error'](f"Error in chat completion: {e}")
                     if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
@@ -5000,6 +5033,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except ToolExecutionError:
             raise
         except Exception as e:
+            self._last_stop_reason = "error"
             _get_display_functions()['display_error'](f"Error in achat: {e}")
             if get_logger().getEffectiveLevel() == logging.DEBUG:
                 total_time = time.time() - start_time
