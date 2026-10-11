@@ -79,18 +79,25 @@ def test_finalizer_does_not_wait_for_the_websocket_close():
     import asyncio
     from praisonaiagents.mcp.mcp_websocket import WebSocketMCPClient
 
-    loop = asyncio.new_event_loop()   # never run, so a waiting close() would hang
-    ws = WebSocketMCPClient.__new__(WebSocketMCPClient)
+    loop = asyncio.new_event_loop()   # the session's loop; not running yet,
+    ws = WebSocketMCPClient.__new__(WebSocketMCPClient)   # so a waiting close() would hang
     ws._closed = False
     ws.transport = None
+    ws._loop = loop
+    scheduled = []
+
+    async def aclose():
+        scheduled.append(True)
+
+    ws.aclose = aclose
     m = _bare_mcp(("fin-e",))
     m.websocket_client = ws
     try:
-        from unittest import mock
-        with mock.patch("praisonaiagents.mcp.mcp_websocket.get_event_loop", return_value=loop):
-            assert _run_with_timeout(m.__del__, seconds=2.0), "MCP.__del__ waited on the WebSocket close"
+        assert _run_with_timeout(m.__del__, seconds=2.0), "MCP.__del__ waited on the WebSocket close"
+        # The close was still scheduled on the session's loop, not skipped.
+        loop.run_until_complete(asyncio.sleep(0.05))
+        assert scheduled == [True], "finalizer skipped the WebSocket cleanup"
     finally:
-        loop.run_until_complete(asyncio.sleep(0.01))   # let the scheduled aclose() finish
         loop.close()
     assert "fin-e" not in MCP.list_active_server_names()
 
