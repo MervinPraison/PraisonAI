@@ -8065,6 +8065,21 @@ class WebSocketGateway:
         # Auto-enable when the effective session store is durable (the default).
         return self._durable_store_present(gw_cfg)
 
+    def _register_rooms_from_config(self, rooms_cfg: Optional[Dict[str, Any]]) -> None:
+        """Register each ``rooms.<name>`` roster as a ``room:<name>`` route target.
+
+        Issue #5768: a room is agent-shaped (see ``bots._room.GatewayRoom``), so
+        binding ``routes: {group: room:standup}`` resolves it through the same
+        agent registry and session/delivery path as a single agent.
+        """
+        if not rooms_cfg:
+            return
+        from praisonai_bot.bots._room import build_rooms
+
+        for route_id, room in build_rooms(rooms_cfg, self._agents).items():
+            self._agents[route_id] = room
+            logger.info(f"Room registered: {route_id} roster={room.config.roster}")
+
     def _create_agents_from_config(
         self,
         agents_cfg: Dict[str, Dict[str, Any]],
@@ -10424,6 +10439,7 @@ class WebSocketGateway:
                 guardrails_cfg=guardrails_cfg,
                 durable_runs=durable_runs,
             )
+            self._register_rooms_from_config(new_cfg.get("rooms"))
             candidate = {
                 "agents": dict(self._agents),
                 "shell": dict(self._shell_routed_agents),
@@ -11373,6 +11389,7 @@ class WebSocketGateway:
                 guardrails_cfg=guardrails_cfg,
                 durable_runs=durable_runs,
             )
+        self._register_rooms_from_config(cfg.get("rooms"))
 
         # Register inbound trigger hooks (Issue #2281). Hooks may live at the
         # top level (``hooks:``) or nested under ``gateway:`` for grouping.

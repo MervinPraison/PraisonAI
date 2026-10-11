@@ -1072,6 +1072,11 @@ class GatewayConfigSchema(BaseModel):
     # surfaces a warning per invalid entry so the operator sees it.
     schedules: Optional[Dict[str, Dict[str, Any]]] = None
 
+    # Multi-agent conversation rooms (Issue #5768). Each ``rooms.<name>`` entry
+    # (``agents:``/``roster:``, ``max_rounds``, ``max_messages``) is parsed by
+    # core ``RoomConfig.from_dict`` and bound like an agent via ``room:<name>``.
+    rooms: Optional[Dict[str, Dict[str, Any]]] = None
+
     # Gateway server settings (host/port, drain_timeout, admission control,
     # etc.) and inbound trigger hooks. Kept as dicts/lists on this model so
     # downstream consumers (``gateway/server.py`` reads them via ``.get(...)``)
@@ -1526,6 +1531,8 @@ class GatewayConfigSchema(BaseModel):
         agent_ids = set(self.agents or {})
         if not agent_ids:
             return
+        # Declared rooms are routable as ``room:<name>`` (Issue #5768).
+        agent_ids |= {f"room:{name}" for name in (self.rooms or {})}
 
         import difflib
 

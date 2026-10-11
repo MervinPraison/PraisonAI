@@ -1997,6 +1997,22 @@
       "default": null,
       "title": "Schedules"
     },
+    "rooms": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Rooms"
+    },
     "gateway": {
       "anyOf": [
         {
