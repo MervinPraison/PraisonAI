@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Union
+from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Union
 
 from praisonaiagents.gateway.protocols import PresenceInfo
 from praisonaiagents.push.models import ChannelMessage
@@ -70,6 +70,9 @@ class PushClient:
         self._event_handlers: Dict[str, List[Callable]] = {}
         # Channels to re-subscribe to after reconnect
         self._subscribed_channels: set = set()
+        # Strong refs to fire-and-forget tasks (ACKs, async channel callbacks)
+        # so they cannot be garbage collected before they run.
+        self._pending_tasks: Set[asyncio.Task] = set()
 
     # ------------------------------------------------------------------
     # Connection lifecycle
@@ -113,6 +116,10 @@ class PushClient:
                 await self._receive_task
             except asyncio.CancelledError:
                 pass
+
+        # Drain in-flight ACKs / callbacks before closing the transport.
+        if self._pending_tasks:
+            await asyncio.gather(*list(self._pending_tasks), return_exceptions=True)
 
         if self._transport:
             await self._transport.disconnect()
@@ -257,6 +264,13 @@ class PushClient:
     # Internal
     # ------------------------------------------------------------------
 
+    def _spawn(self, coro: Any) -> asyncio.Task:
+        """Schedule a fire-and-forget task while holding a strong reference."""
+        task = asyncio.create_task(coro)
+        self._pending_tasks.add(task)
+        task.add_done_callback(self._pending_tasks.discard)
+        return task
+
     async def _send(self, data: Dict[str, Any]) -> None:
         """Send a message through the active transport."""
         if not (self._transport and self._transport.is_connected):
@@ -297,7 +311,7 @@ class PushClient:
                     "channel.list", "presence.heartbeat_ack", "presence.list",
                     "joined", "left", "error",
                 ):
-                    asyncio.create_task(self._send({"type": "message_ack", "event_id": event_id}))
+                    self._spawn(self._send({"type": "message_ack", "event_id": event_id}))
 
                 # Dispatch channel messages (non-blocking)
                 channel = data.get("channel")
@@ -306,7 +320,7 @@ class PushClient:
                     for cb in self._channel_callbacks.get(channel, []):
                         try:
                             if asyncio.iscoroutinefunction(cb):
-                                asyncio.create_task(cb(msg))
+                                self._spawn(cb(msg))
                             else:
                                 cb(msg)
                         except Exception as e:

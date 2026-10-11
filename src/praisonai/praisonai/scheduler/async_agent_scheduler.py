@@ -564,6 +564,9 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
             Agent execution result
         """
         logger.info("Executing agent once (async)")
+        if self._budget_exceeded():
+            logger.warning(f"Budget limit reached: ${self._total_cost:.4f} >= ${self.max_cost}; skipping run")
+            return None
         try:
             result = await self._executor.execute(self.task)
             logger.info(f"One-time async execution successful: {result}")
