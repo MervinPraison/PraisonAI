@@ -126,3 +126,76 @@ def test_concurrent_turns_see_their_own_cancel_token(monkeypatch):
     assert seen["B"]() is False
     tokens["A"].cancelled = True
     assert seen["A"]() is False
+
+
+def test_overlapping_turn_does_not_reset_in_flight_turns_guard(monkeypatch):
+    agent = _agent(monkeypatch)
+    guard = agent._ensure_loop_guard()
+    started_a = threading.Event()
+    release_a = threading.Event()
+    real_impl = agent._chat_impl
+
+    def impl(prompt, *args, **kwargs):
+        if prompt == "A":
+            guard.record("lookup", {"q": "x"}, True, "same")
+            started_a.set()
+            release_a.wait(5)
+            return "ok"
+        return real_impl(prompt, *args, **kwargs)
+
+    monkeypatch.setattr(agent, "_chat_impl", impl)
+    monkeypatch.setattr(agent, "_chat_completion", _boom)
+    th = threading.Thread(target=agent.chat, args=("A",))
+    th.start()
+    assert started_a.wait(5)
+    agent.chat("B")  # B runs fully while A is in flight
+    assert guard._tool_counts.get("lookup") == 1  # A's tracking survives B's turn start
+    release_a.set()
+    th.join(5)
+    assert agent._turns_in_flight == 0
+
+
+def test_overlapping_achat_tool_worker_sees_own_cancel_token(monkeypatch):
+    agent = _agent(monkeypatch)
+    seen = {}
+
+    def probe(label: str) -> str:
+        """Record the calling turn's liveness."""
+        seen[label] = agent._current_turn_liveness()
+        return label
+
+    agent.tools = [probe]
+    agent._tool_timeout = 5  # run the tool body in the executor worker thread
+
+    class _Tok:
+        def __init__(self):
+            self.cancelled = False
+
+        def is_set(self):
+            return self.cancelled
+
+    tokens = {"A": _Tok(), "B": _Tok()}
+    b_done = None
+
+    async def fake_impl(prompt, **kwargs):
+        if prompt == "A":
+            await b_done.wait()  # A's tool runs after B's turn has started and ended
+        await asyncio.to_thread(agent.execute_tool, "probe", {"label": prompt})
+        if prompt == "B":
+            b_done.set()
+        return "ok"
+
+    monkeypatch.setattr(agent, "_achat_impl", fake_impl)
+
+    async def main():
+        nonlocal b_done
+        b_done = asyncio.Event()
+        await asyncio.gather(
+            agent.achat("A", cancel_token=tokens["A"]),
+            agent.achat("B", cancel_token=tokens["B"]),
+        )
+
+    asyncio.run(main())
+    tokens["B"].cancelled = True
+    assert seen["A"]() is True  # cancelling B leaves A's approvals live
+    assert seen["B"]() is False

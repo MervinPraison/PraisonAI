@@ -10,6 +10,7 @@ import os
 import re
 import time
 import json
+import threading
 import logging
 from praisonaiagents._logging import get_logger
 from ..errors import BudgetExceededError, ToolExecutionError
@@ -21,14 +22,35 @@ from ._lazy_display import _get_console, _get_live, _get_display_functions
 logger = logging.getLogger(__name__)
 
 
-def _reset_turn_cancel(ctx_token):
-    """Restore the per-context turn cancel token set by ``chat``/``achat``."""
+_turns_lock = threading.Lock()
+
+
+def _enter_turn(agent, cancel):
+    """Mark a ``chat``/``achat`` turn in flight and bind its cancel token to this context."""
+    with _turns_lock:
+        agent._turns_in_flight = getattr(agent, "_turns_in_flight", 0) + 1
+    return _active_turn_cancel.set((agent, cancel))
+
+
+def _exit_turn(agent, ctx_token):
+    """Undo ``_enter_turn``: restore the context's cancel token and drop the in-flight count."""
     if ctx_token is None:
         return
+    with _turns_lock:
+        agent._turns_in_flight = max(getattr(agent, "_turns_in_flight", 1) - 1, 0)
     try:
         _active_turn_cancel.reset(ctx_token)
     except (ValueError, LookupError):
         _active_turn_cancel.set(None)
+
+
+def _reset_loop_guard_for_turn(agent):
+    """Reset per-turn loop-guard limits unless another turn on this agent is still
+    running (the guard is shared; resetting it would restart that turn's limits).
+    Never force-creates the guard."""
+    guard = getattr(agent, "_loop_guard", None)
+    if guard is not None and getattr(agent, "_turns_in_flight", 0) <= 1:
+        guard.reset_turn()
 
 
 
@@ -3377,7 +3399,7 @@ Your Goal: {self.goal}"""
                 cancel_source, explicit=cancel_token is not None
             )
             self._active_turn_token = _cancel
-            _cancel_ctx = _active_turn_cancel.set((self, _cancel))
+            _cancel_ctx = _enter_turn(self, _cancel)
             if _cancel is not None and getattr(_cancel, "is_set", lambda: False)():
                 reason = getattr(_cancel, "reason", None) or "cancelled before LLM call"
                 raise InterruptedError(f"Agent chat cancelled: {reason}")
@@ -3434,7 +3456,7 @@ Your Goal: {self.goal}"""
             finally:
                 if getattr(self, "_active_turn_token", None) is _cancel:
                     self._active_turn_token = None
-                _reset_turn_cancel(_cancel_ctx)
+                _exit_turn(self, _cancel_ctx)
                 if _cancel is not None:
                     _cancel.close()
 
@@ -3444,10 +3466,8 @@ Your Goal: {self.goal}"""
         # sees tools used in this turn (not during a nested skill-review turn).
         self._reset_turn_tools()
         # Per-turn loop-guard limits (time/count/no-progress) must not accumulate
-        # across turns of a long-lived agent. Don't force-create it here.
-        _guard = getattr(self, "_loop_guard", None)
-        if _guard is not None:
-            _guard.reset_turn()
+        # across turns of a long-lived agent.
+        _reset_loop_guard_for_turn(self)
         self._last_stop_reason = "completed"
         # Apply rate limiter if configured (before any LLM call)
         if self._rate_limiter is not None:
@@ -4214,7 +4234,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             cancel_source, explicit=cancel_token is not None
         )
         self._active_turn_token = _cancel
-        _cancel_ctx = _active_turn_cancel.set((self, _cancel))
+        _cancel_ctx = _enter_turn(self, _cancel)
         try:
             if getattr(getattr(self, "execution", None), "durable", False):
                 from .durable import abegin_durable_run
@@ -4278,7 +4298,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     finally:
                         if getattr(self, "_active_turn_token", None) is _cancel:
                             self._active_turn_token = None
-                        _reset_turn_cancel(_cancel_ctx)
+                        _exit_turn(self, _cancel_ctx)
                         if _cancel is not None:
                             _cancel.close()
 
@@ -4291,10 +4311,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # sees tools used in this turn (not during a nested skill-review turn).
         self._reset_turn_tools()
         # Per-turn loop-guard limits (time/count/no-progress) must not accumulate
-        # across turns of a long-lived agent. Don't force-create it here.
-        _guard = getattr(self, "_loop_guard", None)
-        if _guard is not None:
-            _guard.reset_turn()
+        # across turns of a long-lived agent.
+        _reset_loop_guard_for_turn(self)
         self._last_stop_reason = "completed"
         # Apply rate limiter if configured (before any LLM call) - async parity
         # with the sync path in _chat_impl; without this, async bursts (astart,
