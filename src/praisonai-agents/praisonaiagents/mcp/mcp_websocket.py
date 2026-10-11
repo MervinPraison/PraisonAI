@@ -367,6 +367,11 @@ class WebSocketMCPClient:
         self.transport = None
         self.tools: List[WebSocketMCPTool] = []
         self._closed = False
+        # The loop that owns ``self.session``. ``get_event_loop()`` is
+        # thread-local, so close() must not look it up again: a finalizer or a
+        # caller on another thread would get a different, idle loop and the
+        # scheduled cleanup would never run.
+        self._loop = None
         
         # Configure logging
         if debug:
@@ -380,6 +385,7 @@ class WebSocketMCPClient:
     def _initialize(self):
         """Initialize the connection and discover tools."""
         loop = get_event_loop()
+        self._loop = loop
         
         # Start event loop in background thread if not running
         def run_event_loop():
@@ -499,11 +505,14 @@ class WebSocketMCPClient:
             return
         
         try:
-            loop = get_event_loop()
-            if not loop.is_closed():
+            loop = getattr(self, "_loop", None)
+            if loop is not None and not loop.is_closed():
                 future = asyncio.run_coroutine_threadsafe(self.aclose(), loop)
                 if wait:
                     future.result(timeout=5)
+            else:
+                # Never connected (or its loop is gone): nothing to close.
+                self._closed = True
         except Exception:
             self._closed = True
     
