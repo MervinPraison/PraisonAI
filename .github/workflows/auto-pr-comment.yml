@@ -16,7 +16,10 @@ on:
   pull_request_target:
     types: [opened, synchronize]
   schedule:
-    - cron: '30 3,9,15,21 * * *'
+    # Hourly stale/missing-FINAL sweep. A push is the only other recovery
+    # trigger, and at push time the "wait for CI" debounce correctly holds back;
+    # this sweep is what re-posts the FINAL once the push has settled.
+    - cron: '30 * * * *'
   workflow_dispatch:
 
 env:
@@ -163,7 +166,7 @@ jobs:
                 return;
               }
               const result = await chain.maybeTriggerClaudeFinal(
-                github, owner, repo, pr, finalBody, core, opts
+                github, owner, repo, pr, finalBody, core, { ...opts, staleRecovery: true }
               );
               if (result.posted) core.info(`Posted stale-FINAL recovery @claude on PR #${pr}`);
               return;
@@ -241,7 +244,7 @@ jobs:
               const result = await chain.maybeTriggerClaudeFinal(
                 github, owner, repo, pr.number,
                 mergeGate.FINAL_CLAUDE_REVIEW_BODY, core,
-                { skipCopilot: true, optionalWaitMs: 0 }
+                { skipCopilot: true, optionalWaitMs: 0, staleRecovery: hasFinal && isStale }
               );
               if (result.posted) {
                 posted++;

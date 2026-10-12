@@ -107,5 +107,37 @@ assert(
   'claude FINAL not re-posted when already triggered',
   !chain.claudeFinalReady([greptile, finalClaude], [], { prCreatedAt: oldPr, requiredWaitMs: 0 }).ready
 );
+assert(
+  'stale-FINAL recovery may re-post over an existing trigger',
+  chain.claudeFinalReady([greptile, finalClaude], [], {
+    prCreatedAt: oldPr, requiredWaitMs: 0, skipCopilot: true, staleRecovery: true,
+  }).ready
+);
 
-process.exit(failed ? 1 : 0);
+// maybeTriggerClaudeFinal actually posts the recovery comment.
+(async () => {
+  const posted = [];
+  const fakeGithub = {
+    rest: {
+      pulls: {
+        get: async () => ({ data: { created_at: oldPr } }),
+        listReviews: async () => ({ data: [] }),
+      },
+      issues: {
+        listComments: async () => ({ data: [greptile, finalClaude] }),
+        createComment: async (args) => { posted.push(args); },
+      },
+    },
+  };
+  const stale = await chain.maybeTriggerClaudeFinal(
+    fakeGithub, 'o', 'r', 1, 'BODY', null,
+    { skipCopilot: true, optionalWaitMs: 0, requiredWaitMs: 0, staleRecovery: true }
+  );
+  assert('stale-FINAL recovery posts the replacement comment', stale.posted && posted.length === 1);
+  const dup = await chain.maybeTriggerClaudeFinal(
+    fakeGithub, 'o', 'r', 1, 'BODY', null,
+    { skipCopilot: true, optionalWaitMs: 0, requiredWaitMs: 0 }
+  );
+  assert('without staleRecovery an existing FINAL is not re-posted', !dup.posted && posted.length === 1);
+  process.exit(failed ? 1 : 0);
+})();
