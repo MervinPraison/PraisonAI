@@ -165,6 +165,8 @@ function isClaudeFinalReplyComment(c) {
     AUTO_ACTORS.some((a) => a.toLowerCase() === login);
   if (!fromAutomation) return false;
   const body = c.body || '';
+  // The FINAL trigger embeds the Phase 1 heading; an @claude request is never a reply.
+  if (/^\s*@claude\b/i.test(body)) return false;
   return FINAL_REPLY_MARKERS.some((re) => re.test(body));
 }
 

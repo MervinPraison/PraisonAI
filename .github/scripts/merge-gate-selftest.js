@@ -91,6 +91,15 @@ assert(
     body: '## CI fix: `test_service_delete_all` (pushed 52c0fdb1e)',
   })
 );
+assert(
+  'the FINAL @claude trigger (embeds the Phase 1 heading) is not a completion',
+  !mg.isClaudeFinalReplyComment({ user: { login: 'MervinPraison' }, body: mg.FINAL_CLAUDE_REVIEW_BODY })
+);
+const triggerOnly = [
+  { user: { login: 'MervinPraison' }, body: mg.FINAL_CLAUDE_REVIEW_BODY, created_at: '2026-10-12T08:00:00Z' },
+];
+assert('real FINAL trigger alone is not a completed review',
+  !mg.finalClaudeCompletedOnSha(triggerOnly, '2026-10-12T07:55:00Z'));
 // PR #5772 timeline: FINAL 07:49:49, reviewer pushes 07:56:13, review 07:56:28.
 const pr5772 = [
   { user: { login: 'MervinPraison' }, body: '@claude You are the FINAL architecture reviewer.', created_at: '2026-10-12T07:49:49Z' },

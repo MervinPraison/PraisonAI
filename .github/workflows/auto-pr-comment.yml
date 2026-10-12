@@ -166,7 +166,7 @@ jobs:
                 return;
               }
               const result = await chain.maybeTriggerClaudeFinal(
-                github, owner, repo, pr, finalBody, core, opts
+                github, owner, repo, pr, finalBody, core, { ...opts, staleRecovery: true }
               );
               if (result.posted) core.info(`Posted stale-FINAL recovery @claude on PR #${pr}`);
               return;
@@ -244,7 +244,7 @@ jobs:
               const result = await chain.maybeTriggerClaudeFinal(
                 github, owner, repo, pr.number,
                 mergeGate.FINAL_CLAUDE_REVIEW_BODY, core,
-                { skipCopilot: true, optionalWaitMs: 0 }
+                { skipCopilot: true, optionalWaitMs: 0, staleRecovery: hasFinal && isStale }
               );
               if (result.posted) {
                 posted++;

@@ -163,7 +163,9 @@ function claudeFinalAlreadyTriggered(comments) {
 }
 
 function claudeFinalReady(comments, reviews = [], options = {}) {
-  if (claudeFinalAlreadyTriggered(comments)) {
+  // staleRecovery: the caller already confirmed (shouldSkipStaleFinalRecovery)
+  // that the existing FINAL is stale on HEAD, so a re-post is intended.
+  if (!options.staleRecovery && claudeFinalAlreadyTriggered(comments)) {
     return { ready: false, reason: 'claude FINAL already triggered', already: true };
   }
   const prior = priorReviewersReady(comments, reviews, options);
