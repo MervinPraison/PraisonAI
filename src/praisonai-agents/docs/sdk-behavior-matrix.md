@@ -1,8 +1,9 @@
 # SDK Behavior Matrix
 
 Deterministic expectations for the public knobs that integrators most often mistake for
-"model randomness". Each row names the test that pins the behavior; if the test passes and
-your app disagrees with the row, the row (or your call) is wrong — not the model.
+"model randomness". Each row lists a related test. Passing it is a useful check, but mocked
+unit tests do not rule out SDK bugs in the paths they replace. If your app disagrees with a
+row, check the sharp edges and investigate the real call path.
 
 - **Scope:** `praisonaiagents` Python API (main branch). Paths are relative to
   `src/praisonai-agents/`.
@@ -14,7 +15,7 @@ your app disagrees with the row, the row (or your call) is wrong — not the mod
 1. Find the knob from the report in the tables below.
 2. Run the listed test: `PYTHONPATH=. python -m pytest <test> -q`.
 3. **Test fails** → SDK defect; open a bug. **Test passes** but behavior differs → check the
-   *Sharp edge* column, then update this page if it is stale.
+   *Sharp edge* column, reproduce on the real call path, then open a bug or update this page.
 
 ---
 
@@ -28,15 +29,17 @@ Streaming is configured through `output=`, not a constructor kwarg.
 | API / knob | Expected behavior | Sharp edge | Test |
 | --- | --- | --- | --- |
 | `chat(prompt, stream=None)` | Inherits `agent.stream`. Returns the final `str` (or model, see §3). | Never a generator. | `tests/unit/agent/test_execution_api.py` |
-| `chat(stream=True)` | Tokens go to `agent.stream_emitter`; the call still returns the full `str`. If the adapter cannot stream (`"Streaming is not supported"`) or the stream attempt fails transiently, it falls back to a non-streaming call. | `None` is **not** a valid "streaming succeeded" result (#5737). `LLMError`, `ToolExecutionError`, other `ValueError`s and post-dispatch tool-turn failures are raised, not retried. | `tests/test_chat_explicit_stream_fallback.py`, `tests/test_streaming_fallback_kwargs.py` |
+| `chat(stream=True)` | Tokens go to `agent.stream_emitter`; the call still returns the full `str`. If the adapter cannot stream (`"Streaming is not supported"`) or the stream attempt fails transiently, it falls back to a non-streaming call. | `None` is **not** a valid "streaming succeeded" result (#5737). `LLMError`, `ToolExecutionError`, other `ValueError`s and post-dispatch tool-turn failures are **not retried** by the fallback. Of these, only `ToolExecutionError` reaches the caller; the rest roll back history and `chat()` returns `None` (see below). | `tests/test_chat_explicit_stream_fallback.py`, `tests/test_streaming_fallback_kwargs.py` |
 | `chat(stream=False)` | Single non-streaming completion; no stream events. | — | `tests/unit/test_stream_preset.py` |
 | `start(prompt)` | Stream priority: explicit kwarg > `agent.stream` > TTY. When streaming, returns a **generator** of chunks; otherwise a `str`. | Because `agent.stream` is always a bool, the TTY fallback only applies if `agent.stream` is set to `None`. Output guardrails are not applied to streamed chunks. | `tests/unit/agent/test_execution_api.py` |
-| `run(prompt)` | Never streams unless `stream=True` is passed; returns `str`. | Ignores TTY. | `tests/unit/agent/test_execution_api.py::test_run_ignores_tty_detection` |
-| `iter_stream(prompt)` | Always a generator of chunks. | — | `tests/unit/agent/test_execution_api.py::test_iter_stream_always_streams` |
-| `achat()` / `astart()` | Same `stream` resolution as `chat()`; awaits and returns the final `str`. | Unlike `start()`, `astart()` never returns an (async) generator. | `tests/unit/agent/test_achat_unified_dispatch.py`, `tests/unit/agent/test_execution_api.py::test_astart_streams_in_tty` |
+| `run(prompt)` | Never streams unless `stream=True` is passed; returns `str`. | Ignores TTY. | `tests/unit/agent/test_execution_api.py::TestAgentRunMethod::test_run_ignores_tty_detection` |
+| `iter_stream(prompt)` | Always a generator of chunks. | — | `tests/unit/agent/test_execution_api.py::TestAgentIterStreamMethod::test_iter_stream_always_streams` |
+| `achat()` / `astart()` | Same `stream` resolution as `chat()`; awaits and returns the final `str`. | Unlike `start()`, `astart()` never returns an (async) generator. | `tests/unit/agent/test_achat_unified_dispatch.py`, `tests/unit/agent/test_execution_api.py::TestAsyncMethods::test_astart_streams_in_tty` |
 
 **When `chat()`/`achat()` return `None`:** input guardrail or `BEFORE_AGENT` hook blocked the
-run, or the LLM call failed (history is rolled back and the error is displayed/logged).
+run, or the LLM call failed with anything other than `ToolExecutionError` (history is rolled
+back and the error is displayed/logged, not raised). Check for `None` rather than relying on
+`try/except` around `chat()`.
 An **output** guardrail rejection returns a fixed refusal string, not `None`; see
 `agent.last_guardrail_error`.
 
@@ -76,7 +79,7 @@ outputs; otherwise the schema is appended to the prompt as text.
 | API / knob | Expected behavior | Sharp edge | Test |
 | --- | --- | --- | --- |
 | `AGUI(agent=...).get_router()` | Returns a FastAPI `APIRouter`; mount it with `app.include_router(...)`. `POST {prefix}/agui` → SSE (`text/event-stream`); `GET {prefix}/status` → `{"status": "available"}`. | AGUI has no built-in server or default port — you run uvicorn and own startup/shutdown. `AGUI()` with no agent raises `ValueError`. | `tests/agui/test_agui.py`, `tests/agui/test_router.py` |
-| SSE events | `RUN_STARTED` → `TEXT_MESSAGE_*` / `TOOL_CALL_*` → `RUN_FINISHED`; exceptions become `RUN_ERROR`. | Multi-agent (`agents=`) sends the whole result as one text message, not token stream. | `tests/agui/test_router.py::test_agui_endpoint_handles_agent_error` |
+| SSE events | `RUN_STARTED` → `TEXT_MESSAGE_*` / `TOOL_CALL_*` → `RUN_FINISHED`; exceptions become `RUN_ERROR`. | Multi-agent (`agents=`) sends the whole result as one text message, not token stream. Event order and `RUN_ERROR` emission over the endpoint are **not pinned** by a test; the router test only checks that a failing agent still yields HTTP 200. | `tests/agui/test_streaming.py::TestRunLifecycleEvents` (event construction), `tests/agui/test_router.py::TestAGUIEndpointErrorHandling::test_agui_endpoint_handles_agent_error` (HTTP only) |
 
 ---
 
