@@ -11,7 +11,7 @@ import uuid
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 from dataclasses import dataclass, field
-from concurrent.futures import ThreadPoolExecutor, Future
+from concurrent.futures import CancelledError, ThreadPoolExecutor, Future
 
 from praisonaiagents._logging import get_logger
 
@@ -137,6 +137,7 @@ class BackgroundJobManager:
         self._jobs: Dict[str, JobInfo] = {}
         self._futures: Dict[str, Future] = {}
         self._lock = threading.Lock()
+        self._last_gc = time.time()
 
     def _persist(self, job: JobInfo) -> None:
         """Best-effort persist of a job's current state to the store.
@@ -193,6 +194,13 @@ class BackgroundJobManager:
             The job ID
         """
         job_id = job_id or str(uuid.uuid4())[:8]
+        
+        # Opportunistically evict old terminal jobs so long-lived hosts
+        # (gateways, bots, servers) don't retain every finished result.
+        now = time.time()
+        if now - self._last_gc > self._GC_INTERVAL:
+            self._last_gc = now
+            self.cleanup_completed()
         
         job_info = JobInfo(
             job_id=job_id,
@@ -357,9 +365,17 @@ class BackgroundJobManager:
             RuntimeError: If job failed
         """
         with self._lock:
-            if job_id not in self._futures:
+            future = self._futures.get(job_id)
+        if future is None:
+            # Evicted from memory: answer terminal outcomes from the durable store
+            job = self._store.get(job_id) if self._store else None
+            if job is None or job.status not in self._EVICTABLE_STATES:
                 raise KeyError(f"Job {job_id} not found")
-            future = self._futures[job_id]
+            if job.status == JobStatus.COMPLETED:
+                return job.result
+            if job.status == JobStatus.CANCELLED:
+                raise CancelledError(f"Job {job_id} was cancelled")
+            raise RuntimeError(job.error or f"Job {job_id} {job.status.value}")
         
         try:
             return future.result(timeout=timeout)
@@ -515,6 +531,9 @@ class BackgroundJobManager:
         JobStatus.CANCELLED,
         JobStatus.LOST,
     )
+
+    # Minimum seconds between opportunistic cleanups triggered by start_job
+    _GC_INTERVAL = 60.0
 
     def cleanup_completed(self, max_age: float = 3600.0) -> int:
         """

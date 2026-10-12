@@ -48,12 +48,11 @@ def _accurate_tokeniser_available() -> bool:
 
         def _probe() -> None:
             try:
-                from ..context.tokens import estimate_tokens_accurate
-                # Force real tokeniser init; heuristic fallback returns >0 too,
-                # but a network download would block here (bounded by the thread
-                # timeout below rather than hanging the caller).
-                estimate_tokens_accurate("probe", "gpt-4")
-                result.append(True)
+                from ..context.tokens import _get_tiktoken_encoder
+                # Force real tokeniser init; a network download would block
+                # here (bounded by the thread timeout below rather than
+                # hanging the caller). None means the load failed.
+                result.append(_get_tiktoken_encoder("gpt-4") is not None)
             except Exception:
                 result.append(False)
 

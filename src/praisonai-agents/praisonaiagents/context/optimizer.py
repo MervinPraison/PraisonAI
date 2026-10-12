@@ -673,17 +673,17 @@ class LLMContextCompressorOptimizer(BaseOptimizer):
         
         try:
             # Use configured compressor with LLM (if available)
-            import asyncio
+            from ..utils.async_bridge import run_coroutine_from_any_context
             try:
-                # Try async compression with configured LLM
-                result = asyncio.run(self.compressor.compress(
-                    messages=messages,
-                    target_tokens=target_tokens,
+                # Works both with and without a running event loop
+                result = run_coroutine_from_any_context(self.compressor.compress(
+                    messages,
                     summary_target_tokens=self.summary_target_tokens,
                     protect_last_n_tokens=self.protect_last_n_tokens,
                 ))
-            except:
-                # Fallback to sync compression if async fails
+            except Exception as e:
+                # Fallback to deterministic compression if LLM compression fails
+                logger.warning("LLM compression failed, using deterministic fallback: %s", e)
                 result = self._sync_compress(messages, target_tokens)
             
             optimized_tokens = estimate_messages_tokens(result.messages)

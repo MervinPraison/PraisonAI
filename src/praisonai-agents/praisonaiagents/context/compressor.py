@@ -84,6 +84,8 @@ class ContextCompressor:
         )
     """
     
+    _MAX_SESSION_HISTORY = 100
+
     def __init__(
         self,
         llm: Optional[LLMProviderProtocol] = None,
@@ -190,6 +192,8 @@ class ContextCompressor:
                 summary_text=summary_text,
             )
             self._session_history.append(compression_session)
+            # Bounded so reused compressors don't retain every summary forever
+            del self._session_history[:-self._MAX_SESSION_HISTORY]
         
         return CompressResult(
             messages=compressed_messages,
