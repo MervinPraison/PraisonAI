@@ -152,7 +152,16 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Release gate (#5780): 7/7 core live SDK scenarios must pass before publish.
+  live-smoke:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/live-sdk-smoke.yml
+    with:
+      require_key: true
+    secrets: inherit
+
   release:
+    needs: live-smoke
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: >-

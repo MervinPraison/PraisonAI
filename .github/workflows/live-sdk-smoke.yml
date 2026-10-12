@@ -1,0 +1,66 @@
+name: Live SDK Smoke
+
+# Release gate (issue #5780): 7/7 core live scenarios must pass before publish.
+# - workflow_call: required job in pypi-release.yml (missing key = failure)
+# - workflow_dispatch: manual run by the release manager
+# - pull_request labeled `run-live-smoke`: opt-in for risky SDK PRs
+#   (fork PRs get no secrets, so the harness skips with an explicit message)
+# - schedule: weekly core + extended run
+# Harness: scripts/live_sdk_smoke.py (same command reproduces locally).
+
+on:
+  workflow_call:
+    inputs:
+      require_key:
+        type: boolean
+        default: true
+  workflow_dispatch:
+    inputs:
+      extended:
+        description: 'Also run the non-blocking extended scenarios'
+        type: boolean
+        default: false
+  pull_request:
+    types: [labeled]
+  schedule:
+    - cron: '0 6 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    if: github.event_name != 'pull_request' || github.event.label.name == 'run-live-smoke'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065  # v5
+        with:
+          python-version: '3.11'
+
+      - name: Install praisonaiagents
+        run: pip install -e "src/praisonai-agents[api]" httpx
+
+      - name: Run live SDK smoke
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          REQUIRE_KEY: ${{ inputs.require_key == true }}
+          EXTENDED: ${{ github.event_name == 'schedule' || inputs.extended == true }}
+        run: |
+          args=(--json live_sdk_smoke.json)
+          [ "$REQUIRE_KEY" = "true" ] && args+=(--require-key)
+          [ "$EXTENDED" = "true" ] && args+=(--extended)
+          python scripts/live_sdk_smoke.py "${args[@]}"
+
+      - name: Upload summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: live-sdk-smoke
+          path: live_sdk_smoke.json
+          retention-days: 30
+          if-no-files-found: warn

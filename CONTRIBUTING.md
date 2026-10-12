@@ -24,3 +24,11 @@ Thank you for your interest! Here's how to get started:
 - Update documentation as needed
 - TypeScript changes: implement in `src/praisonai-ts/` and run `npm test` there
 - After merge, sync the npm mirror: `gh workflow run "Sync to praisonai-js" --repo MervinPraison/PraisonAI`
+
+## Release gate: live SDK smoke
+
+Every PyPI release must pass 7/7 core live scenarios in `scripts/live_sdk_smoke.py`. `pypi-release.yml` runs it as a required job, so a failure or a missing `OPENAI_API_KEY` blocks publishing. A waiver needs a written exception in the release notes.
+
+- Reproduce locally: `OPENAI_API_KEY=... python scripts/live_sdk_smoke.py` (add `--extended` for the non-blocking set)
+- Run in CI: `gh workflow run "Live SDK Smoke"`, or add the `run-live-smoke` label to a risky SDK PR
+- The extended set runs weekly. Failed scenario names are printed and saved to the `live-sdk-smoke` artifact (`live_sdk_smoke.json`)
