@@ -148,14 +148,27 @@ class TestFileLock:
 
         try:
             with FileLock(temp_path, timeout=0.1):
+                acquired_mtime = lock_path.stat().st_mtime
                 # Hold well past the timeout; heartbeat should keep it fresh.
                 time.sleep(0.5)
-                # A waiter must still see the lock as live (not stale).
-                waiter = FileLock(temp_path, timeout=0.1)
-                age = time.time() - lock_path.stat().st_mtime
-                assert age <= waiter.timeout, (
-                    "live lock aged past timeout; heartbeat not refreshing mtime"
+                # The heartbeat (every timeout/3) must have refreshed the mtime
+                # several times by now. Asserting that it moved forward checks
+                # the regression (a holder that never refreshes) without
+                # sampling one instant's age against a 0.1 s budget, which a
+                # descheduled heartbeat thread on a busy CI runner can exceed.
+                assert lock_path.stat().st_mtime > acquired_mtime, (
+                    "heartbeat not refreshing the live lock's mtime"
                 )
+                # A waiter polling for a while must observe the lock as live
+                # (age within timeout) at least once.
+                waiter = FileLock(temp_path, timeout=0.1)
+                deadline = time.time() + 2.0
+                fresh = False
+                while time.time() < deadline and not fresh:
+                    fresh = time.time() - lock_path.stat().st_mtime <= waiter.timeout
+                    if not fresh:
+                        time.sleep(0.01)
+                assert fresh, "live lock aged past timeout; heartbeat not refreshing mtime"
                 assert lock_path.exists()
         finally:
             temp_path.unlink()

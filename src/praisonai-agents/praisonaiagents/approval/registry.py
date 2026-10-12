@@ -17,6 +17,7 @@ Usage (no Agent param needed)::
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextvars
 import threading
 from praisonaiagents._logging import get_logger
@@ -98,6 +99,9 @@ class ApprovalRegistry:
     :func:`get_approval_registry`.
     """
 
+    # Upper bound on per-context approval-cache entries (see ``mark_approved``).
+    _MAX_CONTEXT_APPROVALS = 1024
+
     def __init__(self) -> None:
         # Backends
         self._global_backend = None  # type: ignore[assignment]
@@ -122,6 +126,17 @@ class ApprovalRegistry:
         # agent's grant that is being written at the same time. Only wraps these
         # small in-memory mutations, so it adds no hot-path cost.
         self._scope_lock = threading.Lock()
+        # Scope ids whose release a GC finalizer could not apply because
+        # ``_scope_lock`` was held (possibly by the very frame the collector
+        # interrupted). Drained by the next ``release_scope``.
+        self._pending_scope_releases: List[str] = []
+        # Scope ids of agents that have been closed or collected. A finalizer
+        # appends here (deque.append is atomic, so no lock); the next ordinary
+        # ``mark_approved`` drains it and prunes those agents' keys from the
+        # per-context cache it is already copying. Bounded: if a dead scope
+        # falls off the end its keys are still bounded by the cache cap below.
+        self._dead_scope_ids: collections.deque = collections.deque(maxlen=4096)
+        self._dead_scopes: Dict[str, None] = {}
 
         # Per-agent, per-tool auto-approval (G-A fix)
         self._agent_tool_auto_approve: Dict[tuple[str, str], bool] = {}
@@ -133,8 +148,10 @@ class ApprovalRegistry:
         self._session_scoped_targets: Set[tuple[Optional[str], str]] = set()
 
         # Context variables (per-coroutine / per-thread)
-        self._approved_context: contextvars.ContextVar[Set[str]] = contextvars.ContextVar(
-            "approved_context", default=set()
+        # Per-context approval cache: an insertion-ordered ``{cache_key: scope}``
+        # mapping, replaced (never mutated) on every write. ``None`` = empty.
+        self._approved_context: contextvars.ContextVar[Optional[Dict[str, str]]] = contextvars.ContextVar(
+            "approved_context", default=None
         )
         self._yaml_approved_tools: contextvars.ContextVar[Set[str]] = contextvars.ContextVar(
             "yaml_approved_tools", default=set()
@@ -304,9 +321,47 @@ class ApprovalRegistry:
         agent_name: Optional[str] = None,
         scope_id: Optional[str] = None,
     ) -> None:
-        approved = self._approved_context.get(set())
-        approved.add(self._approval_cache_key(tool_name, arguments or {}, agent_name, scope_id))
-        self._approved_context.set(approved)
+        # Copy-on-write: ``contextvars.copy_context()`` copies the mapping, not
+        # the cache object, so mutating it in place would leak an approval
+        # granted in a child context (worker thread, task) into its parent and
+        # siblings. The copy also prunes keys of agents that have since died
+        # and keeps at most ``_MAX_CONTEXT_APPROVALS`` (oldest dropped first;
+        # a dropped entry only means a human may be asked again).
+        key = self._approval_cache_key(tool_name, arguments or {}, agent_name, scope_id)
+        scope = scope_id or agent_name or '*'
+        dead = self._drain_dead_scopes()
+        current = self._approved_context.get(None) or {}
+        if key in current and not dead:
+            return
+        if isinstance(current, dict):
+            fresh = {k: s for k, s in current.items() if s not in dead} if dead else dict(current)
+        else:  # tolerate a plain set written by older code or tests
+            # Keys are "{scope}:{tool}:{hash}" and scope ids themselves contain
+            # a colon ("{name}:{uuid}"), so strip the last two fields.
+            fresh = {k: k.rsplit(":", 2)[0] for k in current}
+        fresh.pop(key, None)
+        fresh[key] = scope
+        overflow = len(fresh) - self._MAX_CONTEXT_APPROVALS
+        if overflow > 0:
+            for old in list(fresh)[:overflow]:
+                del fresh[old]
+        self._approved_context.set(fresh)
+
+    def _drain_dead_scopes(self) -> Dict[str, None]:
+        """Move finalizer-reported dead scopes into the bounded lookup map.
+
+        Called only from ordinary (non-finalizer) code. Returns the map so the
+        caller can prune with an O(1) membership test per cached key.
+        """
+        if self._dead_scope_ids:
+            with self._scope_lock:
+                while self._dead_scope_ids:
+                    self._dead_scopes[self._dead_scope_ids.popleft()] = None
+                overflow = len(self._dead_scopes) - self._dead_scope_ids.maxlen
+                if overflow > 0:
+                    for old in list(self._dead_scopes)[:overflow]:
+                        del self._dead_scopes[old]
+        return self._dead_scopes
 
     def is_already_approved(
         self,
@@ -317,7 +372,7 @@ class ApprovalRegistry:
     ) -> bool:
         # Honour an explicit mark_approved() from the agent approval path even
         # for critical tools (e.g. execute_command after AutoApproveBackend).
-        if self._approval_cache_key(tool_name, arguments or {}, agent_name, scope_id) in self._approved_context.get(set()):
+        if self._approval_cache_key(tool_name, arguments or {}, agent_name, scope_id) in (self._approved_context.get(None) or ()):
             return True
         return False
 
@@ -439,11 +494,11 @@ class ApprovalRegistry:
             )
 
     def clear_approved(self) -> None:
-        self._approved_context.set(set())
+        self._approved_context.set(None)
         with self._scope_lock:
             self._session_scoped_targets.clear()
 
-    def release_scope(self, scope_id: str) -> None:
+    def release_scope(self, scope_id: str, *, from_finalizer: bool = False) -> None:
         """Drop all grants recorded under a per-instance approval scope id.
 
         ``auto_approve_tool`` (skill ``allowed-tools`` pre-approval),
@@ -455,6 +510,14 @@ class ApprovalRegistry:
         ``Agent.close()``/``aclose()``/``__del__`` to reclaim a dead agent's
         entries without touching any other agent's grants.
 
+        ``from_finalizer=True`` must be used from a garbage-collection
+        finalizer, which runs in whichever thread and context the collector
+        fires in, possibly in the middle of a ContextVar update or while this
+        thread already holds ``_scope_lock``. It therefore never writes the
+        ContextVar (the "current" context there is not the agent's anyway) and
+        never blocks on the lock: if the lock is busy the release is queued and
+        applied by the next ``release_scope`` call.
+
         Mutates the shared collections **in place under ``_scope_lock``** (rather
         than rebuilding-and-replacing) so a concurrent writer's grant for a
         *different* scope can never be lost to a read-modify-write race, and
@@ -462,11 +525,24 @@ class ApprovalRegistry:
         """
         if not scope_id:
             return
-        with self._scope_lock:
-            for key in [k for k in self._agent_tool_auto_approve if k[0] == scope_id]:
+        # Lets every context prune this agent's cache keys on its next write.
+        self._dead_scope_ids.append(scope_id)
+        if from_finalizer:
+            if not self._scope_lock.acquire(blocking=False):
+                self._pending_scope_releases.append(scope_id)
+                return
+        else:
+            self._scope_lock.acquire()
+        try:
+            scopes = {scope_id}
+            while self._pending_scope_releases:
+                scopes.add(self._pending_scope_releases.pop())
+            for key in [k for k in self._agent_tool_auto_approve if k[0] in scopes]:
                 self._agent_tool_auto_approve.pop(key, None)
-            for entry in [t for t in self._session_scoped_targets if t[0] == scope_id]:
+            for entry in [t for t in self._session_scoped_targets if t[0] in scopes]:
                 self._session_scoped_targets.discard(entry)
+        finally:
+            self._scope_lock.release()
 
         # Evict this scope's per-context approval-cache keys. ``mark_approved``
         # stores ``"{scope_id}:{tool}:{hash}"`` entries in the ``_approved_context``
@@ -474,10 +550,16 @@ class ApprovalRegistry:
         # agents would otherwise retain one key per approved call forever. This
         # only touches the *current* context's set (ContextVars are per
         # coroutine/thread), which is the context the closing agent ran in.
-        prefix = f"{scope_id}:"
+        if from_finalizer:
+            return
         try:
-            approved = self._approved_context.get(set())
-            if approved:
+            approved = self._approved_context.get(None)
+            if isinstance(approved, dict) and approved:
+                remaining = {k: s for k, s in approved.items() if s != scope_id}
+                if len(remaining) != len(approved):
+                    self._approved_context.set(remaining)
+            elif approved:  # a plain set written by older code or tests
+                prefix = f"{scope_id}:"
                 remaining = {k for k in approved if not k.startswith(prefix)}
                 if len(remaining) != len(approved):
                     self._approved_context.set(remaining)
