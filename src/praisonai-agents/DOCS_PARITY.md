@@ -21,7 +21,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Agent | 22 | 62 | 19717 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 701 |
-| ✅ Approval | 1 | 8 | 4051 |
+| ✅ Approval | 1 | 8 | 4123 |
 | ✅ Audio | 2 | 12 | 1000 |
 | ✅ Auto Generation | 5 | 12 | 3941 |
 | ✅ Autonomy | 3 | 7 | 2808 |
