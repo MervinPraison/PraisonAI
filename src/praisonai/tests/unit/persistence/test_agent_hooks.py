@@ -26,8 +26,10 @@ class _EchoAgent:
 
     def __init__(self):
         self.chat_history = []
+        self.history_at_call = None
 
     def chat(self, prompt, *args, **kwargs):
+        self.history_at_call = list(self.chat_history)
         return f"echo: {prompt}"
 
     async def achat(self, prompt, *args, **kwargs):
@@ -56,7 +58,8 @@ def test_wrap_agent_with_persistence_persists_and_resumes(orchestrator):
 
     resumed = wrap_agent_with_persistence(_EchoAgent(), orchestrator, session_id="s1")
     resumed.chat("again")
-    assert resumed.chat_history[:2] == [
+    # History must be restored *before* the agent answers.
+    assert resumed.history_at_call == [
         {"role": "user", "content": "hi"},
         {"role": "assistant", "content": "echo: hi"},
     ]
@@ -90,10 +93,20 @@ def test_persistent_agent_delegates_and_persists(orchestrator):
     agent.end_session()
 
 
-def test_create_persistent_session_context_manager(orchestrator):
+def test_create_persistent_session_context_manager(orchestrator, monkeypatch):
+    ended = []
+    real_end = orchestrator.on_agent_end
+    monkeypatch.setattr(
+        orchestrator,
+        "on_agent_end",
+        lambda agent, sid: (ended.append(sid), real_end(agent, sid))[1],
+    )
+
     with create_persistent_session(orchestrator, session_id="s4") as session:
         session.persist_message("user", "hi")
         session.persist_message("assistant", "hello")
+        assert ended == []
 
+    assert ended == ["s4"]
     assert session.get_session().session_id == "s4"
     assert _pairs(session.get_messages()) == [("user", "hi"), ("assistant", "hello")]
