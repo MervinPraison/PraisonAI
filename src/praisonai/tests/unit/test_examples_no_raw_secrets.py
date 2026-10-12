@@ -1,6 +1,6 @@
 """Shipped examples must never contain raw credentials (issue #5783).
 
-Operators copy example configs verbatim into durable stores, so every channel
+Operators copy example configs verbatim into durable stores, so every bot
 credential in ``examples/`` must be an environment (``${VAR}``) or SecretRef
 (``{source, id}``) reference, and no high-confidence secret literal may appear.
 Intentionally fake demo values must say so (contain ``FAKE``).
@@ -33,19 +33,29 @@ _CREDENTIAL_KEYS = {
 _ENV_REF = re.compile(r"^\$\{[A-Za-z_][A-Za-z0-9_]*\}$")
 
 
-def _example_files(suffixes):
+def _is_text_file(path):
+    # ``.env.example`` etc. have no useful suffix, so match env templates by name.
+    return path.suffix in _TEXT_SUFFIXES or path.name == ".env" or path.name.startswith(".env.")
+
+
+def _example_files(predicate):
     if not _EXAMPLES_DIR.exists():
         return []
     return sorted(
         p for p in _EXAMPLES_DIR.rglob("*")
-        if p.is_file() and p.suffix in suffixes and "node_modules" not in p.parts
+        if p.is_file() and predicate(p) and "node_modules" not in p.parts
     )
+
+
+def test_env_templates_are_scanned():
+    assert _is_text_file(Path(".env.example"))
+    assert _is_text_file(Path(".env"))
 
 
 @pytest.mark.skipif(not _EXAMPLES_DIR.exists(), reason="examples not present")
 def test_examples_contain_no_secret_literals():
     hits = []
-    for path in _example_files(_TEXT_SUFFIXES):
+    for path in _example_files(_is_text_file):
         try:
             text = path.read_text(encoding="utf-8", errors="ignore")
         except OSError:
@@ -57,32 +67,41 @@ def test_examples_contain_no_secret_literals():
     assert not hits, "Raw secret literals in examples (use ${VAR}): " + ", ".join(hits)
 
 
-def _channel_yaml_files():
-    files = []
-    for path in _example_files({".yaml", ".yml"}):
+def _literal_credentials(node, where=""):
+    """Yield dotted paths of credential keys holding a literal, at any depth.
+
+    Walking the whole document covers every bot config shape (``channels:``,
+    ``platforms:`` and top-level keys such as ``signing_secret``).
+    """
+    if isinstance(node, dict):
+        for key, value in node.items():
+            path = f"{where}.{key}" if where else str(key)
+            if key in _CREDENTIAL_KEYS and value not in (None, ""):
+                is_secret_ref = isinstance(value, dict) and {"source", "id"} <= value.keys()
+                is_env_ref = isinstance(value, str) and bool(_ENV_REF.match(value))
+                if not (is_secret_ref or is_env_ref):
+                    yield path
+            yield from _literal_credentials(value, path)
+    elif isinstance(node, list):
+        for i, item in enumerate(node):
+            yield from _literal_credentials(item, f"{where}[{i}]")
+
+
+def test_literal_credential_detection_covers_bot_shapes():
+    assert list(_literal_credentials({"channels": {"slack": {"token": "x"}}})) == ["channels.slack.token"]
+    assert list(_literal_credentials({"platforms": {"telegram": {"token": "x"}}})) == ["platforms.telegram.token"]
+    assert list(_literal_credentials({"signing_secret": "x"})) == ["signing_secret"]
+    assert not list(_literal_credentials({"token": "${T}", "api_key": {"source": "env", "id": "K"}}))
+
+
+@pytest.mark.skipif(not _EXAMPLES_DIR.exists(), reason="examples not present")
+def test_yaml_credentials_are_references():
+    hits = []
+    for path in _example_files(lambda p: p.suffix in {".yaml", ".yml"}):
         try:
-            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            docs = list(yaml.safe_load_all(path.read_text(encoding="utf-8")))
         except (yaml.YAMLError, OSError):
             continue
-        if isinstance(data, dict) and isinstance(data.get("channels"), dict):
-            files.append((path, data["channels"]))
-    return files
-
-
-@pytest.mark.skipif(not _channel_yaml_files(), reason="no channel examples present")
-@pytest.mark.parametrize(
-    "path,channels", _channel_yaml_files(), ids=lambda v: v.name if isinstance(v, Path) else ""
-)
-def test_channel_credentials_are_references(path, channels):
-    for name, cfg in channels.items():
-        if not isinstance(cfg, dict):
-            continue
-        for key, value in cfg.items():
-            if key not in _CREDENTIAL_KEYS or value in (None, ""):
-                continue
-            is_secret_ref = isinstance(value, dict) and {"source", "id"} <= value.keys()
-            is_env_ref = isinstance(value, str) and bool(_ENV_REF.match(value))
-            assert is_secret_ref or is_env_ref, (
-                f"{path.name}: channels.{name}.{key} must be a ${{VAR}} or "
-                f"SecretRef reference, not a literal"
-            )
+        for doc in docs:
+            hits += [f"{path.relative_to(_REPO_ROOT)}: {k}" for k in _literal_credentials(doc)]
+    assert not hits, "Credentials must be ${VAR} or SecretRef references: " + ", ".join(hits)
