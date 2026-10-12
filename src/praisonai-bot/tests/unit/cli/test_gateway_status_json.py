@@ -34,9 +34,9 @@ def test_build_status_snapshot_merges_health_and_info(monkeypatch):
     info = {"version": "2.3.4", "protocol_version": 7}
 
     def fake_fetch(host, port, path, timeout=5.0):
-        return health if path == "/health" else info
+        return 200, (health if path == "/health" else info)
 
-    monkeypatch.setattr(gateway_cmd, "_fetch_gateway_json", fake_fetch)
+    monkeypatch.setattr(gateway_cmd, "_fetch_gateway", fake_fetch)
     monkeypatch.setattr(
         "praisonai_bot.daemon.get_daemon_status",
         lambda: {"platform": "linux", "installed": True, "running": True, "pid": 42},
@@ -60,7 +60,7 @@ def test_build_status_snapshot_merges_health_and_info(monkeypatch):
 
 def test_build_status_snapshot_unreachable(monkeypatch):
     monkeypatch.setattr(
-        gateway_cmd, "_fetch_gateway_json", lambda *a, **k: None
+        gateway_cmd, "_fetch_gateway", lambda *a, **k: (None, None)
     )
     monkeypatch.setattr(
         "praisonai_bot.daemon.get_daemon_status",
@@ -133,9 +133,9 @@ def test_snapshot_signals_version_unavailable_when_info_unreachable(monkeypatch)
     health = {"status": "healthy", "uptime": 1.0}
 
     def fake_fetch(host, port, path, timeout=5.0):
-        return health if path == "/health" else None
+        return (200, health) if path == "/health" else (None, None)
 
-    monkeypatch.setattr(gateway_cmd, "_fetch_gateway_json", fake_fetch)
+    monkeypatch.setattr(gateway_cmd, "_fetch_gateway", fake_fetch)
     monkeypatch.setattr(
         "praisonai_bot.daemon.get_daemon_status",
         lambda: {"platform": "linux", "installed": True, "running": True},
@@ -145,3 +145,125 @@ def test_snapshot_signals_version_unavailable_when_info_unreachable(monkeypatch)
     assert snap["reachable"] is True
     assert snap.get("version") is None
     assert snap["version_unavailable"] == "info_unreachable"
+
+
+def _snapshot_with_info(monkeypatch, info_status, info, host="127.0.0.1"):
+    def fake_fetch(h, port, path, timeout=5.0):
+        if path == "/health":
+            return 200, {"status": "healthy"}
+        return info_status, info
+
+    monkeypatch.setattr(gateway_cmd, "_fetch_gateway", fake_fetch)
+    monkeypatch.setattr(
+        "praisonai_bot.daemon.get_daemon_status",
+        lambda: {"platform": "linux", "installed": True, "running": True},
+    )
+    return gateway_cmd._build_status_snapshot(host, 8765)
+
+
+def test_access_reports_scopes_when_authorized(monkeypatch):
+    snap = _snapshot_with_info(
+        monkeypatch, 200, {"version": "1", "scopes": ["read", "write"]}
+    )
+    assert snap["access"] == {"authorized": True, "scopes": ["read", "write"]}
+
+
+def test_access_flags_read_only_credential(monkeypatch):
+    snap = _snapshot_with_info(monkeypatch, 200, {"version": "1", "scopes": ["read"]})
+    assert snap["reachable"] is True
+    assert snap["access"]["authorized"] is True
+    assert "auth_scopes" in snap["access"]["next_step"]
+
+
+def test_access_distinguishes_refused_credential_from_unreachable(monkeypatch):
+    monkeypatch.setenv("GATEWAY_AUTH_TOKEN", "wrong")
+    snap = _snapshot_with_info(monkeypatch, 403, None)
+    assert snap["reachable"] is True
+    assert snap["access"]["authorized"] is False
+    assert snap["access"]["http_status"] == 403
+    assert "rejected" in snap["access"]["next_step"]
+
+
+def test_access_missing_token_suggests_doctor_fix(monkeypatch, tmp_path):
+    monkeypatch.delenv("GATEWAY_AUTH_TOKEN", raising=False)
+    monkeypatch.setenv("PRAISONAI_ENV_FILE", str(tmp_path / "missing.env"))
+    snap = _snapshot_with_info(monkeypatch, 401, None)
+    assert "doctor --fix" in snap["access"]["next_step"]
+
+
+def test_access_remote_host_explains_loopback_only_token(monkeypatch):
+    monkeypatch.setenv("GATEWAY_AUTH_TOKEN", "tok")
+    snap = _snapshot_with_info(monkeypatch, 401, None, host="10.0.0.5")
+    assert "loopback" in snap["access"]["next_step"]
+
+
+def test_access_omitted_when_unreachable(monkeypatch):
+    monkeypatch.setattr(gateway_cmd, "_fetch_gateway", lambda *a, **k: (None, None))
+    monkeypatch.setattr(
+        "praisonai_bot.daemon.get_daemon_status",
+        lambda: {"platform": "linux", "installed": False, "running": False},
+    )
+    snap = gateway_cmd._build_status_snapshot("127.0.0.1", 8765)
+    assert snap["reachable"] is False
+    assert "access" not in snap
+
+
+@pytest.mark.parametrize("status", [None, 404, 500, 503])
+def test_access_unknown_when_no_auth_decision(monkeypatch, status):
+    monkeypatch.setenv("GATEWAY_AUTH_TOKEN", "tok")
+    snap = _snapshot_with_info(monkeypatch, status, None)
+    assert snap["access"] == {"authorized": None, "http_status": status}
+
+
+def _capture_urlopen(monkeypatch, outcome):
+    """Patch ``urlopen`` so ``_fetch_gateway``'s real error handling runs."""
+    import io
+    import urllib.request
+
+    seen = {}
+
+    class _Resp(io.BytesIO):
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(req, timeout=None):
+        seen["auth"] = req.get_header("Authorization")
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return _Resp(json.dumps(outcome).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    return seen
+
+
+@pytest.mark.parametrize("code", [401, 403])
+def test_fetch_gateway_surfaces_http_refusal(monkeypatch, code):
+    import urllib.error
+
+    monkeypatch.setenv("GATEWAY_AUTH_TOKEN", "tok")
+    err = urllib.error.HTTPError("http://x/info", code, "denied", {}, None)
+    _capture_urlopen(monkeypatch, err)
+    assert gateway_cmd._fetch_gateway("127.0.0.1", 8765, "/info") == (code, None)
+    assert gateway_cmd._fetch_gateway_json("127.0.0.1", 8765, "/info") is None
+
+
+def test_fetch_gateway_connection_failure_is_unreachable(monkeypatch):
+    import urllib.error
+
+    _capture_urlopen(monkeypatch, urllib.error.URLError("refused"))
+    assert gateway_cmd._fetch_gateway("127.0.0.1", 8765, "/info") == (None, None)
+
+
+@pytest.mark.parametrize(
+    "host,expected", [("127.0.0.1", "Bearer tok"), ("10.0.0.5", None)]
+)
+def test_fetch_gateway_sends_token_only_to_loopback(monkeypatch, host, expected):
+    monkeypatch.setenv("GATEWAY_AUTH_TOKEN", "tok")
+    seen = _capture_urlopen(monkeypatch, {"ok": True})
+    assert gateway_cmd._fetch_gateway(host, 8765, "/info") == (200, {"ok": True})
+    assert seen["auth"] == expected

@@ -1725,6 +1725,9 @@ class WebSocketGateway:
                 "sessions": len(self._sessions),
                 "clients": len(self._clients),
                 "api": api_cfg.to_dict() if api_cfg is not None else {},
+                # The caller's effective operator scopes, so `gateway status`
+                # can tell "reachable but under-authorised" apart (#5776).
+                "scopes": _resolve_operator_scopes(request),
             })
         
         async def _reject_connection(
