@@ -284,6 +284,8 @@ def test_expand_access_groups_passthrough_and_comma_string():
 
     assert expand_access_groups(["1", "2"], None) == ["1", "2"]
     assert expand_access_groups("group:a", {"a": "5, 6"}) == ["5", "6"]
+    # Env-expanded "${ADMINS}" inside a list must still split into ids.
+    assert expand_access_groups(["group:a"], {"a": ["5,6", "7"]}) == ["5", "6", "7"]
 
 
 def test_expand_access_groups_unknown_fails_closed():

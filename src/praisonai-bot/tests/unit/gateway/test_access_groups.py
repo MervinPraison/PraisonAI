@@ -35,3 +35,11 @@ def test_unknown_group_fails_closed(tmp_path):
     cfg_path.write_text(_BASE.replace('["group:admins"]', '["group:nope"]'))
     with pytest.raises(ValueError, match="Unknown access group"):
         WebSocketGateway.load_gateway_config(str(cfg_path))
+
+
+def test_env_backed_group_in_list_splits(tmp_path, monkeypatch):
+    monkeypatch.setenv("ADMINS", "111,222")
+    cfg_path = tmp_path / "gateway.yaml"
+    cfg_path.write_text(_BASE.replace('admins: ["111", "222"]', 'admins: ["${ADMINS}"]'))
+    cfg = WebSocketGateway.load_gateway_config(str(cfg_path))
+    assert cfg["channels"]["discord"]["allowed_users"] == ["111", "222"]

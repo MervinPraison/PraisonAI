@@ -146,7 +146,8 @@ def expand_access_groups(
     reference it from any channel's ``allowed_users``/``allowlist``/
     ``blocklist``, so editing or revoking membership happens in one place.
     Groups may include other groups. Order is preserved and duplicates removed;
-    a comma-separated string (env-expanded ``${VAR}``) is accepted as a list.
+    comma-separated strings (env-expanded ``${VAR}``) are split into ids,
+    whether given bare or as list items.
 
     Raises:
         ValueError: on an unknown group or a cycle, so a bad reference fails
@@ -158,10 +159,10 @@ def expand_access_groups(
 
     def _walk(items: Iterable[str], stack: tuple) -> None:
         if isinstance(items, str):
-            # Env-expanded value like "${ADMINS}" -> "111,222".
-            items = items.split(",")
-        for raw in items or ():
-            entry = str(raw).strip()
+            items = (items,)
+        # Split every item on commas: an env-expanded value like "${ADMINS}"
+        # -> "111,222" may arrive bare or inside a list (["${ADMINS}"]).
+        for entry in (p.strip() for raw in items or () for p in str(raw).split(",")):
             if not entry.startswith(GROUP_PREFIX):
                 if entry and entry not in seen:
                     seen.add(entry)

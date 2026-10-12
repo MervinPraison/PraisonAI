@@ -7952,13 +7952,15 @@ class WebSocketGateway:
                 f"Gateway config validation failed ({config_path}):\n"
                 "  - 'access_groups' must be a mapping of name -> list of ids"
             )
-        from praisonaiagents.bots.admission import expand_access_groups
-
         for cname, cdef in (raw.get("channels") or {}).items():
             if not isinstance(cdef, dict):
                 continue
             for key in ("allowed_users", "allowlist", "blocklist"):
-                if cdef.get(key):
+                # Only touch core when groups are in play, so configs without
+                # them keep loading on older praisonaiagents releases.
+                if cdef.get(key) and (access_groups or "group:" in str(cdef[key])):
+                    from praisonaiagents.bots.admission import expand_access_groups
+
                     try:
                         cdef[key] = expand_access_groups(cdef[key], access_groups)
                     except ValueError as exc:
