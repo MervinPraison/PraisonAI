@@ -50,6 +50,9 @@ class ManagedBackendBase:
     def _after_stream(self, full: str) -> None:
         """Hook for post-stream bookkeeping. Default: no-op."""
 
+    def interrupt(self) -> None:
+        """Stop the in-flight run. Default: no-op."""
+
     async def stream(self, prompt: str, **kwargs) -> AsyncIterator[str]:
         """Yield text chunks as the managed agent produces them.
 
@@ -58,12 +61,21 @@ class ManagedBackendBase:
         """
         loop = asyncio.get_running_loop()
         q: "queue.Queue[Optional[str]]" = queue.Queue()
+        stop = threading.Event()  # set when the consumer stops reading
 
         def _producer() -> None:
             full = ""
             try:
                 session_id = self._ensure_session()
                 for chunk in self._iter_events(session_id, prompt):
+                    if stop.is_set():
+                        # Consumer went away: stop the upstream run (best-effort)
+                        # instead of draining it into an orphaned queue.
+                        try:
+                            self.interrupt()
+                        except Exception:  # noqa: BLE001
+                            logger.debug("[managed] interrupt on cancel failed", exc_info=True)
+                        break
                     if chunk:
                         text = str(chunk)
                         q.put(text)
@@ -80,8 +92,12 @@ class ManagedBackendBase:
         thread = threading.Thread(target=_producer, daemon=True)
         thread.start()
 
-        while True:
-            chunk = await loop.run_in_executor(None, q.get)
-            if chunk is None:
-                break
-            yield chunk
+        try:
+            while True:
+                chunk = await loop.run_in_executor(None, q.get)
+                if chunk is None:
+                    break
+                yield chunk
+        finally:
+            # Covers break / aclose() / cancellation by the consumer.
+            stop.set()

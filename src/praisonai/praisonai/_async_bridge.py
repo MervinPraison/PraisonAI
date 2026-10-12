@@ -221,11 +221,22 @@ class AsyncBridge:
         
         try:
             asyncio.run_coroutine_threadsafe(_cancel_all(), loop).result(timeout)
+        except concurrent.futures.TimeoutError:
+            # A task ignored cancellation. Don't raise: shutdown() runs from
+            # scoped_bridge's __exit__, so raising would mask the caller's error.
+            logger.warning(
+                "AsyncBridge: tasks ignored cancellation for %ss during shutdown",
+                timeout,
+            )
         finally:
             loop.call_soon_threadsafe(loop.stop)
             if thread is not None:
                 thread.join(timeout)
-            if not loop.is_closed():
+            # Closing a still-running loop raises RuntimeError; leak the daemon
+            # thread instead of corrupting the caller's error signal.
+            if thread is not None and thread.is_alive():
+                logger.warning("AsyncBridge: loop thread did not stop; leaving loop open")
+            elif not loop.is_closed():
                 loop.close()
 
 # Backwards-compatible module-level shared default.

@@ -377,3 +377,61 @@ def test_logging_integration(mock_logger):
     
     # Verify logging is available (don't assert specific calls since they may not happen in unit tests)
     assert mock_logger is not None
+
+@pytest.mark.allow_sleep
+def test_managed_stream_cancel_stops_producer():
+    """Regression for #5773: breaking out of stream() stops the producer and
+    interrupts the upstream run instead of leaking it."""
+    import asyncio
+    import time
+    from praisonai.integrations._managed_base import ManagedBackendBase
+
+    class _Backend(ManagedBackendBase):
+        produced = 0
+        interrupted = False
+
+        def _ensure_session(self):
+            return "s"
+
+        def _iter_events(self, session_id, prompt):
+            while True:
+                time.sleep(0.01)
+                self.produced += 1
+                yield "x"
+
+        def interrupt(self):
+            self.interrupted = True
+
+    async def _run():
+        backend = _Backend()
+        async for _ in backend.stream("hi"):
+            break
+        await asyncio.sleep(0.2)
+        produced = backend.produced
+        await asyncio.sleep(0.2)
+        assert backend.produced == produced
+        assert backend.interrupted
+
+    asyncio.run(_run())
+
+
+@pytest.mark.allow_sleep
+def test_local_managed_execute_forwards_kwargs():
+    """Regression for #5773: execute() honours stream_live and timeout."""
+    import asyncio
+    import time
+    from praisonai.integrations.managed_local import LocalManagedAgent
+
+    agent = LocalManagedAgent()
+    seen = {}
+
+    def _execute_sync(prompt, stream_live=False):
+        seen["stream_live"] = stream_live
+        time.sleep(0.5)
+        return "done"
+
+    agent._execute_sync = _execute_sync
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(agent.execute("p", stream_live=True, timeout=0.05))
+    assert seen["stream_live"] is True
+    assert asyncio.run(agent.execute("p")) == "done"
