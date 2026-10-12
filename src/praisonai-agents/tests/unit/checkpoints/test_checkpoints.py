@@ -681,8 +681,25 @@ class TestCheckpointService:
         )
         await service.initialize()
 
-        assert await service._run_git("config", "maintenance.auto") == "false"
-        assert await service._run_git("config", "gc.autoDetach") == "false"
+        # Nothing is persisted, so stores created by older versions (same
+        # on-disk config) get the overrides on reopen too.
+        config_path = os.path.join(service.git_dir, "config")
+        with open(config_path) as f:
+            assert "maintenance" not in f.read()
+
+        reopened = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await reopened.initialize()
+        assert await reopened._run_git("config", "maintenance.auto") == "false"
+        assert await reopened._run_git("config", "gc.autoDetach") == "false"
+
+        # A commit must not leave a detached maintenance run holding the lock.
+        with open(os.path.join(temp_workspace, "f.txt"), "w") as f:
+            f.write("x")
+        await reopened.save("c1")
+        assert await reopened.delete_all()
 
 
 if __name__ == "__main__":

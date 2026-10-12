@@ -276,12 +276,6 @@ class CheckpointService:
             # Set worktree to workspace
             await self._run_git("config", "core.worktree", self.config.workspace_dir)
 
-            # Housekeeping is driven by _maybe_gc. Stop git from spawning
-            # detached `maintenance run --auto` after each commit: it holds
-            # maintenance.lock in the shadow dir and races delete_all().
-            await self._run_git("config", "maintenance.auto", "false")
-            await self._run_git("config", "gc.autoDetach", "false")
-
             # Seed objects from the project's real repo (if any) so the first
             # checkpoint only stores changed files, and tune for large repos.
             # Both are best-effort: no real repo → unchanged standalone path.
@@ -318,7 +312,14 @@ class CheckpointService:
         """Run a git command in the shadow repository."""
         env = self._get_sanitized_env()
         
-        cmd = ["git", f"--git-dir={self.git_dir}", f"--work-tree={self.config.workspace_dir}"]
+        # Housekeeping is driven by _maybe_gc. Stop git from spawning detached
+        # `maintenance run --auto` after commits: it holds maintenance.lock in
+        # the shadow dir and races delete_all(). Passed per-command so shadow
+        # repos created by older versions are covered too.
+        cmd = [
+            "git", "-c", "maintenance.auto=false", "-c", "gc.autoDetach=false",
+            f"--git-dir={self.git_dir}", f"--work-tree={self.config.workspace_dir}",
+        ]
         cmd.extend(args)
         
         process = await asyncio.create_subprocess_exec(
