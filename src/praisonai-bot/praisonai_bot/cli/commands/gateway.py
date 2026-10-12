@@ -660,8 +660,10 @@ def gateway_status(
                     scopes = access.get("scopes")
                     scope_s = ", ".join(scopes) if scopes is not None else "unknown"
                     print(f"  Access: authorized (scopes: {scope_s})")
-                else:
+                elif access["authorized"] is False:
                     print(f"  Access: credential refused (HTTP {info_status})")
+                else:
+                    print(f"  Access: unknown (/info returned HTTP {info_status})")
                 if access.get("next_step"):
                     print(f"  Next step: {access['next_step']}")
             if deep and config and os.path.exists(config):
@@ -994,23 +996,25 @@ def _summarise_access(host: str, info_status, info) -> dict:
                 "gateway.auth_scopes in the gateway config"
             )
         return access
+    if info_status not in (401, 403):
+        # No auth decision was made (timeout, 404, 5xx): don't blame the token.
+        return {"authorized": None, "http_status": info_status}
     access = {"authorized": False, "http_status": info_status}
-    if info_status in (401, 403):
-        if host not in _LOOPBACK_HOSTS:
-            access["next_step"] = (
-                "the CLI only sends GATEWAY_AUTH_TOKEN to loopback; run "
-                "`praisonai gateway status` on the gateway host"
-            )
-        elif not _resolve_gateway_auth_token():
-            access["next_step"] = (
-                "no GATEWAY_AUTH_TOKEN found; export it or run "
-                "`praisonai gateway doctor --fix`"
-            )
-        else:
-            access["next_step"] = (
-                "GATEWAY_AUTH_TOKEN was rejected; it does not match the "
-                "running gateway's auth token"
-            )
+    if host not in _LOOPBACK_HOSTS:
+        access["next_step"] = (
+            "the CLI only sends GATEWAY_AUTH_TOKEN to loopback; run "
+            "`praisonai gateway status` on the gateway host"
+        )
+    elif not _resolve_gateway_auth_token():
+        access["next_step"] = (
+            "no GATEWAY_AUTH_TOKEN found; export it or run "
+            "`praisonai gateway doctor --fix`"
+        )
+    else:
+        access["next_step"] = (
+            "GATEWAY_AUTH_TOKEN was rejected; it does not match the "
+            "running gateway's auth token"
+        )
     return access
 
 

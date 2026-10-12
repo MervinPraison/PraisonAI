@@ -206,3 +206,64 @@ def test_access_omitted_when_unreachable(monkeypatch):
     snap = gateway_cmd._build_status_snapshot("127.0.0.1", 8765)
     assert snap["reachable"] is False
     assert "access" not in snap
+
+
+@pytest.mark.parametrize("status", [None, 404, 500, 503])
+def test_access_unknown_when_no_auth_decision(monkeypatch, status):
+    monkeypatch.setenv("GATEWAY_AUTH_TOKEN", "tok")
+    snap = _snapshot_with_info(monkeypatch, status, None)
+    assert snap["access"] == {"authorized": None, "http_status": status}
+
+
+def _capture_urlopen(monkeypatch, outcome):
+    """Patch ``urlopen`` so ``_fetch_gateway``'s real error handling runs."""
+    import io
+    import urllib.request
+
+    seen = {}
+
+    class _Resp(io.BytesIO):
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    def fake_urlopen(req, timeout=None):
+        seen["auth"] = req.get_header("Authorization")
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return _Resp(json.dumps(outcome).encode())
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    return seen
+
+
+@pytest.mark.parametrize("code", [401, 403])
+def test_fetch_gateway_surfaces_http_refusal(monkeypatch, code):
+    import urllib.error
+
+    monkeypatch.setenv("GATEWAY_AUTH_TOKEN", "tok")
+    err = urllib.error.HTTPError("http://x/info", code, "denied", {}, None)
+    _capture_urlopen(monkeypatch, err)
+    assert gateway_cmd._fetch_gateway("127.0.0.1", 8765, "/info") == (code, None)
+    assert gateway_cmd._fetch_gateway_json("127.0.0.1", 8765, "/info") is None
+
+
+def test_fetch_gateway_connection_failure_is_unreachable(monkeypatch):
+    import urllib.error
+
+    _capture_urlopen(monkeypatch, urllib.error.URLError("refused"))
+    assert gateway_cmd._fetch_gateway("127.0.0.1", 8765, "/info") == (None, None)
+
+
+@pytest.mark.parametrize(
+    "host,expected", [("127.0.0.1", "Bearer tok"), ("10.0.0.5", None)]
+)
+def test_fetch_gateway_sends_token_only_to_loopback(monkeypatch, host, expected):
+    monkeypatch.setenv("GATEWAY_AUTH_TOKEN", "tok")
+    seen = _capture_urlopen(monkeypatch, {"ok": True})
+    assert gateway_cmd._fetch_gateway(host, 8765, "/info") == (200, {"ok": True})
+    assert seen["auth"] == expected
