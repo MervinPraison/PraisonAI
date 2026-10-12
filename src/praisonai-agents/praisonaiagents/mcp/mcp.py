@@ -105,7 +105,11 @@ class MCPToolRunner(threading.Thread):
                                 if item is None:  # Shutdown signal
                                     break
                                 
-                                response_queue, kind, name, arguments = item
+                                response_queue, kind, name, arguments, cancelled = item
+                                if cancelled.is_set():
+                                    # Caller already gave up (timed out); never
+                                    # execute a call it was told did not happen.
+                                    continue
                                 try:
                                     if kind == "resource":
                                         result = await asyncio.wait_for(session.read_resource(name), timeout=self.timeout)
@@ -177,10 +181,12 @@ class MCPToolRunner(threading.Thread):
             return (False, self._init_error)
 
         response_queue = queue.Queue(maxsize=1)
-        self.queue.put((response_queue, kind, name, arguments))
+        cancelled = threading.Event()
+        self.queue.put((response_queue, kind, name, arguments, cancelled))
         try:
             success, result = response_queue.get(timeout=self.timeout)
         except queue.Empty:
+            cancelled.set()
             return (False, f"MCP {kind} call timed out after {self.timeout} seconds")
         if not success:
             return (False, result)
@@ -231,12 +237,15 @@ class MCPToolRunner(threading.Thread):
         response_queue = queue.Queue(maxsize=1)
         try:
             # Put request in queue with caller-specific response channel
-            self.queue.put((response_queue, "tool", tool_name, arguments))
+            cancelled = threading.Event()
+            self.queue.put((response_queue, "tool", tool_name, arguments, cancelled))
             
             # Wait for result with timeout
             try:
                 success, result = response_queue.get(timeout=self.timeout)
             except queue.Empty:
+                # Mark abandoned so the runner skips it if not yet started
+                cancelled.set()
                 return f"Error: MCP tool call timed out after {self.timeout} seconds"
             if not success:
                 return f"Error: {result}"

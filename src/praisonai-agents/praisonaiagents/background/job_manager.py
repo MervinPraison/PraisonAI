@@ -137,6 +137,7 @@ class BackgroundJobManager:
         self._jobs: Dict[str, JobInfo] = {}
         self._futures: Dict[str, Future] = {}
         self._lock = threading.Lock()
+        self._last_gc = time.time()
 
     def _persist(self, job: JobInfo) -> None:
         """Best-effort persist of a job's current state to the store.
@@ -193,6 +194,13 @@ class BackgroundJobManager:
             The job ID
         """
         job_id = job_id or str(uuid.uuid4())[:8]
+        
+        # Opportunistically evict old terminal jobs so long-lived hosts
+        # (gateways, bots, servers) don't retain every finished result.
+        now = time.time()
+        if now - self._last_gc > self._GC_INTERVAL:
+            self._last_gc = now
+            self.cleanup_completed()
         
         job_info = JobInfo(
             job_id=job_id,
@@ -515,6 +523,9 @@ class BackgroundJobManager:
         JobStatus.CANCELLED,
         JobStatus.LOST,
     )
+
+    # Minimum seconds between opportunistic cleanups triggered by start_job
+    _GC_INTERVAL = 60.0
 
     def cleanup_completed(self, max_age: float = 3600.0) -> int:
         """

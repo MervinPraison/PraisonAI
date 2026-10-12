@@ -9,6 +9,7 @@ import asyncio
 import concurrent.futures
 import contextvars
 import logging
+import threading
 from typing import Any, Awaitable, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
@@ -62,8 +63,17 @@ def run_coroutine_from_any_context(coro: Awaitable[T], timeout: Optional[float] 
     # its own loop, carrying the caller's contextvars across so context set by
     # the caller (trace/session/approval) is visible inside the coroutine.
     ctx = contextvars.copy_context()
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(ctx.run, asyncio.run, _wrapped())
+    future: "concurrent.futures.Future[T]" = concurrent.futures.Future()
+
+    def _worker() -> None:
+        try:
+            future.set_result(ctx.run(asyncio.run, _wrapped()))
+        except BaseException as exc:  # propagate everything to the caller
+            future.set_exception(exc)
+
+    # Daemon thread: a stuck worker abandoned after a timeout must not keep the
+    # interpreter alive at exit (non-daemon pool threads are joined at exit).
+    threading.Thread(target=_worker, name="praisonai-async-bridge", daemon=True).start()
     try:
         # The timeout is normally enforced *inside* the worker loop by
         # asyncio.wait_for. But a coroutine that ignores cancellation (a blocking
@@ -76,9 +86,6 @@ def run_coroutine_from_any_context(coro: Awaitable[T], timeout: Optional[float] 
         raise TimeoutError(
             f"Coroutine did not complete within {timeout}s"
         ) from exc
-    finally:
-        # Never block on a stuck worker: don't wait for it to wind down.
-        executor.shutdown(wait=False)
 
 def is_async_context() -> bool:
     """

@@ -2,11 +2,12 @@ import os
 import time
 import json
 import logging
+import collections
 import contextlib
 import contextvars
 import threading
 from praisonaiagents._logging import get_logger
-from typing import Any, Dict, Optional, List, Tuple, Callable
+from typing import Any, Deque, Dict, Optional, List, Tuple, Callable
 from ..main import display_error, TaskOutput
 from ..agent.agent import Agent
 from ..task.task import Task
@@ -1150,7 +1151,8 @@ class AgentTeam(SpawnAnnounceProtocol):
         # Spawn-announce pattern support
         self._spawned_agents: Dict[str, SpawnedSubAgent] = {}
         self._completion_callbacks: Dict[str, Callable[[SubAgentCompletionEvent], Any]] = {}
-        self._completion_events: List[SubAgentCompletionEvent] = []
+        # Bounded so long-lived teams don't retain every sub-agent result forever
+        self._completion_events: Deque[SubAgentCompletionEvent] = collections.deque(maxlen=1000)
         self._event_bus: Optional[EventBus] = None
         self._spawn_lock = threading.RLock()  # Thread-safe spawn operations (reentrant)
         # Strong references to fire-and-forget async spawn tasks. The event loop

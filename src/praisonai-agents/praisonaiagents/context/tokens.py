@@ -4,6 +4,7 @@ Token Estimation for PraisonAI Agents.
 Provides fast, offline token estimation with optional accurate tokenizer support.
 """
 
+from functools import lru_cache
 from typing import List, Dict, Any, Optional
 import json
 
@@ -31,15 +32,38 @@ def estimate_tokens_heuristic(text: str) -> int:
     if not text:
         return 0
     
-    total = 0.0
-    for char in text:
-        code_point = ord(char)
-        if code_point <= 127:
-            total += ASCII_TOKENS_PER_CHAR
-        else:
-            total += NON_ASCII_TOKENS_PER_CHAR
+    # C-speed counting instead of a per-character Python loop
+    if text.isascii():
+        return max(1, int(len(text) * ASCII_TOKENS_PER_CHAR))
+    ascii_count = len(text.encode("ascii", "ignore"))
+    total = (ascii_count * ASCII_TOKENS_PER_CHAR
+             + (len(text) - ascii_count) * NON_ASCII_TOKENS_PER_CHAR)
     
     return max(1, int(total))
+
+
+def _get_tiktoken_encoder(model: str):
+    """Return a cached tiktoken encoder for ``model``, or None if unavailable.
+
+    Failures (tiktoken missing, vocab download blocked) are negatively cached
+    so we never retry a failing load on every message.
+    """
+    cache_key = model.lower()
+    if cache_key in _tokenizer_cache:
+        return _tokenizer_cache[cache_key]
+    enc = None
+    try:
+        import tiktoken
+        try:
+            enc = tiktoken.encoding_for_model(model)
+        except Exception:
+            # Unknown model (or failed load): cl100k_base is a close match for
+            # GPT-4/3.5/Claude-style tokenisation
+            enc = tiktoken.get_encoding("cl100k_base")
+    except Exception:
+        enc = None
+    _tokenizer_cache[cache_key] = enc
+    return enc
 
 
 def estimate_tokens_accurate(text: str, model: str = "gpt-4") -> int:
@@ -53,33 +77,16 @@ def estimate_tokens_accurate(text: str, model: str = "gpt-4") -> int:
     Returns:
         Token count
     """
-    try:
-        import tiktoken
-        
-        # Cache tokenizer with improved model mapping
-        cache_key = model.lower()
-        if cache_key not in _tokenizer_cache:
-            try:
-                _tokenizer_cache[cache_key] = tiktoken.encoding_for_model(model)
-            except KeyError:
-                # Enhanced fallback mapping for common models
-                if any(model_name in model.lower() for model_name in 
-                       ["gpt-4", "gpt-4o", "gpt-4-turbo"]):
-                    _tokenizer_cache[cache_key] = tiktoken.get_encoding("cl100k_base")
-                elif any(model_name in model.lower() for model_name in 
-                         ["gpt-3.5", "text-davinci", "text-curie"]):
-                    _tokenizer_cache[cache_key] = tiktoken.get_encoding("cl100k_base")
-                elif "claude" in model.lower():
-                    # Claude models use similar tokenization to GPT-4
-                    _tokenizer_cache[cache_key] = tiktoken.get_encoding("cl100k_base")
-                else:
-                    # Ultimate fallback
-                    _tokenizer_cache[cache_key] = tiktoken.get_encoding("cl100k_base")
-        
-        enc = _tokenizer_cache[cache_key]
-        return len(enc.encode(text))
-    except ImportError:
+    if _get_tiktoken_encoder(model) is None:
         return estimate_tokens_heuristic(text)
+    return _count_tiktoken_tokens(text, model)
+
+
+@lru_cache(maxsize=4096)
+def _count_tiktoken_tokens(text: str, model: str) -> int:
+    # History messages are re-counted several times per turn; memoise them.
+    try:
+        return len(_get_tiktoken_encoder(model).encode(text))
     except Exception:
         # Fallback on any tokenization error
         return estimate_tokens_heuristic(text)

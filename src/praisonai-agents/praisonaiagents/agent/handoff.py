@@ -1115,10 +1115,10 @@ class Handoff:
                     
             except HandoffCycleError as e:
                 logger.error(f"Handoff cycle detected: {e}")
-                return f"Error: Handoff cycle detected - {e}"
+                return {"error": f"Handoff cycle detected - {e}", "handoff_failed": True}
             except HandoffDepthError as e:
                 logger.error(f"Handoff depth exceeded: {e}")
-                return f"Error: Maximum handoff depth exceeded - {e}"
+                return {"error": f"Maximum handoff depth exceeded - {e}", "handoff_failed": True}
             except Exception as e:
                 logger.error(f"Error during handoff to {self.agent.name}: {str(e)}")
                 result = HandoffResult(
@@ -1129,7 +1129,9 @@ class Handoff:
                     error=str(e),
                 )
                 self._execute_callback(self.config.on_error, source_agent, kwargs, result)
-                return f"Error during handoff to {self.agent.name}: {str(e)}"
+                # Structured error so tool-failure handling (telemetry, hooks,
+                # run status) sees a failed call rather than a success string
+                return {"error": f"Error during handoff to {self.agent.name}: {e}", "handoff_failed": True}
             finally:
                 if pushed:
                     _pop_handoff()

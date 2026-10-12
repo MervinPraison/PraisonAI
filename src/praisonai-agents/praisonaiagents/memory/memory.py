@@ -527,9 +527,8 @@ class Memory(MemoryCoreMixin):
             )
             self._local.stm_conn.commit()
             
-            # Register connection for cleanup
-            with self._connection_lock:
-                self._all_connections.add(self._local.stm_conn)
+            # Register connection for cleanup (also reclaims dead threads' connections)
+            self._sqlite_adapter._register_connection(self._local.stm_conn)
         return self._local.stm_conn
 
     def _get_ltm_conn(self):
@@ -547,9 +546,8 @@ class Memory(MemoryCoreMixin):
             )
             self._local.ltm_conn.commit()
             
-            # Register connection for cleanup
-            with self._connection_lock:
-                self._all_connections.add(self._local.ltm_conn)
+            # Register connection for cleanup (also reclaims dead threads' connections)
+            self._sqlite_adapter._register_connection(self._local.ltm_conn)
         return self._local.ltm_conn
 
     def _log_verbose(self, msg: str, level: int = logging.INFO):
@@ -2528,6 +2526,7 @@ class Memory(MemoryCoreMixin):
                 # Remove from registry before closing
                 with self._connection_lock:
                     self._all_connections.discard(self._local.stm_conn)
+                    self._sqlite_adapter._connection_owners.pop(self._local.stm_conn, None)
                 self._local.stm_conn.close()
                 self._local.stm_conn = None
             except Exception as e:
@@ -2538,6 +2537,7 @@ class Memory(MemoryCoreMixin):
                 # Remove from registry before closing
                 with self._connection_lock:
                     self._all_connections.discard(self._local.ltm_conn)
+                    self._sqlite_adapter._connection_owners.pop(self._local.ltm_conn, None)
                 self._local.ltm_conn.close()
                 self._local.ltm_conn = None
             except Exception as e:

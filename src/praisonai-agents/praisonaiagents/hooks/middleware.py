@@ -35,6 +35,10 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, TypeVar, Generic
 from functools import wraps
 
+from praisonaiagents._logging import get_logger
+
+logger = get_logger(__name__)
+
 
 @dataclass
 class InvocationContext:
@@ -303,16 +307,33 @@ def _invoke_observer(callback: Callable[[Any], Any], arg: Any) -> None:
     none is running, otherwise scheduled on the running loop. The return value
     is always ignored — these are observers.
     """
-    result = callback(arg)
-    if inspect.iscoroutine(result):
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
-        if loop is not None:
-            loop.create_task(result)
-        else:
-            asyncio.run(result)
+    try:
+        result = callback(arg)
+        if inspect.iscoroutine(result):
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop is not None:
+                # Keep a strong reference so the task isn't GC'd mid-flight,
+                # and log (rather than lose) any exception it raises.
+                task = loop.create_task(result)
+                _OBSERVER_TASKS.add(task)
+                task.add_done_callback(_on_observer_task_done)
+            else:
+                asyncio.run(result)
+    except Exception as e:
+        # Observers must never corrupt the run.
+        logger.warning("Observer %s failed: %s", getattr(callback, "__name__", callback), e)
+
+
+_OBSERVER_TASKS: set = set()
+
+
+def _on_observer_task_done(task: "asyncio.Task") -> None:
+    _OBSERVER_TASKS.discard(task)
+    if not task.cancelled() and task.exception() is not None:
+        logger.warning("Async observer failed: %s", task.exception())
 
 
 def as_step_hook(callback: Callable[[Any], Any]) -> AfterModelFn:
