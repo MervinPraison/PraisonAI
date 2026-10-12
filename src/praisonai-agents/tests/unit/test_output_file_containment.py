@@ -78,6 +78,17 @@ def test_task_output_file_overwrite_preserves_permissions(root):
     assert target.stat().st_mode & 0o777 == 0o644
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX hardlinks")
+def test_task_output_file_hardlink_does_not_write_outside(root, tmp_path):
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret")
+    os.link(outside, root / "linked.txt")
+    team, task = _team("linked.txt")
+    team.save_output_to_file(task, "PWNED")
+    assert (root / "linked.txt").read_text() == "PWNED"
+    assert outside.read_text() == "secret"
+
+
 def test_task_output_file_respects_create_directory(root):
     team, task = _team("missing/out.txt", create_directory=False)
     team.save_output_to_file(task, "ok")
