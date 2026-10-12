@@ -672,6 +672,18 @@ class TestCheckpointService:
         assert result
         assert not os.path.exists(checkpoint_dir)
 
+    @pytest.mark.asyncio
+    async def test_shadow_repo_disables_background_maintenance(self, temp_workspace, temp_storage):
+        """Detached auto-maintenance would hold maintenance.lock and race delete_all()."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        assert await service._run_git("config", "maintenance.auto") == "false"
+        assert await service._run_git("config", "gc.autoDetach") == "false"
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
