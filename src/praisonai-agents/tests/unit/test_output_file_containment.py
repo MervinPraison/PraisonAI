@@ -89,6 +89,22 @@ def test_task_output_file_hardlink_does_not_write_outside(root, tmp_path):
     assert outside.read_text() == "secret"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX hardlinks")
+def test_task_output_file_hardlink_keeps_mode_under_umask(root, tmp_path):
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret")
+    os.chmod(outside, 0o664)
+    os.link(outside, root / "linked.txt")
+    team, task = _team("linked.txt")
+    old_umask = os.umask(0o077)
+    try:
+        team.save_output_to_file(task, "new")
+    finally:
+        os.umask(old_umask)
+    assert (root / "linked.txt").stat().st_mode & 0o777 == 0o664
+    assert outside.read_text() == "secret"
+
+
 @pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="POSIX permission bits")
 def test_task_output_file_overwrite_in_readonly_directory(root):
     (root / "ro").mkdir()

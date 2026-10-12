@@ -1,6 +1,6 @@
-import functools
 import os
 import stat
+import tempfile
 
 from praisonaiagents._logging import get_logger
 
@@ -36,10 +36,20 @@ def write_output_file(path: str, content: str, create_dirs: bool = True) -> str 
             f.truncate(0)
             f.write(content)
             return file_path
-    # A hardlink may share its inode with a file outside the root, so write a
-    # new file under the same name instead of truncating the shared one.
-    os.unlink(file_path)
-    opener = functools.partial(_open_nofollow, mode=stat.S_IMODE(st.st_mode))
-    with open(file_path, "x", encoding="utf-8", opener=opener) as f:
-        f.write(content)
+    # A hardlink may share its inode with a file outside the root, so swap in
+    # a new file under the same name instead of truncating the shared one.
+    fd, tmp = tempfile.mkstemp(
+        dir=os.path.dirname(file_path),
+        prefix=os.path.basename(file_path) + ".",
+        suffix=".tmp",
+    )
+    try:
+        if hasattr(os, "fchmod"):
+            os.fchmod(fd, stat.S_IMODE(st.st_mode))
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp, file_path)
+    except BaseException:
+        os.unlink(tmp)
+        raise
     return file_path
