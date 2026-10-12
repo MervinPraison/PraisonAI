@@ -465,6 +465,8 @@ Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
 
 ## 📘 Using Python Code
 
+> Unsure whether a result is a bug or model randomness? Check the [SDK Behavior Matrix](https://github.com/MervinPraison/PraisonAI/blob/main/src/praisonai-agents/docs/sdk-behavior-matrix.md) for `stream`, memory prefetch, structured output, teams and AG-UI.
+
 ### 1. Single Agent
 
 ```python
