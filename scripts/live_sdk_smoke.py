@@ -18,11 +18,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import concurrent.futures
 import json
 import os
 import sys
 import tempfile
+import threading
 import time
 import uuid
 
@@ -171,25 +171,42 @@ EXTENDED = [stream_chat, achat_minimal, history_second_turn, agent_team]
 NO_RETRY = {"package_version"}
 
 
-def _run(fn, pool):
+def _attempt(fn):
+    """Run fn on its own daemon thread; a hung call is abandoned, never queued behind."""
+    outcome = {}
+
+    def target():
+        try:
+            fn()
+        except BaseException as exc:  # noqa: BLE001 - report every failure by name
+            outcome["exc"] = exc
+
+    thread = threading.Thread(target=target, name=f"smoke-{fn.__name__}", daemon=True)
+    thread.start()
+    thread.join(TIMEOUT)
+    if thread.is_alive():
+        return None
+    return outcome.get("exc", False)
+
+
+def _run(fn):
     attempts = 1 if fn.__name__ in NO_RETRY else 2
     for attempt in range(attempts):
         start = time.monotonic()
-        future = pool.submit(fn)
-        try:
-            future.result(timeout=TIMEOUT)
-            return True, "", time.monotonic() - start
-        except concurrent.futures.TimeoutError:
+        exc = _attempt(fn)
+        if exc is None:
             detail = f"timeout after {TIMEOUT:.0f}s (attempt {attempt + 1})"
-        except Exception as exc:  # noqa: BLE001 - report every failure by name
+            continue
+        if exc:
             return False, f"{type(exc).__name__}: {exc}"[:500], time.monotonic() - start
+        return True, "", time.monotonic() - start
     return False, detail, time.monotonic() - start
 
 
-def _run_suite(name, scenarios, pool):
+def _run_suite(name, scenarios):
     results = []
     for i, fn in enumerate(scenarios, 1):
-        ok, detail, secs = _run(fn, pool)
+        ok, detail, secs = _run(fn)
         label = f"[{i}/{len(scenarios)}] {fn.__name__} "
         print(f"{label:.<44} {'PASS' if ok else 'FAIL'} ({secs:.1f}s) {detail}", flush=True)
         results.append({"suite": name, "scenario": fn.__name__, "passed": ok, "seconds": round(secs, 2), "detail": detail})
@@ -213,9 +230,8 @@ def main():
         # Run inside a scratch dir so memory stores never touch the checkout.
         workdir = tempfile.mkdtemp(prefix="live_sdk_smoke_")
         os.chdir(workdir)
-        pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
-        core = _run_suite("core", CORE, pool)
-        extended = _run_suite("extended", EXTENDED, pool) if args.extended else []
+        core = _run_suite("core", CORE)
+        extended = _run_suite("extended", EXTENDED) if args.extended else []
         failures = [r["scenario"] for r in core if not r["passed"]]
         summary.update(
             passed=sum(r["passed"] for r in core),

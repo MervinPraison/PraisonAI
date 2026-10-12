@@ -42,8 +42,11 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install praisonaiagents
-        run: pip install -e "src/praisonai-agents[api]" httpx
+      # Test the built wheel, not the checkout: this is what PyPI users get.
+      - name: Build and install praisonaiagents wheel
+        run: |
+          pip wheel --no-deps -w dist src/praisonai-agents
+          pip install "$(ls dist/praisonaiagents-*.whl)[api]" httpx
 
       - name: Run live SDK smoke
         env:
