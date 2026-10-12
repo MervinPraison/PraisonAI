@@ -67,6 +67,17 @@ def test_task_output_file_inside_root(root):
     assert (root / "abs.txt").read_text() == "ok"
 
 
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+def test_task_output_file_overwrite_preserves_permissions(root):
+    target = root / "shared.txt"
+    target.write_text("old")
+    os.chmod(target, 0o644)
+    team, task = _team("shared.txt")
+    team.save_output_to_file(task, "new")
+    assert target.read_text() == "new"
+    assert target.stat().st_mode & 0o777 == 0o644
+
+
 def test_task_output_file_respects_create_directory(root):
     team, task = _team("missing/out.txt", create_directory=False)
     team.save_output_to_file(task, "ok")
