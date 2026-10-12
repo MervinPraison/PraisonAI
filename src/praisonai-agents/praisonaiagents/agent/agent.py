@@ -8141,16 +8141,34 @@ Answer:"""
         # Always set closed flag
         self._closed = True
 
-    def _release_approval_scope(self) -> None:
-        """Drop this agent's approval-registry grants (best-effort)."""
+    def _release_approval_scope(self, *, from_finalizer: bool = False) -> None:
+        """Drop this agent's approval-registry grants (best-effort).
+
+        From ``__del__`` only the process-global grants are released, without
+        blocking on the registry lock: a GC finalizer must neither write a
+        ContextVar nor wait on a lock (see ``ApprovalRegistry.release_scope``).
+        """
         scope_id = getattr(self, '_approval_scope_id', None)
         if not scope_id:
             return
         try:
-            from ..approval import get_approval_registry
-            get_approval_registry().release_scope(scope_id)
+            if from_finalizer:
+                # No locks and no imports here: get_approval_registry() takes a
+                # non-reentrant module lock that GC may have interrupted on this
+                # very thread. Read the singleton directly; if no registry was
+                # ever built, this agent recorded no grants.
+                import sys as _sys
+                _approval = _sys.modules.get("praisonaiagents.approval")
+                registry = getattr(_approval, "_registry", None)
+                if registry is None:
+                    return
+            else:
+                from ..approval import get_approval_registry
+                registry = get_approval_registry()
+            registry.release_scope(scope_id, from_finalizer=from_finalizer)
         except Exception as e:
-            logger.warning(f"Approval scope cleanup failed: {e}")
+            if not from_finalizer:
+                logger.warning(f"Approval scope cleanup failed: {e}")
     
     async def aclose(self) -> None:
         """Async version of close() for async context managers."""
@@ -8327,8 +8345,9 @@ Answer:"""
 
                 # Evict this agent's process-global approval grants so a
                 # per-request/session agent that is only ever GC'd (never
-                # close()'d) does not leak registry entries forever.
-                self._release_approval_scope()
+                # close()'d) does not leak registry entries forever. Never the
+                # per-context cache: this may run inside the garbage collector.
+                self._release_approval_scope(from_finalizer=True)
             except Exception as exc:  # noqa: BLE001 - finalizers must not raise
                 import contextlib
                 with contextlib.suppress(Exception):
