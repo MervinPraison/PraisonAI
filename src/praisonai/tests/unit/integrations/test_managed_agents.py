@@ -380,7 +380,7 @@ def test_logging_integration(mock_logger):
 
 @pytest.mark.allow_sleep
 def test_managed_stream_cancel_stops_producer():
-    """Regression for #5773: breaking out of stream() stops the producer and
+    """Regression for #5773: closing stream() stops the producer and
     interrupts the upstream run instead of leaking it."""
     import asyncio
     import time
@@ -404,8 +404,10 @@ def test_managed_stream_cancel_stops_producer():
 
     async def _run():
         backend = _Backend()
-        async for _ in backend.stream("hi"):
+        gen = backend.stream("hi")  # retained reference: needs explicit aclose()
+        async for _ in gen:
             break
+        await gen.aclose()
         await asyncio.sleep(0.2)
         produced = backend.produced
         await asyncio.sleep(0.2)
@@ -416,14 +418,49 @@ def test_managed_stream_cancel_stops_producer():
 
 
 @pytest.mark.allow_sleep
+def test_managed_stream_close_interrupts_blocked_producer():
+    """Closing the stream interrupts even while the producer waits on upstream."""
+    import asyncio
+    import threading
+    from praisonai.integrations._managed_base import ManagedBackendBase
+
+    release = threading.Event()
+
+    class _Backend(ManagedBackendBase):
+        interrupted = threading.Event()
+
+        def _ensure_session(self):
+            return "s"
+
+        def _iter_events(self, session_id, prompt):
+            yield "x"
+            release.wait(5)  # e.g. a long tool call with no text events
+
+        def interrupt(self):
+            self.interrupted.set()
+            release.set()
+
+    async def _run():
+        backend = _Backend()
+        gen = backend.stream("hi")
+        assert await gen.__anext__() == "x"
+        await gen.aclose()
+        assert backend.interrupted.wait(2)
+
+    asyncio.run(_run())
+
+
+@pytest.mark.allow_sleep
 def test_local_managed_execute_forwards_kwargs():
     """Regression for #5773: execute() honours stream_live and timeout."""
     import asyncio
+    import threading
     import time
     from praisonai.integrations.managed_local import LocalManagedAgent
 
     agent = LocalManagedAgent()
     seen = {}
+    interrupted = threading.Event()
 
     def _execute_sync(prompt, stream_live=False):
         seen["stream_live"] = stream_live
@@ -431,7 +468,9 @@ def test_local_managed_execute_forwards_kwargs():
         return "done"
 
     agent._execute_sync = _execute_sync
+    agent.interrupt = interrupted.set
     with pytest.raises(asyncio.TimeoutError):
         asyncio.run(agent.execute("p", stream_live=True, timeout=0.05))
     assert seen["stream_live"] is True
+    assert interrupted.wait(2)
     assert asyncio.run(agent.execute("p")) == "done"

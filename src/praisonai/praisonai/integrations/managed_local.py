@@ -22,7 +22,6 @@ Usage::
 """
 
 import asyncio
-import functools
 import logging
 import os
 import re
@@ -805,18 +804,7 @@ class LocalManagedAgent(ManagedBackendBase):
     # ------------------------------------------------------------------
     async def execute(self, prompt: str, **kwargs) -> str:
         """Execute prompt locally and return full response."""
-        loop = asyncio.get_running_loop()
-        fut = loop.run_in_executor(
-            None,
-            functools.partial(
-                self._execute_sync, prompt,
-                stream_live=bool(kwargs.get("stream_live", False)),
-            ),
-        )
-        timeout = kwargs.get("timeout")
-        if timeout is not None:
-            return await asyncio.wait_for(fut, timeout=timeout)
-        return await fut
+        return await self._execute_in_executor(self._execute_sync, prompt, **kwargs)
 
     def _sync_usage(self) -> None:
         """Sync token usage from inner agent to managed backend counters."""
