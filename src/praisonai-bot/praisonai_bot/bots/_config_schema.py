@@ -1043,6 +1043,10 @@ class GatewayConfigSchema(BaseModel):
     # Channel configuration
     channels: Dict[str, ChannelConfigSchema] = Field(default_factory=dict)
 
+    # Named sender sets referenced from channel allow/block lists as
+    # ``group:<name>`` (Issue #5775); expanded by the gateway loader.
+    access_groups: Optional[Dict[str, Union[List[str], str]]] = None
+
     # Credential-presence auto-enablement (Issue #4779). When true (default),
     # the gateway auto-registers a channel for any known platform whose
     # credential env var(s) are present and that the user has neither declared

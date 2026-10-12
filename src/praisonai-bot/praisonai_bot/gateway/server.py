@@ -7943,6 +7943,31 @@ class WebSocketGateway:
         # (regression guard, PR #3019 review). Platform-typo fail-closed still
         # applies — that check keys off the platform *name*, not the token.
         raw = _resolve(migrated)
+        # Expand ``group:<name>`` references against top-level
+        # ``access_groups`` (Issue #5775) so every channel admits from one
+        # authoritative definition. Unknown groups / cycles fail closed here.
+        access_groups = raw.get("access_groups") or {}
+        if access_groups and not isinstance(access_groups, dict):
+            raise ValueError(
+                f"Gateway config validation failed ({config_path}):\n"
+                "  - 'access_groups' must be a mapping of name -> list of ids"
+            )
+        for cname, cdef in (raw.get("channels") or {}).items():
+            if not isinstance(cdef, dict):
+                continue
+            for key in ("allowed_users", "allowlist", "blocklist"):
+                # Only touch core when groups are in play, so configs without
+                # them keep loading on older praisonaiagents releases.
+                if cdef.get(key) and (access_groups or "group:" in str(cdef[key])):
+                    from praisonaiagents.bots.admission import expand_access_groups
+
+                    try:
+                        cdef[key] = expand_access_groups(cdef[key], access_groups)
+                    except ValueError as exc:
+                        raise ValueError(
+                            f"Gateway config validation failed ({config_path}):\n"
+                            f"  - channels.{cname}.{key}: {exc}"
+                        ) from exc
         # Validate (raises ValueError on unknown platform / no channels). Env
         # substitution already happened above, so skip the schema's own.
         validated = validate_gateway_config(raw, apply_env_substitution=False)

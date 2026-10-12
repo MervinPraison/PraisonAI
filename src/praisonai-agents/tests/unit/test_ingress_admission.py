@@ -263,3 +263,42 @@ def test_deterministic_same_inputs_same_output():
         is_mention=False,
     )
     assert resolve_ingress_admission(**kwargs) == resolve_ingress_admission(**kwargs)
+
+
+# ── Named access groups (Issue #5775) ──────────────────────────────────────
+
+def test_expand_access_groups_nested_and_dedup():
+    from praisonaiagents.bots.admission import expand_access_groups
+
+    groups = {
+        "admins": ["111", "222"],
+        "team": ["group:admins", "333", "111"],
+    }
+    assert expand_access_groups(["group:team", "444"], groups) == [
+        "111", "222", "333", "444",
+    ]
+
+
+def test_expand_access_groups_passthrough_and_comma_string():
+    from praisonaiagents.bots.admission import expand_access_groups
+
+    assert expand_access_groups(["1", "2"], None) == ["1", "2"]
+    assert expand_access_groups("group:a", {"a": "5, 6"}) == ["5", "6"]
+    # Env-expanded "${ADMINS}" inside a list must still split into ids.
+    assert expand_access_groups(["group:a"], {"a": ["5,6", "7"]}) == ["5", "6", "7"]
+
+
+def test_expand_access_groups_unknown_fails_closed():
+    import pytest
+    from praisonaiagents.bots.admission import expand_access_groups
+
+    with pytest.raises(ValueError, match="Unknown access group"):
+        expand_access_groups(["group:missing"], {})
+
+
+def test_expand_access_groups_cycle_rejected():
+    import pytest
+    from praisonaiagents.bots.admission import expand_access_groups
+
+    with pytest.raises(ValueError, match="cycle"):
+        expand_access_groups(["group:a"], {"a": ["group:b"], "b": ["group:a"]})

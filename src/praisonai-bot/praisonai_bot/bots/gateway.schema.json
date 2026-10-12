@@ -1938,6 +1938,31 @@
       "title": "Channels",
       "type": "object"
     },
+    "access_groups": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ]
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Access Groups"
+    },
     "auto_enable_from_env": {
       "default": true,
       "title": "Auto Enable From Env",
