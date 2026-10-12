@@ -79,10 +79,17 @@ def estimate_tokens_accurate(text: str, model: str = "gpt-4") -> int:
     """
     if _get_tiktoken_encoder(model) is None:
         return estimate_tokens_heuristic(text)
+    if len(text) > _COUNT_CACHE_MAX_CHARS:
+        # Don't pin large tool outputs in the cache
+        return _count_tiktoken_tokens.__wrapped__(text, model)
     return _count_tiktoken_tokens(text, model)
 
 
-@lru_cache(maxsize=4096)
+# Bounds the memo to ~16M chars so it can't retain unbounded text
+_COUNT_CACHE_MAX_CHARS = 16_384
+
+
+@lru_cache(maxsize=1024)
 def _count_tiktoken_tokens(text: str, model: str) -> int:
     # History messages are re-counted several times per turn; memoise them.
     try:

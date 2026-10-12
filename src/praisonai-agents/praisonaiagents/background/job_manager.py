@@ -11,7 +11,7 @@ import uuid
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 from dataclasses import dataclass, field
-from concurrent.futures import ThreadPoolExecutor, Future
+from concurrent.futures import CancelledError, ThreadPoolExecutor, Future
 
 from praisonaiagents._logging import get_logger
 
@@ -365,9 +365,17 @@ class BackgroundJobManager:
             RuntimeError: If job failed
         """
         with self._lock:
-            if job_id not in self._futures:
+            future = self._futures.get(job_id)
+        if future is None:
+            # Evicted from memory: answer terminal outcomes from the durable store
+            job = self._store.get(job_id) if self._store else None
+            if job is None or job.status not in self._EVICTABLE_STATES:
                 raise KeyError(f"Job {job_id} not found")
-            future = self._futures[job_id]
+            if job.status == JobStatus.COMPLETED:
+                return job.result
+            if job.status == JobStatus.CANCELLED:
+                raise CancelledError(f"Job {job_id} was cancelled")
+            raise RuntimeError(job.error or f"Job {job_id} {job.status.value}")
         
         try:
             return future.result(timeout=timeout)

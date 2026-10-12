@@ -4470,6 +4470,9 @@ class AgentTeam(SpawnAnnounceProtocol):
                 for event in self._completion_events:
                     if event.agent_id in target_agents:
                         completed_agents.add(event.agent_id)
+                # Finished agents leave _spawned_agents; their event may have
+                # aged out of the bounded history, so don't wait on it forever
+                completed_agents.update(a for a in target_agents if a not in self._spawned_agents)
                 
                 # Return if all target agents are completed
                 if completed_agents >= set(target_agents):
@@ -4692,6 +4695,8 @@ class AgentTeam(SpawnAnnounceProtocol):
             """Check if all target agents are completed - THREAD-SAFE version."""
             with self._spawn_lock:
                 events_snapshot = list(self._completion_events)
+                # Finished agents whose event aged out of the bounded history
+                completed_agents.update(a for a in target_agents if a not in self._spawned_agents)
             for event in events_snapshot:
                 if event.agent_id in target_agents:
                     completed_agents.add(event.agent_id)

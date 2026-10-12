@@ -87,8 +87,9 @@ class SqliteMemoryAdapter:
         # Connection registry for cleanup across threads
         self._all_connections = set()
         self._connection_lock = threading.Lock()
-        # Owning thread per connection, so connections of dead threads can be reclaimed
-        self._connection_owners: Dict[Any, "weakref.ref[threading.Thread]"] = {}
+        # Owning thread (and shared in-memory target, if any) per connection,
+        # so connections of dead threads can be reclaimed
+        self._connection_owners: Dict[Any, tuple] = {}
         
         # Set logger level based on verbose
         if verbose >= 5:
@@ -118,7 +119,10 @@ class SqliteMemoryAdapter:
                 self._local.stm_conn.commit()
             
                 # Register connection for cleanup
-                self._register_connection(self._local.stm_conn)
+                self._register_connection(
+                    self._local.stm_conn,
+                    self._short_target if self.short_db == ":memory:" else None,
+                )
         
             return self._local.stm_conn
     
@@ -144,29 +148,39 @@ class SqliteMemoryAdapter:
                 self._local.ltm_conn.commit()
             
                 # Register connection for cleanup
-                self._register_connection(self._local.ltm_conn)
+                self._register_connection(
+                    self._local.ltm_conn,
+                    self._long_target if self.long_db == ":memory:" else None,
+                )
         
             return self._local.ltm_conn
     
-    def _register_connection(self, conn) -> None:
+    def _register_connection(self, conn, memory_target: Optional[str] = None) -> None:
         """Track ``conn`` for cleanup and close connections of dead threads.
 
         Connections are thread-local, so once their owning thread exits nothing
         can reach them except this registry. Sweeping on each new registration
         keeps short-lived threads from leaking one connection (and fd) each.
+        ``memory_target`` names a shared in-memory database: SQLite drops it when
+        its last connection closes, so one connection to it is always kept.
         """
         with self._connection_lock:
-            for old, owner in list(self._connection_owners.items()):
-                thread = owner()
-                if thread is None or not thread.is_alive():
-                    del self._connection_owners[old]
-                    self._all_connections.discard(old)
-                    try:
-                        old.close()
-                    except Exception:
-                        pass
             self._all_connections.add(conn)
-            self._connection_owners[conn] = weakref.ref(threading.current_thread())
+            self._connection_owners[conn] = (weakref.ref(threading.current_thread()), memory_target)
+            for old, (owner, target) in list(self._connection_owners.items()):
+                thread = owner()
+                if thread is not None and thread.is_alive():
+                    continue
+                if target is not None and not any(
+                    t == target for c, (_, t) in self._connection_owners.items() if c is not old
+                ):
+                    continue
+                del self._connection_owners[old]
+                self._all_connections.discard(old)
+                try:
+                    old.close()
+                except Exception:
+                    pass
 
     def store_short_term(
         self, 
