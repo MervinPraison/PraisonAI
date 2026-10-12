@@ -18,7 +18,7 @@ recorded ``reason_code``.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import FrozenSet, Iterable, Optional
+from typing import FrozenSet, Iterable, List, Mapping, Optional
 
 # Machine-readable reason codes. Kept as module constants so callers can record
 # and compare them without re-typing string literals (which is exactly how the
@@ -129,6 +129,54 @@ def _contains(collection: Optional[Iterable[str]], value: Optional[str]) -> bool
     if not collection or value is None:
         return False
     return value in collection
+
+
+# Prefix marking a reference to a named access group (Issue #5775), e.g.
+# ``allowed_users: ["group:admins"]``.
+GROUP_PREFIX = "group:"
+
+
+def expand_access_groups(
+    entries: Optional[Iterable[str]],
+    groups: Optional[Mapping[str, Iterable[str]]],
+) -> List[str]:
+    """Expand ``group:<name>`` references into concrete sender ids.
+
+    Lets an operator define a set of senders once (``access_groups:``) and
+    reference it from any channel's ``allowed_users``/``allowlist``/
+    ``blocklist``, so editing or revoking membership happens in one place.
+    Groups may include other groups. Order is preserved and duplicates removed;
+    a comma-separated string (env-expanded ``${VAR}``) is accepted as a list.
+
+    Raises:
+        ValueError: on an unknown group or a cycle, so a bad reference fails
+            closed at config load instead of silently widening/narrowing access.
+    """
+    groups = groups or {}
+    out: List[str] = []
+    seen = set()
+
+    def _walk(items: Iterable[str], stack: tuple) -> None:
+        if isinstance(items, str):
+            # Env-expanded value like "${ADMINS}" -> "111,222".
+            items = items.split(",")
+        for raw in items or ():
+            entry = str(raw).strip()
+            if not entry.startswith(GROUP_PREFIX):
+                if entry and entry not in seen:
+                    seen.add(entry)
+                    out.append(entry)
+                continue
+            name = entry[len(GROUP_PREFIX):].strip()
+            if name in stack:
+                chain = " -> ".join(stack + (name,))
+                raise ValueError(f"Access group cycle: {chain}")
+            if name not in groups:
+                raise ValueError(f"Unknown access group: {name!r}")
+            _walk(groups[name], stack + (name,))
+
+    _walk(entries or (), ())
+    return out
 
 
 def resolve_ingress_admission(
