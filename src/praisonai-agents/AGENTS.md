@@ -613,7 +613,7 @@ class MyTool(BaseTool):
 
 New agent-callable third-party connectors (external HTTP/API, SaaS, DB) go to **[PraisonAI-Tools](https://github.com/MervinPraison/PraisonAI-Tools)**, NOT `praisonaiagents/tools/`. Core keeps only tool *protocols, base classes, decorator, registry, resolver, trust/fencing* — not connectors.
 
-**Decision test** (categories are **alternatives**, not cumulative):
+**Decision test** — keep in core only if **both** left-column conditions hold; route out if **any** right-column condition holds:
 
 | Keep in core `praisonaiagents/tools/` | Route to PraisonAI-Tools |
 |---|---|
