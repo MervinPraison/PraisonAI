@@ -29,6 +29,15 @@ logger = logging.getLogger(__name__)
 # timeouts so they cannot exhaust process resources.
 _MAX_ORPHANED_TOOL_EXECUTORS = 4
 
+# Effective cancel token of the turn running in *this* context, as
+# ``(agent, token)``. ``self._active_turn_token`` is a single slot overwritten by
+# whichever concurrent turn started last; this ContextVar (copied into tool
+# executor threads and asyncio tasks) lets each turn's tools/approvals see their
+# own token. Set/reset by ``chat``/``achat``.
+_active_turn_cancel: "contextvars.ContextVar[Optional[tuple]]" = contextvars.ContextVar(
+    "praisonai_active_turn_cancel", default=None
+)
+
 # Worker count for the per-agent tool ThreadPoolExecutor. Used both when the
 # pool is created and to decide (with the per-executor in-flight counter)
 # whether a fresh call would have to queue behind hung workers.
@@ -944,7 +953,11 @@ class ToolExecutionMixin:
         Returns ``None`` when neither is attached, which keeps today's behaviour
         (the request is treated as always live).
         """
-        token = getattr(self, '_active_turn_token', None)
+        current = _active_turn_cancel.get()
+        if current is not None and current[0] is self:
+            token = current[1]
+        else:
+            token = getattr(self, '_active_turn_token', None)
         if token is not None:
             is_set = getattr(token, 'is_set', None)
             if callable(is_set):
