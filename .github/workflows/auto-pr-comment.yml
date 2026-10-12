@@ -16,7 +16,10 @@ on:
   pull_request_target:
     types: [opened, synchronize]
   schedule:
-    - cron: '30 3,9,15,21 * * *'
+    # Hourly stale/missing-FINAL sweep. A push is the only other recovery
+    # trigger, and at push time the "wait for CI" debounce correctly holds back;
+    # this sweep is what re-posts the FINAL once the push has settled.
+    - cron: '30 * * * *'
   workflow_dispatch:
 
 env:

@@ -10,6 +10,10 @@ const CLAUDE_ACTIVE_MS = 35 * 60 * 1000;
 const STALE_FINAL_RECOVERY_WINDOW_MS = 60 * 60 * 1000;
 const STALE_FINAL_MAX_PER_WINDOW = 2;
 const PUSH_AFTER_FINAL_DEBOUNCE_MS = 15 * 60 * 1000;
+// How long after a push the "pushed soon after FINAL" debounce keeps holding
+// stale-FINAL recovery back (long enough for CI / a batch of fixes). After that
+// the debounce expires, so a missed completion can no longer block a PR forever.
+const PUSH_SETTLE_MS = 30 * 60 * 1000;
 const ALLOWED_MERGE_STATES = new Set(['CLEAN', 'UNSTABLE']);
 const AGENT_PY_MAX_AUTO_LINES = 100;
 const PR_MAX_AUTO_ADDITIONS = 800;
@@ -143,6 +147,16 @@ function isClaudeTriggerNoise(c) {
   return false;
 }
 
+// Markers of a completed FINAL review. anthropics/claude-code-action posted a
+// "Claude finished" tracking comment; the local action used since 2026-10-09
+// posts the review itself, which always carries the mandatory Phase 1 table
+// (see FINAL_CLAUDE_REVIEW_BODY) and usually a "Final architecture review" title.
+const FINAL_REPLY_MARKERS = [
+  /Claude finished/,
+  /^#{1,4}\s*Final architecture review\b/im,
+  /^#{1,4}\s*Phase 1 — AGENTS\.md review/m,
+];
+
 function isClaudeFinalReplyComment(c) {
   const login = (c.user?.login || '').toLowerCase();
   const fromAutomation =
@@ -150,7 +164,8 @@ function isClaudeFinalReplyComment(c) {
     login.includes('github-actions') ||
     AUTO_ACTORS.some((a) => a.toLowerCase() === login);
   if (!fromAutomation) return false;
-  return (c.body || '').includes('Claude finished');
+  const body = c.body || '';
+  return FINAL_REPLY_MARKERS.some((re) => re.test(body));
 }
 
 function hasRecentClaudeTrigger(comments, minutes = 35) {
@@ -354,7 +369,11 @@ function shouldSkipStaleFinalRecovery(comments, headPushedAt, headPusherLogin = 
   if (!isStaleFinalAfterPush(comments, headPushedAt)) {
     return { skip: true, reason: 'not stale' };
   }
-  if (headPusherLogin && isClaudeAutomationLogin(headPusherLogin) && isPushSoonAfterLatestFinal(comments, headPushedAt)) {
+  // The debounces below compare the push to the FINAL trigger, a relation that
+  // never changes; only hold recovery back while the push is still settling.
+  const pushSettling =
+    !!headPushedAt && Date.now() - new Date(headPushedAt).getTime() < PUSH_SETTLE_MS;
+  if (pushSettling && headPusherLogin && isClaudeAutomationLogin(headPusherLogin) && isPushSoonAfterLatestFinal(comments, headPushedAt)) {
     return {
       skip: true,
       reason: 'head pushed by Claude automation soon after FINAL (wait for CI)',
@@ -363,7 +382,7 @@ function shouldSkipStaleFinalRecovery(comments, headPushedAt, headPusherLogin = 
   if (needsFinalReReviewAfterConflictRebase(comments, headPushedAt)) {
     return { skip: false, reason: '' };
   }
-  if (isPushSoonAfterLatestFinal(comments, headPushedAt)) {
+  if (pushSettling && isPushSoonAfterLatestFinal(comments, headPushedAt)) {
     return {
       skip: true,
       reason: 'head pushed soon after FINAL (wait for CI / batched fixes)',

@@ -66,6 +66,40 @@ assert(
   !mg.isStaleFinalAfterPush(finishedOnHead, '2026-06-12T09:00:00Z')
 );
 
+// The local Claude action (since 2026-10-09) posts the review itself rather than
+// an "Claude finished" tracking comment. Real reply shapes from open PRs:
+const reviewReplies = [
+  '## Final architecture review — PR #5772 (fixes #5771)\n\n#### Phase 1 — AGENTS.md review\n| Check | Result |',
+  '## Final architecture review\n\n#### Phase 1 — AGENTS.md review\n| Check | Result |',
+  '#### Phase 1 — AGENTS.md review\n| Check | Result |\n|---|---|',
+  '## Final architecture review: PR #5774\n\n#### Phase 1 — AGENTS.md review',
+];
+for (const body of reviewReplies) {
+  assert(
+    `FINAL review reply counts as completion: ${body.slice(0, 40)}`,
+    mg.isClaudeFinalReplyComment({ user: { login: 'praisonai-triage-agent[bot]' }, body })
+  );
+}
+assert(
+  'a human posting the review format is not a completion',
+  !mg.isClaudeFinalReplyComment({ user: { login: 'someone' }, body: reviewReplies[0] })
+);
+assert(
+  'unrelated triage-bot comment is not a completion',
+  !mg.isClaudeFinalReplyComment({
+    user: { login: 'praisonai-triage-agent[bot]' },
+    body: '## CI fix: `test_service_delete_all` (pushed 52c0fdb1e)',
+  })
+);
+// PR #5772 timeline: FINAL 07:49:49, reviewer pushes 07:56:13, review 07:56:28.
+const pr5772 = [
+  { user: { login: 'MervinPraison' }, body: '@claude You are the FINAL architecture reviewer.', created_at: '2026-10-12T07:49:49Z' },
+  { user: { login: 'praisonai-triage-agent[bot]' }, body: reviewReplies[0], created_at: '2026-10-12T07:56:28Z' },
+];
+assert('PR #5772 shape: FINAL is current on HEAD', !mg.isStaleFinalAfterPush(pr5772, '2026-10-12T07:56:13Z'));
+assert('PR #5772 shape: still stale if HEAD moves after the review',
+  mg.isStaleFinalAfterPush(pr5772, '2026-10-12T09:00:00Z'));
+
 assert('cancelled detect-and-trigger does not block', mg.OPTIONAL_CANCELLED_CHECKS.has('detect-and-trigger'));
 assert('optional pending recovery check name listed', mg.OPTIONAL_PENDING_WHEN_CORE_GREEN.has('claude-review-recovery'));
 assert('ignorable pending when core green', mg.isIgnorablePendingCheck(
@@ -219,7 +253,7 @@ const firstFinal = {
 };
 const pushSoonAfter = mg.shouldSkipStaleFinalRecovery(
   [firstFinal],
-  iso(nowMs - 16 * 60 * 1000)
+  iso(nowMs - 8 * 60 * 1000)
 );
 assert('debounce push soon after FINAL', pushSoonAfter.skip && pushSoonAfter.reason.includes('soon after'));
 
@@ -236,10 +270,24 @@ assert('hourly cap blocks third FINAL in window', capped.skip && capped.reason.i
 
 const botPush = mg.shouldSkipStaleFinalRecovery(
   [firstFinal],
-  iso(nowMs - 16 * 60 * 1000),
+  iso(nowMs - 8 * 60 * 1000),
   'praisonai-triage-agent[bot]'
 );
 assert('skip when automation pushed head', botPush.skip && botPush.reason.includes('automation'));
+
+// The "pushed soon after FINAL" debounce must expire. It compares the push to
+// the FINAL trigger, which never changes, so without a clock check a PR whose
+// FINAL reviewer pushed a fix within 15 min of the trigger was skipped forever.
+const oldFinal = {
+  user: { login: 'MervinPraison' },
+  body: '@claude You are the FINAL architecture reviewer.',
+  created_at: iso(nowMs - 3 * 60 * 60 * 1000),
+};
+const settledHead = iso(nowMs - 3 * 60 * 60 * 1000 + 4 * 60 * 1000); // pushed 4 min after FINAL, 2h56m ago
+const expired = mg.shouldSkipStaleFinalRecovery([oldFinal], settledHead);
+assert('soon-after-FINAL debounce expires once the push has settled', !expired.skip);
+const expiredBot = mg.shouldSkipStaleFinalRecovery([oldFinal], settledHead, 'praisonai-triage-agent[bot]');
+assert('automation-push debounce expires once the push has settled', !expiredBot.skip);
 
 assert('claude automation login', mg.isClaudeAutomationLogin('praisonai-triage-agent[bot]'));
 
