@@ -153,3 +153,21 @@ def test_task_output_file_traversal_blocked_real_run(root):
     team, _ = _team("../escaped.txt")
     team.start()
     assert not (root.parent / "escaped.txt").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX hardlinks")
+def test_task_output_file_hardlink_group_kept_or_bits_dropped(root, tmp_path, monkeypatch):
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret")
+    os.chmod(outside, 0o660)
+    os.link(outside, root / "linked.txt")
+
+    def deny(*args):
+        raise PermissionError
+
+    monkeypatch.setattr(os, "fchown", deny)
+    team, task = _team("linked.txt")
+    team.save_output_to_file(task, "new")
+    assert (root / "linked.txt").read_text() == "new"
+    assert (root / "linked.txt").stat().st_mode & 0o777 == 0o600
+    assert outside.read_text() == "secret"

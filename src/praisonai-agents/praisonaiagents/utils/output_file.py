@@ -44,8 +44,15 @@ def write_output_file(path: str, content: str, create_dirs: bool = True) -> str 
         suffix=".tmp",
     )
     try:
+        mode = stat.S_IMODE(st.st_mode)
+        if hasattr(os, "fchown"):
+            try:
+                os.fchown(fd, -1, st.st_gid)
+            except OSError:
+                # Can't keep the original group; don't grant its bits to ours.
+                mode &= ~0o070
         if hasattr(os, "fchmod"):
-            os.fchmod(fd, stat.S_IMODE(st.st_mode))
+            os.fchmod(fd, mode)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)
         os.replace(tmp, file_path)
