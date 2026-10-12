@@ -1,12 +1,16 @@
+import functools
 import os
 import stat
 
 from praisonaiagents._logging import get_logger
 
 from ..tools.path_safety import resolve_within_root
-from .atomic_io import atomic_write_text
 
 logger = get_logger(__name__)
+
+
+def _open_nofollow(path, flags, mode=0o666):
+    return os.open(path, flags | getattr(os, "O_NOFOLLOW", 0), mode)
 
 
 def write_output_file(path: str, content: str, create_dirs: bool = True) -> str | None:
@@ -26,13 +30,16 @@ def write_output_file(path: str, content: str, create_dirs: bool = True) -> str 
         return None
     if create_dirs:
         os.makedirs(os.path.dirname(file_path), exist_ok=True)
-    try:
-        with open(file_path, "x", encoding="utf-8") as f:
+    with open(file_path, "a", encoding="utf-8", opener=_open_nofollow) as f:
+        st = os.fstat(f.fileno())
+        if st.st_nlink == 1:
+            f.truncate(0)
             f.write(content)
-    except FileExistsError:
-        # Replace rather than truncate so a hardlink to a file outside the
-        # root is not written through, then restore the old mode (mkstemp is 0600).
-        mode = stat.S_IMODE(os.stat(file_path).st_mode)
-        atomic_write_text(file_path, content)
-        os.chmod(file_path, mode)
+            return file_path
+    # A hardlink may share its inode with a file outside the root, so write a
+    # new file under the same name instead of truncating the shared one.
+    os.unlink(file_path)
+    opener = functools.partial(_open_nofollow, mode=stat.S_IMODE(st.st_mode))
+    with open(file_path, "x", encoding="utf-8", opener=opener) as f:
+        f.write(content)
     return file_path

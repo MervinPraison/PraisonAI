@@ -89,6 +89,20 @@ def test_task_output_file_hardlink_does_not_write_outside(root, tmp_path):
     assert outside.read_text() == "secret"
 
 
+@pytest.mark.skipif(os.name == "nt" or os.geteuid() == 0, reason="POSIX permission bits")
+def test_task_output_file_overwrite_in_readonly_directory(root):
+    (root / "ro").mkdir()
+    target = root / "ro" / "out.txt"
+    target.write_text("old")
+    os.chmod(root / "ro", 0o555)
+    try:
+        team, task = _team("ro/out.txt")
+        team.save_output_to_file(task, "new")
+    finally:
+        os.chmod(root / "ro", 0o755)
+    assert target.read_text() == "new"
+
+
 def test_task_output_file_respects_create_directory(root):
     team, task = _team("missing/out.txt", create_directory=False)
     team.save_output_to_file(task, "ok")
