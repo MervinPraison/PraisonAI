@@ -653,6 +653,17 @@ def gateway_status(
         try:
             handler = GatewayHandler()
             handler.status(host=host, port=port, deep=deep)
+            info_status, info = _fetch_gateway(host, port, "/info")
+            if info_status is not None:
+                access = _summarise_access(host, info_status, info)
+                if access["authorized"]:
+                    scopes = access.get("scopes")
+                    scope_s = ", ".join(scopes) if scopes is not None else "unknown"
+                    print(f"  Access: authorized (scopes: {scope_s})")
+                else:
+                    print(f"  Access: credential refused (HTTP {info_status})")
+                if access.get("next_step"):
+                    print(f"  Next step: {access['next_step']}")
             if deep and config and os.path.exists(config):
                 from praisonai_bot.daemon.launchd import get_logs
 
@@ -932,26 +943,75 @@ def _resolve_gateway_auth_token() -> str:
     return ""
 
 
-def _fetch_gateway_json(host: str, port: int, path: str, timeout: float = 5.0):
-    """GET a JSON gateway endpoint over loopback, returning None on failure.
+_LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
 
+
+def _fetch_gateway(host: str, port: int, path: str, timeout: float = 5.0):
+    """GET a JSON gateway endpoint, returning ``(http_status, body)``.
+
+    ``http_status`` is ``None`` when nothing answered, so callers can tell an
+    unreachable gateway apart from one that refused the credential (#5776).
     Attaches the loopback-only bearer token (resolved from the environment or
     the persisted ``~/.praisonai/.env``) so authenticated gateways still
     answer, without leaking the credential onto a remote plaintext hop.
     """
     import json
+    import urllib.error
     import urllib.request
 
     url = f"http://{host}:{port}{path}"
     try:
         req = urllib.request.Request(url)
         token = _resolve_gateway_auth_token()
-        if token and host in ("127.0.0.1", "localhost", "::1"):
+        if token and host in _LOOPBACK_HOSTS:
             req.add_header("Authorization", f"Bearer {token}")
         with urllib.request.urlopen(req, timeout=timeout) as response:
-            return json.loads(response.read().decode())
+            return response.status, json.loads(response.read().decode())
+    except urllib.error.HTTPError as exc:
+        return exc.code, None
     except Exception:
-        return None
+        return None, None
+
+
+def _fetch_gateway_json(host: str, port: int, path: str, timeout: float = 5.0):
+    """GET a JSON gateway endpoint over loopback, returning None on failure."""
+    status, body = _fetch_gateway(host, port, path, timeout)
+    return body if status == 200 else None
+
+
+def _summarise_access(host: str, info_status, info) -> dict:
+    """Classify what this CLI's credential may do on a reachable gateway (#5776).
+
+    Distinguishes "reachable but the credential was refused" and "reachable
+    with limited operator scopes" from a dead socket, with a named next step.
+    """
+    if info_status == 200 and isinstance(info, dict):
+        scopes = info.get("scopes")
+        access = {"authorized": True, "scopes": scopes}
+        if scopes is not None and not ({"admin", "write"} & set(scopes)):
+            access["next_step"] = (
+                "credential lacks operator write/admin scope; grant it via "
+                "gateway.auth_scopes in the gateway config"
+            )
+        return access
+    access = {"authorized": False, "http_status": info_status}
+    if info_status in (401, 403):
+        if host not in _LOOPBACK_HOSTS:
+            access["next_step"] = (
+                "the CLI only sends GATEWAY_AUTH_TOKEN to loopback; run "
+                "`praisonai gateway status` on the gateway host"
+            )
+        elif not _resolve_gateway_auth_token():
+            access["next_step"] = (
+                "no GATEWAY_AUTH_TOKEN found; export it or run "
+                "`praisonai gateway doctor --fix`"
+            )
+        else:
+            access["next_step"] = (
+                "GATEWAY_AUTH_TOKEN was rejected; it does not match the "
+                "running gateway's auth token"
+            )
+    return access
 
 
 def _build_status_snapshot(host: str, port: int) -> dict:
@@ -979,8 +1039,12 @@ def _build_status_snapshot(host: str, port: int) -> dict:
     except Exception as exc:  # noqa: BLE001
         snapshot["daemon"] = {"error": str(exc)}
 
-    health = _fetch_gateway_json(host, port, "/health")
-    info = _fetch_gateway_json(host, port, "/info")
+    health_status, health = _fetch_gateway(host, port, "/health")
+    if health_status != 200:
+        health = None
+    info_status, info = _fetch_gateway(host, port, "/info")
+    if info_status != 200:
+        info = None
 
     if info:
         snapshot["version"] = info.get("version")
@@ -1011,6 +1075,7 @@ def _build_status_snapshot(host: str, port: int) -> dict:
         # (#5363, greptile P1).
         if info is None and snapshot.get("version") is None:
             snapshot["version_unavailable"] = "info_unreachable"
+        snapshot["access"] = _summarise_access(host, info_status, info)
 
     return snapshot
 
