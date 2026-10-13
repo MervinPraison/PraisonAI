@@ -241,7 +241,9 @@ jobs:
             );
 
       - name: Ask Claude to fix merge gate BLOCK findings
-        if: steps.scan.outputs.fix_requests != '' && steps.scan.outputs.fix_requests != '[]'
+        # Scheduled scans only: they share one non-cancelling concurrency group,
+        # so two runs can never race to post the same request.
+        if: github.event_name == 'schedule' && steps.scan.outputs.fix_requests != '' && steps.scan.outputs.fix_requests != '[]'
         uses: actions/github-script@v7
         env:
           FIX_REQUESTS: ${{ steps.scan.outputs.fix_requests }}

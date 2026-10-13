@@ -1304,12 +1304,15 @@ const BLOCKED_ON_HEAD_REASON = 'merge gate blocked this HEAD (waiting for a fix 
 const BLOCKED_MERGE_GATE_LABEL = 'pipeline/blocked:merge-gate';
 
 // Only verdicts posted by the gate's own automation may hold a PR out; anyone
-// can comment "MERGE_GATE_VERDICT: BLOCK".
+// can comment "MERGE_GATE_VERDICT: BLOCK". Exact logins: a substring match would
+// trust any account whose name merely contains the bot's name.
+const GATE_VERDICT_AUTHORS = new Set(['praisonai-triage-agent[bot]', 'github-actions[bot]']);
+
 function latestMergeGateVerdictComment(comments, headPushedAt) {
   const headTime = headPushedAt ? new Date(headPushedAt).getTime() - 60000 : 0;
   let latest = null;
   for (const c of comments || []) {
-    if (!isClaudeAutomationLogin(c.user?.login)) continue;
+    if (!GATE_VERDICT_AUTHORS.has(c.user?.login)) continue;
     if (!isMergeGateVerdictComment(c.body)) continue;
     if (isAutomatedFallbackVerdict(c.body)) continue;
     const t = new Date(c.created_at).getTime();
@@ -1371,7 +1374,7 @@ async function listPrNumbersForMergeGateScan(github, owner, repo, core) {
   // keep scanning them (they never take a slot while held) so the fix request
   // is still posted and they re-enter once a fix lands.
   const heldOut = await listOpenIssuesWithLabel(github, owner, repo, BLOCKED_MERGE_GATE_LABEL);
-  const mergeReady = [...mergeReadyIssues, ...heldOut]
+  const eligible = (issues) => issues
     .filter((issue) => issue.pull_request)
     .filter((issue) => {
       const labels = (issue.labels || []).map((l) => (typeof l === 'string' ? l : l.name));
@@ -1383,11 +1386,15 @@ async function listPrNumbersForMergeGateScan(github, owner, repo, core) {
       }
       return true;
     })
-    .map((issue) => issue.number)
+    .map((issue) => issue.number);
+  // Only a real merge-ready PR may short-circuit the scan; held-out PRs alone
+  // must not hide unlabelled ready PRs from the oldest-open fallback below.
+  const labelledReady = eligible(mergeReadyIssues);
+  const mergeReady = [...labelledReady, ...eligible(heldOut)]
     .filter((n, i, all) => all.indexOf(n) === i)
     .sort((a, b) => a - b);
 
-  if (mergeReady.length > 0) {
+  if (labelledReady.length > 0) {
     core?.info?.(
       `Merge gate scan: ${mergeReady.length} ${MERGE_READY_LABEL} PR(s) (skipping unlabelled open PRs)`
     );
@@ -1486,6 +1493,8 @@ function findMergeGateVerdict(comments, minCreatedAt = null, headPushedAt = null
 }
 
 module.exports = {
+  GATE_VERDICT_AUTHORS,
+  listPrNumbersForMergeGateScan,
   BLOCKED_ON_HEAD_REASON,
   BLOCK_FIX_MARKER,
   blockedOnUnchangedHead,

@@ -148,6 +148,32 @@ assert('PR #5772 shape: still stale if HEAD moves after the review',
   assert('bare marker text (not the HTML comment) is ignored', mg.blockFixRequestDue([quoted], sha));
 }
 
+{
+  const t0 = Date.parse('2026-10-13T10:00:00Z');
+  const isoAt = (ms) => new Date(ms).toISOString();
+  const forged = { user: { login: 'evil-praisonai-triage-agent' }, body: 'MERGE_GATE_VERDICT: BLOCK', created_at: isoAt(t0) };
+  assert('look-alike login cannot hold a PR out',
+    !mg.blockedOnUnchangedHead([forged], isoAt(t0 - 3600e3), [], t0 + 60e3));
+  assert('only exact gate logins are trusted', mg.GATE_VERDICT_AUTHORS.has('praisonai-triage-agent[bot]') && !mg.GATE_VERDICT_AUTHORS.has('evil-praisonai-triage-agent'));
+}
+(async () => {
+  const fakeGithub = (byLabel, openPrs) => ({
+    rest: {
+      issues: { listForRepo: async ({ labels }) => ({ data: byLabel[labels] || [] }) },
+      pulls: { list: async () => ({ data: openPrs }) },
+    },
+  });
+  const pr = (n, labels) => ({ number: n, pull_request: {}, labels: labels.map((name) => ({ name })) });
+  const onlyHeld = await mg.listPrNumbersForMergeGateScan(
+    fakeGithub({ 'pipeline/blocked:merge-gate': [pr(10, ['pipeline/blocked:merge-gate'])] }, [{ number: 10 }, { number: 20 }]),
+    'o', 'r', null);
+  assert('held-out PRs alone fall back to scanning all open PRs', onlyHeld.includes(20) && onlyHeld.includes(10));
+  const mixed = await mg.listPrNumbersForMergeGateScan(
+    fakeGithub({ 'pipeline/merge-ready': [pr(30, ['pipeline/merge-ready'])], 'pipeline/blocked:merge-gate': [pr(10, [])] }, []),
+    'o', 'r', null);
+  assert('merge-ready plus held-out PRs are both scanned', mixed.join(',') === '10,30');
+})();
+
 assert('cancelled detect-and-trigger does not block', mg.OPTIONAL_CANCELLED_CHECKS.has('detect-and-trigger'));
 assert('optional pending recovery check name listed', mg.OPTIONAL_PENDING_WHEN_CORE_GREEN.has('claude-review-recovery'));
 assert('ignorable pending when core green', mg.isIgnorablePendingCheck(
