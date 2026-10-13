@@ -104,9 +104,17 @@ class ManagedBackendBase:
             full = ""
             try:
                 session_id = self._ensure_session()
+                if stop.is_set():
+                    return  # consumer left during session setup; never start the run
                 for chunk in self._iter_events(session_id, prompt):
                     if stop.is_set():
-                        break  # consumer went away; interrupt() already requested
+                        # The consumer-side interrupt may have fired before this
+                        # run existed, so interrupt again now that it does.
+                        try:
+                            self.interrupt()
+                        except Exception:  # noqa: BLE001
+                            logger.debug("[managed] interrupt failed", exc_info=True)
+                        break
                     if chunk:
                         text = str(chunk)
                         q.put(text)
