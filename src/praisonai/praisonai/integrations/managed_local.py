@@ -804,8 +804,7 @@ class LocalManagedAgent(ManagedBackendBase):
     # ------------------------------------------------------------------
     async def execute(self, prompt: str, **kwargs) -> str:
         """Execute prompt locally and return full response."""
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._execute_sync, prompt)
+        return await self._execute_in_executor(self._execute_sync, prompt, **kwargs)
 
     def _sync_usage(self) -> None:
         """Sync token usage from inner agent to managed backend counters."""

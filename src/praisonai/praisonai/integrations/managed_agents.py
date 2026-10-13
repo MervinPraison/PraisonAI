@@ -749,8 +749,7 @@ class AnthropicManagedAgent(ManagedBackendBase):
 
         Runs the synchronous Anthropic SDK in a thread executor to stay async-safe.
         """
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._execute_sync, prompt)
+        return await self._execute_in_executor(self._execute_sync, prompt, **kwargs)
 
     def _execute_sync(self, prompt: str, stream_live: bool = False) -> str:
         """Synchronous execution using the SDK's native streaming.

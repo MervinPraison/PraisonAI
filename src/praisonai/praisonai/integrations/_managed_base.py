@@ -24,6 +24,7 @@ whole streaming loop.
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import queue
 import threading
@@ -50,20 +51,70 @@ class ManagedBackendBase:
     def _after_stream(self, full: str) -> None:
         """Hook for post-stream bookkeeping. Default: no-op."""
 
+    def interrupt(self) -> None:
+        """Stop the in-flight run. Default: no-op."""
+
+    def _interrupt_in_background(self) -> None:
+        """Call ``interrupt()`` on a daemon thread so the event loop never blocks."""
+        def _run() -> None:
+            try:
+                self.interrupt()
+            except Exception:  # noqa: BLE001
+                logger.debug("[managed] interrupt failed", exc_info=True)
+
+        threading.Thread(target=_run, daemon=True).start()
+
+    async def _execute_in_executor(self, sync_fn, prompt: str, **kwargs) -> str:
+        """Run ``sync_fn(prompt, stream_live=...)`` off-loop, honouring ``timeout``.
+
+        On timeout the backend is interrupted (best-effort) before re-raising;
+        the worker thread itself cannot be killed.
+        """
+        loop = asyncio.get_running_loop()
+        fut = loop.run_in_executor(
+            None,
+            functools.partial(
+                sync_fn, prompt, stream_live=bool(kwargs.get("stream_live", False)),
+            ),
+        )
+        timeout = kwargs.get("timeout")
+        if timeout is None:
+            return await fut
+        try:
+            return await asyncio.wait_for(fut, timeout=timeout)
+        except asyncio.TimeoutError:
+            self._interrupt_in_background()
+            raise
+
     async def stream(self, prompt: str, **kwargs) -> AsyncIterator[str]:
         """Yield text chunks as the managed agent produces them.
 
         The synchronous ``_iter_events`` producer runs on a daemon thread and
         feeds a sentinel-terminated queue; the event loop is never blocked.
+
+        To stop early, close the generator (``await gen.aclose()`` or
+        ``contextlib.aclosing``); a bare ``break`` only closes it once the
+        generator is garbage-collected.
         """
         loop = asyncio.get_running_loop()
         q: "queue.Queue[Optional[str]]" = queue.Queue()
+        stop = threading.Event()  # set when the consumer stops reading
 
         def _producer() -> None:
             full = ""
             try:
                 session_id = self._ensure_session()
+                if stop.is_set():
+                    return  # consumer left during session setup; never start the run
                 for chunk in self._iter_events(session_id, prompt):
+                    if stop.is_set():
+                        # The consumer-side interrupt may have fired before this
+                        # run existed, so interrupt again now that it does.
+                        try:
+                            self.interrupt()
+                        except Exception:  # noqa: BLE001
+                            logger.debug("[managed] interrupt failed", exc_info=True)
+                        break
                     if chunk:
                         text = str(chunk)
                         q.put(text)
@@ -80,8 +131,16 @@ class ManagedBackendBase:
         thread = threading.Thread(target=_producer, daemon=True)
         thread.start()
 
-        while True:
-            chunk = await loop.run_in_executor(None, q.get)
-            if chunk is None:
-                break
-            yield chunk
+        try:
+            while True:
+                chunk = await loop.run_in_executor(None, q.get)
+                if chunk is None:
+                    break
+                yield chunk
+        finally:
+            # Runs on aclose() / cancellation (or GC after a bare break).
+            stop.set()
+            if thread.is_alive():
+                # The producer may be blocked waiting on upstream events (e.g. a
+                # long tool call), so interrupt independently of it.
+                self._interrupt_in_background()
