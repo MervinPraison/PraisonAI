@@ -381,11 +381,10 @@ class ChatMixin:
             budget = max(0, int(getattr(config, "prefetch_token_budget", 512)))
             if not limit or not budget:
                 return ""
-            scope = self._memory_prefetch_scope()
             results: List[Any] = []
             for term in self._memory_prefetch_search_queries(query):
                 batch = await self.asearch_memory(
-                    term, memory_type="long_term", limit=limit, **scope
+                    term, memory_type="long_term", limit=limit
                 )
                 if batch:
                     results = list(batch)
