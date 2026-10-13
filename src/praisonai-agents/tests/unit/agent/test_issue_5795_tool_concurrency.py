@@ -1,0 +1,71 @@
+"""Regression tests for #5795: tool/MCP calls must not be timed out by queue wait."""
+import asyncio
+import concurrent.futures as cf
+import threading
+import time
+
+from praisonaiagents import Agent
+
+
+def test_parallel_sync_tools_not_timed_out_by_queue_wait():
+    def slow(n: int) -> str:
+        """slow tool"""
+        time.sleep(0.5)
+        return f"ok{n}"
+
+    agent = Agent(name="t", instructions="x", tools=[slow], llm="gpt-4o-mini")
+    agent._tool_timeout = 0.8
+    with cf.ThreadPoolExecutor(5) as ex:
+        results = list(ex.map(lambda i: agent.execute_tool("slow", {"n": i}), range(5)))
+    for i, result in enumerate(results):
+        assert isinstance(result, str) and result.startswith(f"ok{i}"), result
+
+
+def test_hung_async_sync_tools_do_not_starve_default_executor():
+    release = threading.Event()
+    tools = []
+    for i in range(10):
+        def hang(x: int = 0) -> str:
+            """hang"""
+            release.wait(10)
+            return "x"
+        hang.__name__ = f"hang{i}"
+        tools.append(hang)
+
+    agent = Agent(name="u", instructions="x", tools=tools, llm="gpt-4o-mini")
+    agent._tool_timeout = 0.2
+
+    async def main():
+        for i in range(10):
+            result = await asyncio.wait_for(agent.execute_tool_async(f"hang{i}", {"x": 1}), 5)
+            assert isinstance(result, dict) and result.get("timeout"), result
+        # The loop's default executor is still free for other to_thread users.
+        assert await asyncio.wait_for(asyncio.to_thread(lambda: 42), 2) == 42
+
+    try:
+        asyncio.run(main())
+    finally:
+        release.set()
+
+
+def test_transport_wrapper_cancels_call_on_timeout():
+    from praisonaiagents.mcp.mcp_sse import SSEMCPTool
+
+    loop = asyncio.new_event_loop()
+    threading.Thread(target=loop.run_forever, daemon=True).start()
+    finished = threading.Event()
+
+    class _Session:
+        async def call_tool(self, name, kwargs):
+            await asyncio.sleep(1.0)
+            finished.set()
+
+    try:
+        tool = SSEMCPTool("t", "d", _Session(), {}, timeout=0.1)
+        tool._loop = loop
+        result = tool()
+        assert "timed out" in result
+        time.sleep(1.3)
+        assert not finished.is_set()
+    finally:
+        loop.call_soon_threadsafe(loop.stop)
