@@ -8129,6 +8129,9 @@ Answer:"""
                     executor.shutdown(wait=False, cancel_futures=True)
                 else:
                     executor.shutdown(wait=False)
+            async_executor = self.__dict__.pop('_async_tool_executor', None)
+            if async_executor is not None:
+                async_executor.shutdown(wait=False, cancel_futures=True)
         except Exception as e:
             logger.warning(f"ThreadPoolExecutor cleanup failed: {e}")
 
@@ -8278,6 +8281,9 @@ Answer:"""
                         None,
                         lambda: executor.shutdown(wait=False)
                     )
+            async_executor = self.__dict__.pop('_async_tool_executor', None)
+            if async_executor is not None:
+                async_executor.shutdown(wait=False, cancel_futures=True)
 
             # Approval scope cleanup (see close()).
             self._release_approval_scope()

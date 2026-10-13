@@ -17,6 +17,7 @@ Protocol Revision: 2025-11-25
 """
 
 import asyncio
+import concurrent.futures
 import json
 from praisonaiagents._logging import get_logger
 import threading
@@ -295,6 +296,12 @@ class WebSocketMCPTool:
         
         try:
             return future.result(timeout=self.timeout)
+        except concurrent.futures.TimeoutError:
+            # Cancel the in-flight call so a timed-out (possibly side-effecting)
+            # tool does not keep running on the session loop after we report failure.
+            future.cancel()
+            logger.error(f"Tool {self.name} timed out after {self.timeout}s")
+            return f"Error: MCP tool {self.name} timed out after {self.timeout}s"
         except Exception as e:
             logger.error(f"Error calling tool {self.name}: {e}")
             return f"Error: {str(e)}"

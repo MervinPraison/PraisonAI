@@ -40,8 +40,9 @@ _active_turn_cancel: "contextvars.ContextVar[Optional[tuple]]" = contextvars.Con
 
 # Worker count for the per-agent tool ThreadPoolExecutor. Used both when the
 # pool is created and to decide (with the per-executor in-flight counter)
-# whether a fresh call would have to queue behind hung workers.
-_TOOL_POOL_MAX_WORKERS = 2
+# whether a fresh call would have to queue behind hung workers. Matches the
+# default ParallelToolCallExecutor width so a parallel batch never queues.
+_TOOL_POOL_MAX_WORKERS = 5
 
 # Sentinel returned as the "arguments" value when a tool call's argument string
 # cannot be parsed (e.g. truncated by max_tokens or a dropped connection).
@@ -1342,8 +1343,10 @@ class ToolExecutionMixin:
                             with tool_progress_channel(_attempt_sink):
                                 # Use copy_context to preserve injection context in executor thread
                                 ctx = contextvars.copy_context()
+                                started = threading.Event()
 
                                 def execute_with_context():
+                                    started.set()
                                     with with_injection_context(state):
                                         return self._execute_tool_with_circuit_breaker(function_name, arguments)
 
@@ -1415,6 +1418,13 @@ class ToolExecutionMixin:
                                     }
                                     break
                                 try:
+                                    # Charge tool_timeout from when the body starts,
+                                    # not from submit, so time spent queued for a
+                                    # worker never times out a healthy tool. The
+                                    # queue wait is itself bounded by tool_timeout
+                                    # so a pool stuck behind hung workers still fails.
+                                    if not started.wait(timeout=tool_timeout):
+                                        raise concurrent.futures.TimeoutError()
                                     result = future.result(timeout=tool_timeout)
                                 except concurrent.futures.TimeoutError:
                                     if _progress_active is not None:

@@ -1352,6 +1352,29 @@ Write the complete compiled report:"""
         task_id = getattr(task, 'id', None)
         return await self.achat(prompt, task_name=task_name, task_description=task_description, task_id=task_id)
 
+    def _get_async_tool_executor(self):
+        """Return the per-agent bounded pool that runs sync tools for the async path.
+
+        Sync tools awaited via ``execute_tool_async`` must not run on the loop's
+        shared default executor: ``asyncio.wait_for`` cannot stop a hung thread,
+        so leaked workers would starve every other ``to_thread`` user in the
+        process. A dedicated pool caps the leak at the tool pool size; calls
+        queued behind hung workers time out without ever starting.
+        """
+        executor = self.__dict__.get("_async_tool_executor")
+        if executor is None:
+            import concurrent.futures
+            from .tool_execution import _TOOL_POOL_MAX_WORKERS
+            # setdefault is atomic; a losing racer's pool never spawned a thread.
+            executor = self.__dict__.setdefault(
+                "_async_tool_executor",
+                concurrent.futures.ThreadPoolExecutor(
+                    max_workers=_TOOL_POOL_MAX_WORKERS,
+                    thread_name_prefix=f"atool-{getattr(self, 'name', 'agent')}",
+                ),
+            )
+        return executor
+
     async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
         """Async version of execute_tool with retry policy support.
 
@@ -1948,11 +1971,13 @@ Write the complete compiled report:"""
                     if _inject_state is not None:
                         with with_injection_context(_inject_state), tool_progress_channel(_progress_sink):
                             return await loop.run_in_executor(
-                                None, copy_context_to_callable(lambda: call_target(**call_arguments))
+                                self._get_async_tool_executor(),
+                                copy_context_to_callable(lambda: call_target(**call_arguments)),
                             )
                     with tool_progress_channel(_progress_sink):
                         return await loop.run_in_executor(
-                            None, copy_context_to_callable(lambda: call_target(**call_arguments))
+                            self._get_async_tool_executor(),
+                            copy_context_to_callable(lambda: call_target(**call_arguments)),
                         )
 
                 # Circuit-breaker parity with the sync path (tool_execution.py).
