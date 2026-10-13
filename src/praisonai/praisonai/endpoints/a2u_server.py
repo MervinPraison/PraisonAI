@@ -11,7 +11,6 @@ import logging
 import os
 import threading
 import uuid
-import weakref
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -19,9 +18,9 @@ from typing import Any, Deque, Dict, List, Optional, Set
 
 logger = logging.getLogger(__name__)
 
-# Strong-enough references to in-flight publish tasks so CPython's GC cannot
-# collect a fire-and-forget task before it runs. Entries drop out on completion.
-_BACKGROUND_TASKS: "weakref.WeakSet" = weakref.WeakSet()
+# Strong references to in-flight publish tasks so CPython's GC cannot collect
+# a fire-and-forget task before it runs. Entries drop out on completion.
+_BACKGROUND_TASKS: Set["asyncio.Task"] = set()
 
 # Bound in-process state so an unauthenticated flood cannot exhaust memory.
 def _positive_int_env(name: str, default: int) -> int:

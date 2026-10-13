@@ -9,13 +9,16 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Union
+from typing import Any, Callable, Coroutine, Dict, List, Optional, Set, Union
 
 from praisonaiagents.gateway.protocols import PresenceInfo
 from praisonaiagents.push.models import ChannelMessage
 from praisonaiagents.push.protocols import PushTransportProtocol
 
 logger = logging.getLogger(__name__)
+
+# Max seconds disconnect() waits for in-flight ACKs/callbacks before cancelling.
+_DRAIN_TIMEOUT = 5.0
 
 # Type alias for channel message callbacks
 MessageCallback = Callable[[ChannelMessage], Coroutine[Any, Any, None]]
@@ -70,6 +73,9 @@ class PushClient:
         self._event_handlers: Dict[str, List[Callable]] = {}
         # Channels to re-subscribe to after reconnect
         self._subscribed_channels: set = set()
+        # Strong refs to fire-and-forget tasks (ACKs, async channel callbacks)
+        # so they cannot be garbage collected before they run.
+        self._pending_tasks: Set[asyncio.Task] = set()
 
     # ------------------------------------------------------------------
     # Connection lifecycle
@@ -114,11 +120,23 @@ class PushClient:
             except asyncio.CancelledError:
                 pass
 
-        if self._transport:
-            await self._transport.disconnect()
-            self._transport = None
+        # Drain in-flight ACKs / callbacks before closing the transport.
+        # Exclude the calling task (a callback may call disconnect()) and bound
+        # the wait so callbacks awaiting replies cannot block shutdown.
+        pending = self._pending_tasks - {asyncio.current_task()}
+        try:
+            if pending:
+                await asyncio.wait(pending, timeout=_DRAIN_TIMEOUT)
+        finally:
+            # Runs on timeout and if disconnect() itself is cancelled mid-drain.
+            for task in pending:
+                if not task.done():
+                    task.cancel()
+            if self._transport:
+                await self._transport.disconnect()
+                self._transport = None
+            self._closed_event.set()
 
-        self._closed_event.set()
         logger.info("PushClient disconnected")
 
     async def wait_closed(self) -> None:
@@ -257,6 +275,13 @@ class PushClient:
     # Internal
     # ------------------------------------------------------------------
 
+    def _spawn(self, coro: Any) -> asyncio.Task:
+        """Schedule a fire-and-forget task while holding a strong reference."""
+        task = asyncio.create_task(coro)
+        self._pending_tasks.add(task)
+        task.add_done_callback(self._pending_tasks.discard)
+        return task
+
     async def _send(self, data: Dict[str, Any]) -> None:
         """Send a message through the active transport."""
         if not (self._transport and self._transport.is_connected):
@@ -297,7 +322,7 @@ class PushClient:
                     "channel.list", "presence.heartbeat_ack", "presence.list",
                     "joined", "left", "error",
                 ):
-                    asyncio.create_task(self._send({"type": "message_ack", "event_id": event_id}))
+                    self._spawn(self._send({"type": "message_ack", "event_id": event_id}))
 
                 # Dispatch channel messages (non-blocking)
                 channel = data.get("channel")
@@ -306,7 +331,7 @@ class PushClient:
                     for cb in self._channel_callbacks.get(channel, []):
                         try:
                             if asyncio.iscoroutinefunction(cb):
-                                asyncio.create_task(cb(msg))
+                                self._spawn(cb(msg))
                             else:
                                 cb(msg)
                         except Exception as e:
