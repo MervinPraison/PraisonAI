@@ -91,7 +91,9 @@ class GatewayRoom:
     # Members are stored as ``{"role": "assistant", "content": "<id>: <text>"}``
     # because session stores persist only role/content (extra keys are dropped).
     def _to_events(self, history: List[Dict[str, Any]]) -> List[RoomEvent]:
-        roster = set(self.config.roster)
+        # Longest id first so an id containing ": " (or prefixing another id)
+        # is matched whole rather than split at the first separator.
+        prefixes = sorted(self.config.roster, key=len, reverse=True)
         events: List[RoomEvent] = []
         for msg in history or []:
             if not isinstance(msg, dict):
@@ -99,9 +101,10 @@ class GatewayRoom:
             role = msg.get("role")
             content = str(msg.get("content") or "")
             if role == "assistant":
-                speaker, sep, text = content.partition(": ")
-                if sep and speaker in roster:
-                    events.append(RoomEvent(speaker=speaker, content=text))
+                for aid in prefixes:
+                    if content.startswith(f"{aid}: "):
+                        events.append(RoomEvent(speaker=aid, content=content[len(aid) + 2:]))
+                        break
             elif role == "user":
                 events.append(RoomEvent(speaker=self._human, content=content))
             elif role == "system" and content:

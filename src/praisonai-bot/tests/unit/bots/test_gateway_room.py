@@ -151,6 +151,20 @@ def test_human_and_summary_ids_never_collide_with_roster():
     assert "Earlier: shipped v1" in agents["user"].prompts[0]
 
 
+def test_member_ids_containing_separator_survive_reload():
+    ids = ("research", "research: lead")
+    room = GatewayRoom(
+        RoomConfig(name="r", roster=list(ids)), {n: FakeAgent(n) for n in ids}
+    )
+    events = room._to_events([
+        {"role": "assistant", "content": "research: lead: found it"},
+        {"role": "assistant", "content": "research: on it"},
+    ])
+    assert [(e.speaker, e.content) for e in events] == [
+        ("research: lead", "found it"), ("research", "on it"),
+    ]
+
+
 def test_route_tool_policy_scopes_member_tools():
     from praisonaiagents.gateway.protocols import ToolPolicy
 
