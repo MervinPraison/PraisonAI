@@ -132,6 +132,7 @@ jobs:
     outputs:
       matrix: ${{ steps.scan.outputs.matrix }}
       has_candidates: ${{ steps.scan.outputs.has_candidates }}
+      fix_requests: ${{ steps.scan.outputs.fix_requests }}
     steps:
       - uses: actions/checkout@v4
 
@@ -189,6 +190,12 @@ jobs:
             }
 
             core.info('Skipped: ' + JSON.stringify(skipped));
+            // PRs held out because the gate already BLOCKed their HEAD: ask
+            // Claude (once per HEAD, capped) to fix the findings.
+            const fixRequests = skipped
+              .filter((s) => s.block_fix_due && s.head_sha)
+              .map((s) => ({ pr: s.pr, head_sha: s.head_sha }));
+            core.setOutput('fix_requests', JSON.stringify(fixRequests));
             core.setOutput('matrix', JSON.stringify({ include: candidates }));
             core.setOutput('has_candidates', candidates.length > 0 ? 'true' : 'false');
 
@@ -227,6 +234,35 @@ jobs:
             await ps.syncOpenPullRequests(
               github, owner, repo, { maxPrs: 10, dispatchMergeGate: false }, core
             );
+
+      - name: Ask Claude to fix merge gate BLOCK findings
+        if: steps.scan.outputs.fix_requests != '' && steps.scan.outputs.fix_requests != '[]'
+        uses: actions/github-script@v7
+        env:
+          FIX_REQUESTS: ${{ steps.scan.outputs.fix_requests }}
+        with:
+          # Posted as the maintainer (like FINAL triggers) so claude.yml accepts it;
+          # comments from the app bot are filtered out there.
+          github-token: ${{ secrets.GH_TOKEN != '' && secrets.GH_TOKEN || github.token }}
+          script: |
+            const path = require('path');
+            const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const requests = JSON.parse(process.env.FIX_REQUESTS || '[]');
+            for (const { pr, head_sha: headSha } of requests) {
+              // Re-check against fresh comments so parallel scans cannot double-post.
+              const comments = await mergeGate.listAllComments(github, owner, repo, pr);
+              if (!mergeGate.blockFixRequestDue(comments, headSha)) {
+                core.info(`PR #${pr}: fix request already posted for ${headSha.slice(0, 12)} (or cap reached)`);
+                continue;
+              }
+              await github.rest.issues.createComment({
+                owner, repo, issue_number: pr,
+                body: mergeGate.buildBlockFixRequestBody(headSha),
+              });
+              core.info(`PR #${pr}: asked Claude to fix BLOCK findings on ${headSha.slice(0, 12)}`);
+            }
 
   claude-assess:
     needs: scan-candidates
@@ -324,7 +360,7 @@ jobs:
             5. Do not bloat the Agent class with additional params — only if absolutely required; we already support many params.
             6. If agent.py adds >100 lines or new Agent __init__ params, respond MERGE_GATE_VERDICT: BLOCK (manual review required).
             7. BLOCK if labels security/breaking-change/needs-manual-review/release, sensitive paths (.github/workflows, auth, pyproject.toml), secrets in diff, PR >800 lines or >30 files, or SDK changes without tests. Label `merge-gate-ci-only` exempts CI-only changes under `.github/workflows/`, `.github/actions/`, or merge-gate scripts.
-            8. Confirm no CHANGES_REQUESTED reviews and CI green on HEAD ${{ matrix.head_sha }}.
+            8. Confirm no CHANGES_REQUESTED reviews on HEAD ${{ matrix.head_sha }}. CI: the scan already verified the check runs on this HEAD before selecting it (mcp__github__get_pull_request_status returns only legacy commit statuses such as CodeRabbit, so it is not CI evidence). Jobs still running in the Optimized Test Suite (`smoke`, `main (3.11)`) are not blockers once test-core is green; BLOCK on CI only for a check you can see has FAILED.
             9. Author policy: MERGE_GATE_VERDICT: BLOCK if the PR author is a first-time contributor (`author_association: FIRST_TIME_CONTRIBUTOR`) or any human not on the auto-merge allowlist (app/praisonai-triage-agent, MervinPraison, github-actions[bot] CI-only). Fork PRs and external contributors always require maintainer manual merge — never APPROVE for gate auto-merge.
             10. If ready to merge: MERGE_GATE_VERDICT: APPROVE. Otherwise: MERGE_GATE_VERDICT: BLOCK with reasons.
 

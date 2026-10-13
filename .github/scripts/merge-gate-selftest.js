@@ -109,6 +109,37 @@ assert('PR #5772 shape: FINAL is current on HEAD', !mg.isStaleFinalAfterPush(pr5
 assert('PR #5772 shape: still stale if HEAD moves after the review',
   mg.isStaleFinalAfterPush(pr5772, '2026-10-12T09:00:00Z'));
 
+// Starvation guard: a PR the gate already BLOCKed on its current HEAD must not
+// be re-assessed (and must not take a candidate slot) until something changes.
+{
+  const t0 = Date.parse('2026-10-13T10:00:00Z');
+  const isoAt = (ms) => new Date(ms).toISOString();
+  const head = isoAt(t0 - 60 * 60 * 1000);
+  const block = { user: { login: 'praisonai-triage-agent[bot]' }, body: 'MERGE_GATE_VERDICT: BLOCK\nP1 open', created_at: isoAt(t0) };
+  const approve = { user: { login: 'praisonai-triage-agent[bot]' }, body: 'MERGE_GATE_VERDICT: APPROVE', created_at: isoAt(t0) };
+  const oldChecks = [{ name: 'test-core', completed_at: isoAt(t0 - 30 * 60 * 1000) }];
+  const newChecks = [...oldChecks, { name: 'smoke', completed_at: isoAt(t0 + 10 * 60 * 1000) }];
+  const now = t0 + 2 * 60 * 60 * 1000;
+  assert('BLOCK on unchanged HEAD is skipped', mg.blockedOnUnchangedHead([block], head, oldChecks, now));
+  assert('BLOCK is re-assessed once a check completes after it', !mg.blockedOnUnchangedHead([block], head, newChecks, now));
+  assert('BLOCK is re-assessed after 24h', !mg.blockedOnUnchangedHead([block], head, oldChecks, t0 + 25 * 60 * 60 * 1000));
+  assert('APPROVE never triggers the skip', !mg.blockedOnUnchangedHead([approve], head, oldChecks, now));
+  assert('BLOCK from an older HEAD does not count', !mg.blockedOnUnchangedHead([block], isoAt(t0 + 60 * 60 * 1000), oldChecks, now));
+  assert('no verdict, no skip', !mg.blockedOnUnchangedHead([], head, oldChecks, now));
+
+  const sha = 'ab3416547aaedf4689eb89534e3724b7ae13b08a';
+  const body = mg.buildBlockFixRequestBody(sha);
+  assert('fix request starts with @claude', /^@claude\b/.test(body));
+  assert('fix request avoids the verdict marker (claude.yml ignores it)', !body.includes('MERGE_GATE_VERDICT'));
+  assert('fix request is not a FINAL trigger', !mg.isFinalClaudeTriggerComment({ user: { login: 'MervinPraison' }, body }));
+  assert('fix request due when none posted', mg.blockFixRequestDue([], sha));
+  const posted = { user: { login: 'MervinPraison' }, body, created_at: isoAt(now) };
+  assert('fix request not repeated for the same HEAD', !mg.blockFixRequestDue([posted], sha));
+  const other = (s) => ({ user: { login: 'MervinPraison' }, body: mg.buildBlockFixRequestBody(s), created_at: isoAt(now) });
+  assert('fix request due again on a new HEAD', mg.blockFixRequestDue([posted], 'f'.repeat(40)));
+  assert('fix requests capped per PR', !mg.blockFixRequestDue([other('1'.repeat(40)), other('2'.repeat(40)), other('3'.repeat(40))], 'f'.repeat(40)));
+}
+
 assert('cancelled detect-and-trigger does not block', mg.OPTIONAL_CANCELLED_CHECKS.has('detect-and-trigger'));
 assert('optional pending recovery check name listed', mg.OPTIONAL_PENDING_WHEN_CORE_GREEN.has('claude-review-recovery'));
 assert('ignorable pending when core green', mg.isIgnorablePendingCheck(

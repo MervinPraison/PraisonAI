@@ -1266,13 +1266,89 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
 
   if (ctx.pr.mergeable === false) reasons.push('not mergeable');
 
+  // Starvation guard (see BLOCKED_ON_HEAD_REASON). Not applied on the merge
+  // step itself, which only runs right after a fresh verdict.
+  let blockedOnHead = false;
+  if (!forMergeStep && latestMergeGateVerdictComment(ctx.comments, ctx.headPushedAt)) {
+    const runs = await listChecksOnSha(github, owner, repo, ctx.headSha);
+    if (blockedOnUnchangedHead(ctx.comments, ctx.headPushedAt, runs)) {
+      blockedOnHead = true;
+      reasons.push(BLOCKED_ON_HEAD_REASON);
+    }
+  }
+
   const ready = reasons.length === 0;
   return {
     ready,
     reasons,
     headSha: ctx.headSha,
     prNumber,
+    blockedOnHead,
+    blockFixDue: blockedOnHead && blockFixRequestDue(ctx.comments, ctx.headSha),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Starvation guard. Candidates are scanned oldest-first and capped at
+// MAX_CANDIDATES, so PRs the gate keeps BLOCKing on an unchanged HEAD used to
+// take every slot on every scan (170 identical Opus BLOCKs on three PRs) while
+// newer ready PRs were never looked at. A BLOCK on the current HEAD now holds
+// the PR out until a commit lands, a check completes after the verdict (e.g. a
+// pending job the verdict cited has since passed), or BLOCK_RECHECK_AFTER_MS.
+// While held out, Claude is asked (once per HEAD, capped) to fix the findings.
+// ---------------------------------------------------------------------------
+const BLOCK_RECHECK_AFTER_MS = 24 * 60 * 60 * 1000;
+const BLOCK_FIX_MARKER = 'merge-gate-fix-request:';
+const MAX_BLOCK_FIX_REQUESTS = 3;
+const BLOCKED_ON_HEAD_REASON = 'merge gate blocked this HEAD (waiting for a fix commit)';
+
+function latestMergeGateVerdictComment(comments, headPushedAt) {
+  const headTime = headPushedAt ? new Date(headPushedAt).getTime() - 60000 : 0;
+  let latest = null;
+  for (const c of comments || []) {
+    if (!isMergeGateVerdictComment(c.body)) continue;
+    if (isAutomatedFallbackVerdict(c.body)) continue;
+    const t = new Date(c.created_at).getTime();
+    if (headTime && t < headTime) continue;
+    if (!latest || t > new Date(latest.created_at).getTime()) latest = c;
+  }
+  return latest;
+}
+
+/** True when the newest verdict on HEAD is BLOCK and nothing has changed since. */
+function blockedOnUnchangedHead(comments, headPushedAt, checkRuns, nowMs = Date.now()) {
+  const verdict = latestMergeGateVerdictComment(comments, headPushedAt);
+  if (!verdict || !/MERGE_GATE_VERDICT:\s*BLOCK\b/.test(verdict.body || '')) return false;
+  const verdictMs = new Date(verdict.created_at).getTime();
+  if (nowMs - verdictMs >= BLOCK_RECHECK_AFTER_MS) return false;
+  const checkCompletedSince = (checkRuns || []).some(
+    (r) => r.completed_at && new Date(r.completed_at).getTime() > verdictMs
+  );
+  return !checkCompletedSince;
+}
+
+function buildBlockFixRequestBody(headSha) {
+  // Must start with @claude and must NOT contain the verdict marker or the
+  // FINAL-review phrases: claude.yml ignores comments with the marker, and the
+  // merge gate would mistake the others for a FINAL trigger.
+  return [
+    '@claude The merge gate blocked this PR on HEAD `' + headSha.slice(0, 12) + '`.',
+    '',
+    'Read the latest merge gate BLOCK verdict comment on this PR and the review threads it cites.',
+    'Fix every blocking finding on this branch, add or update tests for each fix, and push.',
+    'Do not post an approval or a verdict yourself; the review chain re-runs after your push.',
+    'If a finding is wrong, explain why in a reply instead of changing code.',
+    '',
+    `<!-- ${BLOCK_FIX_MARKER}${headSha.slice(0, 12)} -->`,
+  ].join('\n');
+}
+
+/** One fix request per HEAD, at most MAX_BLOCK_FIX_REQUESTS per PR. */
+function blockFixRequestDue(comments, headSha) {
+  const requests = (comments || []).filter((c) => (c.body || '').includes(BLOCK_FIX_MARKER));
+  if (requests.length >= MAX_BLOCK_FIX_REQUESTS) return false;
+  const marker = BLOCK_FIX_MARKER + headSha.slice(0, 12);
+  return !requests.some((c) => (c.body || '').includes(marker));
 }
 
 async function listPrNumbersForMergeGateScan(github, owner, repo, core) {
@@ -1350,7 +1426,12 @@ async function selectMergeGateCandidates(github, owner, repo, prNumbers, maxCand
     if (result.ready) {
       readyList.push({ pr_number: num, head_sha: result.headSha });
     } else {
-      skipped.push({ pr: num, reasons: result.reasons });
+      skipped.push({
+        pr: num,
+        reasons: result.reasons,
+        head_sha: result.headSha,
+        block_fix_due: !!result.blockFixDue,
+      });
     }
   }
   readyList.sort((a, b) => a.pr_number - b.pr_number);
@@ -1403,6 +1484,12 @@ function findMergeGateVerdict(comments, minCreatedAt = null, headPushedAt = null
 }
 
 module.exports = {
+  BLOCKED_ON_HEAD_REASON,
+  BLOCK_FIX_MARKER,
+  blockedOnUnchangedHead,
+  blockFixRequestDue,
+  buildBlockFixRequestBody,
+  latestMergeGateVerdictComment,
   CLAUDE_TRIGGER_LOGINS,
   AUTO_ACTORS,
   isFinalClaudeTriggerComment,
