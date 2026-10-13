@@ -13,6 +13,7 @@ import logging
 import os
 import time
 import platform
+import threading
 # psutil is imported lazily inside methods that need it
 # to avoid hard failure when the package is not installed
 from typing import Dict, List, Optional, Union
@@ -94,6 +95,9 @@ class ShellTools:
     def __init__(self):
         """Initialize ShellTools."""
         self._check_dependencies()
+        # Commands started with run_in_background=True, keyed by process_id
+        self._background: Dict[str, Dict] = {}
+        self._background_lock = threading.Lock()
     
     def _check_dependencies(self):
         """Check if required packages are installed (lazy — no hard failure)."""
@@ -108,7 +112,8 @@ class ShellTools:
         env: Optional[Dict[str, str]] = None,
         max_output_size: int = 10000,
         spill: bool = True,
-        spill_dir: Optional[str] = None
+        spill_dir: Optional[str] = None,
+        run_in_background: bool = False
     ) -> Dict[str, Union[str, int, bool]]:
         """Execute a shell command safely.
         
@@ -127,7 +132,12 @@ class ShellTools:
             spill_dir: Optional directory for overflow artifacts (defaults to a
                 session/workspace dir via ``PRAISONAI_TOOL_OUTPUT_DIR`` or the
                 system temp dir).
-            
+            run_in_background: When True, start the command and return
+                immediately with a ``process_id`` instead of waiting (use for
+                dev servers, watchers, long builds/test suites). ``timeout`` is
+                ignored. Inspect it with ``get_command_output`` and end it with
+                ``stop_command``.
+
         Returns:
             Dictionary with execution results
         """
@@ -195,7 +205,10 @@ class ShellTools:
             process_env = os.environ.copy()
             if env:
                 process_env.update(env)
-            
+
+            if run_in_background:
+                return self._start_background(command, cwd, process_env)
+
             # Start process
             start_time = time.time()
             process = subprocess.Popen(
@@ -301,6 +314,127 @@ class ShellTools:
                 'execution_time': 0
             }
     
+    def _start_background(self, command, cwd, process_env):
+        """Start *command* detached, writing stdout+stderr to a log file."""
+        import tempfile
+        import uuid
+
+        fd, log_path = tempfile.mkstemp(prefix="praisonai-bg-", suffix=".log")
+        with os.fdopen(fd, "wb") as log_file:
+            process = subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=log_file,
+                stderr=subprocess.STDOUT,
+                cwd=cwd,
+                shell=False,  # Always use shell=False for security
+                env=process_env,
+                # Own process group so stop_command can reach the whole tree
+                start_new_session=platform.system() != 'Windows',
+            )
+        process_id = uuid.uuid4().hex[:8]
+        with self._background_lock:
+            if not self._background:
+                import atexit
+                atexit.register(self._stop_all_background)
+            self._background[process_id] = {"process": process, "log_path": log_path}
+        return {
+            'success': True,
+            'process_id': process_id,
+            'pid': process.pid,
+            'status': 'running',
+            'log_file': log_path,
+        }
+
+    def get_command_output(self, process_id: str, tail: int = 200) -> Dict[str, Union[str, int, bool, None]]:
+        """Get status and latest output of a command started with run_in_background=True.
+
+        Args:
+            process_id: The process_id returned by execute_command
+            tail: Number of most recent output lines to return
+
+        Returns:
+            Dictionary with status ("running" or "exited"), exit_code and output
+        """
+        entry = self._background.get(process_id)
+        if entry is None:
+            return {'success': False, 'error': f'No background command with process_id {process_id!r}'}
+        process = entry["process"]
+        exit_code = process.poll()
+        # Read only the end of the log so a chatty process stays bounded.
+        max_bytes = 64 * 1024
+        try:
+            with open(entry["log_path"], "rb") as f:
+                f.seek(0, os.SEEK_END)
+                f.seek(max(0, f.tell() - max_bytes))
+                data = f.read().decode("utf-8", errors="replace")
+        except OSError as e:
+            data = f"<unable to read output: {e}>"
+        lines = data.splitlines()[-tail:] if tail > 0 else []
+        return {
+            'success': exit_code in (None, 0),
+            'process_id': process_id,
+            'pid': process.pid,
+            'status': 'running' if exit_code is None else 'exited',
+            'exit_code': exit_code,
+            'output': "\n".join(lines),
+            'log_file': entry["log_path"],
+        }
+
+    def stop_command(self, process_id: str) -> Dict[str, Union[str, int, bool, None]]:
+        """Stop a command started with run_in_background=True (and its children).
+
+        Args:
+            process_id: The process_id returned by execute_command
+
+        Returns:
+            Dictionary with the final status and exit_code
+        """
+        entry = self._background.get(process_id)
+        if entry is None:
+            return {'success': False, 'error': f'No background command with process_id {process_id!r}'}
+        process = entry["process"]
+        if process.poll() is None:
+            self._terminate_background(process)
+        return {
+            'success': True,
+            'process_id': process_id,
+            'status': 'exited',
+            'exit_code': process.returncode,
+        }
+
+    def _terminate_background(self, process):
+        """Terminate a background process group, escalating to kill."""
+        if platform.system() != 'Windows':
+            import signal
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+                process.wait(timeout=5)
+                return
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            except ProcessLookupError:
+                pass
+        else:
+            self._kill_process_tree(process)
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait()
+
+    def _stop_all_background(self):
+        """Do not leave dev servers/watchers orphaned when the interpreter exits."""
+        for entry in list(self._background.values()):
+            try:
+                if entry["process"].poll() is None:
+                    self._terminate_background(entry["process"])
+            except Exception as exc:
+                logging.debug("Failed to stop background command: %s", exc, exc_info=True)
+
     def _current_cancel_event(self):
         """Return the agent's cooperative cancellation Event, if any.
 
@@ -626,6 +760,8 @@ _shell_tools = ShellTools()
 execute_command = _shell_tools.execute_command
 list_processes = _shell_tools.list_processes
 kill_process = _shell_tools.kill_process
+get_command_output = _shell_tools.get_command_output
+stop_command = _shell_tools.stop_command
 get_system_info = _shell_tools.get_system_info
 
 if __name__ == "__main__":

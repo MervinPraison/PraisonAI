@@ -34,7 +34,8 @@ PRAISONAI_CORE_TOOLS: FrozenSet[str] = frozenset({
     "copy_file", "move_file", "delete_file",
     
     # Shell operations  
-    "execute_command", "list_processes", "kill_process", "get_system_info",
+    "execute_command", "get_command_output", "stop_command",
+    "list_processes", "kill_process", "get_system_info",
     
     # Web operations
     "search_web", "web_search", "internet_search", "web_crawl", "crawl_web",
