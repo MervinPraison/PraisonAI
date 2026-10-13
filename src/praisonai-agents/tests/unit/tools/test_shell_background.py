@@ -96,17 +96,39 @@ def test_exported_from_tools_package():
     assert callable(tools.stop_command)
 
 
-def test_stop_kills_children_that_ignore_sigterm(tmp_path):
-    """Parent exits on SIGTERM; a child ignoring it must still be killed."""
+def _pid_alive(pid):
+    """True if *pid* is running; a dead-but-unreaped zombie counts as stopped."""
     import os
 
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return f.read().rsplit(")", 1)[1].split()[0] != "Z"
+    except OSError:
+        pass
+    try:
+        import psutil
+        return psutil.Process(pid).status() != psutil.STATUS_ZOMBIE
+    except Exception:
+        return True
+
+
+def test_stop_kills_children_that_ignore_sigterm(tmp_path):
+    """Parent exits on SIGTERM; a child ignoring it must still be killed."""
     pid_file = tmp_path / "child.pid"
-    child = "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)"
+    # The child writes its pid only after SIG_IGN is installed, so the test
+    # cannot race ahead and stop the group before SIGTERM is being ignored.
+    child = (
+        "import os, signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+        f"open({str(pid_file)!r}, 'w').write(str(os.getpid())); time.sleep(60)"
+    )
     script = tmp_path / "parent.py"
     script.write_text(
         "import subprocess, sys, time\n"
-        f"c = subprocess.Popen([sys.executable, '-c', {child!r}])\n"
-        f"open({str(pid_file)!r}, 'w').write(str(c.pid))\n"
+        f"subprocess.Popen([sys.executable, '-c', {child!r}])\n"
         "time.sleep(60)\n"
     )
     tools = ShellTools()
@@ -118,11 +140,25 @@ def test_stop_kills_children_that_ignore_sigterm(tmp_path):
 
     assert tools.stop_command(result["process_id"])["status"] == "exited"
     deadline = time.monotonic() + 5
-    while time.monotonic() < deadline:
-        try:
-            os.kill(child_pid, 0)
-        except ProcessLookupError:
-            break
+    while _pid_alive(child_pid) and time.monotonic() < deadline:
         time.sleep(0.05)
-    else:
+    if _pid_alive(child_pid):
         pytest.fail("child process survived stop_command")
+
+
+@pytest.mark.parametrize("error", [FileNotFoundError("taskkill"), __import__("subprocess").TimeoutExpired("taskkill", 10)])
+def test_kill_tree_windows_without_psutil_still_kills_when_taskkill_fails(monkeypatch, error):
+    """A missing or hung taskkill must not skip process.kill() (no psutil, Windows)."""
+    from unittest import mock
+
+    from praisonaiagents.tools import shell_tools
+
+    monkeypatch.setitem(sys.modules, "psutil", None)  # import psutil -> ImportError
+    monkeypatch.setattr(shell_tools.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(shell_tools.subprocess, "run", mock.Mock(side_effect=error))
+    process = mock.Mock(pid=12345)
+
+    ShellTools()._kill_process_tree(process)
+
+    shell_tools.subprocess.run.assert_called_once()
+    process.kill.assert_called_once()

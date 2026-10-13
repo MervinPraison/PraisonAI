@@ -472,13 +472,17 @@ class ShellTools:
                     pass
             parent.kill()
         except ImportError:
-            try:
-                if platform.system() == 'Windows':
+            if platform.system() == 'Windows':
+                # Own try: a missing/hung taskkill must not skip process.kill().
+                try:
                     subprocess.run(
                         ['taskkill', '/F', '/T', '/PID', str(process.pid)],
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                         timeout=10,
                     )
+                except Exception:
+                    pass
+            try:
                 process.kill()
             except Exception:
                 pass
