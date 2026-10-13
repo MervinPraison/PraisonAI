@@ -36,9 +36,10 @@ class GatewayRoom:
     Args:
         config: Room roster + planner caps (``RoomConfig``).
         agents: Mapping of agent id -> Agent. Roster ids missing here are
-            recorded as a pass by the core runtime. Agents exposing
-            ``clone_for_channel`` are cloned so a member shared with another
-            room or route never has its history/tools swapped concurrently.
+            recorded as a pass by the core runtime. Each member is cloned via
+            ``clone_for_channel`` so a member shared with another room or
+            route never has its history/tools swapped concurrently; members
+            that cannot be cloned are left out (they pass) rather than shared.
 
     Example::
 
@@ -51,7 +52,11 @@ class GatewayRoom:
 
     def __init__(self, config: RoomConfig, agents: Mapping[str, Any]) -> None:
         self.config = config
-        self.agents = {aid: _private(a) for aid, a in agents.items()}
+        self.agents = {}
+        for aid, agent in agents.items():
+            member = _private(aid, agent)
+            if member is not None:
+                self.agents[aid] = member
         self.name = f"{ROOM_ROUTE_PREFIX}{config.name}"
         # Swapped in/out per session by BotSessionManager (durable transcript).
         self.chat_history: List[Dict[str, Any]] = []
@@ -122,9 +127,14 @@ class GatewayRoom:
             saved = getattr(agent, "chat_history", None)
             if saved is not None:
                 agent.chat_history = []
+            # Decide narrowing once per turn: the session may restore the full
+            # tool list (clearing ``_allowed_tools``) while this call still runs,
+            # and the restore below must not depend on that shared state.
+            allowed = self._allowed_tools
             saved_tools = getattr(agent, "tools", None)
-            if self._allowed_tools is not None and saved_tools:
-                agent.tools = [t for t in saved_tools if id(t) in self._allowed_tools]
+            narrowed = allowed is not None and bool(saved_tools)
+            if narrowed:
+                agent.tools = [t for t in saved_tools if id(t) in allowed]
             try:
                 if blocking or not hasattr(agent, "achat"):
                     # Sync path: already on an executor thread (see ``chat``),
@@ -136,7 +146,7 @@ class GatewayRoom:
             finally:
                 if saved is not None:
                     agent.chat_history = saved
-                if self._allowed_tools is not None and saved_tools:
+                if narrowed:
                     agent.tools = saved_tools
             return "" if out is None else str(getattr(out, "output", out))
 
@@ -196,15 +206,24 @@ def _outsider(base: str, roster: List[str]) -> str:
     return base
 
 
-def _private(agent: Any) -> Any:
-    """Give the room its own member copy so shared agents are never mutated."""
+def _private(agent_id: str, agent: Any) -> Optional[Any]:
+    """Return the room's own member copy, or ``None`` if it cannot be isolated.
+
+    Each turn swaps the member's ``chat_history``/``tools``; doing that on an
+    instance shared with other routes or rooms would leak state into them.
+    """
     clone = getattr(agent, "clone_for_channel", None)
     if callable(clone):
         try:
             return clone()
-        except Exception as e:  # pragma: no cover - defensive
-            logger.warning("Room member clone failed; sharing instance: %s", e)
-    return agent
+        except Exception as e:
+            logger.error("Room member %r could not be cloned; it will pass: %s", agent_id, e)
+            return None
+    logger.error(
+        "Room member %r has no clone_for_channel(); it will pass instead of "
+        "sharing a mutable instance", agent_id,
+    )
+    return None
 
 
 def _supported(fn: Any, opts: Dict[str, Any]) -> Dict[str, Any]:

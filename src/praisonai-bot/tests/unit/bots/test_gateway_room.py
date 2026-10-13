@@ -28,12 +28,16 @@ class FakeAgent:
             reply += f" @{self.mention}"
         return reply
 
+    def clone_for_channel(self):
+        return FakeAgent(self.name, self.mention)
+
 
 def _room(**kw):
     agents = {"researcher": FakeAgent("researcher", mention="critic"),
               "critic": FakeAgent("critic")}
     cfg = RoomConfig(name="standup", roster=["researcher", "critic"], **kw)
-    return GatewayRoom(cfg, agents), agents
+    room = GatewayRoom(cfg, agents)
+    return room, room.agents
 
 
 def test_room_runs_bounded_turns_and_records_transcript():
@@ -140,6 +144,7 @@ def test_room_transcript_survives_real_session_store(tmp_path):
 def test_human_and_summary_ids_never_collide_with_roster():
     agents = {n: FakeAgent(n) for n in ("user", "human")}
     room = GatewayRoom(RoomConfig(name="r", roster=["user", "human"]), agents)
+    agents = room.agents
     room.chat_history = [{"role": "system", "content": "Earlier: shipped v1"}]
     out = room.chat("hi")
     assert "**user**" in out and "**human**" in out
@@ -158,7 +163,6 @@ def test_route_tool_policy_scopes_member_tools():
         pass
 
     room, agents = _room(max_rounds=1)
-    agents = room.agents
     agents["researcher"].tools = [safe, shell]
     mgr = BotSessionManager(platform="test")
     asyncio.run(mgr.chat(room, "u1", "go", tool_policy=ToolPolicy(deny_tools=["shell"])))
@@ -180,14 +184,55 @@ def test_room_forwards_attachments_and_stops_on_cancel():
         room.chat("again", cancel_token=Stop())
 
 
-def test_room_clones_members_that_support_it():
-    class Cloneable(FakeAgent):
-        def clone_for_channel(self):
-            return Cloneable(self.name)
+def test_room_clones_members_and_never_shares_unclonable_ones():
+    class Plain:
+        name = "critic"
+        chat_history = []
 
-    shared = Cloneable("researcher")
-    room = GatewayRoom(RoomConfig(name="r", roster=["researcher"]), {"researcher": shared})
+        def chat(self, prompt):  # pragma: no cover - must never be called
+            raise AssertionError("shared instance was used")
+
+    class Broken(FakeAgent):
+        def clone_for_channel(self):
+            raise RuntimeError("boom")
+
+    shared = FakeAgent("researcher")
+    room = GatewayRoom(
+        RoomConfig(name="r", roster=["researcher", "critic", "broken"]),
+        {"researcher": shared, "critic": Plain(), "broken": Broken("broken")},
+    )
     assert room.agents["researcher"] is not shared
+    assert set(room.agents) == {"researcher"}  # unclonable members pass
+    out = room.chat("hi")
+    assert "**researcher**" in out and "critic" not in out and "broken" not in out
+    assert shared.prompts == [] and shared.chat_history == ["own-history"]
+
+
+def test_member_tools_restored_when_policy_cleared_mid_turn():
+    """A timeout/cancel restore of ``room.tools`` must not strand narrowed tools."""
+
+    def safe():
+        pass
+
+    def shell():
+        pass
+
+    room, agents = _room(max_rounds=1)
+    researcher = agents["researcher"]
+    researcher.tools = [safe, shell]
+    full = room.tools
+    room.tools = [safe]  # session narrows for this turn
+    inner_chat = researcher.chat
+
+    def chat(prompt, **kw):
+        room.tools = full  # session restores while the member is still running
+        return inner_chat(prompt, **kw)
+
+    researcher.chat = chat
+    room.chat("go")
+    assert researcher.seen["tools"] == [safe]
+    assert researcher.tools == [safe, shell]
+    assert room._allowed_tools is None
 
 
 def test_schema_rejects_invalid_room():
