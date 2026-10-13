@@ -159,6 +159,7 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
     SUPPORTS_RUNTIME_FEATURES = True
     SUPPORTS_SESSION_CONTINUITY = True
     SUPPORTS_STREAM_BRIDGE = True
+    SUPPORTS_CORE_TOOL_TIMEOUT = True
 
     @property
     def name(self) -> str:

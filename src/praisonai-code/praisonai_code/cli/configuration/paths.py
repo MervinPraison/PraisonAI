@@ -4,6 +4,7 @@ Configuration paths for PraisonAI CLI.
 Defines standard locations for configuration files.
 """
 
+import functools
 import os
 from pathlib import Path
 from typing import List, Optional
@@ -176,6 +177,7 @@ def get_project_config_path(project_root: Optional[Path] = None) -> Path:
 # a literal, so the tenth feature cannot drift again.
 # ---------------------------------------------------------------------------
 
+@functools.lru_cache(maxsize=1)
 def _canonical_project_dirname() -> str:
     """The canonical project data directory name (``.praisonai``).
 
@@ -191,9 +193,14 @@ def _canonical_project_dirname() -> str:
         return ".praisonai"
 
 
-#: Canonical project data directory name. Import this instead of writing
-#: ``".praisonai"`` (or, worse, ``".praison"``) anywhere.
-PROJECT_DATA_DIRNAME = _canonical_project_dirname()
+def __getattr__(name: str):
+    # ``PROJECT_DATA_DIRNAME`` is the canonical project data directory name.
+    # Import it instead of writing ``".praisonai"`` (or, worse, ``".praison"``)
+    # anywhere. Resolved lazily so importing this module (on every CLI start)
+    # does not import ``praisonaiagents`` and its root-logger setup.
+    if name == "PROJECT_DATA_DIRNAME":
+        return _canonical_project_dirname()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 #: Legacy project data directory name, kept for *read-only* fallback so an
 #: existing ``./.praison/thinking.json`` is still found after the fix.
@@ -207,7 +214,7 @@ def get_project_data_dir(project_root: Optional[Path] = None) -> Path:
     ``.praison`` name: writes must always land where the runtime reads.
     """
     root = project_root if project_root is not None else Path.cwd()
-    return Path(root) / PROJECT_DATA_DIRNAME
+    return Path(root) / _canonical_project_dirname()
 
 
 def get_project_data_path(*parts: str, project_root: Optional[Path] = None) -> Path:
@@ -249,7 +256,7 @@ def get_knowledge_store_path(collection: str) -> str:
     config consumers expect, and it must stay relative to whatever directory
     the command is run from.
     """
-    canonical = f"./{PROJECT_DATA_DIRNAME}/knowledge/{collection}"
+    canonical = f"./{_canonical_project_dirname()}/knowledge/{collection}"
     legacy = f"./{LEGACY_PROJECT_DATA_DIRNAME}/knowledge/{collection}"
     if not os.path.exists(canonical) and os.path.exists(legacy):
         return legacy

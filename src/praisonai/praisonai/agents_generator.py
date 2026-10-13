@@ -815,7 +815,9 @@ class AgentsGenerator:
         adapter name by the time an adapter invokes a wrap closure at run time).
         """
         if native_delegates_to_core is None:
-            native_delegates_to_core = (getattr(self, "framework", None) or "") == "praisonai"
+            native_delegates_to_core = self._delegates_tool_timeout_to_core(
+                getattr(self, "framework", None)
+            )
         return _wrap_with_timeout(
             tool,
             timeout_seconds,
@@ -824,6 +826,18 @@ class AgentsGenerator:
             owner_key=self._timeout_owner_key,
             native_delegates_to_core=native_delegates_to_core,
         )
+
+    def _delegates_tool_timeout_to_core(self, framework) -> bool:
+        """Whether ``framework``'s adapter declares ``SUPPORTS_CORE_TOOL_TIMEOUT``."""
+        if not framework:
+            return False
+        from .framework_adapters.registry import adapter_capability
+
+        return adapter_capability(
+            str(framework),
+            "SUPPORTS_CORE_TOOL_TIMEOUT",
+            registry=getattr(self, "_adapter_registry", None),
+        ) is True
 
     def close(self):
         """Release the owned tool-timeout executor; safe to call repeatedly."""
@@ -1135,7 +1149,7 @@ class AgentsGenerator:
             )
         except Exception:
             resolved_framework = _requested_framework
-        native = resolved_framework == "praisonai"
+        native = self._delegates_tool_timeout_to_core(resolved_framework)
 
         uniform = self._resolve_uniform_tool_timeout(config)
         wrap = None
