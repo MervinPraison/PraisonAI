@@ -50,3 +50,23 @@ def test_unknown_error_maps_to_internal_with_safe_message():
 
 def test_timeout_is_transient():
     assert _turn_error_payload(asyncio.TimeoutError())["code"] == "transient"
+
+
+def test_retry_after_is_not_capped():
+    class _LongResp:
+        headers = {"retry-after": "3600"}
+
+    class _LongRateLimit(Exception):
+        status_code = 429
+        response = _LongResp()
+
+    assert _turn_error_payload(_LongRateLimit("slow down"))["retry_after_seconds"] == 3600
+
+
+def test_terminal_turn_carries_typed_error():
+    from praisonai_bot.gateway.server import _TerminalTurn
+
+    err = {"code": "transient", "retryable": True}
+    turn = _TerminalTurn("wedged", outcome_status="error", error=err)
+    assert turn == "wedged" and turn.outcome_status == "error" and turn.error is err
+    assert _TerminalTurn("ok").error is None

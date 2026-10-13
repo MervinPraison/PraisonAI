@@ -271,7 +271,9 @@ def _turn_error_payload(exc: BaseException) -> Dict[str, Any]:
             ErrorCategory.TRANSIENT: "transient",
         }.get(classify_error(exc), "internal")
         retryable = code in _RETRYABLE_TURN_ERRORS
-    retry_after = extract_retry_after(exc) if retryable else None
+    # Export the provider's full wait: the default 300s backoff cap would make
+    # clients retry before the provider allows it.
+    retry_after = extract_retry_after(exc, cap_seconds=math.inf) if retryable else None
     return {
         "code": code,
         "retryable": retryable,
@@ -813,14 +815,19 @@ class _TerminalTurn(str):
     classified as a successful turn. Subclassing ``str`` keeps every existing
     consumer (``session.add_message``, the ``content`` frame, ``.lower()`` in
     tests) working unchanged, while ``outcome_status`` lets the session queue
-    report the true terminal outcome instead of a default ``ok``.
+    report the true terminal outcome instead of a default ``ok``. ``error`` is
+    the optional typed wire error (#5802) for a failed terminal ending.
     """
 
-    __slots__ = ("outcome_status",)
+    __slots__ = ("outcome_status", "error")
 
-    def __new__(cls, value: str, *, outcome_status: str = "ok") -> "_TerminalTurn":
+    def __new__(
+        cls, value: str, *, outcome_status: str = "ok",
+        error: Optional[Dict[str, Any]] = None,
+    ) -> "_TerminalTurn":
         obj = super().__new__(cls, value)
         obj.outcome_status = outcome_status
+        obj.error = error
         return obj
 
 
@@ -4757,6 +4764,12 @@ class WebSocketGateway:
             return _TerminalTurn(
                 "Turn cancelled: worker wedged; session will be re-placed.",
                 outcome_status="error",
+                error={
+                    "code": "transient",
+                    "retryable": True,
+                    "retry_after_seconds": None,
+                    "message": _TURN_ERROR_MESSAGES["transient"],
+                },
             )
         finally:
             existing = self._active_turns.get(sid)
@@ -4892,6 +4905,7 @@ class WebSocketGateway:
                     carried = getattr(response, "outcome_status", None)
                     if carried is not None:
                         outcome_status = carried
+                        turn_error = getattr(response, "error", None)
                 finally:
                     # Always clean up the relay callback
                     if relay_callback and emitter is not None:
