@@ -367,7 +367,7 @@ class ShellTools:
             with open(entry["log_path"], "rb") as f:
                 f.seek(0, os.SEEK_END)
                 f.seek(max(0, f.tell() - max_bytes))
-                data = f.read().decode("utf-8", errors="replace")
+                data = f.read(max_bytes).decode("utf-8", errors="replace")
         except OSError as e:
             data = f"<unable to read output: {e}>"
         lines = data.splitlines()[-tail:] if tail > 0 else []
@@ -409,14 +409,17 @@ class ShellTools:
             import signal
             try:
                 os.killpg(process.pid, signal.SIGTERM)
-                process.wait(timeout=5)
-                return
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
             except ProcessLookupError:
+                pass
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            # The parent exiting does not mean its children did: SIGKILL
+            # whatever is left in the group so nothing outlives stop_command.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
                 pass
         else:
             self._kill_process_tree(process)
@@ -455,7 +458,8 @@ class ShellTools:
         """Kill a child process and its descendants (best-effort).
 
         Uses psutil to reach the whole tree when available, falling back to
-        ``process.kill()`` otherwise. Safe to call if the process already exited.
+        ``taskkill /T`` on Windows or ``process.kill()`` otherwise. Safe to
+        call if the process already exited.
         """
         try:
             import psutil
@@ -469,6 +473,12 @@ class ShellTools:
             parent.kill()
         except ImportError:
             try:
+                if platform.system() == 'Windows':
+                    subprocess.run(
+                        ['taskkill', '/F', '/T', '/PID', str(process.pid)],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        timeout=10,
+                    )
                 process.kill()
             except Exception:
                 pass

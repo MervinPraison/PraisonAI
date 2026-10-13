@@ -94,3 +94,35 @@ def test_exported_from_tools_package():
 
     assert callable(tools.get_command_output)
     assert callable(tools.stop_command)
+
+
+def test_stop_kills_children_that_ignore_sigterm(tmp_path):
+    """Parent exits on SIGTERM; a child ignoring it must still be killed."""
+    import os
+
+    pid_file = tmp_path / "child.pid"
+    child = "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(60)"
+    script = tmp_path / "parent.py"
+    script.write_text(
+        "import subprocess, sys, time\n"
+        f"c = subprocess.Popen([sys.executable, '-c', {child!r}])\n"
+        f"open({str(pid_file)!r}, 'w').write(str(c.pid))\n"
+        "time.sleep(60)\n"
+    )
+    tools = ShellTools()
+    result = _run(tools, f"{sys.executable} {script}", run_in_background=True)
+    deadline = time.monotonic() + 10
+    while not (pid_file.exists() and pid_file.read_text()) and time.monotonic() < deadline:
+        time.sleep(0.05)
+    child_pid = int(pid_file.read_text())
+
+    assert tools.stop_command(result["process_id"])["status"] == "exited"
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline:
+        try:
+            os.kill(child_pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("child process survived stop_command")
