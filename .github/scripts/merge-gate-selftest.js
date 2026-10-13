@@ -156,7 +156,7 @@ assert('PR #5772 shape: still stale if HEAD moves after the review',
     !mg.blockedOnUnchangedHead([forged], isoAt(t0 - 3600e3), [], t0 + 60e3));
   assert('only exact gate logins are trusted', mg.GATE_VERDICT_AUTHORS.has('praisonai-triage-agent[bot]') && !mg.GATE_VERDICT_AUTHORS.has('evil-praisonai-triage-agent'));
 }
-(async () => {
+const listingTests = (async () => {
   const fakeGithub = (byLabel, openPrs) => ({
     rest: {
       issues: { listForRepo: async ({ labels }) => ({ data: byLabel[labels] || [] }) },
@@ -729,6 +729,7 @@ assert(
   );
   assert('held-out PRs stay in the scan list (deduped)', JSON.stringify(scanList) === '[5766,5803]');
 
+  await listingTests;
   process.exit(failed ? 1 : 0);
 })().catch((err) => {
   console.error(err);
