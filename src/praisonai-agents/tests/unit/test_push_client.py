@@ -264,3 +264,15 @@ class TestPushClientDisconnectDrain:
         await asyncio.sleep(0)
         assert task.cancelled()
         assert mock_transport._closed
+
+    @pytest.mark.asyncio
+    async def test_cancelled_disconnect_still_cancels_callbacks(self, client, mock_transport):
+        stuck = client._spawn(asyncio.Event().wait())
+        disconnecting = asyncio.ensure_future(client.disconnect())
+        await asyncio.sleep(0.05)  # let disconnect() reach the drain wait
+        disconnecting.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await disconnecting
+        await asyncio.sleep(0)
+        assert stuck.cancelled()
+        assert mock_transport._closed

@@ -126,15 +126,17 @@ class PushClient:
         pending = self._pending_tasks - {asyncio.current_task()}
         try:
             if pending:
-                _, still_running = await asyncio.wait(pending, timeout=_DRAIN_TIMEOUT)
-                for task in still_running:
-                    task.cancel()
+                await asyncio.wait(pending, timeout=_DRAIN_TIMEOUT)
         finally:
+            # Runs on timeout and if disconnect() itself is cancelled mid-drain.
+            for task in pending:
+                if not task.done():
+                    task.cancel()
             if self._transport:
                 await self._transport.disconnect()
                 self._transport = None
+            self._closed_event.set()
 
-        self._closed_event.set()
         logger.info("PushClient disconnected")
 
     async def wait_closed(self) -> None:
