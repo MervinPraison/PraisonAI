@@ -26,7 +26,6 @@ except ImportError as e:
 
 from pydantic import BaseModel
 
-_BEST_AVAILABLE = "praisonai_code.llm.catalogue.ModelCatalogue.best_available"
 
 class DummyModel(BaseModel):
     pass
@@ -52,13 +51,10 @@ class TestAutoGeneratorDefaultModel:
             # Set required API key
             os.environ['OPENAI_API_KEY'] = 'test-key'
             
-            # Pin the fixed representative regardless of the installed
-            # litellm catalogue's capability ranking (see #5749).
-            with patch(_BEST_AVAILABLE, return_value=None):
-                generator = AutoGenerator(
-                    topic="Test topic",
-                    framework="praisonai"
-                )
+            generator = AutoGenerator(
+                topic="Test topic",
+                framework="praisonai"
+            )
             
             assert generator.config_list[0]['model'] == _RANKED_OPENAI
     
@@ -275,10 +271,9 @@ class TestWorkflowAutoGenerator:
         with patch.dict(os.environ, {}, clear=True), _patch_best_available():
             os.environ['OPENAI_API_KEY'] = 'test-key'
             
-            with patch(_BEST_AVAILABLE, return_value=None):
-                generator = WorkflowAutoGenerator(
-                    topic="Test workflow"
-                )
+            generator = WorkflowAutoGenerator(
+                topic="Test workflow"
+            )
             
             assert generator.config_list[0]['model'] == _RANKED_OPENAI
     
