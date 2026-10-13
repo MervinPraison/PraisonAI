@@ -355,21 +355,32 @@ async def check_extension_loaded(port: int = 9222) -> DiagnosticResult:
                 targets = await resp.json()
                 
                 # Look for extension service worker
-                extension_patterns = ["praisonai", "fkmfdklcegbbpipbcimbokpfcfamhpdc"]
-                
+                extension_patterns = [
+                    "praisonai",
+                    "browser-agent",
+                    "browser agent",
+                    "fkmfdklcegbbpipbcimbokpfcfamhpdc",
+                    "egjhiolafabdaakjboedhcappifmhcfk",
+                    "egjhiolaf",
+                ]
+
                 service_worker = None
                 offscreen = None
-                
+
                 for target in targets:
                     url_lower = target.get("url", "").lower()
+                    title_lower = (target.get("title") or "").lower()
                     target_type = target.get("type", "")
-                    
+
+                    haystack = f"{url_lower} {title_lower}"
                     for pattern in extension_patterns:
-                        if pattern in url_lower:
+                        if pattern in haystack:
                             if target_type == "service_worker":
                                 service_worker = target
                             elif "offscreen" in url_lower:
                                 offscreen = target
+                            elif target_type == "background_page" and service_worker is None:
+                                service_worker = target
                 
                 if service_worker:
                     result_details = {
