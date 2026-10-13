@@ -3162,7 +3162,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.7.11"
+version = "1.7.12"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -3295,7 +3295,7 @@ requires-dist = [
     { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.83.14" },
     { name = "litellm", marker = "extra == 'memory'", specifier = ">=1.83.14" },
     { name = "markitdown", extras = ["all"], marker = "extra == 'knowledge'", specifier = ">=0.1.0" },
-    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.20.0" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.20.0,<2" },
     { name = "mcp", marker = "extra == 'parallel-search'", specifier = ">=1.30.0,<2" },
     { name = "mem0ai", marker = "extra == 'knowledge'", specifier = ">=0.1.0" },
     { name = "mem0ai", extras = ["graph"], marker = "extra == 'graph'", specifier = ">=0.1.0" },
