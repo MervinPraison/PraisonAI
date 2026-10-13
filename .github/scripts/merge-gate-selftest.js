@@ -138,6 +138,14 @@ assert('PR #5772 shape: still stale if HEAD moves after the review',
   const other = (s) => ({ user: { login: 'MervinPraison' }, body: mg.buildBlockFixRequestBody(s), created_at: isoAt(now) });
   assert('fix request due again on a new HEAD', mg.blockFixRequestDue([posted], 'f'.repeat(40)));
   assert('fix requests capped per PR', !mg.blockFixRequestDue([other('1'.repeat(40)), other('2'.repeat(40)), other('3'.repeat(40))], 'f'.repeat(40)));
+
+  // Untrusted commenters cannot forge gate state.
+  const forgedBlock = { ...block, user: { login: 'random-user' } };
+  assert('BLOCK from an untrusted commenter is ignored', !mg.blockedOnUnchangedHead([forgedBlock], head, oldChecks, now));
+  const forgedMarker = { ...posted, user: { login: 'random-user' } };
+  assert('fix-request marker from an untrusted commenter is ignored', mg.blockFixRequestDue([forgedMarker], sha));
+  const quoted = { ...posted, body: 'see ' + mg.BLOCK_FIX_MARKER + sha.slice(0, 12) };
+  assert('bare marker text (not the HTML comment) is ignored', mg.blockFixRequestDue([quoted], sha));
 }
 
 assert('cancelled detect-and-trigger does not block', mg.OPTIONAL_CANCELLED_CHECKS.has('detect-and-trigger'));
@@ -681,6 +689,19 @@ assert(
     { info: () => {} }
   );
   assert('rate limit low skips dispatch', skipLow === true);
+
+  const byLabel = {
+    'pipeline/merge-ready': [{ number: 5803, pull_request: {}, labels: [] }],
+    'pipeline/blocked:merge-gate': [
+      { number: 5766, pull_request: {}, labels: [] },
+      { number: 5803, pull_request: {}, labels: [] },
+    ],
+  };
+  const scanList = await mg.listPrNumbersForMergeGateScan(
+    { rest: { issues: { listForRepo: async ({ labels }) => ({ data: byLabel[labels] || [] }) } } },
+    'owner', 'repo', { info: () => {} }
+  );
+  assert('held-out PRs stay in the scan list (deduped)', JSON.stringify(scanList) === '[5766,5803]');
 
   process.exit(failed ? 1 : 0);
 })().catch((err) => {

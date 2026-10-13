@@ -176,7 +176,12 @@ jobs:
               if (result.ready) {
                 candidates.push({ pr_number: n, head_sha: result.headSha });
               } else {
-                skipped.push({ pr: n, reasons: result.reasons });
+                skipped.push({
+                  pr: n,
+                  reasons: result.reasons,
+                  head_sha: result.headSha,
+                  block_fix_due: !!result.blockFixDue,
+                });
               }
             } else {
               const prNumbers = await mergeGate.listPrNumbersForMergeGateScan(
@@ -240,21 +245,29 @@ jobs:
         uses: actions/github-script@v7
         env:
           FIX_REQUESTS: ${{ steps.scan.outputs.fix_requests }}
+          HAS_GH_TOKEN: ${{ secrets.GH_TOKEN != '' }}
         with:
           # Posted as the maintainer (like FINAL triggers) so claude.yml accepts it;
           # comments from the app bot are filtered out there.
-          github-token: ${{ secrets.GH_TOKEN != '' && secrets.GH_TOKEN || github.token }}
+          github-token: ${{ secrets.GH_TOKEN || github.token }}
           script: |
+            // github.token comments cannot start claude.yml, and posting the
+            // marker anyway would use up this HEAD's request.
+            if (process.env.HAS_GH_TOKEN !== 'true') {
+              core.warning('GH_TOKEN secret missing — not posting merge gate fix requests');
+              return;
+            }
             const path = require('path');
             const mergeGate = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/merge-gate.js'));
             const owner = context.repo.owner;
             const repo = context.repo.repo;
             const requests = JSON.parse(process.env.FIX_REQUESTS || '[]');
             for (const { pr, head_sha: headSha } of requests) {
-              // Re-check against fresh comments so parallel scans cannot double-post.
-              const comments = await mergeGate.listAllComments(github, owner, repo, pr);
-              if (!mergeGate.blockFixRequestDue(comments, headSha)) {
-                core.info(`PR #${pr}: fix request already posted for ${headSha.slice(0, 12)} (or cap reached)`);
+              // Re-evaluate on fresh state: a commit may have landed since the
+              // scan, and parallel scans must not double-post.
+              const fresh = await mergeGate.evaluatePipelineQuiescent(github, owner, repo, pr, core);
+              if (fresh.headSha !== headSha || !fresh.blockFixDue) {
+                core.info(`PR #${pr}: fix request no longer due for ${headSha.slice(0, 12)}`);
                 continue;
               }
               await github.rest.issues.createComment({

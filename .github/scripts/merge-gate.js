@@ -1301,11 +1301,15 @@ const BLOCK_RECHECK_AFTER_MS = 24 * 60 * 60 * 1000;
 const BLOCK_FIX_MARKER = 'merge-gate-fix-request:';
 const MAX_BLOCK_FIX_REQUESTS = 3;
 const BLOCKED_ON_HEAD_REASON = 'merge gate blocked this HEAD (waiting for a fix commit)';
+const BLOCKED_MERGE_GATE_LABEL = 'pipeline/blocked:merge-gate';
 
+// Only verdicts posted by the gate's own automation may hold a PR out; anyone
+// can comment "MERGE_GATE_VERDICT: BLOCK".
 function latestMergeGateVerdictComment(comments, headPushedAt) {
   const headTime = headPushedAt ? new Date(headPushedAt).getTime() - 60000 : 0;
   let latest = null;
   for (const c of comments || []) {
+    if (!isClaudeAutomationLogin(c.user?.login)) continue;
     if (!isMergeGateVerdictComment(c.body)) continue;
     if (isAutomatedFallbackVerdict(c.body)) continue;
     const t = new Date(c.created_at).getTime();
@@ -1343,34 +1347,31 @@ function buildBlockFixRequestBody(headSha) {
   ].join('\n');
 }
 
-/** One fix request per HEAD, at most MAX_BLOCK_FIX_REQUESTS per PR. */
+/** One fix request per HEAD, at most MAX_BLOCK_FIX_REQUESTS per PR (trusted posters only). */
 function blockFixRequestDue(comments, headSha) {
-  const requests = (comments || []).filter((c) => (c.body || '').includes(BLOCK_FIX_MARKER));
+  const requests = (comments || []).filter(
+    (c) => CLAUDE_TRIGGER_LOGINS.includes(c.user?.login) && (c.body || '').includes(`<!-- ${BLOCK_FIX_MARKER}`)
+  );
   if (requests.length >= MAX_BLOCK_FIX_REQUESTS) return false;
-  const marker = BLOCK_FIX_MARKER + headSha.slice(0, 12);
+  const marker = `<!-- ${BLOCK_FIX_MARKER}${headSha.slice(0, 12)} -->`;
   return !requests.some((c) => (c.body || '').includes(marker));
 }
 
-async function listPrNumbersForMergeGateScan(github, owner, repo, core) {
-  let mergeReadyIssues;
+async function listOpenIssuesWithLabel(github, owner, repo, label) {
+  const params = { owner, repo, state: 'open', labels: label, per_page: 100 };
   if (typeof github.paginate === 'function') {
-    mergeReadyIssues = await github.paginate(github.rest.issues.listForRepo, {
-      owner,
-      repo,
-      state: 'open',
-      labels: MERGE_READY_LABEL,
-      per_page: 100,
-    });
-  } else {
-    ({ data: mergeReadyIssues } = await github.rest.issues.listForRepo({
-      owner,
-      repo,
-      state: 'open',
-      labels: MERGE_READY_LABEL,
-      per_page: 100,
-    }));
+    return github.paginate(github.rest.issues.listForRepo, params);
   }
-  const mergeReady = mergeReadyIssues
+  return (await github.rest.issues.listForRepo(params)).data;
+}
+
+async function listPrNumbersForMergeGateScan(github, owner, repo, core) {
+  const mergeReadyIssues = await listOpenIssuesWithLabel(github, owner, repo, MERGE_READY_LABEL);
+  // Label sync swaps merge-ready for the merge-gate blocker on held-out PRs;
+  // keep scanning them (they never take a slot while held) so the fix request
+  // is still posted and they re-enter once a fix lands.
+  const heldOut = await listOpenIssuesWithLabel(github, owner, repo, BLOCKED_MERGE_GATE_LABEL);
+  const mergeReady = [...mergeReadyIssues, ...heldOut]
     .filter((issue) => issue.pull_request)
     .filter((issue) => {
       const labels = (issue.labels || []).map((l) => (typeof l === 'string' ? l : l.name));
@@ -1383,6 +1384,7 @@ async function listPrNumbersForMergeGateScan(github, owner, repo, core) {
       return true;
     })
     .map((issue) => issue.number)
+    .filter((n, i, all) => all.indexOf(n) === i)
     .sort((a, b) => a - b);
 
   if (mergeReady.length > 0) {
