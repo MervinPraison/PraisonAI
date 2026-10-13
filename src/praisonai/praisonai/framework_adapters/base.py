@@ -64,6 +64,9 @@ class BaseFrameworkAdapter(_CoreBaseFrameworkAdapter):
     # session or structured-stream flags.
     SUPPORTS_SESSION_CONTINUITY = False
     SUPPORTS_STREAM_BRIDGE = False
+    # True when core enforces the per-tool timeout (via each agent's
+    # ``tool_config``), so the wrapper must not wrap plain callables (#5650).
+    SUPPORTS_CORE_TOOL_TIMEOUT = False
 
     def _resolve_llm(self, spec: Any, llm_config: Optional[List[Dict]]):
         """Build a provider model object from spec and shared llm_config."""
