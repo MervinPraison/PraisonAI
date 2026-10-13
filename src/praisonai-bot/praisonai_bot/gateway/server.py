@@ -231,6 +231,55 @@ def _delivery_text_digest(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8", "replace")).hexdigest()[:16]
 
 
+# Issue #5802: safe, user-facing text per wire error code (never raw ``str(e)``).
+_TURN_ERROR_MESSAGES = {
+    "rate_limit": "Rate limited by the model provider. Please retry shortly.",
+    "overloaded": "The model provider is overloaded. Please retry shortly.",
+    "transient": "A temporary error occurred. Please retry.",
+    "idle_timeout": "The model provider stopped responding. Please retry.",
+    "context_overflow": "The conversation is too long for the model. Start a new chat.",
+    "billing": "The model provider account is out of credit.",
+    "auth": "The model provider rejected the credentials.",
+    "auth_permanent": "The model provider rejected the credentials.",
+    "model_not_found": "The configured model is not available.",
+}
+_RETRYABLE_TURN_ERRORS = frozenset({"rate_limit", "overloaded", "transient", "idle_timeout"})
+
+
+def _turn_error_payload(exc: BaseException) -> Dict[str, Any]:
+    """Project a failed turn's exception onto a stable wire error envelope.
+
+    Issue #5802: reuses the core classifiers so clients get a machine-readable
+    ``code``, ``retryable`` and provider ``retry_after_seconds`` instead of a
+    bare ``"Error: <str>"``. Unknown failures map to ``"internal"``.
+    """
+    from praisonaiagents.errors import PraisonAIError
+    from praisonaiagents.llm.error_classifier import (
+        ErrorCategory, classify_error, extract_retry_after,
+    )
+
+    kind = getattr(exc, "error_category", None) if isinstance(exc, PraisonAIError) else None
+    if kind and kind != "unknown":
+        code = kind
+        retryable = bool(exc.is_retryable)
+    else:
+        code = {
+            ErrorCategory.RATE_LIMIT: "rate_limit",
+            ErrorCategory.CONTEXT_LIMIT: "context_overflow",
+            ErrorCategory.AUTH: "auth",
+            ErrorCategory.INVALID_REQUEST: "invalid_request",
+            ErrorCategory.TRANSIENT: "transient",
+        }.get(classify_error(exc), "internal")
+        retryable = code in _RETRYABLE_TURN_ERRORS
+    retry_after = extract_retry_after(exc) if retryable else None
+    return {
+        "code": code,
+        "retryable": retryable,
+        "retry_after_seconds": math.ceil(retry_after) if retry_after else None,
+        "message": _TURN_ERROR_MESSAGES.get(code, "The agent failed to complete this turn."),
+    }
+
+
 def _apply_bot_loop_config(config_kwargs: Dict[str, Any], ch_cfg: Mapping[str, Any]) -> None:
     """Fold a channel's ``allow_bots`` / ``bot_loop_protection`` into BotConfig.
 
@@ -4796,6 +4845,7 @@ class WebSocketGateway:
                 controller = InterruptController()
                 timeout = getattr(self.config, "per_turn_timeout", 0.0) or 0.0
                 outcome_status = "ok"
+                turn_error: Optional[Dict[str, Any]] = None
                 # Issue #5129: a SESSION stop during admission/placement drops
                 # this already-dequeued message instead of running it. Skipped
                 # here is accounted for by ``_abort_session`` (pending_cancelled).
@@ -4830,6 +4880,10 @@ class WebSocketGateway:
                     logger.error(f"Agent error in queue processor: {e}")
                     response = f"Error: {str(e)}"
                     outcome_status = "error"
+                    try:
+                        turn_error = _turn_error_payload(e)
+                    except Exception:  # pragma: no cover - never mask the turn failure
+                        turn_error = None
                 else:
                     # A terminal turn (e.g. a wedged worker torn down by the
                     # executor) carries its own outcome so a non-ok ending is
@@ -4871,11 +4925,15 @@ class WebSocketGateway:
                 # Final frame: distinct "final" status resolves the pending turn
                 # that the "accepted" ack opened, and carries a structured
                 # terminal outcome alongside the text (not just a bare string).
+                # A failed turn additionally carries a typed ``error`` (#5802).
+                outcome: Dict[str, Any] = {"status": outcome_status}
+                if turn_error is not None:
+                    outcome["error"] = turn_error
                 await self._send_to_client(client_id, {
                     "type": "response",
                     "status": "final",
                     "content": response,
-                    "outcome": {"status": outcome_status},
+                    "outcome": outcome,
                     "session_id": session.session_id,
                 })
         finally:
