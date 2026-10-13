@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from .webhook import WebhookBot, WebhookRoute
     from .bot import Bot
     from .botos import BotOS, ThreadRef
+    from ._room import GatewayRoom
     from ._session import BotSessionManager
     from ._identity import StoreBackedIdentityResolver
     from ._agent_registry import AgentRegistry, normalize_number
@@ -94,6 +95,9 @@ def __getattr__(name: str):
     if name == "BotOS":
         from .botos import BotOS
         return BotOS
+    if name == "GatewayRoom":
+        from ._room import GatewayRoom
+        return GatewayRoom
     if name == "ThreadRef":
         from .botos import ThreadRef
         return ThreadRef
@@ -227,7 +231,7 @@ __all__ = [
     "SignalBot",
     "LocalBot",
     "WebhookBot", "WebhookRoute",
-    "Bot", "BotOS", "ThreadRef",
+    "Bot", "BotOS", "ThreadRef", "GatewayRoom",
     "BotSessionManager",
     "StoreBackedIdentityResolver",
     "AgentRegistry", "normalize_number",
