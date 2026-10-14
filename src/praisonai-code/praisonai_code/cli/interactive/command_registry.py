@@ -313,6 +313,16 @@ def _discover_entry_point_sources() -> List[Any]:
     return sources
 
 
+def _definitions_fingerprint() -> Any:
+    """Fingerprint of the definition roots, or ``None`` when unavailable."""
+    try:
+        from ..features.custom_definitions import definitions_fingerprint
+
+        return definitions_fingerprint()
+    except Exception:  # pragma: no cover - defensive
+        return None
+
+
 class CommandRegistry:
     """Aggregates command sources into a single ``/name`` namespace.
 
@@ -331,6 +341,7 @@ class CommandRegistry:
         self._commands: Dict[str, Command] = {}
         self._aliases: Dict[str, str] = {}
         self._discovered = False
+        self._fingerprint: Any = None
 
     def add_source(self, source: Any) -> None:
         """Append a command source (invalidates the discovery cache)."""
@@ -338,9 +349,16 @@ class CommandRegistry:
         self._discovered = False
 
     def discover(self, force: bool = False) -> Dict[str, Command]:
-        """Resolve all sources into ``{name: Command}`` (cached)."""
-        if self._discovered and not force:
+        """Resolve all sources into ``{name: Command}`` (cached).
+
+        The cache is invalidated when the file-based definition roots change
+        (a command or skill was added, removed or edited), so long-lived
+        interactive sessions pick up edits on the next lookup without restart.
+        """
+        fingerprint = _definitions_fingerprint()
+        if self._discovered and not force and fingerprint == self._fingerprint:
             return self._commands
+        self._fingerprint = fingerprint
 
         self._commands.clear()
         self._aliases.clear()
