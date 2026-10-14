@@ -41,6 +41,24 @@ def stop_timeout_seconds(config_path: str) -> int:
             doc = yaml.safe_load(fh) or {}
         if isinstance(doc, dict) and isinstance(doc.get("gateway"), dict):
             gw = doc["gateway"]
+        if "${" in repr(gw):
+            # Resolve ``${VAR}`` the way the gateway will at start: after
+            # loading ~/.praisonai/.env, so the deadline tracks the real drain.
+            import os
+            import re
+
+            from ..cli.features.gateway import _load_praisonai_env_file
+
+            _load_praisonai_env_file()
+
+            def _resolve(obj: Any) -> Any:
+                if isinstance(obj, str):
+                    return re.sub(r"\$\{([^}]+)\}", lambda m: os.environ.get(m.group(1), ""), obj)
+                if isinstance(obj, dict):
+                    return {k: _resolve(v) for k, v in obj.items()}
+                return obj
+
+            gw = _resolve(gw)
     except Exception:  # advisory — never block install on config parse
         pass
 

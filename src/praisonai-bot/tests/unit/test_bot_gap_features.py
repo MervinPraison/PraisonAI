@@ -636,6 +636,23 @@ class TestDaemonService:
         # Missing config still yields a deadline covering the production drain.
         assert stop_timeout_seconds(str(tmp_path / "missing.yaml")) >= 30
 
+    def test_service_stop_deadline_resolves_env_file_vars(self, tmp_path, monkeypatch):
+        # ``${VAR}`` drain values resolve from ~/.praisonai/.env exactly as the
+        # gateway does at start, so the deadline isn't sized from the default.
+        import os
+        from praisonai_bot.daemon import stop_timeout_seconds
+
+        env_file = tmp_path / ".env"
+        env_file.write_text("PRAISONAI_TEST_DRAIN_5815=120\n")
+        monkeypatch.setenv("PRAISONAI_ENV_FILE", str(env_file))
+        monkeypatch.delenv("PRAISONAI_TEST_DRAIN_5815", raising=False)
+        cfg = tmp_path / "bot.yaml"
+        cfg.write_text('gateway:\n  drain_timeout: "${PRAISONAI_TEST_DRAIN_5815}"\n')
+        try:
+            assert stop_timeout_seconds(str(cfg)) > 2 * 120 + 5
+        finally:
+            os.environ.pop("PRAISONAI_TEST_DRAIN_5815", None)
+
     def test_windows_startup_script_honours_fatal_config_exit(self):
         from praisonai_bot.daemon.windows import _generate_startup_script
         script = _generate_startup_script("/tmp/test_bot.yaml")
