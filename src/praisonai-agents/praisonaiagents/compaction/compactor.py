@@ -573,6 +573,48 @@ class ContextCompactor:
 
         return cut_index
 
+    def shrink_to_fit(
+        self, messages: List[Dict[str, Any]], target_tokens: int
+    ) -> List[Dict[str, Any]]:
+        """Shrink ``messages`` toward ``target_tokens`` after a provider overflow.
+
+        Reactive counterpart to ``compact``: used once a provider has rejected
+        a request as too long. It never drops the latest user message or
+        anything after it (the in-flight turn and its tool calls). It first
+        drops the oldest turns before that message, snapped so tool-call pairs
+        stay together, then trims oversized tool results to head + tail.
+        Returns a new list; the input is not mutated.
+        """
+        system = [m for m in messages if m.get("role") == "system"]
+        rest = [m for m in messages if m.get("role") != "system"]
+        user_idxs = [i for i, m in enumerate(rest) if m.get("role") == "user"]
+        anchor = user_idxs[-1] if user_idxs else max(len(rest) - 1, 0)
+
+        total = self.count_total_tokens(system + rest)
+        cut = 0
+        while cut < anchor and total > target_tokens:
+            total -= self.count_message_tokens(rest[cut])
+            cut += 1
+        kept = rest[self._snap_to_pair_boundary(rest, cut):]
+
+        if self.count_total_tokens(system + kept) > target_tokens:
+            n_tools = sum(1 for m in kept if m.get("role") == "tool")
+            # ~4 chars/token: tool results share roughly half the target budget
+            cap = max(500, target_tokens * 2 // max(n_tools, 1))
+            trimmed = []
+            for m in kept:
+                content = m.get("content")
+                if m.get("role") == "tool" and isinstance(content, str) and len(content) > cap:
+                    head, tail = content[: cap * 2 // 3], content[-(cap // 3):]
+                    m = {**m, "content": (
+                        f"{head}\n...[truncated {len(content):,} chars to fit the "
+                        f"context window]...\n{tail}"
+                    )}
+                trimmed.append(m)
+            kept = trimmed
+
+        return system + kept
+
     def preview_older_slice(
         self, messages: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:

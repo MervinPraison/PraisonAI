@@ -40,6 +40,9 @@ from ..tools.schema import build_tool_definition
 # and surface a tool-error so the model can re-emit the call instead.
 _TOOL_ARGUMENTS_PARSE_FAILED = object()
 
+# Bounded shrink-and-retry steps after a provider context-overflow rejection.
+_CONTEXT_OVERFLOW_SHRINK_STEPS = 3
+
 
 # ``litellm.success_callback``/``_async_success_callback``/``callbacks`` are
 # process-global lists shared by every LLM instance. Guard the read-modify-write
@@ -983,7 +986,8 @@ Respond with ONLY a valid JSON tool call in this format:
         if any(indicator in error_str for indicator in [
             "maximum context length", "context window is too long", 
             "context length exceeded", "context_length_exceeded",
-            "input too long", "prompt too long"
+            "input too long", "prompt too long", "prompt is too long",
+            "contextwindowexceeded",
         ]):
             return "context_overflow"
         
@@ -1626,6 +1630,40 @@ Respond with ONLY a valid JSON tool call in this format:
 
         raise last_error
 
+    def _shrink_on_context_overflow(self, error, completion_params, step) -> bool:
+        """Shrink the request after a provider context-overflow rejection.
+
+        Reactive recovery for when proactive compaction was disabled or its
+        estimate was wrong: halves the estimated prompt size per step (dropping
+        old turns, then trimming oversized tool results) and updates
+        ``completion_params["messages"]`` in place so the rest of the turn
+        keeps the smaller context. Returns True when a retry is worthwhile;
+        False leaves the caller to raise the original error, as before.
+        """
+        if step >= _CONTEXT_OVERFLOW_SHRINK_STEPS:
+            return False
+        messages = completion_params.get("messages")
+        if not isinstance(messages, list) or self.classify_error_kind(error) != "context_overflow":
+            return False
+        try:
+            from ..compaction import ContextCompactor
+            compactor = ContextCompactor()
+            before = compactor.count_total_tokens(messages)
+            shrunk = compactor.shrink_to_fit(messages, before // 2)
+            after = compactor.count_total_tokens(shrunk)
+        except Exception as shrink_error:
+            logging.debug(f"Context overflow recovery skipped: {shrink_error}")
+            return False
+        if after >= before:
+            return False
+        logging.warning(
+            f"Context window exceeded for {self.model}; shrank prompt "
+            f"{before}→{after} tokens and retrying "
+            f"({step + 1}/{_CONTEXT_OVERFLOW_SHRINK_STEPS})"
+        )
+        messages[:] = shrunk
+        return True
+
     def _completion_with_retry(self, **completion_params):
         """Execute litellm.completion with automatic retry on rate limit errors.
         
@@ -1646,7 +1684,13 @@ Respond with ONLY a valid JSON tool call in this format:
         # entirely, so scripted turns never reach (or trip) the guard.
         check_model_request(self.model, "litellm.completion")
         import litellm
-        response = self._call_with_retry(litellm.completion, **completion_params)
+        for step in range(_CONTEXT_OVERFLOW_SHRINK_STEPS + 1):
+            try:
+                response = self._call_with_retry(litellm.completion, **completion_params)
+                break
+            except Exception as e:
+                if not self._shrink_on_context_overflow(e, completion_params, step):
+                    raise
         if not completion_params.get("stream"):
             self._track_token_usage(response, self._response_model_for_tracking(response))
         return response
@@ -1669,10 +1713,16 @@ Respond with ONLY a valid JSON tool call in this format:
         """
         check_model_request(self.model, "litellm.acompletion")
         import litellm
-        response = await self._call_with_retry_async(
-            litellm.acompletion,
-            **completion_params,
-        )
+        for step in range(_CONTEXT_OVERFLOW_SHRINK_STEPS + 1):
+            try:
+                response = await self._call_with_retry_async(
+                    litellm.acompletion,
+                    **completion_params,
+                )
+                break
+            except Exception as e:
+                if not self._shrink_on_context_overflow(e, completion_params, step):
+                    raise
         if not completion_params.get("stream"):
             self._track_token_usage(response, self._response_model_for_tracking(response))
         return response
