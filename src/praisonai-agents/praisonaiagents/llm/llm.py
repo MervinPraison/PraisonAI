@@ -988,7 +988,7 @@ Respond with ONLY a valid JSON tool call in this format:
             "context length exceeded", "context_length_exceeded",
             "input too long", "prompt too long", "prompt is too long",
             "contextwindowexceeded",
-        ]):
+        ]) or "contextwindowexceeded" in error_type:
             return "context_overflow"
         
         # Model not found/available

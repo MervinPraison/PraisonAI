@@ -155,3 +155,59 @@ def test_native_agent_path_shrinks_without_context_manager():
 
     assert compactor.count_total_tokens(shrunk) <= before // 2
     assert shrunk[-1] == {"role": "user", "content": "final question"}
+
+
+def test_shrink_to_fit_keeps_task_behind_tool_loop_user_messages():
+    """Synthesized user messages (media follow-ups, steering) don't end the turn."""
+    messages = [
+        {"role": "system", "content": "sys"},
+        *_long_history(5),
+        {"role": "user", "content": "summarise the report"},
+        {"role": "assistant", "content": None, "tool_calls": [
+            {"id": "c1", "type": "function",
+             "function": {"name": "read", "arguments": "{}"}},
+        ]},
+        {"role": "tool", "tool_call_id": "c1", "content": "w " * 3000},
+        {"role": "user", "content": "[steering] keep it short"},
+    ]
+    compactor = ContextCompactor()
+
+    shrunk = compactor.shrink_to_fit(messages, compactor.count_total_tokens(messages) // 2)
+
+    assert shrunk[1] == {"role": "user", "content": "summarise the report"}
+    assert shrunk[2]["tool_calls"][0]["id"] == "c1"
+    assert shrunk[-1]["content"] == "[steering] keep it short"
+
+
+def test_shrink_to_fit_never_grows_small_tool_results():
+    messages = [
+        {"role": "user", "content": "go"},
+        {"role": "assistant", "content": None, "tool_calls": [
+            {"id": "c1", "type": "function",
+             "function": {"name": "read", "arguments": "{}"}},
+        ]},
+        {"role": "tool", "tool_call_id": "c1", "content": "a" * 510},
+    ]
+
+    shrunk = ContextCompactor().shrink_to_fit(messages, 1)
+
+    assert len(shrunk[2]["content"]) <= 510
+
+
+def test_overflow_classified_by_exception_type():
+    llm = LLM(model="custom/test-model", api_key="test")
+
+    assert llm.classify_error_kind(ContextWindowExceededError("bad request")) == "context_overflow"
+
+
+def test_native_restart_skipped_for_tool_turns_without_context_manager():
+    """Restarting a tool turn from its outer messages would rerun finished tools."""
+    from praisonaiagents import Agent
+
+    def read():
+        return "x"
+
+    agent = Agent(name="t", instructions="Be helpful", tools=[read], context=False)
+    assert agent.context_manager is None
+    assert agent._can_restart_after_overflow(None) is False
+    assert Agent(name="t2", instructions="hi")._can_restart_after_overflow(None) is True

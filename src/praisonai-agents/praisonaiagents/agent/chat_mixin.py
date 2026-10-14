@@ -2013,6 +2013,16 @@ Your Goal: {self.goal}"""
             return self.context_manager.emergency_truncate(messages, target)
         return compactor.shrink_to_fit(messages, target)
 
+    def _can_restart_after_overflow(self, tools) -> bool:
+        """Whether an overflow may restart the whole turn with shrunk messages.
+
+        The restart replays the turn from its outer messages, so without a
+        ContextManager it is limited to tool-free turns: a tool turn would
+        rerun already-completed tool calls. LiteLLM tool turns recover inside
+        the request loop instead (``LLM._shrink_on_context_overflow``).
+        """
+        return bool(self.context_manager) or not (tools or self.tools)
+
     def _max_retry_depth(self) -> int:
         """Maximum LLM retry depth honoured by the recovery loop.
 
@@ -2345,7 +2355,7 @@ Your Goal: {self.goal}"""
             )
             
             # Execute recovery actions based on classification
-            if classification.should_compress_context:
+            if classification.should_compress_context and self._can_restart_after_overflow(tools):
                 try:
                     truncated_messages = self._shrink_after_context_overflow(messages, model_name)
                     
@@ -2518,7 +2528,7 @@ Your Goal: {self.goal}"""
         )
         
         # Execute recovery actions based on classification (async-compatible)
-        if classification.should_compress_context:
+        if classification.should_compress_context and self._can_restart_after_overflow(tools):
             try:
                 truncated_messages = self._shrink_after_context_overflow(messages, model_name)
                 
