@@ -233,6 +233,29 @@ def test_truncated_tool_call_does_not_continue_finished_answer():
     assert all(m.get("content") != CONTINUE_PROMPT for m in seen[-1])
 
 
+
+def test_async_truncated_tool_call_does_not_continue_finished_answer():
+    llm = _llm()
+    # The async loop makes one extra post-tool call of its own (pre-existing).
+    responses = [_tool_resp("length"), _resp("Done: 3.", "stop"), _resp("Done: 3.", "stop")]
+    seen = []
+
+    async def fake(**params):
+        from litellm import ModelResponse
+        seen.append(list(params["messages"]))
+        return ModelResponse(**responses.pop(0))
+
+    async def run_tool(name, args, *a, **k):
+        return _add(**args)
+
+    with patch.object(type(llm), "_supports_responses_api", return_value=False), \
+            patch.object(llm, "_acompletion_with_retry", side_effect=fake):
+        out = asyncio.run(llm.get_response_async(
+            "write", stream=False, verbose=False, tools=[_add], execute_tool_fn=run_tool))
+    assert out == "Done: 3."
+    assert all(m.get("content") != CONTINUE_PROMPT for call in seen for m in call)
+
+
 def test_text_response_format_still_continues():
     _, resp, seen = _run_openai(
         [_completion("Hello ", "length"), _completion("world.", "stop")],
