@@ -2014,7 +2014,8 @@ class OpenAIClient:
         self._last_stop_reason = "completed"
         _wrapup_injected = False
         from ._continuation import OutputContinuation
-        _continuation = OutputContinuation(output_continuation)
+        # Schema-enforced output cannot be continued as a text suffix.
+        _continuation = OutputContinuation(False if kwargs.get("response_format") else output_continuation)
         # Ensure a defined return value even if cancellation breaks the loop
         # before any model call is made.
         final_response = None
@@ -2023,6 +2024,9 @@ class OpenAIClient:
             # G2: Check for cancellation at the top of each tool iteration.
             if _is_cancelled():
                 self._last_stop_reason = "cancelled"
+                if _continuation.text and final_response is not None:
+                    # Return every truncated piece gathered so far, not just the last.
+                    final_response.choices[0].message.content = _continuation.text
                 break
             # G2: Mid-run steering - inject pending steering notes before next call.
             _inject_steering(messages)
@@ -2374,7 +2378,8 @@ class OpenAIClient:
         self._last_stop_reason = "completed"
         _wrapup_injected = False
         from ._continuation import OutputContinuation
-        _continuation = OutputContinuation(output_continuation)
+        # Schema-enforced output cannot be continued as a text suffix.
+        _continuation = OutputContinuation(False if kwargs.get("response_format") else output_continuation)
         # Ensure a defined return value even if cancellation breaks the loop
         # before any model call is made.
         final_response = None
@@ -2383,6 +2388,9 @@ class OpenAIClient:
             # G2: Check for cancellation at the top of each tool iteration.
             if _is_cancelled():
                 self._last_stop_reason = "cancelled"
+                if _continuation.text and final_response is not None:
+                    # Return every truncated piece gathered so far, not just the last.
+                    final_response.choices[0].message.content = _continuation.text
                 break
             # G2: Mid-run steering - inject pending steering notes before next call.
             _inject_steering(messages)

@@ -143,3 +143,66 @@ def test_execution_config_round_trip():
     assert ExecutionConfig().output_continuation is True
     cfg = ExecutionConfig.from_dict(ExecutionConfig(output_continuation=False).to_dict())
     assert cfg.output_continuation is False
+
+
+def test_litellm_structured_output_is_not_continued():
+    from pydantic import BaseModel
+
+    class Out(BaseModel):
+        text: str
+
+    _, _, seen = _run_sync([_resp('{"text": "a', "length")], output_json=Out)
+    assert len(seen) == 1
+
+
+def _chunk(content, finish_reason=None):
+    return SimpleNamespace(choices=[SimpleNamespace(
+        delta=SimpleNamespace(content=content, tool_calls=None), finish_reason=finish_reason)])
+
+
+def test_litellm_streamed_length_is_continued():
+    llm = _llm()
+    streams = [[_chunk("Hello "), _chunk(None, "length")], [_chunk("world."), _chunk(None, "stop")]]
+    seen = []
+
+    def fake(**params):
+        seen.append(list(params["messages"]))
+        return iter(streams.pop(0))
+
+    with patch.object(type(llm), "_supports_responses_api", return_value=False), \
+            patch.object(llm, "_completion_with_retry", side_effect=fake):
+        out = llm.get_response("write", stream=True, verbose=False)
+    assert out == "Hello world."
+    assert len(seen) == 2
+    assert llm._last_stop_reason == "completed"
+
+
+def test_openai_native_structured_output_is_not_continued():
+    _, resp, seen = _run_openai(
+        [_completion('{"a": ', "length")], response_format={"type": "json_object"}
+    )
+    assert len(seen) == 1
+    assert resp.choices[0].message.content == '{"a": '
+
+
+def test_openai_native_cancel_keeps_earlier_pieces():
+    cancelled = SimpleNamespace(flag=False)
+    token = SimpleNamespace(is_set=lambda: cancelled.flag)
+    responses = [_completion("a", "length"), _completion("b", "length")]
+
+    def nxt():
+        if len(responses) == 1:
+            cancelled.flag = True
+        return responses.pop(0)
+
+    from praisonaiagents.llm.openai_client import OpenAIClient
+    client = OpenAIClient(api_key="sk-test")
+
+    async def fake(messages, **params):
+        return nxt()
+
+    with patch.object(client, "acreate_completion", side_effect=fake):
+        resp = asyncio.run(client.achat_completion_with_tools(
+            [{"role": "user", "content": "write"}], stream=False, cancel_token=token))
+    assert resp.choices[0].message.content == "ab"
+    assert client._last_stop_reason == "cancelled"
