@@ -1338,50 +1338,77 @@ def _mtime(path: Path) -> Optional[int]:
         return None
 
 
-def definitions_fingerprint() -> Tuple:
+def _skill_dirs() -> List[Path]:
+    """Skill roots used by core skill discovery (user, ``PRAISONAI_HOME``,
+    synced ``remote-skills``, system), or ``[]`` when skills are unavailable."""
+    try:
+        from praisonaiagents.skills.discovery import get_default_skill_dirs
+
+        return list(get_default_skill_dirs())
+    except Exception:
+        return []
+
+
+def definitions_fingerprint(root: Optional[str] = None) -> Tuple:
     """Return a cheap mtime fingerprint of the file-based definition roots.
 
     Long-lived sessions (interactive TUI/REPL, warm runtime) compare this
     between prompts and re-run the existing discovery when it changes, so
     edits to commands, agents, skills, tools and rules/instruction files
     (``CLAUDE.md``/``AGENTS.md``/``PRAISON.md``) apply without a restart.
+    ``root`` is the workspace the session loads rules from (defaults to the
+    current directory); it and its ancestors are scanned along with ``~``
+    and the core skill directories.
     Only ``stat``/``listdir`` calls are made (no file reads, no subprocess)
     and the result is cached for ``_FINGERPRINT_TTL`` seconds so per-keystroke
     callers (e.g. completion) stay cheap.
     """
     global _fingerprint_cache
-    cwd = os.getcwd()
+    key = (os.path.abspath(root) if root else None, os.getcwd())
     now = time.monotonic()
-    cached_cwd, cached_at, cached = _fingerprint_cache
-    if cached_cwd == cwd and now - cached_at < _FINGERPRINT_TTL:
+    cached_key, cached_at, cached = _fingerprint_cache
+    if cached_key == key and now - cached_at < _FINGERPRINT_TTL:
         return cached
 
     entries: List[Tuple[str, Optional[int]]] = []
-    current = Path(cwd)
-    bases = [current, *current.parents, Path.home()]
+
+    def _scan_dir(directory: Path, skills: bool) -> None:
+        try:
+            children = sorted(os.listdir(directory))
+        except OSError:
+            return
+        entries.append((str(directory), _mtime(directory)))
+        for child in children:
+            child_path = directory / child
+            entries.append((str(child_path), _mtime(child_path)))
+            if skills:
+                # In-place edits do not bump the parent's mtime.
+                for name in ("SKILL.md", "skill.md"):
+                    skill_md = child_path / name
+                    entries.append((str(skill_md), _mtime(skill_md)))
+
+    bases: List[Path] = []
+    for start in dict.fromkeys(Path(p) for p in (key[0], key[1]) if p):
+        bases.extend([start, *start.parents])
+    bases.append(Path.home())
+    skill_dirs: List[Path] = []
     for base in dict.fromkeys(bases):
         for name in _FINGERPRINT_FILES:
             mtime = _mtime(base / name)
             if mtime is not None:
                 entries.append((str(base / name), mtime))
-        for root in _FINGERPRINT_ROOTS:
-            root_dir = base / root
+        for root_name in _FINGERPRINT_ROOTS:
+            root_dir = base / root_name
             if not root_dir.is_dir():
                 continue
             for sub in _FINGERPRINT_SUBDIRS:
-                sub_dir = root_dir / sub
-                try:
-                    children = sorted(os.listdir(sub_dir))
-                except OSError:
-                    continue
-                entries.append((str(sub_dir), _mtime(sub_dir)))
-                for child in children:
-                    child_path = sub_dir / child
-                    entries.append((str(child_path), _mtime(child_path)))
-                    if sub == "skills":
-                        skill_md = child_path / "SKILL.md"
-                        entries.append((str(skill_md), _mtime(skill_md)))
+                if sub == "skills":
+                    skill_dirs.append(root_dir / sub)
+                else:
+                    _scan_dir(root_dir / sub, skills=False)
+    for skill_dir in dict.fromkeys([*skill_dirs, *_skill_dirs()]):
+        _scan_dir(skill_dir, skills=True)
 
     fingerprint = tuple(entries)
-    _fingerprint_cache = (cwd, now, fingerprint)
+    _fingerprint_cache = (key, now, fingerprint)
     return fingerprint

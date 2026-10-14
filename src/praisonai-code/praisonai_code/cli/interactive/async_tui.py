@@ -35,14 +35,14 @@ _debug_initialized = False
 _REGISTRY_FAILED = object()
 
 
-def _definitions_fingerprint():
+def _definitions_fingerprint(workspace=None):
     """Fingerprint of rules/definition files, or ``None`` when unavailable."""
     try:
         from praisonai_code.cli.features.custom_definitions import (
             definitions_fingerprint,
         )
 
-        return definitions_fingerprint()
+        return definitions_fingerprint(workspace)
     except Exception:  # pragma: no cover - defensive
         return None
 
@@ -379,7 +379,7 @@ class AsyncTUI:
         self._running = False
         self._agent = None
         self._review_agent = None  # Cached read-only agent for review commands
-        self._definitions_fingerprint = _definitions_fingerprint()
+        self._definitions_fingerprint = _definitions_fingerprint(self.config.workspace)
         self._interrupt_controller = None  # Cooperative cancellation for in-flight turns
         self._interrupt_worker = None  # Tracks an in-flight/abandoned turn worker
         self._processing = False
@@ -708,7 +708,7 @@ class AsyncTUI:
         # agent was built, so edits apply on the next prompt without a restart.
         # Conversation continuity is preserved via the session store (as for
         # ``/model``).
-        fingerprint = _definitions_fingerprint()
+        fingerprint = _definitions_fingerprint(self.config.workspace)
         if fingerprint != self._definitions_fingerprint:
             self._definitions_fingerprint = fingerprint
             self._agent = None

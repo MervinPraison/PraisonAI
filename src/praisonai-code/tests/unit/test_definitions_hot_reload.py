@@ -130,3 +130,70 @@ def test_warm_runtime_rebuilds_agents_after_rules_edit(project):
         runtime.run("three", session_id="s1")
         assert runtime._agents["test-model"] is not anon
         assert runtime._session_agents["s1"] is not session
+
+
+def test_fingerprint_watches_workspace_outside_cwd(project, tmp_path):
+    workspace = tmp_path / "other"
+    workspace.mkdir()
+    before = definitions_fingerprint(str(workspace))
+    (workspace / "AGENTS.md").write_text("Workspace rule.\n")
+    assert definitions_fingerprint(str(workspace)) != before
+
+
+def test_fingerprint_watches_lowercase_skill_md_and_praisonai_home(project, tmp_path, monkeypatch):
+    skill = project / ".claude" / "skills" / "demo"
+    skill.mkdir(parents=True)
+    skill_md = skill / "skill.md"
+    skill_md.write_text("---\nname: demo\ndescription: Old\n---\nbody\n")
+    before = definitions_fingerprint()
+    _bump_mtime(skill_md)
+    assert definitions_fingerprint() != before
+
+    praison_home = tmp_path / "praison_home"
+    monkeypatch.setenv("PRAISONAI_HOME", str(praison_home))
+    (praison_home / "skills").mkdir(parents=True)
+    before = definitions_fingerprint()
+    (praison_home / "skills" / "user-skill").mkdir()
+    assert definitions_fingerprint() != before
+
+
+def test_subtree_attacher_reattaches_edited_nested_instructions(tmp_path):
+    from praisonai_code.integration.context_files import PathContextAttacher
+
+    pkg = tmp_path / "packages" / "foo"
+    pkg.mkdir(parents=True)
+    rules = pkg / "AGENTS.md"
+    rules.write_text("Old package rule.\n")
+    target = pkg / "mod.py"
+    target.write_text("")
+
+    attacher = PathContextAttacher(max_chars=0)
+    assert "Old package rule." in attacher.attach_for_path(target)
+    # Unchanged: cached result is reused.
+    assert "Old package rule." in attacher.attach_for_path(target)
+
+    rules.write_text("New package rule.\n")
+    _bump_mtime(rules)
+    assert "New package rule." in attacher.attach_for_path(target)
+
+
+def test_warm_session_rebuild_restores_history_from_store(project, tmp_path, monkeypatch):
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path / "praison_home"))
+    from praisonai_code.cli.state.project_sessions import get_project_session_store
+
+    store = get_project_session_store()
+    store.add_user_message("s1", "remember 42")
+    store.add_assistant_message("s1", "noted")
+
+    runtime = WarmRuntime(model="test-model")
+    with patch("praisonaiagents.Agent", _FakeAgent), patch(
+        "praisonai_code.runtime.server._apply_cold_path_parity", lambda c: None
+    ):
+        first = runtime._get_session_agent("s1", None)
+        (project / "AGENTS.md").write_text("New rule.\n")
+        runtime._refresh_if_definitions_changed()
+        rebuilt = runtime._get_session_agent("s1", None)
+
+    assert rebuilt is not first
+    contents = [m["content"] for m in rebuilt.chat_history]
+    assert contents[:2] == ["remember 42", "noted"]
