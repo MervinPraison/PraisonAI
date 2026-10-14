@@ -3056,6 +3056,8 @@ Respond with ONLY a valid JSON tool call in this format:
         # Mid-run steering: optional callable() -> list[str] draining pending
         # steering notes so they can be injected as user messages between iterations.
         steering_drain = kwargs.pop("steering_drain", None)
+        # Bounded auto-continuation on output-token truncation (True/False/int cap).
+        output_continuation = kwargs.pop("output_continuation", True)
 
         def _is_cancelled() -> bool:
             return cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()
@@ -3198,8 +3200,14 @@ Respond with ONLY a valid JSON tool call in this format:
             # Structured stop reason so callers can distinguish completion from
             # truncation (unified with the OpenAI-native path). "completed" default.
             self._last_stop_reason = "completed"
+            from ._continuation import OutputContinuation, is_structured
+            # Schema-enforced output cannot be continued as a text suffix.
+            _continuation = OutputContinuation(False if (output_json or output_pydantic or is_structured(getattr(self, "response_format", None))) else output_continuation)
 
             while iteration_count < max_iterations:
+                # Continue only when *this* response hit the length limit, not on a
+                # sticky truncation left by an earlier (e.g. repaired) tool call.
+                _stop_before = self._last_stop_reason
                 # G2: Check for cancellation at the top of each tool iteration so a
                 # /stop request promptly halts a mid-flight run on every provider.
                 if _is_cancelled():
@@ -3453,10 +3461,12 @@ Respond with ONLY a valid JSON tool call in this format:
                             continue
                         else:
                             # No tool calls — we have a final answer
-                            if iteration_count > 0:
-                                final_response_text = response_text.strip() if response_text else ""
-                            else:
-                                final_response_text = response_text.strip() if response_text else ""
+                            if _continuation.take(messages, response_text, self._last_stop_reason == "length_truncated" and _stop_before != "length_truncated"):
+                                self._last_stop_reason = "completed"
+                                response_text = ""
+                                continue
+                            response_text = _continuation.stitch(response_text)
+                            final_response_text = response_text.strip() if response_text else ""
                             break
 
                     # ── Chat Completions path (unchanged) ───────────────────
@@ -3617,6 +3627,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                                 **kwargs
                                             )
                                         ):
+                                            self._record_stream_finish(chunk)
                                             if chunk and chunk.choices and chunk.choices[0].delta:
                                                 delta = chunk.choices[0].delta
                                                 response_text, tool_calls = self._process_stream_delta(
@@ -3636,6 +3647,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                             **kwargs
                                         )
                                     ):
+                                        self._record_stream_finish(chunk)
                                         if chunk and chunk.choices and chunk.choices[0].delta:
                                             delta = chunk.choices[0].delta
                                             response_text, tool_calls = self._process_stream_delta(
@@ -3667,6 +3679,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                                         **kwargs
                                                     )
                                                 ):
+                                                    self._record_stream_finish(chunk)
                                                     if chunk and chunk.choices and chunk.choices[0].delta:
                                                         delta = chunk.choices[0].delta
                                                         response_text, tool_calls = self._process_stream_delta(
@@ -3767,7 +3780,9 @@ Respond with ONLY a valid JSON tool call in this format:
                                     raise streaming_error
                             
                             if streaming_success:
-                                response_text = response_text.strip() if response_text else ""
+                                # Keep whitespace at a continuation seam; the stitched answer is stripped later.
+                                if not (self._last_stop_reason == "length_truncated" and _stop_before != "length_truncated") and not _continuation.text:
+                                    response_text = response_text.strip() if response_text else ""
                                 
                                 # Execute callbacks after streaming completes (only if not verbose, since verbose will call display_interaction later)
                                 if not verbose and not callback_executed:
@@ -3816,6 +3831,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                             **kwargs
                                         )
                                     ):
+                                        self._record_stream_finish(chunk)
                                         if chunk and chunk.choices and chunk.choices[0].delta:
                                             delta = chunk.choices[0].delta
                                             response_text, tool_calls = self._process_stream_delta(
@@ -3863,6 +3879,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                             **kwargs
                                         )
                                     ):
+                                        self._record_stream_finish(chunk)
                                         if chunk and chunk.choices and chunk.choices[0].delta:
                                             delta = chunk.choices[0].delta
                                             response_text, tool_calls = self._process_stream_delta(
@@ -4258,12 +4275,11 @@ Respond with ONLY a valid JSON tool call in this format:
                                 interaction_displayed = False
                                 break
                         
-                        # If we've executed tools in previous iterations, this response contains the final answer
-                        if iteration_count > 0:
-                            final_response_text = response_text.strip() if response_text else ""
-                            break
-                        
-                        # First iteration with no tool calls - just return the response
+                        if _continuation.take(messages, response_text, self._last_stop_reason == "length_truncated" and _stop_before != "length_truncated"):
+                            self._last_stop_reason = "completed"
+                            response_text = ""
+                            continue
+                        response_text = _continuation.stitch(response_text)
                         final_response_text = response_text.strip() if response_text else ""
                         break
                         
@@ -5460,6 +5476,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Mid-run steering: optional callable() -> list[str] draining pending
         # steering notes so they can be injected as user messages between iterations.
         steering_drain = kwargs.pop("steering_drain", None)
+        # Bounded auto-continuation on output-token truncation (True/False/int cap).
+        output_continuation = kwargs.pop("output_continuation", True)
 
         def _is_cancelled() -> bool:
             return cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()
@@ -5603,8 +5621,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             accumulated_tool_results = []  # Store all tool results across iterations
             # Structured stop reason (unified with the OpenAI-native path).
             self._last_stop_reason = "completed"
+            from ._continuation import OutputContinuation, is_structured
+            # Schema-enforced output cannot be continued as a text suffix.
+            _continuation = OutputContinuation(False if (output_json or output_pydantic or is_structured(getattr(self, "response_format", None))) else output_continuation)
 
             while iteration_count < max_iterations:
+                # Continue only when *this* response hit the length limit, not on a
+                # sticky truncation left by an earlier (e.g. repaired) tool call.
+                _stop_before = self._last_stop_reason
                 # G2: Check for cancellation at the top of each tool iteration so a
                 # /stop request promptly halts a mid-flight run on every provider.
                 if _is_cancelled():
@@ -5753,6 +5777,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         iteration_count += 1
                         continue
                     else:
+                        if _continuation.take(messages, response_text, self._last_stop_reason == "length_truncated" and _stop_before != "length_truncated"):
+                            self._last_stop_reason = "completed"
+                            response_text = ""
+                            continue
+                        response_text = _continuation.stitch(response_text)
                         final_response_text = response_text.strip() if response_text else ""
                         break
 
@@ -5831,6 +5860,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     **kwargs
                                 )
                             ):
+                                self._record_stream_finish(chunk)
                                 if chunk and chunk.choices and chunk.choices[0].delta:
                                     delta = chunk.choices[0].delta
                                     response_text, tool_calls = self._process_stream_delta(
@@ -5853,6 +5883,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     **kwargs
                                 )
                             ):
+                                self._record_stream_finish(chunk)
                                 if chunk and chunk.choices and chunk.choices[0].delta:
                                     delta = chunk.choices[0].delta
                                     if delta.content:
@@ -5862,7 +5893,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     if formatted_tools and self._supports_streaming_tools():
                                         tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
                         
-                        response_text = response_text.strip() if response_text else ""
+                        # Keep whitespace at a continuation seam; the stitched answer is stripped later.
+                        if not (self._last_stop_reason == "length_truncated" and _stop_before != "length_truncated") and not _continuation.text:
+                            response_text = response_text.strip() if response_text else ""
                         
                         # We already have tool_calls from streaming if supported
                         # No need for a second API call!
@@ -6289,6 +6322,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             interaction_displayed = False
                             break
                     
+                    if _continuation.take(messages, response_text, self._last_stop_reason == "length_truncated" and _stop_before != "length_truncated"):
+                        self._last_stop_reason = "completed"
+                        response_text = ""
+                        continue
+                    response_text = _continuation.stitch(response_text)
                     # If we've executed tools in previous iterations, this response contains the final answer
                     if iteration_count > 0 and not final_response_text:
                         final_response_text = response_text.strip()
@@ -6725,6 +6763,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except Exception:
             # Never let outcome classification break the response path.
             return
+
+    def _record_stream_finish(self, chunk: Any) -> None:
+        """Record a streamed chunk's ``finish_reason`` (e.g. ``length``) if present."""
+        if chunk and getattr(chunk, "choices", None) and getattr(chunk.choices[0], "finish_reason", None):
+            self._record_finish_reason(chunk)
 
     def _extract_token_usage(self, response: Union[Dict[str, Any], Any]) -> Optional[TokenUsage]:
         """Extract token usage from LiteLLM response for public API."""
