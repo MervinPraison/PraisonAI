@@ -441,8 +441,6 @@ class BrowserServer:
         
         logger.debug(f"[SERVER][SCAN] _handle_start_session:server.py checking {len(extension_conns)} extension connection(s)")
 
-        import json as json_mod
-
         # Deliver to ONE idle extension connection only (never a CLI client) to
         # avoid duplicate debugger attachment. Extension availability was already
         # validated above via extension_conns, which excludes CLI clients and
