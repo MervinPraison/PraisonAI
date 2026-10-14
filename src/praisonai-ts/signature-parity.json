@@ -1797,7 +1797,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3323",
+        "location": "src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3345",
         "resolved_class": "ChatMixin"
       },
       "ts_only": [
@@ -4656,7 +4656,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:490",
+        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:493",
         "resolved_class": "LLM"
       },
       "ts_only": [
