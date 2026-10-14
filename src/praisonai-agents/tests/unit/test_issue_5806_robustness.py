@@ -7,6 +7,7 @@ import pytest
 
 from praisonaiagents import Agent
 from praisonaiagents.hooks import before_tool
+from praisonaiagents.mcp.mcp import MCPToolRunner
 from praisonaiagents.session.context import get_session_context, set_session_context
 
 
@@ -75,3 +76,84 @@ def test_dead_mcp_runner_fails_fast_with_message():
     assert runner.call_tool("ping", {}) == "Error: MCP server connection lost: Connection closed"
     assert runner._dispatch("resource", "x", None) == (False, runner._dead)
     assert runner.queue.empty()
+
+
+def _fake_runner(dead=None, init_error=None):
+    runner = MCPToolRunner.__new__(MCPToolRunner)
+    runner.initialized = threading.Event()
+    runner.initialized.set()
+    runner._init_error = init_error
+    runner._dead = dead
+    runner.queue = queue.Queue()
+    runner.timeout = 1
+    runner.server_params = None
+    runner.resources = []
+    runner.stop = lambda timeout=None: None
+    return runner
+
+
+def _patch_runner_factory(monkeypatch, factory):
+    import praisonaiagents.mcp.mcp as m
+
+    created = []
+
+    def make(params, timeout):
+        r = factory()
+        created.append(r)
+        return r
+
+    monkeypatch.setattr(m, "MCPToolRunner", make)
+    return created
+
+
+def test_failed_restart_stays_eligible_for_retry(monkeypatch):
+    from praisonaiagents.mcp.mcp import MCP
+
+    mcp = MCP.__new__(MCP)
+    mcp.runner = _fake_runner(dead="lost")
+    created = _patch_runner_factory(monkeypatch, lambda: _fake_runner(init_error="boom"))
+    assert mcp._call_stdio_tool("t", {}) == "Error: boom"
+    assert mcp._call_stdio_tool("t", {}) == "Error: boom"
+    assert len(created) == 2
+
+
+def test_restart_after_shutdown_is_refused(monkeypatch):
+    from praisonaiagents.mcp.mcp import MCP
+
+    mcp = MCP.__new__(MCP)
+    mcp.runner = _fake_runner(dead="lost")
+    mcp._closing = True
+    created = _patch_runner_factory(monkeypatch, _fake_runner)
+    assert mcp._call_stdio_tool("t", {}) == "Error: lost"
+    assert created == []
+
+
+def test_resource_helpers_follow_restarted_runner(monkeypatch):
+    from praisonaiagents.mcp.mcp import MCP
+
+    mcp = MCP.__new__(MCP)
+    old = _fake_runner()
+    old.resources = [object()]
+    old.resource_templates = []
+    old.prompts = []
+    old.tools = []
+    mcp.runner = old
+    read = {fn.__name__: fn for fn in mcp._generate_resource_tools()}["read_mcp_resource"]
+    old._dead = "lost"
+    fresh = _fake_runner()
+    fresh.read_resource = lambda uri: f"fresh:{uri}"
+    _patch_runner_factory(monkeypatch, lambda: fresh)
+    assert read("x://1") == "fresh:x://1"
+    assert mcp.runner is fresh
+
+
+def test_request_enqueued_after_drain_is_answered():
+    runner = _fake_runner()
+
+    class LateDeath(queue.Queue):
+        def put(self, item, *a, **k):
+            super().put(item, *a, **k)
+            runner._dead = "lost"  # runner died and drained just before our put landed
+
+    runner.queue = LateDeath()
+    assert runner._dispatch("resource", "x", None) == (False, "lost")

@@ -235,6 +235,8 @@ class MCPToolRunner(threading.Thread):
         response_queue = queue.Queue(maxsize=1)
         cancelled = threading.Event()
         self.queue.put((response_queue, kind, name, arguments, cancelled))
+        if self._dead:
+            self._fail_pending()  # the runner may have drained the queue before our put
         try:
             success, result = response_queue.get(timeout=self.timeout)
         except queue.Empty:
@@ -295,6 +297,8 @@ class MCPToolRunner(threading.Thread):
             # Put request in queue with caller-specific response channel
             cancelled = threading.Event()
             self.queue.put((response_queue, "tool", tool_name, arguments, cancelled))
+            if self._dead:
+                self._fail_pending()  # the runner may have drained the queue before our put
             
             # Wait for result with timeout
             try:
@@ -887,17 +891,17 @@ class MCP:
         if has_resources:
             def list_mcp_resources() -> str:
                 """List the resources available from the connected MCP server."""
-                return _res.to_json(_res.resources_to_dicts(runner.resources))
+                return _res.to_json(_res.resources_to_dicts(self._live_stdio_runner(runner).resources))
 
             def list_mcp_resource_templates() -> str:
                 """List the resource templates available from the MCP server."""
                 return _res.to_json(
-                    _res.resource_templates_to_dicts(runner.resource_templates)
+                    _res.resource_templates_to_dicts(self._live_stdio_runner(runner).resource_templates)
                 )
 
             def read_mcp_resource(uri: str) -> str:
                 """Read a resource from the MCP server by its URI."""
-                return runner.read_resource(uri)
+                return self._live_stdio_runner(runner).read_resource(uri)
 
             candidates.extend(
                 [list_mcp_resources, list_mcp_resource_templates, read_mcp_resource]
@@ -906,11 +910,11 @@ class MCP:
         if has_prompts:
             def list_mcp_prompts() -> str:
                 """List the prompt templates available from the MCP server."""
-                return _res.to_json(_res.prompts_to_dicts(runner.prompts))
+                return _res.to_json(_res.prompts_to_dicts(self._live_stdio_runner(runner).prompts))
 
             def get_mcp_prompt(name: str, arguments: dict = None) -> str:
                 """Fetch an MCP prompt template rendered with the given arguments."""
-                return runner.get_prompt(name, arguments or {})
+                return self._live_stdio_runner(runner).get_prompt(name, arguments or {})
 
             candidates.extend([list_mcp_prompts, get_mcp_prompt])
 
@@ -922,27 +926,48 @@ class MCP:
     # Respawns allowed after a stdio server dies mid-session.
     _MAX_STDIO_RESTARTS = 3
 
+    def _live_stdio_runner(self, fallback=None):
+        """Return the current stdio runner, respawning it if its server died.
+
+        At most ``_MAX_STDIO_RESTARTS`` respawns; a replacement that fails to
+        start is marked dead so a later call may retry within that budget. No
+        replacement is kept once :meth:`shutdown` has begun.
+        """
+        runner = getattr(self, "runner", None) or fallback
+        if runner is None or not isinstance(getattr(runner, "_dead", None), str):
+            return runner
+        lock = self.__dict__.setdefault("_restart_lock", threading.Lock())
+        with lock:
+            restarts = getattr(self, "_stdio_restarts", 0)
+            if (self.runner is runner and not getattr(self, "_closing", False)
+                    and restarts < self._MAX_STDIO_RESTARTS):
+                self._stdio_restarts = restarts + 1
+                logging.warning(
+                    "MCP stdio server lost (%s); restarting (%d/%d)",
+                    runner._dead, self._stdio_restarts, self._MAX_STDIO_RESTARTS,
+                )
+                runner.stop(timeout=1)
+                new_runner = MCPToolRunner(runner.server_params, runner.timeout)
+                if not new_runner.initialized.wait(timeout=runner.timeout) or new_runner._init_error:
+                    new_runner._dead = new_runner._init_error or "MCP server restart timed out"
+                    new_runner.stop(timeout=1)
+                self.runner = new_runner
+                # shutdown() sets _closing before reading self.runner, so either
+                # it sees new_runner or we see _closing here.
+                if getattr(self, "_closing", False):
+                    new_runner.stop(timeout=1)
+            return self.runner or runner
+
     def _call_stdio_tool(self, tool_name, arguments):
         """Call a stdio tool, lazily respawning the runner if its server died.
 
         The call that observed the crash is never replayed (it may already have
         reached the server); the next call gets a fresh runner instead.
         """
-        runner = self.runner
-        if runner is not None and isinstance(getattr(runner, "_dead", None), str):
-            lock = self.__dict__.setdefault("_restart_lock", threading.Lock())
-            with lock:
-                if self.runner is runner and getattr(self, "_stdio_restarts", 0) < self._MAX_STDIO_RESTARTS:
-                    self._stdio_restarts = getattr(self, "_stdio_restarts", 0) + 1
-                    logging.warning(
-                        "MCP stdio server lost (%s); restarting (%d/%d)",
-                        runner._dead, self._stdio_restarts, self._MAX_STDIO_RESTARTS,
-                    )
-                    runner.stop(timeout=1)
-                    new_runner = MCPToolRunner(runner.server_params, runner.timeout)
-                    new_runner.initialized.wait(timeout=runner.timeout)
-                    self.runner = new_runner
-                runner = self.runner
+        runner = self._live_stdio_runner()
+        dead = getattr(runner, "_dead", None)
+        if isinstance(dead, str):
+            return f"Error: {dead}"
         return runner.call_tool(tool_name, arguments)
 
     def _create_tool_wrapper(self, tool):
@@ -1469,6 +1494,7 @@ class MCP:
         stdio runner instead of joining it (a join can wait up to the operation
         timeout inside the garbage collector) and releases the server-name
         registration without waiting on its lock."""
+        self._closing = True  # stop _live_stdio_runner from installing a replacement
         # Shutdown stdio runner if present
         if hasattr(self, 'runner') and self.runner is not None:
             try:
