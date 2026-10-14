@@ -206,3 +206,37 @@ def test_openai_native_cancel_keeps_earlier_pieces():
             [{"role": "user", "content": "write"}], stream=False, cancel_token=token))
     assert resp.choices[0].message.content == "ab"
     assert client._last_stop_reason == "cancelled"
+
+
+def _tool_resp(finish_reason):
+    return {
+        "choices": [{"finish_reason": finish_reason, "message": {
+            "role": "assistant", "content": None,
+            "tool_calls": [{"id": "c1", "type": "function",
+                            "function": {"name": "add", "arguments": '{"a": 1, "b": 2}'}}]}}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }
+
+
+def _add(a: int, b: int) -> int:
+    """Add two numbers."""
+    return a + b
+
+
+def test_truncated_tool_call_does_not_continue_finished_answer():
+    llm, out, seen = _run_sync(
+        [_tool_resp("length"), _resp("Done: 3.", "stop")],
+        tools=[_add], execute_tool_fn=lambda name, args, *a, **k: _add(**args),
+    )
+    assert out == "Done: 3."
+    assert len(seen) == 2
+    assert all(m.get("content") != CONTINUE_PROMPT for m in seen[-1])
+
+
+def test_text_response_format_still_continues():
+    _, resp, seen = _run_openai(
+        [_completion("Hello ", "length"), _completion("world.", "stop")],
+        response_format={"type": "text"},
+    )
+    assert resp.choices[0].message.content == "Hello world."
+    assert len(seen) == 2

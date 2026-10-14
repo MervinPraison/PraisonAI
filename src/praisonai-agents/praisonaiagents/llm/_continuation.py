@@ -51,3 +51,10 @@ class OutputContinuation:
         if not self.text:
             return text
         return self.text + (text or "")
+
+
+def is_structured(response_format: Any) -> bool:
+    """True when ``response_format`` enforces JSON/schema output (stitching would break it)."""
+    if isinstance(response_format, dict):
+        return response_format.get("type", "text") != "text"
+    return bool(response_format)

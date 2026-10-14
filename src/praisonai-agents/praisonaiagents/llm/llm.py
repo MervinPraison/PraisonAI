@@ -3150,11 +3150,14 @@ Respond with ONLY a valid JSON tool call in this format:
             # Structured stop reason so callers can distinguish completion from
             # truncation (unified with the OpenAI-native path). "completed" default.
             self._last_stop_reason = "completed"
-            from ._continuation import OutputContinuation
+            from ._continuation import OutputContinuation, is_structured
             # Schema-enforced output cannot be continued as a text suffix.
-            _continuation = OutputContinuation(False if (output_json or output_pydantic or getattr(self, "response_format", None)) else output_continuation)
+            _continuation = OutputContinuation(False if (output_json or output_pydantic or is_structured(getattr(self, "response_format", None))) else output_continuation)
 
             while iteration_count < max_iterations:
+                # Continue only when *this* response hit the length limit, not on a
+                # sticky truncation left by an earlier (e.g. repaired) tool call.
+                _stop_before = self._last_stop_reason
                 # G2: Check for cancellation at the top of each tool iteration so a
                 # /stop request promptly halts a mid-flight run on every provider.
                 if _is_cancelled():
@@ -3408,7 +3411,7 @@ Respond with ONLY a valid JSON tool call in this format:
                             continue
                         else:
                             # No tool calls — we have a final answer
-                            if _continuation.take(messages, response_text, self._last_stop_reason == "length_truncated"):
+                            if _continuation.take(messages, response_text, self._last_stop_reason == "length_truncated" and _stop_before != "length_truncated"):
                                 self._last_stop_reason = "completed"
                                 response_text = ""
                                 continue
@@ -3728,7 +3731,7 @@ Respond with ONLY a valid JSON tool call in this format:
                             
                             if streaming_success:
                                 # Keep whitespace at a continuation seam; the stitched answer is stripped later.
-                                if self._last_stop_reason != "length_truncated" and not _continuation.text:
+                                if not (self._last_stop_reason == "length_truncated" and _stop_before != "length_truncated") and not _continuation.text:
                                     response_text = response_text.strip() if response_text else ""
                                 
                                 # Execute callbacks after streaming completes (only if not verbose, since verbose will call display_interaction later)
@@ -4222,7 +4225,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                 interaction_displayed = False
                                 break
                         
-                        if _continuation.take(messages, response_text, self._last_stop_reason == "length_truncated"):
+                        if _continuation.take(messages, response_text, self._last_stop_reason == "length_truncated" and _stop_before != "length_truncated"):
                             self._last_stop_reason = "completed"
                             response_text = ""
                             continue
@@ -5568,11 +5571,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             accumulated_tool_results = []  # Store all tool results across iterations
             # Structured stop reason (unified with the OpenAI-native path).
             self._last_stop_reason = "completed"
-            from ._continuation import OutputContinuation
+            from ._continuation import OutputContinuation, is_structured
             # Schema-enforced output cannot be continued as a text suffix.
-            _continuation = OutputContinuation(False if (output_json or output_pydantic or getattr(self, "response_format", None)) else output_continuation)
+            _continuation = OutputContinuation(False if (output_json or output_pydantic or is_structured(getattr(self, "response_format", None))) else output_continuation)
 
             while iteration_count < max_iterations:
+                # Continue only when *this* response hit the length limit, not on a
+                # sticky truncation left by an earlier (e.g. repaired) tool call.
+                _stop_before = self._last_stop_reason
                 # G2: Check for cancellation at the top of each tool iteration so a
                 # /stop request promptly halts a mid-flight run on every provider.
                 if _is_cancelled():
@@ -5721,7 +5727,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         iteration_count += 1
                         continue
                     else:
-                        if _continuation.take(messages, response_text, self._last_stop_reason == "length_truncated"):
+                        if _continuation.take(messages, response_text, self._last_stop_reason == "length_truncated" and _stop_before != "length_truncated"):
                             self._last_stop_reason = "completed"
                             response_text = ""
                             continue
@@ -5838,7 +5844,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
                         
                         # Keep whitespace at a continuation seam; the stitched answer is stripped later.
-                        if self._last_stop_reason != "length_truncated" and not _continuation.text:
+                        if not (self._last_stop_reason == "length_truncated" and _stop_before != "length_truncated") and not _continuation.text:
                             response_text = response_text.strip() if response_text else ""
                         
                         # We already have tool_calls from streaming if supported
@@ -6266,7 +6272,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             interaction_displayed = False
                             break
                     
-                    if _continuation.take(messages, response_text, self._last_stop_reason == "length_truncated"):
+                    if _continuation.take(messages, response_text, self._last_stop_reason == "length_truncated" and _stop_before != "length_truncated"):
                         self._last_stop_reason = "completed"
                         response_text = ""
                         continue

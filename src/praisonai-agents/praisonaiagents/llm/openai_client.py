@@ -2013,9 +2013,9 @@ class OpenAIClient:
         # truncation (unified with the LiteLLM path). "completed" by default.
         self._last_stop_reason = "completed"
         _wrapup_injected = False
-        from ._continuation import OutputContinuation
+        from ._continuation import OutputContinuation, is_structured
         # Schema-enforced output cannot be continued as a text suffix.
-        _continuation = OutputContinuation(False if kwargs.get("response_format") else output_continuation)
+        _continuation = OutputContinuation(False if is_structured(kwargs.get("response_format")) else output_continuation)
         # Ensure a defined return value even if cancellation breaks the loop
         # before any model call is made.
         final_response = None
@@ -2377,9 +2377,9 @@ class OpenAIClient:
         # Structured stop reason (unified with the sync/LiteLLM paths).
         self._last_stop_reason = "completed"
         _wrapup_injected = False
-        from ._continuation import OutputContinuation
+        from ._continuation import OutputContinuation, is_structured
         # Schema-enforced output cannot be continued as a text suffix.
-        _continuation = OutputContinuation(False if kwargs.get("response_format") else output_continuation)
+        _continuation = OutputContinuation(False if is_structured(kwargs.get("response_format")) else output_continuation)
         # Ensure a defined return value even if cancellation breaks the loop
         # before any model call is made.
         final_response = None
