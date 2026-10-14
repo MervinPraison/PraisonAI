@@ -2007,6 +2007,35 @@ Your Goal: {self.goal}"""
         except Exception:
             logging.debug("MODEL_FALLBACK stream event failed", exc_info=True)
 
+    def _shrink_after_context_overflow(self, messages, model_name):
+        """Shrink ``messages`` after the provider rejected them as too long.
+
+        Uses the configured ContextManager when present; otherwise falls back
+        to ``ContextCompactor.shrink_to_fit`` so agents without ``context=``
+        still recover. Each call targets at most half the current estimate, so
+        bounded retries shrink progressively even when the estimate was wrong.
+        """
+        from ..context.budgeter import get_model_limit
+        from ..compaction import ContextCompactor
+        compactor = ContextCompactor()
+        target = min(
+            int(get_model_limit(model_name) * 0.7),  # 70% of limit for safety
+            compactor.count_total_tokens(messages) // 2,
+        )
+        if self.context_manager:
+            return self.context_manager.emergency_truncate(messages, target)
+        return compactor.shrink_to_fit(messages, target)
+
+    def _can_restart_after_overflow(self, tools) -> bool:
+        """Whether an overflow may restart the whole turn with shrunk messages.
+
+        The restart replays the turn from its outer messages, so without a
+        ContextManager it is limited to tool-free turns: a tool turn would
+        rerun already-completed tool calls. LiteLLM tool turns recover inside
+        the request loop instead (``LLM._shrink_on_context_overflow``).
+        """
+        return bool(self.context_manager) or not (tools or self.tools)
+
     def _max_retry_depth(self) -> int:
         """Maximum LLM retry depth honoured by the recovery loop.
 
@@ -2339,14 +2368,9 @@ Your Goal: {self.goal}"""
             )
             
             # Execute recovery actions based on classification
-            if classification.should_compress_context and self.context_manager:
+            if classification.should_compress_context and self._can_restart_after_overflow(tools):
                 try:
-                    from ..context.budgeter import get_model_limit
-                    model_limit = get_model_limit(model_name)
-                    target = int(model_limit * 0.7)  # Target 70% of limit for safety
-                    
-                    # Apply emergency truncation
-                    truncated_messages = self.context_manager.emergency_truncate(messages, target)
+                    truncated_messages = self._shrink_after_context_overflow(messages, model_name)
                     
                     logging.info(f"[{self.name}] {classification.user_message}")
                     
@@ -2523,14 +2547,9 @@ Your Goal: {self.goal}"""
         )
         
         # Execute recovery actions based on classification (async-compatible)
-        if classification.should_compress_context and self.context_manager:
+        if classification.should_compress_context and self._can_restart_after_overflow(tools):
             try:
-                from ..context.budgeter import get_model_limit
-                model_limit = get_model_limit(model_name)
-                target = int(model_limit * 0.7)  # Target 70% of limit for safety
-                
-                # Apply emergency truncation
-                truncated_messages = self.context_manager.emergency_truncate(messages, target)
+                truncated_messages = self._shrink_after_context_overflow(messages, model_name)
                 
                 logging.info(f"[{self.name}] {classification.user_message}")
                 

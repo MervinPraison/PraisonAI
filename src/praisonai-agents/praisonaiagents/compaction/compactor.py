@@ -573,6 +573,63 @@ class ContextCompactor:
 
         return cut_index
 
+    def shrink_to_fit(
+        self, messages: List[Dict[str, Any]], target_tokens: int
+    ) -> List[Dict[str, Any]]:
+        """Shrink ``messages`` toward ``target_tokens`` after a provider overflow.
+
+        Reactive counterpart to ``compact``: used once a provider has rejected
+        a request as too long. It never drops the user message that opened
+        the in-flight turn or anything after it (its tool calls and results). It first
+        drops the oldest turns before that message, snapped so tool-call pairs
+        stay together, then trims oversized tool results to head + tail.
+        Returns a new list; the input is not mutated.
+        """
+        system = [m for m in messages if m.get("role") == "system"]
+        rest = [m for m in messages if m.get("role") != "system"]
+        anchor = max(len(rest) - 1, 0)
+        # Tool loops add their own user messages (media follow-ups, steering,
+        # repair prompts) after tool results or other user messages. The turn
+        # opens at the latest user message that follows a plain assistant
+        # reply (or nothing), so walk back past the synthesized ones.
+        for i in reversed(range(len(rest))):
+            if rest[i].get("role") != "user":
+                continue
+            anchor = i
+            prev = rest[i - 1] if i else None
+            if prev is None or (prev.get("role") == "assistant" and not prev.get("tool_calls")):
+                break
+
+        total = self.count_total_tokens(system + rest)
+        cut = 0
+        while cut < anchor and total > target_tokens:
+            total -= self.count_message_tokens(rest[cut])
+            cut += 1
+        kept = rest[self._snap_to_pair_boundary(rest, cut):]
+
+        if self.count_total_tokens(system + kept) > target_tokens:
+            n_tools = sum(1 for m in kept if m.get("role") == "tool")
+            # ~4 chars/token: tool results share roughly half the target budget
+            cap = max(500, target_tokens * 2 // max(n_tools, 1))
+            trimmed = []
+            for m in kept:
+                content = m.get("content")
+                if m.get("role") == "tool" and isinstance(content, str) and len(content) > cap:
+                    marker = (
+                        f"\n...[truncated {len(content):,} chars to fit the "
+                        f"context window]...\n"
+                    )
+                    # Keep the marker inside the cap so the result never grows.
+                    keep = max(cap - len(marker), 0)
+                    head, tail = content[: keep * 2 // 3], content[len(content) - keep // 3:]
+                    shortened = f"{head}{marker}{tail}"
+                    if len(shortened) < len(content):
+                        m = {**m, "content": shortened}
+                trimmed.append(m)
+            kept = trimmed
+
+        return system + kept
+
     def preview_older_slice(
         self, messages: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:
