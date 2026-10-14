@@ -115,6 +115,16 @@ def _apply_cold_path_parity(config: Dict[str, Any]) -> None:
         pass
 
 
+def _definitions_fingerprint() -> Any:
+    """Fingerprint of rules/definition files, or ``None`` when unavailable."""
+    try:
+        from ..cli.features.custom_definitions import definitions_fingerprint
+
+        return definitions_fingerprint()
+    except Exception:
+        return None
+
+
 class WarmRuntime:
     """Holds warm agent state and executes prompts for the runtime server."""
 
@@ -132,9 +142,28 @@ class WarmRuntime:
         # Model each session agent was built with, so a later run that overrides
         # the model rebuilds the agent instead of silently reusing the old one.
         self._session_models: Dict[str, Optional[str]] = {}
+        # Fingerprint of rules/tools/definition files the cached agents were
+        # built from; a change drops them so edits apply on the next run.
+        self._definitions_fingerprint = _definitions_fingerprint()
         self.last_activity = time.time()
         # Event hub used to fan out live session events to attached clients.
         self.hub = hub or SessionEventHub()
+
+    def _refresh_if_definitions_changed(self) -> None:
+        """Drop warm agents when rules/tools/definition files were edited.
+
+        Session agents rehydrate their history from the session store on
+        rebuild, so this only refreshes the project context, not the
+        conversation.
+        """
+        fingerprint = _definitions_fingerprint()
+        with self._lock:
+            if fingerprint == self._definitions_fingerprint:
+                return
+            self._definitions_fingerprint = fingerprint
+            self._agents.clear()
+            self._session_agents.clear()
+            self._session_models.clear()
 
     def _agent_key(self, model: Optional[str]) -> str:
         return model or self._default_model or "__default__"
@@ -272,6 +301,7 @@ class WarmRuntime:
         ``--session`` run is observable under its own id.
         """
         self.last_activity = time.time()
+        self._refresh_if_definitions_changed()
         stream_id = event_id or session_id
         if stream_id:
             self.hub.publish(stream_id, {

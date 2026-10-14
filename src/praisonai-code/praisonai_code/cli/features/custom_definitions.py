@@ -1317,3 +1317,71 @@ def run_shell_escape(
         return ShellEscapeResult(
             enabled=True, command=command, output=str(exc), error=True
         )
+
+# File-based definition roots scanned by commands/agents/tools, skills and
+# rules discovery. Used only to *detect* edits; the existing discovery code
+# remains the single source of truth for what is loaded.
+_FINGERPRINT_ROOTS = (".praisonai", ".claude", ".agents", ".cursor", ".windsurf")
+_FINGERPRINT_SUBDIRS = ("agents", "commands", "rules", "skills", "tools")
+_FINGERPRINT_FILES = (
+    "CLAUDE.md", "CLAUDE.local.md", "AGENTS.md", "GEMINI.md",
+    ".cursorrules", ".windsurfrules", "PRAISON.md", "PRAISON.local.md",
+)
+_FINGERPRINT_TTL = 1.0
+_fingerprint_cache: Tuple[Any, float, Any] = (None, 0.0, None)
+
+
+def _mtime(path: Path) -> Optional[int]:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
+def definitions_fingerprint() -> Tuple:
+    """Return a cheap mtime fingerprint of the file-based definition roots.
+
+    Long-lived sessions (interactive TUI/REPL, warm runtime) compare this
+    between prompts and re-run the existing discovery when it changes, so
+    edits to commands, agents, skills, tools and rules/instruction files
+    (``CLAUDE.md``/``AGENTS.md``/``PRAISON.md``) apply without a restart.
+    Only ``stat``/``listdir`` calls are made (no file reads, no subprocess)
+    and the result is cached for ``_FINGERPRINT_TTL`` seconds so per-keystroke
+    callers (e.g. completion) stay cheap.
+    """
+    global _fingerprint_cache
+    cwd = os.getcwd()
+    now = time.monotonic()
+    cached_cwd, cached_at, cached = _fingerprint_cache
+    if cached_cwd == cwd and now - cached_at < _FINGERPRINT_TTL:
+        return cached
+
+    entries: List[Tuple[str, Optional[int]]] = []
+    current = Path(cwd)
+    bases = [current, *current.parents, Path.home()]
+    for base in dict.fromkeys(bases):
+        for name in _FINGERPRINT_FILES:
+            mtime = _mtime(base / name)
+            if mtime is not None:
+                entries.append((str(base / name), mtime))
+        for root in _FINGERPRINT_ROOTS:
+            root_dir = base / root
+            if not root_dir.is_dir():
+                continue
+            for sub in _FINGERPRINT_SUBDIRS:
+                sub_dir = root_dir / sub
+                try:
+                    children = sorted(os.listdir(sub_dir))
+                except OSError:
+                    continue
+                entries.append((str(sub_dir), _mtime(sub_dir)))
+                for child in children:
+                    child_path = sub_dir / child
+                    entries.append((str(child_path), _mtime(child_path)))
+                    if sub == "skills":
+                        skill_md = child_path / "SKILL.md"
+                        entries.append((str(skill_md), _mtime(skill_md)))
+
+    fingerprint = tuple(entries)
+    _fingerprint_cache = (cwd, now, fingerprint)
+    return fingerprint
