@@ -617,6 +617,25 @@ class TestDaemonService:
         assert "<key>SuccessfulExit</key>" in plist
         assert "<key>KeepAlive</key>\n    <true/>" not in plist
 
+    def test_service_stop_deadline_covers_configured_drain(self, tmp_path):
+        # Issue #5815: the supervisor's stop deadline must cover the gateway's
+        # drain budget, and only the gateway gets the first signal.
+        from praisonai_bot.daemon import stop_timeout_seconds
+        from praisonai_bot.daemon.launchd import _generate_plist
+        from praisonai_bot.daemon.systemd import _generate_unit
+
+        cfg = tmp_path / "bot.yaml"
+        cfg.write_text("gateway:\n  drain_timeout: 120\n  watchdog:\n    shutdown_grace: 8\n")
+        deadline = stop_timeout_seconds(str(cfg))
+        assert deadline > 2 * 120 + 8
+        unit = _generate_unit(str(cfg))
+        assert f"TimeoutStopSec={deadline}" in unit
+        assert "KillMode=mixed" in unit
+        plist = _generate_plist(str(cfg))
+        assert f"<key>ExitTimeOut</key>\n    <integer>{deadline}</integer>" in plist
+        # Missing config still yields a deadline covering the production drain.
+        assert stop_timeout_seconds(str(tmp_path / "missing.yaml")) >= 30
+
     def test_windows_startup_script_honours_fatal_config_exit(self):
         from praisonai_bot.daemon.windows import _generate_startup_script
         script = _generate_startup_script("/tmp/test_bot.yaml")
