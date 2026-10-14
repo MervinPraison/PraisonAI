@@ -1,0 +1,145 @@
+"""Auto-continuation of answers cut off by the output-token limit (#5810)."""
+import asyncio
+from types import SimpleNamespace
+from unittest.mock import patch
+
+from praisonaiagents.llm._continuation import CONTINUE_PROMPT, OutputContinuation
+
+
+def _resp(content, finish_reason):
+    return {
+        "choices": [{"message": {"role": "assistant", "content": content}, "finish_reason": finish_reason}],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+    }
+
+
+def test_take_and_stitch():
+    c = OutputContinuation(True)
+    msgs = []
+    assert c.take(msgs, "Hello ", True)
+    assert msgs[-1] == {"role": "user", "content": CONTINUE_PROMPT}
+    assert msgs[-2] == {"role": "assistant", "content": "Hello "}
+    assert c.stitch("world") == "Hello world"
+
+
+def test_not_truncated_or_disabled_is_noop():
+    msgs = []
+    assert not OutputContinuation(True).take(msgs, "done", False)
+    assert not OutputContinuation(False).take(msgs, "part", True)
+    assert not OutputContinuation(0).take(msgs, "part", True)
+    assert not OutputContinuation(True).take(msgs, "", True)
+    assert msgs == []
+    assert OutputContinuation(True).stitch("x") == "x"
+
+
+def test_cap_bounds_continuations():
+    c = OutputContinuation(2)
+    msgs = []
+    assert c.take(msgs, "a", True) and c.take(msgs, "b", True)
+    assert not c.take(msgs, "c", True)
+
+
+def _llm():
+    from praisonaiagents.llm.llm import LLM
+    llm = LLM(model="groq/llama-3.1-8b-instant")
+    return llm
+
+
+def _run_sync(responses, **kw):
+    llm = _llm()
+    seen = []
+
+    def fake(**params):
+        seen.append(list(params["messages"]))
+        return responses.pop(0)
+
+    with patch.object(type(llm), "_supports_responses_api", return_value=False), \
+            patch.object(llm, "_completion_with_retry", side_effect=fake):
+        out = llm.get_response("write", stream=False, verbose=False, **kw)
+    return llm, out, seen
+
+
+def test_litellm_sync_continues_and_stitches():
+    llm, out, seen = _run_sync([_resp("Hello ", "length"), _resp("world.", "stop")])
+    assert out == "Hello world."
+    assert llm._last_stop_reason == "completed"
+    assert seen[1][-1]["content"] == CONTINUE_PROMPT
+    assert seen[1][-2] == {"role": "assistant", "content": "Hello "}
+
+
+def test_litellm_sync_cap_surfaces_truncated():
+    llm, out, seen = _run_sync(
+        [_resp("a", "length"), _resp("b", "length")], output_continuation=1
+    )
+    assert out == "ab"
+    assert llm._last_stop_reason == "length_truncated"
+    assert len(seen) == 2
+
+
+def test_litellm_sync_opt_out_keeps_old_behaviour():
+    llm, out, seen = _run_sync([_resp("a", "length")], output_continuation=False)
+    assert out == "a"
+    assert llm._last_stop_reason == "length_truncated"
+    assert len(seen) == 1
+
+
+def test_litellm_async_continues_and_stitches():
+    llm = _llm()
+    responses = [_resp("Hello ", "length"), _resp("world.", "stop")]
+
+    async def fake(**params):
+        from litellm import ModelResponse
+        return ModelResponse(**responses.pop(0))
+
+    with patch.object(type(llm), "_supports_responses_api", return_value=False), \
+            patch.object(llm, "_acompletion_with_retry", side_effect=fake):
+        out = asyncio.run(llm.get_response_async("write", stream=False, verbose=False))
+    assert out == "Hello world."
+    assert llm._last_stop_reason == "completed"
+
+
+def _completion(content, finish_reason):
+    from openai.types.chat import ChatCompletion
+    return ChatCompletion.model_validate({
+        "id": "x", "object": "chat.completion", "created": 0, "model": "gpt-4o-mini",
+        "choices": [{"index": 0, "finish_reason": finish_reason,
+                     "message": {"role": "assistant", "content": content}}],
+    })
+
+
+def _run_openai(responses, **kw):
+    from praisonaiagents.llm.openai_client import OpenAIClient
+    client = OpenAIClient(api_key="sk-test")
+    seen = []
+
+    async def fake(messages, **params):
+        seen.append(list(messages))
+        return responses.pop(0)
+
+    with patch.object(client, "acreate_completion", side_effect=fake):
+        resp = asyncio.run(client.achat_completion_with_tools(
+            [{"role": "user", "content": "write"}], stream=False, **kw))
+    return client, resp, seen
+
+
+def test_openai_native_continues_and_stitches():
+    client, resp, seen = _run_openai([_completion("Hello ", "length"), _completion("world.", "stop")])
+    assert resp.choices[0].message.content == "Hello world."
+    assert client._last_stop_reason == "completed"
+    assert seen[1][-1]["content"] == CONTINUE_PROMPT
+
+
+def test_openai_native_cap_surfaces_truncated():
+    client, resp, seen = _run_openai(
+        [_completion("a", "length"), _completion("b", "length")], output_continuation=1
+    )
+    assert resp.choices[0].message.content == "ab"
+    assert client._last_stop_reason == "length_truncated"
+    assert len(seen) == 2
+
+
+def test_execution_config_round_trip():
+    from praisonaiagents.config.feature_configs import ExecutionConfig
+    assert ExecutionConfig().output_continuation is True
+    cfg = ExecutionConfig.from_dict(ExecutionConfig(output_continuation=False).to_dict())
+    assert cfg.output_continuation is False

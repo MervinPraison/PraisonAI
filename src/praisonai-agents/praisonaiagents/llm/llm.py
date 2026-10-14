@@ -3006,6 +3006,8 @@ Respond with ONLY a valid JSON tool call in this format:
         # Mid-run steering: optional callable() -> list[str] draining pending
         # steering notes so they can be injected as user messages between iterations.
         steering_drain = kwargs.pop("steering_drain", None)
+        # Bounded auto-continuation on output-token truncation (True/False/int cap).
+        output_continuation = kwargs.pop("output_continuation", True)
 
         def _is_cancelled() -> bool:
             return cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()
@@ -3148,6 +3150,8 @@ Respond with ONLY a valid JSON tool call in this format:
             # Structured stop reason so callers can distinguish completion from
             # truncation (unified with the OpenAI-native path). "completed" default.
             self._last_stop_reason = "completed"
+            from ._continuation import OutputContinuation
+            _continuation = OutputContinuation(output_continuation)
 
             while iteration_count < max_iterations:
                 # G2: Check for cancellation at the top of each tool iteration so a
@@ -3403,10 +3407,12 @@ Respond with ONLY a valid JSON tool call in this format:
                             continue
                         else:
                             # No tool calls — we have a final answer
-                            if iteration_count > 0:
-                                final_response_text = response_text.strip() if response_text else ""
-                            else:
-                                final_response_text = response_text.strip() if response_text else ""
+                            if _continuation.take(messages, response_text, self._last_stop_reason == "length_truncated"):
+                                self._last_stop_reason = "completed"
+                                response_text = ""
+                                continue
+                            response_text = _continuation.stitch(response_text)
+                            final_response_text = response_text.strip() if response_text else ""
                             break
 
                     # ── Chat Completions path (unchanged) ───────────────────
@@ -4208,12 +4214,11 @@ Respond with ONLY a valid JSON tool call in this format:
                                 interaction_displayed = False
                                 break
                         
-                        # If we've executed tools in previous iterations, this response contains the final answer
-                        if iteration_count > 0:
-                            final_response_text = response_text.strip() if response_text else ""
-                            break
-                        
-                        # First iteration with no tool calls - just return the response
+                        if _continuation.take(messages, response_text, self._last_stop_reason == "length_truncated"):
+                            self._last_stop_reason = "completed"
+                            response_text = ""
+                            continue
+                        response_text = _continuation.stitch(response_text)
                         final_response_text = response_text.strip() if response_text else ""
                         break
                         
@@ -5410,6 +5415,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Mid-run steering: optional callable() -> list[str] draining pending
         # steering notes so they can be injected as user messages between iterations.
         steering_drain = kwargs.pop("steering_drain", None)
+        # Bounded auto-continuation on output-token truncation (True/False/int cap).
+        output_continuation = kwargs.pop("output_continuation", True)
 
         def _is_cancelled() -> bool:
             return cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()
@@ -5553,6 +5560,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             accumulated_tool_results = []  # Store all tool results across iterations
             # Structured stop reason (unified with the OpenAI-native path).
             self._last_stop_reason = "completed"
+            from ._continuation import OutputContinuation
+            _continuation = OutputContinuation(output_continuation)
 
             while iteration_count < max_iterations:
                 # G2: Check for cancellation at the top of each tool iteration so a
@@ -5703,6 +5712,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         iteration_count += 1
                         continue
                     else:
+                        if _continuation.take(messages, response_text, self._last_stop_reason == "length_truncated"):
+                            self._last_stop_reason = "completed"
+                            response_text = ""
+                            continue
+                        response_text = _continuation.stitch(response_text)
                         final_response_text = response_text.strip() if response_text else ""
                         break
 
@@ -6239,6 +6253,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             interaction_displayed = False
                             break
                     
+                    if _continuation.take(messages, response_text, self._last_stop_reason == "length_truncated"):
+                        self._last_stop_reason = "completed"
+                        response_text = ""
+                        continue
+                    response_text = _continuation.stitch(response_text)
                     # If we've executed tools in previous iterations, this response contains the final answer
                     if iteration_count > 0 and not final_response_text:
                         final_response_text = response_text.strip()

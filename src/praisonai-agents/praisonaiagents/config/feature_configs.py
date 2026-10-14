@@ -972,6 +972,11 @@ class ExecutionConfig:
     # and reject a conflicting ToolConfig(parallel=True) instead of silently winning.
     parallel_tool_calls: Optional[bool] = None
 
+    # Auto-continue a final answer cut off by the output-token limit
+    # (finish_reason="length"): True = up to 3 continuations (default),
+    # False/0 = disabled (surface ``length_truncated`` immediately), int = cap.
+    output_continuation: Union[bool, int] = True
+
     # Durable tool-loop replay. Default-off keeps the execution hot path free
     # of journal construction and SQLite writes.
     durable: bool = False
@@ -1101,6 +1106,7 @@ class ExecutionConfig:
             "compaction_strategy": self.compaction_strategy.value if self.compaction_strategy and hasattr(self.compaction_strategy, 'value') else (str(self.compaction_strategy) if self.compaction_strategy else None),
             "max_budget": self.max_budget,
             "parallel_tool_calls": self.parallel_tool_calls,
+            "output_continuation": self.output_continuation,
             "durable": self.durable,
             "journal_path": self.journal_path,
             "resume_run_id": self.resume_run_id,
@@ -1146,6 +1152,7 @@ class ExecutionConfig:
             compaction_strategy=compaction_strategy,
             max_budget=data.get("max_budget", None),
             parallel_tool_calls=data.get("parallel_tool_calls", None),
+            output_continuation=data.get("output_continuation", True),
             durable=data.get("durable", False),
             journal_path=data.get("journal_path", None),
             resume_run_id=data.get("resume_run_id", None),

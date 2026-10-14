@@ -1978,6 +1978,8 @@ class OpenAIClient:
         # path so /stop and live steering work on the OpenAI-native loop too.
         cancel_token = kwargs.pop("cancel_token", None)
         steering_drain = kwargs.pop("steering_drain", None)
+        # Bounded auto-continuation on output-token truncation (True/False/int cap).
+        output_continuation = kwargs.pop("output_continuation", True)
         # Durable sink for deferred tool re-injection: the caller's persistent
         # conversation history (e.g. the agent's ``chat_history``). Background
         # jobs usually complete after this loop returns, so late results must
@@ -2011,6 +2013,8 @@ class OpenAIClient:
         # truncation (unified with the LiteLLM path). "completed" by default.
         self._last_stop_reason = "completed"
         _wrapup_injected = False
+        from ._continuation import OutputContinuation
+        _continuation = OutputContinuation(output_continuation)
         # Ensure a defined return value even if cancellation breaks the loop
         # before any model call is made.
         final_response = None
@@ -2275,7 +2279,17 @@ class OpenAIClient:
                 if iteration_count >= max_iterations:
                     self._last_stop_reason = "max_steps"
             else:
-                # No tool calls, we're done
+                # No tool calls, we're done -- unless the output-token limit cut
+                # the answer off, in which case ask the model to continue (bounded).
+                from ..agent.run_outcome import classify_finish_reason
+                _choice = final_response.choices[0]
+                _truncated = classify_finish_reason(getattr(_choice, "finish_reason", None)) == "length_truncated"
+                if _continuation.take(messages, _choice.message.content, _truncated):
+                    continue
+                if _continuation.text:
+                    _choice.message.content = _continuation.stitch(_choice.message.content)
+                if _truncated and _choice.message.content and self._last_stop_reason == "completed":
+                    self._last_stop_reason = "length_truncated"
                 break
 
         # Usage is recorded per iteration inside the loop above so every billed
@@ -2328,6 +2342,8 @@ class OpenAIClient:
         # path so /stop and live steering work on the OpenAI-native loop too.
         cancel_token = kwargs.pop("cancel_token", None)
         steering_drain = kwargs.pop("steering_drain", None)
+        # Bounded auto-continuation on output-token truncation (True/False/int cap).
+        output_continuation = kwargs.pop("output_continuation", True)
         # Durable sink for deferred tool re-injection (see sync counterpart).
         deferred_history_sink = kwargs.pop("deferred_history_sink", None)
 
@@ -2357,6 +2373,8 @@ class OpenAIClient:
         # Structured stop reason (unified with the sync/LiteLLM paths).
         self._last_stop_reason = "completed"
         _wrapup_injected = False
+        from ._continuation import OutputContinuation
+        _continuation = OutputContinuation(output_continuation)
         # Ensure a defined return value even if cancellation breaks the loop
         # before any model call is made.
         final_response = None
@@ -2641,7 +2659,17 @@ class OpenAIClient:
                 if iteration_count >= max_iterations:
                     self._last_stop_reason = "max_steps"
             else:
-                # No tool calls, we're done
+                # No tool calls, we're done -- unless the output-token limit cut
+                # the answer off, in which case ask the model to continue (bounded).
+                from ..agent.run_outcome import classify_finish_reason
+                _choice = final_response.choices[0]
+                _truncated = classify_finish_reason(getattr(_choice, "finish_reason", None)) == "length_truncated"
+                if _continuation.take(messages, _choice.message.content, _truncated):
+                    continue
+                if _continuation.text:
+                    _choice.message.content = _continuation.stitch(_choice.message.content)
+                if _truncated and _choice.message.content and self._last_stop_reason == "completed":
+                    self._last_stop_reason = "length_truncated"
                 break
 
         # Usage is recorded per iteration inside the loop above so every billed
