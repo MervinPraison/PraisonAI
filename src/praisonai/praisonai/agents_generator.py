@@ -418,6 +418,7 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
     import concurrent.futures
     import functools
     import inspect
+    import time
 
     # Identity of the wrapper's owner so a shared framework-tool object wrapped
     # by one generator is transparently re-wrapped (not skipped) when a
@@ -457,7 +458,17 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
             # pool; a second failure is genuinely fatal. Surfacing the failure
             # as ToolTimeoutError keeps the module contract (see the docstring
             # above) intact instead of leaking RuntimeError/CancelledError.
+            # A single monotonic deadline spans both attempts so a retry never
+            # extends the user-declared wall-clock budget.
+            deadline = time.monotonic() + timeout_seconds
             for attempt in (0, 1):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ToolTimeoutError(
+                        tool_name=tool_name,
+                        timeout_seconds=timeout_seconds,
+                        background_work_may_continue=False,
+                    )
                 try:
                     executor = executor_factory()
                     future = executor.submit(fn, *args, **kwargs)
@@ -478,7 +489,7 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
                         background_work_may_continue=False,
                     )
                 try:
-                    return future.result(timeout=timeout_seconds)
+                    return future.result(timeout=remaining)
                 except concurrent.futures.TimeoutError:
                     # Best-effort cancel; only effective if the future has not started.
                     # A started sync call cannot be interrupted, so warn operators that
@@ -638,7 +649,7 @@ class AgentsGenerator:
         self.agent_callback = agent_callback
         self.task_callback = task_callback
         self.agent_yaml = agent_yaml
-        self.tools = tools or []  # Store tool class names as a list
+        self.tools = tools or []  # Tool classes, callables or framework tool objects
         self.cli_config = cli_config or {}  # Store CLI configuration overrides
 
         # Per-run behaviour toggles. Precedence: explicit arg > cli_config > env
@@ -1115,12 +1126,21 @@ class AgentsGenerator:
     def _build_tools_dict(self, config):
         """Shared tool resolution logic for sync and async paths."""
         tools_dict = self.tool_resolver.resolve_all_from_yaml(config)
-        for tool_class in self.tools:
-            if isinstance(tool_class, type):
+        for tool in self.tools:
+            if isinstance(tool, type):
                 try:
-                    tools_dict[tool_class.__name__] = tool_class()
+                    tools_dict[tool.__name__] = tool()
                 except (TypeError, ValueError, RuntimeError) as e:
-                    self.logger.warning(f"Failed to instantiate tool class {tool_class.__name__}: {e}")
+                    self.logger.warning(f"Failed to instantiate tool class {tool.__name__}: {e}")
+            elif callable(tool) or _looks_like_framework_tool(tool):
+                # Plain callables / @tool functions and framework tool instances
+                # (CrewAI/LangChain BaseTool) are registered as-is by name.
+                name = getattr(tool, "name", None) or getattr(tool, "__name__", None)
+                if not isinstance(name, str) or not name:
+                    name = type(tool).__name__
+                tools_dict[name] = tool
+            else:
+                self.logger.warning(f"Ignoring non-tool entry in tools: {tool!r}")
 
         # Enforce tool_timeout from CLI/YAML at the wrapper layer so the field is
         # not silently dropped. The timeout stack (_wrap_tool_with_timeout) is

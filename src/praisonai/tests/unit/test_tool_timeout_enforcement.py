@@ -973,3 +973,79 @@ def test_native_adapter_preserves_subsecond_tool_timeout():
     # Fractional budget preserved exactly (not rounded to 0, not to 1).
     assert tc.timeout == 0.4
     assert tc.timeout > 0
+
+
+def test_build_tools_dict_keeps_python_callables_and_framework_tools():
+    """Python-API ``tools=[...]`` entries that are not classes (plain callables,
+    framework tool instances) must be registered, not silently dropped (#5808)."""
+    gen = _make_generator()
+
+    def my_search(q: str) -> str:
+        return q
+
+    class _FrameworkTool:
+        name = "fw_tool"
+        description = "d"
+        args_schema = None
+
+        def _run(self, q):
+            return q
+
+    class _ToolClass:
+        pass
+
+    class _FakeResolver:
+        def resolve_all_from_yaml(self, config):
+            return {}
+
+    fw = _FrameworkTool()
+    gen.tool_resolver = _FakeResolver()
+    gen.tools = [my_search, fw, _ToolClass, 42]
+
+    tools_dict = gen._build_tools_dict({"roles": {"a": {}}})
+    assert tools_dict["my_search"] is my_search
+    assert tools_dict["fw_tool"] is fw
+    assert isinstance(tools_dict["_ToolClass"], _ToolClass)
+    assert 42 not in tools_dict.values()
+
+
+def test_sync_timeout_retry_shares_single_deadline():
+    """A CancelledError retry (pool recycled under a queued future) must not
+    restart the full ``tool_timeout`` budget (#5808)."""
+    import concurrent.futures
+    from unittest import mock
+    from praisonai.agents_generator import _wrap_with_timeout, ToolTimeoutError
+
+    waits = []
+
+    class _Future:
+        def __init__(self, exc):
+            self._exc = exc
+
+        def result(self, timeout=None):
+            waits.append(timeout)
+            raise self._exc
+
+        def cancel(self):
+            return True
+
+    futures = iter([
+        _Future(concurrent.futures.CancelledError()),
+        _Future(concurrent.futures.TimeoutError()),
+    ])
+
+    class _Executor:
+        def submit(self, fn, *a, **kw):
+            return next(futures)
+
+    ticks = [100.0, 100.0, 103.0]
+
+    def _clock():
+        return ticks.pop(0) if len(ticks) > 1 else ticks[0]
+
+    with mock.patch("time.monotonic", _clock):
+        wrapped = _wrap_with_timeout(lambda: None, 5.0, lambda: _Executor())
+        with pytest.raises(ToolTimeoutError):
+            wrapped()
+    # Second attempt only gets the remaining budget, not a fresh 5s.
+    assert waits == [5.0, 2.0]
