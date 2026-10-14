@@ -157,3 +157,57 @@ def test_request_enqueued_after_drain_is_answered():
 
     runner.queue = LateDeath()
     assert runner._dispatch("resource", "x", None) == (False, "lost")
+
+
+def test_stop_cancels_runner_hung_in_initialize(monkeypatch):
+    import contextlib
+    import praisonaiagents.mcp.mcp as m
+
+    transport_closed = threading.Event()
+
+    @contextlib.asynccontextmanager
+    async def fake_stdio_client(params):
+        try:
+            yield None, None
+        finally:
+            transport_closed.set()  # where the real client reaps the child
+
+    class HangingSession:
+        def __init__(self, read, write):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *exc):
+            return False
+
+        async def initialize(self):
+            await asyncio.sleep(3600)
+
+    monkeypatch.setattr(m, "stdio_client", fake_stdio_client, raising=False)
+    monkeypatch.setattr(m, "ClientSession", HangingSession, raising=False)
+
+    runner = m.MCPToolRunner(None, timeout=5)
+    assert not runner.initialized.wait(timeout=0.3)
+    runner.stop(timeout=2)
+    assert not runner.is_alive()
+    assert transport_closed.is_set()
+    assert runner._init_error == "MCP initialization cancelled"
+
+
+def test_stop_before_loop_starts_is_honoured(monkeypatch):
+    import praisonaiagents.mcp.mcp as m
+
+    runner = MCPToolRunner.__new__(MCPToolRunner)
+    threading.Thread.__init__(runner, daemon=True)
+    runner.initialized = threading.Event()
+    runner.queue = queue.Queue()
+    runner._init_error = None
+    runner._dead = None
+    runner._loop = None
+    runner._main_task = None
+    runner._stop_requested = True
+    monkeypatch.setattr(m, "stdio_client", lambda p: pytest.fail("spawned"), raising=False)
+    asyncio.run(runner._run_async())
+    assert runner._init_error == "MCP initialization cancelled"

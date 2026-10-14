@@ -54,6 +54,10 @@ class MCPToolRunner(threading.Thread):
         # Set once the server's transport closes; the runner stops serving and
         # callers get this message instead of queueing onto a dead session.
         self._dead = None
+        # Startup task handle so stop() can cancel a hung initialize().
+        self._loop = None
+        self._main_task = None
+        self._stop_requested = False
         self.tools = []
         self.resources = []
         self.resource_templates = []
@@ -99,7 +103,11 @@ class MCPToolRunner(threading.Thread):
         
     async def _run_async(self):
         """Async entry point for MCP operations."""
+        self._loop = asyncio.get_running_loop()
+        self._main_task = asyncio.current_task()
         try:
+            if self._stop_requested:
+                raise asyncio.CancelledError()
             # Set up MCP session
             async with stdio_client(self.server_params) as (read, write):
                 async with ClientSession(read, write) as session:
@@ -156,6 +164,12 @@ class MCPToolRunner(threading.Thread):
                             await asyncio.sleep(0.01)
                         except asyncio.CancelledError:
                             break
+        except asyncio.CancelledError:
+            # stop() cancelled a startup that never completed; leaving the
+            # contexts above has already terminated the stdio child.
+            if not self.initialized.is_set():
+                self._init_error = "MCP initialization cancelled"
+            self.initialized.set()
         except Exception as e:
             if self.initialized.is_set():
                 # Session ended after a successful init (e.g. teardown of a
@@ -390,6 +404,14 @@ class MCPToolRunner(threading.Thread):
             self.queue.put(None)
         except Exception:
             pass
+        # The sentinel is only read once init finishes, so cancel a startup
+        # that is still in progress (e.g. hung in session.initialize()).
+        self._stop_requested = True
+        if not self.initialized.is_set() and self._main_task is not None:
+            try:
+                self._loop.call_soon_threadsafe(self._main_task.cancel)
+            except RuntimeError:
+                pass  # loop already closed
         if timeout is None:
             timeout = getattr(self, "timeout", 60)
         if self.is_alive():
