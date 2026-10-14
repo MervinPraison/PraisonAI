@@ -60,6 +60,19 @@ if TYPE_CHECKING:
     pass
 
 
+def _sleep_unless_cancelled(seconds: float, cancel_token: Any = None, step: float = 0.2) -> None:
+    """Sleep for ``seconds``, raising ``InterruptedError`` as soon as ``cancel_token`` is set."""
+    deadline = time.monotonic() + seconds
+    while True:
+        if cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)():
+            reason = getattr(cancel_token, "reason", None) or "cancelled during retry backoff"
+            raise InterruptedError(f"Agent chat cancelled: {reason}")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(step, remaining))
+
+
 class _TurnCancelToken:
     """Track cancellation observed by one call without shared backend state."""
 
@@ -2378,7 +2391,10 @@ Your Goal: {self.goal}"""
 
                     # Apply backoff if suggested
                     if classification.backoff_seconds and classification.backoff_seconds > 0:
-                        time.sleep(classification.backoff_seconds)
+                        _sleep_unless_cancelled(
+                            classification.backoff_seconds,
+                            cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None),
+                        )
                     
                     # Temporarily override the model and clear dispatcher cache
                     # for this call. Serialise the mutate/restore window so a
@@ -2407,7 +2423,10 @@ Your Goal: {self.goal}"""
             elif classification.is_retryable and classification.backoff_seconds > 0:
                 if _retry_depth < self._max_retry_depth():  # Bounded by configured RetryBackoffConfig.max_retries
                     logging.info(f"[{self.name}] {classification.user_message} (waiting {classification.backoff_seconds:.1f}s)")
-                    time.sleep(classification.backoff_seconds)
+                    _sleep_unless_cancelled(
+                        classification.backoff_seconds,
+                        cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None),
+                    )
                     return self._chat_completion(
                         messages, temperature, tools, stream, 
                         reasoning_steps, task_name, task_description, task_id, response_format, 

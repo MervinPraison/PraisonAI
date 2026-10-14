@@ -22,6 +22,26 @@ except ImportError:
     StdioServerParameters = None
     stdio_client = None
 
+def _is_transport_closed(exc):
+    """True when ``exc`` means the stdio session is gone for good."""
+    try:
+        import anyio
+        if isinstance(exc, (anyio.ClosedResourceError, anyio.BrokenResourceError, anyio.EndOfStream)):
+            return True
+    except ImportError:
+        pass
+    if isinstance(exc, (BrokenPipeError, ConnectionResetError, EOFError)):
+        return True
+    try:
+        from mcp.shared.exceptions import McpError
+        from mcp.types import CONNECTION_CLOSED
+        if isinstance(exc, McpError) and getattr(getattr(exc, "error", None), "code", None) == CONNECTION_CLOSED:
+            return True
+    except ImportError:
+        pass
+    return False
+
+
 class MCPToolRunner(threading.Thread):
     """A dedicated thread for running MCP operations."""
     
@@ -31,6 +51,9 @@ class MCPToolRunner(threading.Thread):
         self.queue = queue.Queue()
         self.initialized = threading.Event()
         self._init_error = None
+        # Set once the server's transport closes; the runner stops serving and
+        # callers get this message instead of queueing onto a dead session.
+        self._dead = None
         self.tools = []
         self.resources = []
         self.resource_templates = []
@@ -121,7 +144,11 @@ class MCPToolRunner(threading.Thread):
                                 except asyncio.TimeoutError:
                                     response_queue.put((False, f"MCP {kind} call timed out after {self.timeout} seconds (server side)"))
                                 except Exception as e:
-                                    response_queue.put((False, str(e)))
+                                    if _is_transport_closed(e):
+                                        self._dead = f"MCP server connection lost: {str(e) or type(e).__name__}"
+                                        response_queue.put((False, self._dead))
+                                        break  # leave stdio_client() so the child is reaped
+                                    response_queue.put((False, str(e) or type(e).__name__))
                             except queue.Empty:
                                 pass
                             
@@ -130,8 +157,31 @@ class MCPToolRunner(threading.Thread):
                         except asyncio.CancelledError:
                             break
         except Exception as e:
-            self._init_error = f"MCP initialization error: {str(e)}"
+            if self.initialized.is_set():
+                # Session ended after a successful init (e.g. teardown of a
+                # crashed server); report it as a lost connection, not init.
+                self._dead = self._dead or f"MCP server connection lost: {str(e) or type(e).__name__}"
+            else:
+                self._init_error = f"MCP initialization error: {str(e)}"
             self.initialized.set()  # Ensure we don't hang
+        finally:
+            if self.initialized.is_set() and not self._init_error and not self._dead:
+                self._dead = "MCP server session ended"
+            self._fail_pending()
+
+    def _fail_pending(self):
+        """Answer requests still queued after the loop exits so callers don't wait out the timeout."""
+        message = self._dead or self._init_error or "MCP server session ended"
+        while True:
+            try:
+                item = self.queue.get(block=False)
+            except queue.Empty:
+                return
+            if item is not None:
+                try:
+                    item[0].put((False, message), block=False)
+                except Exception:
+                    pass
 
     async def _discover_resources_and_prompts(self, session):
         """Enumerate server resources, resource templates and prompts.
@@ -179,6 +229,8 @@ class MCPToolRunner(threading.Thread):
 
         if self._init_error:
             return (False, self._init_error)
+        if self._dead:
+            return (False, self._dead)
 
         response_queue = queue.Queue(maxsize=1)
         cancelled = threading.Event()
@@ -230,6 +282,10 @@ class MCPToolRunner(threading.Thread):
             if telemetry:
                 telemetry.track_tool_usage(tool_name, success=False, execution_time=0)
             return f"Error: {self._init_error}"
+        if self._dead:
+            if telemetry:
+                telemetry.track_tool_usage(tool_name, success=False, execution_time=0)
+            return f"Error: {self._dead}"
         
         # Start timing after initialization check
         start_time = time.time()
@@ -863,6 +919,32 @@ class MCP:
         ]
         return synthetic
 
+    # Respawns allowed after a stdio server dies mid-session.
+    _MAX_STDIO_RESTARTS = 3
+
+    def _call_stdio_tool(self, tool_name, arguments):
+        """Call a stdio tool, lazily respawning the runner if its server died.
+
+        The call that observed the crash is never replayed (it may already have
+        reached the server); the next call gets a fresh runner instead.
+        """
+        runner = self.runner
+        if runner is not None and isinstance(getattr(runner, "_dead", None), str):
+            lock = self.__dict__.setdefault("_restart_lock", threading.Lock())
+            with lock:
+                if self.runner is runner and getattr(self, "_stdio_restarts", 0) < self._MAX_STDIO_RESTARTS:
+                    self._stdio_restarts = getattr(self, "_stdio_restarts", 0) + 1
+                    logging.warning(
+                        "MCP stdio server lost (%s); restarting (%d/%d)",
+                        runner._dead, self._stdio_restarts, self._MAX_STDIO_RESTARTS,
+                    )
+                    runner.stop(timeout=1)
+                    new_runner = MCPToolRunner(runner.server_params, runner.timeout)
+                    new_runner.initialized.wait(timeout=runner.timeout)
+                    self.runner = new_runner
+                runner = self.runner
+        return runner.call_tool(tool_name, arguments)
+
     def _create_tool_wrapper(self, tool):
         """Create a wrapper function for an MCP tool."""
         from .mcp_schema_utils import build_tool_signature, build_openai_tool_dict
@@ -908,7 +990,7 @@ class MCP:
             all_args.update(kwargs)
             
             # Call the tool
-            return self.runner.call_tool(tool.name, all_args)
+            return self._call_stdio_tool(tool.name, all_args)
         
         # Make sure the wrapper has the correct signature for inspection
         wrapper.__signature__ = signature
