@@ -1038,7 +1038,9 @@ def test_sync_timeout_retry_shares_single_deadline():
         def submit(self, fn, *a, **kw):
             return next(futures)
 
-    ticks = [100.0, 100.0, 103.0]
+    # deadline, pre-check 0, wait 0, pre-check 1 (3s spent), wait 1 (pool
+    # setup took another 1s and must be charged to the budget).
+    ticks = [100.0, 100.0, 100.0, 103.0, 104.0]
 
     def _clock():
         return ticks.pop(0) if len(ticks) > 1 else ticks[0]
@@ -1048,4 +1050,52 @@ def test_sync_timeout_retry_shares_single_deadline():
         with pytest.raises(ToolTimeoutError):
             wrapped()
     # Second attempt only gets the remaining budget, not a fresh 5s.
-    assert waits == [5.0, 2.0]
+    assert waits == [5.0, 1.0]
+
+
+def test_run_sync_or_offload_cancels_submitted_work_when_worker_never_joins(monkeypatch):
+    """If the worker thread does not finish within the join window, the async
+    work must already be submitted so it can be cancelled rather than left
+    running (or started later) on the shared bridge loop (#5808)."""
+    import asyncio
+    from praisonai import _async_bridge
+
+    monkeypatch.setenv("PRAISONAI_ALLOW_LOOP_BLOCKING", "true")
+    submitted = []
+    real_submit = _async_bridge.AsyncBridge.submit
+
+    def _spy_submit(self, coro):
+        fut = real_submit(self, coro)
+        submitted.append(fut)
+        return fut
+
+    class _StalledThread:
+        """Worker that never gets scheduled within the join window."""
+
+        def __init__(self, *a, **kw):
+            pass
+
+        def start(self):
+            pass
+
+        def join(self, timeout=None):
+            pass
+
+        def is_alive(self):
+            return True
+
+    # Spin the bridge loop up before stalling Thread so only the worker stalls.
+    _async_bridge._default_bridge().run_sync(asyncio.sleep(0))
+    monkeypatch.setattr(_async_bridge.AsyncBridge, "submit", _spy_submit)
+    monkeypatch.setattr(_async_bridge.threading, "Thread", _StalledThread)
+
+    async def _slow():
+        await asyncio.sleep(30)
+
+    async def _caller():
+        with pytest.raises(TimeoutError):
+            _async_bridge.run_sync_or_offload(_slow(), timeout=0.05)
+
+    asyncio.run(_caller())
+    assert len(submitted) == 1
+    assert submitted[0].cancelled()

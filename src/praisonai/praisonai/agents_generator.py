@@ -462,8 +462,7 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
             # extends the user-declared wall-clock budget.
             deadline = time.monotonic() + timeout_seconds
             for attempt in (0, 1):
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
+                if deadline - time.monotonic() <= 0:
                     raise ToolTimeoutError(
                         tool_name=tool_name,
                         timeout_seconds=timeout_seconds,
@@ -488,8 +487,11 @@ def _wrap_with_timeout(tool, timeout_seconds: float, executor_factory, on_leaked
                         timeout_seconds=timeout_seconds,
                         background_work_may_continue=False,
                     )
+                # Recompute right before waiting so time spent obtaining or
+                # recycling the pool is charged to the budget; an expired budget
+                # (timeout=0) takes the normal cancel/report path below.
                 try:
-                    return future.result(timeout=remaining)
+                    return future.result(timeout=max(0.0, deadline - time.monotonic()))
                 except concurrent.futures.TimeoutError:
                     # Best-effort cancel; only effective if the future has not started.
                     # A started sync call cannot be interrupted, so warn operators that
