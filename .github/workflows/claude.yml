@@ -154,6 +154,14 @@ jobs:
         github.actor == 'github-actions[bot]' ||
         (github.event_name == 'issues' && github.event.action == 'labeled' && github.event.label.name == 'claude' && github.actor == 'praisonai-triage-agent[bot]')
       ) &&
+      (
+        github.event_name == 'issues' ||
+        github.actor == 'github-actions[bot]' ||
+        (github.event_name == 'pull_request_review' &&
+          contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)) ||
+        ((github.event_name == 'issue_comment' || github.event_name == 'pull_request_review_comment') &&
+          contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))
+      ) &&
       github.actor != 'dependabot[bot]' &&
       github.actor != 'cursor[bot]' &&
       github.actor != 'renovate[bot]'
@@ -168,6 +176,38 @@ jobs:
       actions: read
       id-token: write
     steps:
+      # Must stay the first step: nothing below may run (no App token, no OAuth
+      # token, no agent) for a requester without write access. The job-level
+      # `if:` already filters on author_association; this re-checks the real
+      # permission level, which also excludes read-only collaborators.
+      - name: Authorize requester (write access required)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const trustedAutomation = new Set(['github-actions[bot]', 'praisonai-triage-agent[bot]']);
+            const p = context.payload;
+            const login = p.comment?.user?.login || p.review?.user?.login || p.sender?.login || context.actor;
+            if (trustedAutomation.has(login) && login === context.actor) {
+              core.info(`Trusted repository automation: ${login}`);
+              return;
+            }
+            let permission = 'none';
+            try {
+              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: login,
+              });
+              permission = data.permission;
+            } catch (err) {
+              core.info(`Permission lookup for ${login} failed: ${err.status || err.message}`);
+            }
+            if (!['admin', 'write'].includes(permission)) {
+              core.setFailed(`Claude can only be invoked by users with write access; ${login} has '${permission}'.`);
+              return;
+            }
+            core.info(`${login} has ${permission} access`);
+
       - name: Generate GitHub App Token
         id: app-token
         uses: actions/create-github-app-token@v1

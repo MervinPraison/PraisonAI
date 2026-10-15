@@ -82,6 +82,37 @@ const skipPending = ciFix.shouldSkipCiFix({
 });
 assert('skips when ci fix pending label', skipPending.skip && skipPending.reason.includes('pending'));
 
+// A request the App bot posted never reached Claude (claude.yml ignores it);
+// its pending label must not block the real request.
+const botRequest = {
+  user: { login: 'praisonai-triage-agent[bot]' },
+  body: `@claude CI failed on HEAD \`${headSha.slice(0, 8)}\`. Please fix.`,
+  created_at: '2026-10-13T21:16:49Z',
+};
+const maintainerRequest = {
+  user: { login: 'MervinPraison' },
+  body: '@claude CI failed on HEAD `0d561a42`. Please fix.',
+  created_at: '2026-10-13T09:16:04Z',
+};
+const strandedLabel = ciFix.shouldSkipCiFix({
+  comments: [maintainerRequest, botRequest],
+  headSha,
+  labels: [ciFix.CI_FIX_LABEL],
+  hasFinal: true,
+  claudeInProgress: false,
+  failedChecks: [{ name: 'test-core' }],
+});
+assert('label left by an ignored bot request does not block', !strandedLabel.skip);
+const realPending = ciFix.shouldSkipCiFix({
+  comments: [botRequest, { ...maintainerRequest, created_at: '2026-10-13T22:00:00Z' }],
+  headSha,
+  labels: [ciFix.CI_FIX_LABEL],
+  hasFinal: true,
+  claudeInProgress: false,
+  failedChecks: [{ name: 'test-core' }],
+});
+assert('label still blocks after a real maintainer request', realPending.skip && realPending.reason.includes('pending'));
+
 const failedRuns = mergeGate.listFailedChecksOnSha([
   { status: 'completed', conclusion: 'success', name: 'smoke' },
   { status: 'completed', conclusion: 'failure', name: 'test-core (cli)' },

@@ -199,12 +199,14 @@ async function syncPipelineLabels(github, owner, repo, prNumber, core) {
 
   core?.info?.(`PR #${prNumber}: stage=${stage} blockers=[${blockers.join(', ')}]`);
 
+  // CI-fix requests are posted only by ci-failure-claude.yml, which uses the
+  // maintainer token. Label sync runs under the App token, whose comments
+  // claude.yml ignores: a request posted from here never reached Claude, yet
+  // its pending label blocked every real request for that PR.
   const ciNotGreen = (evalResult.reasons || []).some((r) =>
     r.toLowerCase().includes('ci not green')
   );
-  if (ciNotGreen || blockers.includes('pipeline/blocked:ci')) {
-    await ciFix.maybeTriggerCiFixClaude(github, owner, repo, prNumber, core);
-  } else {
+  if (!ciNotGreen && !blockers.includes('pipeline/blocked:ci')) {
     await ciFix.maybeClearCiFixLabel(
       github, owner, repo, prNumber, ctx.labels, ctx.headSha, core
     );
