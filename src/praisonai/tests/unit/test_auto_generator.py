@@ -26,6 +26,11 @@ except ImportError as e:
 
 from pydantic import BaseModel
 
+# Capture the module AutoGenerator actually lives in: other suites purge
+# ``praisonai.*`` from sys.modules, after which string-based
+# ``patch('praisonai.auto.X')`` targets a fresh copy and misses these globals.
+_auto_mod = sys.modules[AutoGenerator.__module__]
+
 
 class DummyModel(BaseModel):
     pass
@@ -214,8 +219,8 @@ class TestAutoGeneratorLiteLLMFallback:
     """Test suite for LiteLLM fallback to OpenAI."""
 
     def test_uses_litellm_when_available(self):
-        with patch('praisonai.auto.is_available', side_effect=lambda x: x == "litellm"):
-            with patch('praisonai.auto._get_litellm') as mock_litellm:
+        with patch.object(_auto_mod, 'is_available', side_effect=lambda x: x == "litellm"):
+            with patch.object(_auto_mod, '_get_litellm') as mock_litellm:
 
                 mock_response = Mock()
                 mock_response.choices = [
@@ -235,6 +240,39 @@ class TestAutoGeneratorLiteLLMFallback:
                 )
 
                 mock_litellm.return_value.completion.assert_called_once()
+
+    def test_litellm_retries_transient_errors(self):
+        class RateLimitError(Exception):
+            status_code = 429
+
+        mock_response = Mock()
+        mock_response.choices = [Mock(message=Mock(content="{}"))]
+
+        with patch.object(_auto_mod, 'is_available', side_effect=lambda x: x == "litellm"), \
+                patch.object(_auto_mod, '_get_litellm') as mock_litellm, \
+                patch.object(_auto_mod.asyncio, 'sleep') as mock_sleep:
+            mock_sleep.return_value = None
+            mock_litellm.return_value.completion.side_effect = [
+                RateLimitError("429"), mock_response,
+            ]
+            generator = AutoGenerator(topic="Test topic", framework="praisonai")
+            generator._structured_completion(response_model=DummyModel, messages=[])
+
+            assert mock_litellm.return_value.completion.call_count == 2
+            mock_sleep.assert_called_once_with(1.0)
+
+    def test_litellm_does_not_retry_terminal_errors(self):
+        class AuthenticationError(Exception):
+            status_code = 401
+
+        with patch.object(_auto_mod, 'is_available', side_effect=lambda x: x == "litellm"), \
+                patch.object(_auto_mod, '_get_litellm') as mock_litellm:
+            mock_litellm.return_value.completion.side_effect = AuthenticationError("401")
+            generator = AutoGenerator(topic="Test topic", framework="praisonai")
+            with pytest.raises(AuthenticationError):
+                generator._structured_completion(response_model=DummyModel, messages=[])
+
+            mock_litellm.return_value.completion.assert_called_once()
 
 
     def test_falls_back_to_openai_when_litellm_unavailable(self):

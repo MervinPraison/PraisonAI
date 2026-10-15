@@ -53,6 +53,57 @@ async def _maybe_await(value):
     return value
 
 
+# Retries for the LiteLLM leg of the structured-completion ladder. The OpenAI
+# SDK leg already retries transient errors itself (``max_retries`` /
+# ``OPENAI_MAX_RETRIES``); LiteLLM does not by default, so a single 429/5xx would
+# otherwise fail ``praisonai auto`` outright.
+_LLM_TRANSIENT_RETRIES = 2
+_LLM_RETRY_MAX_DELAY = 30.0
+
+
+def _is_transient_llm_error(exc: BaseException) -> bool:
+    """True for rate-limit / server / network errors worth retrying.
+
+    Auth, bad-request and schema errors are terminal and must fail fast so the
+    OpenAI fallback still fires immediately.
+    """
+    status = getattr(exc, "status_code", None)
+    if isinstance(status, int):
+        return status in (408, 429) or status >= 500
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return True
+    name = type(exc).__name__
+    return "Timeout" in name or "Connection" in name
+
+
+def _retry_after_seconds(exc: BaseException) -> Optional[float]:
+    """Return the provider's ``Retry-After`` hint in seconds, if present."""
+    headers = getattr(getattr(exc, "response", None), "headers", None)
+    try:
+        value = headers.get("retry-after") if headers is not None else None
+        return float(value) if value is not None else None
+    except (TypeError, ValueError, AttributeError):
+        return None
+
+
+async def _retry_transient(fn):
+    """Await ``fn()``, retrying transient LLM errors with exponential backoff."""
+    delay = 1.0
+    for attempt in range(_LLM_TRANSIENT_RETRIES + 1):
+        try:
+            return await fn()
+        except Exception as e:
+            if attempt == _LLM_TRANSIENT_RETRIES or not _is_transient_llm_error(e):
+                raise
+            wait = min(_retry_after_seconds(e) or delay, _LLM_RETRY_MAX_DELAY)
+            logger.warning(
+                "Transient LLM error (%s); retrying in %.1fs (attempt %d/%d).",
+                e, wait, attempt + 1, _LLM_TRANSIENT_RETRIES,
+            )
+            await asyncio.sleep(wait)
+            delay *= 2
+
+
 def _rich_print(*args, **kwargs):
     """Lazy-loaded rich.print wrapper."""
     from rich import print as rich_print_impl
@@ -718,10 +769,12 @@ class BaseAutoGenerator:
                 # The async path awaits the provider coroutine directly. The sync
                 # path offloads the blocking provider call via asyncio.to_thread
                 # so it never blocks the bridge event loop this coroutine runs on.
-                response = (
-                    await _maybe_await(call(**call_kwargs))
+                # Transient 429/5xx/network errors are retried before falling
+                # through to the OpenAI leg.
+                response = await _retry_transient(
+                    lambda: _maybe_await(call(**call_kwargs))
                     if is_async
-                    else await asyncio.to_thread(lambda: call(**call_kwargs))
+                    else asyncio.to_thread(lambda: call(**call_kwargs))
                 )
                 content = response.choices[0].message.content
                 return response_model.model_validate_json(content)
