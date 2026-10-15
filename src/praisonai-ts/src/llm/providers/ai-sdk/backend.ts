@@ -200,7 +200,8 @@ export class AISDKBackend implements LLMProvider {
             toolCalls: result.toolCalls?.map((tc: any) => ({
               toolCallId: tc.toolCallId,
               toolName: tc.toolName,
-              args: tc.args
+              // ai@4 calls it `args`, ai@5+ `input`.
+              args: tc.args ?? tc.input
             })),
             usage: result.usage,
             finishReason: result.finishReason
@@ -311,14 +312,17 @@ export class AISDKBackend implements LLMProvider {
           const finalResult = await result;
           
           // Yield tool calls if any
-          if (finalResult.toolCalls && finalResult.toolCalls.length > 0) {
-            for (const tc of finalResult.toolCalls) {
+          // ai@5+ exposes toolCalls as a promise on the stream result.
+          const finalToolCalls: any[] | undefined = await finalResult.toolCalls;
+          if (finalToolCalls && finalToolCalls.length > 0) {
+            for (const tc of finalToolCalls) {
+              const tcArgs = tc.args ?? tc.input;
               const toolCall = {
                 id: tc.toolCallId,
                 type: 'function' as const,
                 function: {
                   name: tc.toolName,
-                  arguments: typeof tc.args === 'string' ? tc.args : JSON.stringify(tc.args)
+                  arguments: typeof tcArgs === 'string' ? tcArgs : JSON.stringify(tcArgs)
                 }
               };
               
