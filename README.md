@@ -1008,7 +1008,7 @@ PraisonAI keeps framework overhead microsecond-class: creating an `Agent` (one t
 |--------------------|-----------|----------|
 | Avg Agent instantiation (1 tool, 1000 iterations) | **46 μs** | 2026-10-15 · praisonaiagents 1.7.12 |
 
-Methodology, comparisons and how to reproduce: [benchmarks/BENCHMARK_RESULTS.md](src/praisonai-agents/benchmarks/BENCHMARK_RESULTS.md) · [docs](https://docs.praison.ai/docs/developers/benchmarks)
+Methodology, comparisons and how to reproduce: [benchmarks/BENCHMARK_RESULTS.md](https://github.com/MervinPraison/PraisonAI/blob/main/src/praisonai-agents/benchmarks/BENCHMARK_RESULTS.md) · [docs](https://docs.praison.ai/docs/developers/benchmarks)
 
 ---
 

@@ -41,7 +41,7 @@
 cd src/praisonai-agents
 pip install -e . agno openai-agents "pydantic-ai-slim[openai]" langgraph langchain-openai crewai
 # OpenAI-backed constructors need a key to exist; no request is made
-OPENAI_API_KEY=sk-dummy PYTHONWARNINGS='ignore::DeprecationWarning' python benchmarks/performance_benchmark.py --save
+OPENAI_API_KEY=sk-dummy PYTHONWARNINGS='ignore::DeprecationWarning' python benchmarks/performance_benchmark.py --save --iterations 1000 --warmup 10 --only praisonai praisonai_litellm agno pydantic openai_agents langgraph
 ```
 
 Older, superseded result files live in [`archive/`](archive/).

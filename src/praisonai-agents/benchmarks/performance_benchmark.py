@@ -307,7 +307,9 @@ def save_benchmark_results(results: dict, machine: dict, iterations: int, warmup
         '', '## How to Reproduce', '', '```bash', 'cd src/praisonai-agents',
         'pip install -e . agno openai-agents "pydantic-ai-slim[openai]" langgraph langchain-openai crewai',
         "# OpenAI-backed constructors need a key to exist; no request is made",
-        "OPENAI_API_KEY=sk-dummy PYTHONWARNINGS='ignore::DeprecationWarning' python benchmarks/performance_benchmark.py --save",
+        "OPENAI_API_KEY=sk-dummy PYTHONWARNINGS='ignore::DeprecationWarning' "
+        f"python benchmarks/performance_benchmark.py --save --iterations {iterations} "
+        f"--warmup {warmup} --only {' '.join(results)}",
         '```', '',
         'Older, superseded result files live in [`archive/`](archive/).', '',
     ]
@@ -325,6 +327,8 @@ def main():
     parser.add_argument('--warmup', type=int, default=10, help='Warmup runs (default: 10)')
     parser.add_argument('--only', nargs='+', choices=list(FRAMEWORKS), help='Benchmark only these frameworks')
     args = parser.parse_args()
+    if args.iterations <= 0 or args.warmup < 0:
+        parser.error('--iterations must be > 0 and --warmup must be >= 0')
 
     machine = get_machine_info()
 
