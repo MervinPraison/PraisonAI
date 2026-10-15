@@ -1332,8 +1332,8 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/agent/simple.ts:1018",
-        "location": "src/praisonai-ts/src/agent/simple.ts:196",
+        "ctor_location": "src/praisonai-ts/src/agent/simple.ts:1019",
+        "location": "src/praisonai-ts/src/agent/simple.ts:197",
         "options_parameters": [
           "config"
         ]
@@ -1824,7 +1824,7 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:3588",
+        "location": "src/praisonai-ts/src/agent/simple.ts:3592",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],
@@ -2083,7 +2083,7 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "location": "src/praisonai-ts/src/agent/simple.ts:2493",
+        "location": "src/praisonai-ts/src/agent/simple.ts:2497",
         "options_interfaces": [
           "options: AgentChatOptions"
         ],
