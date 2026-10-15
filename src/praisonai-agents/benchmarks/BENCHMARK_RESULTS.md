@@ -1,70 +1,47 @@
 # PraisonAI Agents - Benchmark Results
 
-**Generated:** 2026-06-17
-**Methodology:** 10 warmup runs + 1000 measured iterations (`performance_benchmark.py` config)
-**Config:** `Agent(name=..., instructions=..., model="gpt-4o-mini", tools=[get_weather], output="silent")`
+**Generated:** 2026-10-15 (single run of `performance_benchmark.py`)
+**Methodology:** 10 warmup runs + 1000 measured iterations per framework
+**Setup (every framework):** one agent, model `gpt-4o-mini`, one `get_weather` tool, no LLM call. Tool wrapping (`function_tool`, `@tool`, ...) happens inside the timed call. Frameworks that were not installed are omitted.
 
 ## Agent Instantiation Time
 
-| Framework | Avg Time (μs) | Min (μs) | Median (μs) | Relative |
-|-----------|---------------|----------|-------------|----------|
-| OpenAI Agents SDK | 5.05 | — | — | 1.00x (fastest) |
-| Agno | 5.27 | — | — | 1.04x |
-| **PraisonAI** | **13.62** | **12.58** | **12.96** | **2.69x** |
-| PraisonAI (LiteLLM) | 14.49 | 13.37 | 13.71 | 2.86x |
-
-### PraisonAI detail (1000 iter)
-
-| Variant | Avg (μs) | Min (μs) | Median (μs) | Std (μs) |
-|---------|----------|----------|-------------|----------|
-| With tools (`gpt-4o-mini`) | 13.62 | 12.58 | 12.96 | 2.73 |
-| With tools (`openai/gpt-4o-mini`) | 14.49 | 13.37 | 13.71 | 4.14 |
-| Minimal, no tools | 13.40 | — | — | — |
-
-## Historical baseline
-
-| Source | Config | Avg (μs) | Notes |
-|--------|--------|----------|-------|
-| `performance_benchmark.py` (Dec 2025) | tools + 1000 iter | **3.20** | Pre-init-bloat baseline |
-| `simple_benchmark.py` (Dec 2025) | no tools, 100 iter | **3.77** | Saved in prior `BENCHMARK_RESULTS.md` |
-| Current (Jun 2026) | tools + 1000 iter | **13.62** | After lazy-init optimisations (was ~31 μs pre-fix) |
+| Framework | Avg (μs) | Min (μs) | Median (μs) | Std (μs) | Avg memory (KiB) | Relative |
+|-----------|----------|----------|-------------|----------|------------------|----------|
+| Agno | 9.51 | 9.16 | 9.33 | 1.00 | 6.83 | 1.00x (fastest) |
+| PraisonAI | 45.55 | 42.63 | 44.26 | 4.11 | 20.55 | 4.79x |
+| PraisonAI (LiteLLM) | 46.94 | 44.65 | 45.82 | 3.26 | 20.81 | 4.94x |
+| OpenAI Agents SDK | 591.02 | 529.26 | 566.69 | 60.62 | 60.19 | 62.18x |
+| PydanticAI | 1,021.99 | 882.02 | 935.63 | 1,674.03 | 51.22 | 108x |
+| LangGraph | 3,232.91 | 2,836.27 | 3,183.02 | 233.32 | 89.66 | 340x |
 
 ## Package Versions
 
 | Package | Version |
 |---------|---------|
-| PraisonAI | 1.6.60 |
-| Agno | 2.4.2 |
-| OpenAI Agents SDK | 0.7.0 |
+| praisonaiagents | 1.7.12 |
+| agno | 3.1.3 |
+| pydantic-ai-slim | 2.56.0 |
+| openai-agents | 0.23.1 |
+| langgraph | 1.2.15 |
+
+## Machine
+
+| Field | Value |
+|-------|-------|
+| Platform | Linux-6.17.0-1022-azure-x86_64-with-glibc2.39 |
+| Processor | x86_64 |
+| CPUs | 4 |
+| Python | 3.12.3 |
+| Load avg (1 min) at start | 0.85 |
 
 ## How to Reproduce
 
-PraisonAI-only (fast; avoids CrewAI/LangGraph import hang):
-
 ```bash
-cd praisonai-agents
-PYTHONWARNINGS='ignore::DeprecationWarning' python -c "
-import time, statistics
-from typing import Literal
-from praisonaiagents import Agent
-
-def get_weather(city: Literal['nyc', 'sf']):
-    return 'cloudy' if city == 'nyc' else 'sunny'
-
-def bench(fn, n=1000, w=10):
-    for _ in range(w): fn()
-    times = []
-    for _ in range(n):
-        s = time.perf_counter(); fn(); times.append(time.perf_counter()-s)
-    print(f'avg={statistics.mean(times)*1e6:.2f} μs')
-
-bench(lambda: Agent(name='Test', instructions='Hi', model='gpt-4o-mini', tools=[get_weather], output='silent'))
-"
+cd src/praisonai-agents
+pip install -e . agno openai-agents "pydantic-ai-slim[openai]" langgraph langchain-openai crewai
+# OpenAI-backed constructors need a key to exist; no request is made
+OPENAI_API_KEY=sk-dummy PYTHONWARNINGS='ignore::DeprecationWarning' python benchmarks/performance_benchmark.py --save
 ```
 
-Full multi-framework benchmark:
-
-```bash
-cd praisonai-agents
-PYTHONWARNINGS='ignore::DeprecationWarning' python benchmarks/performance_benchmark.py --save
-```
+Older, superseded result files live in [`archive/`](archive/).

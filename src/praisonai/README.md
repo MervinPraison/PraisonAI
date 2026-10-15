@@ -1002,11 +1002,13 @@ agent.start('Write a movie script about a robot in Mars');
 
 ## ⚡ Performance
 
-PraisonAI is built for speed, with agent instantiation in around 14μs. This reduces overhead, improves responsiveness, and helps multi-agent systems scale efficiently in real-world production workloads.
+PraisonAI keeps framework overhead microsecond-class: creating an `Agent` (one tool, no LLM call) averaged **46 μs** in our 2026-10-15 run, so per-agent setup is negligible next to model latency in multi-agent workloads.
 
-| Performance Metric | PraisonAI |
-|--------------------|-----------|
-| Avg Instantiation Time | **14 μs** |
+| Performance Metric | PraisonAI | Measured |
+|--------------------|-----------|----------|
+| Avg Agent instantiation (1 tool, 1000 iterations) | **46 μs** | 2026-10-15 · praisonaiagents 1.7.12 |
+
+Methodology, comparisons and how to reproduce: [benchmarks/BENCHMARK_RESULTS.md](src/praisonai-agents/benchmarks/BENCHMARK_RESULTS.md) · [docs](https://docs.praison.ai/docs/developers/benchmarks)
 
 ---
 
