@@ -11,6 +11,7 @@ import time
 import asyncio
 from praisonaiagents._logging import get_logger
 import subprocess
+import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import List, Optional, Dict, Any
 
@@ -78,25 +79,14 @@ class HookRunner:
         # misbehaving hook can only exhaust hook capacity, never the loop's
         # shared default executor that guardrails/tools/locks also rely on.
         self._hook_pool: Optional[ThreadPoolExecutor] = None
-        # hook.id -> in-flight Future for a sync hook. The slot is reserved
-        # before submission and only cleared when the worker finishes, so a
-        # still-running (timed-out or cancelled) hook caps new launches at one
-        # thread per hook. Guarded by ``_stuck_lock`` so concurrent invocations
-        # of the same hook cannot both reserve the slot and race past the cap.
+        # hook.id -> worker Future of a sync hook that ran past its timeout.
+        # It is cleared only when that worker finishes, so a stuck hook caps
+        # new launches at one leaked thread per hook. Healthy concurrent calls
+        # (e.g. parallel tool calls) are not tracked and never denied. A
+        # threading lock, because execute_sync() drives each call on its own
+        # event loop in the caller's thread.
         self._stuck: Dict[str, Any] = {}
-        self._stuck_lock_obj: Optional[asyncio.Lock] = None
-
-    @property
-    def _stuck_lock(self) -> asyncio.Lock:
-        """Lazily create the in-flight-slot lock on first use.
-
-        Created lazily (not in ``__init__``) because a ``HookRunner`` may be
-        constructed before any event loop exists; the lock is only needed once
-        we are already inside ``async def execute`` / ``_execute_function_hook``.
-        """
-        if self._stuck_lock_obj is None:
-            self._stuck_lock_obj = asyncio.Lock()
-        return self._stuck_lock_obj
+        self._stuck_lock = threading.Lock()
 
     def _release_stuck(self, hook_id: str, fut: Any) -> None:
         """Clear the in-flight slot once the worker Future completes.
@@ -104,8 +94,9 @@ class HookRunner:
         Only removes the entry if it still points at *this* Future, so a newer
         reserved invocation is never clobbered by an older worker draining.
         """
-        if self._stuck.get(hook_id) is fut:
-            self._stuck.pop(hook_id, None)
+        with self._stuck_lock:
+            if self._stuck.get(hook_id) is fut:
+                self._stuck.pop(hook_id, None)
 
     def _get_hook_pool(self) -> ThreadPoolExecutor:
         """Lazily create the dedicated sync-hook executor."""
@@ -439,14 +430,9 @@ class HookRunner:
                     timeout=timeout
                 )
             else:
-                # Reserve the single in-flight slot for this hook *under a lock*
-                # and *before* submitting, so two concurrent invocations can't
-                # both see an empty ``_stuck`` and both launch a worker (which
-                # would exceed the intended one-worker-per-hook cap and double
-                # the side effects). The slot is only cleared once the worker
-                # finishes; a still-running previous worker fails this one
-                # closed immediately instead of leaking another thread.
-                async with self._stuck_lock:
+                # A previous invocation that timed out and is still running
+                # fails this one closed instead of leaking another thread.
+                with self._stuck_lock:
                     prev = self._stuck.get(hook.id)
                     if prev is not None and not prev.done():
                         duration = (time.time() - start_time) * 1000
@@ -463,29 +449,31 @@ class HookRunner:
                             ),
                         )
 
-                    # Execute sync function in the dedicated hook pool with
-                    # timeout. ``copy_context_to_callable`` preserves
-                    # trace/session contextvars across the thread, matching
-                    # other executor sites.
-                    from ..trace.context_events import copy_context_to_callable
-                    loop = asyncio.get_event_loop()
-                    func = hook.func
-                    data = input_data
-                    fut = loop.run_in_executor(
-                        self._get_hook_pool(),
-                        copy_context_to_callable(lambda: func(data)),
-                    )
-                    # Reserve the slot now; a completion callback clears it only
-                    # when the worker actually finishes, so a timeout *or* a
-                    # cancellation leaves the slot held until the thread drains.
-                    self._stuck[hook.id] = fut
-                    fut.add_done_callback(
-                        lambda f, hid=hook.id: self._release_stuck(hid, f)
-                    )
-
-                result = await asyncio.wait_for(
-                    asyncio.shield(fut), timeout=timeout
+                # Execute sync function in the dedicated hook pool with
+                # timeout. ``copy_context_to_callable`` preserves
+                # trace/session contextvars across the thread, matching
+                # other executor sites. A concurrent Future (not a loop-bound
+                # one) so the stuck-slot release works after the loop closes.
+                from ..trace.context_events import copy_context_to_callable
+                func = hook.func
+                data = input_data
+                fut = self._get_hook_pool().submit(
+                    copy_context_to_callable(lambda: func(data))
                 )
+                try:
+                    result = await asyncio.wait_for(
+                        asyncio.shield(asyncio.wrap_future(fut)), timeout=timeout
+                    )
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    # The worker cannot be cancelled; hold the slot until it
+                    # actually finishes.
+                    if not fut.done():
+                        with self._stuck_lock:
+                            self._stuck[hook.id] = fut
+                        fut.add_done_callback(
+                            lambda f, hid=hook.id: self._release_stuck(hid, f)
+                        )
+                    raise
             
             duration = (time.time() - start_time) * 1000
             

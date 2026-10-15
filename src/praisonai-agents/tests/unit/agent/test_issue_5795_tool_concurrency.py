@@ -8,6 +8,15 @@ from contextlib import asynccontextmanager
 from types import SimpleNamespace
 
 from praisonaiagents import Agent
+from praisonaiagents.hooks import HookEvent, HookRegistry
+
+
+def _allow_all_hooks():
+    """Own registry (no leaked global hooks) with a sync BEFORE_TOOL hook,
+    so parallel tool calls also run the hook concurrently."""
+    registry = HookRegistry()
+    registry.register_function(HookEvent.BEFORE_TOOL, lambda data: None)
+    return registry
 
 
 def test_parallel_sync_tools_not_timed_out_by_queue_wait():
@@ -16,7 +25,7 @@ def test_parallel_sync_tools_not_timed_out_by_queue_wait():
         time.sleep(0.5)
         return f"ok{n}"
 
-    agent = Agent(name="t", instructions="x", tools=[slow], llm="gpt-4o-mini")
+    agent = Agent(name="t", instructions="x", tools=[slow], llm="gpt-4o-mini", hooks=_allow_all_hooks())
     agent._tool_timeout = 0.8
     with cf.ThreadPoolExecutor(5) as ex:
         results = list(ex.map(lambda i: agent.execute_tool("slow", {"n": i}), range(5)))
@@ -30,7 +39,7 @@ def test_parallel_async_sync_tools_not_timed_out_by_queue_wait():
         time.sleep(0.5)
         return f"ok{n}"
 
-    agent = Agent(name="a", instructions="x", tools=[slow], llm="gpt-4o-mini")
+    agent = Agent(name="a", instructions="x", tools=[slow], llm="gpt-4o-mini", hooks=_allow_all_hooks())
     agent._tool_timeout = 0.8
 
     async def main():
@@ -54,7 +63,7 @@ def test_hung_async_sync_tools_do_not_starve_default_executor():
         hang.__name__ = f"hang{i}"
         tools.append(hang)
 
-    agent = Agent(name="u", instructions="x", tools=tools, llm="gpt-4o-mini")
+    agent = Agent(name="u", instructions="x", tools=tools, llm="gpt-4o-mini", hooks=HookRegistry())
     agent._tool_timeout = 0.2
 
     async def main():
