@@ -216,8 +216,8 @@ class BotHandler:
     def _load_dotenv() -> None:
         """Auto-load .env file if python-dotenv is available."""
         try:
-            from dotenv import load_dotenv
-            load_dotenv()
+            from dotenv import find_dotenv, load_dotenv
+            load_dotenv(find_dotenv(usecwd=True))
             logger.debug(".env file loaded")
         except ImportError:
             # Also try manual .env loading as fallback

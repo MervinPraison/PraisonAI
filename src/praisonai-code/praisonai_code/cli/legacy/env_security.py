@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 # Security: blocklist of environment variable keys that must not be set from
 # untrusted YAML config files. These keys can alter code-loading behaviour
@@ -38,7 +38,9 @@ def _load_env_once():
     """Load environment variables from .env file once at CLI startup."""
     global _env_loaded
     if not _env_loaded:
-        load_dotenv()
+        # Search from the CWD, not this module's directory (which would pick
+        # up a .env above the package/install location).
+        load_dotenv(find_dotenv(usecwd=True))
         _env_loaded = True
 
 
