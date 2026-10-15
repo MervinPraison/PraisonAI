@@ -1,0 +1,50 @@
+# OpenShell sandbox policy for the PraisonAI contract risk review example.
+# Principle (same as NemoClaw's Pi agent): deny by default and allow only the
+# managed inference route. No PyPI, no GitHub, no embeddings, no other hosts.
+#
+#   openshell sandbox create --from praisonai-contract-review:dev \
+#     --policy policy.yaml -- bash /app/scripts/run.sh
+version: 1
+
+filesystem_policy:
+  include_workdir: true
+  read_only:
+    - /usr
+    - /opt/venv
+    - /lib
+    - /proc
+    - /dev/urandom
+    - /app
+    - /etc            # /etc/hosts writes must fail
+    - /var/log
+    - /var/lib/dpkg
+  read_write:
+    - /sandbox
+    - /tmp
+    - /dev/null
+
+landlock:
+  # Fail sandbox startup instead of running with unenforced filesystem rules.
+  compatibility: strict
+
+process:
+  run_as_user: sandbox
+  run_as_group: sandbox
+
+network_policies:
+  managed_inference:
+    name: managed_inference
+    endpoints:
+      - host: inference.local
+        port: 443
+        protocol: rest
+        enforcement: enforce
+        rules:
+          - allow: { method: POST, path: "/v1/chat/completions" }
+          - allow: { method: GET, path: "/v1/models" }
+    # OpenShell sees PraisonAI as the Python interpreter. Python egress grants are
+    # process-wide, so every Python process in the sandbox gets inference.local.
+    # Confirm the observed interpreter path with `openshell term` on first run.
+    binaries:
+      - { path: /opt/venv/bin/python3* }
+      - { path: /usr/local/bin/python3* }

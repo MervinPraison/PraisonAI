@@ -1,0 +1,14 @@
+{
+  "description": "Ground-truth risky clauses planted in the synthetic contracts. verify.sh checks that risk_report.md cites at least min_cited of these clause IDs.",
+  "min_cited": 6,
+  "findings": [
+    {"vendor": "A", "clause": "A-3.2", "rule": "P1", "severity": "Medium", "issue": "36-month auto-renewal with 90-day notice"},
+    {"vendor": "A", "clause": "A-5.1", "rule": "P2", "severity": "High", "issue": "Uncapped liability on the customer only"},
+    {"vendor": "B", "clause": "B-4.1", "rule": "P3", "severity": "High", "issue": "Data may be stored outside the region"},
+    {"vendor": "B", "clause": "B-4.2", "rule": "P4", "severity": "Medium", "issue": "Sub-processors added without notice"},
+    {"vendor": "B", "clause": "B-4.3", "rule": "P3", "severity": "High", "issue": "No breach-notification deadline"},
+    {"vendor": "C", "clause": "C-5.2", "rule": "P5", "severity": "High", "issue": "Vendor owns derivatives of customer data"},
+    {"vendor": "C", "clause": "C-6.1", "rule": "P6", "severity": "Medium", "issue": "Unilateral 15%/yr price increases"},
+    {"vendor": "C", "clause": "C-7.1", "rule": "P6", "severity": "Medium", "issue": "Termination for convenience by the vendor only"}
+  ]
+}

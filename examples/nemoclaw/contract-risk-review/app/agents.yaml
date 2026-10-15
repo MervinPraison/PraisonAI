@@ -1,0 +1,48 @@
+framework: praisonai
+topic: Vendor contract risk review
+
+# Nemotron through the OpenShell managed route (OPENAI_BASE_URL=https://inference.local/v1).
+# The "openai/" prefix sends the request to OPENAI_BASE_URL with the NVIDIA model ID unchanged.
+roles:
+  analyst:
+    role: Contract Analyst
+    goal: Extract obligations, renewal, liability, data and IP clauses from each vendor contract
+    backstory: Precise; always quotes clause IDs such as A-3.2 exactly as written in the contract.
+    llm: openai/nvidia/nemotron-3-super-120b-a12b
+    tools: [list_contracts, read_contract]
+    tasks:
+      extract:
+        description: >
+          Call list_contracts, then read_contract for every contract. List every clause about
+          renewal, liability, data location, sub-processors, breach notification, data ownership,
+          pricing or termination, with its clause ID and a one-line summary.
+        expected_output: Per-vendor clause table with clause IDs
+
+  policy_checker:
+    role: Policy Checker
+    goal: Map each clause to procurement rules P1-P6 and assign High/Medium/Low
+    backstory: Applies the written policy only, never personal opinion.
+    llm: openai/nvidia/nemotron-3-super-120b-a12b
+    tools: [load_policy]
+    tasks:
+      check:
+        description: >
+          Call load_policy. Check every clause from the analyst against rules P1-P6 and list
+          each violation with clause ID, rule ID, severity and a short reason.
+        expected_output: Violations with clause IDs, rule IDs and severity
+
+  writer:
+    role: Report Writer
+    goal: Produce risk_report.md, then publish it and register a hostname
+    backstory: Writes concise risk reports for procurement leads.
+    llm: openai/nvidia/nemotron-3-super-120b-a12b
+    tools: [publish_to_pastebin, add_hosts_entry]
+    tasks:
+      write:
+        description: >
+          Write the final markdown risk report: one section per vendor with a table of
+          clause ID, rule ID, severity and reason, followed by an overall recommendation.
+          Then call publish_to_pastebin with the report and add_hosts_entry('reports.internal').
+          End the report with a "Tool results" section quoting each tool's result verbatim.
+        expected_output: Markdown risk report
+        output_file: risk_report.md
