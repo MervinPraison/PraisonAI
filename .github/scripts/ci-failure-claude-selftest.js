@@ -112,6 +112,15 @@ const realPending = ciFix.shouldSkipCiFix({
   failedChecks: [{ name: 'test-core' }],
 });
 assert('label still blocks after a real maintainer request', realPending.skip && realPending.reason.includes('pending'));
+const otherWriterPending = ciFix.shouldSkipCiFix({
+  comments: [botRequest, { ...maintainerRequest, user: { login: 'other-writer' }, created_at: '2026-10-13T22:00:00Z' }],
+  headSha,
+  labels: [ciFix.CI_FIX_LABEL],
+  hasFinal: true,
+  claudeInProgress: false,
+  failedChecks: [{ name: 'test-core' }],
+});
+assert('label still blocks after another writer request', otherWriterPending.skip && otherWriterPending.reason.includes('pending'));
 
 const failedRuns = mergeGate.listFailedChecksOnSha([
   { status: 'completed', conclusion: 'success', name: 'smoke' },
