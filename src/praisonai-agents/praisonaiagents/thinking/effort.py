@@ -7,6 +7,7 @@ each provider's native request parameter:
 - OpenAI o-series / GPT-5 / xAI reasoning models -> native ``reasoning_effort``
   (``minimal|low|medium|high``).
 - Anthropic / Gemini extended-thinking models -> a ``thinking`` token budget.
+- Nemotron 3 on NVIDIA NIM -> ``chat_template_kwargs.enable_thinking``.
 - Models without a reasoning control -> nothing (silently ignored,
   backward-compatible).
 
@@ -87,6 +88,14 @@ def _is_extended_thinking_model(model: str) -> bool:
     )
 
 
+def _is_nim_nemotron3_model(model: str) -> bool:
+    """Nemotron 3 served by NVIDIA NIM (``nvidia_nim/`` route only)."""
+    name = (model or "").lower()
+    return name.startswith("nvidia_nim/") and (
+        "nemotron-3-" in name or "nemotron-nano-3-" in name
+    )
+
+
 def resolve_reasoning_params(effort: Any, model: str) -> Dict[str, Any]:
     """Translate a unified reasoning-effort level to provider-native kwargs.
 
@@ -103,7 +112,19 @@ def resolve_reasoning_params(effort: Any, model: str) -> Dict[str, Any]:
         off/unset or the model has no reasoning control.
     """
     level = normalize_effort(effort)
-    if level is None or level == "off":
+    if level is None:
+        return {}
+
+    # Nemotron 3 on NVIDIA NIM thinks by default and is switched through the
+    # chat template; it is the one model family where "off" sends something.
+    if _is_nim_nemotron3_model(model):
+        if level == "off":
+            return {"chat_template_kwargs": {"enable_thinking": False}}
+        if level in ("minimal", "low"):
+            return {"chat_template_kwargs": {"enable_thinking": True, "low_effort": True}}
+        return {"chat_template_kwargs": {"enable_thinking": True}}
+
+    if level == "off":
         return {}
 
     # Anthropic / Gemini expose an extended-thinking token budget. Checked first
