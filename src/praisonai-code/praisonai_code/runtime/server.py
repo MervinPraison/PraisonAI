@@ -115,6 +115,18 @@ def _apply_cold_path_parity(config: Dict[str, Any]) -> None:
         pass
 
 
+def _enable_live_control(config: Dict[str, Any]) -> None:
+    """Let an attached client steer or interrupt a live turn.
+
+    Reuses the core seams: ``message_steering`` queues guidance drained between
+    tool iterations, and an ``InterruptController`` provides cooperative cancel.
+    """
+    from praisonaiagents.agent.interrupt import InterruptController
+
+    config["message_steering"] = True
+    config["interrupt_controller"] = InterruptController()
+
+
 def _definitions_fingerprint() -> Any:
     """Fingerprint of rules/definition files, or ``None`` when unavailable."""
     try:
@@ -148,6 +160,9 @@ class WarmRuntime:
         self.last_activity = time.time()
         # Event hub used to fan out live session events to attached clients.
         self.hub = hub or SessionEventHub()
+        # Event-stream id -> agent currently executing a turn for it, so an
+        # attached client can steer/interrupt that live turn.
+        self._live: Dict[str, Any] = {}
 
     def _refresh_if_definitions_changed(self) -> None:
         """Drop warm agents when rules/tools/definition files were edited.
@@ -185,6 +200,7 @@ class WarmRuntime:
                 if resolved:
                     config["llm"] = resolved
                 _apply_cold_path_parity(config)
+                _enable_live_control(config)
                 agent = Agent(**config)
                 self._agents[key] = agent
             return agent
@@ -237,6 +253,7 @@ class WarmRuntime:
         if resolved:
             config["llm"] = resolved
         _apply_cold_path_parity(config)
+        _enable_live_control(config)
         agent = Agent(**config)
 
         # Rehydrate prior history + wire persistence via the shared CLI helper.
@@ -267,6 +284,62 @@ class WarmRuntime:
         with self._lock:
             self._session_agents.pop(session_id, None)
             self._session_models.pop(session_id, None)
+
+    def _start_live(self, agent: Any, prompt: str, stream_id: Optional[str]) -> Any:
+        """Run ``agent.start`` while registered as the live turn for ``stream_id``.
+
+        Any interrupt or steering left over from a previous turn is cleared first
+        so it cannot leak into this one (the warm agent is reused across turns
+        and, on the anonymous path, across clients).
+        """
+        _reset_live_control(agent)
+        if stream_id:
+            with self._lock:
+                self._live[stream_id] = agent
+        try:
+            return agent.start(prompt)
+        finally:
+            if stream_id:
+                with self._lock:
+                    if self._live.get(stream_id) is agent:
+                        self._live.pop(stream_id, None)
+            _reset_live_control(agent)
+
+    def _live_agent(self, stream_id: str) -> Any:
+        with self._lock:
+            return self._live.get(stream_id)
+
+    def steer(self, stream_id: str, message: str, priority: int = 5) -> bool:
+        """Queue a steering message into the live turn for ``stream_id``.
+
+        Returns False when no turn is running for that id.
+        """
+        agent = self._live_agent(stream_id)
+        if agent is None or not agent.steer(message, priority=priority):
+            return False
+        self.hub.publish(stream_id, {
+            "type": "run.steer",
+            "session_id": stream_id,
+            "message": message,
+        })
+        return True
+
+    def interrupt(self, stream_id: str, reason: str = "attach") -> bool:
+        """Request cooperative cancel of the live turn for ``stream_id``.
+
+        Returns False when no turn is running for that id.
+        """
+        agent = self._live_agent(stream_id)
+        controller = getattr(agent, "interrupt_controller", None)
+        if controller is None:
+            return False
+        controller.request(reason)
+        self.hub.publish(stream_id, {
+            "type": "run.interrupt",
+            "session_id": stream_id,
+            "reason": reason,
+        })
+        return True
 
     def run(
         self,
@@ -316,7 +389,7 @@ class WarmRuntime:
             with self._lock_for(f"__session__:{session_id}"):
                 agent = self._get_session_agent(session_id, model)
                 try:
-                    result = agent.start(prompt)
+                    result = self._start_live(agent, prompt, stream_id)
                 except Exception as e:
                     # A failed turn can leave partial state; drop the warm agent
                     # so the next turn rehydrates cleanly from the store.
@@ -344,7 +417,7 @@ class WarmRuntime:
         with self._lock_for(key):
             agent = self._get_agent(key)
             try:
-                result = agent.start(prompt)
+                result = self._start_live(agent, prompt, stream_id)
             except Exception as e:
                 self._evict_agent(key)
                 if stream_id:
@@ -371,6 +444,16 @@ class WarmRuntime:
                 "result": text,
             })
         return text
+
+
+def _reset_live_control(agent: Any) -> None:
+    """Clear pending interrupt/steering state on a reused warm agent."""
+    controller = getattr(agent, "interrupt_controller", None)
+    if controller is not None:
+        controller.clear()
+    steering = getattr(agent, "_message_steering", None)
+    if steering is not None:
+        steering.clear_messages()
 
 
 def _make_handler(token: str, runtime: WarmRuntime):
@@ -433,6 +516,36 @@ def _make_handler(token: str, runtime: WarmRuntime):
                 except Exception as e:  # noqa: BLE001 - surface to client as error
                     self._send_json(200, {"ok": False, "error": str(e)})
                 return
+
+            # Live-turn control from an attached client:
+            # /sessions/{id}/steer and /sessions/{id}/interrupt.
+            path = urlsplit(self.path).path
+            prefix = "/sessions/"
+            for action in ("steer", "interrupt"):
+                suffix = f"/{action}"
+                if path.startswith(prefix) and path.endswith(suffix):
+                    session_id = unquote(path[len(prefix):-len(suffix)])
+                    if not session_id:
+                        self._send_json(400, {"ok": False, "error": "missing session id"})
+                        return
+                    payload = self._read_json()
+                    if action == "steer":
+                        message = payload.get("message")
+                        if not message:
+                            self._send_json(400, {"ok": False, "error": "missing message"})
+                            return
+                        try:
+                            priority = int(payload.get("priority", 5))
+                        except (TypeError, ValueError):
+                            priority = 5
+                        ok = runtime.steer(session_id, str(message), priority=priority)
+                    else:
+                        ok = runtime.interrupt(session_id)
+                    if ok:
+                        self._send_json(200, {"ok": True})
+                    else:
+                        self._send_json(200, {"ok": False, "error": "no live run for session"})
+                    return
 
             self._send_json(404, {"ok": False, "error": "not found"})
 

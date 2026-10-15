@@ -42,6 +42,11 @@ class RuntimeClient:
             with _urlrequest.urlopen(req, timeout=self._timeout) as resp:
                 data = resp.read().decode("utf-8")
         except _urlerror.HTTPError as e:
+            if e.code == 404:
+                raise RuntimeUnavailable(
+                    f"runtime does not support {path} (older daemon? restart it with "
+                    "praisonai daemon stop && praisonai daemon start)"
+                ) from e
             raise RuntimeUnavailable(f"runtime returned HTTP {e.code}") from e
         except (_urlerror.URLError, OSError) as e:
             raise RuntimeUnavailable(f"runtime unreachable: {e}") from e
@@ -88,6 +93,30 @@ class RuntimeClient:
         if not result.get("ok", False):
             raise RuntimeUnavailable(result.get("error", "runtime run failed"))
         return str(result.get("result", ""))
+
+    def _control(self, session_id: str, action: str, payload: Dict[str, Any]) -> None:
+        path = f"/sessions/{_urlquote(session_id, safe='')}/{action}"
+        result = self._post(path, payload)
+        if not result.get("ok", False):
+            raise RuntimeUnavailable(result.get("error", f"{action} failed"))
+
+    def steer(self, session_id: str, message: str, priority: int = 5) -> None:
+        """Inject a steering message into the live turn for ``session_id``.
+
+        Raises:
+            RuntimeUnavailable: if the runtime is unreachable, lacks the
+                endpoint, or no turn is running for ``session_id``.
+        """
+        self._control(session_id, "steer", {"message": message, "priority": priority})
+
+    def interrupt(self, session_id: str) -> None:
+        """Request cooperative cancel of the live turn for ``session_id``.
+
+        Raises:
+            RuntimeUnavailable: if the runtime is unreachable, lacks the
+                endpoint, or no turn is running for ``session_id``.
+        """
+        self._control(session_id, "interrupt", {})
 
     def attach(self, session_id: str) -> Iterator[Dict[str, Any]]:
         """Yield live events for ``session_id`` as they are published.
