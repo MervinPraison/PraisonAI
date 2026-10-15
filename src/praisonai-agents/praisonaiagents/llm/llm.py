@@ -1240,12 +1240,21 @@ Respond with ONLY a valid JSON tool call in this format:
         values fill in the gaps.
         """
         kwargs = dict(kwargs)
+        if profile.model:
+            # Params were already built, so route nvidia/ ids to NIM here too.
+            from .model_providers import to_litellm_nvidia_nim
+            new_model = to_litellm_nvidia_nim(profile.model) or profile.model
+            if self._crosses_nim_boundary(kwargs.get("model"), new_model):
+                # A key or endpoint carried over across the NIM boundary is the
+                # wrong vendor's; the profile's own values are re-applied below.
+                for key in ("api_key", "base_url", "api_base"):
+                    kwargs.pop(key, None)
+            kwargs["model"] = new_model
         if profile.api_key:
             kwargs["api_key"] = profile.api_key
         if profile.base_url:
             kwargs["base_url"] = profile.base_url
-        if profile.model:
-            kwargs["model"] = profile.model
+        self._apply_nvidia_nim_credentials(kwargs)
         return kwargs
 
     def _resolve_subscription_creds(self):
@@ -7008,6 +7017,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         for _local_prefix in ("llama_cpp/", "llamacpp/"):
             if model.startswith(_local_prefix):
                 return f"openai/{model[len(_local_prefix):]}"
+        # NVIDIA NIM ids start with "nvidia/", which litellm does not know;
+        # its route is "nvidia_nim/".
+        from .model_providers import to_litellm_nvidia_nim
+        nim_model = to_litellm_nvidia_nim(model)
+        if nim_model:
+            return nim_model
         if "/" in model:
             return model
         effective_base_url = self.base_url
@@ -7020,6 +7035,35 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if self._detect_provider() != "openai":
             return model
         return f"openai/{model}"
+
+    @staticmethod
+    def _crosses_nim_boundary(old_model: Any, new_model: Any) -> bool:
+        """True when a model switch moves onto or off the NVIDIA NIM route."""
+        return str(old_model or "").startswith("nvidia_nim/") != str(new_model or "").startswith("nvidia_nim/")
+
+    @staticmethod
+    def _apply_nvidia_nim_credentials(params: Dict[str, Any]) -> None:
+        """Give an ``nvidia_nim/`` request an NVIDIA key, never the OpenAI one.
+
+        litellm reads only NVIDIA_NIM_API_KEY; when that is missing the OpenAI
+        SDK falls back to OPENAI_API_KEY and sends it to NVIDIA. Precedence:
+        explicit api_key, NVIDIA_NIM_API_KEY, NVIDIA_API_KEY, then a placeholder
+        for a local NIM (which accepts any non-empty key).
+        """
+        if params.get("api_key") or not str(params.get("model", "")).startswith("nvidia_nim/"):
+            return
+        key = os.environ.get("NVIDIA_NIM_API_KEY") or os.environ.get("NVIDIA_API_KEY")
+        if key:
+            params["api_key"] = key
+            return
+        base = params.get("base_url") or params.get("api_base") or os.environ.get("NVIDIA_NIM_API_BASE")
+        if base and "integrate.api.nvidia.com" not in base:
+            params["api_key"] = "not-used"
+            return
+        raise ValueError(
+            "NVIDIA_API_KEY is not set — get one at build.nvidia.com, "
+            "or pass base_url= for a local NIM"
+        )
 
     def _guard_format_with_tools(self, params: Dict[str, Any]) -> None:
         """Refuse a combination that makes the model fabricate.
@@ -7102,7 +7146,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 params["extra_headers"] = extra_headers
         
         # Override with any provided parameters
+        base_model = params.get("model")
         params.update(override_params)
+
+        # A per-call or failover-profile model override bypasses
+        # _resolve_openai_compatible_model, so route nvidia/ ids here too.
+        from .model_providers import to_litellm_nvidia_nim
+        nim_model = to_litellm_nvidia_nim(params.get("model"))
+        if nim_model:
+            params["model"] = nim_model
+        if self._crosses_nim_boundary(base_model, params.get("model")):
+            # The instance key and endpoint belong to the other vendor; let the
+            # target's own apply. Per-call values are still honoured.
+            for key in ("api_key", "base_url", "api_base"):
+                if key not in override_params:
+                    params.pop(key, None)
+        self._apply_nvidia_nim_credentials(params)
 
         # Resolve temperature from the instance when the caller did not specify
         # one. Public entry points now default temperature to None so a value
@@ -7145,9 +7204,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if effort is not None:
             from ..thinking.effort import resolve_reasoning_params
             reasoning_params = resolve_reasoning_params(effort, params['model'])
-            # Don't clobber an explicit native param the caller already set.
+            # Don't clobber an explicit native param the caller already set,
+            # whether top-level or nested in extra_body.
+            extra_body = params.get('extra_body') or {}
             for key, value in reasoning_params.items():
-                params.setdefault(key, value)
+                if key not in extra_body:
+                    params.setdefault(key, value)
 
         # Reasoning models (o1/o3/gpt-5.x) require max_completion_tokens and
         # reject the legacy max_tokens parameter plus several sampling params.
@@ -7211,8 +7273,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if 'tools' in params and params['tools'] and 'tool_choice' not in params:
             try:
                 import litellm
-                # Check if model supports function calling before setting tool_choice
-                if litellm.supports_function_calling(model=self.model):
+                # Check if model supports function calling before setting tool_choice.
+                # litellm's map has no NIM chat entries, so NIM is opted in explicitly.
+                if (str(params['model']).startswith('nvidia_nim/')
+                        or litellm.supports_function_calling(model=self.model)):
                     params['tool_choice'] = 'auto'
                     logging.debug(f"Set tool_choice='auto' for model {self.model}")
             except Exception as e:
