@@ -7134,6 +7134,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Override with any provided parameters
         params.update(override_params)
 
+        # A per-call or failover-profile model override bypasses
+        # _resolve_openai_compatible_model, so route nvidia/ ids here too.
+        from .model_providers import to_litellm_nvidia_nim
+        nim_model = to_litellm_nvidia_nim(params.get("model"))
+        if nim_model:
+            params["model"] = nim_model
         self._apply_nvidia_nim_credentials(params)
 
         # Resolve temperature from the instance when the caller did not specify

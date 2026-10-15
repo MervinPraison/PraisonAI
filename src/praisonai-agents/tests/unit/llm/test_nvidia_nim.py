@@ -40,6 +40,15 @@ def test_llm_routes_nvidia_prefix_and_keeps_display_model(monkeypatch):
     assert llm.model == "nvidia/nemotron-super"
 
 
+def test_per_call_nvidia_model_override_is_routed(monkeypatch):
+    # Per-call / failover-profile model overrides arrive via override_params.
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-x")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-openai")
+    params = LLM(model="gpt-4o-mini")._build_completion_params(model="nvidia/nemotron-super")
+    assert params["model"] == SUPER
+    assert params["api_key"] == "nvapi-x"
+
+
 def test_existing_nvidia_nim_prefix_unchanged(monkeypatch):
     monkeypatch.setenv("NVIDIA_NIM_API_KEY", "nim-key")
     params = LLM(model=SUPER)._build_completion_params()
