@@ -39,7 +39,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Embeddings | 6 | 23 | 2074 |
 | ✅ Evaluation | 1 | 9 | 3709 |
 | ✅ Events | 1 | 2 | 782 |
-| ✅ Execution | 3 | 4 | 1694 |
+| ✅ Execution | 3 | 4 | 1697 |
 | ✅ Failover | 2 | 1 | 576 |
 | ✅ Files | 2 | 7 | 2376 |
 | ✅ Flow | 1 | 3 | 811 |
@@ -56,7 +56,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2859 |
 | ✅ Optimizer | 1 | 2 | 794 |
-| ✅ Output | 3 | 5 | 1289 |
+| ✅ Output | 3 | 6 | 1573 |
 | ✅ Parallel Execution | 3 | 2 | 546 |
 | ✅ Planning | 6 | 7 | 1827 |
 | ✅ Plugins | 8 | 5 | 4114 |
