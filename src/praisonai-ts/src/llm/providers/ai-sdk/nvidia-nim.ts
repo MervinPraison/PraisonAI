@@ -32,8 +32,15 @@ export function toNvidiaNimModelId(modelId: string): string {
  * Create the NIM provider. Key order: explicit apiKey, NVIDIA_NIM_API_KEY,
  * NVIDIA_API_KEY. A local NIM accepts any non-empty key, so a non-NVIDIA
  * baseURL gets a placeholder. OPENAI_API_KEY is never consulted.
+ *
+ * `packageName` comes from the provider registry so the import stays computed:
+ * a literal `import('@ai-sdk/openai-compatible')` would be pulled into
+ * bundles (e.g. the mobile webview) that never load host providers.
  */
-export async function createNvidiaNimProvider(options: AISDKProviderOptions = {}): Promise<unknown> {
+export async function createNvidiaNimProvider(
+  options: AISDKProviderOptions = {},
+  packageName: string
+): Promise<unknown> {
   const baseURL = options.baseURL || getEnv('NVIDIA_NIM_API_BASE') || NVIDIA_NIM_DEFAULT_BASE_URL;
   let apiKey = options.apiKey || getEnv('NVIDIA_NIM_API_KEY') || getEnv('NVIDIA_API_KEY');
   if (!apiKey) {
@@ -46,7 +53,7 @@ export async function createNvidiaNimProvider(options: AISDKProviderOptions = {}
     }
     apiKey = 'not-used';
   }
-  const { createOpenAICompatible } = await import('@ai-sdk/openai-compatible');
+  const { createOpenAICompatible } = await import(packageName);
   return createOpenAICompatible({
     name: 'nvidia-nim',
     baseURL,

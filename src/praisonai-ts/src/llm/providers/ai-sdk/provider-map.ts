@@ -52,10 +52,10 @@ export function parseModelString(model: string, defaultProvider: string = 'opena
   }
   
   // Infer provider from model prefix
-  const inferredProvider = inferProviderFromModel(model);
+  const providerId = inferProviderFromModel(model) || resolveProviderAlias(defaultProvider);
   return { 
-    providerId: inferredProvider || defaultProvider, 
-    modelId: model 
+    providerId, 
+    modelId: providerId === 'nvidia-nim' ? toNvidiaNimModelId(model) : model 
   };
 }
 
@@ -211,7 +211,7 @@ export async function createAISDKProvider(
   // Dynamically import the provider package
   try {
     if (resolved === 'nvidia-nim') {
-      return await createNvidiaNimProvider(options);
+      return await createNvidiaNimProvider(options, providerInfo.package);
     }
 
     const providerModule = await import(providerInfo.package);

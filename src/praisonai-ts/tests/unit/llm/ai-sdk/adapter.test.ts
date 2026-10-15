@@ -84,7 +84,8 @@ describe('toAISDKPrompt', () => {
       type: 'tool-call',
       toolCallId: 'call_123',
       toolName: 'get_weather',
-      args: { city: 'London' }
+      args: { city: 'London' },
+      input: { city: 'London' }
     });
   });
 
@@ -107,7 +108,8 @@ describe('toAISDKPrompt', () => {
         type: 'tool-result',
         toolCallId: 'call_123',
         toolName: 'get_weather',
-        result: { temperature: 20 }
+        result: { temperature: 20 },
+        output: { type: 'json', value: { temperature: 20 } }
       }]
     });
   });

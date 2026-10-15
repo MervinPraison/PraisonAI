@@ -58,6 +58,13 @@ describe('NIM model ids', () => {
     expect(parseModelString(input)).toEqual({ providerId: 'nvidia-nim', modelId: expected });
   });
 
+  it('maps a bare alias under defaultProvider', () => {
+    expect(parseModelString('nemotron-super', 'nvidia')).toEqual({
+      providerId: 'nvidia-nim',
+      modelId: 'nvidia/nemotron-3-super-120b-a12b',
+    });
+  });
+
   it('leaves other providers alone', () => {
     expect(parseModelString('openai/gpt-4o').modelId).toBe('gpt-4o');
     expect(toNvidiaNimModelId('meta/x')).toBe('meta/x');
@@ -123,5 +130,69 @@ describe('nvidiaNimReasoningKwargs', () => {
     expect(nvidiaNimReasoningKwargs('ollama/nemotron-3-super-120b-a12b', 'off')).toBeUndefined();
     expect(nvidiaNimReasoningKwargs('gpt-4o-mini', 'high')).toBeUndefined();
     expect(nvidiaNimReasoningKwargs('nvidia/nemotron-super', undefined)).toBeUndefined();
+  });
+});
+
+describe('NIM tool calls and streaming', () => {
+  const bodies: any[] = [];
+  const json = (message: Record<string, unknown>, finish: string) =>
+    new Response(JSON.stringify({
+      id: 'c', object: 'chat.completion', created: 0, model: 'nvidia/nemotron-3-super-120b-a12b',
+      choices: [{ index: 0, message: { role: 'assistant', ...message }, finish_reason: finish }],
+      usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+    }), { status: 200, headers: { 'content-type': 'application/json' } });
+  const sse = (deltas: Record<string, unknown>[], finish = 'stop') =>
+    new Response(
+      [...deltas.map((delta) => ({ delta, finish_reason: null })), { delta: {}, finish_reason: finish }]
+        .map((choice) => `data: ${JSON.stringify({
+          id: 'c', object: 'chat.completion.chunk', created: 0, model: 'm',
+          choices: [{ index: 0, ...choice }],
+        })}\n\n`).join('') + 'data: [DONE]\n\n',
+      { status: 200, headers: { 'content-type': 'text/event-stream' } }
+    );
+
+  beforeEach(() => {
+    bodies.length = 0;
+    process.env.NVIDIA_API_KEY = 'nvapi-test';
+  });
+
+  it.each([false, true])('runs a tool call round trip (stream=%s) with chat_template_kwargs on every request', async (stream) => {
+    const seen: string[] = [];
+    const getWeather = (city: string) => { seen.push(city); return `Weather in ${city}: 20C`; };
+    const fetchImpl = (async (_url: any, init: any) => {
+      const body = JSON.parse(init.body);
+      bodies.push(body);
+      if (stream) {
+        return bodies.length === 1
+          ? sse([{ tool_calls: [{ index: 0, id: 'call_1', type: 'function', function: { name: 'getWeather', arguments: '{"city":"Paris"}' } }] }], 'tool_calls')
+          : sse([{ content: 'It is 20C in Paris.' }]);
+      }
+      if (bodies.length === 1) {
+        return json({
+          content: null,
+          tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'getWeather', arguments: '{"city":"Paris"}' } }],
+        }, 'tool_calls');
+      }
+      return json({ content: 'It is 20C in Paris.' }, 'stop');
+    }) as unknown as typeof fetch;
+
+    const result = await agent('nvidia/nemotron-super', { fetch: fetchImpl, stream, tools: [getWeather], reasoningEffort: 'off' }).chat('weather?');
+    expect(result).toBe('It is 20C in Paris.');
+    expect(seen).toEqual(['Paris']);
+    expect(bodies[0].tools.map((t: any) => t.function.name)).toEqual(['getWeather']);
+    expect(bodies[1].messages.some((m: any) => m.role === 'tool' && /20C/.test(m.content))).toBe(true);
+    for (const b of bodies) expect(b.chat_template_kwargs).toEqual({ enable_thinking: false });
+  });
+
+  it('streams text chunks with chat_template_kwargs in the request', async () => {
+    const fetchImpl = (async (_url: any, init: any) => {
+      bodies.push(JSON.parse(init.body));
+      return sse([{ content: 'hel' }, { content: 'lo' }]);
+    }) as unknown as typeof fetch;
+
+    const result = await agent('nvidia/nemotron-super', { fetch: fetchImpl, stream: true, reasoningEffort: 'low' }).chat('hi');
+    expect(result).toBe('hello');
+    expect(bodies[0].stream).toBe(true);
+    expect(bodies[0].chat_template_kwargs).toEqual({ enable_thinking: true, low_effort: true });
   });
 });
