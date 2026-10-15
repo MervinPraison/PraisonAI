@@ -21,11 +21,15 @@ print(json.dumps({"blocked": out, "egress": EGRESS}))
 """
 
 
-def test_egress_guard_blocks_non_loopback_only():
+def test_egress_guard_blocks_non_loopback_only(tmp_path):
     import json
 
-    p = subprocess.run([sys.executable, "-c", CODE], cwd=PROBES, capture_output=True, text=True,
-                       env={"PYTHONPATH": str(PROBES)})
+    log = tmp_path / "egress.log"
+    p = subprocess.run([sys.executable, "-c", CODE + "raise SystemExit(1)"], cwd=PROBES,
+                       capture_output=True, text=True,
+                       env={"PYTHONPATH": str(PROBES), "BENCH_EGRESS_LOG": str(log)})
     out = json.loads(p.stdout)
     assert out["blocked"] == {"192.0.2.1": True, "127.0.0.1": False}
     assert out["egress"] == ["('192.0.2.1', 9)"]
+    # The log survives a probe that exits without reporting.
+    assert log.read_text().splitlines() == ["('192.0.2.1', 9)"]

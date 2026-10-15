@@ -127,3 +127,14 @@ def test_stale_badge_after_30_days(repo, capsys):
     pp.main(late + ["--write"])
     assert "Stale:" in readme.read_text()
     assert pp.main(late + ["--check"]) == 0
+    assert pp.main(base[:-1] + ["2026-11-20", "--check"]) == 0  # the notice has no day count
+
+
+def test_check_covers_docs_snippet(repo):
+    tmp, _, _, base = repo
+    snippet = tmp / "proof-points.mdx"
+    assert pp.main(base + ["--check", "--docs-snippet", str(snippet)]) == 1  # missing
+    pp.main(base + ["--write", "--docs-snippet", str(snippet)])
+    assert pp.main(base + ["--check", "--docs-snippet", str(snippet)]) == 0
+    snippet.write_text("edited\n")
+    assert pp.main(base + ["--check", "--docs-snippet", str(snippet)]) == 1

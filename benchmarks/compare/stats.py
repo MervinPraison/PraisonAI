@@ -65,7 +65,8 @@ def rank(summaries: dict, lower_is_better: bool = True) -> dict:
     """Rank frameworks by median.
 
     Returns ``{"order": [...], "leader": "clear"|"tied"|None}`` where each entry
-    is ``{framework, rank, median, ci95, ratio_to_best}``.
+    is ``{framework, rank, median, ci95, ratio_to_best}``. ``leader`` is None
+    with fewer than two frameworks: there is nothing to beat.
     """
     items = sorted(summaries.items(), key=lambda kv: kv[1]["median"],
                    reverse=not lower_is_better)
@@ -87,6 +88,4 @@ def rank(summaries: dict, lower_is_better: bool = True) -> dict:
         a, b = order[0]["ci95"], order[1]["ci95"]
         clear = a[1] < b[0] if lower_is_better else a[0] > b[1]
         leader = "clear" if clear else "tied"
-    elif order:
-        leader = "clear"
     return {"order": order, "leader": leader}

@@ -1,8 +1,11 @@
 """Egress guard: block and record every non-loopback socket connection.
 
-Imports nothing heavy at module level so cold-import probes stay cold.
+Imports nothing heavy at module level so cold-import probes stay cold. When
+``BENCH_EGRESS_LOG`` is set, each attempt is also appended to that file at once,
+so the record survives a probe that crashes or times out before reporting.
 """
 
+import os
 import sys
 
 EGRESS = []
@@ -30,6 +33,10 @@ def _audit(event, args):
     host = address[0] if isinstance(address, tuple) else address
     if not _is_loopback(host):
         EGRESS.append(str(address))
+        log = os.environ.get("BENCH_EGRESS_LOG")
+        if log:
+            with open(log, "a") as f:
+                f.write(str(address) + "\n")
         raise OSError(f"benchmark egress guard: blocked connection to {address!r}")
 
 

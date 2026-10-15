@@ -44,3 +44,8 @@ def test_diff_summary():
     s = stats.diff_summary([7.0, 7.1, 6.9], [4.0, 4.1, 3.9], scale=1 / 3)
     assert abs(s["median"] - 1.0) < 1e-9
     assert s["ci95"][0] <= s["median"] <= s["ci95"][1]
+
+
+def test_single_framework_has_no_leader():
+    r = stats.rank({"a": {"median": 1.0, "ci95": [1.0, 1.0]}})
+    assert r["leader"] is None and r["order"][0]["rank"] == 1

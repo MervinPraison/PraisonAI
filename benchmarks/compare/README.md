@@ -100,12 +100,15 @@ because CrewAI's ReAct parser keeps only the text after that marker. If a reques
    non-loopback `socket.connect`.
 4. In CI the run happens inside a loopback-only network namespace (`unshare --net`).
 
-`run.py` exits non-zero if any probe attempted egress.
+`run.py` exits non-zero if any probe attempted egress. The guard also appends each
+attempt to a log file, so a probe that crashes or times out cannot hide one. With
+`--strict` (the PR smoke run) it also fails when a framework, probe or contract fails.
 
 ## Statistics and publishing rules
 
 - Frameworks run in seeded-random interleaved rounds, so runner drift hits everyone
-  equally. On Linux the stub and the probes are pinned to different cores.
+  equally. On Linux the stub and the probes are pinned to two different CPUs the process
+  may use (no pinning with fewer than two).
 - GC stays on, and every framework runs in quiet mode.
 - The canonical working directory is a fresh temp directory that is **not** a git repo,
   matching deployed apps (`--git-workdir` for the alternative).
@@ -115,6 +118,9 @@ because CrewAI's ReAct parser keeps only the text after that marker. If a reques
 - Ratios are relative to the **best** framework, never to PraisonAI.
 - "Fastest", "lowest" and "fewest" are used only when the leader's CI does not
   overlap the runner-up's. Otherwise first place is "tied for first within noise".
+  With fewer than two ranked frameworks there is no label.
+- A framework that fails a scenario part-way is not ranked or published for that metric.
+- S6 counts lines only after `ruff format`; without `ruff` S6 is not counted.
 - Every published number carries the date, versions, machine or runner image, and n.
   The full ranking is shown for every metric, and contract failures are shown as such.
 - Numbers are never compared across machines.

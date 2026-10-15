@@ -9,7 +9,8 @@ methodology.
                                      [--scenarios s1,s2,s3,s4,s5,s6] [--frozen]
                                      [--python FW=/path/to/python]
 
-Exit status is non-zero when any probe tried a non-loopback connection.
+Exit status is non-zero when any probe tried a non-loopback connection, and
+with ``--strict`` also when a framework, probe or contract failed.
 """
 
 from __future__ import annotations
@@ -84,6 +85,15 @@ def sync_env(fw: str, frozen: bool) -> Path:
     return project / ".venv" / "bin" / "python"
 
 
+def pinned_cpus() -> list[int]:
+    """Two CPUs this process may use (stub, probes), or [] to skip pinning."""
+    if not (sys.platform.startswith("linux") and shutil.which("taskset")
+            and hasattr(os, "sched_getaffinity")):
+        return []
+    cpus = sorted(os.sched_getaffinity(0))
+    return cpus[:2] if len(cpus) >= 2 else []
+
+
 def machine_info() -> dict:
     info = {"platform": platform.platform(), "machine": platform.machine(),
             "cores": os.cpu_count(), "runner_image": os.environ.get("ImageOS"),
@@ -126,13 +136,15 @@ class Runner:
         self.stub_url = stub_url
         self.workdir = workdir
         self.egress: list[dict] = []
-        self.pin = (["taskset", "-c", "1"] if sys.platform.startswith("linux")
-                    and shutil.which("taskset") and (os.cpu_count() or 1) >= 2 else [])
+        self.egress_log = Path(workdir) / ".egress.log"
+        cpus = pinned_cpus()
+        self.pin = ["taskset", "-c", str(cpus[1])] if cpus else []
         env = {k: v for k, v in os.environ.items()
                if not k.startswith(("PYTHON", "OPENAI_", "VIRTUAL_ENV"))}
         env.update(TELEMETRY_OFF, **PROXY_TRAP)
         env.update(BENCH_STUB_URL=stub_url, OPENAI_BASE_URL=stub_url + "/v1",
-                   OPENAI_API_KEY="sk-stub", PYTHONHASHSEED="0")
+                   OPENAI_API_KEY="sk-stub", PYTHONHASHSEED="0",
+                   BENCH_EGRESS_LOG=str(self.egress_log))
         self.env = env
 
     def reset_stub(self) -> None:
@@ -149,6 +161,13 @@ class Runner:
                                text=True, timeout=self.args.timeout)
         except subprocess.TimeoutExpired:
             return {"error": f"timeout after {self.args.timeout}s"}
+        finally:
+            # Read from the guard's log, not the probe's output, so a crash or
+            # timeout cannot hide a blocked connection.
+            if self.egress_log.exists():
+                self.egress.append({"framework": fw, "probe": script,
+                                    "connections": self.egress_log.read_text().splitlines()})
+                self.egress_log.unlink()
         wall_ms = (time.perf_counter() - t0) * 1e3
         lines = [ln for ln in p.stdout.splitlines() if ln.strip()]
         try:
@@ -157,8 +176,6 @@ class Runner:
             tail = (p.stderr or p.stdout).strip().splitlines()[-5:]
             return {"error": f"exit {p.returncode}: " + " | ".join(tail), "stderr": p.stderr}
         out["wall_ms"] = wall_ms
-        if out.get("egress"):
-            self.egress.append({"framework": fw, "probe": script, "connections": out["egress"]})
         if flags and p.stderr:
             out["stderr"] = p.stderr
         return out
@@ -303,6 +320,11 @@ def run_s5(rn: Runner, fws, procs: int, k: int) -> tuple[dict, dict]:
 
 def run_s6(fws, contract: dict) -> dict:
     ruff = shutil.which("ruff")
+    if not ruff:
+        # Unformatted counts depend on how each file happens to be wrapped.
+        return {"counts": {}, "formatted": False,
+                "errors": {fw: "ruff not installed: not counted" for fw in fws
+                           if scenario("team3", fw)}}
     tmp = Path(tempfile.mkdtemp(prefix="bench-loc-"))
     samples, errors = {}, {}
     for fw in fws:
@@ -315,18 +337,20 @@ def run_s6(fws, contract: dict) -> dict:
         dst = tmp / f"{fw}.py"
         shutil.copy(src, dst)
         samples[fw] = dst
-    if ruff and samples:
+    if samples:
         subprocess.run([ruff, "format", "--quiet", "--line-length", "88", *map(str, samples.values())],
                        check=True)
     counts = {fw: loc.count(p.read_text()) for fw, p in samples.items()}
     shutil.rmtree(tmp, ignore_errors=True)
-    return {"counts": counts, "errors": errors, "formatted": bool(ruff)}
+    return {"counts": counts, "errors": errors, "formatted": True}
 
 
 # ------------------------------------------------------------------------ results
 
 def metric(key: str, summaries: dict, errors: dict, **extra) -> dict:
     title, unit, superlative, lower = METRICS[key]
+    # A framework that failed part-way is neither ranked nor published.
+    summaries = {fw: s for fw, s in summaries.items() if fw not in errors}
     ranked = {fw: s for fw, s in summaries.items() if fw != BASELINE}
     out = {"title": title, "unit": unit, "superlative": superlative,
            "lower_is_better": lower, "summary": summaries,
@@ -439,8 +463,8 @@ def markdown_summary(res: dict) -> str:
 # --------------------------------------------------------------------------- main
 
 def start_stub(latency_ms: float):
-    pin = (["taskset", "-c", "0"] if sys.platform.startswith("linux") and shutil.which("taskset")
-           and (os.cpu_count() or 1) >= 2 else [])
+    cpus = pinned_cpus()
+    pin = ["taskset", "-c", str(cpus[0])] if cpus else []
     proc = subprocess.Popen([*pin, sys.executable, str(HERE / "stub" / "server.py"),
                              "--latency-ms", str(latency_ms)],
                             stdout=subprocess.PIPE, text=True)
@@ -464,6 +488,8 @@ def main(argv=None) -> int:
     p.add_argument("--latency-ms", type=float, default=0.0, help="stub latency per request")
     p.add_argument("--git-workdir", action="store_true",
                    help="run probes inside a git repo (canonical run is non-git)")
+    p.add_argument("--strict", action="store_true",
+                   help="also fail when a framework, probe or contract fails (PR smoke run)")
     p.add_argument("--out", default=str(HERE / "results"))
     p.add_argument("--raw", help="write raw samples here (default: <out>/raw/<date>.json)")
     args = p.parse_args(argv)
@@ -538,6 +564,14 @@ def main(argv=None) -> int:
     if egress:
         log(f"FAIL: non-loopback connections attempted: {egress}")
         return 1
+    if args.strict:
+        failures = [f"{fw}: {i['error']}" for fw, i in info.items() if "error" in i]
+        failures += [f"{key} {fw}: {err[:120]}"
+                     for key, m in res["metrics"].items() for fw, err in m["errors"].items()]
+        failures += [f"contract {fw}" for fw, c in res["contract"].items() if not c["passed"]]
+        if failures:
+            log("FAIL (--strict): " + "; ".join(failures))
+            return 1
     return 0
 
 

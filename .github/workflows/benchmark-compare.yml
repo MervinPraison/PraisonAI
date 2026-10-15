@@ -55,7 +55,7 @@ jobs:
         run: uv tool install ruff && uv tool dir --bin >> "$GITHUB_PATH"
       - name: Smoke run (raw_openai + praisonai)
         run: |
-          python3 benchmarks/compare/run.py --frozen --frameworks raw_openai,praisonai --scale 0.1 --out /tmp/bench-smoke
+          python3 benchmarks/compare/run.py --frozen --strict --frameworks raw_openai,praisonai --scale 0.1 --out /tmp/bench-smoke
 
   bench:
     if: github.event_name != 'pull_request'
