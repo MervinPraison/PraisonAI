@@ -278,7 +278,12 @@ class HookRegistry:
     
     def has_hooks(self, event: HookEvent) -> bool:
         """Check if there are any hooks registered for an event."""
-        return bool(self.get_hooks(event))
+        # Hot-path existence check: same result as bool(get_hooks(event))
+        # without the snapshot copy, priority sort, or filtered list.
+        if not self._enabled:
+            return False
+        with self._lock:
+            return any(h.enabled for h in self._hooks.get(event, ()))
     
     def clear(self, event: Optional[HookEvent] = None):
         """
