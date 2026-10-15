@@ -234,6 +234,19 @@ class TokenUsage:
             'audio_output_tokens': self.audio_output_tokens,
         }
 
+# error_classifier category -> (text-derived kinds that may refine it, default kind).
+_CATEGORY_KINDS = {
+    "rate_limit": ({"rate_limit", "billing"}, "rate_limit"),
+    "auth": ({"auth", "auth_permanent"}, "auth"),
+    "context_limit": ({"context_overflow"}, "context_overflow"),
+    "invalid_request": (
+        {"context_overflow", "model_not_found", "auth", "auth_permanent", "billing", "format_error"},
+        "format_error",
+    ),
+    "transient": ({"overloaded", "idle_timeout"}, "overloaded"),
+    "permanent": ({"billing"}, "billing"),
+}
+
 class LLM:
     """
     Easy to use wrapper for language models. Supports multiple providers like OpenAI, 
@@ -886,11 +899,12 @@ Respond with ONLY a valid JSON tool call in this format:
         else:
             return False
 
-    def _parse_retry_delay(self, error_message: str) -> float:
-        """Parse retry delay from rate limit error message.
+    def _parse_retry_delay(self, error_message: Union[Exception, str]) -> float:
+        """Parse retry delay from a rate limit error.
 
         Args:
-            error_message: The error message from the API
+            error_message: The provider exception (preferred, so the structured
+                ``Retry-After`` response header is honoured) or its message
 
         Returns:
             Retry delay in seconds, or default if not found
@@ -902,7 +916,8 @@ Respond with ONLY a valid JSON tool call in this format:
 
         from .error_classifier import extract_retry_after
 
-        delay = extract_retry_after(Exception(error_message), cap_seconds=max_delay)
+        error = error_message if isinstance(error_message, BaseException) else Exception(error_message)
+        delay = extract_retry_after(error, cap_seconds=max_delay)
         return self._retry_delay if delay is None else delay
 
     def _is_rate_limit_error(self, error: Exception) -> bool:
@@ -939,15 +954,35 @@ Respond with ONLY a valid JSON tool call in this format:
     def classify_error_kind(self, error: Exception) -> AgentErrorKind:
         """
         Classify error into typed AgentErrorKind instead of freeform strings.
-        
-        Replaces scattered regex checks with systematic classification.
-        
+
+        The HTTP status code / exception type (via ``error_classifier``) is
+        authoritative; message text only refines the kind within that category,
+        so e.g. a 400 whose body happens to contain "500" is never retried as
+        an overload.
+
         Args:
             error: Exception to classify
-            
+
         Returns:
             AgentErrorKind: Typed error classification
         """
+        text_kind = self._classify_error_kind_from_text(error)
+        from .error_classifier import _classify_by_type_and_code, _extract_status_code
+        category = _classify_by_type_and_code(error)
+        if category is None:
+            return text_kind
+        allowed, default = _CATEGORY_KINDS[category.value]
+        if text_kind in allowed:
+            return text_kind
+        # A 404 from a completion endpoint means the model/deployment is missing.
+        if _extract_status_code(error) == 404 or type(error).__name__ == "NotFoundError":
+            return "model_not_found"
+        if default == "overloaded" and "timeout" in type(error).__name__.lower():
+            return "idle_timeout"
+        return default
+
+    def _classify_error_kind_from_text(self, error: Exception) -> AgentErrorKind:
+        """Message-substring fallback used when no status code / type is known."""
         error_str = str(error).lower()
         error_type = type(error).__name__.lower()
         
@@ -969,7 +1004,7 @@ Respond with ONLY a valid JSON tool call in this format:
         
         # Billing/quota issues (must be checked before generic 429/rate-limit)
         if any(indicator in error_str for indicator in [
-            "insufficient quota", "quota exceeded", "billing", "credit",
+            "insufficient quota", "quota exceeded", "billing", "credit balance", "insufficient credit",
             "payment required", "subscription required", "subscription expired",
             "plan limit"
         ]):
@@ -1101,7 +1136,7 @@ Respond with ONLY a valid JSON tool call in this format:
 
         # Rate limiting - extract retry delay
         if error_kind == "rate_limit":
-            backoff = self._parse_retry_delay(str(error))  # Returns seconds
+            backoff = self._parse_retry_delay(error)  # Returns seconds
             if backoff == 0:  # No specific delay found, use exponential backoff
                 backoff = min(2 ** (attempt - 1), 60)  # 1s, 2s, 4s, ... cap at 60s
             return FailoverDecision(
