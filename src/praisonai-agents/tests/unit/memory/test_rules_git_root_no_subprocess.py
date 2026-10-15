@@ -1,5 +1,6 @@
 """Regression tests for #5819: no `git` subprocess per agent outside a repo."""
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -41,10 +42,38 @@ def test_agents_in_non_git_dir_spawn_no_git_subprocess(tmp_path, monkeypatch, no
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
     from praisonaiagents import Agent
 
+    # _init_rules_manager swallows errors, so prove construction completed.
+    built = []
+    orig_init = RulesManager.__init__
+
+    def counting_init(self, *args, **kwargs):
+        orig_init(self, *args, **kwargs)
+        built.append(self)
+
+    monkeypatch.setattr(RulesManager, "__init__", counting_init)
+
     for i in range(3):
         agent = Agent(name=f"a{i}", instructions="x", output="silent")
         agent._init_rules_manager()
+    assert len(built) == 3
     assert _git_calls(run_calls) == []
+
+
+@pytest.mark.parametrize("var", ["GIT_DIR", "GIT_WORK_TREE"])
+def test_git_env_var_still_uses_rev_parse(tmp_path, monkeypatch, no_git_env, var):
+    # No ancestor .git, but GIT_DIR/GIT_WORK_TREE lets git locate the repo.
+    monkeypatch.setenv(var, "/elsewhere")
+    calls = []
+
+    def fake_run(args, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout="/repo/root\n", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    manager = RulesManager(workspace_path=str(tmp_path))
+    calls.clear()
+    assert manager._find_git_root() == Path("/repo/root")
+    assert calls == [["git", "rev-parse", "--show-toplevel"]]
 
 
 def test_git_repo_root_found(tmp_path, no_git_env, run_calls):
