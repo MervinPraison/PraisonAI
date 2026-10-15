@@ -1245,8 +1245,10 @@ Respond with ONLY a valid JSON tool call in this format:
             from .model_providers import to_litellm_nvidia_nim
             new_model = to_litellm_nvidia_nim(profile.model) or profile.model
             if self._crosses_nim_boundary(kwargs.get("model"), new_model):
-                # A key carried over across the NIM boundary is the wrong vendor's.
-                kwargs.pop("api_key", None)
+                # A key or endpoint carried over across the NIM boundary is the
+                # wrong vendor's; the profile's own values are re-applied below.
+                for key in ("api_key", "base_url", "api_base"):
+                    kwargs.pop(key, None)
             kwargs["model"] = new_model
         if profile.api_key:
             kwargs["api_key"] = profile.api_key
@@ -7153,9 +7155,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         nim_model = to_litellm_nvidia_nim(params.get("model"))
         if nim_model:
             params["model"] = nim_model
-        if "api_key" not in override_params and self._crosses_nim_boundary(base_model, params.get("model")):
-            # The instance key belongs to the other vendor; let the target's own key apply.
-            params.pop("api_key", None)
+        if self._crosses_nim_boundary(base_model, params.get("model")):
+            # The instance key and endpoint belong to the other vendor; let the
+            # target's own apply. Per-call values are still honoured.
+            for key in ("api_key", "base_url", "api_base"):
+                if key not in override_params:
+                    params.pop(key, None)
         self._apply_nvidia_nim_credentials(params)
 
         # Resolve temperature from the instance when the caller did not specify

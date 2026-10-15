@@ -182,3 +182,39 @@ def test_failover_off_nim_drops_nvidia_key(monkeypatch):
     kwargs = llm._apply_profile_to_kwargs(profile, {"model": SUPER, "api_key": "nvapi-x"})
     assert kwargs["model"] == "gpt-4o-mini"
     assert "api_key" not in kwargs
+
+
+def test_failover_onto_nim_drops_inherited_base_url(monkeypatch):
+    from praisonaiagents.llm.failover import AuthProfile
+
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-x")
+    llm = LLM(model="gpt-4o-mini", base_url="https://openai-proxy.example")
+    inherited = {"model": "gpt-4o-mini", "api_key": "sk-primary",
+                 "base_url": "https://openai-proxy.example", "api_base": "https://openai-proxy.example"}
+    # Hosted NIM profile with no endpoint: the NVIDIA key must not go to the proxy.
+    nim = AuthProfile(name="nim", provider="nvidia", api_key="", model="nvidia/nemotron-super")
+    kwargs = llm._apply_profile_to_kwargs(nim, inherited)
+    assert kwargs["model"] == SUPER and kwargs["api_key"] == "nvapi-x"
+    assert "base_url" not in kwargs and "api_base" not in kwargs
+    # A profile's own endpoint (e.g. local NIM) is kept.
+    local = AuthProfile(name="local", provider="nvidia", api_key="", model="nvidia/nemotron-super",
+                        base_url="http://localhost:8000/v1")
+    assert llm._apply_profile_to_kwargs(local, inherited)["base_url"] == "http://localhost:8000/v1"
+
+
+def test_hosted_nim_without_key_after_proxy_failover_raises():
+    from praisonaiagents.llm.failover import AuthProfile
+
+    llm = LLM(model="gpt-4o-mini")
+    nim = AuthProfile(name="nim", provider="nvidia", api_key="", model="nvidia/nemotron-super")
+    with pytest.raises(ValueError):
+        llm._apply_profile_to_kwargs(nim, {"model": "gpt-4o-mini", "base_url": "https://openai-proxy.example"})
+
+
+def test_instance_base_url_not_carried_across_nim_boundary(monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-x")
+    llm = LLM(model="gpt-4o-mini", base_url="https://openai-proxy.example")
+    params = llm._build_completion_params(model="nvidia/nemotron-super")
+    assert params["api_key"] == "nvapi-x" and "base_url" not in params
+    params = llm._build_completion_params(model="nvidia/nemotron-super", base_url="http://localhost:8000/v1")
+    assert params["base_url"] == "http://localhost:8000/v1"
