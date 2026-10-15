@@ -65,6 +65,8 @@ TOOL_MAPPINGS = {
     'execute_command': ('.shell_tools', None),
     'list_processes': ('.shell_tools', None),
     'kill_process': ('.shell_tools', None),
+    'get_command_output': ('.shell_tools', None),
+    'stop_command': ('.shell_tools', None),
     'get_system_info': ('.shell_tools', None),
     'shell_tools': ('.shell_tools', None),
 

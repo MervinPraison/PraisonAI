@@ -313,7 +313,7 @@ class ToolsetRegistry:
         # System administration tools
         self.register_toolset(
             "system",
-            tools=["execute_command", "list_processes", "kill_process", "get_system_info"],
+            tools=["execute_command", "get_command_output", "stop_command", "list_processes", "kill_process", "get_system_info"],
             description="System administration and shell operations"
         )
         
