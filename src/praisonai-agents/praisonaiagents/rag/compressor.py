@@ -12,7 +12,7 @@ No heavy imports at module level.
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
-from .budget import estimate_tokens
+from .budget import _truncate_to_tokens, estimate_tokens
 
 
 @runtime_checkable
@@ -219,8 +219,9 @@ class ContextCompressor:
                 # Partial fit
                 remaining = target_tokens - used_tokens
                 if remaining > 50:  # Only if meaningful space
-                    chars_to_keep = remaining * 4
-                    truncated_text = text[:chars_to_keep] + "..."
+                    truncated_text = _truncate_to_tokens(
+                        text, remaining - estimate_tokens("...")
+                    ) + "..."
                     result.append({
                         **chunk,
                         'text': truncated_text,
