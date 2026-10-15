@@ -77,12 +77,30 @@ def _is_transient_llm_error(exc: BaseException) -> bool:
 
 
 def _retry_after_seconds(exc: BaseException) -> Optional[float]:
-    """Return the provider's ``Retry-After`` hint in seconds, if present."""
+    """Return the provider's ``Retry-After`` hint in seconds, if present.
+
+    Accepts both forms allowed by RFC 9110: delta-seconds and HTTP-date.
+    """
     headers = getattr(getattr(exc, "response", None), "headers", None)
     try:
         value = headers.get("retry-after") if headers is not None else None
-        return float(value) if value is not None else None
-    except (TypeError, ValueError, AttributeError):
+    except AttributeError:
+        return None
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        pass
+    try:
+        from email.utils import parsedate_to_datetime
+        from datetime import datetime, timezone
+
+        when = parsedate_to_datetime(value)
+        if when.tzinfo is None:
+            when = when.replace(tzinfo=timezone.utc)
+        return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
+    except (TypeError, ValueError, IndexError):
         return None
 
 

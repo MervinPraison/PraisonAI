@@ -274,6 +274,54 @@ class TestAutoGeneratorLiteLLMFallback:
 
             mock_litellm.return_value.completion.assert_called_once()
 
+    def test_litellm_retry_exhaustion_falls_back_to_openai(self):
+        class ServiceUnavailableError(Exception):
+            status_code = 503
+
+        with patch.object(_auto_mod, 'is_available', side_effect=lambda x: x in ("litellm", "openai")), \
+                patch.object(_auto_mod, '_get_litellm') as mock_litellm, \
+                patch.object(_auto_mod.asyncio, 'sleep') as mock_sleep, \
+                patch.object(AutoGenerator, '_get_core_client') as mock_client:
+            mock_sleep.return_value = None
+            mock_litellm.return_value.completion.side_effect = ServiceUnavailableError("503")
+            mock_client.return_value.parse_structured_output.return_value = DummyModel()
+            generator = AutoGenerator(topic="Test topic", framework="praisonai")
+            generator._structured_completion(response_model=DummyModel, messages=[])
+
+            assert mock_litellm.return_value.completion.call_count == 3
+            assert [c.args[0] for c in mock_sleep.call_args_list] == [1.0, 2.0]
+            mock_client.return_value.parse_structured_output.assert_called_once()
+
+    def test_litellm_retry_exhaustion_raises_without_openai(self):
+        class ServiceUnavailableError(Exception):
+            status_code = 503
+
+        with patch.object(_auto_mod, 'is_available', side_effect=lambda x: x == "litellm"), \
+                patch.object(_auto_mod, '_get_litellm') as mock_litellm, \
+                patch.object(_auto_mod.asyncio, 'sleep') as mock_sleep:
+            mock_sleep.return_value = None
+            mock_litellm.return_value.completion.side_effect = ServiceUnavailableError("503")
+            generator = AutoGenerator(topic="Test topic", framework="praisonai")
+            with pytest.raises(ServiceUnavailableError):
+                generator._structured_completion(response_model=DummyModel, messages=[])
+
+            assert mock_litellm.return_value.completion.call_count == 3
+
+    def test_retry_after_http_date(self):
+        from email.utils import format_datetime
+        from datetime import datetime, timedelta, timezone
+
+        when = format_datetime(datetime.now(timezone.utc) + timedelta(seconds=10), usegmt=True)
+        exc = Exception("429")
+        exc.response = Mock(headers={"retry-after": when})
+        assert 0 < _auto_mod._retry_after_seconds(exc) <= 10
+
+        exc.response = Mock(headers={"retry-after": "5"})
+        assert _auto_mod._retry_after_seconds(exc) == 5.0
+
+        exc.response = Mock(headers={"retry-after": "garbage"})
+        assert _auto_mod._retry_after_seconds(exc) is None
+
 
     def test_falls_back_to_openai_when_litellm_unavailable(self):
 
