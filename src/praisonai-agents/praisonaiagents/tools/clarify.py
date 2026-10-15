@@ -82,6 +82,8 @@ class ClarifyTool(BaseTool):
     def __init__(self, handler: Optional[ClarifyHandler] = None):
         super().__init__()
         self.handler = handler or ClarifyHandler()
+        # Only the auto-created default yields to a turn-bound handler.
+        self._default_handler = None if handler else self.handler
     
     async def run(
         self, 
@@ -117,7 +119,7 @@ class ClarifyTool(BaseTool):
         # An explicitly configured handler wins; otherwise use the handler
         # bound by the active interactive surface (bot/gateway turn), if any.
         handler = self.handler
-        if getattr(handler, "ask_callback", True) is None:
+        if handler is self._default_handler:
             handler = _bound_handler.get() or handler
         return await handler.ask(question, choices)
     

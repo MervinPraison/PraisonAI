@@ -257,6 +257,13 @@ async def test_bound_handler_used_by_default_instance_and_reset():
         # An explicitly configured handler still takes precedence.
         explicit = ClarifyTool(handler=ClarifyHandler(ask_callback=lambda q, c: "prod"))
         assert await explicit.run(question="Which env?") == "prod"
+
+        # A custom subclass overriding ask() (no ask_callback) also wins.
+        class _Custom(ClarifyHandler):
+            async def ask(self, question, choices=None):
+                return "custom"
+
+        assert await ClarifyTool(handler=_Custom()).run(question="Which env?") == "custom"
     finally:
         reset_clarify_handler(token)
 
