@@ -245,3 +245,19 @@ async def test_real_agentic_clarify():
 
 if __name__ == "__main__":
     pytest.main([__file__])
+
+@pytest.mark.asyncio
+async def test_bound_handler_used_by_default_instance_and_reset():
+    """Issue #5850: an interactive surface can bind a turn-scoped handler."""
+    from praisonaiagents.tools.clarify import set_clarify_handler, reset_clarify_handler
+
+    token = set_clarify_handler(ClarifyHandler(ask_callback=lambda q, c: "staging"))
+    try:
+        assert await clarify.run(question="Which env?") == "staging"
+        # An explicitly configured handler still takes precedence.
+        explicit = ClarifyTool(handler=ClarifyHandler(ask_callback=lambda q, c: "prod"))
+        assert await explicit.run(question="Which env?") == "prod"
+    finally:
+        reset_clarify_handler(token)
+
+    assert "best judgment" in await clarify.run(question="Which env?")

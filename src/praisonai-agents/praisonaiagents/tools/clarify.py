@@ -10,12 +10,30 @@ This is a first-class tool that integrates with different contexts:
 - UI: Uses interactive components
 """
 
+import contextvars
 import logging
 from typing import Optional, List, Any, Dict, Callable
 
 from .base import BaseTool
 
 logger = logging.getLogger(__name__)
+
+# Turn-scoped handler bound by an interactive surface (e.g. a bot/gateway
+# session) so the shared ``clarify`` instance reaches the user instead of
+# falling back to a best guess. ContextVars are carried into tool execution.
+_bound_handler: contextvars.ContextVar[Optional["ClarifyHandler"]] = contextvars.ContextVar(
+    "praisonai_clarify_handler", default=None
+)
+
+
+def set_clarify_handler(handler: Optional["ClarifyHandler"]) -> contextvars.Token:
+    """Bind *handler* for the current context; pass the token to ``reset_clarify_handler``."""
+    return _bound_handler.set(handler)
+
+
+def reset_clarify_handler(token: contextvars.Token) -> None:
+    """Restore the clarify handler binding that preceded ``set_clarify_handler``."""
+    _bound_handler.reset(token)
 
 
 class ClarifyHandler:
@@ -96,8 +114,12 @@ class ClarifyTool(BaseTool):
                         return await result
                     return result
         
-        # Use the tool's handler
-        return await self.handler.ask(question, choices)
+        # An explicitly configured handler wins; otherwise use the handler
+        # bound by the active interactive surface (bot/gateway turn), if any.
+        handler = self.handler
+        if getattr(handler, "ask_callback", True) is None:
+            handler = _bound_handler.get() or handler
+        return await handler.ask(question, choices)
     
     def get_schema(self) -> Dict[str, Any]:
         """Get OpenAI-compatible schema for this tool."""
@@ -195,4 +217,7 @@ def create_bot_clarify_handler(send_message_fn: Callable, wait_for_reply_fn: Cal
 
 
 # Export the tool for registration
-__all__ = ['clarify', 'ClarifyTool', 'ClarifyHandler', 'create_cli_clarify_handler', 'create_bot_clarify_handler']
+__all__ = [
+    'clarify', 'ClarifyTool', 'ClarifyHandler', 'create_cli_clarify_handler', 'create_bot_clarify_handler',
+    'set_clarify_handler', 'reset_clarify_handler',
+]
