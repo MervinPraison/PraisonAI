@@ -301,10 +301,9 @@ class RouterAgent(Agent):
         Returns:
             Task execution result
         """
-        # Estimate context size in tokens (rough estimate: ~4 chars per token)
-        # This is a simplified heuristic; actual tokenization varies by model
-        text_length = len(task_description) + (len(context) if context else 0)
-        context_size = text_length // 4  # Approximate token count
+        # Estimate context size in tokens (canonical heuristic, CJK-aware)
+        from ..context.tokens import estimate_tokens_heuristic
+        context_size = estimate_tokens_heuristic(task_description + (context or ""))
         
         # Select the best model for this task
         selected_model = self._select_model_for_task(

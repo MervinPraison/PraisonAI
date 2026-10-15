@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 from ..context.budgeter import MODEL_LIMITS as _CANONICAL_LIMITS
+from ..context.tokens import estimate_tokens_heuristic
 
 
 # RAG-specific context windows not present in the canonical budgeter table
@@ -285,11 +286,9 @@ def estimate_tokens(text: str) -> int:
     Returns:
         Estimated token count
     """
-    if not text:
-        return 0
-    # Average of 4 characters per token for English
-    # This is a conservative estimate
-    return len(text) // 4 + 1
+    # Delegate to the canonical estimator so dense (CJK/non-ASCII) text is not
+    # under-counted ~5x and over-filled past the budget.
+    return estimate_tokens_heuristic(text)
 
 
 class DefaultBudgetEnforcer:

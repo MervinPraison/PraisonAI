@@ -349,9 +349,13 @@ class PermissionAllowlist:
             with open(filepath, "r") as f:
                 data = json.load(f)
         except json.JSONDecodeError:
+            # Fail closed: a corrupt allowlist grants nothing.
             from ..utils.atomic_io import quarantine_corrupt_file
-            dest = quarantine_corrupt_file(filepath)
-            logger.warning("Corrupt permission allowlist %s moved to %s; starting empty", filepath, dest)
+            try:
+                dest = quarantine_corrupt_file(filepath)
+                logger.warning("Corrupt permission allowlist %s moved to %s; starting empty", filepath, dest)
+            except OSError:
+                logger.warning("Corrupt permission allowlist %s; ignoring it", filepath)
             return allowlist
         for tool_name, tool_data in data.get("tools", {}).items():
             allowlist.add_tool(tool_name, paths=tool_data.get("allowed_paths", []), session_only=tool_data.get("session_only", False))

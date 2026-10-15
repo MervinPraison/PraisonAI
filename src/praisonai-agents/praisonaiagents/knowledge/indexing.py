@@ -417,7 +417,7 @@ class FileTracker:
             return
         
         try:
-            os.makedirs(os.path.dirname(self._state_file), exist_ok=True)
+            os.makedirs(os.path.dirname(self._state_file) or ".", exist_ok=True)
             from ..utils.atomic_io import atomic_write_json
             atomic_write_json(self._state_file, self._tracked, indent=2)
         except (OSError, IOError):
