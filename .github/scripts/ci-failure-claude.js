@@ -221,10 +221,8 @@ async function maybeTriggerCiFixClaude(github, owner, repo, prNumber, core, opts
   if (pr.state !== 'open') return { skipped: true, reason: 'not open' };
   if (pr.draft) return { skipped: true, reason: 'draft' };
 
-  const headRepo = pr.head.repo?.full_name;
-  if (headRepo && headRepo !== baseRepo && !pr.maintainer_can_modify) {
-    return { skipped: true, reason: 'fork without maintainer edits' };
-  }
+  // Never hand fork code to Claude automatically (a deleted fork has head.repo null).
+  if (pr.head.repo?.full_name !== baseRepo) return { skipped: true, reason: 'fork PR' };
 
   const headSha = pr.head.sha;
   const labels = ctx.labels;

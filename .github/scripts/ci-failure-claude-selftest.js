@@ -130,4 +130,17 @@ const failedRuns = mergeGate.listFailedChecksOnSha([
 assert('listFailedChecksOnSha finds failures only', failedRuns.length === 1);
 assert('failed check name', failedRuns[0].name === 'test-core (cli)');
 
-process.exit(failed ? 1 : 0);
+// Fork code must never be handed to Claude automatically, even with maintainer edits on.
+(async () => {
+  const realLoad = mergeGate.loadPrContext;
+  for (const [label, repo] of [['fork with maintainer edits', { full_name: 'someone/r' }], ['deleted fork', null]]) {
+    mergeGate.loadPrContext = async () => ({
+      pr: { state: 'open', draft: false, maintainer_can_modify: true, head: { repo, sha: headSha } },
+      labels: [],
+    });
+    const res = await ciFix.maybeTriggerCiFixClaude({}, 'o', 'r', 1, null);
+    assert(`no automatic CI-fix request on a ${label}`, res.skipped && res.reason === 'fork PR');
+  }
+  mergeGate.loadPrContext = realLoad;
+  process.exit(failed ? 1 : 0);
+})();

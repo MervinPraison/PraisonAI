@@ -140,9 +140,8 @@ jobs:
 
               if (status !== 'DIRTY') return { skipped: true, reason: 'not dirty' };
               if (isDraft) return { skipped: true, reason: 'draft' };
-              if (headRepo && headRepo !== baseRepo && !maintainerCanModify) {
-                return { skipped: true, reason: 'fork without maintainer edits' };
-              }
+              // Never hand fork code to Claude automatically (a deleted fork has no head repo).
+              if (headRepo !== baseRepo) return { skipped: true, reason: 'fork PR' };
               if (labels.includes(LABEL)) {
                 return { skipped: true, reason: 'conflict resolution pending' };
               }
