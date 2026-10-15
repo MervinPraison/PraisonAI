@@ -183,5 +183,118 @@ class TestRealtimeAgentConfigResolution(unittest.TestCase):
         assert agent._realtime_config.voice == "fable"
 
 
+
+class TestRealtimeAgentGA(unittest.TestCase):
+    """GA Realtime wire protocol (beta interface was retired)."""
+
+    def test_default_model_is_ga(self):
+        from praisonaiagents import RealtimeAgent
+        assert RealtimeAgent().llm == "gpt-realtime"
+
+    def test_session_payload_ga_shape(self):
+        from praisonaiagents.agent.realtime_agent import RealtimeConfig
+        session = RealtimeConfig(voice="nova", instructions="hi",
+                                 max_response_output_tokens=100).to_session()
+        assert session["type"] == "realtime"
+        assert session["output_modalities"] == ["audio"]
+        assert session["audio"]["output"]["voice"] == "nova"
+        assert session["audio"]["input"]["format"] == {"type": "audio/pcm", "rate": 24000}
+        assert session["audio"]["input"]["turn_detection"] == {"type": "server_vad"}
+        assert session["instructions"] == "hi"
+        assert session["max_output_tokens"] == 100
+        assert "temperature" not in session and "modalities" not in session
+
+    def test_text_only_and_no_vad(self):
+        from praisonaiagents.agent.realtime_agent import RealtimeConfig
+        session = RealtimeConfig(modalities=["text"], turn_detection="none",
+                                 input_audio_format="g711_ulaw").to_session()
+        assert session["output_modalities"] == ["text"]
+        assert session["audio"]["input"]["turn_detection"] is None
+        assert session["audio"]["input"]["format"] == {"type": "audio/pcmu"}
+
+    def test_temperature_deprecated_and_ignored(self):
+        import warnings
+        from praisonaiagents.agent.realtime_agent import RealtimeConfig
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            session = RealtimeConfig(temperature=0.5).to_session()
+        assert "temperature" not in session
+        assert any(issubclass(x.category, DeprecationWarning) for x in w)
+
+    def test_connect_against_local_server(self):
+        """aconnect() must work with the installed websockets client."""
+        import asyncio
+        import json
+        import os
+        from unittest.mock import patch
+        try:
+            import websockets
+        except ImportError:
+            self.skipTest("websockets not installed")
+        from praisonaiagents import RealtimeAgent
+
+        async def run():
+            received, headers = [], []
+            original_connect = websockets.connect
+
+            async def handler(connection):
+                req = getattr(connection, "request", None)
+                headers.append(dict(req.headers) if req else dict(connection.request_headers))
+                async for message in connection:
+                    received.append(json.loads(message))
+
+            async with websockets.serve(handler, "127.0.0.1", 0) as server:
+                port = server.sockets[0].getsockname()[1]
+
+                def local_connect(url, **kwargs):
+                    return original_connect(f"ws://127.0.0.1:{port}", **kwargs)
+
+                agent = RealtimeAgent(verbose=False)
+                with patch.dict(os.environ, {"OPENAI_API_KEY": "local-fixture-only"}), \
+                     patch.object(websockets, "connect", local_connect):
+                    connected = await agent.aconnect()
+                    await asyncio.sleep(0.1)
+                    await agent.adisconnect()
+            return connected, received, headers
+
+        connected, received, headers = asyncio.run(run())
+        assert connected is True
+        assert received[0]["type"] == "session.update"
+        assert received[0]["session"]["type"] == "realtime"
+        lowered = {k.lower(): v for k, v in headers[0].items()}
+        assert lowered["authorization"] == "Bearer local-fixture-only"
+        assert "openai-beta" not in lowered
+
+    def test_receive_loop_handles_ga_events(self):
+        import asyncio
+        import base64
+        import json
+        from praisonaiagents import RealtimeAgent
+
+        class FakeWS:
+            def __init__(self, msgs):
+                self._msgs = msgs
+
+            def __aiter__(self):
+                return self._gen()
+
+            async def _gen(self):
+                for m in self._msgs:
+                    yield m
+
+        agent = RealtimeAgent(verbose=False)
+        texts, audio = [], []
+        agent.on_message(texts.append)
+        agent.on_audio(audio.append)
+        agent._connected = True
+        agent._ws = FakeWS([
+            json.dumps({"type": "response.output_text.delta", "delta": "hi"}),
+            json.dumps({"type": "response.output_audio.delta",
+                        "delta": base64.b64encode(b"ab").decode()}),
+        ])
+        asyncio.run(agent.receive_loop())
+        assert texts == ["hi"]
+        assert audio == [b"ab"]
+
 if __name__ == "__main__":
     unittest.main()
