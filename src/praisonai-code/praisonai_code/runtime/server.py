@@ -160,9 +160,10 @@ class WarmRuntime:
         self.last_activity = time.time()
         # Event hub used to fan out live session events to attached clients.
         self.hub = hub or SessionEventHub()
-        # Event-stream id -> agent currently executing a turn for it, so an
-        # attached client can steer/interrupt that live turn.
-        self._live: Dict[str, Any] = {}
+        # Event-stream id -> agents currently executing a turn for it, so an
+        # attached client can steer/interrupt the live turn. A list because two
+        # runs (different sessions/models) may share one ``--attach`` label.
+        self._live: Dict[str, List[Any]] = {}
 
     def _refresh_if_definitions_changed(self) -> None:
         """Drop warm agents when rules/tools/definition files were edited.
@@ -286,7 +287,7 @@ class WarmRuntime:
             self._session_models.pop(session_id, None)
 
     def _start_live(self, agent: Any, prompt: str, stream_id: Optional[str]) -> Any:
-        """Run ``agent.start`` while registered as the live turn for ``stream_id``.
+        """Run ``agent.start`` while registered as a live turn for ``stream_id``.
 
         Any interrupt or steering left over from a previous turn is cleared first
         so it cannot leak into this one (the warm agent is reused across turns
@@ -295,51 +296,57 @@ class WarmRuntime:
         _reset_live_control(agent)
         if stream_id:
             with self._lock:
-                self._live[stream_id] = agent
+                self._live.setdefault(stream_id, []).append(agent)
         try:
             return agent.start(prompt)
         finally:
             if stream_id:
                 with self._lock:
-                    if self._live.get(stream_id) is agent:
+                    live = self._live.get(stream_id, [])
+                    if agent in live:
+                        live.remove(agent)
+                    if not live:
                         self._live.pop(stream_id, None)
             _reset_live_control(agent)
 
-    def _live_agent(self, stream_id: str) -> Any:
-        with self._lock:
-            return self._live.get(stream_id)
-
     def steer(self, stream_id: str, message: str, priority: int = 5) -> bool:
-        """Queue a steering message into the live turn for ``stream_id``.
+        """Queue a steering message into the live turn(s) for ``stream_id``.
 
         Returns False when no turn is running for that id.
         """
-        agent = self._live_agent(stream_id)
-        if agent is None or not agent.steer(message, priority=priority):
-            return False
-        self.hub.publish(stream_id, {
-            "type": "run.steer",
-            "session_id": stream_id,
-            "message": message,
-        })
-        return True
+        # Lookup and delivery share the lock that deregisters a finished turn,
+        # so a late request can never reach the agent's next (unrelated) turn.
+        with self._lock:
+            ok = False
+            for agent in self._live.get(stream_id, []):
+                ok = bool(agent.steer(message, priority=priority)) or ok
+        if ok:
+            self.hub.publish(stream_id, {
+                "type": "run.steer",
+                "session_id": stream_id,
+                "message": message,
+            })
+        return ok
 
     def interrupt(self, stream_id: str, reason: str = "attach") -> bool:
-        """Request cooperative cancel of the live turn for ``stream_id``.
+        """Request cooperative cancel of the live turn(s) for ``stream_id``.
 
         Returns False when no turn is running for that id.
         """
-        agent = self._live_agent(stream_id)
-        controller = getattr(agent, "interrupt_controller", None)
-        if controller is None:
-            return False
-        controller.request(reason)
-        self.hub.publish(stream_id, {
-            "type": "run.interrupt",
-            "session_id": stream_id,
-            "reason": reason,
-        })
-        return True
+        with self._lock:
+            ok = False
+            for agent in self._live.get(stream_id, []):
+                controller = getattr(agent, "interrupt_controller", None)
+                if controller is not None:
+                    controller.request(reason)
+                    ok = True
+        if ok:
+            self.hub.publish(stream_id, {
+                "type": "run.interrupt",
+                "session_id": stream_id,
+                "reason": reason,
+            })
+        return ok
 
     def run(
         self,

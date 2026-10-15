@@ -38,6 +38,20 @@ class _LiveAgent:
         return f"stopped: {self.interrupt_controller.reason}"
 
 
+def _live(runtime, stream_id):
+    with runtime._lock:
+        return list(runtime._live.get(stream_id, []))
+
+
+def _wait_live(runtime, stream_id, count=1):
+    for _ in range(200):
+        agents = _live(runtime, stream_id)
+        if len(agents) >= count:
+            return agents
+        time.sleep(0.01)
+    return _live(runtime, stream_id)
+
+
 def _run_in_thread(runtime, **kwargs):
     out = {}
     t = threading.Thread(target=lambda: out.setdefault("r", runtime.run("go", **kwargs)))
@@ -57,12 +71,8 @@ def test_steer_and_interrupt_reach_live_session_turn():
             lambda *a, **k: None,
         )
         t, out = _run_in_thread(runtime, session_id="s1")
-        for _ in range(200):
-            if runtime._live_agent("s1") is not None:
-                break
-            time.sleep(0.01)
-        agent = runtime._live_agent("s1")
-        assert agent is not None and agent.started.wait(2)
+        (agent,) = _wait_live(runtime, "s1")
+        assert agent.started.wait(2)
 
         assert runtime.steer("s1", "also update the tests") is True
         for _ in range(200):
@@ -76,12 +86,42 @@ def test_steer_and_interrupt_reach_live_session_turn():
 
     assert out["r"] == "stopped: attach"
     # Live registration and interrupt state are cleared after the turn.
-    assert runtime._live_agent("s1") is None
+    assert _live(runtime, "s1") == []
     assert not agent.interrupt_controller.is_set()
     types = []
     while not events.empty():
         types.append(events.get_nowait()["type"])
     assert types == ["run.start", "run.steer", "run.interrupt", "run.result"]
+
+
+def test_shared_attach_label_keeps_both_runs_controllable():
+    """Two sessions streaming to one --attach label must not replace each other."""
+    runtime = WarmRuntime()
+    with pytest.MonkeyPatch.context() as mp:
+        import praisonaiagents
+
+        mp.setattr(praisonaiagents, "Agent", _LiveAgent, raising=False)
+        mp.setattr(
+            "praisonai_code.cli.state.project_sessions.apply_cli_session_continuity",
+            lambda *a, **k: None,
+        )
+        t1, _ = _run_in_thread(runtime, session_id="a", event_id="shared")
+        t2, _ = _run_in_thread(runtime, session_id="b", event_id="shared")
+        first, second = _wait_live(runtime, "shared", count=2)
+        assert first.started.wait(2) and second.started.wait(2)
+
+        # Finishing one run must leave the other registered and controllable.
+        first.interrupt_controller.request("done")
+        for _ in range(200):
+            if _live(runtime, "shared") == [second]:
+                break
+            time.sleep(0.01)
+        assert _live(runtime, "shared") == [second]
+        assert runtime.interrupt("shared") is True
+        t1.join(2)
+        t2.join(2)
+    assert _live(runtime, "shared") == []
+    assert runtime.interrupt("shared") is False
 
 
 def test_control_without_live_turn_returns_false():
