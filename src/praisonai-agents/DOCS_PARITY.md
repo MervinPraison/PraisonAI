@@ -44,7 +44,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Files | 2 | 7 | 2376 |
 | ✅ Flow | 1 | 3 | 811 |
 | ✅ Gateway | 7 | 103 | 39813 |
-| ✅ Guardrails | 5 | 4 | 2642 |
+| ✅ Guardrails | 5 | 4 | 2631 |
 | ✅ Handoffs | 11 | 6 | 2812 |
 | ✅ Hooks | 2 | 9 | 5317 |
 | ✅ Image | 1 | 11 | 1346 |
@@ -64,7 +64,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Providers | 1 | 57 | 8661 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 3284 |
-| ✅ Realtime | 2 | 5 | 674 |
+| ✅ Realtime | 2 | 5 | 696 |
 | ✅ Reflection | 3 | 3 | 732 |
 | ✅ Retrieval | 2 | 5 | 1068 |
 | ✅ Routing | 1 | 2 | 430 |
@@ -75,7 +75,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Tasks | 2 | 8 | 3266 |
 | ✅ Telemetry | 1 | 2 | 660 |
 | ✅ Templates | 1 | 9 | 1859 |
-| ✅ Tools | 12 | 147 | 45501 |
+| ✅ Tools | 12 | 147 | 45624 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1219 |
 | ✅ Video | 2 | 10 | 1383 |
