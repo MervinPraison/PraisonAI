@@ -137,3 +137,24 @@ def test_user_chat_template_kwargs_wins(monkeypatch):
     params = LLM(model="nvidia/nemotron-super", reasoning_effort="off")._build_completion_params(
         chat_template_kwargs={"enable_thinking": True})
     assert params["chat_template_kwargs"] == {"enable_thinking": True}
+
+
+def test_failover_profile_nvidia_model_is_routed(monkeypatch):
+    from unittest.mock import Mock, patch
+    from praisonaiagents.llm.failover import AuthProfile, FailoverManager
+
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-x")
+    manager = FailoverManager()
+    manager.add_profile(AuthProfile(name="primary", provider="openai", api_key="sk-primary", priority=0))
+    manager.add_profile(AuthProfile(name="nim", provider="nvidia", api_key="", model="nvidia/nemotron-super", priority=1))
+    llm = LLM(model="gpt-4o-mini", failover_manager=manager)
+    llm._max_retries = 2
+    llm._retry_delay = 0.01
+    func = Mock(side_effect=[Exception("AuthenticationError: 401 Unauthorized"), "ok"])
+
+    with patch("time.sleep"):
+        assert llm._call_with_retry(func, model="gpt-4o-mini", api_key="sk-primary") == "ok"
+
+    retried = func.call_args_list[1].kwargs
+    assert retried["model"] == SUPER
+    assert retried["api_key"] == "nvapi-x"

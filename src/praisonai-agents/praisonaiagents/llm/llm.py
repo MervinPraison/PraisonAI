@@ -1240,12 +1240,19 @@ Respond with ONLY a valid JSON tool call in this format:
         values fill in the gaps.
         """
         kwargs = dict(kwargs)
+        if profile.model:
+            # Params were already built, so route nvidia/ ids to NIM here too.
+            from .model_providers import to_litellm_nvidia_nim
+            nim_model = to_litellm_nvidia_nim(profile.model)
+            if nim_model and not str(kwargs.get("model", "")).startswith("nvidia_nim/"):
+                # A key carried over from a non-NIM profile is not an NVIDIA key.
+                kwargs.pop("api_key", None)
+            kwargs["model"] = nim_model or profile.model
         if profile.api_key:
             kwargs["api_key"] = profile.api_key
         if profile.base_url:
             kwargs["base_url"] = profile.base_url
-        if profile.model:
-            kwargs["model"] = profile.model
+        self._apply_nvidia_nim_credentials(kwargs)
         return kwargs
 
     def _resolve_subscription_creds(self):
