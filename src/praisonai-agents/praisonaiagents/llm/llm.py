@@ -1243,11 +1243,11 @@ Respond with ONLY a valid JSON tool call in this format:
         if profile.model:
             # Params were already built, so route nvidia/ ids to NIM here too.
             from .model_providers import to_litellm_nvidia_nim
-            nim_model = to_litellm_nvidia_nim(profile.model)
-            if nim_model and not str(kwargs.get("model", "")).startswith("nvidia_nim/"):
-                # A key carried over from a non-NIM profile is not an NVIDIA key.
+            new_model = to_litellm_nvidia_nim(profile.model) or profile.model
+            if self._crosses_nim_boundary(kwargs.get("model"), new_model):
+                # A key carried over across the NIM boundary is the wrong vendor's.
                 kwargs.pop("api_key", None)
-            kwargs["model"] = nim_model or profile.model
+            kwargs["model"] = new_model
         if profile.api_key:
             kwargs["api_key"] = profile.api_key
         if profile.base_url:
@@ -7035,6 +7035,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         return f"openai/{model}"
 
     @staticmethod
+    def _crosses_nim_boundary(old_model: Any, new_model: Any) -> bool:
+        """True when a model switch moves onto or off the NVIDIA NIM route."""
+        return str(old_model or "").startswith("nvidia_nim/") != str(new_model or "").startswith("nvidia_nim/")
+
+    @staticmethod
     def _apply_nvidia_nim_credentials(params: Dict[str, Any]) -> None:
         """Give an ``nvidia_nim/`` request an NVIDIA key, never the OpenAI one.
 
@@ -7139,6 +7144,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 params["extra_headers"] = extra_headers
         
         # Override with any provided parameters
+        base_model = params.get("model")
         params.update(override_params)
 
         # A per-call or failover-profile model override bypasses
@@ -7147,6 +7153,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         nim_model = to_litellm_nvidia_nim(params.get("model"))
         if nim_model:
             params["model"] = nim_model
+        if "api_key" not in override_params and self._crosses_nim_boundary(base_model, params.get("model")):
+            # The instance key belongs to the other vendor; let the target's own key apply.
+            params.pop("api_key", None)
         self._apply_nvidia_nim_credentials(params)
 
         # Resolve temperature from the instance when the caller did not specify

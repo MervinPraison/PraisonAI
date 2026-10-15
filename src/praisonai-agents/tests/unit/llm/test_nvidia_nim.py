@@ -158,3 +158,27 @@ def test_failover_profile_nvidia_model_is_routed(monkeypatch):
     retried = func.call_args_list[1].kwargs
     assert retried["model"] == SUPER
     assert retried["api_key"] == "nvapi-x"
+
+
+def test_instance_key_not_carried_across_nim_boundary(monkeypatch):
+    monkeypatch.setenv("NVIDIA_API_KEY", "nvapi-x")
+    # An explicit OpenAI key on the LLM must not reach NIM on a per-call switch...
+    params = LLM(model="gpt-4o-mini", api_key="sk-explicit")._build_completion_params(model="nvidia/nemotron-super")
+    assert params["api_key"] == "nvapi-x"
+    # ...and an explicit NVIDIA key must not reach OpenAI the other way round.
+    params = LLM(model="nvidia/nemotron-super", api_key="nvapi-explicit")._build_completion_params(model="gpt-4o-mini")
+    assert "api_key" not in params
+    # A per-call api_key is still honoured.
+    params = LLM(model="gpt-4o-mini", api_key="sk-explicit")._build_completion_params(
+        model="nvidia/nemotron-super", api_key="nvapi-call")
+    assert params["api_key"] == "nvapi-call"
+
+
+def test_failover_off_nim_drops_nvidia_key(monkeypatch):
+    from praisonaiagents.llm.failover import AuthProfile
+
+    llm = LLM(model="nvidia/nemotron-super")
+    profile = AuthProfile(name="openai", provider="openai", api_key="", model="gpt-4o-mini")
+    kwargs = llm._apply_profile_to_kwargs(profile, {"model": SUPER, "api_key": "nvapi-x"})
+    assert kwargs["model"] == "gpt-4o-mini"
+    assert "api_key" not in kwargs
