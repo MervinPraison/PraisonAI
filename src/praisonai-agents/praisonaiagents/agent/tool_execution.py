@@ -4493,7 +4493,7 @@ class ToolExecutionMixin:
                 return "timeout"
             elif ("rate" in error_msg and "limit" in error_msg) or "too many requests" in error_msg:
                 return "rate_limit"
-            elif "connection" in error_msg or "network" in error_msg:
+            elif "connect" in error_msg or "network" in error_msg:
                 return "connection_error"
         
         # Check exception type
@@ -4505,8 +4505,8 @@ class ToolExecutionMixin:
                 return "timeout"
             elif ("rate" in exc_msg and "limit" in exc_msg) or "too many requests" in exc_msg:
                 return "rate_limit"  
-            elif ("connection" in exc_msg or "network" in exc_msg or 
-                  "connection" in exc_type):
+            elif ("connect" in exc_msg or "network" in exc_msg or
+                  "connect" in exc_type):
                 return "connection_error"
         
         return "unknown"

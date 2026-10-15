@@ -91,3 +91,27 @@ def test_agent_retries_transient_remote_mcp_failure(monkeypatch, loop):
 
     assert agent._execute_tool_with_circuit_breaker("lookup", {}) == "ok"
     assert call_tool.await_count == 2
+
+
+def test_agent_retries_httpx_style_connect_error(monkeypatch, loop):
+    """httpx ``ConnectError`` (often empty/DNS message) is classified as a connection error."""
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    from types import SimpleNamespace
+
+    from praisonaiagents import Agent
+    from praisonaiagents.tools.retry import RetryPolicy
+
+    class ConnectError(Exception):
+        pass
+
+    call_tool = AsyncMock(side_effect=[
+        ConnectError("[Errno -3] Temporary failure in name resolution"),
+        SimpleNamespace(isError=False, content=[SimpleNamespace(text="ok")]),
+    ])
+    tool = _make_tool("praisonaiagents.mcp.mcp_http_stream", "HTTPStreamMCPTool", loop, call_tool)
+    agent = Agent(name="t", instructions="x", tools=[tool], llm="gpt-4o-mini")
+    agent._tool_retry_policy = RetryPolicy(max_attempts=3, initial_delay_ms=0, max_delay_ms=0)
+
+    assert agent._classify_error_type(remote_tool_error("lookup", ConnectError(), 5), None) == "connection_error"
+    assert agent._execute_tool_with_circuit_breaker("lookup", {}) == "ok"
+    assert call_tool.await_count == 2
