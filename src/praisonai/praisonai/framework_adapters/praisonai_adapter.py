@@ -1004,7 +1004,8 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             if want_metrics:
                 from . import _run_metrics
                 metrics = _run_metrics.RunMetrics(team)
-            written = self._track_output_files(team)
+            # Only --trust runs check output_file writes; skip the read-back otherwise.
+            written = self._track_output_files(team) if cli.get('trust') else set()
             try:
                 # Use native async path
                 response = await team.astart()
