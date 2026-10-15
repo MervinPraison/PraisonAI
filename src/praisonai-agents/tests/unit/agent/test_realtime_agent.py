@@ -217,9 +217,13 @@ class TestRealtimeAgentGA(unittest.TestCase):
         from praisonaiagents.agent.realtime_agent import RealtimeConfig
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            session = RealtimeConfig(temperature=0.5).to_session()
+            config = RealtimeConfig(temperature=0.5)
+        # Warned once at construction, pointing at the caller.
+        assert [x.filename for x in w if issubclass(x.category, DeprecationWarning)] == [__file__]
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            session = config.to_session()
         assert "temperature" not in session
-        assert any(issubclass(x.category, DeprecationWarning) for x in w)
 
     def test_connect_against_local_server(self):
         """aconnect() must work with the installed websockets client."""

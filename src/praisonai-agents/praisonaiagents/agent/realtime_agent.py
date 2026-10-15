@@ -31,19 +31,21 @@ class RealtimeConfig:
     max_response_output_tokens: Optional[int] = None
     instructions: Optional[str] = None
     
+    def __post_init__(self):
+        if self.temperature is not None:
+            warnings.warn(
+                "RealtimeConfig.temperature is ignored: the GA Realtime API "
+                "does not support a session temperature.",
+                DeprecationWarning,
+                stacklevel=4,
+            )
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary."""
         return {k: v for k, v in asdict(self).items() if v is not None}
 
     def to_session(self) -> Dict[str, Any]:
         """Build a GA Realtime ``session.update`` payload from this config."""
-        if self.temperature is not None:
-            warnings.warn(
-                "RealtimeConfig.temperature is ignored: the GA Realtime API "
-                "does not support a session temperature.",
-                DeprecationWarning,
-                stacklevel=3,
-            )
         turn_detection = (
             None if self.turn_detection in (None, "none")
             else {"type": self.turn_detection}
