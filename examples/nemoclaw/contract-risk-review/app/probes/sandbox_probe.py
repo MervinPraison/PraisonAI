@@ -12,6 +12,7 @@ import json
 import os
 import socket
 import ssl
+import stat
 import sys
 import urllib.error
 import urllib.request
@@ -20,6 +21,7 @@ from pathlib import Path
 CA_BUNDLE = os.environ.get("SSL_CERT_FILE", "/etc/openshell-tls/ca-bundle.pem")
 INFERENCE_MODELS = os.environ.get("OPENAI_BASE_URL", "https://inference.local/v1").rstrip("/") + "/models"
 TIMEOUT = 10
+CANARY = "/etc/praisonai-canary"
 
 
 def _ssl_context():
@@ -68,6 +70,23 @@ def check_etc_hosts_denied():
         return True, f"{type(exc).__name__}: {exc}"
 
 
+def check_etc_canary_denied():
+    """/etc/hosts is root-owned, so its check passes on file permissions alone.
+    The canary is owned by this user, so only the read-only /etc policy can deny it."""
+    try:
+        st = os.stat(CANARY)
+    except OSError as exc:
+        return False, f"{CANARY} missing ({type(exc).__name__}); rebuild the image"
+    if st.st_uid != os.getuid() or not st.st_mode & stat.S_IWUSR:
+        return False, f"{CANARY} is not owner-writable by uid {os.getuid()}; check proves nothing"
+    try:
+        with open(CANARY, "a", encoding="utf-8") as f:
+            f.write("")
+        return False, f"opened {CANARY} for append; /etc is not read-only"
+    except OSError as exc:
+        return True, f"{type(exc).__name__}: {exc}"
+
+
 def _check_write(path):
     try:
         Path(path).write_text("ok\n", encoding="utf-8")
@@ -81,6 +100,7 @@ CHECKS = [
     ("raw_socket_1.1.1.1_443", "denied", check_raw_socket_denied),
     ("inference_local_models", "2xx", check_inference_allowed),
     ("etc_hosts_append", "denied", check_etc_hosts_denied),
+    ("etc_canary_append", "denied", check_etc_canary_denied),
     ("write_workdir", "success", lambda: _check_write(Path.cwd() / "ok.txt")),
     ("write_tmp", "success", lambda: _check_write("/tmp/ok.txt")),
 ]

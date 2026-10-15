@@ -18,8 +18,11 @@ RUN apt-get update \
 RUN python -m venv /opt/venv \
  && /opt/venv/bin/pip install --no-cache-dir "praisonai==${PRAISONAI_VERSION}"
 
+# The canary is owned by `sandbox`, so file permissions allow the write and only
+# the policy's read-only /etc can block it (see probes/sandbox_probe.py).
 RUN groupadd -g 1000 sandbox \
- && useradd -m -d /sandbox -u 1000 -g sandbox -s /bin/bash sandbox
+ && useradd -m -d /sandbox -u 1000 -g sandbox -s /bin/bash sandbox \
+ && install -o sandbox -g sandbox -m 0644 /dev/null /etc/praisonai-canary
 
 # Root-owned and read-only to the agent; run.sh copies it to /sandbox/work.
 COPY app/ /app/
