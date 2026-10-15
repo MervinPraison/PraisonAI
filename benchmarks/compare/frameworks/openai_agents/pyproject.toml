@@ -1,0 +1,12 @@
+# Benchmark environment for "openai_agents". Not a package: run.py syncs it with
+# `uv sync` and runs the probes with its interpreter. The weekly job
+# refreshes uv.lock (`uv lock --upgrade`) in the results PR.
+[project]
+name = "bench-openai-agents"
+version = "0"
+requires-python = "==3.12.*"
+dependencies = ["openai-agents>=0.2"]
+
+[tool.uv]
+package = false
+

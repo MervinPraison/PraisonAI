@@ -1,0 +1,165 @@
+name: Cross-framework benchmark
+
+# Weekly cross-framework benchmark against a local mock LLM (no LLM secrets).
+# Results reach main only through a PR; this workflow never pushes to main.
+# Methodology: benchmarks/compare/README.md
+
+on:
+  schedule:
+    - cron: "0 4 * * 0"  # weekly, Sunday 04:00 UTC
+  workflow_dispatch:
+    inputs:
+      frameworks:
+        description: "Comma-separated frameworks, or 'all'"
+        default: "all"
+      scale:
+        description: "Multiplier for every sample count"
+        default: "1"
+      frozen:
+        description: "Re-run the committed lockfiles instead of upgrading them"
+        type: boolean
+        default: false
+  pull_request:
+    paths:
+      - "benchmarks/compare/**"
+      - "scripts/proof_points.py"
+      - ".github/workflows/benchmark-compare.yml"
+      - "README.md"
+      - "src/praisonai/README.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: benchmark-compare-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  UV_PYTHON: "3.12"
+
+jobs:
+  selftest:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4
+      - name: Harness self-tests
+        run: uv run --frozen --project benchmarks/compare/frameworks/raw_openai --with pytest pytest benchmarks/compare/tests -q
+      - name: Proof points are generated, not hand-typed
+        run: python3 scripts/proof_points.py --check
+      - name: Install ruff (S6 formats scenario files before counting)
+        run: uv tool install ruff && uv tool dir --bin >> "$GITHUB_PATH"
+      - name: Smoke run (raw_openai + praisonai)
+        run: |
+          python3 benchmarks/compare/run.py --frozen --frameworks raw_openai,praisonai --scale 0.1 --out /tmp/bench-smoke
+
+  bench:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4
+      - name: Upgrade competitor lockfiles
+        if: ${{ !inputs.frozen }}
+        run: |
+          for project in benchmarks/compare/frameworks/*/; do
+            uv lock --upgrade --project "$project"
+          done
+      - name: Install ruff (S6 formats scenario files before counting)
+        run: uv tool install ruff && uv tool dir --bin >> "$GITHUB_PATH"
+      - name: Install every framework into its own venv
+        run: |
+          for project in benchmarks/compare/frameworks/*/; do
+            # praisonai tracks main (path dependency), so it re-locks against the checkout.
+            if [ "$(basename "$project")" = praisonai ]; then uv sync --project "$project"
+            else uv sync --frozen --project "$project"; fi
+          done
+      - name: Run in a loopback-only network namespace
+        env:
+          FRAMEWORKS: ${{ inputs.frameworks || 'all' }}
+          SCALE: ${{ inputs.scale || '1' }}
+        run: |
+          [[ "$FRAMEWORKS" =~ ^[a-z_,]+$ && "$SCALE" =~ ^[0-9.]+$ ]] || { echo "::error::bad inputs"; exit 1; }
+          sudo -E unshare --net -- bash -c "ip link set lo up && exec sudo -E -u $USER \
+            env PATH=$PATH HOME=$HOME UV_OFFLINE=1 \
+            python3 benchmarks/compare/run.py --frozen --frameworks '$FRAMEWORKS' --scale '$SCALE'"
+      - name: Generate proof points
+        run: python3 scripts/proof_points.py --write
+      - uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          retention-days: 90
+          path: |
+            benchmarks/compare/results/
+            benchmarks/compare/frameworks/*/uv.lock
+            README.md
+            src/praisonai/README.md
+
+  publish:
+    needs: bench
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: benchmark-results
+      - name: Pull request summary
+        id: summary
+        run: |
+          {
+            echo "body<<EOF"
+            echo "Automated weekly cross-framework benchmark (run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)."
+            echo
+            echo "Results are published whether PraisonAI wins or loses. Review the contract failures and the lockfile changes before merging."
+            echo
+            cat benchmarks/compare/results/proof_points.md
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+      - uses: peter-evans/create-pull-request@v7
+        with:
+          branch: bench/weekly
+          delete-branch: true
+          title: "bench: weekly cross-framework results"
+          commit-message: "bench: weekly cross-framework results"
+          body: ${{ steps.summary.outputs.body }}
+          add-paths: |
+            benchmarks/compare/results/*.json
+            benchmarks/compare/results/proof_points.md
+            benchmarks/compare/frameworks/*/uv.lock
+            README.md
+            src/praisonai/README.md
+      - name: Checkout PraisonAIDocs
+        id: docs
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          repository: MervinPraison/PraisonAIDocs
+          path: PraisonAIDocs
+          token: ${{ secrets.SECRETS_ADMIN_PAT }}
+          persist-credentials: false
+      - name: Render docs snippet
+        if: steps.docs.outcome == 'success'
+        run: python3 scripts/proof_points.py --write --docs-snippet PraisonAIDocs/docs/snippets/proof-points.mdx
+      - if: steps.docs.outcome == 'success'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          path: PraisonAIDocs
+          token: ${{ secrets.SECRETS_ADMIN_PAT }}
+          branch: bench/weekly
+          delete-branch: true
+          title: "docs: weekly benchmark proof points"
+          commit-message: "docs: weekly benchmark proof points"
+          body: "Generated from ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          add-paths: docs/snippets/proof-points.mdx

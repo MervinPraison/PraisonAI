@@ -1,0 +1,11 @@
+# S1 · each framework's minimal import for building the S4 team.
+# raw_openai is the baseline and is never ranked.
+[imports]
+praisonai = "from praisonaiagents import Agent, AgentTeam"
+praisonai_release = "from praisonaiagents import Agent, AgentTeam"
+raw_openai = "from openai import OpenAI"
+langgraph = "from langgraph.graph import StateGraph, START, END; from langchain_openai import ChatOpenAI"
+crewai = "from crewai import Agent, Crew, Task, LLM, Process"
+agno = "from agno.agent import Agent; from agno.workflow import Workflow; from agno.models.openai import OpenAIChat"
+openai_agents = "from agents import Agent, Runner, OpenAIChatCompletionsModel, set_tracing_disabled; from openai import AsyncOpenAI"
+autogen = "from autogen_agentchat.agents import AssistantAgent; from autogen_agentchat.teams import RoundRobinGroupChat; from autogen_ext.models.openai import OpenAIChatCompletionClient"

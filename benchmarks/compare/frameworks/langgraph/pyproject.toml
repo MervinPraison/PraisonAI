@@ -1,0 +1,12 @@
+# Benchmark environment for "langgraph". Not a package: run.py syncs it with
+# `uv sync` and runs the probes with its interpreter. The weekly job
+# refreshes uv.lock (`uv lock --upgrade`) in the results PR.
+[project]
+name = "bench-langgraph"
+version = "0"
+requires-python = "==3.12.*"
+dependencies = ["langgraph>=1.0", "langchain-openai>=0.3"]
+
+[tool.uv]
+package = false
+

@@ -1,0 +1,14 @@
+# Benchmark environment for "praisonai". Not a package: run.py syncs it with
+# `uv sync` and runs the probes with its interpreter. The weekly job
+# refreshes uv.lock (`uv lock --upgrade`) in the results PR.
+[project]
+name = "bench-praisonai"
+version = "0"
+requires-python = "==3.12.*"
+dependencies = ["praisonaiagents"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+praisonaiagents = { path = "../../../../src/praisonai-agents", editable = false }

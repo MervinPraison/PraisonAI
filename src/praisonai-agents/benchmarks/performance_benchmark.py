@@ -137,8 +137,6 @@ def run_benchmark(func: Callable, name: str, iterations: int = 1000, warmup: int
 # Framework Imports
 # ============================================================================
 from praisonaiagents import Agent as PraisonAgent
-from agno.agent import Agent as AgnoAgent
-from agno.models.openai import OpenAIChat
 
 # Additional frameworks for comparison
 try:
@@ -204,6 +202,9 @@ def instantiate_praisonai_litellm_agent():
 
 def instantiate_agno_agent():
     """Instantiate an Agno agent with one tool."""
+    from agno.agent import Agent as AgnoAgent
+    from agno.models.openai import OpenAIChat
+
     return AgnoAgent(model=OpenAIChat(id="gpt-4o-mini"), tools=tools)
 
 
@@ -314,12 +315,9 @@ def save_benchmark_results(results: dict, baseline):
         avg_us = result.avg_run_time * 1e6
         ratio = result.avg_run_time / baseline.avg_run_time if baseline.avg_run_time > 0 else 0
         
-        if name == 'praisonai':
-            table_rows.append(f'| **{display_name}** | **{avg_us:.2f}** | **1.00x (fastest)** |')
-        else:
-            avg_str = f'{avg_us:,.2f}' if avg_us >= 1000 else f'{avg_us:.2f}'
-            ratio_str = f'{ratio:,.0f}x' if ratio >= 100 else f'{ratio:.2f}x'
-            table_rows.append(f'| {display_name} | {avg_str} | {ratio_str} |')
+        avg_str = f'{avg_us:,.2f}' if avg_us >= 1000 else f'{avg_us:.2f}'
+        ratio_str = f'{ratio:,.0f}x' if ratio >= 100 else f'{ratio:.2f}x'
+        table_rows.append(f'| {display_name} | {avg_str} | {ratio_str} |')
     
     # Save to BENCHMARK_RESULTS.md
     with open(filepath, 'w') as f:
@@ -497,7 +495,8 @@ if __name__ == "__main__":
     print("="*70)
     
     if 'praisonai' in results:
-        baseline = results['praisonai']
+        # Ratios are relative to the fastest framework, never to PraisonAI.
+        baseline = min(results.values(), key=lambda r: r.avg_run_time)
         
         print(f"\n{'Framework':<25} {'Avg Time (μs)':<15} {'Avg Memory (KiB)':<18} {'Relative':<15}")
         print("-" * 73)

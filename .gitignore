@@ -1,6 +1,7 @@
 workspace.code-workspace
 .vscode
 crewai
+!benchmarks/compare/frameworks/crewai/
 .cache
 __pycache__
 chroma.sqlite3

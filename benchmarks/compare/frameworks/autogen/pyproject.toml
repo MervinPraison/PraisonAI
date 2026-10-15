@@ -1,0 +1,12 @@
+# Benchmark environment for "autogen". Not a package: run.py syncs it with
+# `uv sync` and runs the probes with its interpreter. The weekly job
+# refreshes uv.lock (`uv lock --upgrade`) in the results PR.
+[project]
+name = "bench-autogen"
+version = "0"
+requires-python = "==3.12.*"
+dependencies = ["autogen-agentchat>=0.7", "autogen-ext[openai]>=0.7"]
+
+[tool.uv]
+package = false
+
