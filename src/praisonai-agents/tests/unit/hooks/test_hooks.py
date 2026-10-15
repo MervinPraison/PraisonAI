@@ -428,6 +428,30 @@ class TestHookRegistry:
         assert len(hooks_list["before_tool"]) == 1
         assert hooks_list["before_tool"][0]["name"] == "test_hook"
 
+    def test_has_hooks_matches_get_hooks(self):
+        """has_hooks() honours per-hook and global enable flags like get_hooks()."""
+        registry = HookRegistry()
+        assert not registry.has_hooks(HookEvent.BEFORE_TOOL)
+
+        hook_id = registry.register_function(
+            event=HookEvent.BEFORE_TOOL,
+            func=lambda data: HookResult.allow(),
+            matcher="write_*"
+        )
+        assert registry.has_hooks(HookEvent.BEFORE_TOOL)
+        assert not registry.has_hooks(HookEvent.AFTER_TOOL)
+
+        registry.disable_hook(hook_id)
+        assert not registry.has_hooks(HookEvent.BEFORE_TOOL)
+
+        registry.enable_hook(hook_id)
+        registry.enabled = False
+        assert not registry.has_hooks(HookEvent.BEFORE_TOOL)
+
+        registry.enabled = True
+        registry.unregister(hook_id)
+        assert not registry.has_hooks(HookEvent.BEFORE_TOOL)
+
 
 # =============================================================================
 # Event Input Tests
