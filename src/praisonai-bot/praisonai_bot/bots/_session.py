@@ -156,6 +156,32 @@ async def _null_async_context():
     yield
 
 
+def _bind_turn_clarify(asked: List[Any]):
+    """Bind the built-in ``clarify`` tool to this bot turn (Issue #5850).
+
+    A blocking "send and await reply" would deadlock on the per-user turn lock,
+    so the question is delivered with this turn's reply instead: choices become
+    ``MessagePresentation.question()`` reply buttons whose tap feeds the next
+    turn, and the agent is told to stop rather than guess. Returns a reset
+    token, or ``None`` when the core SDK lacks the binding.
+    """
+    try:
+        from praisonaiagents.tools.clarify import ClarifyHandler, set_clarify_handler
+    except ImportError:
+        return None
+
+    def _ask(question: str, choices: Optional[List[str]] = None) -> str:
+        asked.append((question, list(choices or [])))
+        return (
+            "Your question has been delivered to the user. Do not guess an answer: "
+            "end your turn now by restating the question"
+            + (" and its choices" if choices else "")
+            + ". Their answer will arrive as their next message."
+        )
+
+    return set_clarify_handler(ClarifyHandler(ask_callback=_ask))
+
+
 class BotSessionManager:
     """Lightweight per-user session store for bot agents.
 
@@ -1439,6 +1465,11 @@ class BotSessionManager:
                         # below while the turn executes.
                         self.note_run_progress()
 
+                        # Route the built-in ``clarify`` tool to the user for
+                        # this turn instead of its best-guess fallback.
+                        _clarify_asked: List[Any] = []
+                        _clarify_token = _bind_turn_clarify(_clarify_asked)
+
                         bridged_stream_callback = None
                         try:
                             # Choose streaming vs non-streaming path based on callback
@@ -1581,6 +1612,9 @@ class BotSessionManager:
                             raise
                         finally:
                             agent.chat_history = saved_history
+                            if _clarify_token is not None:
+                                from praisonaiagents.tools.clarify import reset_clarify_handler
+                                reset_clarify_handler(_clarify_token)
                             # Restore the agent's original toolset if a
                             # per-route policy scoped it for this turn.
                             if _restore_tools is not None:
@@ -1622,6 +1656,9 @@ class BotSessionManager:
                         )
                         storage_key = self._storage_key(user_id)
                         text, presentation = extract_presentation(response)
+                        if presentation is None and _clarify_asked and _clarify_asked[-1][1]:
+                            from praisonaiagents.bots.presentation import MessagePresentation
+                            presentation = MessagePresentation.question(*_clarify_asked[-1])
                         # Issue #3296: optionally surface *why* the turn ended.
                         # The completion is read from the agent-emitted result
                         # first (AgentReply/dict), falling back to the agent's
