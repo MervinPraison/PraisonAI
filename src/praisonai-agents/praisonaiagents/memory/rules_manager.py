@@ -194,7 +194,8 @@ class RulesManager:
         Find the git repository root from a starting path.
         
         Uses pure Python (no gitpython dependency) for performance.
-        Falls back to subprocess if needed.
+        Worktrees and submodules are covered by the walk-up (their ``.git``
+        is a file). ``git`` is only invoked when GIT_DIR/GIT_WORK_TREE is set.
         
         Args:
             start_path: Starting path (defaults to workspace_path)
@@ -212,7 +213,10 @@ class RulesManager:
                 return current
             current = current.parent
         
-        # Method 2: Fallback to git command (handles edge cases like worktrees)
+        # Method 2: Only GIT_DIR/GIT_WORK_TREE can locate a repo without a
+        # .git on disk; otherwise rev-parse would fail too (~9 ms per agent).
+        if not (os.environ.get("GIT_DIR") or os.environ.get("GIT_WORK_TREE")):
+            return None
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "--show-toplevel"],
