@@ -135,13 +135,56 @@ def test_failed_run_raises(mock_endpoint, tmp_path, monkeypatch):
 
 def test_run_failure_detection(tmp_path):
     failure = PraisonAIAdapter._run_failure
-    assert failure("text", [], 0) is None
-    assert failure({"task_status": {0: "failed", 1: "completed"}}, [], 0) == "1 of 2 task(s) failed"
+    done = lambda path=None: SimpleNamespace(status="completed", output_file=path)
+    assert failure("text", [done()], set()) is None
+    assert failure({"task_status": {0: "failed", 1: "completed"}}, [], set()) == "1 of 2 task(s) failed"
+    # Text response from the last task must not hide an earlier failed task.
+    failed = SimpleNamespace(status="failed", output_file=None)
+    assert failure("text", [failed, done()], set()) == "1 of 2 task(s) failed"
 
-    missing = SimpleNamespace(output_file=str(tmp_path / "missing.md"))
-    assert failure("text", [missing], 0) is None  # only checked for --trust runs
-    assert "missing.md" in failure("text", [missing], 0, check_files=True)
+    path = str(tmp_path / "out.md")
+    assert failure("text", [done(path)], set()) is None  # only checked for --trust runs
+    assert "out.md" in failure("text", [done(path)], set(), check_files=True)
+    assert failure("text", [done(path)], {path}, check_files=True) is None
+    # A task that never ran (e.g. skipped workflow branch) is not a write failure.
+    skipped = SimpleNamespace(status="not started", output_file=path)
+    assert failure("text", [skipped], set(), check_files=True) is None
 
-    written = tmp_path / "written.md"
-    written.write_text("x")
-    assert failure("text", [SimpleNamespace(output_file=str(written))], 0, check_files=True) is None
+
+def test_stale_output_file_is_not_counted_as_written(tmp_path):
+    path = tmp_path / "report.md"
+    path.write_text("OLD RUN")
+    task = SimpleNamespace(output_file=str(path))
+    team = SimpleNamespace(save_output_to_file=lambda t, out: None)  # write silently fails
+    written = PraisonAIAdapter._track_output_files(team)
+    team.save_output_to_file(task, "NEW RUN")
+    assert written == set()
+
+    team = SimpleNamespace(save_output_to_file=lambda t, out: path.write_text(str(out)))
+    written = PraisonAIAdapter._track_output_files(team)
+    team.save_output_to_file(task, "NEW RUN")
+    assert written == {str(path)}
+
+
+def test_run_metrics_counts_calls_and_closes_failed_timers():
+    from praisonaiagents.telemetry.token_collector import TokenMetrics, get_token_collector
+    from praisonai.framework_adapters._run_metrics import RunMetrics
+
+    agent = SimpleNamespace(name="Analyst", _approval_scope_id="id-1")
+    team = SimpleNamespace(
+        agents=[agent], on_task_start=None, on_task_complete=None,
+        get_token_usage_summary=lambda: {"by_agent": {}},
+    )
+    metrics = RunMetrics(team)
+    collector = get_token_collector()
+    for _ in range(150):  # more than the collector's recent-history cap
+        collector.track_tokens("m", "Analyst", TokenMetrics(), agent_id="id-1")
+    collector.track_tokens("m", "Analyst", TokenMetrics(), agent_id="other-team")
+    team.on_task_start(SimpleNamespace(agent=agent), 0)  # task fails: no complete hook
+    metrics.close()
+    collector.track_tokens("m", "Analyst", TokenMetrics(), agent_id="id-1")  # after run
+
+    row = metrics.report("m")["agents"][0]
+    assert row["calls"] == 150
+    assert row["latency_s"] >= 0 and "Analyst" in metrics.latency
+    assert "track_tokens" not in collector.__dict__ and team.on_task_start is None

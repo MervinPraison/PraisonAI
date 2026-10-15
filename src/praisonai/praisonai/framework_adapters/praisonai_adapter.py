@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 import os
-import time
 from typing import Any, Dict, List, Optional
 
 from .base import BaseFrameworkAdapter
@@ -1001,10 +1000,11 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             bridge, _ = self._attach_stream_bridge(team)
             cli = cli_config or {}
             want_metrics = cli.get('metrics') or cli.get('metrics_json')
+            metrics = None
             if want_metrics:
                 from . import _run_metrics
-                latency = _run_metrics.attach_latency_timer(team)
-            run_started = time.time()
+                metrics = _run_metrics.RunMetrics(team)
+            written = self._track_output_files(team)
             try:
                 # Use native async path
                 response = await team.astart()
@@ -1021,8 +1021,10 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 raise
             finally:
                 self._detach_stream_bridge(team, bridge)
+                if metrics is not None:
+                    metrics.close()
             result = f"### PraisonAI Output ###\n{response}" if response else "### PraisonAI Output ###\nTask completed."
-            failure = self._run_failure(response, tasks, run_started, check_files=cli.get('trust'))
+            failure = self._run_failure(response, tasks, written, check_files=cli.get('trust'))
             if bridge is not None:
                 if failure:
                     bridge.emit_run_error(failure)
@@ -1042,8 +1044,8 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 except Exception as e:  # never fail a completed run on save
                     logger.warning(f"Failed to save session state '{auto_save}': {e}")
 
-            if want_metrics:
-                report = _run_metrics.build_report(team, latency, model_name)
+            if metrics is not None:
+                report = metrics.report(model_name)
                 if cli.get('metrics'):
                     _run_metrics.print_table(report)
                 if cli.get('metrics_json'):
@@ -1066,27 +1068,52 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                     logger.error(f"Error stopping InteractiveRuntime: {e}")
     
     @staticmethod
-    def _run_failure(response, tasks, run_started, *, check_files=False) -> Optional[str]:
+    def _track_output_files(team) -> set:
+        """Record the ``output_file`` paths core actually wrote during this run.
+
+        Core's ``save_output_to_file`` only logs write errors, so wrap it on the
+        instance and verify the file now holds this run's output. A stale file
+        from an earlier run therefore never passes as written.
+        """
+        written: set = set()
+        original = team.save_output_to_file
+
+        def save_output_to_file(task, task_output):
+            original(task, task_output)
+            path = getattr(task, 'output_file', None)
+            if not path:
+                return
+            try:
+                with open(path) as f:
+                    if f.read() == str(task_output):
+                        written.add(path)
+            except OSError:
+                pass
+
+        team.save_output_to_file = save_output_to_file
+        return written
+
+    @staticmethod
+    def _run_failure(response, tasks, written, *, check_files=False) -> Optional[str]:
         """Return an error message when the team run failed, else ``None``.
 
-        ``AgentTeam.astart`` returns its status dict instead of the final text
-        when no final result was produced. With ``check_files`` (headless
-        ``--trust`` runs) a declared ``output_file`` that was not written this
-        run also counts as a failure, since core only logs that write error.
+        A task counts as failed when its final status is ``failed`` — this
+        holds even when ``AgentTeam.astart`` returns a later task's text rather
+        than its status dict. With ``check_files`` (headless ``--trust`` runs)
+        a declared ``output_file`` not written this run also counts, since core
+        only logs that write error.
         """
+        statuses = [getattr(t, 'status', None) for t in tasks]
         if isinstance(response, dict):
-            statuses = list((response.get('task_status') or {}).values())
-            failed = statuses.count('failed')
-            if failed:
-                return f"{failed} of {len(statuses)} task(s) failed"
+            statuses = list((response.get('task_status') or {}).values()) or statuses
+        failed = statuses.count('failed')
+        if failed:
+            return f"{failed} of {len(statuses)} task(s) failed"
         if check_files:
-            # 2s slack absorbs coarse filesystem mtime resolution.
+            # Only completed tasks: skipped workflow branches never write.
             missing = [
                 t.output_file for t in tasks
-                if t.output_file and (
-                    not os.path.isfile(t.output_file)
-                    or os.path.getmtime(t.output_file) < run_started - 2
-                )
+                if t.output_file and t.status == 'completed' and t.output_file not in written
             ]
             if missing:
                 return f"output_file not written: {', '.join(missing)}"
