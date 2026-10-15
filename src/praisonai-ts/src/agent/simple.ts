@@ -9,6 +9,7 @@ import { getEnv } from '../llm/openaiClientOptions';
 import { resolveDefaultModel } from '../llm/default-model';
 import { randomUUID } from '../utils/uuid';
 import { parseModelString } from '../llm/backend-resolver';
+import { nvidiaNimReasoningKwargs } from '../llm/providers/ai-sdk/nvidia-nim';
 import { notYetHonoured, unhonouredFor } from '../utils/parity-notice';
 import { Handoff, promptWithHandoffInstructions } from './handoff';
 import { Memory, type MemoryConfig } from '../memory/memory';
@@ -1357,7 +1358,8 @@ export class Agent {
     if (config.skills !== undefined) this._skillsInput = config.skills;
     this.retryConfig = resolveRetryConfig(config.retry);
 
-    if (config.reasoningEffort !== undefined && (this._useAISDKBackend || !this._fetchWrapped)) {
+    const nimReasoning = this._fetchWrapped && nvidiaNimReasoningKwargs(this.llm, config.reasoningEffort);
+    if (config.reasoningEffort !== undefined && !nimReasoning && (this._useAISDKBackend || !this._fetchWrapped)) {
       notYetHonoured(
         'Agent',
         'reasoningEffort',
@@ -1371,7 +1373,9 @@ export class Agent {
   /** Extra JSON body fields for OpenAI-compatible requests (see wrapFetchWithBodyExtras). */
   private requestExtras(): Record<string, unknown> {
     const extras: Record<string, unknown> = {};
-    if (this.reasoningEffort && this.reasoningEffort !== 'off') extras.reasoning_effort = this.reasoningEffort;
+    const nimReasoning = nvidiaNimReasoningKwargs(this.llm, this.reasoningEffort);
+    if (nimReasoning) extras.chat_template_kwargs = nimReasoning;
+    else if (this.reasoningEffort && this.reasoningEffort !== 'off') extras.reasoning_effort = this.reasoningEffort;
     if (this.defaultMaxTokens !== undefined) extras.max_tokens = this.defaultMaxTokens;
     if (this._turnSeed !== undefined) extras.seed = this._turnSeed;
     if (this._toolConfig?.parallel !== undefined) extras.parallel_tool_calls = this._toolConfig.parallel;

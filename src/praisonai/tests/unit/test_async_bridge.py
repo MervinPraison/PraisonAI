@@ -404,5 +404,29 @@ class TestAsyncScopedBridge(unittest.TestCase):
         )
 
 
+
+class TestShutdownWithStubbornTask(unittest.TestCase):
+    """Regression for #5773: a task ignoring cancellation must not make
+    ``shutdown()`` raise (it runs from scope ``__exit__`` and would mask the
+    caller's real exception)."""
+
+    def test_shutdown_does_not_raise_when_task_ignores_cancel(self):
+        bridge = AsyncBridge()
+        release = threading.Event()
+
+        async def _stubborn():
+            while not release.is_set():
+                try:
+                    await asyncio.sleep(0.05)
+                except asyncio.CancelledError:
+                    pass
+
+        bridge.submit(_stubborn())
+        try:
+            bridge.shutdown(timeout=0.2, permanent=True)  # must not raise
+        finally:
+            release.set()
+
+
 if __name__ == "__main__":
     unittest.main()

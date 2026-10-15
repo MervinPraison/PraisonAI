@@ -109,6 +109,71 @@ assert('PR #5772 shape: FINAL is current on HEAD', !mg.isStaleFinalAfterPush(pr5
 assert('PR #5772 shape: still stale if HEAD moves after the review',
   mg.isStaleFinalAfterPush(pr5772, '2026-10-12T09:00:00Z'));
 
+// Starvation guard: a PR the gate already BLOCKed on its current HEAD must not
+// be re-assessed (and must not take a candidate slot) until something changes.
+{
+  const t0 = Date.parse('2026-10-13T10:00:00Z');
+  const isoAt = (ms) => new Date(ms).toISOString();
+  const head = isoAt(t0 - 60 * 60 * 1000);
+  const block = { user: { login: 'praisonai-triage-agent[bot]' }, body: 'MERGE_GATE_VERDICT: BLOCK\nP1 open', created_at: isoAt(t0) };
+  const approve = { user: { login: 'praisonai-triage-agent[bot]' }, body: 'MERGE_GATE_VERDICT: APPROVE', created_at: isoAt(t0) };
+  const oldChecks = [{ name: 'test-core', completed_at: isoAt(t0 - 30 * 60 * 1000) }];
+  const newChecks = [...oldChecks, { name: 'smoke', completed_at: isoAt(t0 + 10 * 60 * 1000) }];
+  const now = t0 + 2 * 60 * 60 * 1000;
+  assert('BLOCK on unchanged HEAD is skipped', mg.blockedOnUnchangedHead([block], head, oldChecks, now));
+  assert('BLOCK is re-assessed once a check completes after it', !mg.blockedOnUnchangedHead([block], head, newChecks, now));
+  assert('BLOCK is re-assessed after 24h', !mg.blockedOnUnchangedHead([block], head, oldChecks, t0 + 25 * 60 * 60 * 1000));
+  assert('APPROVE never triggers the skip', !mg.blockedOnUnchangedHead([approve], head, oldChecks, now));
+  assert('BLOCK from an older HEAD does not count', !mg.blockedOnUnchangedHead([block], isoAt(t0 + 60 * 60 * 1000), oldChecks, now));
+  assert('no verdict, no skip', !mg.blockedOnUnchangedHead([], head, oldChecks, now));
+
+  const sha = 'ab3416547aaedf4689eb89534e3724b7ae13b08a';
+  const body = mg.buildBlockFixRequestBody(sha);
+  assert('fix request starts with @claude', /^@claude\b/.test(body));
+  assert('fix request avoids the verdict marker (claude.yml ignores it)', !body.includes('MERGE_GATE_VERDICT'));
+  assert('fix request is not a FINAL trigger', !mg.isFinalClaudeTriggerComment({ user: { login: 'MervinPraison' }, body }));
+  assert('fix request due when none posted', mg.blockFixRequestDue([], sha));
+  const posted = { user: { login: 'MervinPraison' }, body, created_at: isoAt(now) };
+  assert('fix request not repeated for the same HEAD', !mg.blockFixRequestDue([posted], sha));
+  const other = (s) => ({ user: { login: 'MervinPraison' }, body: mg.buildBlockFixRequestBody(s), created_at: isoAt(now) });
+  assert('fix request due again on a new HEAD', mg.blockFixRequestDue([posted], 'f'.repeat(40)));
+  assert('fix requests capped per PR', !mg.blockFixRequestDue([other('1'.repeat(40)), other('2'.repeat(40)), other('3'.repeat(40))], 'f'.repeat(40)));
+
+  // Untrusted commenters cannot forge gate state.
+  const forgedBlock = { ...block, user: { login: 'random-user' } };
+  assert('BLOCK from an untrusted commenter is ignored', !mg.blockedOnUnchangedHead([forgedBlock], head, oldChecks, now));
+  const forgedMarker = { ...posted, user: { login: 'random-user' } };
+  assert('fix-request marker from an untrusted commenter is ignored', mg.blockFixRequestDue([forgedMarker], sha));
+  const quoted = { ...posted, body: 'see ' + mg.BLOCK_FIX_MARKER + sha.slice(0, 12) };
+  assert('bare marker text (not the HTML comment) is ignored', mg.blockFixRequestDue([quoted], sha));
+}
+
+{
+  const t0 = Date.parse('2026-10-13T10:00:00Z');
+  const isoAt = (ms) => new Date(ms).toISOString();
+  const forged = { user: { login: 'evil-praisonai-triage-agent' }, body: 'MERGE_GATE_VERDICT: BLOCK', created_at: isoAt(t0) };
+  assert('look-alike login cannot hold a PR out',
+    !mg.blockedOnUnchangedHead([forged], isoAt(t0 - 3600e3), [], t0 + 60e3));
+  assert('only exact gate logins are trusted', mg.GATE_VERDICT_AUTHORS.has('praisonai-triage-agent[bot]') && !mg.GATE_VERDICT_AUTHORS.has('evil-praisonai-triage-agent'));
+}
+const listingTests = (async () => {
+  const fakeGithub = (byLabel, openPrs) => ({
+    rest: {
+      issues: { listForRepo: async ({ labels }) => ({ data: byLabel[labels] || [] }) },
+      pulls: { list: async () => ({ data: openPrs }) },
+    },
+  });
+  const pr = (n, labels) => ({ number: n, pull_request: {}, labels: labels.map((name) => ({ name })) });
+  const onlyHeld = await mg.listPrNumbersForMergeGateScan(
+    fakeGithub({ 'pipeline/blocked:merge-gate': [pr(10, ['pipeline/blocked:merge-gate'])] }, [{ number: 10 }, { number: 20 }]),
+    'o', 'r', null);
+  assert('held-out PRs alone fall back to scanning all open PRs', onlyHeld.includes(20) && onlyHeld.includes(10));
+  const mixed = await mg.listPrNumbersForMergeGateScan(
+    fakeGithub({ 'pipeline/merge-ready': [pr(30, ['pipeline/merge-ready'])], 'pipeline/blocked:merge-gate': [pr(10, [])] }, []),
+    'o', 'r', null);
+  assert('merge-ready plus held-out PRs are both scanned', mixed.join(',') === '10,30');
+})();
+
 assert('cancelled detect-and-trigger does not block', mg.OPTIONAL_CANCELLED_CHECKS.has('detect-and-trigger'));
 assert('optional pending recovery check name listed', mg.OPTIONAL_PENDING_WHEN_CORE_GREEN.has('claude-review-recovery'));
 assert('ignorable pending when core green', mg.isIgnorablePendingCheck(
@@ -651,6 +716,20 @@ assert(
   );
   assert('rate limit low skips dispatch', skipLow === true);
 
+  const byLabel = {
+    'pipeline/merge-ready': [{ number: 5803, pull_request: {}, labels: [] }],
+    'pipeline/blocked:merge-gate': [
+      { number: 5766, pull_request: {}, labels: [] },
+      { number: 5803, pull_request: {}, labels: [] },
+    ],
+  };
+  const scanList = await mg.listPrNumbersForMergeGateScan(
+    { rest: { issues: { listForRepo: async ({ labels }) => ({ data: byLabel[labels] || [] }) } } },
+    'owner', 'repo', { info: () => {} }
+  );
+  assert('held-out PRs stay in the scan list (deduped)', JSON.stringify(scanList) === '[5766,5803]');
+
+  await listingTests;
   process.exit(failed ? 1 : 0);
 })().catch((err) => {
   console.error(err);

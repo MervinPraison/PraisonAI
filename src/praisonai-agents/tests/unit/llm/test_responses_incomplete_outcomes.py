@@ -10,6 +10,13 @@ from praisonaiagents.llm.openai_client import OpenAIClient
 
 
 @pytest.fixture(autouse=True)
+def no_output_continuation(monkeypatch):
+    # These tests pin the terminal truncation outcome; disable auto-continuation
+    # (covered in test_output_continuation.py) so a truncated mock is not re-asked.
+    monkeypatch.setattr('praisonaiagents.llm._continuation.DEFAULT_MAX_CONTINUATIONS', 0)
+
+
+@pytest.fixture(autouse=True)
 def isolate_responses_endpoint(monkeypatch):
     monkeypatch.delenv('OPENAI_API_BASE', raising=False)
     monkeypatch.delenv('OPENAI_BASE_URL', raising=False)

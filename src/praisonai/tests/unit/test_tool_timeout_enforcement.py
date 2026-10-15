@@ -973,3 +973,129 @@ def test_native_adapter_preserves_subsecond_tool_timeout():
     # Fractional budget preserved exactly (not rounded to 0, not to 1).
     assert tc.timeout == 0.4
     assert tc.timeout > 0
+
+
+def test_build_tools_dict_keeps_python_callables_and_framework_tools():
+    """Python-API ``tools=[...]`` entries that are not classes (plain callables,
+    framework tool instances) must be registered, not silently dropped (#5808)."""
+    gen = _make_generator()
+
+    def my_search(q: str) -> str:
+        return q
+
+    class _FrameworkTool:
+        name = "fw_tool"
+        description = "d"
+        args_schema = None
+
+        def _run(self, q):
+            return q
+
+    class _ToolClass:
+        pass
+
+    class _FakeResolver:
+        def resolve_all_from_yaml(self, config):
+            return {}
+
+    fw = _FrameworkTool()
+    gen.tool_resolver = _FakeResolver()
+    gen.tools = [my_search, fw, _ToolClass, 42]
+
+    tools_dict = gen._build_tools_dict({"roles": {"a": {}}})
+    assert tools_dict["my_search"] is my_search
+    assert tools_dict["fw_tool"] is fw
+    assert isinstance(tools_dict["_ToolClass"], _ToolClass)
+    assert 42 not in tools_dict.values()
+
+
+def test_sync_timeout_retry_shares_single_deadline():
+    """A CancelledError retry (pool recycled under a queued future) must not
+    restart the full ``tool_timeout`` budget (#5808)."""
+    import concurrent.futures
+    from unittest import mock
+    from praisonai.agents_generator import _wrap_with_timeout, ToolTimeoutError
+
+    waits = []
+
+    class _Future:
+        def __init__(self, exc):
+            self._exc = exc
+
+        def result(self, timeout=None):
+            waits.append(timeout)
+            raise self._exc
+
+        def cancel(self):
+            return True
+
+    futures = iter([
+        _Future(concurrent.futures.CancelledError()),
+        _Future(concurrent.futures.TimeoutError()),
+    ])
+
+    class _Executor:
+        def submit(self, fn, *a, **kw):
+            return next(futures)
+
+    # deadline, pre-check 0, wait 0, pre-check 1 (3s spent), wait 1 (pool
+    # setup took another 1s and must be charged to the budget).
+    ticks = [100.0, 100.0, 100.0, 103.0, 104.0]
+
+    def _clock():
+        return ticks.pop(0) if len(ticks) > 1 else ticks[0]
+
+    with mock.patch("time.monotonic", _clock):
+        wrapped = _wrap_with_timeout(lambda: None, 5.0, lambda: _Executor())
+        with pytest.raises(ToolTimeoutError):
+            wrapped()
+    # Second attempt only gets the remaining budget, not a fresh 5s.
+    assert waits == [5.0, 1.0]
+
+
+def test_run_sync_or_offload_cancels_submitted_work_when_worker_never_joins(monkeypatch):
+    """If the worker thread does not finish within the join window, the async
+    work must already be submitted so it can be cancelled rather than left
+    running (or started later) on the shared bridge loop (#5808)."""
+    import asyncio
+    from praisonai import _async_bridge
+
+    monkeypatch.setenv("PRAISONAI_ALLOW_LOOP_BLOCKING", "true")
+    submitted = []
+    real_submit = _async_bridge.AsyncBridge.submit
+
+    def _spy_submit(self, coro):
+        fut = real_submit(self, coro)
+        submitted.append(fut)
+        return fut
+
+    class _StalledThread:
+        """Worker that never gets scheduled within the join window."""
+
+        def __init__(self, *a, **kw):
+            pass
+
+        def start(self):
+            pass
+
+        def join(self, timeout=None):
+            pass
+
+        def is_alive(self):
+            return True
+
+    # Spin the bridge loop up before stalling Thread so only the worker stalls.
+    _async_bridge._default_bridge().run_sync(asyncio.sleep(0))
+    monkeypatch.setattr(_async_bridge.AsyncBridge, "submit", _spy_submit)
+    monkeypatch.setattr(_async_bridge.threading, "Thread", _StalledThread)
+
+    async def _slow():
+        await asyncio.sleep(30)
+
+    async def _caller():
+        with pytest.raises(TimeoutError):
+            _async_bridge.run_sync_or_offload(_slow(), timeout=0.05)
+
+    asyncio.run(_caller())
+    assert len(submitted) == 1
+    assert submitted[0].cancelled()

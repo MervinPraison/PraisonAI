@@ -231,6 +231,57 @@ def _delivery_text_digest(text: str) -> str:
     return hashlib.sha1(text.encode("utf-8", "replace")).hexdigest()[:16]
 
 
+# Issue #5802: safe, user-facing text per wire error code (never raw ``str(e)``).
+_TURN_ERROR_MESSAGES = {
+    "rate_limit": "Rate limited by the model provider. Please retry shortly.",
+    "overloaded": "The model provider is overloaded. Please retry shortly.",
+    "transient": "A temporary error occurred. Please retry.",
+    "idle_timeout": "The model provider stopped responding. Please retry.",
+    "context_overflow": "The conversation is too long for the model. Start a new chat.",
+    "billing": "The model provider account is out of credit.",
+    "auth": "The model provider rejected the credentials.",
+    "auth_permanent": "The model provider rejected the credentials.",
+    "model_not_found": "The configured model is not available.",
+}
+_RETRYABLE_TURN_ERRORS = frozenset({"rate_limit", "overloaded", "transient", "idle_timeout"})
+
+
+def _turn_error_payload(exc: BaseException) -> Dict[str, Any]:
+    """Project a failed turn's exception onto a stable wire error envelope.
+
+    Issue #5802: reuses the core classifiers so clients get a machine-readable
+    ``code``, ``retryable`` and provider ``retry_after_seconds`` instead of a
+    bare ``"Error: <str>"``. Unknown failures map to ``"internal"``.
+    """
+    from praisonaiagents.errors import PraisonAIError
+    from praisonaiagents.llm.error_classifier import (
+        ErrorCategory, classify_error, extract_retry_after,
+    )
+
+    kind = getattr(exc, "error_category", None) if isinstance(exc, PraisonAIError) else None
+    if kind and kind != "unknown":
+        code = kind
+        retryable = bool(exc.is_retryable)
+    else:
+        code = {
+            ErrorCategory.RATE_LIMIT: "rate_limit",
+            ErrorCategory.CONTEXT_LIMIT: "context_overflow",
+            ErrorCategory.AUTH: "auth",
+            ErrorCategory.INVALID_REQUEST: "invalid_request",
+            ErrorCategory.TRANSIENT: "transient",
+        }.get(classify_error(exc), "internal")
+        retryable = code in _RETRYABLE_TURN_ERRORS
+    # Export the provider's full wait: the default 300s backoff cap would make
+    # clients retry before the provider allows it.
+    retry_after = extract_retry_after(exc, cap_seconds=math.inf) if retryable else None
+    return {
+        "code": code,
+        "retryable": retryable,
+        "retry_after_seconds": math.ceil(retry_after) if retry_after else None,
+        "message": _TURN_ERROR_MESSAGES.get(code, "The agent failed to complete this turn."),
+    }
+
+
 def _apply_bot_loop_config(config_kwargs: Dict[str, Any], ch_cfg: Mapping[str, Any]) -> None:
     """Fold a channel's ``allow_bots`` / ``bot_loop_protection`` into BotConfig.
 
@@ -764,14 +815,19 @@ class _TerminalTurn(str):
     classified as a successful turn. Subclassing ``str`` keeps every existing
     consumer (``session.add_message``, the ``content`` frame, ``.lower()`` in
     tests) working unchanged, while ``outcome_status`` lets the session queue
-    report the true terminal outcome instead of a default ``ok``.
+    report the true terminal outcome instead of a default ``ok``. ``error`` is
+    the optional typed wire error (#5802) for a failed terminal ending.
     """
 
-    __slots__ = ("outcome_status",)
+    __slots__ = ("outcome_status", "error")
 
-    def __new__(cls, value: str, *, outcome_status: str = "ok") -> "_TerminalTurn":
+    def __new__(
+        cls, value: str, *, outcome_status: str = "ok",
+        error: Optional[Dict[str, Any]] = None,
+    ) -> "_TerminalTurn":
         obj = super().__new__(cls, value)
         obj.outcome_status = outcome_status
+        obj.error = error
         return obj
 
 
@@ -4708,6 +4764,12 @@ class WebSocketGateway:
             return _TerminalTurn(
                 "Turn cancelled: worker wedged; session will be re-placed.",
                 outcome_status="error",
+                error={
+                    "code": "transient",
+                    "retryable": True,
+                    "retry_after_seconds": None,
+                    "message": _TURN_ERROR_MESSAGES["transient"],
+                },
             )
         finally:
             existing = self._active_turns.get(sid)
@@ -4796,6 +4858,7 @@ class WebSocketGateway:
                 controller = InterruptController()
                 timeout = getattr(self.config, "per_turn_timeout", 0.0) or 0.0
                 outcome_status = "ok"
+                turn_error: Optional[Dict[str, Any]] = None
                 # Issue #5129: a SESSION stop during admission/placement drops
                 # this already-dequeued message instead of running it. Skipped
                 # here is accounted for by ``_abort_session`` (pending_cancelled).
@@ -4830,6 +4893,10 @@ class WebSocketGateway:
                     logger.error(f"Agent error in queue processor: {e}")
                     response = f"Error: {str(e)}"
                     outcome_status = "error"
+                    try:
+                        turn_error = _turn_error_payload(e)
+                    except Exception:  # pragma: no cover - never mask the turn failure
+                        turn_error = None
                 else:
                     # A terminal turn (e.g. a wedged worker torn down by the
                     # executor) carries its own outcome so a non-ok ending is
@@ -4838,6 +4905,7 @@ class WebSocketGateway:
                     carried = getattr(response, "outcome_status", None)
                     if carried is not None:
                         outcome_status = carried
+                        turn_error = getattr(response, "error", None)
                 finally:
                     # Always clean up the relay callback
                     if relay_callback and emitter is not None:
@@ -4871,11 +4939,15 @@ class WebSocketGateway:
                 # Final frame: distinct "final" status resolves the pending turn
                 # that the "accepted" ack opened, and carries a structured
                 # terminal outcome alongside the text (not just a bare string).
+                # A failed turn additionally carries a typed ``error`` (#5802).
+                outcome: Dict[str, Any] = {"status": outcome_status}
+                if turn_error is not None:
+                    outcome["error"] = turn_error
                 await self._send_to_client(client_id, {
                     "type": "response",
                     "status": "final",
                     "content": response,
-                    "outcome": {"status": outcome_status},
+                    "outcome": outcome,
                     "session_id": session.session_id,
                 })
         finally:
@@ -8093,6 +8165,21 @@ class WebSocketGateway:
         # Auto-enable when the effective session store is durable (the default).
         return self._durable_store_present(gw_cfg)
 
+    def _register_rooms_from_config(self, rooms_cfg: Optional[Dict[str, Any]]) -> None:
+        """Register each ``rooms.<name>`` roster as a ``room:<name>`` route target.
+
+        Issue #5768: a room is agent-shaped (see ``bots._room.GatewayRoom``), so
+        binding ``routes: {group: room:standup}`` resolves it through the same
+        agent registry and session/delivery path as a single agent.
+        """
+        if not rooms_cfg:
+            return
+        from praisonai_bot.bots._room import build_rooms
+
+        for route_id, room in build_rooms(rooms_cfg, self._agents).items():
+            self._agents[route_id] = room
+            logger.info(f"Room registered: {route_id} roster={room.config.roster}")
+
     def _create_agents_from_config(
         self,
         agents_cfg: Dict[str, Dict[str, Any]],
@@ -10452,6 +10539,7 @@ class WebSocketGateway:
                 guardrails_cfg=guardrails_cfg,
                 durable_runs=durable_runs,
             )
+            self._register_rooms_from_config(new_cfg.get("rooms"))
             candidate = {
                 "agents": dict(self._agents),
                 "shell": dict(self._shell_routed_agents),
@@ -10523,6 +10611,7 @@ class WebSocketGateway:
                     guardrails_cfg=guardrails_cfg,
                     durable_runs=durable_runs,
                 )
+                self._register_rooms_from_config(prev_cfg.get("rooms"))
             prev_channels_cfg = prev_cfg.get("channels", {})
             if prev_channels_cfg:
                 await self.start_channels(prev_channels_cfg)
@@ -10584,6 +10673,7 @@ class WebSocketGateway:
                         guardrails_cfg=guardrails_cfg,
                         durable_runs=durable_runs,
                     )
+                    self._register_rooms_from_config(new_cfg.get("rooms"))
 
                 # Register inbound trigger hooks (Issue #2281).
                 self._apply_hooks_from_config(new_cfg)
@@ -10702,6 +10792,7 @@ class WebSocketGateway:
                         guardrails_cfg=guardrails_cfg,
                         durable_runs=durable_runs,
                     )
+                    self._register_rooms_from_config(new_cfg.get("rooms"))
                 logger.info("Agents reloaded")
             
             # Restart specific channels
@@ -11401,6 +11492,7 @@ class WebSocketGateway:
                 guardrails_cfg=guardrails_cfg,
                 durable_runs=durable_runs,
             )
+        self._register_rooms_from_config(cfg.get("rooms"))
 
         # Register inbound trigger hooks (Issue #2281). Hooks may live at the
         # top level (``hooks:``) or nested under ``gateway:`` for grouping.

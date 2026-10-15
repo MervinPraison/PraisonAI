@@ -45,9 +45,30 @@ function hasRecentCiFixComment(comments, headSha) {
   });
 }
 
+/**
+ * The newest CI-fix request on the PR, from any author. A request posted by an
+ * bot claude.yml ignores (e.g. the App bot) never reached Claude, so the
+ * pending label it left behind must not block a real request.
+ */
+function latestCiFixComment(comments) {
+  let latest = null;
+  for (const c of comments || []) {
+    if (!isCiFixComment(c)) continue;
+    if (!latest || new Date(c.created_at) > new Date(latest.created_at)) latest = c;
+  }
+  return latest;
+}
+
 function shouldSkipCiFix({ comments, headSha, labels, hasFinal, claudeInProgress, failedChecks }) {
   if (!failedChecks.length) return { skip: true, reason: 'no failed checks' };
-  if (labels.includes(CI_FIX_LABEL)) return { skip: true, reason: 'ci fix pending' };
+  if (labels.includes(CI_FIX_LABEL)) {
+    const latest = latestCiFixComment(comments);
+    const login = latest?.user?.login || '';
+    // claude.yml drops comments from bots other than github-actions[bot];
+    // human writers do reach Claude, so their request still blocks.
+    const strandedByIgnoredBot = login.endsWith('[bot]') && !AUTO_ACTORS.includes(login);
+    if (!strandedByIgnoredBot) return { skip: true, reason: 'ci fix pending' };
+  }
   if (!hasFinal) return { skip: true, reason: 'awaiting final claude review trigger' };
   if (claudeInProgress) return { skip: true, reason: 'claude in progress' };
   if (hasCiFixCommentForSha(comments, headSha)) {
@@ -200,10 +221,8 @@ async function maybeTriggerCiFixClaude(github, owner, repo, prNumber, core, opts
   if (pr.state !== 'open') return { skipped: true, reason: 'not open' };
   if (pr.draft) return { skipped: true, reason: 'draft' };
 
-  const headRepo = pr.head.repo?.full_name;
-  if (headRepo && headRepo !== baseRepo && !pr.maintainer_can_modify) {
-    return { skipped: true, reason: 'fork without maintainer edits' };
-  }
+  // Never hand fork code to Claude automatically (a deleted fork has head.repo null).
+  if (pr.head.repo?.full_name !== baseRepo) return { skipped: true, reason: 'fork PR' };
 
   const headSha = pr.head.sha;
   const labels = ctx.labels;
@@ -279,6 +298,7 @@ async function processWorkflowRunFailure(github, owner, repo, workflowRun, core)
 
 module.exports = {
   CI_FIX_LABEL,
+  latestCiFixComment,
   COOLDOWN_MS,
   ciFixShaMarker,
   isCiFixComment,

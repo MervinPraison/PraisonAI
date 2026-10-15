@@ -4,6 +4,7 @@ from dataclasses import dataclass, field, asdict
 from typing import Any, Callable, Dict, List, Optional, Union
 import asyncio
 import logging
+import warnings
 from praisonaiagents._logging import get_logger
 
 @dataclass
@@ -16,7 +17,8 @@ class RealtimeConfig:
         turn_detection: Turn detection mode (server_vad, none)
         input_audio_format: Input audio format (pcm16, g711_ulaw, g711_alaw)
         output_audio_format: Output audio format (pcm16, g711_ulaw, g711_alaw)
-        temperature: Sampling temperature (0.0 to 2.0)
+        temperature: Deprecated; the GA Realtime API has no session temperature,
+            so this value is ignored (a DeprecationWarning is emitted if set)
         max_response_output_tokens: Maximum tokens for response
         instructions: System instructions for the session
     """
@@ -25,13 +27,63 @@ class RealtimeConfig:
     turn_detection: str = "server_vad"
     input_audio_format: str = "pcm16"
     output_audio_format: str = "pcm16"
-    temperature: float = 0.8
+    temperature: Optional[float] = None
     max_response_output_tokens: Optional[int] = None
     instructions: Optional[str] = None
     
+    def __post_init__(self):
+        if self.temperature is not None:
+            # stacklevel=4: __post_init__ -> dataclass __init__ -> caller, plus one
+            # frame for the warnings.warn wrapper installed by _warning_patch.
+            warnings.warn(
+                "RealtimeConfig.temperature is ignored: the GA Realtime API "
+                "does not support a session temperature.",
+                DeprecationWarning,
+                stacklevel=4,
+            )
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert config to dictionary."""
         return {k: v for k, v in asdict(self).items() if v is not None}
+
+    def to_session(self) -> Dict[str, Any]:
+        """Build a GA Realtime ``session.update`` payload from this config."""
+        turn_detection = (
+            None if self.turn_detection in (None, "none")
+            else {"type": self.turn_detection}
+        )
+        session: Dict[str, Any] = {
+            "type": "realtime",
+            # GA accepts a single output modality; audio includes a transcript.
+            "output_modalities": ["audio"] if "audio" in self.modalities else ["text"],
+            "audio": {
+                "input": {
+                    "format": _audio_format(self.input_audio_format),
+                    "turn_detection": turn_detection,
+                },
+                "output": {
+                    "format": _audio_format(self.output_audio_format),
+                    "voice": self.voice,
+                },
+            },
+        }
+        if self.instructions is not None:
+            session["instructions"] = self.instructions
+        if self.max_response_output_tokens is not None:
+            session["max_output_tokens"] = self.max_response_output_tokens
+        return session
+
+
+_AUDIO_FORMATS = {
+    "pcm16": {"type": "audio/pcm", "rate": 24000},
+    "g711_ulaw": {"type": "audio/pcmu"},
+    "g711_alaw": {"type": "audio/pcma"},
+}
+
+
+def _audio_format(fmt: str) -> Dict[str, Any]:
+    """Map a legacy format name (pcm16, g711_ulaw, g711_alaw) to the GA shape."""
+    return dict(_AUDIO_FORMATS.get(fmt) or {"type": fmt})
 
 class RealtimeAgent:
     """Agent for real-time voice conversations using OpenAI Realtime API.
@@ -69,7 +121,7 @@ class RealtimeAgent:
         Args:
             name: Agent name
             llm: Deprecated alias for model=. Passing both raises TypeError.
-            model: Model to use (default: gpt-4o-realtime-preview)
+            model: Model to use (default: gpt-realtime)
             realtime: Realtime configuration (bool, dict, or RealtimeConfig)
             instructions: System instructions
             verbose: Enable verbose output
@@ -77,7 +129,7 @@ class RealtimeAgent:
         """
         from ..utils.model_alias import resolve_model_name
         self.name = name
-        self.llm = resolve_model_name(llm, model, "RealtimeAgent") or "gpt-4o-realtime-preview"
+        self.llm = resolve_model_name(llm, model, "RealtimeAgent") or "gpt-realtime"
         self.instructions = instructions
         self.verbose = verbose
         
@@ -184,16 +236,16 @@ class RealtimeAgent:
             # Build WebSocket URL
             url = f"wss://api.openai.com/v1/realtime?model={self.llm}"
             
-            headers = {
-                "Authorization": f"Bearer {api_key}",
-                "OpenAI-Beta": "realtime=v1"
-            }
+            headers = {"Authorization": f"Bearer {api_key}"}
             
-            self._ws = await websockets.connect(url, extra_headers=headers)
+            # websockets>=14 renamed extra_headers to additional_headers
+            major = int(websockets.__version__.split(".")[0])
+            header_kwarg = "additional_headers" if major >= 14 else "extra_headers"
+            self._ws = await websockets.connect(url, **{header_kwarg: headers})
             self._connected = True
             
             # Send session configuration
-            config = self._realtime_config.to_dict()
+            config = self._realtime_config.to_session()
             await self._send_event({
                 "type": "session.update",
                 "session": config
@@ -407,13 +459,13 @@ class RealtimeAgent:
                     event_type = event.get("type", "")
                     
                     # Handle text responses
-                    if event_type == "response.text.delta":
+                    if event_type in ("response.output_text.delta", "response.text.delta"):
                         text = event.get("delta", "")
                         for callback in self._on_message_callbacks:
                             callback(text)
                     
                     # Handle audio responses
-                    elif event_type == "response.audio.delta":
+                    elif event_type in ("response.output_audio.delta", "response.audio.delta"):
                         audio_b64 = event.get("delta", "")
                         if audio_b64:
                             audio_bytes = base64.b64decode(audio_b64)

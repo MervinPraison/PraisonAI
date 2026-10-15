@@ -29,8 +29,8 @@ def _maybe_load_dotenv() -> None:
     enables it explicitly).
     """
     if os.getenv("PRAISONAI_CALL_LOAD_DOTENV", "").lower() == "true":
-        from dotenv import load_dotenv
-        load_dotenv()
+        from dotenv import find_dotenv, load_dotenv
+        load_dotenv(find_dotenv(usecwd=True))
 
 
 _maybe_load_dotenv()
@@ -733,8 +733,8 @@ def main(args=None):
     # effect). Module globals were captured at import — before this load — so
     # refresh the ones consumed at request time, otherwise a ``.env``-only
     # ``OPENAI_API_KEY``/``CALL_SERVER_TOKEN``/rate-limit would be ignored.
-    from dotenv import load_dotenv
-    load_dotenv()
+    from dotenv import find_dotenv, load_dotenv
+    load_dotenv(find_dotenv(usecwd=True))
     _refresh_env_globals()
     default_port = int(os.getenv('PORT', PORT))
     use_public_env = os.getenv('PUBLIC', 'false').lower() == 'true'

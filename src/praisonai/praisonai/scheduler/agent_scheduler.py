@@ -352,6 +352,16 @@ class AgentScheduler(_BaseAgentScheduler):
     
     def _execute_with_retry(self, max_retries: int):
         """Execute agent with retry logic and timeout."""
+        # Guard here too (not just in the schedule loop) so the
+        # run_immediately path cannot bill past max_cost. Mirrors the async
+        # scheduler.
+        if self._budget_exceeded():
+            logger.warning(f"Budget limit reached: ${self._total_cost:.4f} >= ${self.max_cost}")
+            logger.warning("Stopping scheduler to prevent additional costs")
+            # Signal only; teardown happens in _run_schedule's finally.
+            self._stop_event.set()
+            return
+
         with self._stats_lock:
             self._execution_count += 1
         success = False
@@ -468,6 +478,9 @@ class AgentScheduler(_BaseAgentScheduler):
             Agent execution result
         """
         logger.debug("Executing agent once")
+        if self._budget_exceeded():
+            logger.warning(f"Budget limit reached: ${self._total_cost:.4f} >= ${self.max_cost}; skipping run")
+            return None
         try:
             result = self._executor.execute(self.task)
             logger.debug(f"One-time execution successful: {result}")

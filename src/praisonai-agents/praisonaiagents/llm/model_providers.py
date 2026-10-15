@@ -105,6 +105,35 @@ def default_auxiliary_model(explicit: Optional[str] = None) -> str:
     return DEFAULT_AUXILIARY_MODEL
 
 
+# NVIDIA NIM (build.nvidia.com / local NIM containers). NIM catalog ids already
+# start with ``nvidia/`` but litellm's provider prefix is ``nvidia_nim/``, so
+# ``nvidia/<model>`` is rewritten. Short aliases map to catalog slugs verified
+# against ``GET https://integrate.api.nvidia.com/v1/models`` on 2026-10-15.
+NVIDIA_NIM_ALIASES = {
+    "nemotron-super": "nemotron-3-super-120b-a12b",
+    "nemotron-nano": "nemotron-nano-3-30b-a3b",
+    "nemotron-ultra": "nemotron-3-ultra-550b-a55b",
+}
+
+
+def to_litellm_nvidia_nim(model: str) -> Optional[str]:
+    """Map a user-facing ``nvidia/...`` id to litellm's ``nvidia_nim/...`` route.
+
+    ``nvidia/<x>`` -> ``nvidia_nim/nvidia/<x>`` (aliases expanded) and
+    ``nvidia/<publisher>/<x>`` -> ``nvidia_nim/<publisher>/<x>``. Anything else,
+    including an already-routed ``nvidia_nim/...``, returns None.
+    """
+    if not isinstance(model, str) or not model.lower().startswith("nvidia/"):
+        return None
+    rest = model[len("nvidia/"):]
+    if not rest:
+        return None
+    if "/" in rest:
+        return f"nvidia_nim/{rest}"
+    rest = NVIDIA_NIM_ALIASES.get(rest.lower(), rest)
+    return f"nvidia_nim/nvidia/{rest}"
+
+
 def _entry_point_matchers():
     """Yield (provider_id, matcher) pairs registered by third-party plugins.
 

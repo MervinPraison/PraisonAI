@@ -40,6 +40,9 @@ from ..tools.schema import build_tool_definition
 # and surface a tool-error so the model can re-emit the call instead.
 _TOOL_ARGUMENTS_PARSE_FAILED = object()
 
+# Bounded shrink-and-retry steps after a provider context-overflow rejection.
+_CONTEXT_OVERFLOW_SHRINK_STEPS = 3
+
 
 # ``litellm.success_callback``/``_async_success_callback``/``callbacks`` are
 # process-global lists shared by every LLM instance. Guard the read-modify-write
@@ -983,8 +986,9 @@ Respond with ONLY a valid JSON tool call in this format:
         if any(indicator in error_str for indicator in [
             "maximum context length", "context window is too long", 
             "context length exceeded", "context_length_exceeded",
-            "input too long", "prompt too long"
-        ]):
+            "input too long", "prompt too long", "prompt is too long",
+            "contextwindowexceeded",
+        ]) or "contextwindowexceeded" in error_type:
             return "context_overflow"
         
         # Model not found/available
@@ -1236,12 +1240,21 @@ Respond with ONLY a valid JSON tool call in this format:
         values fill in the gaps.
         """
         kwargs = dict(kwargs)
+        if profile.model:
+            # Params were already built, so route nvidia/ ids to NIM here too.
+            from .model_providers import to_litellm_nvidia_nim
+            new_model = to_litellm_nvidia_nim(profile.model) or profile.model
+            if self._crosses_nim_boundary(kwargs.get("model"), new_model):
+                # A key or endpoint carried over across the NIM boundary is the
+                # wrong vendor's; the profile's own values are re-applied below.
+                for key in ("api_key", "base_url", "api_base"):
+                    kwargs.pop(key, None)
+            kwargs["model"] = new_model
         if profile.api_key:
             kwargs["api_key"] = profile.api_key
         if profile.base_url:
             kwargs["base_url"] = profile.base_url
-        if profile.model:
-            kwargs["model"] = profile.model
+        self._apply_nvidia_nim_credentials(kwargs)
         return kwargs
 
     def _resolve_subscription_creds(self):
@@ -1626,6 +1639,40 @@ Respond with ONLY a valid JSON tool call in this format:
 
         raise last_error
 
+    def _shrink_on_context_overflow(self, error, completion_params, step) -> bool:
+        """Shrink the request after a provider context-overflow rejection.
+
+        Reactive recovery for when proactive compaction was disabled or its
+        estimate was wrong: halves the estimated prompt size per step (dropping
+        old turns, then trimming oversized tool results) and updates
+        ``completion_params["messages"]`` in place so the rest of the turn
+        keeps the smaller context. Returns True when a retry is worthwhile;
+        False leaves the caller to raise the original error, as before.
+        """
+        if step >= _CONTEXT_OVERFLOW_SHRINK_STEPS:
+            return False
+        messages = completion_params.get("messages")
+        if not isinstance(messages, list) or self.classify_error_kind(error) != "context_overflow":
+            return False
+        try:
+            from ..compaction import ContextCompactor
+            compactor = ContextCompactor()
+            before = compactor.count_total_tokens(messages)
+            shrunk = compactor.shrink_to_fit(messages, before // 2)
+            after = compactor.count_total_tokens(shrunk)
+        except Exception as shrink_error:
+            logging.debug(f"Context overflow recovery skipped: {shrink_error}")
+            return False
+        if after >= before:
+            return False
+        logging.warning(
+            f"Context window exceeded for {self.model}; shrank prompt "
+            f"{before}→{after} tokens and retrying "
+            f"({step + 1}/{_CONTEXT_OVERFLOW_SHRINK_STEPS})"
+        )
+        messages[:] = shrunk
+        return True
+
     def _completion_with_retry(self, **completion_params):
         """Execute litellm.completion with automatic retry on rate limit errors.
         
@@ -1646,7 +1693,13 @@ Respond with ONLY a valid JSON tool call in this format:
         # entirely, so scripted turns never reach (or trip) the guard.
         check_model_request(self.model, "litellm.completion")
         import litellm
-        response = self._call_with_retry(litellm.completion, **completion_params)
+        for step in range(_CONTEXT_OVERFLOW_SHRINK_STEPS + 1):
+            try:
+                response = self._call_with_retry(litellm.completion, **completion_params)
+                break
+            except Exception as e:
+                if not self._shrink_on_context_overflow(e, completion_params, step):
+                    raise
         if not completion_params.get("stream"):
             self._track_token_usage(response, self._response_model_for_tracking(response))
         return response
@@ -1669,10 +1722,16 @@ Respond with ONLY a valid JSON tool call in this format:
         """
         check_model_request(self.model, "litellm.acompletion")
         import litellm
-        response = await self._call_with_retry_async(
-            litellm.acompletion,
-            **completion_params,
-        )
+        for step in range(_CONTEXT_OVERFLOW_SHRINK_STEPS + 1):
+            try:
+                response = await self._call_with_retry_async(
+                    litellm.acompletion,
+                    **completion_params,
+                )
+                break
+            except Exception as e:
+                if not self._shrink_on_context_overflow(e, completion_params, step):
+                    raise
         if not completion_params.get("stream"):
             self._track_token_usage(response, self._response_model_for_tracking(response))
         return response
@@ -3006,6 +3065,8 @@ Respond with ONLY a valid JSON tool call in this format:
         # Mid-run steering: optional callable() -> list[str] draining pending
         # steering notes so they can be injected as user messages between iterations.
         steering_drain = kwargs.pop("steering_drain", None)
+        # Bounded auto-continuation on output-token truncation (True/False/int cap).
+        output_continuation = kwargs.pop("output_continuation", True)
 
         def _is_cancelled() -> bool:
             return cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()
@@ -3148,8 +3209,14 @@ Respond with ONLY a valid JSON tool call in this format:
             # Structured stop reason so callers can distinguish completion from
             # truncation (unified with the OpenAI-native path). "completed" default.
             self._last_stop_reason = "completed"
+            from ._continuation import OutputContinuation, is_structured
+            # Schema-enforced output cannot be continued as a text suffix.
+            _continuation = OutputContinuation(False if (output_json or output_pydantic or is_structured(getattr(self, "response_format", None))) else output_continuation)
 
             while iteration_count < max_iterations:
+                # Continue only when *this* response hit the length limit, not on a
+                # sticky truncation left by an earlier (e.g. repaired) tool call.
+                _stop_before = self._last_stop_reason
                 # G2: Check for cancellation at the top of each tool iteration so a
                 # /stop request promptly halts a mid-flight run on every provider.
                 if _is_cancelled():
@@ -3403,10 +3470,12 @@ Respond with ONLY a valid JSON tool call in this format:
                             continue
                         else:
                             # No tool calls — we have a final answer
-                            if iteration_count > 0:
-                                final_response_text = response_text.strip() if response_text else ""
-                            else:
-                                final_response_text = response_text.strip() if response_text else ""
+                            if _continuation.take(messages, response_text, self._last_stop_reason == "length_truncated" and _stop_before != "length_truncated"):
+                                self._last_stop_reason = "completed"
+                                response_text = ""
+                                continue
+                            response_text = _continuation.stitch(response_text)
+                            final_response_text = response_text.strip() if response_text else ""
                             break
 
                     # ── Chat Completions path (unchanged) ───────────────────
@@ -3567,6 +3636,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                                 **kwargs
                                             )
                                         ):
+                                            self._record_stream_finish(chunk)
                                             if chunk and chunk.choices and chunk.choices[0].delta:
                                                 delta = chunk.choices[0].delta
                                                 response_text, tool_calls = self._process_stream_delta(
@@ -3586,6 +3656,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                             **kwargs
                                         )
                                     ):
+                                        self._record_stream_finish(chunk)
                                         if chunk and chunk.choices and chunk.choices[0].delta:
                                             delta = chunk.choices[0].delta
                                             response_text, tool_calls = self._process_stream_delta(
@@ -3617,6 +3688,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                                         **kwargs
                                                     )
                                                 ):
+                                                    self._record_stream_finish(chunk)
                                                     if chunk and chunk.choices and chunk.choices[0].delta:
                                                         delta = chunk.choices[0].delta
                                                         response_text, tool_calls = self._process_stream_delta(
@@ -3717,7 +3789,9 @@ Respond with ONLY a valid JSON tool call in this format:
                                     raise streaming_error
                             
                             if streaming_success:
-                                response_text = response_text.strip() if response_text else ""
+                                # Keep whitespace at a continuation seam; the stitched answer is stripped later.
+                                if not (self._last_stop_reason == "length_truncated" and _stop_before != "length_truncated") and not _continuation.text:
+                                    response_text = response_text.strip() if response_text else ""
                                 
                                 # Execute callbacks after streaming completes (only if not verbose, since verbose will call display_interaction later)
                                 if not verbose and not callback_executed:
@@ -3766,6 +3840,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                             **kwargs
                                         )
                                     ):
+                                        self._record_stream_finish(chunk)
                                         if chunk and chunk.choices and chunk.choices[0].delta:
                                             delta = chunk.choices[0].delta
                                             response_text, tool_calls = self._process_stream_delta(
@@ -3813,6 +3888,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                             **kwargs
                                         )
                                     ):
+                                        self._record_stream_finish(chunk)
                                         if chunk and chunk.choices and chunk.choices[0].delta:
                                             delta = chunk.choices[0].delta
                                             response_text, tool_calls = self._process_stream_delta(
@@ -4208,12 +4284,11 @@ Respond with ONLY a valid JSON tool call in this format:
                                 interaction_displayed = False
                                 break
                         
-                        # If we've executed tools in previous iterations, this response contains the final answer
-                        if iteration_count > 0:
-                            final_response_text = response_text.strip() if response_text else ""
-                            break
-                        
-                        # First iteration with no tool calls - just return the response
+                        if _continuation.take(messages, response_text, self._last_stop_reason == "length_truncated" and _stop_before != "length_truncated"):
+                            self._last_stop_reason = "completed"
+                            response_text = ""
+                            continue
+                        response_text = _continuation.stitch(response_text)
                         final_response_text = response_text.strip() if response_text else ""
                         break
                         
@@ -5410,6 +5485,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Mid-run steering: optional callable() -> list[str] draining pending
         # steering notes so they can be injected as user messages between iterations.
         steering_drain = kwargs.pop("steering_drain", None)
+        # Bounded auto-continuation on output-token truncation (True/False/int cap).
+        output_continuation = kwargs.pop("output_continuation", True)
 
         def _is_cancelled() -> bool:
             return cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()
@@ -5553,8 +5630,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             accumulated_tool_results = []  # Store all tool results across iterations
             # Structured stop reason (unified with the OpenAI-native path).
             self._last_stop_reason = "completed"
+            from ._continuation import OutputContinuation, is_structured
+            # Schema-enforced output cannot be continued as a text suffix.
+            _continuation = OutputContinuation(False if (output_json or output_pydantic or is_structured(getattr(self, "response_format", None))) else output_continuation)
 
             while iteration_count < max_iterations:
+                # Continue only when *this* response hit the length limit, not on a
+                # sticky truncation left by an earlier (e.g. repaired) tool call.
+                _stop_before = self._last_stop_reason
                 # G2: Check for cancellation at the top of each tool iteration so a
                 # /stop request promptly halts a mid-flight run on every provider.
                 if _is_cancelled():
@@ -5703,6 +5786,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         iteration_count += 1
                         continue
                     else:
+                        if _continuation.take(messages, response_text, self._last_stop_reason == "length_truncated" and _stop_before != "length_truncated"):
+                            self._last_stop_reason = "completed"
+                            response_text = ""
+                            continue
+                        response_text = _continuation.stitch(response_text)
                         final_response_text = response_text.strip() if response_text else ""
                         break
 
@@ -5781,6 +5869,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     **kwargs
                                 )
                             ):
+                                self._record_stream_finish(chunk)
                                 if chunk and chunk.choices and chunk.choices[0].delta:
                                     delta = chunk.choices[0].delta
                                     response_text, tool_calls = self._process_stream_delta(
@@ -5803,6 +5892,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     **kwargs
                                 )
                             ):
+                                self._record_stream_finish(chunk)
                                 if chunk and chunk.choices and chunk.choices[0].delta:
                                     delta = chunk.choices[0].delta
                                     if delta.content:
@@ -5812,7 +5902,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     if formatted_tools and self._supports_streaming_tools():
                                         tool_calls = self._process_tool_calls_from_stream(delta, tool_calls)
                         
-                        response_text = response_text.strip() if response_text else ""
+                        # Keep whitespace at a continuation seam; the stitched answer is stripped later.
+                        if not (self._last_stop_reason == "length_truncated" and _stop_before != "length_truncated") and not _continuation.text:
+                            response_text = response_text.strip() if response_text else ""
                         
                         # We already have tool_calls from streaming if supported
                         # No need for a second API call!
@@ -6239,6 +6331,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             interaction_displayed = False
                             break
                     
+                    if _continuation.take(messages, response_text, self._last_stop_reason == "length_truncated" and _stop_before != "length_truncated"):
+                        self._last_stop_reason = "completed"
+                        response_text = ""
+                        continue
+                    response_text = _continuation.stitch(response_text)
                     # If we've executed tools in previous iterations, this response contains the final answer
                     if iteration_count > 0 and not final_response_text:
                         final_response_text = response_text.strip()
@@ -6676,6 +6773,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Never let outcome classification break the response path.
             return
 
+    def _record_stream_finish(self, chunk: Any) -> None:
+        """Record a streamed chunk's ``finish_reason`` (e.g. ``length``) if present."""
+        if chunk and getattr(chunk, "choices", None) and getattr(chunk.choices[0], "finish_reason", None):
+            self._record_finish_reason(chunk)
+
     def _extract_token_usage(self, response: Union[Dict[str, Any], Any]) -> Optional[TokenUsage]:
         """Extract token usage from LiteLLM response for public API."""
         try:
@@ -6915,6 +7017,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         for _local_prefix in ("llama_cpp/", "llamacpp/"):
             if model.startswith(_local_prefix):
                 return f"openai/{model[len(_local_prefix):]}"
+        # NVIDIA NIM ids start with "nvidia/", which litellm does not know;
+        # its route is "nvidia_nim/".
+        from .model_providers import to_litellm_nvidia_nim
+        nim_model = to_litellm_nvidia_nim(model)
+        if nim_model:
+            return nim_model
         if "/" in model:
             return model
         effective_base_url = self.base_url
@@ -6927,6 +7035,35 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if self._detect_provider() != "openai":
             return model
         return f"openai/{model}"
+
+    @staticmethod
+    def _crosses_nim_boundary(old_model: Any, new_model: Any) -> bool:
+        """True when a model switch moves onto or off the NVIDIA NIM route."""
+        return str(old_model or "").startswith("nvidia_nim/") != str(new_model or "").startswith("nvidia_nim/")
+
+    @staticmethod
+    def _apply_nvidia_nim_credentials(params: Dict[str, Any]) -> None:
+        """Give an ``nvidia_nim/`` request an NVIDIA key, never the OpenAI one.
+
+        litellm reads only NVIDIA_NIM_API_KEY; when that is missing the OpenAI
+        SDK falls back to OPENAI_API_KEY and sends it to NVIDIA. Precedence:
+        explicit api_key, NVIDIA_NIM_API_KEY, NVIDIA_API_KEY, then a placeholder
+        for a local NIM (which accepts any non-empty key).
+        """
+        if params.get("api_key") or not str(params.get("model", "")).startswith("nvidia_nim/"):
+            return
+        key = os.environ.get("NVIDIA_NIM_API_KEY") or os.environ.get("NVIDIA_API_KEY")
+        if key:
+            params["api_key"] = key
+            return
+        base = params.get("base_url") or params.get("api_base") or os.environ.get("NVIDIA_NIM_API_BASE")
+        if base and "integrate.api.nvidia.com" not in base:
+            params["api_key"] = "not-used"
+            return
+        raise ValueError(
+            "NVIDIA_API_KEY is not set — get one at build.nvidia.com, "
+            "or pass base_url= for a local NIM"
+        )
 
     def _guard_format_with_tools(self, params: Dict[str, Any]) -> None:
         """Refuse a combination that makes the model fabricate.
@@ -7009,7 +7146,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 params["extra_headers"] = extra_headers
         
         # Override with any provided parameters
+        base_model = params.get("model")
         params.update(override_params)
+
+        # A per-call or failover-profile model override bypasses
+        # _resolve_openai_compatible_model, so route nvidia/ ids here too.
+        from .model_providers import to_litellm_nvidia_nim
+        nim_model = to_litellm_nvidia_nim(params.get("model"))
+        if nim_model:
+            params["model"] = nim_model
+        if self._crosses_nim_boundary(base_model, params.get("model")):
+            # The instance key and endpoint belong to the other vendor; let the
+            # target's own apply. Per-call values are still honoured.
+            for key in ("api_key", "base_url", "api_base"):
+                if key not in override_params:
+                    params.pop(key, None)
+        self._apply_nvidia_nim_credentials(params)
 
         # Resolve temperature from the instance when the caller did not specify
         # one. Public entry points now default temperature to None so a value
@@ -7052,9 +7204,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if effort is not None:
             from ..thinking.effort import resolve_reasoning_params
             reasoning_params = resolve_reasoning_params(effort, params['model'])
-            # Don't clobber an explicit native param the caller already set.
+            # Don't clobber an explicit native param the caller already set,
+            # whether top-level or nested in extra_body.
+            extra_body = params.get('extra_body') or {}
             for key, value in reasoning_params.items():
-                params.setdefault(key, value)
+                if key not in extra_body:
+                    params.setdefault(key, value)
 
         # Reasoning models (o1/o3/gpt-5.x) require max_completion_tokens and
         # reject the legacy max_tokens parameter plus several sampling params.
@@ -7118,8 +7273,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if 'tools' in params and params['tools'] and 'tool_choice' not in params:
             try:
                 import litellm
-                # Check if model supports function calling before setting tool_choice
-                if litellm.supports_function_calling(model=self.model):
+                # Check if model supports function calling before setting tool_choice.
+                # litellm's map has no NIM chat entries, so NIM is opted in explicitly.
+                if (str(params['model']).startswith('nvidia_nim/')
+                        or litellm.supports_function_calling(model=self.model)):
                     params['tool_choice'] = 'auto'
                     logging.debug(f"Set tool_choice='auto' for model {self.model}")
             except Exception as e:

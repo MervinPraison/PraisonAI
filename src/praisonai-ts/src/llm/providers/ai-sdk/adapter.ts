@@ -32,7 +32,7 @@ export interface AISDKAssistantMessage {
   role: 'assistant';
   content: Array<
     | { type: 'text'; text: string }
-    | { type: 'tool-call'; toolCallId: string; toolName: string; args: unknown }
+    | { type: 'tool-call'; toolCallId: string; toolName: string; args: unknown; input: unknown }
   >;
 }
 
@@ -43,6 +43,7 @@ export interface AISDKToolMessage {
     toolCallId: string;
     toolName: string;
     result: unknown;
+    output: { type: 'text'; value: string } | { type: 'json'; value: unknown };
   }>;
 }
 
@@ -72,14 +73,20 @@ export function toAISDKPrompt(messages: Message[]): AISDKMessage[] {
         
       case 'assistant':
         if (msg.tool_calls && msg.tool_calls.length > 0) {
+          // `args`/`result` are the ai@4 field names, `input`/`output` the
+          // ai@5+ ones; both are sent so either major accepts the follow-up.
           return {
             role: 'assistant' as const,
-            content: msg.tool_calls.map(tc => ({
-              type: 'tool-call' as const,
-              toolCallId: tc.id,
-              toolName: tc.function.name,
-              args: safeParseJSON(tc.function.arguments)
-            }))
+            content: msg.tool_calls.map(tc => {
+              const args = safeParseJSON(tc.function.arguments);
+              return {
+                type: 'tool-call' as const,
+                toolCallId: tc.id,
+                toolName: tc.function.name,
+                args,
+                input: args
+              };
+            })
           };
         }
         return {
@@ -87,16 +94,21 @@ export function toAISDKPrompt(messages: Message[]): AISDKMessage[] {
           content: [{ type: 'text' as const, text: msg.content || '' }]
         };
         
-      case 'tool':
+      case 'tool': {
+        const result = safeParseJSON(msg.content || '');
         return {
           role: 'tool' as const,
           content: [{
             type: 'tool-result' as const,
             toolCallId: msg.tool_call_id || '',
             toolName: msg.name || '',
-            result: safeParseJSON(msg.content || '')
+            result,
+            output: typeof result === 'string'
+              ? { type: 'text' as const, value: result }
+              : { type: 'json' as const, value: result }
           }]
         };
+      }
         
       default:
         // Fallback to user message for unknown roles
@@ -228,7 +240,7 @@ export function extractToolCallsFromContent(content: unknown[]): ToolCall[] {
   }
   
   return content
-    .filter((part): part is { type: 'tool-call'; toolCallId: string; toolName: string; args: unknown } =>
+    .filter((part): part is { type: 'tool-call'; toolCallId: string; toolName: string; args?: unknown; input?: unknown } =>
       typeof part === 'object' &&
       part !== null &&
       'type' in part &&
@@ -237,7 +249,7 @@ export function extractToolCallsFromContent(content: unknown[]): ToolCall[] {
     .map(part => fromAISDKToolCall({
       toolCallId: part.toolCallId,
       toolName: part.toolName,
-      args: part.args
+      args: part.args ?? part.input
     }));
 }
 

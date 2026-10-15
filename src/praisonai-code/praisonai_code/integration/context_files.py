@@ -16,8 +16,9 @@ from __future__ import annotations
 import glob as _glob
 import logging
 import os
+import stat as _stat
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 logger = logging.getLogger(__name__)
 
@@ -471,6 +472,22 @@ def resolve_instruction_sources(
     return "\n\n".join(chunks)
 
 
+def _stat_file(path: Path) -> List[os.stat_result]:
+    """``[stat]`` for an existing regular file, else ``[]``."""
+    try:
+        st = path.stat()
+    except OSError:
+        return []
+    return [st] if _stat.S_ISREG(st.st_mode) else []
+
+
+def _mtime_ns(path: Path) -> Optional[int]:
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
 def _identity_key(path: Path):
     """Filesystem identity for dedup (device+inode), falling back to resolved path."""
     try:
@@ -513,7 +530,8 @@ class PathContextAttacher:
         """
         self._seen: Set = set()
         self._seen_texts: Set[str] = set()
-        self._dir_cache: Dict[Path, str] = {}
+        self._dir_cache: Dict[Path, Tuple[Tuple, str]] = {}
+        self._search_dirs: Dict[Path, List[Path]] = {}
         self._max_chars = max_chars
         self._emitted_chars = 0
         # Seed dedup with the identities of already-loaded files so the same
@@ -542,7 +560,9 @@ class PathContextAttacher:
         instruction files (root first, nearest last), deduplicated against
         everything already emitted/loaded and bounded by the char budget. The
         first touch of a directory does the disk walk; later touches of the same
-        directory return the cached (already-deduped) result cheaply.
+        directory return the cached (already-deduped) result cheaply unless an
+        instruction file on the walk was added or edited since (``stat`` only),
+        in which case its new content is attached.
 
         Returns an empty string when nothing new is found or the budget is
         exhausted.
@@ -550,8 +570,20 @@ class PathContextAttacher:
         p = Path(file_path)
         directory = (p if p.is_dir() else p.parent).resolve()
 
-        if directory in self._dir_cache:
-            return self._dir_cache[directory]
+        search_dirs = self._search_dirs.get(directory)
+        if search_dirs is None:
+            search_dirs = _discover_search_dirs(directory, walk_up=True)
+            self._search_dirs[directory] = search_dirs
+        signature = tuple(
+            (str(candidate), st.st_mtime_ns)
+            for search_dir in search_dirs
+            for name in DEFAULT_CANDIDATES
+            for candidate in (search_dir / name,)
+            for st in _stat_file(candidate)
+        )
+        cached = self._dir_cache.get(directory)
+        if cached is not None and cached[0] == signature:
+            return cached[1]
 
         # Collect newly-discovered files without mutating dedup state yet: if
         # the char budget discards this result we must not permanently lock the
@@ -559,12 +591,13 @@ class PathContextAttacher:
         chunks: List[str] = []
         new_keys: List = []
         local_seen_texts: Set[str] = set()
-        for search_dir in _discover_search_dirs(directory, walk_up=True):
+        for search_dir in search_dirs:
             for name in DEFAULT_CANDIDATES:
                 candidate = search_dir / name
                 if not candidate.is_file():
                     continue
-                key = _identity_key(candidate)
+                # mtime in the key so an edited file is attached again.
+                key = (_identity_key(candidate), _mtime_ns(candidate))
                 if key in self._seen:
                     continue
                 try:
@@ -601,7 +634,7 @@ class PathContextAttacher:
             self._seen_texts |= local_seen_texts
 
         self._emitted_chars += len(result)
-        self._dir_cache[directory] = result
+        self._dir_cache[directory] = (signature, result)
         return result
 
 

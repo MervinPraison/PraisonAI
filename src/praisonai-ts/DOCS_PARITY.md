@@ -67,7 +67,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Planning | 11 | 2 | 529 |
 | ✅ Plugins | 9 | 2 | 749 |
 | ✅ Prompts | 4 | 2 | 262 |
-| ✅ Providers | 26 | 116 | 8149 |
+| ✅ Providers | 26 | 116 | 8327 |
 | ✅ PubSub | 1 | 1 | 149 |
 | ✅ Query | 7 | 2 | 246 |
 | ✅ RAG | 16 | 2 | 386 |

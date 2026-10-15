@@ -12,6 +12,7 @@ import {
   PROVIDER_ALIASES 
 } from './types';
 import { getEnv } from '../../openaiClientOptions';
+import { createNvidiaNimProvider, toNvidiaNimModelId } from './nvidia-nim';
 
 /**
  * Parsed model string result
@@ -43,17 +44,18 @@ export function parseModelString(model: string, defaultProvider: string = 'opena
   if (model.includes('/')) {
     const [providerId, ...rest] = model.split('/');
     const resolvedProvider = resolveProviderAlias(providerId.toLowerCase());
+    const modelId = rest.join('/');
     return { 
       providerId: resolvedProvider, 
-      modelId: rest.join('/') 
+      modelId: resolvedProvider === 'nvidia-nim' ? toNvidiaNimModelId(modelId) : modelId
     };
   }
   
   // Infer provider from model prefix
-  const inferredProvider = inferProviderFromModel(model);
+  const providerId = inferProviderFromModel(model) || resolveProviderAlias(defaultProvider);
   return { 
-    providerId: inferredProvider || defaultProvider, 
-    modelId: model 
+    providerId, 
+    modelId: providerId === 'nvidia-nim' ? toNvidiaNimModelId(model) : model 
   };
 }
 
@@ -208,6 +210,10 @@ export async function createAISDKProvider(
   
   // Dynamically import the provider package
   try {
+    if (resolved === 'nvidia-nim') {
+      return await createNvidiaNimProvider(options, providerInfo.package);
+    }
+
     const providerModule = await import(providerInfo.package);
     
     // Most AI SDK providers export a create<Provider> function
@@ -265,6 +271,11 @@ export function validateProviderApiKey(providerId: string, explicitApiKey?: stri
   // A key passed programmatically (e.g. new Agent({ apiKey })) is as valid as
   // one in the environment; the AI SDK provider receives it directly.
   if (explicitApiKey) {
+    return true;
+  }
+  // NIM resolves its own key (NVIDIA_NIM_API_KEY / NVIDIA_API_KEY, or none for
+  // a local container) when the provider is created.
+  if (resolveProviderAlias(providerId) === 'nvidia-nim') {
     return true;
   }
   const envKey = getProviderEnvKey(providerId);

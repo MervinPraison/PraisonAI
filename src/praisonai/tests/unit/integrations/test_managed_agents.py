@@ -377,3 +377,186 @@ def test_logging_integration(mock_logger):
     
     # Verify logging is available (don't assert specific calls since they may not happen in unit tests)
     assert mock_logger is not None
+
+@pytest.mark.allow_sleep
+def test_managed_stream_cancel_stops_producer():
+    """Regression for #5773: closing stream() stops the producer and
+    interrupts the upstream run instead of leaking it."""
+    import asyncio
+    import time
+    from praisonai.integrations._managed_base import ManagedBackendBase
+
+    class _Backend(ManagedBackendBase):
+        produced = 0
+        interrupted = False
+
+        def _ensure_session(self):
+            return "s"
+
+        def _iter_events(self, session_id, prompt):
+            while True:
+                time.sleep(0.01)
+                self.produced += 1
+                yield "x"
+
+        def interrupt(self):
+            self.interrupted = True
+
+    async def _run():
+        backend = _Backend()
+        gen = backend.stream("hi")  # retained reference: needs explicit aclose()
+        async for _ in gen:
+            break
+        await gen.aclose()
+        await asyncio.sleep(0.2)
+        produced = backend.produced
+        await asyncio.sleep(0.2)
+        assert backend.produced == produced
+        assert backend.interrupted
+
+    asyncio.run(_run())
+
+
+@pytest.mark.allow_sleep
+def test_managed_stream_close_interrupts_blocked_producer():
+    """Closing the stream interrupts even while the producer waits on upstream."""
+    import asyncio
+    import threading
+    from praisonai.integrations._managed_base import ManagedBackendBase
+
+    release = threading.Event()
+
+    class _Backend(ManagedBackendBase):
+        interrupted = threading.Event()
+
+        def _ensure_session(self):
+            return "s"
+
+        def _iter_events(self, session_id, prompt):
+            yield "x"
+            release.wait(5)  # e.g. a long tool call with no text events
+
+        def interrupt(self):
+            self.interrupted.set()
+            release.set()
+
+    async def _run():
+        backend = _Backend()
+        gen = backend.stream("hi")
+        assert await gen.__anext__() == "x"
+        await gen.aclose()
+        assert backend.interrupted.wait(2)
+
+    asyncio.run(_run())
+
+
+@pytest.mark.allow_sleep
+def test_local_managed_execute_forwards_kwargs():
+    """Regression for #5773: execute() honours stream_live and timeout."""
+    import asyncio
+    import threading
+    import time
+    from praisonai.integrations.managed_local import LocalManagedAgent
+
+    agent = LocalManagedAgent()
+    seen = {}
+    interrupted = threading.Event()
+
+    def _execute_sync(prompt, stream_live=False):
+        seen["stream_live"] = stream_live
+        time.sleep(0.5)
+        return "done"
+
+    agent._execute_sync = _execute_sync
+    agent.interrupt = interrupted.set
+    with pytest.raises(asyncio.TimeoutError):
+        asyncio.run(agent.execute("p", stream_live=True, timeout=0.05))
+    assert seen["stream_live"] is True
+    assert interrupted.wait(2)
+    assert asyncio.run(agent.execute("p")) == "done"
+
+
+@pytest.mark.allow_sleep
+def test_managed_stream_close_during_session_setup_never_starts_run():
+    """Closing stream() while _ensure_session() is still running must not
+    start the run (the consumer-side interrupt had no session to target)."""
+    import asyncio
+    import threading
+    from praisonai.integrations._managed_base import ManagedBackendBase
+
+    in_setup = threading.Event()
+    release = threading.Event()
+    done = threading.Event()
+
+    class _Backend(ManagedBackendBase):
+        started = False
+
+        def _ensure_session(self):
+            in_setup.set()
+            release.wait(5)  # slow session creation
+            return "s"
+
+        def _iter_events(self, session_id, prompt):
+            self.started = True  # would send user.message
+            yield "x"
+
+        def _after_stream(self, full):
+            done.set()
+
+    async def _run():
+        backend = _Backend()
+        gen = backend.stream("hi")
+        task = asyncio.ensure_future(gen.__anext__())
+        await asyncio.get_running_loop().run_in_executor(None, in_setup.wait, 2)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await gen.aclose()
+        release.set()
+        assert await asyncio.get_running_loop().run_in_executor(None, done.wait, 2)
+        assert backend.started is False
+
+    asyncio.run(_run())
+
+
+@pytest.mark.allow_sleep
+def test_managed_stream_producer_interrupts_run_started_after_close():
+    """If the run starts after the consumer-side interrupt fired, the producer
+    interrupts it itself on the next chunk."""
+    import asyncio
+    import threading
+    from praisonai.integrations._managed_base import ManagedBackendBase
+
+    stopped = threading.Event()
+    calls = []
+
+    class _Backend(ManagedBackendBase):
+        def _ensure_session(self):
+            return "s"
+
+        def _iter_events(self, session_id, prompt):
+            yield "x"
+            stopped.wait(5)  # consumer closes before the next chunk
+            yield "y"
+
+        def interrupt(self):
+            calls.append(threading.current_thread().name)
+            stopped.set()
+
+        def _after_stream(self, full):
+            calls.append("after")
+
+    async def _run():
+        backend = _Backend()
+        gen = backend.stream("hi")
+        assert await gen.__anext__() == "x"
+        await gen.aclose()
+        for _ in range(200):
+            if "after" in calls:
+                break
+            await asyncio.sleep(0.01)
+        # one interrupt from the consumer side, one from the producer on "y"
+        assert calls.count("after") == 1
+        assert len([c for c in calls if c != "after"]) == 2
+
+    asyncio.run(_run())

@@ -1589,7 +1589,11 @@ Write the complete compiled report:"""
         def _run_chain():
             return manager.execute_tool_call(request, _final_handler)
 
-        response = await loop.run_in_executor(None, _run_chain)
+        # run_in_executor does not copy ContextVars (unlike asyncio.to_thread);
+        # run the chain in a copy of the caller's context so hooked async tools
+        # still see session identity, cancel state and the handoff chain.
+        import contextvars
+        response = await loop.run_in_executor(None, contextvars.copy_context().run, _run_chain)
         return response.result if isinstance(response, ToolResponse) else response
 
     async def _execute_tool_async_with_retry(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:

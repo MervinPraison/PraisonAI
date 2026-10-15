@@ -354,23 +354,35 @@ async def check_extension_loaded(port: int = 9222) -> DiagnosticResult:
                 
                 targets = await resp.json()
                 
-                # Look for extension service worker
-                extension_patterns = ["praisonai", "fkmfdklcegbbpipbcimbokpfcfamhpdc"]
-                
+                # Only chrome-extension:// targets count, so unrelated pages or
+                # workers whose URL/title mention the name are not false positives.
+                # Unpacked builds get a random ID, so the name is also matched on title.
+                extension_ids = (
+                    "fkmfdklcegbbpipbcimbokpfcfamhpdc",
+                    "egjhiolafabdaakjboedhcappifmhcfk",
+                )
+                extension_names = ("praisonai", "browser-agent", "browser agent")
+
                 service_worker = None
                 offscreen = None
-                
+
                 for target in targets:
                     url_lower = target.get("url", "").lower()
+                    if not url_lower.startswith("chrome-extension://"):
+                        continue
+                    title_lower = (target.get("title") or "").lower()
                     target_type = target.get("type", "")
-                    
-                    for pattern in extension_patterns:
-                        if pattern in url_lower:
-                            if target_type == "service_worker":
-                                service_worker = target
-                            elif "offscreen" in url_lower:
-                                offscreen = target
-                
+
+                    haystack = f"{url_lower} {title_lower}"
+                    if not any(p in haystack for p in extension_ids + extension_names):
+                        continue
+                    if target_type == "service_worker":
+                        service_worker = target
+                    elif "offscreen" in url_lower:
+                        offscreen = target
+                    elif target_type == "background_page" and service_worker is None:
+                        service_worker = target
+
                 if service_worker:
                     result_details = {
                         "port": port,

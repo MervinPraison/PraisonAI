@@ -679,8 +679,9 @@ def _ps_providers() -> tuple:
         return ("docker", "e2b", "modal", "daytona", "flyio", "tenki")
 
 
-#: Kept as a module attribute so existing imports and tests keep working.
-_PS_PROVIDERS = _ps_providers()
+#: Optional override (tests patch it); ``None`` polls the live registry on each
+#: call instead of walking it at import time and freezing a stale snapshot.
+_PS_PROVIDERS: Optional[tuple] = None
 
 
 def _discover_instances(provider_filter: Optional[str] = None):
@@ -699,7 +700,9 @@ def _discover_instances(provider_filter: Optional[str] = None):
 
     from praisonaiagents.managed._compute_bridge import resolve_compute
 
-    names = [provider_filter] if provider_filter else list(_PS_PROVIDERS)
+    names = [provider_filter] if provider_filter else list(
+        _PS_PROVIDERS if _PS_PROVIDERS is not None else _ps_providers()
+    )
     found = []
     errors = []
 

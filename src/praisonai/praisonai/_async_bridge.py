@@ -221,11 +221,22 @@ class AsyncBridge:
         
         try:
             asyncio.run_coroutine_threadsafe(_cancel_all(), loop).result(timeout)
+        except concurrent.futures.TimeoutError:
+            # A task ignored cancellation. Don't raise: shutdown() runs from
+            # scoped_bridge's __exit__, so raising would mask the caller's error.
+            logger.warning(
+                "AsyncBridge: tasks ignored cancellation for %ss during shutdown",
+                timeout,
+            )
         finally:
             loop.call_soon_threadsafe(loop.stop)
             if thread is not None:
                 thread.join(timeout)
-            if not loop.is_closed():
+            # Closing a still-running loop raises RuntimeError; leak the daemon
+            # thread instead of corrupting the caller's error signal.
+            if thread is not None and thread.is_alive():
+                logger.warning("AsyncBridge: loop thread did not stop; leaving loop open")
+            elif not loop.is_closed():
                 loop.close()
 
 # Backwards-compatible module-level shared default.
@@ -470,24 +481,22 @@ def run_sync_or_offload(
 
     result: list[T] = []
     error: list[BaseException] = []
-    # Hold the concurrent.futures.Future for the in-flight coroutine so the
-    # caller can cancel the async work if the worker join times out (otherwise
-    # a stuck coroutine keeps running on the bridge loop after we've raised).
-    fut_box: list[concurrent.futures.Future] = []
-    bridge = _default_bridge()
+    # Submit on the caller thread (as AsyncBridge.run_sync does) so a Future
+    # always exists before the join window opens: if the worker join times out
+    # we can always cancel the async work instead of leaving it running on the
+    # shared bridge loop. The Task inherits the caller's ContextVars.
+    try:
+        fut = _default_bridge().submit(coro)
+    except BaseException:
+        with contextlib.suppress(Exception):
+            coro.close()  # type: ignore[attr-defined]
+        raise
 
     def _runner() -> None:
         try:
-            fut = bridge.submit(coro)
-            fut_box.append(fut)
             result.append(fut.result(timeout=timeout))
-        except (TimeoutError, concurrent.futures.TimeoutError) as e:
-            if fut_box:
-                fut_box[0].cancel()
-            error.append(e)
         except BaseException as e:  # noqa: BLE001 - re-raised on caller thread
-            if fut_box:
-                fut_box[0].cancel()
+            fut.cancel()
             error.append(e)
 
     thread = threading.Thread(
@@ -506,8 +515,7 @@ def run_sync_or_offload(
     if timeout is not None:
         thread.join(timeout + 1.0)
         if thread.is_alive():
-            if fut_box:
-                fut_box[0].cancel()
+            fut.cancel()
             raise TimeoutError(
                 f"run_sync_or_offload() worker did not complete within {timeout}s"
             )

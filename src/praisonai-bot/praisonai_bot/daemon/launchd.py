@@ -39,6 +39,8 @@ def _generate_plist(config_path: str) -> str:
     abs_config = os.path.abspath(config_path)
     working_dir = os.path.dirname(abs_config) or os.getcwd()
     log_dir = _log_dir()
+    from . import stop_timeout_seconds
+    stop_timeout = stop_timeout_seconds(abs_config)
 
     return f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -76,6 +78,9 @@ def _generate_plist(config_path: str) -> str:
     </dict>
     <key>ThrottleInterval</key>
     <integer>30</integer>
+    <!-- Allow the configured graceful drain to finish before SIGKILL (#5815). -->
+    <key>ExitTimeOut</key>
+    <integer>{stop_timeout}</integer>
     <key>StandardOutPath</key>
     <string>{log_dir}/bot-stdout.log</string>
     <key>StandardErrorPath</key>

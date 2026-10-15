@@ -23,6 +23,7 @@ const BLOCKER_LABELS = [
   'pipeline/blocked:stale-final',
   'pipeline/blocked:no-final',
   'pipeline/blocked:wrong-repo',
+  'pipeline/blocked:merge-gate',
 ];
 const ALL_PIPELINE_LABELS = [...STAGE_LABELS, ...BLOCKER_LABELS];
 
@@ -38,6 +39,7 @@ const LABEL_SPECS = [
   { name: 'pipeline/blocked:cooldown', color: 'fef2c0', description: 'Blocked: post-push or @claude cooldown' },
   { name: 'pipeline/blocked:stale-final', color: 'f9d0c4', description: 'Blocked: FINAL stale after new commits' },
   { name: 'pipeline/blocked:no-final', color: 'ededed', description: 'Blocked: no FINAL @claude trigger yet' },
+  { name: 'pipeline/blocked:merge-gate', color: 'e4e669', description: 'Blocked: merge gate BLOCK on HEAD; fix requested' },
   {
     name: 'pipeline/external-example',
     color: 'bfd4f2',
@@ -95,6 +97,7 @@ function reasonToBlockerLabel(reason) {
     r.includes('possible secret') ||
     r.includes('agent.py')
   ) return 'pipeline/blocked:manual-review';
+  if (r.includes('merge gate blocked this head')) return 'pipeline/blocked:merge-gate';
   if (r.includes('recent @claude') || r.includes('post-push buffer')) return 'pipeline/blocked:cooldown';
   if (r.includes('stale final')) return 'pipeline/blocked:stale-final';
   if (r.includes('no final claude')) return 'pipeline/blocked:no-final';
@@ -196,12 +199,14 @@ async function syncPipelineLabels(github, owner, repo, prNumber, core) {
 
   core?.info?.(`PR #${prNumber}: stage=${stage} blockers=[${blockers.join(', ')}]`);
 
+  // CI-fix requests are posted only by ci-failure-claude.yml, which uses the
+  // maintainer token. Label sync runs under the App token, whose comments
+  // claude.yml ignores: a request posted from here never reached Claude, yet
+  // its pending label blocked every real request for that PR.
   const ciNotGreen = (evalResult.reasons || []).some((r) =>
     r.toLowerCase().includes('ci not green')
   );
-  if (ciNotGreen || blockers.includes('pipeline/blocked:ci')) {
-    await ciFix.maybeTriggerCiFixClaude(github, owner, repo, prNumber, core);
-  } else {
+  if (!ciNotGreen && !blockers.includes('pipeline/blocked:ci')) {
     await ciFix.maybeClearCiFixLabel(
       github, owner, repo, prNumber, ctx.labels, ctx.headSha, core
     );

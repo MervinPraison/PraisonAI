@@ -27,7 +27,7 @@ logger = get_logger("mcp-websocket")
 
 # Import shared utilities for thread-safe event loop and schema fixing
 from ..trace.redact import redact_string
-from .mcp_schema_utils import ThreadLocalEventLoop, build_openai_tool_dict, build_tool_signature, get_running_loop_or_none
+from .mcp_schema_utils import ThreadLocalEventLoop, build_openai_tool_dict, build_tool_signature, get_running_loop_or_none, remote_tool_error
 
 def is_websocket_url(url: str) -> bool:
     """
@@ -296,8 +296,9 @@ class WebSocketMCPTool:
         try:
             return future.result(timeout=self.timeout)
         except Exception as e:
-            logger.error(f"Error calling tool {self.name}: {e}")
-            return f"Error: {str(e)}"
+            future.cancel()
+            logger.error(f"Error calling tool {self.name}: {e!r}")
+            return remote_tool_error(self.name, e, self.timeout)
     
     async def _async_call(self, **kwargs):
         """Call the tool asynchronously."""

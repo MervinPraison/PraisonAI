@@ -23,45 +23,45 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Agent-to-User (A2U) | 1 | 3 | 701 |
 | ✅ Approval | 1 | 8 | 4164 |
 | ✅ Audio | 2 | 12 | 1000 |
-| ✅ Auto Generation | 5 | 12 | 3941 |
+| ✅ Auto Generation | 5 | 12 | 4003 |
 | ✅ Autonomy | 3 | 7 | 2808 |
-| ✅ Bots | 7 | 39 | 16336 |
+| ✅ Bots | 7 | 39 | 16361 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 124 | 39441 |
+| ✅ CLI | 5 | 124 | 39583 |
 | ✅ Chunking | 2 | 2 | 435 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 5022 |
 | ✅ Conditions | 1 | 3 | 1386 |
 | ✅ Configuration | 3 | 8 | 3350 |
-| ✅ Context Management | 16 | 37 | 14687 |
+| ✅ Context Management | 16 | 37 | 14724 |
 | ✅ Deep Research | 8 | 2 | 591 |
 | ✅ Display | 6 | 3 | 844 |
 | ✅ Embeddings | 6 | 23 | 2074 |
 | ✅ Evaluation | 1 | 9 | 3709 |
 | ✅ Events | 1 | 2 | 782 |
-| ✅ Execution | 3 | 4 | 1694 |
+| ✅ Execution | 3 | 4 | 1697 |
 | ✅ Failover | 2 | 1 | 576 |
 | ✅ Files | 2 | 7 | 2376 |
 | ✅ Flow | 1 | 3 | 811 |
-| ✅ Gateway | 7 | 100 | 38793 |
+| ✅ Gateway | 7 | 103 | 39813 |
 | ✅ Guardrails | 5 | 4 | 2642 |
-| ✅ Handoffs | 11 | 6 | 2748 |
-| ✅ Hooks | 2 | 9 | 5283 |
+| ✅ Handoffs | 11 | 6 | 2812 |
+| ✅ Hooks | 2 | 9 | 5317 |
 | ✅ Image | 1 | 11 | 1346 |
 | ✅ Knowledge | 4 | 20 | 6264 |
-| ✅ LLM | 3 | 15 | 6105 |
-| ✅ Loops | 4 | 5 | 1478 |
-| ✅ MCP | 1 | 64 | 15195 |
+| ✅ LLM | 3 | 15 | 6142 |
+| ✅ Loops | 4 | 5 | 1511 |
+| ✅ MCP | 1 | 64 | 15388 |
 | ✅ Memory | 6 | 21 | 8484 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2859 |
-| ✅ Optimizer | 1 | 2 | 792 |
-| ✅ Output | 3 | 5 | 1289 |
+| ✅ Optimizer | 1 | 2 | 794 |
+| ✅ Output | 3 | 6 | 1573 |
 | ✅ Parallel Execution | 3 | 2 | 546 |
 | ✅ Planning | 6 | 7 | 1827 |
 | ✅ Plugins | 8 | 5 | 4114 |
-| ✅ Prompts | 2 | 9 | 2043 |
-| ✅ Providers | 1 | 57 | 8655 |
+| ✅ Prompts | 2 | 9 | 2046 |
+| ✅ Providers | 1 | 57 | 8661 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 3284 |
 | ✅ Realtime | 2 | 5 | 674 |
@@ -69,13 +69,13 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Retrieval | 2 | 5 | 1068 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 7 | 3720 |
-| ✅ Security | 1 | 3 | 3644 |
+| ✅ Security | 1 | 3 | 3655 |
 | ✅ Sessions | 4 | 21 | 8752 |
 | ✅ Skills | 6 | 16 | 6045 |
 | ✅ Tasks | 2 | 8 | 3266 |
 | ✅ Telemetry | 1 | 2 | 660 |
 | ✅ Templates | 1 | 9 | 1859 |
-| ✅ Tools | 12 | 147 | 45463 |
+| ✅ Tools | 12 | 147 | 45501 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1219 |
 | ✅ Video | 2 | 10 | 1383 |

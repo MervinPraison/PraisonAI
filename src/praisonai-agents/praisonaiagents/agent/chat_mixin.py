@@ -60,6 +60,19 @@ if TYPE_CHECKING:
     pass
 
 
+def _sleep_unless_cancelled(seconds: float, cancel_token: Any = None, step: float = 0.2) -> None:
+    """Sleep for ``seconds``, raising ``InterruptedError`` as soon as ``cancel_token`` is set."""
+    deadline = time.monotonic() + seconds
+    while True:
+        if cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)():
+            reason = getattr(cancel_token, "reason", None) or "cancelled during retry backoff"
+            raise InterruptedError(f"Agent chat cancelled: {reason}")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return
+        time.sleep(min(step, remaining))
+
+
 class _TurnCancelToken:
     """Track cancellation observed by one call without shared backend state."""
 
@@ -1994,6 +2007,35 @@ Your Goal: {self.goal}"""
         except Exception:
             logging.debug("MODEL_FALLBACK stream event failed", exc_info=True)
 
+    def _shrink_after_context_overflow(self, messages, model_name):
+        """Shrink ``messages`` after the provider rejected them as too long.
+
+        Uses the configured ContextManager when present; otherwise falls back
+        to ``ContextCompactor.shrink_to_fit`` so agents without ``context=``
+        still recover. Each call targets at most half the current estimate, so
+        bounded retries shrink progressively even when the estimate was wrong.
+        """
+        from ..context.budgeter import get_model_limit
+        from ..compaction import ContextCompactor
+        compactor = ContextCompactor()
+        target = min(
+            int(get_model_limit(model_name) * 0.7),  # 70% of limit for safety
+            compactor.count_total_tokens(messages) // 2,
+        )
+        if self.context_manager:
+            return self.context_manager.emergency_truncate(messages, target)
+        return compactor.shrink_to_fit(messages, target)
+
+    def _can_restart_after_overflow(self, tools) -> bool:
+        """Whether an overflow may restart the whole turn with shrunk messages.
+
+        The restart replays the turn from its outer messages, so without a
+        ContextManager it is limited to tool-free turns: a tool turn would
+        rerun already-completed tool calls. LiteLLM tool turns recover inside
+        the request loop instead (``LLM._shrink_on_context_overflow``).
+        """
+        return bool(self.context_manager) or not (tools or self.tools)
+
     def _max_retry_depth(self) -> int:
         """Maximum LLM retry depth honoured by the recovery loop.
 
@@ -2326,14 +2368,9 @@ Your Goal: {self.goal}"""
             )
             
             # Execute recovery actions based on classification
-            if classification.should_compress_context and self.context_manager:
+            if classification.should_compress_context and self._can_restart_after_overflow(tools):
                 try:
-                    from ..context.budgeter import get_model_limit
-                    model_limit = get_model_limit(model_name)
-                    target = int(model_limit * 0.7)  # Target 70% of limit for safety
-                    
-                    # Apply emergency truncation
-                    truncated_messages = self.context_manager.emergency_truncate(messages, target)
+                    truncated_messages = self._shrink_after_context_overflow(messages, model_name)
                     
                     logging.info(f"[{self.name}] {classification.user_message}")
                     
@@ -2378,7 +2415,10 @@ Your Goal: {self.goal}"""
 
                     # Apply backoff if suggested
                     if classification.backoff_seconds and classification.backoff_seconds > 0:
-                        time.sleep(classification.backoff_seconds)
+                        _sleep_unless_cancelled(
+                            classification.backoff_seconds,
+                            cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None),
+                        )
                     
                     # Temporarily override the model and clear dispatcher cache
                     # for this call. Serialise the mutate/restore window so a
@@ -2407,7 +2447,10 @@ Your Goal: {self.goal}"""
             elif classification.is_retryable and classification.backoff_seconds > 0:
                 if _retry_depth < self._max_retry_depth():  # Bounded by configured RetryBackoffConfig.max_retries
                     logging.info(f"[{self.name}] {classification.user_message} (waiting {classification.backoff_seconds:.1f}s)")
-                    time.sleep(classification.backoff_seconds)
+                    _sleep_unless_cancelled(
+                        classification.backoff_seconds,
+                        cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None),
+                    )
                     return self._chat_completion(
                         messages, temperature, tools, stream, 
                         reasoning_steps, task_name, task_description, task_id, response_format, 
@@ -2504,14 +2547,9 @@ Your Goal: {self.goal}"""
         )
         
         # Execute recovery actions based on classification (async-compatible)
-        if classification.should_compress_context and self.context_manager:
+        if classification.should_compress_context and self._can_restart_after_overflow(tools):
             try:
-                from ..context.budgeter import get_model_limit
-                model_limit = get_model_limit(model_name)
-                target = int(model_limit * 0.7)  # Target 70% of limit for safety
-                
-                # Apply emergency truncation
-                truncated_messages = self.context_manager.emergency_truncate(messages, target)
+                truncated_messages = self._shrink_after_context_overflow(messages, model_name)
                 
                 logging.info(f"[{self.name}] {classification.user_message}")
                 
@@ -2705,6 +2743,7 @@ Your Goal: {self.goal}"""
                     emit_events=emit_events,
                     verbose=self.verbose,
                     max_iterations=self._resolve_max_steps(),
+                    output_continuation=getattr(getattr(self, "execution", None), "output_continuation", True),
                     reasoning_steps=reasoning_steps,
                     task_name=task_name,
                     task_description=task_description,
@@ -2753,6 +2792,7 @@ Your Goal: {self.goal}"""
                 emit_events=emit_events,
                 verbose=self.verbose,
                 max_iterations=self._resolve_max_steps(),
+                output_continuation=getattr(getattr(self, "execution", None), "output_continuation", True),
                 reasoning_steps=reasoning_steps,
                 task_name=task_name,
                 task_description=task_description,
@@ -2903,6 +2943,7 @@ Your Goal: {self.goal}"""
                 emit_events=emit_events,
                 verbose=self.verbose,
                 max_iterations=self._resolve_max_steps(),
+                output_continuation=getattr(getattr(self, "execution", None), "output_continuation", True),
                 reasoning_steps=reasoning_steps,
                 task_name=task_name,
                 task_description=task_description,
@@ -3753,6 +3794,7 @@ Your Goal: {self.goal}"""
                         ),
                         parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
                         max_iterations=self._resolve_max_steps(),
+                        output_continuation=getattr(getattr(self, "execution", None), "output_continuation", True),
                         max_tool_calls_per_turn=self._resolve_max_tool_calls(),
                         reasoning_steps=reasoning_steps,
                         stream=stream
@@ -4485,6 +4527,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         ),
                         'parallel_tool_calls': getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
                         'max_iterations': self._resolve_max_steps(),
+                        'output_continuation': getattr(getattr(self, "execution", None), "output_continuation", True),
                         'max_tool_calls_per_turn': self._resolve_max_tool_calls(),
                         'reasoning_steps': reasoning_steps,
                         'stream': stream

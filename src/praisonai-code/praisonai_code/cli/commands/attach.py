@@ -9,7 +9,11 @@ same active session and observe it concurrently.
 
 The runtime must be running (``praisonai daemon start``) and a ``praisonai run``
 must have been issued against the same session id (``run --attach <id>``) for
-events to appear. Attaching is read-only: it never starts execution itself.
+events to appear. Attaching is read-only by default: it never starts execution
+itself. ``--message`` steers and ``--interrupt`` cancels the live turn instead:
+
+    praisonai attach --message "also update the tests" <session-id>
+    praisonai attach --interrupt <session-id>
 """
 
 import json as _json
@@ -26,12 +30,20 @@ def attach_main(
     ctx: typer.Context,
     session_id: str = typer.Argument(..., help="Session id to attach to"),
     json_output: bool = typer.Option(False, "--json", help="Emit raw NDJSON events"),
+    message: str = typer.Option(
+        None, "--message", "-m", help="Steer the live turn with this message, then exit"
+    ),
+    interrupt: bool = typer.Option(
+        False, "--interrupt", help="Interrupt the live turn, then exit"
+    ),
 ):
     """Stream live events for a running session.
 
     Examples:
         praisonai attach my-session
         praisonai attach my-session --json
+        praisonai attach -m "focus on the failing test" my-session
+        praisonai attach --interrupt my-session
     """
     if ctx.invoked_subcommand is not None:
         return
@@ -59,6 +71,19 @@ def attach_main(
         raise typer.Exit(1)
 
     client = RuntimeClient(descriptor)
+
+    if message or interrupt:
+        try:
+            if message:
+                client.steer(session_id, message)
+                output.print_success(f"Steering message sent to '{session_id}'.")
+            if interrupt:
+                client.interrupt(session_id)
+                output.print_success(f"Interrupt requested for '{session_id}'.")
+        except RuntimeUnavailable as e:
+            output.print_error(str(e))
+            raise typer.Exit(1)
+        return
 
     if not json_output:
         output.print_info(f"Attached to session '{session_id}'. Ctrl-C to detach.")
@@ -91,5 +116,9 @@ def _render_event(output, event: dict) -> None:
             print(result)
     elif etype == "run.error":
         output.print_error(f"✗ run.error: {event.get('error', '')}")
+    elif etype == "run.steer":
+        output.print_info(f"↪ run.steer: {event.get('message', '')}")
+    elif etype == "run.interrupt":
+        output.print_info("■ run.interrupt requested")
     else:
         output.print(_json.dumps(event))

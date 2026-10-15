@@ -20,7 +20,7 @@ import { getEnv } from './openaiClientOptions';
 // copy of the provider registry that could not see providers registered on the
 // first. Neither module imports this file back (no cycle), and neither loads
 // the AI SDK itself: backend.ts defers `import('ai')` until the first call.
-import { createAISDKBackend } from './providers/ai-sdk';
+import { createAISDKBackend, resolveProviderAlias } from './providers/ai-sdk';
 import { createProvider } from './providers';
 import { resolveDefaultModel } from './default-model';
 
@@ -159,7 +159,9 @@ export async function resolveBackend(
         const providers =
           options.config?.apiKey || options.config?.baseUrl || options.config?.fetch
             ? {
-                [providerId]: {
+                // Keyed by the canonical id (e.g. `nvidia` -> `nvidia-nim`),
+                // which is what the AI SDK backend looks up.
+                [resolveProviderAlias(providerId)]: {
                   ...(options.config.apiKey ? { apiKey: options.config.apiKey } : {}),
                   ...(options.config.baseUrl ? { baseURL: options.config.baseUrl } : {}),
                   ...(options.config.fetch ? { fetch: options.config.fetch } : {}),

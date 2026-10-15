@@ -1044,7 +1044,7 @@ wheels = [
 
 [[package]]
 name = "praisonai-mcp"
-version = "0.1.12"
+version = "0.1.13"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -1072,7 +1072,7 @@ server = [
 requires-dist = [
     { name = "click", specifier = ">=8.4.2" },
     { name = "httpx", marker = "extra == 'auth'", specifier = ">=0.27.0" },
-    { name = "mcp", specifier = ">=1.20.0" },
+    { name = "mcp", specifier = ">=1.20.0,<2" },
     { name = "praisonai-mcp", extras = ["server", "auth"], marker = "extra == 'all'" },
     { name = "praisonaiagents", directory = "../praisonai-agents" },
     { name = "rich", specifier = ">=13.7" },
@@ -1084,7 +1084,7 @@ provides-extras = ["server", "auth", "all"]
 
 [[package]]
 name = "praisonaiagents"
-version = "1.7.11"
+version = "1.7.12"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },
@@ -1116,7 +1116,7 @@ requires-dist = [
     { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.83.14" },
     { name = "litellm", marker = "extra == 'memory'", specifier = ">=1.83.14" },
     { name = "markitdown", extras = ["all"], marker = "extra == 'knowledge'", specifier = ">=0.1.0" },
-    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.20.0" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.20.0,<2" },
     { name = "mcp", marker = "extra == 'parallel-search'", specifier = ">=1.30.0,<2" },
     { name = "mem0ai", marker = "extra == 'knowledge'", specifier = ">=0.1.0" },
     { name = "mem0ai", extras = ["graph"], marker = "extra == 'graph'", specifier = ">=0.1.0" },
