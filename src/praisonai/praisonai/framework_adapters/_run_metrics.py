@@ -46,10 +46,14 @@ class RunMetrics:
         original_track = self._collector.track_tokens
 
         def track_tokens(model, agent, metrics, metadata=None, agent_id=None):
-            if agent_id in self._ids or (agent_id is None and agent in self._names):
+            if self._active and (
+                agent_id in self._ids or (agent_id is None and agent in self._names)
+            ):
                 self.calls[agent] = self.calls.get(agent, 0) + 1
             return original_track(model, agent, metrics, metadata=metadata, agent_id=agent_id)
 
+        self._active = True
+        self._track = track_tokens
         self._collector.track_tokens = track_tokens
 
     def _on_task_start(self, task, task_id):
@@ -72,10 +76,15 @@ class RunMetrics:
         """Restore hooks and close timers of tasks that never completed (failed)."""
         for key in list(self._started):
             self._stop(key)
-        if self._prev_track is None:
-            self._collector.__dict__.pop("track_tokens", None)
-        else:
-            self._collector.track_tokens = self._prev_track
+        # Stop counting, then unwrap only if no later run wrapped on top of us;
+        # otherwise stay in the chain as a pass-through so overlapping runs
+        # finishing out of order keep their own counts.
+        self._active = False
+        if self._collector.__dict__.get("track_tokens") is self._track:
+            if self._prev_track is None:
+                self._collector.__dict__.pop("track_tokens", None)
+            else:
+                self._collector.track_tokens = self._prev_track
         self.team.on_task_start = self._original_start
         self.team.on_task_complete = self._original_complete
 

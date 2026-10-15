@@ -1083,9 +1083,12 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             path = getattr(task, 'output_file', None)
             if not path:
                 return
+            # Read without newline translation: core writes in text mode, so
+            # only os.linesep translation may differ from str(task_output).
+            expected = str(task_output)
             try:
-                with open(path) as f:
-                    if f.read() == str(task_output):
+                with open(path, newline='') as f:
+                    if f.read() in (expected, expected.replace('\n', os.linesep)):
                         written.add(path)
             except OSError:
                 pass

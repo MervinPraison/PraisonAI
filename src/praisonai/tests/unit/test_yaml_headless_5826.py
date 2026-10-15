@@ -188,3 +188,40 @@ def test_run_metrics_counts_calls_and_closes_failed_timers():
     assert row["calls"] == 150
     assert row["latency_s"] >= 0 and "Analyst" in metrics.latency
     assert "track_tokens" not in collector.__dict__ and team.on_task_start is None
+
+
+def test_crlf_output_file_counts_as_written(tmp_path):
+    path = tmp_path / "report.md"
+    task = SimpleNamespace(output_file=str(path))
+
+    def save(t, out):  # mirrors core: text-mode write of str(task_output)
+        with open(t.output_file, "w") as f:
+            f.write(str(out))
+
+    team = SimpleNamespace(save_output_to_file=save)
+    written = PraisonAIAdapter._track_output_files(team)
+    team.save_output_to_file(task, "line one\r\nline two\r\n")
+    assert written == {str(path)}
+
+
+def test_overlapping_run_metrics_closed_out_of_order_keep_counts():
+    from praisonaiagents.telemetry.token_collector import TokenMetrics, get_token_collector
+    from praisonai.framework_adapters._run_metrics import RunMetrics
+
+    def _team(name, agent_id):
+        return SimpleNamespace(
+            agents=[SimpleNamespace(name=name, _approval_scope_id=agent_id)],
+            on_task_start=None, on_task_complete=None,
+            get_token_usage_summary=lambda: {"by_agent": {}},
+        )
+
+    collector = get_token_collector()
+    first, second = RunMetrics(_team("A", "id-a")), RunMetrics(_team("B", "id-b"))
+    first.close()  # first run finishes before the second
+    collector.track_tokens("m", "B", TokenMetrics(), agent_id="id-b")
+    collector.track_tokens("m", "A", TokenMetrics(), agent_id="id-a")
+    second.close()
+
+    assert second.calls == {"B": 1}
+    assert first.calls == {}
+    collector.__dict__.pop("track_tokens", None)  # drop the inert pass-through
