@@ -10,6 +10,8 @@ and direct integration with PraisonAI's features.
 from __future__ import annotations
 
 import logging
+import os
+import time
 from typing import Any, Dict, List, Optional
 
 from .base import BaseFrameworkAdapter
@@ -661,6 +663,10 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                     # consistently with the CrewAI adapter.
                     if task_spec.tools:
                         task_kwargs['tools'] = task_spec.tools
+                    output_file = task_spec.extras.get('output_file')
+                    if output_file:
+                        task_kwargs['output_file'] = output_file
+                        task_kwargs['create_directory'] = bool(os.path.dirname(output_file))
                     task = PraisonTask(**task_kwargs)
                     
                     if task_callback:
@@ -993,6 +999,12 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             # Best-effort and a no-op outside stream-json (the bridge guards on
             # its own `active`), so serve/jobs and non-CLI callers are unaffected.
             bridge, _ = self._attach_stream_bridge(team)
+            cli = cli_config or {}
+            want_metrics = cli.get('metrics') or cli.get('metrics_json')
+            if want_metrics:
+                from . import _run_metrics
+                latency = _run_metrics.attach_latency_timer(team)
+            run_started = time.time()
             try:
                 # Use native async path
                 response = await team.astart()
@@ -1010,8 +1022,12 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             finally:
                 self._detach_stream_bridge(team, bridge)
             result = f"### PraisonAI Output ###\n{response}" if response else "### PraisonAI Output ###\nTask completed."
+            failure = self._run_failure(response, tasks, run_started, check_files=cli.get('trust'))
             if bridge is not None:
-                bridge.emit_run_result(response, ok=True)
+                if failure:
+                    bridge.emit_run_error(failure)
+                else:
+                    bridge.emit_run_result(response, ok=True)
 
             # Persist team state after kickoff so the run can be resumed later
             # (respects --no-save, which leaves auto_save unset).
@@ -1026,6 +1042,18 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 except Exception as e:  # never fail a completed run on save
                     logger.warning(f"Failed to save session state '{auto_save}': {e}")
 
+            if want_metrics:
+                report = _run_metrics.build_report(team, latency, model_name)
+                if cli.get('metrics'):
+                    _run_metrics.print_table(report)
+                if cli.get('metrics_json'):
+                    _run_metrics.print_json(report)
+
+            if failure:
+                # Surface failed runs as errors so the CLI exits non-zero
+                # instead of printing the status dict and exiting 0.
+                raise RuntimeError(failure)
+
             logger.info("PraisonAI async execution completed")
             return result
         finally:
@@ -1037,6 +1065,33 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 except Exception as e:
                     logger.error(f"Error stopping InteractiveRuntime: {e}")
     
+    @staticmethod
+    def _run_failure(response, tasks, run_started, *, check_files=False) -> Optional[str]:
+        """Return an error message when the team run failed, else ``None``.
+
+        ``AgentTeam.astart`` returns its status dict instead of the final text
+        when no final result was produced. With ``check_files`` (headless
+        ``--trust`` runs) a declared ``output_file`` that was not written this
+        run also counts as a failure, since core only logs that write error.
+        """
+        if isinstance(response, dict):
+            statuses = list((response.get('task_status') or {}).values())
+            failed = statuses.count('failed')
+            if failed:
+                return f"{failed} of {len(statuses)} task(s) failed"
+        if check_files:
+            # 2s slack absorbs coarse filesystem mtime resolution.
+            missing = [
+                t.output_file for t in tasks
+                if t.output_file and (
+                    not os.path.isfile(t.output_file)
+                    or os.path.getmtime(t.output_file) < run_started - 2
+                )
+            ]
+            if missing:
+                return f"output_file not written: {', '.join(missing)}"
+        return None
+
     @staticmethod
     def _attach_stream_bridge(team):
         """Attach the CLI stream-json bridge to a team's aggregate emitter.

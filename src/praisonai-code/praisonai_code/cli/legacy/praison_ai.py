@@ -2076,6 +2076,12 @@ class PraisonAI:
             if stream_metrics:
                 cli_config['stream_metrics'] = True
 
+        # Extract --metrics / --metrics-json so YAML team runs report usage
+        if getattr(self.args, 'metrics', False):
+            cli_config['metrics'] = True
+        if getattr(self.args, 'metrics_json', False):
+            cli_config['metrics_json'] = True
+
         output_mode = getattr(self.args, 'output', None)
         if output_mode is None:
             output_mode = getattr(self.args, 'output_format', None)
