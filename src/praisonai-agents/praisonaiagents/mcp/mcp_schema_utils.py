@@ -232,3 +232,27 @@ def get_running_loop_or_none():
         return asyncio.get_running_loop()
     except RuntimeError:
         return None
+
+
+def remote_tool_error(tool_name: str, exc: BaseException, timeout: Optional[float]) -> Dict[str, Any]:
+    """
+    Build the structured error dict for a failed SSE/HTTP-stream/WebSocket tool call.
+
+    Mirrors the stdio transport (``{"error": ..., "mcp_error": True}``, plus
+    ``"timeout": True`` for timeouts) so the agent's retry policy, circuit
+    breaker and ON_RETRY hook treat remote MCP failures like native tool
+    failures instead of a successful ``"Error: ..."`` string. The exception
+    type is kept in the message so the shared classifier can tell a
+    ``ReadTimeout``/``ConnectError`` from a permanent failure.
+    """
+    import asyncio
+    import concurrent.futures
+
+    if isinstance(exc, (TimeoutError, asyncio.TimeoutError, concurrent.futures.TimeoutError)) and not str(exc):
+        return {
+            "error": f"MCP tool call timed out after {timeout} seconds",
+            "timeout": True,
+            "mcp_error": True,
+        }
+    detail = f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__
+    return {"error": f"MCP tool '{tool_name}' failed: {detail}", "mcp_error": True}
