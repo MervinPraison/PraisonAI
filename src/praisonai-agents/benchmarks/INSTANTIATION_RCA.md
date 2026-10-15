@@ -84,7 +84,7 @@ The slowdown is real: **~2.3×** on identical hardware. Median, sampled along `m
 `git bisect` with a 33 μs cut-off has no single culprit: it lands on a wrapper-only commit, and neighbouring
 commits differ by less than the noise. The cost is gradual creep. cProfile on `main` puts ~43% of construction
 time in the body of `Agent.__init__`, and no callee costs more than ~10%. The fix is the slim construction path
-described above, tracked as a follow-up issue. A ~3 ms regression shipped for two weeks unnoticed; the PR gate
+described above, tracked in #5835. A ~3 ms regression shipped for two weeks unnoticed; the PR gate
 in `.github/workflows/benchmark.yml` (`simple_benchmark.py --json --fail-over-threshold`, 150 μs budget) now
 catches regressions of that size.
 
