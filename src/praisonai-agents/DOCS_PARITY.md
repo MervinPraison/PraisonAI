@@ -69,7 +69,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Retrieval | 2 | 5 | 1068 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 7 | 3720 |
-| ✅ Security | 1 | 3 | 3644 |
+| ✅ Security | 1 | 3 | 3655 |
 | ✅ Sessions | 4 | 21 | 8752 |
 | ✅ Skills | 6 | 16 | 6045 |
 | ✅ Tasks | 2 | 8 | 3266 |
