@@ -2007,6 +2007,10 @@ Write the complete compiled report:"""
                     except asyncio.TimeoutError:
                         future.cancel()
                         return _timeout_result()
+                    except asyncio.CancelledError:
+                        # The caller gave up; a still-queued tool must not start later.
+                        future.cancel()
+                        raise
                     try:
                         return await asyncio.wait_for(future, timeout=tool_timeout)
                     except asyncio.TimeoutError:

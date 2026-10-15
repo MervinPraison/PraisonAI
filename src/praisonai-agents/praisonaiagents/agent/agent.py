@@ -3278,6 +3278,12 @@ Your Goal: {self.goal}
             if k in ("_db_run_context", "_db_session_init_lock"):
                 # A clone starts outside the source agent's active DB turn.
                 continue
+            elif k in ("_tool_executor", "_async_tool_executor"):
+                # Thread pools can't be copied; the clone lazily builds its own.
+                continue
+            elif k == "_Agent__hook_runner":
+                # Holds locks; rebuilt lazily on first use.
+                object.__setattr__(result, k, None)
             elif k in ("_Agent__cache_lock",):
                 object.__setattr__(result, k, threading.RLock())
             elif k in ("_cost_lock", "_auto_save_lock"):

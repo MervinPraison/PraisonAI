@@ -145,3 +145,49 @@ def test_stdio_runner_runs_requests_concurrently_and_cancels_on_shutdown(monkeyp
     assert not ok and "shut down" in message
     runner.join(2)
     assert not runner.is_alive()
+
+
+def test_cancelled_queued_async_tool_never_starts():
+    release = threading.Event()
+    ran = []
+
+    def block(n: int) -> str:
+        """block"""
+        release.wait(5)
+        return "done"
+
+    def late() -> str:
+        """late"""
+        ran.append(True)
+        return "late"
+
+    agent = Agent(name="c", instructions="x", tools=[block, late], llm="gpt-4o-mini", hooks=HookRegistry())
+    agent._tool_timeout = 5
+
+    async def main():
+        busy = [asyncio.ensure_future(agent.execute_tool_async("block", {"n": i})) for i in range(5)]
+        await asyncio.sleep(0.2)  # every pool worker is now busy
+        try:
+            await asyncio.wait_for(agent.execute_tool_async("late", {}), timeout=0.2)
+        except asyncio.TimeoutError:
+            pass
+        release.set()
+        await asyncio.gather(*busy)
+        await asyncio.sleep(0.2)
+
+    asyncio.run(main())
+    assert ran == []
+
+
+def test_agent_deepcopy_after_async_tool_use():
+    import copy
+
+    def echo(x: int) -> int:
+        """echo"""
+        return x
+
+    agent = Agent(name="d", instructions="x", tools=[echo], llm="gpt-4o-mini")
+    assert asyncio.run(agent.execute_tool_async("echo", {"x": 1})) == 1
+    clone = copy.deepcopy(agent)
+    assert "_async_tool_executor" not in clone.__dict__
+    assert asyncio.run(clone.execute_tool_async("echo", {"x": 2})) == 2
