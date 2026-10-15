@@ -103,3 +103,23 @@ def test_file_index_save_is_atomic(tmp_path):
     assert index.save()
     with open(index.index_path) as f:
         assert json.load(f)["workspace"] == str(tmp_path)
+
+
+def test_cjk_truncation_stays_within_token_budget():
+    from praisonaiagents.rag.budget import DefaultBudgetEnforcer, TokenBudget, estimate_tokens
+    from praisonaiagents.rag.compressor import ContextCompressor
+    from praisonaiagents.rag.context import truncate_context
+
+    cjk = "汉" * 1000
+    out = truncate_context(cjk, 200)
+    assert out.endswith("[Context truncated...]")
+    assert estimate_tokens(out) <= 200
+
+    budget = TokenBudget(model_max_tokens=1200, reserved_response_tokens=0)
+    available = budget.dynamic_budget()
+    kept = DefaultBudgetEnforcer().enforce([{"text": cjk}, {"text": cjk}], budget)
+    assert sum(estimate_tokens(c["text"]) for c in kept) <= available
+    assert kept[-1]["metadata"]["_truncated"]
+
+    kept = ContextCompressor()._truncate_to_budget([{"text": cjk}], 200)
+    assert estimate_tokens(kept[0]["text"]) <= 200
