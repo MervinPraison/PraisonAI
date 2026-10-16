@@ -46,7 +46,7 @@ class ClientConnection:
     session_id: Optional[str] = None
     connected_at: float = 0.0
     is_extension: bool = False
-    is_cli: bool = False  # True for CLI clients (no Origin header from localhost)
+    is_cli: bool = False  # True for no-Origin localhost clients until they register as extension
 
 
 class BrowserServer:
@@ -322,6 +322,9 @@ class BrowserServer:
         elif msg_type == "cancel_session":
             return await self._handle_stop_session(message, conn)
         
+        elif msg_type == "register":
+            return self._handle_register(message, conn)
+        
         elif msg_type == "ping":
             return {"type": "pong"}
         
@@ -335,6 +338,29 @@ class BrowserServer:
                 "error": f"Unknown message type: {msg_type}",
                 "code": "UNKNOWN_TYPE",
             }
+    
+    def _handle_register(self, message: Dict, conn: ClientConnection) -> Dict:
+        """Let a localhost no-Origin client declare its role.
+
+        Chrome MV3 offscreen documents often omit the Origin header, so they are
+        classified as CLI at handshake. Sending ``{"type": "register",
+        "client": "extension"}`` after connect marks the socket as the extension.
+        Only no-Origin localhost sockets (``is_cli``) may claim the extension
+        role; web-origin sockets cannot.
+        """
+        role = message.get("client")
+        if role == "extension" and (conn.is_cli or conn.is_extension):
+            conn.is_extension, conn.is_cli = True, False
+        elif role == "cli" and not conn.session_id:
+            conn.is_extension, conn.is_cli = False, True
+        else:
+            return {
+                "type": "error",
+                "error": f"Cannot register as client: {role}",
+                "code": "INVALID_ROLE",
+            }
+        logger.info(f"[SERVER][REGISTER] Connection registered as {role}")
+        return {"type": "status", "status": "registered", "role": role}
     
     async def _handle_start_session(
         self,

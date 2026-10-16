@@ -488,3 +488,78 @@ class TestIntegration:
         # Test agent
         agent = BrowserAgent(model="gpt-4o")
         assert agent.model == "gpt-4o"
+
+
+class TestRegisterRole:
+    """No-Origin offscreen sockets can register as the extension (#5854)."""
+
+    @pytest.mark.asyncio
+    async def test_ws_no_origin_register_extension(self):
+        from unittest.mock import AsyncMock
+        from praisonai_browser.server import BrowserServer, ClientConnection
+
+        server = BrowserServer()
+        conn = ClientConnection(websocket=AsyncMock(), is_cli=True)
+        server._connections["offscreen"] = conn
+
+        response = await server._process_message(
+            {"type": "register", "client": "extension"}, conn
+        )
+        assert response == {"type": "status", "status": "registered", "role": "extension"}
+        assert conn.is_extension and not conn.is_cli
+
+        response = await server._process_message(
+            {"type": "start_session", "goal": "Test"}, conn
+        )
+        assert response["status"] == "running"
+        if server._sessions:
+            server._sessions.close()
+
+    @pytest.mark.asyncio
+    async def test_ws_no_origin_without_register_is_cli(self):
+        from unittest.mock import AsyncMock
+        from praisonai_browser.server import BrowserServer, ClientConnection
+
+        server = BrowserServer()
+        conn = ClientConnection(websocket=AsyncMock(), is_cli=True)
+        server._connections["anon"] = conn
+
+        response = await server._process_message(
+            {"type": "start_session", "goal": "Test"}, conn
+        )
+        assert response["code"] == "NO_EXTENSION"
+        conn.websocket.send_text.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_ws_no_origin_cli_start_session(self):
+        from unittest.mock import AsyncMock
+        from praisonai_browser.server import BrowserServer, ClientConnection
+
+        server = BrowserServer()
+        ext = ClientConnection(websocket=AsyncMock(), is_cli=True)
+        cli = ClientConnection(websocket=AsyncMock(), is_cli=True)
+        server._connections["ext"] = ext
+        server._connections["cli"] = cli
+        await server._process_message({"type": "register", "client": "extension"}, ext)
+
+        response = await server._process_message(
+            {"type": "start_session", "goal": "Test"}, cli
+        )
+        assert response["status"] == "running"
+        ext.websocket.send_text.assert_awaited_once()
+        cli.websocket.send_text.assert_not_awaited()
+        if server._sessions:
+            server._sessions.close()
+
+    @pytest.mark.asyncio
+    async def test_web_origin_cannot_register_extension(self):
+        from unittest.mock import AsyncMock
+        from praisonai_browser.server import BrowserServer, ClientConnection
+
+        server = BrowserServer()
+        conn = ClientConnection(websocket=AsyncMock())  # web origin: neither flag
+        response = await server._process_message(
+            {"type": "register", "client": "extension"}, conn
+        )
+        assert response["code"] == "INVALID_ROLE"
+        assert not conn.is_extension
