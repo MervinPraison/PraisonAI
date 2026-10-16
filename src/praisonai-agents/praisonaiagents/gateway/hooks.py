@@ -457,6 +457,13 @@ class HookConfig:
                 "HookConfig.timestamp_header requires signature_scheme "
                 "'hmac_timestamped' or 'structured' (the timestamp must be signed)"
             )
+        # ``structured`` carries ``t=`` in the signature header itself, but
+        # ``hmac_timestamped`` has nowhere to read it from without a header and
+        # would silently reject every request.
+        if self.signature_scheme == "hmac_timestamped" and not self.timestamp_header:
+            raise ValueError(
+                "HookConfig.signature_scheme 'hmac_timestamped' requires timestamp_header"
+            )
         try:
             self.signature_tolerance_seconds = int(self.signature_tolerance_seconds)
         except (TypeError, ValueError):

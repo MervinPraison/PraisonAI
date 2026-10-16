@@ -111,3 +111,10 @@ def test_tolerance_coerced_and_negative_rejected():
         HookConfig(path="n", signature_tolerance_seconds=-1)
     with pytest.raises(ValueError, match="integer"):
         HookConfig(path="n", signature_tolerance_seconds="soon")
+
+
+def test_hmac_timestamped_requires_timestamp_header():
+    # Without a header there is no timestamp to verify, so every request would
+    # be rejected silently; fail at config time instead.
+    with pytest.raises(ValueError, match="requires timestamp_header"):
+        HookConfig(path="x", secret=SECRET, signature_scheme="hmac_timestamped")
