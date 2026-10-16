@@ -575,6 +575,26 @@ def _split_global_flags(argv, value_opts):
     return global_flags, rest
 
 
+def _ensure_utf8_stdio():
+    """Reconfigure non-UTF-8 stdout/stderr (e.g. Windows cp1252) to UTF-8.
+
+    Setting ``PYTHONIOENCODING`` only affects child processes; the current
+    process's streams must be reconfigured so Rich icons/box drawing used by
+    commands like ``praisonai browser doctor`` do not raise
+    ``UnicodeEncodeError``.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        encoding = (getattr(stream, "encoding", None) or "").lower().replace("-", "")
+        if encoding in ("utf8", "cp65001"):
+            continue
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            try:
+                reconfigure(encoding="utf-8", errors="replace")
+            except (ValueError, OSError):
+                pass
+
+
 def _run_typer(argv):
     """Dispatch to the Typer CLI app."""
     import os
@@ -586,6 +606,7 @@ def _run_typer(argv):
             # Force UTF-8 mode for subprocess safety
             if 'PYTHONIOENCODING' not in os.environ:
                 os.environ['PYTHONIOENCODING'] = 'utf-8'
+        _ensure_utf8_stdio()
     
     # Serialize Typer registration through the discovery lock so this path
     # cannot race with ``_get_typer_commands`` mid-registration on another
