@@ -5315,6 +5315,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def _start_stream(self, prompt: str, **kwargs) -> Generator[str, None, None]:
         """Own the durable context for the complete streaming generator."""
+        # A stream is a turn too: give it its own loop guard (as chat/achat get
+        # via _enter_turn) so overlapping streams on a shared agent neither
+        # exhaust nor inherit each other's per-turn limits.
+        guard_token = _turn_loop_guard.set([self, None])
+        try:
+            yield from self._start_stream_turn(prompt, **kwargs)
+        finally:
+            try:
+                _turn_loop_guard.reset(guard_token)
+            except (ValueError, LookupError):
+                _turn_loop_guard.set(None)
+
+    def _start_stream_turn(self, prompt: str, **kwargs) -> Generator[str, None, None]:
         # Tools go to their sandbox before the first model call, once per
         # agent. Placed on chat/achat/_start_stream rather than run/start
         # because AgentTeam and AgentFlow call these three directly -- an

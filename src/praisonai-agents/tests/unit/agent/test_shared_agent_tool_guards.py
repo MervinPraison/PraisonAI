@@ -120,3 +120,40 @@ def test_real_failures_still_open_circuit_breaker(agent_factory, run):
     for _ in range(6):
         result = run(agent, "_down", {"x": "1"})
     assert "circuit breaker open" in str(result)
+
+
+@pytest.mark.parametrize("run", [_sync_run, _async_run], ids=["sync", "async"])
+def test_bad_input_does_not_close_half_open_breaker(agent_factory, run):
+    from praisonaiagents.tools.circuit_breaker import CircuitState, _get_global_registry
+
+    agent = agent_factory([_get_order])
+    agent._ensure_loop_guard().config.enabled = False
+    run(agent, "_get_order", {"order_id": "A1"})  # create the breaker
+    breaker = _get_global_registry().get(f"tool_{id(agent)}__get_order")
+    with breaker._lock:
+        breaker._stats.state = CircuitState.HALF_OPEN
+        breaker._stats.success_count = 0
+    for i in range(breaker.config.success_threshold + 1):
+        run(agent, "_get_order", {"order_id": f"bad{i}"})
+    assert breaker.state == CircuitState.HALF_OPEN
+    assert breaker.stats.success_count == 0
+
+
+def test_streams_get_their_own_loop_guard(agent_factory, monkeypatch):
+    agent = agent_factory([_lookup])
+    agent_guard = agent._ensure_loop_guard()
+    seen = []
+
+    def fake_impl(prompt, **kwargs):
+        guard = agent._ensure_loop_guard()
+        guard.record("lookup", {"q": prompt}, True, "same")
+        seen.append(guard)
+        yield prompt
+
+    monkeypatch.setattr(agent, "_start_stream_impl", fake_impl)
+    assert list(agent._start_stream("a")) == ["a"]
+    assert list(agent._start_stream("b")) == ["b"]
+    assert seen[0] is not seen[1] and agent_guard not in seen
+    assert seen[1]._tool_counts == {"lookup": 1}
+    assert agent._ensure_loop_guard() is agent_guard
+    assert agent_guard._tool_counts == {}

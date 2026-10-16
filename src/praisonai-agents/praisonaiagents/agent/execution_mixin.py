@@ -1970,11 +1970,13 @@ Write the complete compiled report:"""
                 # (a never-raised local class never matches a real exception).
                 class _CircuitBreakerException(Exception):
                     pass
+                _NeutralOutcome = _CircuitBreakerException
                 try:
                     from ..tools.circuit_breaker import (
                         get_circuit_breaker,
                         CircuitBreakerConfig,
                         CircuitBreakerException as _CircuitBreakerException,
+                        _NeutralOutcome,
                     )
                     breaker_name = f"tool_{id(self)}_{function_name}"
                     breaker = get_circuit_breaker(
@@ -2001,25 +2003,24 @@ Write the complete compiled report:"""
                         self.error_dict = error_dict
                         super().__init__(error_dict.get("error", "Tool execution failed"))
 
-                # Caller errors (bad input) say nothing about the tool's health, so
-                # they must not open the breaker for every other caller. Carried
-                # out of acall() as a value and re-raised below (sync parity).
-                class _CallerError:
-                    def __init__(self, exc):
-                        self.exc = exc
-
                 async def _invoke_for_breaker():
+                    # Caller errors (bad input) say nothing about the tool's health:
+                    # recorded as neither failure nor success (sync parity), so they
+                    # can neither open the breaker for other callers nor close a
+                    # half-open one. Unwrapped in _invoke_guarded.
                     try:
                         r = await _invoke()
                     except (ValueError, TypeError, AttributeError) as e:
-                        return _CallerError(e)
+                        raise _NeutralOutcome(e)
+                    if isinstance(r, dict) and r.get("error") and \
+                       r.get("_praison_retryable") is False:
+                        raise _NeutralOutcome(r)
                     if isinstance(r, dict) and r.get("error") and \
                        not r.get("approval_denied") and \
                        not r.get("permission_denied") and \
                        not r.get("approval_error") and \
                        not r.get("policy_denied") and \
-                       not r.get("guardrail_denied") and \
-                       r.get("_praison_retryable") is not False:
+                       not r.get("guardrail_denied"):
                         raise _ToolFailure(r)
                     return r
 
@@ -2033,13 +2034,15 @@ Write the complete compiled report:"""
                     # _circuit_open_result() without reaching either record site.
                     breaker_saw_outcome["done"] = True
                     try:
-                        r = await breaker.acall(_invoke_for_breaker)
+                        return await breaker.acall(_invoke_for_breaker)
                     except _ToolFailure as tf:
                         # Failure was counted by the breaker; return the original dict.
                         return tf.error_dict
-                    if isinstance(r, _CallerError):
-                        raise r.exc
-                    return r
+                    except _NeutralOutcome as n:
+                        neutral = n.value
+                    if isinstance(neutral, BaseException):
+                        raise neutral
+                    return neutral
 
                 def _circuit_open_result():
                     # Record the rejection as a failure so repeated open-circuit
