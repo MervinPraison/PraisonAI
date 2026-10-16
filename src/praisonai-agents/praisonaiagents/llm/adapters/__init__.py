@@ -173,6 +173,41 @@ def _make_tool_call(name: str, arguments: Any, seed: str, idx: int) -> Dict[str,
 _TOOL_CALL_TAG_RE = re.compile(r"<tool_call>\s*(\{[\s\S]*?\})\s*</tool_call>", re.IGNORECASE)
 # <function=name>{...}</function>
 _FUNCTION_TAG_RE = re.compile(r"<function=([a-zA-Z0-9_\-]+)>\s*(\{[\s\S]*?\})\s*</function>", re.IGNORECASE)
+# [TOOL_CALL]{...}[/TOOL_CALL] and LM Studio's [TOOL_REQUEST]{...}[END_TOOL_REQUEST]
+_BRACKET_TAG_RE = re.compile(
+    r"\[(TOOL_CALL|TOOL_REQUEST)\]\s*(\{[\s\S]*?\})\s*\[(?:/TOOL_CALL|END_TOOL_REQUEST)\]",
+    re.IGNORECASE)
+# Open-ended dialects: the JSON payload has no closing tag, so it is decoded
+# with raw_decode from the end of the marker (nested objects stay intact).
+# ReAct: "Action: name" then "Action Input: {...}" (same or next line)
+_REACT_RE = re.compile(r"\bAction\s*:\s*([a-zA-Z0-9_\-]+)\s*Action\s*Input\s*:", re.IGNORECASE)
+# Llama 3.x: <|python_tag|>{"name": ..., "parameters": ...}
+_PYTHON_TAG_RE = re.compile(r"<\|python_tag\|>", re.IGNORECASE)
+
+_EMBEDDED_MARKERS = (
+    "<tool_call>", "<function=", "[tool_call]", "[tool_request]", "<|python_tag|>", "action",
+)
+_JSON_DECODER = json.JSONDecoder()
+
+
+def _json_object_at(text: str, pos: int) -> tuple:
+    """``(object, end)`` for the JSON object at ``pos`` (after whitespace), else ``(None, pos)``."""
+    while pos < len(text) and text[pos].isspace():
+        pos += 1
+    try:
+        data, end = _JSON_DECODER.raw_decode(text, pos)
+    except (json.JSONDecodeError, ValueError):
+        return None, pos
+    return (data, end) if isinstance(data, dict) else (None, pos)
+
+
+def _name_and_args(data: Any, allowed: set) -> Optional[tuple]:
+    """``(name, args)`` from a ``{"name", "arguments"|"parameters"}`` payload."""
+    if isinstance(data, dict):
+        name = data.get("name") or data.get("tool")
+        if isinstance(name, str) and name in allowed:
+            return name, data.get("arguments", data.get("parameters", {}))
+    return None
 
 
 def _recover_json_tool_calls(response_text: str, tools: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
@@ -183,10 +218,14 @@ def _recover_json_tool_calls(response_text: str, tools: List[Dict[str, Any]]) ->
     on DefaultAdapter -- a hosted model returning JSON prose must never have it
     parsed as a tool call.
 
-    Three dialects are recovered, in-process, with no extra LLM round trip:
+    These dialects are recovered, in-process, with no extra LLM round trip:
       1. the whole content is a JSON object/array of ``{"name", "arguments"}``;
       2. one or more ``<tool_call>{...}</tool_call>`` blocks embedded in prose;
-      3. one or more ``<function=name>{...}</function>`` blocks embedded in prose.
+      3. one or more ``<function=name>{...}</function>`` blocks embedded in prose;
+      4. bracketed ``[TOOL_CALL]{...}[/TOOL_CALL]`` /
+         ``[TOOL_REQUEST]{...}[END_TOOL_REQUEST]`` blocks;
+      5. ReAct ``Action: name`` / ``Action Input: {...}`` pairs;
+      6. Llama ``<|python_tag|>{"name", "parameters"}`` calls.
 
     Every recovered name is checked against the advertised tool allowlist so a
     call is never invented, and fenced code blocks are masked first so a call
@@ -221,41 +260,68 @@ def _recover_json_tool_calls(response_text: str, tools: List[Dict[str, Any]]) ->
     # probe is case-insensitive to match the tag regexes -- a model that emits
     # <TOOL_CALL> or <FUNCTION=...> must recover just like the lowercase form.
     lowered = response_text.lower()
-    if not any(marker in lowered for marker in ("<tool_call>", "<function=")):
+    if not any(marker in lowered for marker in _EMBEDDED_MARKERS):
         return None
 
     scan_text = _mask_protected_ranges(response_text)
 
-    # Scan both dialects in a single pass ordered by position in the text, so a
-    # model that interleaves <tool_call> and <function=> blocks yields calls in
-    # the order it actually wrote them -- a dependent or side-effecting call is
-    # never reordered ahead of one it relies on.
+    # Scan every dialect, then order by position in the text, so a model that
+    # interleaves dialects yields calls in the order it actually wrote them --
+    # a dependent or side-effecting call is never reordered ahead of one it
+    # relies on. Each match is (start, end, name, args); a delimited call that
+    # is rejected (unadvertised name, bad JSON) is kept with ``name=None`` so
+    # its span is still reserved and nothing quoted inside it can run.
     matches = []
     for match in _TOOL_CALL_TAG_RE.finditer(scan_text):
         try:
-            data = json.loads(match.group(1))
+            found = _name_and_args(json.loads(match.group(1)), allowed)
         except (json.JSONDecodeError, TypeError):
-            continue
-        if isinstance(data, dict):
-            name = data.get("name") or data.get("tool")
-            if name in allowed:
-                args = data.get("arguments", data.get("parameters", {}))
-                matches.append((match.start(), name, args))
+            found = None
+        matches.append((match.start(), match.end(), *(found or (None, None))))
+
+    for match in _BRACKET_TAG_RE.finditer(scan_text):
+        try:
+            found = _name_and_args(json.loads(match.group(2)), allowed)
+        except (json.JSONDecodeError, TypeError):
+            found = None
+        matches.append((match.start(), match.end(), *(found or (None, None))))
+
+    for match in _PYTHON_TAG_RE.finditer(scan_text):
+        data, end = _json_object_at(scan_text, match.end())
+        found = _name_and_args(data, allowed)
+        matches.append((match.start(), end, *(found or (None, None))))
 
     for match in _FUNCTION_TAG_RE.finditer(scan_text):
-        name = match.group(1)
+        name, args = match.group(1), None
         if name in allowed:
             try:
                 args = json.loads(match.group(2))
             except (json.JSONDecodeError, TypeError):
-                continue
-            matches.append((match.start(), name, args))
+                name = None
+        else:
+            name = None
+        matches.append((match.start(), match.end(), name, args))
 
+    # An unadvertised ReAct call still reserves its decoded JSON input (a
+    # bounded span) so a call quoted inside it never runs.
+    for match in _REACT_RE.finditer(scan_text):
+        args, end = _json_object_at(scan_text, match.end())
+        if args is not None:
+            name = match.group(1)
+            matches.append((match.start(), end, name if name in allowed else None, args))
+
+    # Drop any match that starts inside an earlier call's text -- accepted or
+    # rejected: a marker quoted in another call's arguments is data, never a
+    # second call to run.
     matches.sort(key=lambda m: m[0])
-    salvaged = [
-        _make_tool_call(name, args, response_text, idx)
-        for idx, (_, name, args) in enumerate(matches)
-    ]
+    salvaged = []
+    consumed = 0
+    for start, end, name, args in matches:
+        if start < consumed:
+            continue
+        consumed = end
+        if name is not None:
+            salvaged.append(_make_tool_call(name, args, response_text, len(salvaged)))
 
     return salvaged if salvaged else None
 
