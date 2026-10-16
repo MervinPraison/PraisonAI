@@ -21,6 +21,10 @@ praisonai-browser doctor
 
 With the full stack: `praisonai browser start`, `praisonai browser run "..."`.
 
+## Extension role registration
+
+Sockets without an `Origin` header (CLI, or a Chrome MV3 offscreen document) are treated as CLI clients by default. An extension context that omits `Origin` should send `{"type": "register", "client": "extension"}` right after connecting so the bridge routes `start_automation` to it.
+
 ## Stack
 
 ```
