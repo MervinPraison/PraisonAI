@@ -87,3 +87,27 @@ def test_round_trip_new_fields():
     assert data["timestamp_header"] == "Stripe-Signature"
     assert data["signature_tolerance_seconds"] == 60
     assert "signature_scheme" not in hook.metadata
+
+
+def test_timestamp_header_requires_signed_timestamp_scheme():
+    # An unsigned timestamp header would let an old body+signature be replayed
+    # with a fresh timestamp, so the combination is refused up front.
+    for scheme in ("hmac_hex", "hmac_base64"):
+        with pytest.raises(ValueError, match="timestamp_header"):
+            HookConfig(path="x", secret=SECRET, signature_scheme=scheme,
+                       timestamp_header="X-Ts")
+
+
+def test_tolerance_coerced_and_negative_rejected():
+    hook = HookConfig.from_dict({"path": "q", "secret": SECRET,
+                                 "signature_header": "X-Sig",
+                                 "signature_scheme": "hmac_timestamped",
+                                 "timestamp_header": "X-Ts",
+                                 "signature_tolerance_seconds": "300"})
+    assert hook.signature_tolerance_seconds == 300
+    now = str(int(time.time()))
+    assert hook.verify_signature(BODY, {"X-Sig": _hex(f"{now}.".encode() + BODY), "X-Ts": now})
+    with pytest.raises(ValueError, match=">= 0"):
+        HookConfig(path="n", signature_tolerance_seconds=-1)
+    with pytest.raises(ValueError, match="integer"):
+        HookConfig(path="n", signature_tolerance_seconds="soon")

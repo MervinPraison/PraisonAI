@@ -1348,6 +1348,35 @@
           "default": null,
           "title": "Signature Prefix"
         },
+        "signature_scheme": {
+          "default": "hmac_hex",
+          "enum": [
+            "hmac_hex",
+            "hmac_base64",
+            "hmac_timestamped",
+            "structured"
+          ],
+          "title": "Signature Scheme",
+          "type": "string"
+        },
+        "timestamp_header": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timestamp Header"
+        },
+        "signature_tolerance_seconds": {
+          "default": 300,
+          "minimum": 0,
+          "title": "Signature Tolerance Seconds",
+          "type": "integer"
+        },
         "events": {
           "anyOf": [
             {

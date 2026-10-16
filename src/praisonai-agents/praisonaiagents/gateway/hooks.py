@@ -385,11 +385,12 @@ class HookConfig:
             ``"hmac_timestamped"`` (signs ``"{timestamp}.{body}"``) or
             ``"structured"`` (a ``t=…,v1=…`` header, Stripe-style).
         timestamp_header: Header carrying the provider timestamp (unix
-            seconds). For ``"structured"`` the ``t=`` component is used.
-        signature_tolerance_seconds: Replay window. When a timestamp is in
-            play (``timestamp_header`` set, or a timestamped/structured
-            scheme) a request outside ``±`` this many seconds is rejected
-            before any agent runs. ``0`` disables the freshness check.
+            seconds); only valid with a scheme that signs it. For
+            ``"structured"`` the ``t=`` component is used.
+        signature_tolerance_seconds: Replay window for the timestamped and
+            structured schemes: a request outside ``±`` this many seconds is
+            rejected before any agent runs. ``0`` disables the freshness
+            check; negative values are rejected.
         events: Optional allow-list of event types. A delivery whose event is
             not listed is acknowledged (200) without running a turn.
         event_header: Header carrying the event type, e.g. ``"X-GitHub-Event"``.
@@ -446,6 +447,27 @@ class HookConfig:
                 f"HookConfig.signature_scheme must be one of "
                 f"{list(SIGNATURE_SCHEMES)}, got {self.signature_scheme!r}"
             )
+        # A body-only scheme does not sign the timestamp, so an attacker could
+        # replay an old body+signature with a fresh header: refuse rather than
+        # offer a replay window that does not hold.
+        if self.timestamp_header and self.signature_scheme not in (
+            "hmac_timestamped", "structured",
+        ):
+            raise ValueError(
+                "HookConfig.timestamp_header requires signature_scheme "
+                "'hmac_timestamped' or 'structured' (the timestamp must be signed)"
+            )
+        try:
+            self.signature_tolerance_seconds = int(self.signature_tolerance_seconds)
+        except (TypeError, ValueError):
+            raise ValueError(
+                "HookConfig.signature_tolerance_seconds must be an integer, "
+                f"got {self.signature_tolerance_seconds!r}"
+            ) from None
+        if self.signature_tolerance_seconds < 0:
+            raise ValueError(
+                "HookConfig.signature_tolerance_seconds must be >= 0 (0 disables)"
+            )
         # A configured secret with no explicit header would otherwise read no
         # signature and reject every request. Default to the widely-used
         # ``X-Hub-Signature-256`` (GitHub/webhook convention) so ``secret`` on
@@ -474,11 +496,9 @@ class HookConfig:
             if self.signature_scheme == "structured" and timestamp:
                 # Same composite header (``t=…,v1=…``): take the ``t=`` part.
                 timestamp = _parse_structured(timestamp)[0] or timestamp
-        # Freshness only applies when a timestamp is part of the contract, so
-        # a plain body-only hook (no ``timestamp_header``) is unaffected.
-        timestamped = bool(self.timestamp_header) or self.signature_scheme in (
-            "hmac_timestamped", "structured",
-        )
+        # Freshness only applies when the timestamp is signed, so a plain
+        # body-only hook is unaffected.
+        timestamped = self.signature_scheme in ("hmac_timestamped", "structured")
         return verify_webhook_signature(
             self.secret,
             raw_body,
