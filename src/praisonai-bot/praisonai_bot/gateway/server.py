@@ -1369,6 +1369,8 @@ class WebSocketGateway:
         # contract; the durable backend makes the atomic "already seen or in
         # flight" claim a crash-safe ``UNIQUE`` insert.
         self._hook_idem: Any = None
+        # Lazily-built burst coalescer for hooks with ``coalesce`` (#5867).
+        self._hook_coalescer: Any = None
         self._hook_idempotency_max = 10_000
         self._hook_idempotency_ttl = 86_400.0  # 24h
         # Backend selected by ``hooks.idempotency.store_backend`` in the parsed
@@ -2433,6 +2435,24 @@ class WebSocketGateway:
             idem = hook.resolve_idempotency_key(payload)
             if not self._hook_reserve(idem):
                 return JSONResponse({"ok": True, "deduplicated": True})
+
+            # Burst coalescing (#5867): buffer the delivery under its group key
+            # and acknowledge it now; one run fires for the whole burst. The
+            # delivery is recorded as accepted so a sender retry stays deduped.
+            group = hook.resolve_coalesce_key(payload)
+            if group is not None:
+                pending = self._get_hook_coalescer().submit(group, hook, payload)
+                if pending is None:
+                    self._hook_release(idem)
+                    return JSONResponse(
+                        {"ok": False, "error": "too many pending coalesced groups"},
+                        status_code=503, headers={"Retry-After": "30"},
+                    )
+                self._hook_record(idem)
+                return JSONResponse(
+                    {"ok": True, "coalesced": True, "pending": pending},
+                    status_code=202,
+                )
 
             try:
                 result = await self._run_hook(hook, payload)
@@ -3771,6 +3791,9 @@ class WebSocketGateway:
         
         # Gracefully drain active sessions before closing
         await self._drain_active_sessions(reason="shutdown", timeout=drain_timeout)
+
+        if self._hook_coalescer is not None:
+            await self._hook_coalescer.aclose()
         
         self._is_running = False
         
@@ -5976,8 +5999,28 @@ class WebSocketGateway:
         """Record ``key`` as processed after a successful run."""
         self._get_hook_idem_store().record(key)
 
-    async def _run_hook(self, hook: Any, payload: Dict[str, Any]) -> Dict[str, Any]:
+    def _get_hook_coalescer(self) -> Any:
+        if self._hook_coalescer is None:
+            from .hook_coalescer import HookCoalescer
+
+            async def _dispatch(hook: Any, payload: Dict[str, Any], count: int) -> None:
+                result = await self._run_hook(hook, payload, coalesced=count)
+                if not result.get("ok", False):
+                    logger.error(
+                        "Coalesced hook '%s' run failed: %s",
+                        hook.path, result.get("error"),
+                    )
+
+            self._hook_coalescer = HookCoalescer(_dispatch)
+        return self._hook_coalescer
+
+    async def _run_hook(
+        self, hook: Any, payload: Dict[str, Any], *, coalesced: int = 1
+    ) -> Dict[str, Any]:
         """Execute a hook: resolve session, run agent (or wake), deliver.
+
+        ``coalesced`` is the number of deliveries a coalesced run absorbed
+        (#5867); when > 1 the agent message notes that only the latest is shown.
 
         Returns a JSON-serializable result dict describing what happened.
         """
@@ -6053,6 +6096,11 @@ class WebSocketGateway:
             return {"ok": False, "error": "no agent available", "session": session_key}
 
         message = hook.resolve_message(payload) or ""
+        if coalesced > 1:
+            message = (
+                f"[{coalesced} events coalesced; only the latest is shown]\n\n"
+                f"{message}"
+            )
 
         try:
             gate = getattr(self, "_admission_gate", None)

@@ -267,6 +267,7 @@ _LAZY_IMPORTS = {
     # hooks.py — Inbound trigger / webhook contract (Issue #2281)
     "HookAction": ("praisonaiagents.gateway.hooks", "HookAction"),
     "HookConfig": ("praisonaiagents.gateway.hooks", "HookConfig"),
+    "CoalesceConfig": ("praisonaiagents.gateway.hooks", "CoalesceConfig"),
     "InboundTriggerProtocol": ("praisonaiagents.gateway.hooks", "InboundTriggerProtocol"),
     "render_template": ("praisonaiagents.gateway.hooks", "render_template"),
     "compute_idempotency_key": ("praisonaiagents.gateway.hooks", "compute_idempotency_key"),
@@ -624,6 +625,7 @@ __all__ = [
     # Inbound trigger / webhook contract (Issue #2281)
     "HookAction",
     "HookConfig",
+    "CoalesceConfig",
     "InboundTriggerProtocol",
     "render_template",
     "compute_idempotency_key",

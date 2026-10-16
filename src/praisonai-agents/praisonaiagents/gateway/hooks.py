@@ -16,6 +16,8 @@ limiting and channel delivery all live in the ``praisonai`` wrapper gateway
   templating helper used to build session keys, idempotency keys and messages
   from a JSON payload.
 - ``compute_idempotency_key``: derive a stable dedup key from a payload.
+- ``CoalesceConfig``: opt-in burst coalescing — deliveries sharing a
+  payload-derived group key within a debounce window collapse into one run.
 - ``InboundTriggerProtocol``: the structural contract a gateway implements to
   register hooks.
 
@@ -28,11 +30,13 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 __all__ = [
+    "CoalesceConfig",
     "HookAction",
     "HookConfig",
     "InboundTriggerProtocol",
@@ -234,6 +238,56 @@ def verify_webhook_signature(
 
 
 @dataclass
+class CoalesceConfig:
+    """Opt-in burst coalescing for a hook (Issue #5867).
+
+    Deliveries whose ``group_key`` renders to the same value are collapsed into
+    one run carrying the latest payload. The run fires once the group has been
+    quiet for ``window_seconds``, or at the latest ``max_wait_seconds`` after
+    its first delivery so a steady stream cannot starve dispatch. The buffering
+    and timer live in the gateway runtime; this is only the contract.
+
+    Attributes:
+        group_key: Template over the payload, e.g.
+            ``"{repository.full_name}#{pull_request.number}"``. A delivery whose
+            key renders empty is dispatched immediately (never coalesced).
+        window_seconds: Debounce quiet window.
+        max_wait_seconds: Hard cap from the first delivery in a group.
+    """
+
+    group_key: str
+    window_seconds: float = 30.0
+    max_wait_seconds: float = 300.0
+
+    def __post_init__(self) -> None:
+        if not (self.group_key or "").strip():
+            raise ValueError("CoalesceConfig.group_key must be a non-empty template")
+        self.window_seconds = float(self.window_seconds)
+        self.max_wait_seconds = float(self.max_wait_seconds)
+        if not (
+            math.isfinite(self.window_seconds) and math.isfinite(self.max_wait_seconds)
+        ):
+            raise ValueError("CoalesceConfig durations must be finite")
+        if self.window_seconds <= 0:
+            raise ValueError("CoalesceConfig.window_seconds must be > 0")
+        if self.max_wait_seconds < self.window_seconds:
+            raise ValueError(
+                "CoalesceConfig.max_wait_seconds must be >= window_seconds"
+            )
+
+    def deadline(self, first_at: float, last_at: float) -> float:
+        """When a group first seen at ``first_at`` and last at ``last_at`` fires."""
+        return min(last_at + self.window_seconds, first_at + self.max_wait_seconds)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "group_key": self.group_key,
+            "window_seconds": self.window_seconds,
+            "max_wait_seconds": self.max_wait_seconds,
+        }
+
+
+@dataclass
 class HookConfig:
     """Declarative definition of an inbound event trigger.
 
@@ -271,6 +325,9 @@ class HookConfig:
             ``resolve_event``.
         deliver_only: When ``True`` the rendered ``message`` *is* the delivered
             content, routed straight through ``deliver_to`` with no LLM turn.
+        coalesce: Optional :class:`CoalesceConfig` (or mapping) that collapses
+            a burst of deliveries for the same entity into one run. ``None``
+            (default) runs once per delivery.
     """
 
     path: str
@@ -293,6 +350,8 @@ class HookConfig:
     event_header: Optional[str] = None
     # Pass-through: deliver the rendered message with no LLM turn.
     deliver_only: bool = False
+    # Burst coalescing (#5867).
+    coalesce: Optional[CoalesceConfig] = None
 
     def __post_init__(self) -> None:
         self.path = (self.path or "").strip().strip("/")
@@ -305,6 +364,8 @@ class HookConfig:
             )
         if isinstance(self.events, str):
             self.events = [self.events]
+        if isinstance(self.coalesce, dict):
+            self.coalesce = CoalesceConfig(**self.coalesce)
         # A configured secret with no explicit header would otherwise read no
         # signature and reject every request. Default to the widely-used
         # ``X-Hub-Signature-256`` (GitHub/webhook convention) so ``secret`` on
@@ -408,6 +469,17 @@ class HookConfig:
             self.idempotency_key, payload, path=self.path
         )
 
+    def resolve_coalesce_key(self, payload: Dict[str, Any]) -> Optional[str]:
+        """Resolve the coalescing group for ``payload``.
+
+        Returns ``None`` when coalescing is not configured or the group key
+        renders empty, meaning the delivery runs on its own immediately.
+        """
+        if self.coalesce is None:
+            return None
+        rendered = render_template(self.coalesce.group_key, payload).strip()
+        return f"{self.path}\x00{rendered}" if rendered else None
+
     def resolve_message(self, payload: Dict[str, Any], *, fence: bool = True) -> str:
         """Render the hook message for ``payload``.
 
@@ -445,6 +517,7 @@ class HookConfig:
             "events": list(self.events) if self.events else None,
             "event_header": self.event_header,
             "deliver_only": self.deliver_only,
+            "coalesce": self.coalesce.to_dict() if self.coalesce else None,
         }
 
     @classmethod
@@ -468,6 +541,7 @@ class HookConfig:
             "events",
             "event_header",
             "deliver_only",
+            "coalesce",
         }
         return cls(
             path=data.get("path", ""),
@@ -486,6 +560,7 @@ class HookConfig:
             events=data.get("events"),
             event_header=data.get("event_header"),
             deliver_only=data.get("deliver_only", False),
+            coalesce=data.get("coalesce"),
             metadata={
                 **(data.get("metadata") or {}),
                 **{k: v for k, v in data.items() if k not in known},
