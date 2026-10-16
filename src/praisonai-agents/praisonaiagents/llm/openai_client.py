@@ -487,6 +487,15 @@ class OpenAIClient:
                 client_kwargs = {"api_key": self.api_key, "base_url": self.base_url}
                 if self.max_retries is not None:
                     client_kwargs["max_retries"] = self.max_retries
+                # Use the plain default httpx client rather than openai's
+                # internal wrapper: the wrapper's ``__del__`` schedules
+                # ``aclose()`` on whichever loop is running at GC time. When a
+                # stale client (bound to a closed ``asyncio.run`` loop) is
+                # dropped above, that is the *new* loop, so the orphan task
+                # fails with "Event loop is closed" and is logged as
+                # "Task exception was never retrieved".
+                from openai import DefaultAsyncHttpxClient
+                client_kwargs["http_client"] = DefaultAsyncHttpxClient()
                 self._async_client = AsyncOpenAI(**client_kwargs)
                 self._async_client_loop = running_loop
                 self._async_client_owned = True
@@ -2987,9 +2996,11 @@ class OpenAIClient:
         """Close the OpenAI clients."""
         if self._sync_client and hasattr(self._sync_client, 'close'):
             self._sync_client.close()
-        if self._async_client and hasattr(self._async_client, 'close'):
-            self._async_client.close()
-    
+        # AsyncOpenAI.close() is a coroutine and cannot be awaited here; calling
+        # it only produced a never-awaited coroutine. Drop the reference so the
+        # client is not reused after close (use ``aclose()`` for async teardown).
+        self._async_client = None
+
     async def aclose(self):
         """Asynchronously close the OpenAI clients."""
         if self._sync_client and hasattr(self._sync_client, 'close'):
