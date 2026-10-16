@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import asyncio
 import os
+import threading
 
 from praisonaiagents import AgentOSConfig, AgentOSProtocol
 
@@ -189,11 +190,10 @@ class AgentOS:
             agent's mutable chat_history.
 
             Reuses the wrapper's existing clone/bind helpers (api/agent_invoke.py)
-            rather than reinventing cloning. ``clone_for_channel`` intentionally
-            drops handoffs (nested Agents can't be safely deep-copied and would
-            share RLocks), so agents with handoffs stay on the shared template to
-            avoid silently losing configured delegation. Plain mocks / lightweight
-            callables that don't support isolation also fall back to the template.
+            rather than reinventing cloning. Agents with handoffs are cloned too:
+            ``clone_for_channel`` rebinds their delegation tools to the clone.
+            Plain mocks / lightweight callables that don't support isolation fall
+            back to the template.
             Shared by both POST /chat and the WebSocket endpoint so they can never
             drift apart on this safety property.
             """
@@ -202,8 +202,7 @@ class AgentOS:
                 _clone_agent,
                 bind_session,
             )
-            has_handoffs = bool(getattr(template, "handoffs", None))
-            if _supports_session_isolation(template) and not has_handoffs:
+            if _supports_session_isolation(template):
                 agent = _clone_agent(template)
                 return bind_session(agent, session_id)
             return template
@@ -435,10 +434,10 @@ class AgentOS:
             return {"flow": flow_name, "result": str(result), "session_id": request.session_id}
 
         # ── WebSocket chat ────────────────────────────────────────────────
-        # The docstring advertises WebSocket endpoints. Deliver one that speaks
-        # the same agent surface as POST /chat (achat/chat) rather than a
-        # fabricated streaming API the core Agent does not expose. The whole
-        # response is sent as one frame followed by a terminal {"done": true}.
+        # Streams {"delta": ...} frames from the core Agent's iter_stream(),
+        # then a terminal {"done": true}. Agents without iter_stream, or with an
+        # output guardrail (which streaming cannot apply), get the whole
+        # response from achat/chat as one {"response": ...} frame instead.
         #
         # Two invariants this endpoint must share with POST /chat:
         #   1. Authentication — the HTTP api-key middleware does not run on the
@@ -475,6 +474,56 @@ class AgentOS:
                 return None
             return _isolate_agent(template, session_id)
 
+        async def _send_stream(ws: WebSocket, iter_stream: Any, message: str) -> None:
+            # iter_stream is a sync generator: drain it on a worker thread and
+            # hand chunks back to the loop so other sockets keep being served.
+            # ``slots`` bounds the chunks in flight so a slow client cannot grow
+            # the buffer; ``stop`` makes the worker close the generator (ending
+            # the model/tool work) once the client is gone.
+            loop = asyncio.get_running_loop()
+            chunks: "asyncio.Queue[Any]" = asyncio.Queue()
+            slots = threading.Semaphore(64)
+            stop = threading.Event()
+            end = object()
+
+            def _emit(item: Any) -> None:
+                try:
+                    loop.call_soon_threadsafe(chunks.put_nowait, item)
+                except RuntimeError:  # loop already closed
+                    stop.set()
+
+            def _pump():
+                gen = None
+                try:
+                    gen = iter(iter_stream(message))
+                    for chunk in gen:
+                        slots.acquire()
+                        if stop.is_set():
+                            break
+                        _emit(chunk)
+                except BaseException as e:
+                    _emit(e)
+                finally:
+                    try:
+                        close = getattr(gen, "close", None)
+                        if close is not None:
+                            close()
+                    finally:
+                        _emit(end)
+
+            loop.run_in_executor(None, _pump)
+            try:
+                while (chunk := await chunks.get()) is not end:
+                    if isinstance(chunk, BaseException):
+                        raise chunk
+                    slots.release()
+                    await ws.send_json({"delta": str(chunk)})
+            finally:
+                # Not awaiting the worker: a stalled model call must not pin
+                # this handler. The worker exits at its next chunk.
+                stop.set()
+                slots.release()
+
         @app.websocket(f"{self.config.api_prefix}/chat/stream")
         async def chat_stream(ws: WebSocket):
             if launch_token:
@@ -504,11 +553,15 @@ class AgentOS:
                         await ws.send_json({"error": "no agents available"})
                         continue
                     try:
-                        if hasattr(agent, "achat") and callable(getattr(agent, "achat")):
-                            response = await agent.achat(message)
+                        iter_stream = getattr(agent, "iter_stream", None)
+                        if callable(iter_stream) and getattr(agent, "guardrail", None) is None:
+                            await _send_stream(ws, iter_stream, message)
                         else:
-                            response = await asyncio.to_thread(agent.chat, message)
-                        await ws.send_json({"response": str(response)})
+                            if hasattr(agent, "achat") and callable(getattr(agent, "achat")):
+                                response = await agent.achat(message)
+                            else:
+                                response = await asyncio.to_thread(agent.chat, message)
+                            await ws.send_json({"response": str(response)})
                         await ws.send_json({"done": True})
                     except Exception as e:
                         await ws.send_json({"error": str(e)})

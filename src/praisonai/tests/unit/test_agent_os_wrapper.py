@@ -94,10 +94,9 @@ class TestAgentOSChatSessionIsolation:
         # The shared template's history must stay empty; each request used a clone.
         assert template.chat_history == []
 
-    def test_agent_with_handoffs_is_not_cloned(self, monkeypatch):
-        # ``clone_for_channel`` drops handoffs, so an agent configured with
-        # delegation must NOT be cloned — it stays on the shared template to
-        # preserve its handoff behaviour.
+    def test_agent_with_handoffs_is_cloned_with_delegation(self, monkeypatch):
+        # Handoff agents get a per-request clone too (no shared chat_history);
+        # ``clone_for_channel`` rebinds their delegation tools to the clone.
         pytest.importorskip("fastapi")
         from fastapi.testclient import TestClient
         from praisonaiagents import Agent
@@ -112,7 +111,7 @@ class TestAgentOSChatSessionIsolation:
         seen = []
 
         async def _fake_achat(self, message, *args, **kwargs):
-            seen.append(id(self))
+            seen.append(self)
             return f"echo:{message}"
 
         monkeypatch.setattr(type(template), "achat", _fake_achat, raising=False)
@@ -123,5 +122,11 @@ class TestAgentOSChatSessionIsolation:
 
         r = client.post(f"{prefix}/chat", json={"message": "hi", "session_id": "x"})
         assert r.status_code == 200, r.text
-        # The shared template (with handoffs intact) handled the request.
-        assert seen[-1] == id(template)
+        # A clone handled the request, not the shared template...
+        clone = seen[-1]
+        assert clone is not template
+        assert template.chat_history == []
+        # ...and its delegation tool is bound to the clone itself.
+        tool = next(t for t in clone.tools if t.__name__ == "transfer_to_specialist")
+        bound = [c.cell_contents for c in tool.__closure__]
+        assert clone in bound and template not in bound

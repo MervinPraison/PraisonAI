@@ -72,3 +72,18 @@ def test_clone_rebinds_as_tool_handoff_to_the_clone():
     bound = [c.cell_contents for c in clone_tool.__closure__]
     assert clone in bound
     assert writer not in bound
+
+
+def test_clone_rebinds_handoffs_param_to_the_clone():
+    """handoffs=[...] must survive clone_for_channel() and delegate with the
+    clone's own state (same contract as as_tool() in tools=)."""
+    coder = Agent(name="Coder", instructions="Write Python code")
+    writer = Agent(name="Writer", handoffs=[coder])
+
+    clone = writer.clone_for_channel()
+
+    assert _llm_tool_names(clone) == ["transfer_to_coder"]
+    clone_tool = next(t for t in clone.tools if getattr(t, "__name__", "") == "transfer_to_coder")
+    bound = [c.cell_contents for c in clone_tool.__closure__]
+    assert clone in bound
+    assert writer not in bound

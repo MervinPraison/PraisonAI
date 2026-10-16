@@ -5312,6 +5312,29 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 return
             prompt = _in_prompt
 
+        # Same pre-turn checks as chat()/achat(): a streamed turn must not
+        # bypass a configured rate limit or a blocking BEFORE_AGENT hook.
+        if getattr(self, '_rate_limiter', None) is not None:
+            self._rate_limiter.acquire()
+        from ..hooks import HookEvent, BeforeAgentInput
+        if self._hook_runner.registry.has_hooks(HookEvent.BEFORE_AGENT):
+            hook_results = self._hook_runner.execute_sync(HookEvent.BEFORE_AGENT, BeforeAgentInput(
+                session_id=getattr(self, '_session_id', 'default'),
+                cwd=os.getcwd(),
+                event_name=HookEvent.BEFORE_AGENT,
+                timestamp=str(time.time()),
+                agent_name=self.name,
+                prompt=prompt if isinstance(prompt, str) else str(prompt),
+                conversation_history=self.chat_history,
+                tools_available=[t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
+            ))
+            if self._hook_runner.is_blocked(hook_results):
+                logging.warning(f"Agent {self.name} execution blocked by BEFORE_AGENT hook")
+                return
+            for res in hook_results:
+                if res.output and res.output.modified_input and "prompt" in res.output.modified_input:
+                    prompt = res.output.modified_input["prompt"]
+
         durable_context = None
         durable_token = None
         try:

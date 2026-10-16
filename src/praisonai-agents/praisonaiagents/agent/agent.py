@@ -7120,12 +7120,16 @@ Answer:"""
                 if isinstance(handoff_item, Handoff):
                     # Convert Handoff object to a tool function
                     tool_func = handoff_item.to_tool_function(self)
+                    tool_func._praison_handoff_source = handoff_item
                     self.tools.append(tool_func)
                 elif hasattr(handoff_item, 'name') and hasattr(handoff_item, 'chat'):
                     # Direct agent reference - create a simple handoff
                     from .handoff import handoff
                     handoff_obj = handoff(handoff_item)
                     tool_func = handoff_obj.to_tool_function(self)
+                    # Tagged like the tools= branch above so clone_for_channel()
+                    # rebinds delegation to the clone rather than this agent.
+                    tool_func._praison_handoff_source = handoff_obj
                     self.tools.append(tool_func)
                 else:
                     logging.warning(
