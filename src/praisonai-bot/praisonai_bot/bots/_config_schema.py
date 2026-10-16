@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 from pydantic import (
     BaseModel,
@@ -994,6 +994,12 @@ class HookSchema(BaseModel):
     signature_header: Optional[str] = None
     signature_algo: str = "sha256"
     signature_prefix: Optional[str] = None
+    # Signature scheme + replay window (#5866)
+    signature_scheme: Literal[
+        "hmac_hex", "hmac_base64", "hmac_timestamped", "structured"
+    ] = "hmac_hex"
+    timestamp_header: Optional[str] = None
+    signature_tolerance_seconds: int = Field(default=300, ge=0)
     # Event-type filtering (#3165)
     events: Optional[List[str]] = None
     event_header: Optional[str] = None
