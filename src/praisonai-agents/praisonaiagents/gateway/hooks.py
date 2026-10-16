@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import math
 import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
@@ -263,6 +264,10 @@ class CoalesceConfig:
             raise ValueError("CoalesceConfig.group_key must be a non-empty template")
         self.window_seconds = float(self.window_seconds)
         self.max_wait_seconds = float(self.max_wait_seconds)
+        if not (
+            math.isfinite(self.window_seconds) and math.isfinite(self.max_wait_seconds)
+        ):
+            raise ValueError("CoalesceConfig durations must be finite")
         if self.window_seconds <= 0:
             raise ValueError("CoalesceConfig.window_seconds must be > 0")
         if self.max_wait_seconds < self.window_seconds:

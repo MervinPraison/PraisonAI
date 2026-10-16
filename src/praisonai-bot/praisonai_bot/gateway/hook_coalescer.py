@@ -7,6 +7,9 @@ the group has been quiet for ``window_seconds`` or ``max_wait_seconds`` after
 its first delivery — whichever comes first.
 
 Single event loop only (all calls happen on the gateway's loop), so no locks.
+The number of pending groups is capped at ``max_groups`` so a burst across many
+distinct entities cannot grow the buffer without bound; ``submit`` then returns
+``None`` and the gateway answers with a retryable 503.
 """
 
 from __future__ import annotations
@@ -14,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional, Set
 
 logger = logging.getLogger(__name__)
 
@@ -38,23 +41,38 @@ class HookCoalescer:
     """Debounce buffer keyed by ``HookConfig.resolve_coalesce_key``."""
 
     def __init__(
-        self, dispatch: Dispatch, clock: Callable[[], float] = time.monotonic
+        self,
+        dispatch: Dispatch,
+        clock: Callable[[], float] = time.monotonic,
+        max_groups: int = 10_000,
     ) -> None:
         self._dispatch = dispatch
         self._clock = clock
+        self._max_groups = max_groups
         self._groups: Dict[str, _Group] = {}
+        # Every timer/dispatch task, including groups already removed from
+        # ``_groups`` whose run is in progress, so shutdown can cancel them.
+        self._tasks: Set[asyncio.Task] = set()
 
     def __len__(self) -> int:
         return len(self._groups)
 
-    def submit(self, key: str, hook: Any, payload: Dict[str, Any]) -> int:
-        """Buffer a delivery; returns how many deliveries the group now holds."""
+    def submit(self, key: str, hook: Any, payload: Dict[str, Any]) -> Optional[int]:
+        """Buffer a delivery; returns how many deliveries the group now holds.
+
+        Returns ``None`` (nothing buffered) when a new group would exceed
+        ``max_groups``.
+        """
         now = self._clock()
         group = self._groups.get(key)
         if group is None:
+            if len(self._groups) >= self._max_groups:
+                return None
             group = _Group(hook, payload, now)
             self._groups[key] = group
             group.task = asyncio.ensure_future(self._fire_when_due(key, group))
+            self._tasks.add(group.task)
+            group.task.add_done_callback(self._tasks.discard)
         else:
             group.hook = hook
             group.payload = payload
@@ -80,20 +98,16 @@ class HookCoalescer:
             )
 
     async def aclose(self) -> None:
-        """Cancel pending groups (called on gateway shutdown)."""
-        groups = list(self._groups.values())
+        """Cancel pending groups and in-progress runs (gateway shutdown)."""
+        pending = len(self._groups)
         self._groups.clear()
-        if groups:
+        tasks = list(self._tasks)
+        if tasks:
             logger.warning(
-                "Dropping %d pending coalesced hook group(s) on shutdown",
-                len(groups),
+                "Cancelling %d coalesced hook task(s) on shutdown "
+                "(%d still pending, %d running)",
+                len(tasks), pending, len(tasks) - pending,
             )
-        for group in groups:
-            if group.task is not None:
-                group.task.cancel()
-        for group in groups:
-            if group.task is not None:
-                try:
-                    await group.task
-                except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                    pass
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)

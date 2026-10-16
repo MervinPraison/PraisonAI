@@ -953,6 +953,23 @@ class GatewayServerSchema(BaseModel):
         return v
 
 
+class HookCoalesceSchema(BaseModel):
+    """``hooks[].coalesce`` — mirrors core ``CoalesceConfig`` (#5867)."""
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    group_key: str = Field(min_length=1)
+    window_seconds: float = Field(default=30.0, gt=0)
+    max_wait_seconds: float = Field(default=300.0, gt=0)
+
+    @model_validator(mode="after")
+    def validate_max_wait(self) -> "HookCoalesceSchema":
+        if not self.group_key.strip():
+            raise ValueError("coalesce.group_key must be a non-empty template")
+        if self.max_wait_seconds < self.window_seconds:
+            raise ValueError("coalesce.max_wait_seconds must be >= window_seconds")
+        return self
+
+
 class HookSchema(BaseModel):
     """Schema for a single inbound trigger hook (``hooks:`` entries, #2281).
 
@@ -983,7 +1000,7 @@ class HookSchema(BaseModel):
     # No-LLM pass-through delivery (#3165)
     deliver_only: bool = False
     # Burst coalescing (#5867): {group_key, window_seconds, max_wait_seconds}
-    coalesce: Optional[Dict[str, Any]] = None
+    coalesce: Optional[HookCoalesceSchema] = None
 
     @field_validator("path")
     @classmethod

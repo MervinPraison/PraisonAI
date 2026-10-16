@@ -55,3 +55,13 @@ def test_deadline_debounces_and_caps():
 def test_invalid_config_rejected(kwargs):
     with pytest.raises(ValueError):
         CoalesceConfig(**kwargs)
+
+
+def test_non_finite_durations_rejected():
+    import pytest
+    from praisonaiagents.gateway import CoalesceConfig
+
+    for kw in ({"window_seconds": float("inf"), "max_wait_seconds": float("inf")},
+               {"window_seconds": float("nan")}):
+        with pytest.raises(ValueError):
+            CoalesceConfig(group_key="{pr}", **kw)

@@ -2442,6 +2442,12 @@ class WebSocketGateway:
             group = hook.resolve_coalesce_key(payload)
             if group is not None:
                 pending = self._get_hook_coalescer().submit(group, hook, payload)
+                if pending is None:
+                    self._hook_release(idem)
+                    return JSONResponse(
+                        {"ok": False, "error": "too many pending coalesced groups"},
+                        status_code=503, headers={"Retry-After": "30"},
+                    )
                 self._hook_record(idem)
                 return JSONResponse(
                     {"ok": True, "coalesced": True, "pending": pending},

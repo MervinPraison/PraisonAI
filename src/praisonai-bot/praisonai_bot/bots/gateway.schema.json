@@ -1184,6 +1184,34 @@
       "title": "HealthMonitorSchema",
       "type": "object"
     },
+    "HookCoalesceSchema": {
+      "additionalProperties": false,
+      "description": "``hooks[].coalesce`` \u2014 mirrors core ``CoalesceConfig`` (#5867).",
+      "properties": {
+        "group_key": {
+          "minLength": 1,
+          "title": "Group Key",
+          "type": "string"
+        },
+        "window_seconds": {
+          "default": 30.0,
+          "exclusiveMinimum": 0,
+          "title": "Window Seconds",
+          "type": "number"
+        },
+        "max_wait_seconds": {
+          "default": 300.0,
+          "exclusiveMinimum": 0,
+          "title": "Max Wait Seconds",
+          "type": "number"
+        }
+      },
+      "required": [
+        "group_key"
+      ],
+      "title": "HookCoalesceSchema",
+      "type": "object"
+    },
     "HookSchema": {
       "additionalProperties": true,
       "description": "Schema for a single inbound trigger hook (``hooks:`` entries, #2281).\n\nMirrors ``praisonaiagents.gateway.hooks.HookConfig``; ``extra=\"allow\"``\nkeeps free-form extras (folded into ``metadata`` by ``HookConfig.from_dict``)\nwhile still requiring a non-empty ``path`` and a valid ``action``.",
@@ -1355,15 +1383,13 @@
         "coalesce": {
           "anyOf": [
             {
-              "additionalProperties": true,
-              "type": "object"
+              "$ref": "#/$defs/HookCoalesceSchema"
             },
             {
               "type": "null"
             }
           ],
-          "default": null,
-          "title": "Coalesce"
+          "default": null
         }
       },
       "required": [
