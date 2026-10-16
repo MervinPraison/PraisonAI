@@ -994,6 +994,10 @@ class HookSchema(BaseModel):
     signature_header: Optional[str] = None
     signature_algo: str = "sha256"
     signature_prefix: Optional[str] = None
+    # Signature scheme + replay window (#5866)
+    signature_scheme: str = "hmac_hex"
+    timestamp_header: Optional[str] = None
+    signature_tolerance_seconds: int = 300
     # Event-type filtering (#3165)
     events: Optional[List[str]] = None
     event_header: Optional[str] = None

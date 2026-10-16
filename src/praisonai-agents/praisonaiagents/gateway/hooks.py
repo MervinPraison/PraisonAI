@@ -28,10 +28,12 @@ process; this fires from an external HTTP request.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import math
 import re
+import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
@@ -187,6 +189,33 @@ def compute_idempotency_key(
     return hashlib.sha256(basis.encode("utf-8")).hexdigest()
 
 
+SIGNATURE_SCHEMES = ("hmac_hex", "hmac_base64", "hmac_timestamped", "structured")
+
+
+def _parse_structured(value: str) -> "tuple[Optional[str], List[str]]":
+    """Split a composite ``t=…,v1=…`` header into (timestamp, [v1 signatures])."""
+    timestamp: Optional[str] = None
+    signatures: List[str] = []
+    for part in value.split(","):
+        key, sep, val = part.strip().partition("=")
+        if not sep:
+            continue
+        if key == "t":
+            timestamp = val
+        elif key == "v1":
+            signatures.append(val)
+    return timestamp, signatures
+
+
+def _timestamp_fresh(timestamp: Optional[str], tolerance_seconds: float) -> bool:
+    """Whether a unix ``timestamp`` (seconds) is within ``tolerance_seconds`` of now."""
+    try:
+        ts = float(str(timestamp).strip())
+    except (TypeError, ValueError):
+        return False
+    return abs(time.time() - ts) <= tolerance_seconds
+
+
 def verify_webhook_signature(
     secret: Optional[str],
     raw_body: bytes,
@@ -194,14 +223,17 @@ def verify_webhook_signature(
     *,
     algo: str = "sha256",
     prefix: Optional[str] = None,
+    scheme: str = "hmac_hex",
+    timestamp: Optional[str] = None,
+    tolerance_seconds: float = 0,
 ) -> bool:
     """Constant-time HMAC verification of a webhook body (dependency-free).
 
     A pure counterpart to ``compute_idempotency_key`` that lets the core
     contract validate a provider signature over the *raw* request bytes without
     importing the wrapper's crypto. Mirrors the wrapper's ``verify_hmac``: it is
-    fail-closed (a missing secret/signature or unknown ``algo`` returns
-    ``False`` rather than raising) and prefix-aware.
+    fail-closed (a missing secret/signature or unknown ``algo``/``scheme``
+    returns ``False`` rather than raising) and prefix-aware.
 
     Args:
         secret: Shared signing secret. Falsy → ``False``.
@@ -212,29 +244,60 @@ def verify_webhook_signature(
             the comparison is against the fully-prefixed computed value, so the
             caller passes the raw header value unchanged. When omitted, an
             ``algo=`` style prefix on the provided signature is auto-stripped.
+        scheme: ``"hmac_hex"`` (default, hex HMAC of the body),
+            ``"hmac_base64"`` (base64 HMAC of the body), ``"hmac_timestamped"``
+            (hex HMAC of ``"{timestamp}.{body}"``) or ``"structured"`` (a
+            ``t=…,v1=…`` header; hex HMAC of ``"{t}.{body}"``, any ``v1`` may
+            match).
+        timestamp: Provider timestamp (unix seconds). For ``"structured"`` it
+            is read from the ``t=`` component when not given.
+        tolerance_seconds: When > 0, a missing or stale timestamp (outside
+            ``±tolerance_seconds`` of now) is rejected — the replay window.
 
     Returns:
         ``True`` only if a non-empty signature matches the computed HMAC using a
-        constant-time comparison.
+        constant-time comparison (and, when enforced, the timestamp is fresh).
     """
-    if not secret or not signature:
+    if not secret or not signature or scheme not in SIGNATURE_SCHEMES:
         return False
+
+    candidates = [signature]
+    if scheme == "structured":
+        parsed_ts, candidates = _parse_structured(signature)
+        timestamp = timestamp or parsed_ts
+        if not candidates:
+            return False
+
+    if tolerance_seconds and tolerance_seconds > 0:
+        if not _timestamp_fresh(timestamp, tolerance_seconds):
+            return False
 
     secret_bytes = secret.encode("utf-8") if isinstance(secret, str) else secret
     body_bytes = raw_body if isinstance(raw_body, bytes) else str(raw_body).encode("utf-8")
+    if scheme in ("hmac_timestamped", "structured"):
+        if not timestamp:
+            return False
+        body_bytes = f"{timestamp}.".encode("utf-8") + body_bytes
 
     try:
-        computed = hmac.new(secret_bytes, body_bytes, algo).hexdigest()
+        digest = hmac.new(secret_bytes, body_bytes, algo).digest()
     except (ValueError, TypeError):
         return False
+    if scheme == "hmac_base64":
+        computed = base64.b64encode(digest).decode("ascii")
+    else:
+        computed = digest.hex()
 
-    provided = signature
     if prefix:
-        return hmac.compare_digest(f"{prefix}{computed}", provided)
-
-    if "=" in provided and provided.split("=", 1)[0].isalnum():
-        provided = provided.split("=", 1)[1]
-    return hmac.compare_digest(computed, provided)
+        computed = f"{prefix}{computed}"
+    matched = False
+    for provided in candidates:
+        if not prefix and scheme != "hmac_base64" and "=" in provided \
+                and provided.split("=", 1)[0].isalnum():
+            provided = provided.split("=", 1)[1]
+        # Evaluate every candidate so timing does not reveal which one matched.
+        matched |= hmac.compare_digest(computed, provided)
+    return matched
 
 
 @dataclass
@@ -318,6 +381,15 @@ class HookConfig:
             ``"X-Hub-Signature-256"``.
         signature_algo: Digest for the HMAC, e.g. ``"sha256"``.
         signature_prefix: Optional signature prefix, e.g. ``"sha256="``.
+        signature_scheme: ``"hmac_hex"`` (default), ``"hmac_base64"``,
+            ``"hmac_timestamped"`` (signs ``"{timestamp}.{body}"``) or
+            ``"structured"`` (a ``t=…,v1=…`` header, Stripe-style).
+        timestamp_header: Header carrying the provider timestamp (unix
+            seconds). For ``"structured"`` the ``t=`` component is used.
+        signature_tolerance_seconds: Replay window. When a timestamp is in
+            play (``timestamp_header`` set, or a timestamped/structured
+            scheme) a request outside ``±`` this many seconds is rejected
+            before any agent runs. ``0`` disables the freshness check.
         events: Optional allow-list of event types. A delivery whose event is
             not listed is acknowledged (200) without running a turn.
         event_header: Header carrying the event type, e.g. ``"X-GitHub-Event"``.
@@ -345,6 +417,9 @@ class HookConfig:
     signature_header: Optional[str] = None
     signature_algo: str = "sha256"
     signature_prefix: Optional[str] = None
+    signature_scheme: str = "hmac_hex"
+    timestamp_header: Optional[str] = None
+    signature_tolerance_seconds: int = 300
     # Event filtering.
     events: Optional[List[str]] = None
     event_header: Optional[str] = None
@@ -366,6 +441,11 @@ class HookConfig:
             self.events = [self.events]
         if isinstance(self.coalesce, dict):
             self.coalesce = CoalesceConfig(**self.coalesce)
+        if self.signature_scheme not in SIGNATURE_SCHEMES:
+            raise ValueError(
+                f"HookConfig.signature_scheme must be one of "
+                f"{list(SIGNATURE_SCHEMES)}, got {self.signature_scheme!r}"
+            )
         # A configured secret with no explicit header would otherwise read no
         # signature and reject every request. Default to the widely-used
         # ``X-Hub-Signature-256`` (GitHub/webhook convention) so ``secret`` on
@@ -384,16 +464,30 @@ class HookConfig:
         """
         if not self.secret:
             return True
+        lowered = {k.lower(): v for k, v in headers.items()}
         signature = None
         if self.signature_header:
-            lowered = {k.lower(): v for k, v in headers.items()}
             signature = lowered.get(self.signature_header.lower())
+        timestamp = None
+        if self.timestamp_header:
+            timestamp = lowered.get(self.timestamp_header.lower())
+            if self.signature_scheme == "structured" and timestamp:
+                # Same composite header (``t=…,v1=…``): take the ``t=`` part.
+                timestamp = _parse_structured(timestamp)[0] or timestamp
+        # Freshness only applies when a timestamp is part of the contract, so
+        # a plain body-only hook (no ``timestamp_header``) is unaffected.
+        timestamped = bool(self.timestamp_header) or self.signature_scheme in (
+            "hmac_timestamped", "structured",
+        )
         return verify_webhook_signature(
             self.secret,
             raw_body,
             signature,
             algo=self.signature_algo,
             prefix=self.signature_prefix,
+            scheme=self.signature_scheme,
+            timestamp=timestamp,
+            tolerance_seconds=self.signature_tolerance_seconds if timestamped else 0,
         )
 
     def resolve_event(
@@ -514,6 +608,9 @@ class HookConfig:
             "signature_header": self.signature_header,
             "signature_algo": self.signature_algo,
             "signature_prefix": self.signature_prefix,
+            "signature_scheme": self.signature_scheme,
+            "timestamp_header": self.timestamp_header,
+            "signature_tolerance_seconds": self.signature_tolerance_seconds,
             "events": list(self.events) if self.events else None,
             "event_header": self.event_header,
             "deliver_only": self.deliver_only,
@@ -538,6 +635,9 @@ class HookConfig:
             "signature_header",
             "signature_algo",
             "signature_prefix",
+            "signature_scheme",
+            "timestamp_header",
+            "signature_tolerance_seconds",
             "events",
             "event_header",
             "deliver_only",
@@ -557,6 +657,9 @@ class HookConfig:
             signature_header=data.get("signature_header"),
             signature_algo=data.get("signature_algo", "sha256"),
             signature_prefix=data.get("signature_prefix"),
+            signature_scheme=data.get("signature_scheme", "hmac_hex"),
+            timestamp_header=data.get("timestamp_header"),
+            signature_tolerance_seconds=data.get("signature_tolerance_seconds", 300),
             events=data.get("events"),
             event_header=data.get("event_header"),
             deliver_only=data.get("deliver_only", False),
