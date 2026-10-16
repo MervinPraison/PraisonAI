@@ -47,6 +47,7 @@ class ClientConnection:
     connected_at: float = 0.0
     is_extension: bool = False
     is_cli: bool = False  # True for no-Origin localhost clients until they register as extension
+    no_origin: bool = False  # Fixed at handshake; gates role registration
 
 
 class BrowserServer:
@@ -242,6 +243,7 @@ class BrowserServer:
             connected_at=time.time(),
             is_extension=is_extension,
             is_cli=is_cli,
+            no_origin=is_cli,
         )
         self._connections[conn_id] = conn
         
@@ -345,13 +347,14 @@ class BrowserServer:
         Chrome MV3 offscreen documents often omit the Origin header, so they are
         classified as CLI at handshake. Sending ``{"type": "register",
         "client": "extension"}`` after connect marks the socket as the extension.
-        Only no-Origin localhost sockets (``is_cli``) may claim the extension
-        role; web-origin sockets cannot.
+        Only sockets that connected without an Origin (``no_origin``, fixed at
+        handshake) may change role; web-origin sockets cannot, even by first
+        registering as ``cli``.
         """
         role = message.get("client")
-        if role == "extension" and (conn.is_cli or conn.is_extension):
+        if role == "extension" and (conn.no_origin or conn.is_extension):
             conn.is_extension, conn.is_cli = True, False
-        elif role == "cli" and not conn.session_id:
+        elif role == "cli" and conn.no_origin and not conn.session_id:
             conn.is_extension, conn.is_cli = False, True
         else:
             return {

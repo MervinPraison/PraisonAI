@@ -499,7 +499,7 @@ class TestRegisterRole:
         from praisonai_browser.server import BrowserServer, ClientConnection
 
         server = BrowserServer()
-        conn = ClientConnection(websocket=AsyncMock(), is_cli=True)
+        conn = ClientConnection(websocket=AsyncMock(), is_cli=True, no_origin=True)
         server._connections["offscreen"] = conn
 
         response = await server._process_message(
@@ -521,7 +521,7 @@ class TestRegisterRole:
         from praisonai_browser.server import BrowserServer, ClientConnection
 
         server = BrowserServer()
-        conn = ClientConnection(websocket=AsyncMock(), is_cli=True)
+        conn = ClientConnection(websocket=AsyncMock(), is_cli=True, no_origin=True)
         server._connections["anon"] = conn
 
         response = await server._process_message(
@@ -536,8 +536,8 @@ class TestRegisterRole:
         from praisonai_browser.server import BrowserServer, ClientConnection
 
         server = BrowserServer()
-        ext = ClientConnection(websocket=AsyncMock(), is_cli=True)
-        cli = ClientConnection(websocket=AsyncMock(), is_cli=True)
+        ext = ClientConnection(websocket=AsyncMock(), is_cli=True, no_origin=True)
+        cli = ClientConnection(websocket=AsyncMock(), is_cli=True, no_origin=True)
         server._connections["ext"] = ext
         server._connections["cli"] = cli
         await server._process_message({"type": "register", "client": "extension"}, ext)
@@ -563,3 +563,17 @@ class TestRegisterRole:
         )
         assert response["code"] == "INVALID_ROLE"
         assert not conn.is_extension
+
+    @pytest.mark.asyncio
+    async def test_web_origin_cannot_register_cli_then_extension(self):
+        from unittest.mock import AsyncMock
+        from praisonai_browser.server import BrowserServer, ClientConnection
+
+        server = BrowserServer()
+        conn = ClientConnection(websocket=AsyncMock())  # web origin: neither flag
+        for role in ("cli", "extension"):
+            response = await server._process_message(
+                {"type": "register", "client": role}, conn
+            )
+            assert response["code"] == "INVALID_ROLE"
+        assert not conn.is_extension and not conn.is_cli
