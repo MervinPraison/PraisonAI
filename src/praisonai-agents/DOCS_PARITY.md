@@ -18,7 +18,7 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 577 |
-| ✅ Agent | 22 | 62 | 19751 |
+| ✅ Agent | 22 | 62 | 19755 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 701 |
 | ✅ Approval | 1 | 8 | 4164 |
@@ -61,7 +61,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Planning | 6 | 7 | 1827 |
 | ✅ Plugins | 8 | 5 | 4114 |
 | ✅ Prompts | 2 | 9 | 2046 |
-| ✅ Providers | 1 | 57 | 8661 |
+| ✅ Providers | 1 | 57 | 8697 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 3284 |
 | ✅ Realtime | 2 | 5 | 696 |
