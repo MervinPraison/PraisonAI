@@ -982,6 +982,8 @@ class HookSchema(BaseModel):
     event_header: Optional[str] = None
     # No-LLM pass-through delivery (#3165)
     deliver_only: bool = False
+    # Burst coalescing (#5867): {group_key, window_seconds, max_wait_seconds}
+    coalesce: Optional[Dict[str, Any]] = None
 
     @field_validator("path")
     @classmethod

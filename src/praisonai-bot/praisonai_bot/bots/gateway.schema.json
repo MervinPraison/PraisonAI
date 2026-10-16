@@ -1351,6 +1351,19 @@
           "default": false,
           "title": "Deliver Only",
           "type": "boolean"
+        },
+        "coalesce": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Coalesce"
         }
       },
       "required": [
