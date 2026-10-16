@@ -233,3 +233,45 @@ class TestWebSocketChat:
         with client.websocket_connect("/api/chat/stream?api_key=secret") as ws:
             ws.send_json({"message": "hi"})
             assert ws.receive_json() == {"response": "echo:hi"}
+
+
+class StreamingAgent(FakeAgent):
+    guardrail = None
+
+    def iter_stream(self, message):
+        yield "he"
+        yield "llo"
+
+
+class TestWebSocketStreaming:
+    def test_iter_stream_agent_sends_deltas_then_done(self):
+        client = _client(agents=[StreamingAgent("assistant")])
+        with client.websocket_connect("/api/chat/stream") as ws:
+            ws.send_json({"message": "hi"})
+            assert ws.receive_json() == {"delta": "he"}
+            assert ws.receive_json() == {"delta": "llo"}
+            assert ws.receive_json() == {"done": True}
+
+    def test_guardrailed_agent_is_not_streamed(self):
+        # Streaming yields chunks before an output guardrail can validate them,
+        # so a guardrailed agent must keep the validated single-frame path.
+        agent = StreamingAgent("assistant")
+        agent.guardrail = lambda output: (True, output)
+        client = _client(agents=[agent])
+        with client.websocket_connect("/api/chat/stream") as ws:
+            ws.send_json({"message": "hi"})
+            assert ws.receive_json() == {"response": "echo:hi"}
+            assert ws.receive_json() == {"done": True}
+
+    def test_stream_error_is_reported(self):
+        class Broken(StreamingAgent):
+            def iter_stream(self, message):
+                yield "partial"
+                raise RuntimeError("boom")
+
+        client = _client(agents=[Broken("assistant")])
+        with client.websocket_connect("/api/chat/stream") as ws:
+            ws.send_json({"message": "hi"})
+            assert ws.receive_json() == {"delta": "partial"}
+            assert ws.receive_json() == {"error": "boom"}
+
