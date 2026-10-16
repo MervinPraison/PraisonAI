@@ -6,6 +6,7 @@ and response processing. Extracted from agent.py for maintainability.
 """
 
 import asyncio
+import contextvars
 import os
 import re
 import time
@@ -24,12 +25,17 @@ logger = logging.getLogger(__name__)
 
 _turns_lock = threading.Lock()
 
+# Per-turn loop guard: ``[agent, LoopGuard | None]`` bound by ``_enter_turn``. Copied
+# into tool worker threads with the context, so each turn has its own counters and
+# overlapping turns on a shared agent never exhaust each other's limits.
+_turn_loop_guard = contextvars.ContextVar("praisonai_turn_loop_guard", default=None)
+
 
 def _enter_turn(agent, cancel):
     """Mark a ``chat``/``achat`` turn in flight and bind its cancel token to this context."""
     with _turns_lock:
         agent._turns_in_flight = getattr(agent, "_turns_in_flight", 0) + 1
-    return _active_turn_cancel.set((agent, cancel))
+    return _active_turn_cancel.set((agent, cancel)), _turn_loop_guard.set([agent, None])
 
 
 def _exit_turn(agent, ctx_token):
@@ -38,18 +44,36 @@ def _exit_turn(agent, ctx_token):
         return
     with _turns_lock:
         agent._turns_in_flight = max(getattr(agent, "_turns_in_flight", 1) - 1, 0)
-    try:
-        _active_turn_cancel.reset(ctx_token)
-    except (ValueError, LookupError):
-        _active_turn_cancel.set(None)
+    cancel_token, guard_token = ctx_token
+    for var, token in ((_active_turn_cancel, cancel_token), (_turn_loop_guard, guard_token)):
+        try:
+            var.reset(token)
+        except (ValueError, LookupError):
+            var.set(None)
+
+
+def _current_turn_loop_guard(agent):
+    """Return this turn's loop guard for ``agent`` (lazily created, sharing the agent
+    guard's config), or ``None`` when not inside one of ``agent``'s chat turns."""
+    slot = _turn_loop_guard.get()
+    if slot is None or slot[0] is not agent:
+        return None
+    with _turns_lock:
+        if slot[1] is None:
+            from ..escalation.loop_guard import LoopGuard
+            slot[1] = LoopGuard(agent._loop_guard.config)
+        return slot[1]
 
 
 def _reset_loop_guard_for_turn(agent):
-    """Reset per-turn loop-guard limits unless another turn on this agent is still
-    running (the guard is shared; resetting it would restart that turn's limits).
-    Never force-creates the guard."""
+    """Start fresh per-turn loop-guard limits. Inside a chat turn this drops the turn's
+    own guard; outside one it resets the agent-level guard. Never force-creates a guard."""
+    slot = _turn_loop_guard.get()
+    if slot is not None and slot[0] is agent:
+        slot[1] = None
+        return
     guard = getattr(agent, "_loop_guard", None)
-    if guard is not None and getattr(agent, "_turns_in_flight", 0) <= 1:
+    if guard is not None:
         guard.reset_turn()
 
 

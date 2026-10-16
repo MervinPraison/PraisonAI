@@ -2001,14 +2001,25 @@ Write the complete compiled report:"""
                         self.error_dict = error_dict
                         super().__init__(error_dict.get("error", "Tool execution failed"))
 
+                # Caller errors (bad input) say nothing about the tool's health, so
+                # they must not open the breaker for every other caller. Carried
+                # out of acall() as a value and re-raised below (sync parity).
+                class _CallerError:
+                    def __init__(self, exc):
+                        self.exc = exc
+
                 async def _invoke_for_breaker():
-                    r = await _invoke()
+                    try:
+                        r = await _invoke()
+                    except (ValueError, TypeError, AttributeError) as e:
+                        return _CallerError(e)
                     if isinstance(r, dict) and r.get("error") and \
                        not r.get("approval_denied") and \
                        not r.get("permission_denied") and \
                        not r.get("approval_error") and \
                        not r.get("policy_denied") and \
-                       not r.get("guardrail_denied"):
+                       not r.get("guardrail_denied") and \
+                       r.get("_praison_retryable") is not False:
                         raise _ToolFailure(r)
                     return r
 
@@ -2022,10 +2033,13 @@ Write the complete compiled report:"""
                     # _circuit_open_result() without reaching either record site.
                     breaker_saw_outcome["done"] = True
                     try:
-                        return await breaker.acall(_invoke_for_breaker)
+                        r = await breaker.acall(_invoke_for_breaker)
                     except _ToolFailure as tf:
                         # Failure was counted by the breaker; return the original dict.
                         return tf.error_dict
+                    if isinstance(r, _CallerError):
+                        raise r.exc
+                    return r
 
                 def _circuit_open_result():
                     # Record the rejection as a failure so repeated open-circuit

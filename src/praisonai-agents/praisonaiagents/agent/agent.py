@@ -457,11 +457,16 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             self._wire_deferred_history_callback()
 
     def _ensure_loop_guard(self):
-        """Lazy-create loop guard on first tool execution."""
+        """Lazy-create loop guard on first tool execution.
+
+        Inside a chat turn, returns that turn's own guard (same config) so
+        concurrent turns on a shared agent do not share per-turn counters."""
         if self._loop_guard is None:
             from ..escalation.loop_guard import LoopGuard, LoopGuardConfig
             self._loop_guard = LoopGuard(LoopGuardConfig(enabled=True))
-        return self._loop_guard
+        from .chat_mixin import _current_turn_loop_guard
+        turn_guard = _current_turn_loop_guard(self)
+        return turn_guard if turn_guard is not None else self._loop_guard
 
     def _ensure_loop_detector(self):
         """Lazy-create the result-aware tool-loop detector on first tool call.

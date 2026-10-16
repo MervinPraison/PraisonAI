@@ -3328,13 +3328,16 @@ class ToolExecutionMixin:
             def _tool_wrapper():
                 result = self._execute_tool_impl(function_name, arguments)
                 # Convert error dicts to exceptions so circuit breaker can detect failures
-                # Don't treat approval/permission denials as circuit breaker failures
+                # Don't treat approval/permission denials as circuit breaker failures,
+                # nor caller errors (bad input: ValueError/TypeError/AttributeError,
+                # tagged non-retryable) -- they say nothing about the tool's health.
                 if isinstance(result, dict) and result.get("error") and \
                    not result.get("approval_denied") and \
                    not result.get("permission_denied") and \
                    not result.get("approval_error") and \
                    not result.get("policy_denied") and \
-                   not result.get("guardrail_denied"):
+                   not result.get("guardrail_denied") and \
+                   result.get("_praison_retryable") is not False:
                     # Create a sentinel exception to register failure with circuit breaker
                     class _ToolFailure(Exception):
                         def __init__(self, error_dict):
