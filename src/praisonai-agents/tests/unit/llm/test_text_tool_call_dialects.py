@@ -76,3 +76,18 @@ def test_marker_inside_arguments_is_not_a_second_call():
 def test_react_extra_whitespace_in_marker():
     text = 'Action: web_search Action  Input: {"query": "x"}'
     assert _calls(text) == [("web_search", {"query": "x"})]
+
+
+def test_marker_inside_rejected_call_is_not_run():
+    inner = '{"q": "Action: web_search Action Input: {}"}'
+    for text in (
+        '<tool_call>{"name": "not_advertised", "arguments": %s}</tool_call>' % inner,
+        '[TOOL_CALL]{"name": ["web_search"], "arguments": %s}[/TOOL_CALL]' % inner,
+        '<function=not_advertised>%s</function>' % inner,
+        '<|python_tag|>{"name": "not_advertised", "parameters": %s}' % inner,
+    ):
+        assert _calls(text) == [], text
+    # A valid call after a rejected one still runs.
+    text = ('<tool_call>{"name": "nope", "arguments": %s}</tool_call>\n'
+            'Action: get_weather\nAction Input: {"city": "Rome"}' % inner)
+    assert _calls(text) == [("get_weather", {"city": "Rome"})]

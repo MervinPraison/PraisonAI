@@ -268,38 +268,39 @@ def _recover_json_tool_calls(response_text: str, tools: List[Dict[str, Any]]) ->
     # Scan every dialect, then order by position in the text, so a model that
     # interleaves dialects yields calls in the order it actually wrote them --
     # a dependent or side-effecting call is never reordered ahead of one it
-    # relies on. Each match is (start, end, name, args).
+    # relies on. Each match is (start, end, name, args); a delimited call that
+    # is rejected (unadvertised name, bad JSON) is kept with ``name=None`` so
+    # its span is still reserved and nothing quoted inside it can run.
     matches = []
     for match in _TOOL_CALL_TAG_RE.finditer(scan_text):
         try:
             found = _name_and_args(json.loads(match.group(1)), allowed)
         except (json.JSONDecodeError, TypeError):
-            continue
-        if found:
-            matches.append((match.start(), match.end(), *found))
+            found = None
+        matches.append((match.start(), match.end(), *(found or (None, None))))
 
     for match in _BRACKET_TAG_RE.finditer(scan_text):
         try:
             found = _name_and_args(json.loads(match.group(2)), allowed)
         except (json.JSONDecodeError, TypeError):
-            continue
-        if found:
-            matches.append((match.start(), match.end(), *found))
+            found = None
+        matches.append((match.start(), match.end(), *(found or (None, None))))
 
     for match in _PYTHON_TAG_RE.finditer(scan_text):
         data, end = _json_object_at(scan_text, match.end())
         found = _name_and_args(data, allowed)
-        if found:
-            matches.append((match.start(), end, *found))
+        matches.append((match.start(), end, *(found or (None, None))))
 
     for match in _FUNCTION_TAG_RE.finditer(scan_text):
-        name = match.group(1)
+        name, args = match.group(1), None
         if name in allowed:
             try:
                 args = json.loads(match.group(2))
             except (json.JSONDecodeError, TypeError):
-                continue
-            matches.append((match.start(), match.end(), name, args))
+                name = None
+        else:
+            name = None
+        matches.append((match.start(), match.end(), name, args))
 
     for match in _REACT_RE.finditer(scan_text):
         name = match.group(1)
@@ -308,16 +309,18 @@ def _recover_json_tool_calls(response_text: str, tools: List[Dict[str, Any]]) ->
             if args is not None:
                 matches.append((match.start(), end, name, args))
 
-    # Drop any match that starts inside an earlier call's text: a marker quoted
-    # in another call's arguments is data, never a second call to run.
+    # Drop any match that starts inside an earlier call's text -- accepted or
+    # rejected: a marker quoted in another call's arguments is data, never a
+    # second call to run.
     matches.sort(key=lambda m: m[0])
     salvaged = []
     consumed = 0
     for start, end, name, args in matches:
         if start < consumed:
             continue
-        salvaged.append(_make_tool_call(name, args, response_text, len(salvaged)))
         consumed = end
+        if name is not None:
+            salvaged.append(_make_tool_call(name, args, response_text, len(salvaged)))
 
     return salvaged if salvaged else None
 
