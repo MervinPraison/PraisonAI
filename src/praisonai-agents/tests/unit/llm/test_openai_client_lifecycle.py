@@ -77,8 +77,12 @@ def test_sync_close_does_not_create_unawaited_coroutine(client):
         return client.async_client
 
     run_coroutine_from_any_context(touch())
-    with warnings.catch_warnings():
-        warnings.simplefilter("error", RuntimeWarning)
+    # Record rather than raise: an unawaited-coroutine warning is emitted from
+    # the coroutine finaliser, where "error" is routed to sys.unraisablehook
+    # and would not fail the test.
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always", RuntimeWarning)
         client.close()
         gc.collect()
+    assert not [w for w in caught if "never awaited" in str(w.message)]
     assert client._async_client is None
