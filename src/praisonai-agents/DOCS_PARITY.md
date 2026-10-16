@@ -18,7 +18,7 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 577 |
-| ✅ Agent | 22 | 62 | 19755 |
+| ✅ Agent | 22 | 62 | 19777 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 701 |
 | ✅ Approval | 1 | 8 | 4164 |
@@ -49,7 +49,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Hooks | 2 | 9 | 5317 |
 | ✅ Image | 1 | 11 | 1346 |
 | ✅ Knowledge | 4 | 20 | 6264 |
-| ✅ LLM | 3 | 15 | 6142 |
+| ✅ LLM | 3 | 15 | 6160 |
 | ✅ Loops | 4 | 5 | 1511 |
 | ✅ MCP | 1 | 64 | 15388 |
 | ✅ Memory | 6 | 21 | 8484 |
