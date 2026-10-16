@@ -58,3 +58,21 @@ def test_plain_prose_without_markers_is_untouched():
 
 def test_react_non_json_input_is_ignored():
     assert _calls('Action: web_search\nAction Input: praisonai gateway') == []
+
+
+def test_non_string_name_is_skipped_not_raised():
+    text = ('<|python_tag|>{"name": ["get_weather"], "parameters": {}}\n'
+            '[TOOL_CALL]{"name": {"x": 1}, "arguments": {}}[/TOOL_CALL]\n'
+            '<tool_call>{"name": "web_search", "arguments": {"query": "ok"}}</tool_call>')
+    assert _calls(text) == [("web_search", {"query": "ok"})]
+
+
+def test_marker_inside_arguments_is_not_a_second_call():
+    text = ('<tool_call>{"name": "web_search", "arguments": '
+            '{"query": "Action: get_weather Action Input: {}"}}</tool_call>')
+    assert _calls(text) == [("web_search", {"query": "Action: get_weather Action Input: {}"})]
+
+
+def test_react_extra_whitespace_in_marker():
+    text = 'Action: web_search Action  Input: {"query": "x"}'
+    assert _calls(text) == [("web_search", {"query": "x"})]

@@ -185,27 +185,27 @@ _REACT_RE = re.compile(r"Action\s*:\s*([a-zA-Z0-9_\-]+)\s*Action\s*Input\s*:", r
 _PYTHON_TAG_RE = re.compile(r"<\|python_tag\|>", re.IGNORECASE)
 
 _EMBEDDED_MARKERS = (
-    "<tool_call>", "<function=", "[tool_call]", "[tool_request]", "<|python_tag|>", "action input",
+    "<tool_call>", "<function=", "[tool_call]", "[tool_request]", "<|python_tag|>", "action",
 )
 _JSON_DECODER = json.JSONDecoder()
 
 
-def _json_object_at(text: str, pos: int) -> Optional[Dict[str, Any]]:
-    """Decode the JSON object starting at ``pos`` (after whitespace), else None."""
+def _json_object_at(text: str, pos: int) -> tuple:
+    """``(object, end)`` for the JSON object at ``pos`` (after whitespace), else ``(None, pos)``."""
     while pos < len(text) and text[pos].isspace():
         pos += 1
     try:
-        data, _ = _JSON_DECODER.raw_decode(text, pos)
+        data, end = _JSON_DECODER.raw_decode(text, pos)
     except (json.JSONDecodeError, ValueError):
-        return None
-    return data if isinstance(data, dict) else None
+        return None, pos
+    return (data, end) if isinstance(data, dict) else (None, pos)
 
 
 def _name_and_args(data: Any, allowed: set) -> Optional[tuple]:
     """``(name, args)`` from a ``{"name", "arguments"|"parameters"}`` payload."""
     if isinstance(data, dict):
         name = data.get("name") or data.get("tool")
-        if name in allowed:
+        if isinstance(name, str) and name in allowed:
             return name, data.get("arguments", data.get("parameters", {}))
     return None
 
@@ -268,7 +268,7 @@ def _recover_json_tool_calls(response_text: str, tools: List[Dict[str, Any]]) ->
     # Scan every dialect, then order by position in the text, so a model that
     # interleaves dialects yields calls in the order it actually wrote them --
     # a dependent or side-effecting call is never reordered ahead of one it
-    # relies on.
+    # relies on. Each match is (start, end, name, args).
     matches = []
     for match in _TOOL_CALL_TAG_RE.finditer(scan_text):
         try:
@@ -276,7 +276,7 @@ def _recover_json_tool_calls(response_text: str, tools: List[Dict[str, Any]]) ->
         except (json.JSONDecodeError, TypeError):
             continue
         if found:
-            matches.append((match.start(), *found))
+            matches.append((match.start(), match.end(), *found))
 
     for match in _BRACKET_TAG_RE.finditer(scan_text):
         try:
@@ -284,12 +284,13 @@ def _recover_json_tool_calls(response_text: str, tools: List[Dict[str, Any]]) ->
         except (json.JSONDecodeError, TypeError):
             continue
         if found:
-            matches.append((match.start(), *found))
+            matches.append((match.start(), match.end(), *found))
 
     for match in _PYTHON_TAG_RE.finditer(scan_text):
-        found = _name_and_args(_json_object_at(scan_text, match.end()), allowed)
+        data, end = _json_object_at(scan_text, match.end())
+        found = _name_and_args(data, allowed)
         if found:
-            matches.append((match.start(), *found))
+            matches.append((match.start(), end, *found))
 
     for match in _FUNCTION_TAG_RE.finditer(scan_text):
         name = match.group(1)
@@ -298,20 +299,25 @@ def _recover_json_tool_calls(response_text: str, tools: List[Dict[str, Any]]) ->
                 args = json.loads(match.group(2))
             except (json.JSONDecodeError, TypeError):
                 continue
-            matches.append((match.start(), name, args))
+            matches.append((match.start(), match.end(), name, args))
 
     for match in _REACT_RE.finditer(scan_text):
         name = match.group(1)
         if name in allowed:
-            args = _json_object_at(scan_text, match.end())
+            args, end = _json_object_at(scan_text, match.end())
             if args is not None:
-                matches.append((match.start(), name, args))
+                matches.append((match.start(), end, name, args))
 
+    # Drop any match that starts inside an earlier call's text: a marker quoted
+    # in another call's arguments is data, never a second call to run.
     matches.sort(key=lambda m: m[0])
-    salvaged = [
-        _make_tool_call(name, args, response_text, idx)
-        for idx, (_, name, args) in enumerate(matches)
-    ]
+    salvaged = []
+    consumed = 0
+    for start, end, name, args in matches:
+        if start < consumed:
+            continue
+        salvaged.append(_make_tool_call(name, args, response_text, len(salvaged)))
+        consumed = end
 
     return salvaged if salvaged else None
 
