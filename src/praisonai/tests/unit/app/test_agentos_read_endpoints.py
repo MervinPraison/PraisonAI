@@ -275,3 +275,22 @@ class TestWebSocketStreaming:
             assert ws.receive_json() == {"delta": "partial"}
             assert ws.receive_json() == {"error": "boom"}
 
+    def test_client_disconnect_closes_the_stream(self):
+        # The worker must stop pulling from the agent once the client is gone,
+        # rather than running the whole model/tool turn for nobody.
+        import threading
+        closed = threading.Event()
+
+        class Endless(StreamingAgent):
+            def iter_stream(self, message):
+                try:
+                    while True:
+                        yield "x"
+                finally:
+                    closed.set()
+
+        client = _client(agents=[Endless("assistant")])
+        with client.websocket_connect("/api/chat/stream") as ws:
+            ws.send_json({"message": "hi"})
+            assert ws.receive_json() == {"delta": "x"}
+        assert closed.wait(5)

@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Union
 
 import asyncio
 import os
+import threading
 
 from praisonaiagents import AgentOSConfig, AgentOSProtocol
 
@@ -476,27 +477,52 @@ class AgentOS:
         async def _send_stream(ws: WebSocket, iter_stream: Any, message: str) -> None:
             # iter_stream is a sync generator: drain it on a worker thread and
             # hand chunks back to the loop so other sockets keep being served.
+            # ``slots`` bounds the chunks in flight so a slow client cannot grow
+            # the buffer; ``stop`` makes the worker close the generator (ending
+            # the model/tool work) once the client is gone.
             loop = asyncio.get_running_loop()
             chunks: "asyncio.Queue[Any]" = asyncio.Queue()
+            slots = threading.Semaphore(64)
+            stop = threading.Event()
             end = object()
 
-            def _pump():
+            def _emit(item: Any) -> None:
                 try:
-                    for chunk in iter_stream(message):
-                        loop.call_soon_threadsafe(chunks.put_nowait, chunk)
-                except BaseException as e:
-                    loop.call_soon_threadsafe(chunks.put_nowait, e)
-                finally:
-                    loop.call_soon_threadsafe(chunks.put_nowait, end)
+                    loop.call_soon_threadsafe(chunks.put_nowait, item)
+                except RuntimeError:  # loop already closed
+                    stop.set()
 
-            pump = loop.run_in_executor(None, _pump)
+            def _pump():
+                gen = None
+                try:
+                    gen = iter(iter_stream(message))
+                    for chunk in gen:
+                        slots.acquire()
+                        if stop.is_set():
+                            break
+                        _emit(chunk)
+                except BaseException as e:
+                    _emit(e)
+                finally:
+                    try:
+                        close = getattr(gen, "close", None)
+                        if close is not None:
+                            close()
+                    finally:
+                        _emit(end)
+
+            loop.run_in_executor(None, _pump)
             try:
                 while (chunk := await chunks.get()) is not end:
                     if isinstance(chunk, BaseException):
                         raise chunk
+                    slots.release()
                     await ws.send_json({"delta": str(chunk)})
             finally:
-                await pump
+                # Not awaiting the worker: a stalled model call must not pin
+                # this handler. The worker exits at its next chunk.
+                stop.set()
+                slots.release()
 
         @app.websocket(f"{self.config.api_prefix}/chat/stream")
         async def chat_stream(ws: WebSocket):
