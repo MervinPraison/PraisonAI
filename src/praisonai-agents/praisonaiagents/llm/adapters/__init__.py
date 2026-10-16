@@ -180,7 +180,7 @@ _BRACKET_TAG_RE = re.compile(
 # Open-ended dialects: the JSON payload has no closing tag, so it is decoded
 # with raw_decode from the end of the marker (nested objects stay intact).
 # ReAct: "Action: name" then "Action Input: {...}" (same or next line)
-_REACT_RE = re.compile(r"Action\s*:\s*([a-zA-Z0-9_\-]+)\s*Action\s*Input\s*:", re.IGNORECASE)
+_REACT_RE = re.compile(r"\bAction\s*:\s*([a-zA-Z0-9_\-]+)\s*Action\s*Input\s*:", re.IGNORECASE)
 # Llama 3.x: <|python_tag|>{"name": ..., "parameters": ...}
 _PYTHON_TAG_RE = re.compile(r"<\|python_tag\|>", re.IGNORECASE)
 
@@ -302,12 +302,13 @@ def _recover_json_tool_calls(response_text: str, tools: List[Dict[str, Any]]) ->
             name = None
         matches.append((match.start(), match.end(), name, args))
 
+    # An unadvertised ReAct call still reserves its decoded JSON input (a
+    # bounded span) so a call quoted inside it never runs.
     for match in _REACT_RE.finditer(scan_text):
-        name = match.group(1)
-        if name in allowed:
-            args, end = _json_object_at(scan_text, match.end())
-            if args is not None:
-                matches.append((match.start(), end, name, args))
+        args, end = _json_object_at(scan_text, match.end())
+        if args is not None:
+            name = match.group(1)
+            matches.append((match.start(), end, name if name in allowed else None, args))
 
     # Drop any match that starts inside an earlier call's text -- accepted or
     # rejected: a marker quoted in another call's arguments is data, never a

@@ -91,3 +91,15 @@ def test_marker_inside_rejected_call_is_not_run():
     text = ('<tool_call>{"name": "nope", "arguments": %s}</tool_call>\n'
             'Action: get_weather\nAction Input: {"city": "Rome"}' % inner)
     assert _calls(text) == [("get_weather", {"city": "Rome"})]
+
+
+def test_marker_inside_unadvertised_react_input_is_not_run():
+    text = 'Action: not_advertised\nAction Input: {"q": "Action: web_search Action Input: {}"}'
+    assert _calls(text) == []
+    # Later valid ReAct call after the rejected one still runs.
+    text += '\nAction: get_weather\nAction Input: {"city": "Rome"}'
+    assert _calls(text) == [("get_weather", {"city": "Rome"})]
+
+
+def test_react_marker_needs_word_boundary():
+    assert _calls('Transaction: web_search Action Input: {"query": "x"}') == []
