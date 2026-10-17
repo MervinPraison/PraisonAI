@@ -161,6 +161,30 @@ assert('no source issue', o.sourceIssueNumbers({ head: { ref: 'feat/x' }, body: 
   );
   assert('an issue flagged earlier stays outsider (sticky)', r.some((x) => x.includes('flagged')));
 
+  // --- what an outsider run touched (only its own actions count) ---
+  const APP = new Set(['praisonai-triage-agent[bot]']);
+  const SINCE = '2026-10-17T10:00:00Z';
+  const runGh = (timeline, edits = []) => {
+    const g = fakeGithub({ timeline });
+    g.graphql = async () => ({ repository: { issueOrPullRequest: { userContentEdits: { nodes: edits } } } });
+    return g;
+  };
+  const item = (extra = {}) => ({ number: 9, user: { login: 'MervinPraison' }, created_at: '2026-10-01T00:00:00Z', ...extra });
+  assert('PR the App opened during the run is touched',
+    await o.touchedByRun(runGh([]), 'o', 'r', item({ user: { login: 'praisonai-triage-agent[bot]' }, created_at: '2026-10-17T10:05:00Z' }), SINCE, APP));
+  assert('App comment during the run is touched',
+    await o.touchedByRun(runGh([{ event: 'commented', user: { login: 'praisonai-triage-agent[bot]' }, created_at: '2026-10-17T10:06:00Z' }]), 'o', 'r', item(), SINCE, APP));
+  assert('commits pushed during the run are touched',
+    await o.touchedByRun(runGh([{ event: 'committed', committer: { date: '2026-10-17T10:07:00Z' } }]), 'o', 'r', item(), SINCE, APP));
+  assert('App editing the body during the run is touched (GraphQL login has no [bot])',
+    await o.touchedByRun(runGh([], [{ editedAt: '2026-10-17T10:08:00Z', editor: { login: 'praisonai-triage-agent' } }]), 'o', 'r', item(), SINCE, APP));
+  assert('a maintainer comment during the run is not touched',
+    !(await o.touchedByRun(runGh([{ event: 'commented', user: { login: 'MervinPraison' }, created_at: '2026-10-17T10:06:00Z' }]), 'o', 'r', item(), SINCE, APP)));
+  assert('App activity before the run is not touched',
+    !(await o.touchedByRun(runGh([{ event: 'labeled', actor: { login: 'praisonai-triage-agent[bot]' }, created_at: '2026-10-17T09:00:00Z' }]), 'o', 'r', item(), SINCE, APP)));
+  const editFail = await (async () => { const g = runGh([]); g.graphql = async () => { throw new Error('rate'); }; return o.touchedByRun(g, 'o', 'r', item(), SINCE, APP).then(() => null, (e) => e); })();
+  assert('an edit-history lookup failure fails closed (throws)', editFail instanceof Error);
+
   r = await o.outsiderOriginReasons(fakeGithub({ issueError: 410 }), 'o', 'r', internalPr(), []);
   assert('a deleted or transferred source issue (410) counts as unknown, so outsider', r.some((x) => x.includes('unavailable (HTTP 410)')));
 

@@ -545,7 +545,8 @@ jobs:
 
       # A manipulated run can pick any branch name and PR body, create issues as the
       # App, edit or comment on other issues, or push to other PRs. Provenance must
-      # not rely on any of that: everything touched since the run started is flagged.
+      # not rely on any of that: everything this run acted on is flagged (people's
+      # unrelated activity in the same window is not).
       - name: Flag everything touched during an outsider run
         if: needs.claude-response.outputs.outsider == 'true'
         uses: actions/github-script@v7
@@ -560,7 +561,15 @@ jobs:
             const since = process.env.STARTED_AT || new Date(0).toISOString();
             // Issues and PRs created, edited, commented on or pushed to since then.
             const touched = await github.paginate(github.rest.issues.listForRepo, { owner, repo, state: 'all', since, per_page: 100 });
+            const app = new Set(['praisonai-triage-agent[bot]']);
             for (const item of touched) {
+              let flag = true;
+              try {
+                flag = await o.touchedByRun(github, owner, repo, item, since, app);
+              } catch (err) {
+                core.warning(`#${item.number}: ${err.message}; flagging it to be safe`);
+              }
+              if (!flag) continue;
               await github.rest.issues.addLabels({ owner, repo, issue_number: item.number, labels: [o.OUTSIDER_ORIGIN_LABEL] });
               core.info(`Flagged #${item.number} ${o.OUTSIDER_ORIGIN_LABEL}`);
             }

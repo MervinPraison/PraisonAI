@@ -221,6 +221,44 @@ async function issueReasons(github, owner, repo, issueNumber, isWriter, label = 
 }
 
 /**
+ * Did a Claude run act on this issue or PR since `since`? Created it as the App,
+ * appears in its timeline (comments, labels, reviews, force pushes), pushed
+ * commits to it, or edited its text. Unrelated activity by people does not count,
+ * so flagging what an outsider run touched does not sweep up other work.
+ */
+async function touchedByRun(github, owner, repo, item, since, appLogins) {
+  const t = new Date(since).getTime();
+  const after = (d) => !!d && new Date(d).getTime() >= t;
+  const isApp = (login) => !!login && (appLogins.has(login) || appLogins.has(`${login}[bot]`));
+  if (isApp(item.user?.login) && after(item.created_at)) return true;
+  const events = await github.paginate(github.rest.issues.listEventsForTimeline, {
+    owner, repo, issue_number: item.number, per_page: 100,
+  });
+  for (const e of events) {
+    if (isApp(e.actor?.login || e.user?.login) && after(e.created_at || e.submitted_at || e.updated_at)) return true;
+    if (e.event === 'committed' && after(e.committer?.date)) return true;
+  }
+  let data;
+  try {
+    data = await github.graphql(
+      `query($owner: String!, $repo: String!, $number: Int!) {
+        repository(owner: $owner, name: $repo) {
+          issueOrPullRequest(number: $number) {
+            ... on Issue { userContentEdits(first: 20) { nodes { editedAt editor { login } } } }
+            ... on PullRequest { userContentEdits(first: 20) { nodes { editedAt editor { login } } } }
+          }
+        }
+      }`,
+      { owner, repo, number: item.number }
+    );
+  } catch (err) {
+    throw new Error(`edit history lookup failed for #${item.number}: ${err.message}`);
+  }
+  const edits = data?.repository?.issueOrPullRequest?.userContentEdits?.nodes || [];
+  return edits.some((n) => after(n.editedAt) && isApp(n.editor?.login));
+}
+
+/**
  * Why an issue Claude is asked to work on is outsider-influenced ([] when not):
  * the issue itself, anything it was flagged as before, and every issue the
  * request points at ("implement what #500 proposes").
@@ -380,6 +418,7 @@ module.exports = {
   outsiderOriginReasons,
   outsiderIssueReasons,
   referencedIssueNumbers,
+  touchedByRun,
   outsiderSensitivePaths,
   riskFlags,
   formatRiskFlags,
