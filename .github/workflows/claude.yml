@@ -172,6 +172,9 @@ jobs:
     outputs:
       is_pr: ${{ steps.check_fork.outputs.is_pr }}
       pr_number: ${{ steps.check_fork.outputs.pr_number }}
+      trusted_sha: ${{ steps.trusted.outputs.sha }}
+      outsider: ${{ steps.provenance.outputs.outsider }}
+      started_at: ${{ steps.provenance.outputs.started_at }}
     permissions:
       contents: write
       pull-requests: write
@@ -290,9 +293,17 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
+          # Default branch, not the event ref (a review event would check out the PR).
+          ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
+
+      # after-claude checks out exactly this commit: main may move (even by Claude)
+      # before it runs, and it runs scripts next to GH_TOKEN.
+      - name: Record trusted commit
+        id: trusted
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Pick Claude OAuth token
         id: oauth
@@ -330,6 +341,7 @@ jobs:
             const { owner, repo } = context.repo;
             const number = context.payload.pull_request?.number || context.payload.issue?.number;
             if (!number) return;
+            core.setOutput('started_at', new Date().toISOString());
             const isPr = process.env.IS_PR === 'true';
             let origin;
             try {
@@ -346,6 +358,7 @@ jobs:
               origin = ['provenance check failed'];
             }
             if (!origin.length) return;
+            core.setOutput('outsider', 'true');
             core.info(`Outsider origin: ${origin.join('; ')}`);
             // Sticky flag: the merge gate treats anything ever labelled this way as outsider-origin.
             await github.rest.issues.addLabels({ owner, repo, issue_number: number, labels: [o.OUTSIDER_ORIGIN_LABEL] })
@@ -369,12 +382,19 @@ jobs:
         env:
           PR_BRANCH: ${{ steps.check_fork.outputs.pr_branch }}
           PR_NUMBER: ${{ steps.check_fork.outputs.pr_number }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: |
           git fetch origin "pull/${PR_NUMBER}/head:${PR_BRANCH}"
           # git checkout silently replaces ignored files the branch tracks, so a PR
           # carrying .trusted* paths could swap the trusted actions: refuse it.
           if git ls-tree -r --name-only "${PR_BRANCH}" | grep -qE '^\.trusted'; then
             echo "::error::PR #${PR_NUMBER} tracks a .trusted* path; refusing to check it out"
+            exit 1
+          fi
+          # Claude Code reads its configuration (hooks, MCP servers, instructions) from
+          # the working directory; a PR that changes it needs a maintainer, not Claude.
+          if git diff --name-only "origin/${DEFAULT_BRANCH}...${PR_BRANCH}" | grep -qE '(^|/)(\.claude/|\.mcp\.json$|CLAUDE\.md$)'; then
+            echo "::error::PR #${PR_NUMBER} changes Claude Code configuration; a maintainer must review it"
             exit 1
           fi
           git checkout "${PR_BRANCH}"
@@ -499,7 +519,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.repository.default_branch }}
+          ref: ${{ needs.claude-response.outputs.trusted_sha }}
           persist-credentials: false
 
       - name: Generate GitHub App Token
@@ -509,6 +529,27 @@ jobs:
           app-id: ${{ secrets.CLAUDE_APP_ID }}
           private-key: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+
+      # A manipulated run can pick any branch name and PR body, so provenance must
+      # not rely on them: every PR the App opened during an outsider run is flagged.
+      - name: Flag PRs opened during an outsider run
+        if: needs.claude-response.outputs.outsider == 'true'
+        uses: actions/github-script@v7
+        env:
+          STARTED_AT: ${{ needs.claude-response.outputs.started_at }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const path = require('path');
+            const o = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/outsider-review.js'));
+            const { owner, repo } = context.repo;
+            const since = new Date(process.env.STARTED_AT || 0);
+            const { data: prs } = await github.rest.pulls.list({ owner, repo, state: 'all', sort: 'created', direction: 'desc', per_page: 30 });
+            for (const pr of prs) {
+              if (new Date(pr.created_at) < since || !pr.user?.login?.endsWith('[bot]')) continue;
+              await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels: [o.OUTSIDER_ORIGIN_LABEL] });
+              core.info(`Flagged PR #${pr.number} ${o.OUTSIDER_ORIGIN_LABEL}`);
+            }
 
       - name: Kick review chain for bot-created PR
         if: |

@@ -92,25 +92,20 @@ runs:
           console.log('Claude Code ' + installed + ' OK (>= ' + min + ')');
         "
 
+    # Written to a file and passed with --strict-mcp-config, so a PR's .mcp.json
+    # (the working directory may be a PR checkout) never starts a server.
     - name: Install GitHub MCP Server
       shell: bash
       env:
         INPUT_GITHUB_TOKEN: ${{ inputs.github_token }}
       run: |
-        claude mcp add-json github '{
-          "command": "docker",
-          "args": [
-            "run",
-            "-i",
-            "--rm",
-            "-e",
-            "GITHUB_PERSONAL_ACCESS_TOKEN",
-            "ghcr.io/github/github-mcp-server:sha-ff3036d"
-          ],
-          "env": {
-            "GITHUB_PERSONAL_ACCESS_TOKEN": "'"${INPUT_GITHUB_TOKEN}"'"
-          }
-        }'
+        umask 077
+        jq -n --arg token "$INPUT_GITHUB_TOKEN" '{mcpServers: {github: {
+          command: "docker",
+          args: ["run", "-i", "--rm", "-e", "GITHUB_PERSONAL_ACCESS_TOKEN", "ghcr.io/github/github-mcp-server:sha-ff3036d"],
+          env: {GITHUB_PERSONAL_ACCESS_TOKEN: $token}
+        }}}' > "$RUNNER_TEMP/claude-mcp.json"
+        echo "CLAUDE_MCP_CONFIG=$RUNNER_TEMP/claude-mcp.json" >> "$GITHUB_ENV"
 
     - name: Extract GitHub Context and Create Prompt
       shell: bash
@@ -301,6 +296,9 @@ runs:
         
         # Build command arguments
         CMD_ARGS=("-p" "--verbose" "--output-format" "stream-json")
+        # The working directory may be a PR checkout: never load its project or
+        # local settings (hooks, env, apiKeyHelper) or its MCP servers.
+        CMD_ARGS+=("--setting-sources" "user" "--strict-mcp-config" "--mcp-config=$CLAUDE_MCP_CONFIG")
         
         if [[ -n "$INPUT_MODEL" ]]; then
           CMD_ARGS+=("--model" "$INPUT_MODEL")

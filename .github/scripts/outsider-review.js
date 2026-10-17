@@ -6,14 +6,15 @@
  * write access: a fork head, a non-writer author, or a non-writer's issue or
  * comment that Claude read while writing or reviewing it. Such a PR may still
  * be auto-merged, but only after an independent read-only security review
- * passes on its HEAD, and never when it touches the build, dependency or CI
- * surface (those need a maintainer).
+ * passes on its HEAD, and never when it touches the build, dependency, CI or
+ * Claude-config surface unless a maintainer approved that exact commit.
  *
- * The verdict is a commit status set by the merge gate's own GITHUB_TOKEN
- * (github-actions[bot]) from the security run's output. Every Claude run posts
- * comments as the App bot, so a comment saying "SECURITY_REVIEW: PASS" could be
- * forged by any manipulated Claude run; the status cannot, because no Claude
- * run is ever given that token.
+ * The merge decision reads the verdict from an artifact of the merge gate's own
+ * run, written by a deterministic step from the security run's output. Every
+ * Claude run posts comments as the App bot, so a comment saying
+ * "SECURITY_REVIEW: PASS" proves nothing. The security/outsider-review commit
+ * status (github.token) is a second check and a visible record, not the anchor:
+ * any workflow whose token can write statuses could set it.
  *
  * @see .github/prompts/outsider-security-review.md
  * @see .github/workflows/claude-merge-gate.yml (claude-assess)
@@ -24,7 +25,6 @@ const WRITE_PERMISSIONS = new Set(['admin', 'maintain', 'write']);
 const TRUSTED_AUTOMATION = new Set(['Copilot']);
 const SECURITY_STATUS_CONTEXT = 'security/outsider-review';
 const SECURITY_STATUS_CREATOR = 'github-actions[bot]';
-const MAINTAINER_SECURITY_LABEL = 'maintainer-security-reviewed';
 const OUTSIDER_ORIGIN_LABEL = 'origin/outsider';
 
 // Build, dependency, CI and install-time surface. Code here runs on developer
@@ -33,6 +33,7 @@ const OUTSIDER_ORIGIN_LABEL = 'origin/outsider';
 const OUTSIDER_SENSITIVE_PATTERNS = [
   /^\.github\//,
   /^\.trusted/, // where workflows keep main's actions and scripts during a PR run
+  /(^|\/)(\.claude\/|\.mcp\.json$|CLAUDE\.md$)/, // Claude Code config: hooks, MCP servers, instructions
   /(^|\/)(pyproject\.toml|setup\.py|setup\.cfg|MANIFEST\.in|requirements[^/]*\.txt|Pipfile(\.lock)?)$/,
   /(^|\/)(uv|poetry)\.lock$/,
   /(^|\/)(package(-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|\.npmrc)$/,
@@ -62,17 +63,41 @@ function isAutomation(login) {
 
 /**
  * Issues or PRs the change was built from: the claude/issue-N branch plus every
- * "Fixes/Closes/Resolves #N" in the body. All of them count, so a decoy
- * reference to a maintainer's issue cannot hide an outsider's.
+ * closing reference in the body ("Fixes #N", "Fixes: #N", "Fixes owner/repo#N"
+ * or an issue URL in this repo). All of them count, so a decoy reference to a
+ * maintainer's issue cannot hide an outsider's.
  */
-function sourceIssueNumbers(pr) {
+function sourceIssueNumbers(pr, owner = '', repo = '') {
   const numbers = new Set();
   const branch = /^claude\/issue-(\d+)-/.exec(pr?.head?.ref || '');
   if (branch) numbers.add(Number(branch[1]));
-  for (const m of (pr?.body || '').matchAll(/\b(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s+#(\d+)\b/gi)) {
-    numbers.add(Number(m[1]));
+  const here = `${owner}/${repo}`.toLowerCase();
+  const re = /\b(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s*:?\s+(?:([\w.-]+\/[\w.-]+)#|https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/(?:issues|pull)\/|#)(\d+)/gi;
+  for (const m of (pr?.body || '').matchAll(re)) {
+    const target = (m[1] || m[2] || '').toLowerCase();
+    if (!target || !owner || target === here) numbers.add(Number(m[3]));
   }
   return [...numbers];
+}
+
+/** Issues GitHub itself links as closed by the PR (covers every syntax it accepts). */
+async function closingIssueNumbers(github, owner, repo, prNumber) {
+  try {
+    const data = await github.graphql(
+      `query($owner: String!, $repo: String!, $number: Int!) {
+        repository(owner: $owner, name: $repo) {
+          pullRequest(number: $number) { closingIssuesReferences(first: 25) { nodes { number repository { nameWithOwner } } } }
+        }
+      }`,
+      { owner, repo, number: prNumber }
+    );
+    const here = `${owner}/${repo}`.toLowerCase();
+    return (data?.repository?.pullRequest?.closingIssuesReferences?.nodes || [])
+      .filter((n) => (n.repository?.nameWithOwner || '').toLowerCase() === here)
+      .map((n) => n.number);
+  } catch {
+    return [];
+  }
 }
 
 function makePermissionLookup(github, owner, repo) {
@@ -107,7 +132,8 @@ async function outsiderOriginReasons(github, owner, repo, pr, comments = []) {
   if (pr.head?.repo?.full_name !== `${owner}/${repo}`) reasons.push('fork PR');
   if (!(await isWriter(pr.user?.login))) reasons.push(`author @${pr.user?.login} has no write access`);
 
-  const sources = sourceIssueNumbers(pr);
+  const linked = typeof github.graphql === 'function' ? await closingIssueNumbers(github, owner, repo, pr.number) : [];
+  const sources = [...new Set([...sourceIssueNumbers(pr, owner, repo), ...linked])];
   // Claude's own PRs always come from an issue; one we cannot trace is not trusted.
   if (isAutomation(pr.user?.login) && pr.user?.login !== 'github-actions[bot]' && !sources.length) {
     reasons.push('bot PR without a traceable source issue');
@@ -142,25 +168,27 @@ async function wasLabelled(github, owner, repo, number, label) {
     });
     return events.some((e) => e.event === 'labeled' && e.label?.name === label);
   } catch (err) {
-    if (err.status === 404) return false;
+    if (err.status === 404 || err.status === 410) return false;
     throw err;
   }
 }
 
 /**
- * The maintainer override counts only when a person with write access added
- * the label after the current HEAD was pushed (bots and stale labels do not).
+ * The maintainer override: an APPROVED review on exactly this commit by a person
+ * with write access. Tied to the SHA, not to a label or a commit date (both of
+ * which someone else can set or fake).
  */
-async function maintainerReviewedHead(github, owner, repo, prNumber, headPushedAt) {
-  const events = await github.paginate(github.rest.issues.listEventsForTimeline, {
-    owner, repo, issue_number: prNumber, per_page: 100,
+async function maintainerApprovedHead(github, owner, repo, prNumber, headSha) {
+  if (!headSha) return false;
+  const reviews = await github.paginate(github.rest.pulls.listReviews, {
+    owner, repo, pull_number: prNumber, per_page: 100,
   });
-  const added = events
-    .filter((e) => e.event === 'labeled' && e.label?.name === MAINTAINER_SECURITY_LABEL)
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
-  if (!added || isAutomation(added.actor?.login)) return false;
-  if (headPushedAt && new Date(added.created_at) < new Date(headPushedAt)) return false;
-  return makePermissionLookup(github, owner, repo)(added.actor.login);
+  const isWriter = makePermissionLookup(github, owner, repo);
+  for (const r of reviews) {
+    if (r.state !== 'APPROVED' || r.commit_id !== headSha || isAutomation(r.user?.login)) continue;
+    if (await isWriter(r.user.login)) return true;
+  }
+  return false;
 }
 
 /** Outsider authorship of an issue and its comments ([] for a PR number). */
@@ -182,7 +210,8 @@ async function issueReasons(github, owner, repo, issueNumber, isWriter, label = 
     const outsiders = await outsiderLogins(comments.map((c) => c.user?.login), isWriter);
     if (outsiders.length) reasons.push(`${label} #${issueNumber} has comments from ${outsiders.map((l) => '@' + l).join(', ')}`);
   } catch (err) {
-    if (err.status !== 404) throw err;
+    // Deleted or transferred: nothing left to read, and the sticky label still applies.
+    if (err.status !== 404 && err.status !== 410) throw err;
   }
   return reasons;
 }
@@ -303,7 +332,7 @@ function outsiderGateReasons({ origin, files, securityStatus = null, maintainerR
   const sensitive = outsiderSensitivePaths(files);
   if (sensitive.length) {
     reasons.push(
-      `outsider-origin PR touches build/CI/dependency surface (${sensitive.slice(0, 3).join(', ')}) — maintainer review required (label ${MAINTAINER_SECURITY_LABEL})`
+      `outsider-origin PR touches build/CI/dependency/Claude-config surface (${sensitive.slice(0, 3).join(', ')}) — needs a maintainer's approving review on this commit`
     );
   }
   if (forMergeStep && securityStatus !== 'PASS') {
@@ -313,11 +342,10 @@ function outsiderGateReasons({ origin, files, securityStatus = null, maintainerR
 }
 
 module.exports = {
-  MAINTAINER_SECURITY_LABEL,
   OUTSIDER_ORIGIN_LABEL,
   SECURITY_STATUS_CONTEXT,
   sourceIssueNumbers,
-  maintainerReviewedHead,
+  maintainerApprovedHead,
   outsiderOriginReasons,
   outsiderIssueReasons,
   outsiderSensitivePaths,

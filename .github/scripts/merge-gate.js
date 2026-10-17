@@ -35,6 +35,7 @@ const SENSITIVE_PATH_PATTERNS = [
   // Actions and scripts run with the workflow's tokens, like workflows do.
   /^\.github\/(workflows|actions|scripts|prompts)\//,
   /^\.trusted/, // where workflows keep main's actions and scripts during a PR run
+  /(^|\/)(\.claude\/|\.mcp\.json$|CLAUDE\.md$)/, // Claude Code config: hooks, MCP servers, instructions
   /praisonaiagents\/(auth|approval|policy|sandbox)\//,
   /^src\/praisonai-agents\/pyproject\.toml$/,
   /^src\/praisonai\/pyproject\.toml$/,
@@ -161,12 +162,18 @@ const FINAL_REPLY_MARKERS = [
   /^#{1,4}\s*Phase 1 — AGENTS\.md review/m,
 ];
 
+// Exact logins: a substring match would trust any account whose name merely
+// contains one of these (e.g. "github-actions-x").
+const CLAUDE_AUTOMATION_LOGINS = new Set([
+  'praisonai-triage-agent[bot]',
+  'praisonai-triage-agent',
+  'app/praisonai-triage-agent',
+  'github-actions[bot]',
+]);
+
 function isClaudeFinalReplyComment(c) {
-  const login = (c.user?.login || '').toLowerCase();
-  const fromAutomation =
-    login.includes('praisonai-triage') ||
-    login.includes('github-actions') ||
-    AUTO_ACTORS.some((a) => a.toLowerCase() === login);
+  const login = c.user?.login || '';
+  const fromAutomation = CLAUDE_AUTOMATION_LOGINS.has(login) || AUTO_ACTORS.includes(login);
   if (!fromAutomation) return false;
   const body = c.body || '';
   // The FINAL trigger embeds the Phase 1 heading; an @claude request is never a reply.
@@ -353,8 +360,7 @@ function countFinalTriggersSince(comments, sinceMs) {
 }
 
 function isClaudeAutomationLogin(login) {
-  const lower = (login || '').toLowerCase();
-  return lower.includes('praisonai-triage') || lower === 'github-actions[bot]';
+  return CLAUDE_AUTOMATION_LOGINS.has(login || '');
 }
 
 function isPushSoonAfterLatestFinal(comments, headPushedAt) {
@@ -1273,8 +1279,7 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
       securityStatus = outsider.findSecurityReviewStatus(statuses);
     }
     const maintainerReviewed = outsiderOrigin.length > 0
-      && ctx.labels.includes(outsider.MAINTAINER_SECURITY_LABEL)
-      && (await outsider.maintainerReviewedHead(github, owner, repo, prNumber, ctx.headPushedAt));
+      && (await outsider.maintainerApprovedHead(github, owner, repo, prNumber, ctx.headSha));
     reasons.push(...outsider.outsiderGateReasons({
       origin: outsiderOrigin,
       files: pullFiles,

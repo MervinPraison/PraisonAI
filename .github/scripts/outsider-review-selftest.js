@@ -16,7 +16,7 @@ function assert(name, cond) {
 
 const WRITERS = new Set(['MervinPraison']);
 
-function fakeGithub({ issue = null, issues = {}, issueComments = [], reviewComments = [], reviews = [], timeline = [], srcPr = null } = {}) {
+function fakeGithub({ issue = null, issues = {}, issueComments = [], reviewComments = [], reviews = [], timeline = [], srcPr = null, closing = [], issueError = null } = {}) {
   const lists = new Map([
     ['issues.listComments', issueComments],
     ['pulls.listReviewComments', reviewComments],
@@ -34,6 +34,7 @@ function fakeGithub({ issue = null, issues = {}, issueComments = [], reviewComme
     },
     issues: {
       get: async ({ issue_number }) => {
+        if (issueError) throw Object.assign(new Error('gone'), { status: issueError });
         const found = issues[issue_number] || issue;
         if (!found) throw Object.assign(new Error('nf'), { status: 404 });
         return { data: found };
@@ -47,7 +48,8 @@ function fakeGithub({ issue = null, issues = {}, issueComments = [], reviewComme
       get: async () => ({ data: srcPr }),
     },
   };
-  return { rest, paginate: async (method) => lists.get(method) || [] };
+  const graphql = async () => ({ repository: { pullRequest: { closingIssuesReferences: { nodes: closing } } } });
+  return { rest, graphql, paginate: async (method) => lists.get(method) || [] };
 }
 
 const internalPr = (extra = {}) => ({
@@ -61,6 +63,10 @@ const internalPr = (extra = {}) => ({
 // --- provenance ---
 assert('source issue from claude/issue-N branch', o.sourceIssueNumbers(internalPr()).join() === '42');
 assert('every Fixes/Closes reference counts', o.sourceIssueNumbers({ head: { ref: 'feat/x' }, body: 'Fixes #3 and closes #9.' }).join() === '3,9');
+assert('Fixes: #N, owner/repo#N and issue URLs count',
+  o.sourceIssueNumbers({ head: { ref: 'x' }, body: 'Fixes: #4\nResolves o/r#5\ncloses https://github.com/o/r/issues/6' }, 'o', 'r').join() === '4,5,6');
+assert('references to another repo are ignored',
+  o.sourceIssueNumbers({ head: { ref: 'x' }, body: 'Fixes other/repo#7' }, 'o', 'r').length === 0);
 assert('no source issue', o.sourceIssueNumbers({ head: { ref: 'feat/x' }, body: 'tidy' }).length === 0);
 
 (async () => {
@@ -119,15 +125,27 @@ assert('no source issue', o.sourceIssueNumbers({ head: { ref: 'feat/x' }, body: 
   );
   assert('outsider flag is sticky (deleted comments do not clear it)', r.some((x) => x.includes('flagged')));
 
-  const labelled = (login, created_at) => ({ event: 'labeled', label: { name: o.MAINTAINER_SECURITY_LABEL }, actor: { login }, created_at });
-  assert('maintainer label by a writer after HEAD counts',
-    await o.maintainerReviewedHead(fakeGithub({ timeline: [labelled('MervinPraison', '2026-10-17T11:00:00Z')] }), 'o', 'r', 7, '2026-10-17T10:00:00Z'));
-  assert('maintainer label added by a bot does not count',
-    !(await o.maintainerReviewedHead(fakeGithub({ timeline: [labelled('praisonai-triage-agent[bot]', '2026-10-17T11:00:00Z')] }), 'o', 'r', 7, '2026-10-17T10:00:00Z')));
-  assert('maintainer label from before the latest push does not count',
-    !(await o.maintainerReviewedHead(fakeGithub({ timeline: [labelled('MervinPraison', '2026-10-17T09:00:00Z')] }), 'o', 'r', 7, '2026-10-17T10:00:00Z')));
-  assert('maintainer label by a non-writer does not count',
-    !(await o.maintainerReviewedHead(fakeGithub({ timeline: [labelled('stranger', '2026-10-17T11:00:00Z')] }), 'o', 'r', 7, '2026-10-17T10:00:00Z')));
+  const approval = (login, commit_id, state = 'APPROVED') => ({ user: { login }, commit_id, state });
+  const HEAD = 'a'.repeat(40);
+  assert('a writer approving this exact commit is a maintainer review',
+    await o.maintainerApprovedHead(fakeGithub({ reviews: [approval('MervinPraison', HEAD)] }), 'o', 'r', 7, HEAD));
+  assert('approval of an earlier commit does not count',
+    !(await o.maintainerApprovedHead(fakeGithub({ reviews: [approval('MervinPraison', 'b'.repeat(40))] }), 'o', 'r', 7, HEAD)));
+  assert('approval by a bot does not count',
+    !(await o.maintainerApprovedHead(fakeGithub({ reviews: [approval('github-actions[bot]', HEAD)] }), 'o', 'r', 7, HEAD)));
+  assert('approval by a non-writer does not count',
+    !(await o.maintainerApprovedHead(fakeGithub({ reviews: [approval('stranger', HEAD)] }), 'o', 'r', 7, HEAD)));
+  assert('a COMMENTED review does not count',
+    !(await o.maintainerApprovedHead(fakeGithub({ reviews: [approval('MervinPraison', HEAD, 'COMMENTED')] }), 'o', 'r', 7, HEAD)));
+
+  r = await o.outsiderOriginReasons(
+    fakeGithub({ issues: { 1: maintainerIssue, 77: { user: { login: 'stranger' } } }, closing: [{ number: 77, repository: { nameWithOwner: 'o/r' } }] }),
+    'o', 'r', internalPr({ head: { ref: 'fix/x', repo: { full_name: 'o/r' } }, body: 'Fixes #1' }), []
+  );
+  assert('GitHub-linked closing issue counts even if the body hides it', r.some((x) => x.includes('#77 opened by @stranger')));
+
+  r = await o.outsiderOriginReasons(fakeGithub({ issueError: 410 }), 'o', 'r', internalPr(), []);
+  assert('a deleted or transferred source issue (410) does not crash provenance', Array.isArray(r));
 
   r = await o.outsiderIssueReasons(fakeGithub({ issue: { user: { login: 'stranger' } } }), 'o', 'r', 5);
   assert('issue opened by an outsider', r.some((x) => x.includes('issue #5 opened by @stranger')));
@@ -149,6 +167,7 @@ assert('no source issue', o.sourceIssueNumbers({ head: { ref: 'feat/x' }, body: 
   const sensitive = o.outsiderSensitivePaths(files);
   assert('pyproject and .github/actions are sensitive', sensitive.length === 2 && sensitive.includes('src/praisonai-agents/pyproject.toml'));
   assert('trusted-copy paths are sensitive', o.outsiderSensitivePaths([{ filename: '.trusted/scripts/x.js' }, { filename: '.trusted-actions/a/action.yml' }]).length === 2);
+  assert('Claude Code config is sensitive', o.outsiderSensitivePaths([{ filename: '.claude/settings.json' }, { filename: '.mcp.json' }, { filename: 'src/CLAUDE.md' }]).length === 3);
   assert('plain source is not sensitive', !o.outsiderSensitivePaths([files[0]]).length);
   assert('renaming a sensitive file away is still sensitive',
     o.outsiderSensitivePaths([{ filename: 'tests/fixtures.py', previous_filename: 'tests/conftest.py', status: 'renamed' }]).includes('tests/conftest.py'));
@@ -216,7 +235,7 @@ assert('no source issue', o.sourceIssueNumbers({ head: { ref: 'feat/x' }, body: 
   assert('outsider PR blocked by FAIL',
     o.outsiderGateReasons({ origin, files: src, securityStatus: 'FAIL', forMergeStep: true }).some((x) => x.includes('got FAIL')));
   assert('outsider PR touching build surface is held for a maintainer even with PASS',
-    o.outsiderGateReasons({ origin, files, securityStatus: 'PASS', forMergeStep: true }).some((x) => x.includes('maintainer review required')));
+    o.outsiderGateReasons({ origin, files, securityStatus: 'PASS', forMergeStep: true }).some((x) => x.includes("maintainer's approving review")));
   assert('a valid maintainer review releases the hold',
     o.outsiderGateReasons({ origin, files, maintainerReviewed: true, forMergeStep: true }).length === 0);
 
