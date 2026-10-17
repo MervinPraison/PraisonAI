@@ -127,43 +127,42 @@ class MCPToolRunner(threading.Thread):
                     # Signal that initialization is complete
                     self.initialized.set()
                     
-                    # Process requests
-                    while True:
+                    # Process requests. Each request runs as its own task so
+                    # one slow call never serializes the others behind it (the
+                    # session multiplexes requests by id), and the queue is read
+                    # with a short blocking get instead of a busy 10ms poll. The
+                    # bounded get keeps the reader thread from outliving the loop.
+                    loop = asyncio.get_running_loop()
+                    tasks = set()
+
+                    def _next_item():
                         try:
-                            # Check for new requests
-                            try:
-                                item = self.queue.get(block=False)
-                                if item is None:  # Shutdown signal
-                                    break
-                                
-                                response_queue, kind, name, arguments, cancelled = item
-                                if cancelled.is_set():
-                                    # Caller already gave up (timed out); never
-                                    # execute a call it was told did not happen.
-                                    continue
-                                try:
-                                    if kind == "resource":
-                                        result = await asyncio.wait_for(session.read_resource(name), timeout=self.timeout)
-                                    elif kind == "prompt":
-                                        result = await asyncio.wait_for(session.get_prompt(name, arguments or None), timeout=self.timeout)
-                                    else:
-                                        result = await asyncio.wait_for(session.call_tool(name, arguments), timeout=self.timeout)
-                                    response_queue.put((True, result))
-                                except asyncio.TimeoutError:
-                                    response_queue.put((False, f"MCP {kind} call timed out after {self.timeout} seconds (server side)"))
-                                except Exception as e:
-                                    if _is_transport_closed(e):
-                                        self._dead = f"MCP server connection lost: {str(e) or type(e).__name__}"
-                                        response_queue.put((False, self._dead))
-                                        break  # leave stdio_client() so the child is reaped
-                                    response_queue.put((False, str(e) or type(e).__name__))
-                            except queue.Empty:
-                                pass
-                            
-                            # Give other tasks a chance to run
-                            await asyncio.sleep(0.01)
-                        except asyncio.CancelledError:
-                            break
+                            return self.queue.get(timeout=0.25)
+                        except queue.Empty:
+                            return queue.Empty
+
+                    try:
+                        while True:
+                            item = await loop.run_in_executor(None, _next_item)
+                            if item is queue.Empty:
+                                if self._dead:
+                                    break  # leave stdio_client() so the child is reaped
+                                continue
+                            if item is None:  # Shutdown signal
+                                break
+                            if self._dead:
+                                self.queue.put(item)  # answered by _fail_pending()
+                                break
+                            task = asyncio.create_task(self._handle_request(session, item))
+                            tasks.add(task)
+                            task.add_done_callback(tasks.discard)
+                    except asyncio.CancelledError:
+                        pass
+                    finally:
+                        for task in tasks:
+                            task.cancel()
+                        if tasks:
+                            await asyncio.gather(*tasks, return_exceptions=True)
         except asyncio.CancelledError:
             # stop() cancelled a startup that never completed; leaving the
             # contexts above has already terminated the stdio child.
@@ -196,6 +195,34 @@ class MCPToolRunner(threading.Thread):
                     item[0].put((False, message), block=False)
                 except Exception:
                     pass
+
+    async def _handle_request(self, session, item):
+        """Run one queued request on the session and post its result."""
+        response_queue, kind, name, arguments, cancelled = item
+        if cancelled.is_set():
+            # Caller already gave up (timed out); never execute a call it was
+            # told did not happen.
+            return
+        try:
+            if kind == "resource":
+                coro = session.read_resource(name)
+            elif kind == "prompt":
+                coro = session.get_prompt(name, arguments or None)
+            else:
+                coro = session.call_tool(name, arguments)
+            result = await asyncio.wait_for(coro, timeout=self.timeout)
+            response_queue.put((True, result))
+        except asyncio.TimeoutError:
+            response_queue.put((False, f"MCP {kind} call timed out after {self.timeout} seconds (server side)"))
+        except asyncio.CancelledError:
+            response_queue.put((False, f"MCP {kind} call cancelled: runner shut down"))
+            raise
+        except Exception as e:
+            if _is_transport_closed(e):
+                self._dead = f"MCP server connection lost: {str(e) or type(e).__name__}"
+                response_queue.put((False, self._dead))
+                return
+            response_queue.put((False, str(e) or type(e).__name__))
 
     async def _discover_resources_and_prompts(self, session):
         """Enumerate server resources, resource templates and prompts.
