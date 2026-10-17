@@ -119,10 +119,20 @@ if TEXTUAL_AVAILABLE:
             name: Optional[str] = None,
             id: Optional[str] = None,
             classes: Optional[str] = None,
+            frecency=None,
         ):
             super().__init__(name=name, id=id, classes=classes)
             self._commands = commands or []
             self._filtered_commands: List[CommandInfo] = []
+            # Usage-history store; resolved lazily per project on first use
+            self._frecency = frecency
+        
+        def _get_frecency(self):
+            """Get the per-project frecency store (lazy)."""
+            if self._frecency is None:
+                from ...utils.frecency import FrecencyStore
+                self._frecency = FrecencyStore.for_project()
+            return self._frecency
         
         def compose(self):
             """Compose the widget."""
@@ -160,6 +170,10 @@ if TEXTUAL_AVAILABLE:
                 ]
             else:
                 self._filtered_commands = self._commands.copy()
+            
+            # Float frequently/recently used commands up; stable for ties
+            store = self._get_frecency()
+            self._filtered_commands.sort(key=lambda c: -store.boost("commands", c.name))
             
             # Update the option list
             try:
@@ -217,6 +231,7 @@ if TEXTUAL_AVAILABLE:
         
         def _select_command(self, command_name: str) -> None:
             """Select a command and emit event."""
+            self._get_frecency().record("commands", command_name)
             self.post_message(self.CommandSelected(command_name))
         
         def focus_search(self) -> None:

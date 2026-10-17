@@ -113,9 +113,12 @@ class FileSearchService:
         root_dir: str,
         cache_ttl: int = 30,
         max_depth: int = 5,
-        ignore_patterns: Optional[List[str]] = None
+        ignore_patterns: Optional[List[str]] = None,
+        frecency=None
     ):
         self._root = os.path.abspath(root_dir)
+        # Usage-history store; resolved lazily per project on first use
+        self._frecency = frecency
         self._cache_ttl = cache_ttl
         self._max_depth = max_depth
         self._ignore_patterns = ignore_patterns or [
@@ -181,6 +184,18 @@ class FileSearchService:
         self._file_list_time = now
         self._file_list_dir = target_dir
         return files
+    
+    def _get_frecency(self):
+        """Get the per-project frecency store (lazy)."""
+        if self._frecency is None:
+            from ..utils.frecency import FrecencyStore
+            self._frecency = FrecencyStore.for_project(self._root)
+        return self._frecency
+    
+    def record_selection(self, path: str) -> None:
+        """Record that a suggested path was accepted, boosting its rank."""
+        self._get_frecency().record("files", path)
+        self._cache.clear()
     
     def _fuzzy_match(self, text: str, query: str) -> int:
         """
@@ -294,11 +309,13 @@ class FileSearchService:
         # Get all files from the appropriate directory
         all_files = self._get_file_list(search_dir)
         
-        # Score and filter
+        # Score and filter, blending in usage-history (frecency) boost
+        frecency = self._get_frecency()
         scored: List[Tuple[int, str]] = []
         for path in all_files:
             score = self._fuzzy_match(path, search_query)
             if score > 0:
+                score += frecency.boost("files", prefix + path)
                 scored.append((score, path))
         
         # Sort by score descending
@@ -308,11 +325,11 @@ class FileSearchService:
         results = []
         for score, path in scored[:max_results]:
             file_type = "directory" if path.endswith(os.sep) else "file"
-            display_path = prefix + path if prefix else path
+            display_path = prefix + path
             results.append(FileSuggestion(
                 path=display_path,
                 file_type=file_type,
-                score=score
+                score=min(score, 100)
             ))
         
         # Cache results
@@ -410,13 +427,15 @@ def create_combined_completer(commands: List[str], root_dir: str):
             # Check for slash command
             if text.startswith('/'):
                 cmd_text = text[1:].lower()
-                for cmd in commands:
-                    if cmd.lower().startswith(cmd_text):
-                        yield Completion(
-                            f'/{cmd}',
-                            start_position=-len(text),
-                            display=f'/{cmd}'
-                        )
+                matches = [c for c in commands if c.lower().startswith(cmd_text)]
+                store = file_service._get_frecency()
+                matches.sort(key=lambda c: -store.boost("commands", c))
+                for cmd in matches:
+                    yield Completion(
+                        f'/{cmd}',
+                        start_position=-len(text),
+                        display=f'/{cmd}'
+                    )
                 return
             
             # Check for @ mention

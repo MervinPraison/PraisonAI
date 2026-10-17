@@ -195,6 +195,8 @@ if TEXTUAL_AVAILABLE:
         
         def _select_file(self, path: str) -> None:
             """Select a file and emit event."""
+            if self._file_service:
+                self._file_service.record_selection(path)
             self.post_message(self.FileSelected(path, self._at_pos))
 
 
