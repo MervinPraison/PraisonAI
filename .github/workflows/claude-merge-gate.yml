@@ -349,6 +349,7 @@ jobs:
             const o = require('/tmp/outsider-review.js');
             const { owner, repo } = context.repo;
             const pull_number = ${{ matrix.pr_number }};
+            core.setOutput('checked_at', new Date().toISOString());
             const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number });
             const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: pull_number, per_page: 100 });
             const origin = await o.outsiderOriginReasons(github, owner, repo, pr, comments);
@@ -429,9 +430,14 @@ jobs:
             const reviewed = '${{ steps.provenance.outputs.head_sha }}';
             let verdict = o.securityVerdictFromOutput(out, prNumber);
             // The review read the live PR: a push during it means it reviewed something else.
-            const { data: pr } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: prNumber });
-            if (pr.head.sha !== reviewed) {
-              core.warning(`HEAD moved during the security review (${reviewed.slice(0, 7)} -> ${pr.head.sha.slice(0, 7)})`);
+            const { owner, repo } = context.repo;
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+            const events = await github.paginate(github.rest.issues.listEvents, { owner, repo, issue_number: prNumber, per_page: 100 });
+            const moved = o.headMovedDuringReview({
+              savedSha: reviewed, currentSha: pr.head.sha, events, since: '${{ steps.provenance.outputs.checked_at }}',
+            });
+            if (moved) {
+              core.warning(moved);
               verdict = null;
             }
             const dir = `${process.env.RUNNER_TEMP}/gate-verdict`;

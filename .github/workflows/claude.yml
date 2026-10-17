@@ -332,12 +332,18 @@ jobs:
             if (!number) return;
             const isPr = process.env.IS_PR === 'true';
             let origin;
-            if (isPr) {
-              const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
-              const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: number, per_page: 100 });
-              origin = await o.outsiderOriginReasons(github, owner, repo, pr, comments);
-            } else {
-              origin = await o.outsiderIssueReasons(github, owner, repo, number);
+            try {
+              if (isPr) {
+                const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+                const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: number, per_page: 100 });
+                origin = await o.outsiderOriginReasons(github, owner, repo, pr, comments);
+              } else {
+                origin = await o.outsiderIssueReasons(github, owner, repo, number);
+              }
+            } catch (err) {
+              // Unknown provenance gets the stricter prompt; the merge gate re-checks.
+              core.warning(`Outsider provenance failed: ${err.message}`);
+              origin = ['provenance check failed'];
             }
             if (!origin.length) return;
             core.info(`Outsider origin: ${origin.join('; ')}`);

@@ -84,7 +84,12 @@ function makePermissionLookup(github, owner, repo) {
         login,
         github.rest.repos
           .getCollaboratorPermissionLevel({ owner, repo, username: login })
-          .then(({ data }) => WRITE_PERMISSIONS.has(data.permission), () => false)
+          // 404: not a collaborator. Any other failure (rate limit, outage) must
+          // not quietly decide provenance either way, so it propagates.
+          .then(({ data }) => WRITE_PERMISSIONS.has(data.permission), (err) => {
+            if (err.status === 404) return false;
+            throw err;
+          })
       );
     }
     return cache.get(login);
@@ -193,8 +198,11 @@ async function outsiderLogins(logins, isWriter) {
   return unique.filter((_, i) => !writer[i]);
 }
 
+/** Sensitive paths touched, including the old name of a renamed file. */
 function outsiderSensitivePaths(files) {
-  return files.map((f) => f.filename).filter((name) => OUTSIDER_SENSITIVE_PATTERNS.some((p) => p.test(name)));
+  return files
+    .flatMap((f) => [f.filename, f.previous_filename].filter(Boolean))
+    .filter((name) => OUTSIDER_SENSITIVE_PATTERNS.some((p) => p.test(name)));
 }
 
 /** Deterministic red flags in added lines, for the security reviewer. */
@@ -218,14 +226,15 @@ function formatRiskFlags(flags) {
 
 /**
  * A verdict from a Claude run's stream-json output: the first line of a
- * comment it posted on this PR through add_issue_comment (calls that errored
- * are ignored), and, when allowed, a line of its own final answer. Text inside
+ * comment it posted on this PR through add_issue_comment (only calls whose
+ * tool_result came back without error: a failed or timed-out post is not a
+ * verdict), and, when allowed, a line of its own final answer. Text inside
  * tool results (diffs, other comments) never counts. BLOCK/FAIL wins.
  */
 function verdictFromOutput(jsonl, { prNumber, marker, values, allowFinalAnswer = false }) {
   const re = new RegExp(`^\\s*${marker}:\\s*(${values.join('|')})\\b`);
   const calls = new Map();
-  const errored = new Set();
+  const succeeded = new Set();
   const found = [];
   for (const line of (jsonl || '').split('\n')) {
     let msg;
@@ -236,7 +245,7 @@ function verdictFromOutput(jsonl, { prNumber, marker, values, allowFinalAnswer =
         const m = re.exec(String(item.input?.body || ''));
         if (m) calls.set(item.id, m[1]);
       }
-      if (item?.type === 'tool_result' && item.is_error) errored.add(item.tool_use_id);
+      if (item?.type === 'tool_result' && !item.is_error) succeeded.add(item.tool_use_id);
     }
     if (allowFinalAnswer && msg?.type === 'result' && typeof msg.result === 'string') {
       for (const l of msg.result.split('\n')) {
@@ -245,7 +254,7 @@ function verdictFromOutput(jsonl, { prNumber, marker, values, allowFinalAnswer =
       }
     }
   }
-  for (const [id, v] of calls) if (!errored.has(id)) found.push(v);
+  for (const [id, v] of calls) if (succeeded.has(id)) found.push(v);
   if (!found.length) return null;
   return found.includes(values[1]) ? values[1] : values[0];
 }
@@ -256,6 +265,21 @@ function securityVerdictFromOutput(jsonl, prNumber) {
 
 function mergeVerdictFromOutput(jsonl, prNumber) {
   return verdictFromOutput(jsonl, { prNumber, marker: 'MERGE_GATE_VERDICT', values: ['APPROVE', 'BLOCK'], allowFinalAnswer: true });
+}
+
+/**
+ * Why a verdict cannot be bound to `savedSha` (null when it can). The reviewer
+ * reads the live PR, so HEAD must not have moved while it ran. Returning to the
+ * saved SHA after another push always needs a force push, which leaves an
+ * issue event, so A -> B -> A is caught too.
+ */
+function headMovedDuringReview({ savedSha, currentSha, events = [], since }) {
+  if (currentSha !== savedSha) return `HEAD moved ${String(savedSha).slice(0, 7)} -> ${String(currentSha).slice(0, 7)} during the review`;
+  const t = new Date(since);
+  if (events.some((e) => e.event === 'head_ref_force_pushed' && new Date(e.created_at) >= t)) {
+    return 'HEAD was force-pushed during the review';
+  }
+  return null;
 }
 
 /** Latest outsider security status on a commit, trusted only from the gate's token. */
@@ -301,6 +325,7 @@ module.exports = {
   formatRiskFlags,
   securityVerdictFromOutput,
   mergeVerdictFromOutput,
+  headMovedDuringReview,
   findSecurityReviewStatus,
   outsiderGateReasons,
 };
