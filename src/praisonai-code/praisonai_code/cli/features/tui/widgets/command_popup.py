@@ -130,7 +130,7 @@ if TEXTUAL_AVAILABLE:
         def _get_frecency(self):
             """Get the per-project frecency store (lazy)."""
             if self._frecency is None:
-                from ...utils.frecency import FrecencyStore
+                from ....utils.frecency import FrecencyStore
                 self._frecency = FrecencyStore.for_project()
             return self._frecency
         

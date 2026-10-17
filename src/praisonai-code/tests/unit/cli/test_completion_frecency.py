@@ -66,3 +66,34 @@ def test_corrupt_store_is_ignored(tmp_path):
     assert store.boost("files", "x") == 0
     store.record("files", "x")
     assert store.boost("files", "x") > 0
+
+
+def test_malformed_entries_are_ignored(tmp_path):
+    path = tmp_path / "f.json"
+    path.write_text('{"files": {"a.py": [1, "bad"], "b.py": [2, NaN], "c.py": [1, 0]},'
+                    ' "commands": 42}')
+    store = FrecencyStore(path)
+    assert store.boost("files", "a.py") == 0
+    assert store.boost("files", "b.py") == 0
+    assert store.boost("files", "c.py", now=60) > 0
+    store.record("commands", "help")  # must not raise on a non-dict kind
+    assert store.boost("commands", "help") > 0
+
+
+def test_concurrent_sessions_keep_both_selections(tmp_path):
+    path = tmp_path / "f.json"
+    first, second = FrecencyStore(path), FrecencyStore(path)
+    first.boost("files", "x"), second.boost("files", "x")  # both load early
+    first.record("files", "a.py")
+    second.record("files", "b.py")
+    fresh = FrecencyStore(path)
+    assert fresh.boost("files", "a.py") > 0 and fresh.boost("files", "b.py") > 0
+
+
+def test_command_popup_resolves_default_store(tmp_path, monkeypatch):
+    import pytest
+    popup = pytest.importorskip("praisonai_code.cli.features.tui.widgets.command_popup")
+    if not popup.TEXTUAL_AVAILABLE:
+        pytest.skip("textual not installed")
+    monkeypatch.chdir(tmp_path)
+    assert isinstance(popup.CommandPopupWidget([])._get_frecency(), FrecencyStore)
