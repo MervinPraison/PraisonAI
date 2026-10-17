@@ -441,6 +441,23 @@ class BrowserServer:
         self._agents[session_id] = agent
         
         logger.info(f"[SERVER][DATA] _handle_start_session:server.py session_id={session_id}, agent_model={agent.model}")
+
+        # Side panel already runs CDP + observation after start_session. Echoing
+        # start_automation on the same WebSocket fails on some Windows stacks
+        # (OSError: [Errno 22]) and duplicates the automation loop.
+        if conn.is_extension:
+            conn.session_id = session_id
+            logger.info(
+                "[SERVER][START] Extension-originated start_session; "
+                "skipping start_automation echo"
+            )
+            return {
+                "type": "status",
+                "status": "running",
+                "session_id": session_id,
+                "message": f"Session started with goal: {goal}",
+                "start_automation_sent": False,
+            }
         
         # Send start_automation to ONE extension client (first available without a session)
         # Only send to ONE to prevent duplicate debugger attachment
@@ -452,8 +469,6 @@ class BrowserServer:
         sent_to_extension = False
         
         logger.debug(f"[SERVER][SCAN] _handle_start_session:server.py checking {len(extension_conns)} extension connection(s)")
-
-        import json as json_mod
 
         # Deliver to ONE idle extension connection only (never a CLI client) to
         # avoid duplicate debugger attachment. Extension availability was already
@@ -468,7 +483,7 @@ class BrowserServer:
             client_conn.session_id = session_id
             try:
                 logger.info("[SERVER][START] Sending start_automation to extension")
-                await client_conn.websocket.send_text(json_mod.dumps(start_msg))
+                await client_conn.websocket.send_json(start_msg)
                 logger.info(f"[SERVER][START] start_automation sent, session={session_id[:8]}")
                 sent_to_extension = True
                 break  # Only send to ONE extension
@@ -487,7 +502,7 @@ class BrowserServer:
                     continue
                 client_conn.session_id = session_id
                 try:
-                    await client_conn.websocket.send_text(json_mod.dumps(start_msg))
+                    await client_conn.websocket.send_json(start_msg)
                     logger.info("[SERVER][START] Retry: start_automation delivered")
                     sent_to_extension = True
                     break
