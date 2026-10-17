@@ -3,6 +3,8 @@
  * @see .github/workflows/claude-merge-gate.yml
  */
 
+const outsider = require('./outsider-review.js');
+
 const CLAUDE_TRIGGER_LOGINS = ['MervinPraison', 'github-actions[bot]'];
 const AUTO_ACTORS = CLAUDE_TRIGGER_LOGINS;
 const CONFLICT_COOLDOWN_MS = 12 * 60 * 60 * 1000;
@@ -26,11 +28,16 @@ const MAINTAINER_ACCEPT_EXAMPLE_LABEL = 'maintainer-accept-example';
 const CORE_TOOLS_DIR_PREFIX = 'src/praisonai-agents/praisonaiagents/tools/';
 const MAINTAINER_ACCEPT_CORE_TOOLS_LABEL = 'maintainer-accept-core-tools';
 const CORE_VENDOR_TOOL_LABEL = 'pipeline/core-vendor-tool';
-const CI_ONLY_PATH_PREFIXES = ['.github/workflows/', '.github/actions/', '.github/scripts/merge-gate'];
+const CI_ONLY_PATH_PREFIXES = ['.github/workflows/', '.github/actions/', '.github/scripts/', '.github/prompts/'];
 const SDK_PATH_PREFIXES = ['src/praisonai-agents/', 'src/praisonai/', 'src/praisonai-ts/'];
 const TS_SDK_SOURCE_PREFIX = 'src/praisonai-ts/src/';
 const SENSITIVE_PATH_PATTERNS = [
-  /^\.github\/workflows\//,
+  // Actions and scripts run with the workflow's tokens, like workflows do.
+  /^\.github\/(workflows|actions|scripts|prompts)\//,
+  /^\.trusted/, // where workflows keep main's actions and scripts during a PR run
+  /(^|\/)(\.claude\/|\.mcp\.json$|CLAUDE(\.local)?\.md$)/, // Claude Code config: hooks, MCP servers, instructions
+  /(^|\/)(sitecustomize|usercustomize|noxfile)\.py$/, // run at interpreter start / by test runners
+  /(^|\/)(pytest\.ini|tox\.ini|\.gitmodules|\.gitattributes)$/,
   /praisonaiagents\/(auth|approval|policy|sandbox)\//,
   /^src\/praisonai-agents\/pyproject\.toml$/,
   /^src\/praisonai\/pyproject\.toml$/,
@@ -157,12 +164,18 @@ const FINAL_REPLY_MARKERS = [
   /^#{1,4}\s*Phase 1 — AGENTS\.md review/m,
 ];
 
+// Exact logins: a substring match would trust any account whose name merely
+// contains one of these (e.g. "github-actions-x").
+const CLAUDE_AUTOMATION_LOGINS = new Set([
+  'praisonai-triage-agent[bot]',
+  'praisonai-triage-agent',
+  'app/praisonai-triage-agent',
+  'github-actions[bot]',
+]);
+
 function isClaudeFinalReplyComment(c) {
-  const login = (c.user?.login || '').toLowerCase();
-  const fromAutomation =
-    login.includes('praisonai-triage') ||
-    login.includes('github-actions') ||
-    AUTO_ACTORS.some((a) => a.toLowerCase() === login);
+  const login = c.user?.login || '';
+  const fromAutomation = CLAUDE_AUTOMATION_LOGINS.has(login) || AUTO_ACTORS.includes(login);
   if (!fromAutomation) return false;
   const body = c.body || '';
   // The FINAL trigger embeds the Phase 1 heading; an @claude request is never a reply.
@@ -349,8 +362,7 @@ function countFinalTriggersSince(comments, sinceMs) {
 }
 
 function isClaudeAutomationLogin(login) {
-  const lower = (login || '').toLowerCase();
-  return lower.includes('praisonai-triage') || lower === 'github-actions[bot]';
+  return CLAUDE_AUTOMATION_LOGINS.has(login || '');
 }
 
 function isPushSoonAfterLatestFinal(comments, headPushedAt) {
@@ -1255,6 +1267,29 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
   if (agentManual) reasons.push(agentManual);
 
   reasons.push(...sensitivePathReasons(pullFiles, ctx.labels));
+
+  // Outsider-origin PRs (see outsider-review.js). Provenance costs API calls,
+  // so it is skipped on scans that are already blocked for other reasons.
+  let outsiderOrigin = [];
+  if (forMergeStep || reasons.length === 0) {
+    outsiderOrigin = await outsider.outsiderOriginReasons(github, owner, repo, ctx.pr, ctx.comments);
+    let securityStatus = null;
+    if (forMergeStep && outsiderOrigin.length) {
+      const statuses = await github.paginate(github.rest.repos.listCommitStatusesForRef, {
+        owner, repo, ref: ctx.headSha, per_page: 100,
+      });
+      securityStatus = outsider.findSecurityReviewStatus(statuses);
+    }
+    const maintainerReviewed = outsiderOrigin.length > 0
+      && (await outsider.maintainerApprovedHead(github, owner, repo, prNumber, ctx.headSha));
+    reasons.push(...outsider.outsiderGateReasons({
+      origin: outsiderOrigin,
+      files: pullFiles,
+      securityStatus,
+      maintainerReviewed,
+      forMergeStep,
+    }));
+  }
   reasons.push(...prSizeReasons(pullFiles));
   reasons.push(...secretScanReasons(pullFiles));
 
@@ -1285,6 +1320,7 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
     prNumber,
     blockedOnHead,
     blockFixDue: blockedOnHead && blockFixRequestDue(ctx.comments, ctx.headSha),
+    outsiderOrigin,
   };
 }
 
@@ -1477,6 +1513,8 @@ function findMergeGateVerdict(comments, minCreatedAt = null, headPushedAt = null
   const headTime = headPushedAt ? new Date(headPushedAt).getTime() - 60000 : 0;
   const gateComments = comments
     .filter((c) => {
+      // Anyone can type the marker; only the gate's own automation counts.
+      if (!GATE_VERDICT_AUTHORS.has(c.user?.login)) return false;
       if (!isMergeGateVerdictComment(c.body)) return false;
       if (excludeAutomatedFallback && isAutomatedFallbackVerdict(c.body)) return false;
       const created = new Date(c.created_at).getTime();
@@ -1487,8 +1525,9 @@ function findMergeGateVerdict(comments, minCreatedAt = null, headPushedAt = null
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
   if (gateComments.length === 0) return null;
   const body = gateComments[0].body || '';
-  if (/MERGE_GATE_VERDICT:\s*APPROVE\b/.test(body)) return 'APPROVE';
+  // A comment carrying both is a BLOCK.
   if (/MERGE_GATE_VERDICT:\s*BLOCK\b/.test(body)) return 'BLOCK';
+  if (/MERGE_GATE_VERDICT:\s*APPROVE\b/.test(body)) return 'APPROVE';
   return null;
 }
 

@@ -140,7 +140,7 @@ assert(
   );
   assert('without staleRecovery an existing FINAL is not re-posted', !dup.posted && posted.length === 1);
 
-  // Fork code must never be handed to Claude automatically; a maintainer can still @claude.
+  // Fork PRs are reviewed automatically too (read-only, with a security review in claude.yml).
   for (const [label, head] of [['fork', { repo: { full_name: 'someone/r' } }], ['deleted fork', { repo: null }]]) {
     const before = posted.length;
     const forkGithub = {
@@ -154,8 +154,7 @@ assert(
       forkGithub, 'o', 'r', 2, 'BODY', null,
       { skipCopilot: true, optionalWaitMs: 0, requiredWaitMs: 0, staleRecovery: true }
     );
-    assert(`no automatic FINAL on a ${label} PR`, !fork.posted && fork.reason === 'fork PR' && posted.length === before);
+    assert(`automatic FINAL on a ${label} PR`, fork.posted && posted.length === before + 1);
   }
-  assert('isForkPr: same repo is internal', !chain.isForkPr({ head: { repo: { full_name: 'o/r' } } }, 'o', 'r'));
   process.exit(failed ? 1 : 0);
 })();
