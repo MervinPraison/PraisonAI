@@ -336,17 +336,27 @@ class PermissionAllowlist:
                 if not perm.session_only
             }
         }
+        from ..utils.atomic_io import atomic_write_json
         os.makedirs(os.path.dirname(filepath) or ".", exist_ok=True)
-        with open(filepath, "w") as f:
-            json.dump(data, f, indent=2)
+        atomic_write_json(filepath, data, indent=2)
 
     @classmethod
     def load(cls, filepath: str) -> "PermissionAllowlist":
         allowlist = cls()
         if not os.path.exists(filepath):
             return allowlist
-        with open(filepath, "r") as f:
-            data = json.load(f)
+        try:
+            with open(filepath, "r") as f:
+                data = json.load(f)
+        except json.JSONDecodeError:
+            # Fail closed: a corrupt allowlist grants nothing.
+            from ..utils.atomic_io import quarantine_corrupt_file
+            logger.warning("Corrupt permission allowlist %s; ignoring it", filepath)
+            try:
+                quarantine_corrupt_file(filepath)
+            except OSError:
+                pass
+            return allowlist
         for tool_name, tool_data in data.get("tools", {}).items():
             allowlist.add_tool(tool_name, paths=tool_data.get("allowed_paths", []), session_only=tool_data.get("session_only", False))
         return allowlist
