@@ -759,9 +759,14 @@ jobs:
                 return;
               }
               if (record.outsider && record.security !== 'PASS') {
-                core.info(`Skip merge: outsider-origin PR, security review ${record.security}`);
-                await removeLabels();
-                return;
+                // A maintainer's approving review of exactly this commit stands in for the PASS.
+                const outsider = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/outsider-review.js'));
+                if (!(await outsider.maintainerApprovedHead(github, owner, repo, prNumber, scanHeadSha))) {
+                  core.info(`Skip merge: outsider-origin PR, security review ${record.security}, no maintainer approval of HEAD`);
+                  await removeLabels();
+                  return;
+                }
+                core.info('Outsider-origin PR without a security PASS: a maintainer approved this exact commit');
               }
 
               const check = await mergeGate.evaluatePipelineQuiescent(

@@ -213,8 +213,9 @@ async function issueReasons(github, owner, repo, issueNumber, isWriter, label = 
     const outsiders = await outsiderLogins(comments.map((c) => c.user?.login), isWriter);
     if (outsiders.length) reasons.push(`${label} #${issueNumber} has comments from ${outsiders.map((l) => '@' + l).join(', ')}`);
   } catch (err) {
-    // Deleted or transferred: nothing left to read, and the sticky label still applies.
     if (err.status !== 404 && err.status !== 410) throw err;
+    // Deleted, transferred or never existed: who wrote it is unknown, so fail closed.
+    reasons.push(`${label} #${issueNumber} is unavailable (HTTP ${err.status}); provenance unknown`);
   }
   return reasons;
 }

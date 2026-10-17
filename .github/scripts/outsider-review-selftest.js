@@ -162,7 +162,7 @@ assert('no source issue', o.sourceIssueNumbers({ head: { ref: 'feat/x' }, body: 
   assert('an issue flagged earlier stays outsider (sticky)', r.some((x) => x.includes('flagged')));
 
   r = await o.outsiderOriginReasons(fakeGithub({ issueError: 410 }), 'o', 'r', internalPr(), []);
-  assert('a deleted or transferred source issue (410) does not crash provenance', Array.isArray(r));
+  assert('a deleted or transferred source issue (410) counts as unknown, so outsider', r.some((x) => x.includes('unavailable (HTTP 410)')));
 
   r = await o.outsiderIssueReasons(fakeGithub({ issue: { user: { login: 'stranger' } } }), 'o', 'r', 5);
   assert('issue opened by an outsider', r.some((x) => x.includes('issue #5 opened by @stranger')));
