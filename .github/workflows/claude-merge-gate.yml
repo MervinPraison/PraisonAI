@@ -607,12 +607,19 @@ jobs:
             fs.mkdirSync(dir, { recursive: true });
             let security = 'NONE';
             try { security = fs.readFileSync(`${dir}/security`, 'utf8').trim(); } catch {}
-            const { data: pr } = await github.rest.pulls.get({ owner: context.repo.owner, repo: context.repo.repo, pull_number: prNumber });
+            const { owner, repo } = context.repo;
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: prNumber });
+            // Same rule as the security verdict: the review read the live PR.
+            const events = await github.paginate(github.rest.issues.listEvents, { owner, repo, issue_number: prNumber, per_page: 100 });
+            const moved = o.headMovedDuringReview({
+              savedSha: '${{ matrix.head_sha }}', currentSha: pr.head.sha, events, since: '${{ steps.provenance.outputs.checked_at }}',
+            });
+            if (moved) core.warning(moved);
             const record = {
               pr: prNumber,
               head_sha: pr.head.sha,
               scan_head_sha: '${{ matrix.head_sha }}',
-              merge: o.mergeVerdictFromOutput(out, prNumber) || 'NONE',
+              merge: moved ? 'NONE' : (o.mergeVerdictFromOutput(out, prNumber) || 'NONE'),
               outsider: '${{ steps.provenance.outputs.outsider }}' === 'true',
               security,
             };
