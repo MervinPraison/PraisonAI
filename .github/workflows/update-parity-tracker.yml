@@ -35,6 +35,9 @@ jobs:
       uses: actions/checkout@v4
       with:
         ref: main
+        # main only accepts direct pushes from repository admins (ruleset), so the
+        # auto-commit below pushes as the maintainer PAT, not GITHUB_TOKEN.
+        token: ${{ secrets.GH_TOKEN }}
         persist-credentials: true
         fetch-depth: 0
 

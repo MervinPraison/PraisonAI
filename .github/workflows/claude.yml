@@ -413,7 +413,8 @@ jobs:
 
       - uses: ./.trusted/actions/claude-code-action
         env:
-          GH_TOKEN: ${{ steps.check_fork.outputs.can_push_fork == 'true' && secrets.GH_TOKEN || steps.app-token.outputs.token }}
+          # Never the maintainer PAT: main accepts direct pushes only from admins.
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           ANTHROPIC_DEFAULT_OPUS_MODEL: claude-opus-5-5
           ANTHROPIC_DEFAULT_SONNET_MODEL: claude-sonnet-5-5
         with:

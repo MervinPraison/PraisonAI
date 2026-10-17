@@ -203,17 +203,20 @@ jobs:
       - name: Configure git
         env:
           APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          PUSH_TOKEN: ${{ secrets.GH_TOKEN }}
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           git config user.name "praisonai-triage-agent[bot]"
           git config user.email "272766704+praisonai-triage-agent[bot]@users.noreply.github.com"
-          # persist-credentials:false left the remote unauthenticated; push auth
-          # comes from the app token embedded here (masked in logs, and the
-          # token dies with the runner).
-          git remote set-url origin "https://x-access-token:${APP_TOKEN}@github.com/${REPO}.git"
+          # main only accepts direct pushes from repository admins (ruleset), and
+          # the App is the identity Claude runs as, so the release commit and tags
+          # are pushed with the maintainer PAT. The App token stays for gh API
+          # calls (gh release create). persist-credentials:false left the remote
+          # unauthenticated; push auth is the PAT embedded here (masked in logs).
+          [ -n "${PUSH_TOKEN}" ] || { echo "::error::GH_TOKEN secret is required to push the release to main"; exit 1; }
+          git remote set-url origin "https://x-access-token:${PUSH_TOKEN}@github.com/${REPO}.git"
           echo "GH_TOKEN=${APP_TOKEN}" >> "$GITHUB_ENV"
-          GH_TOKEN="${APP_TOKEN}" gh auth setup-git
 
       - name: Release summary
         run: |
@@ -1159,7 +1162,7 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          git remote set-url origin "https://x-access-token:${APP_TOKEN}@github.com/${REPO}.git"
+          # Only the gh API token is refreshed; pushes use the PAT set in "Configure git".
           echo "GH_TOKEN=${APP_TOKEN}" >> "$GITHUB_ENV"
 
       - name: Bump and release wrapper
