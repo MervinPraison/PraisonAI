@@ -710,13 +710,15 @@ def _dump_config_file(path: Path, data: Dict[str, Any]) -> None:
     """Write ``data`` to ``path`` as YAML or TOML based on its suffix."""
     from ..utils.atomic_io import atomic_write_text
 
+    # Write through a symlinked config so the shared target gets the update,
+    # and keep an existing file's mode (the atomic temp file is owner-only).
+    path = path.resolve()
+    mode = path.stat().st_mode & 0o7777 if path.exists() else None
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.suffix.lower() in (".yaml", ".yml"):
         import yaml
 
-        atomic_write_text(
-            str(path), yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
-        )
+        text = yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
     else:
         try:
             import tomli_w
@@ -730,7 +732,10 @@ def _dump_config_file(path: Path, data: Dict[str, Any]) -> None:
                 "Install tomli-w (pip install tomli-w), or convert the config "
                 "to .praisonai/config.yaml."
             ) from None
-        atomic_write_text(str(path), tomli_w.dumps(data))
+        text = tomli_w.dumps(data)
+    atomic_write_text(str(path), text)
+    if mode is not None:
+        os.chmod(path, mode)
 
 
 def set_plugin_enabled(name: str, enabled: bool) -> Path:
