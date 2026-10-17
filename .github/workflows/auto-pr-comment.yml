@@ -39,11 +39,11 @@ jobs:
        (
          github.event.comment.user.login == 'coderabbitai[bot]' ||
          github.event.comment.user.login == 'greptile-apps[bot]' ||
-         contains(github.event.comment.user.login, 'gemini-code-assist') ||
-         contains(github.event.comment.user.login, 'qodo-code-review')
+         github.event.comment.user.login == 'gemini-code-assist[bot]' ||
+         github.event.comment.user.login == 'qodo-code-review[bot]'
        )) ||
       (github.event_name == 'pull_request_review' &&
-       contains(github.event.review.user.login, 'qodo-code-review'))
+       github.event.review.user.login == 'qodo-code-review[bot]')
     runs-on: ubuntu-latest
     permissions:
       issues: write

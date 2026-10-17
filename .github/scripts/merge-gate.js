@@ -34,6 +34,7 @@ const TS_SDK_SOURCE_PREFIX = 'src/praisonai-ts/src/';
 const SENSITIVE_PATH_PATTERNS = [
   // Actions and scripts run with the workflow's tokens, like workflows do.
   /^\.github\/(workflows|actions|scripts|prompts)\//,
+  /^\.trusted/, // where workflows keep main's actions and scripts during a PR run
   /praisonaiagents\/(auth|approval|policy|sandbox)\//,
   /^src\/praisonai-agents\/pyproject\.toml$/,
   /^src\/praisonai\/pyproject\.toml$/,
@@ -1271,11 +1272,14 @@ async function evaluatePipelineQuiescent(github, owner, repo, prNumber, core, op
       });
       securityStatus = outsider.findSecurityReviewStatus(statuses);
     }
+    const maintainerReviewed = outsiderOrigin.length > 0
+      && ctx.labels.includes(outsider.MAINTAINER_SECURITY_LABEL)
+      && (await outsider.maintainerReviewedHead(github, owner, repo, prNumber, ctx.headPushedAt));
     reasons.push(...outsider.outsiderGateReasons({
       origin: outsiderOrigin,
       files: pullFiles,
       securityStatus,
-      labels: ctx.labels,
+      maintainerReviewed,
       forMergeStep,
     }));
   }

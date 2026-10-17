@@ -24,7 +24,6 @@ const WRITE_PERMISSIONS = new Set(['admin', 'maintain', 'write']);
 const TRUSTED_AUTOMATION = new Set(['Copilot']);
 const SECURITY_STATUS_CONTEXT = 'security/outsider-review';
 const SECURITY_STATUS_CREATOR = 'github-actions[bot]';
-const SECURITY_REVIEW_RE = /^\s*SECURITY_REVIEW:\s*(PASS|FAIL)\b/;
 const MAINTAINER_SECURITY_LABEL = 'maintainer-security-reviewed';
 const OUTSIDER_ORIGIN_LABEL = 'origin/outsider';
 
@@ -33,6 +32,7 @@ const OUTSIDER_ORIGIN_LABEL = 'origin/outsider';
 // change to it always needs a maintainer.
 const OUTSIDER_SENSITIVE_PATTERNS = [
   /^\.github\//,
+  /^\.trusted/, // where workflows keep main's actions and scripts during a PR run
   /(^|\/)(pyproject\.toml|setup\.py|setup\.cfg|MANIFEST\.in|requirements[^/]*\.txt|Pipfile(\.lock)?)$/,
   /(^|\/)(uv|poetry)\.lock$/,
   /(^|\/)(package(-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|\.npmrc)$/,
@@ -60,12 +60,19 @@ function isAutomation(login) {
   return !login || login.endsWith('[bot]') || TRUSTED_AUTOMATION.has(login);
 }
 
-/** Issue the PR was built from: claude/issue-N-* branch, else "Fixes #N" in the body. */
-function sourceIssueNumber(pr) {
+/**
+ * Issues or PRs the change was built from: the claude/issue-N branch plus every
+ * "Fixes/Closes/Resolves #N" in the body. All of them count, so a decoy
+ * reference to a maintainer's issue cannot hide an outsider's.
+ */
+function sourceIssueNumbers(pr) {
+  const numbers = new Set();
   const branch = /^claude\/issue-(\d+)-/.exec(pr?.head?.ref || '');
-  if (branch) return Number(branch[1]);
-  const body = /\b(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s+#(\d+)\b/i.exec(pr?.body || '');
-  return body ? Number(body[1]) : null;
+  if (branch) numbers.add(Number(branch[1]));
+  for (const m of (pr?.body || '').matchAll(/\b(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s+#(\d+)\b/gi)) {
+    numbers.add(Number(m[1]));
+  }
+  return [...numbers];
 }
 
 function makePermissionLookup(github, owner, repo) {
@@ -95,9 +102,13 @@ async function outsiderOriginReasons(github, owner, repo, pr, comments = []) {
   if (pr.head?.repo?.full_name !== `${owner}/${repo}`) reasons.push('fork PR');
   if (!(await isWriter(pr.user?.login))) reasons.push(`author @${pr.user?.login} has no write access`);
 
-  const issueNumber = sourceIssueNumber(pr);
-  if (issueNumber) {
-    reasons.push(...(await issueReasons(github, owner, repo, issueNumber, isWriter, 'source issue')));
+  const sources = sourceIssueNumbers(pr);
+  // Claude's own PRs always come from an issue; one we cannot trace is not trusted.
+  if (isAutomation(pr.user?.login) && pr.user?.login !== 'github-actions[bot]' && !sources.length) {
+    reasons.push('bot PR without a traceable source issue');
+  }
+  for (const n of sources) {
+    reasons.push(...(await issueReasons(github, owner, repo, n, isWriter, 'source issue')));
   }
 
   const [reviewComments, reviews] = await Promise.all([
@@ -108,7 +119,43 @@ async function outsiderOriginReasons(github, owner, repo, pr, comments = []) {
   const prOutsiders = await outsiderLogins(prAuthors, isWriter);
   if (prOutsiders.length) reasons.push(`PR has comments from ${prOutsiders.map((l) => '@' + l).join(', ')}`);
 
+  // Sticky: once flagged, always flagged (an outsider deleting a comment after
+  // Claude read it must not clear the flag). Timeline events cannot be edited.
+  for (const n of [pr.number, ...sources]) {
+    if (await wasLabelled(github, owner, repo, n, OUTSIDER_ORIGIN_LABEL)) {
+      reasons.push(`#${n} was flagged ${OUTSIDER_ORIGIN_LABEL} earlier`);
+      break;
+    }
+  }
   return reasons;
+}
+
+async function wasLabelled(github, owner, repo, number, label) {
+  try {
+    const events = await github.paginate(github.rest.issues.listEventsForTimeline, {
+      owner, repo, issue_number: number, per_page: 100,
+    });
+    return events.some((e) => e.event === 'labeled' && e.label?.name === label);
+  } catch (err) {
+    if (err.status === 404) return false;
+    throw err;
+  }
+}
+
+/**
+ * The maintainer override counts only when a person with write access added
+ * the label after the current HEAD was pushed (bots and stale labels do not).
+ */
+async function maintainerReviewedHead(github, owner, repo, prNumber, headPushedAt) {
+  const events = await github.paginate(github.rest.issues.listEventsForTimeline, {
+    owner, repo, issue_number: prNumber, per_page: 100,
+  });
+  const added = events
+    .filter((e) => e.event === 'labeled' && e.label?.name === MAINTAINER_SECURITY_LABEL)
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0];
+  if (!added || isAutomation(added.actor?.login)) return false;
+  if (headPushedAt && new Date(added.created_at) < new Date(headPushedAt)) return false;
+  return makePermissionLookup(github, owner, repo)(added.actor.login);
 }
 
 /** Outsider authorship of an issue and its comments ([] for a PR number). */
@@ -116,7 +163,11 @@ async function issueReasons(github, owner, repo, issueNumber, isWriter, label = 
   const reasons = [];
   try {
     const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
-    if (issue.pull_request) return reasons;
+    if (issue.pull_request) {
+      // A PR as the source: its head and author matter too.
+      const { data: src } = await github.rest.pulls.get({ owner, repo, pull_number: issueNumber });
+      if (src.head?.repo?.full_name !== `${owner}/${repo}`) reasons.push(`${label} #${issueNumber} is a fork PR`);
+    }
     if (!(await isWriter(issue.user?.login))) {
       reasons.push(`${label} #${issueNumber} opened by @${issue.user?.login} (no write access)`);
     }
@@ -166,30 +217,52 @@ function formatRiskFlags(flags) {
 }
 
 /**
- * Verdict from the security run's stream-json output: the first line of the
- * comment it posted through mcp__github__add_issue_comment. Any FAIL wins;
- * no verdict at all is null (treated as not passed).
+ * A verdict from a Claude run's stream-json output: the first line of a
+ * comment it posted on this PR through add_issue_comment (calls that errored
+ * are ignored), and, when allowed, a line of its own final answer. Text inside
+ * tool results (diffs, other comments) never counts. BLOCK/FAIL wins.
  */
-function securityVerdictFromOutput(jsonl) {
-  const verdicts = [];
+function verdictFromOutput(jsonl, { prNumber, marker, values, allowFinalAnswer = false }) {
+  const re = new RegExp(`^\\s*${marker}:\\s*(${values.join('|')})\\b`);
+  const calls = new Map();
+  const errored = new Set();
+  const found = [];
   for (const line of (jsonl || '').split('\n')) {
     let msg;
     try { msg = JSON.parse(line); } catch { continue; }
     for (const item of msg?.message?.content || []) {
-      if (item?.type !== 'tool_use' || !/add_issue_comment$/.test(item.name || '')) continue;
-      const m = SECURITY_REVIEW_RE.exec(String(item.input?.body || ''));
-      if (m) verdicts.push(m[1]);
+      if (item?.type === 'tool_use' && /add_issue_comment$/.test(item.name || '')) {
+        if (Number(item.input?.issue_number) !== Number(prNumber)) continue;
+        const m = re.exec(String(item.input?.body || ''));
+        if (m) calls.set(item.id, m[1]);
+      }
+      if (item?.type === 'tool_result' && item.is_error) errored.add(item.tool_use_id);
+    }
+    if (allowFinalAnswer && msg?.type === 'result' && typeof msg.result === 'string') {
+      for (const l of msg.result.split('\n')) {
+        const m = re.exec(l);
+        if (m) found.push(m[1]);
+      }
     }
   }
-  if (verdicts.includes('FAIL')) return 'FAIL';
-  return verdicts.includes('PASS') ? 'PASS' : null;
+  for (const [id, v] of calls) if (!errored.has(id)) found.push(v);
+  if (!found.length) return null;
+  return found.includes(values[1]) ? values[1] : values[0];
+}
+
+function securityVerdictFromOutput(jsonl, prNumber) {
+  return verdictFromOutput(jsonl, { prNumber, marker: 'SECURITY_REVIEW', values: ['PASS', 'FAIL'] });
+}
+
+function mergeVerdictFromOutput(jsonl, prNumber) {
+  return verdictFromOutput(jsonl, { prNumber, marker: 'MERGE_GATE_VERDICT', values: ['APPROVE', 'BLOCK'], allowFinalAnswer: true });
 }
 
 /** Latest outsider security status on a commit, trusted only from the gate's token. */
 function findSecurityReviewStatus(statuses) {
   const ours = (statuses || [])
     .filter((st) => st.context === SECURITY_STATUS_CONTEXT && st.creator?.login === SECURITY_STATUS_CREATOR)
-    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at) || (b.id || 0) - (a.id || 0));
   if (!ours.length) return null;
   return ours[0].state === 'success' ? 'PASS' : 'FAIL';
 }
@@ -199,9 +272,9 @@ function findSecurityReviewStatus(statuses) {
  * requirement applies only on the merge step: the review itself runs inside
  * the assess job, so it must not keep the PR from becoming a candidate.
  */
-function outsiderGateReasons({ origin, files, securityStatus = null, labels = [], forMergeStep = false }) {
+function outsiderGateReasons({ origin, files, securityStatus = null, maintainerReviewed = false, forMergeStep = false }) {
   if (!origin.length) return [];
-  if (labels.includes(MAINTAINER_SECURITY_LABEL)) return [];
+  if (maintainerReviewed) return [];
   const reasons = [];
   const sensitive = outsiderSensitivePaths(files);
   if (sensitive.length) {
@@ -219,13 +292,15 @@ module.exports = {
   MAINTAINER_SECURITY_LABEL,
   OUTSIDER_ORIGIN_LABEL,
   SECURITY_STATUS_CONTEXT,
-  sourceIssueNumber,
+  sourceIssueNumbers,
+  maintainerReviewedHead,
   outsiderOriginReasons,
   outsiderIssueReasons,
   outsiderSensitivePaths,
   riskFlags,
   formatRiskFlags,
   securityVerdictFromOutput,
+  mergeVerdictFromOutput,
   findSecurityReviewStatus,
   outsiderGateReasons,
 };
