@@ -344,13 +344,19 @@ jobs:
             core.setOutput('started_at', new Date().toISOString());
             const isPr = process.env.IS_PR === 'true';
             let origin;
+            // The request itself can point Claude at other issues ("implement #500").
+            const request = [context.payload.comment?.body, context.payload.review?.body, context.payload.issue?.body]
+              .filter(Boolean).join('\n');
             try {
               if (isPr) {
                 const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
                 const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: number, per_page: 100 });
                 origin = await o.outsiderOriginReasons(github, owner, repo, pr, comments);
+                for (const n of o.referencedIssueNumbers(request, owner, repo)) {
+                  origin.push(...(await o.outsiderIssueReasons(github, owner, repo, n)));
+                }
               } else {
-                origin = await o.outsiderIssueReasons(github, owner, repo, number);
+                origin = await o.outsiderIssueReasons(github, owner, repo, number, request);
               }
             } catch (err) {
               // Unknown provenance gets the stricter prompt; the merge gate re-checks.
@@ -509,7 +515,9 @@ jobs:
   # nothing from its workspace runs next to GH_TOKEN. Scripts come from main.
   after-claude:
     needs: claude-response
-    if: needs.claude-response.result == 'success'
+    # always(): an outsider run that failed or timed out may still have opened or
+    # touched PRs and issues, and those must be flagged. Other steps need success.
+    if: always() && needs.claude-response.outputs.trusted_sha != ''
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -530,9 +538,10 @@ jobs:
           private-key: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
-      # A manipulated run can pick any branch name and PR body, so provenance must
-      # not rely on them: every PR the App opened during an outsider run is flagged.
-      - name: Flag PRs opened during an outsider run
+      # A manipulated run can pick any branch name and PR body, create issues as the
+      # App, edit or comment on other issues, or push to other PRs. Provenance must
+      # not rely on any of that: everything touched since the run started is flagged.
+      - name: Flag everything touched during an outsider run
         if: needs.claude-response.outputs.outsider == 'true'
         uses: actions/github-script@v7
         env:
@@ -543,16 +552,17 @@ jobs:
             const path = require('path');
             const o = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/outsider-review.js'));
             const { owner, repo } = context.repo;
-            const since = new Date(process.env.STARTED_AT || 0);
-            const { data: prs } = await github.rest.pulls.list({ owner, repo, state: 'all', sort: 'created', direction: 'desc', per_page: 30 });
-            for (const pr of prs) {
-              if (new Date(pr.created_at) < since || !pr.user?.login?.endsWith('[bot]')) continue;
-              await github.rest.issues.addLabels({ owner, repo, issue_number: pr.number, labels: [o.OUTSIDER_ORIGIN_LABEL] });
-              core.info(`Flagged PR #${pr.number} ${o.OUTSIDER_ORIGIN_LABEL}`);
+            const since = process.env.STARTED_AT || new Date(0).toISOString();
+            // Issues and PRs created, edited, commented on or pushed to since then.
+            const touched = await github.paginate(github.rest.issues.listForRepo, { owner, repo, state: 'all', since, per_page: 100 });
+            for (const item of touched) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number: item.number, labels: [o.OUTSIDER_ORIGIN_LABEL] });
+              core.info(`Flagged #${item.number} ${o.OUTSIDER_ORIGIN_LABEL}`);
             }
 
       - name: Kick review chain for bot-created PR
         if: |
+          needs.claude-response.result == 'success' &&
           needs.claude-response.outputs.is_pr != 'true' &&
           (github.event_name == 'issues' || github.event_name == 'issue_comment') &&
           github.event.issue != null
@@ -569,7 +579,7 @@ jobs:
             );
 
       - name: Sync pipeline status labels for PR
-        if: needs.claude-response.outputs.is_pr == 'true'
+        if: needs.claude-response.result == 'success' && needs.claude-response.outputs.is_pr == 'true'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GH_TOKEN }}
@@ -581,7 +591,7 @@ jobs:
             await ps.syncPipelineLabels(github, context.repo.owner, context.repo.repo, prNumber, core);
 
       - name: Dispatch merge gate when PR pipeline ready
-        if: needs.claude-response.outputs.is_pr == 'true'
+        if: needs.claude-response.result == 'success' && needs.claude-response.outputs.is_pr == 'true'
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GH_TOKEN }}

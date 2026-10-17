@@ -48,7 +48,10 @@ function fakeGithub({ issue = null, issues = {}, issueComments = [], reviewComme
       get: async () => ({ data: srcPr }),
     },
   };
-  const graphql = async () => ({ repository: { pullRequest: { closingIssuesReferences: { nodes: closing } } } });
+  const graphql = async () => {
+    if (closing === 'error') throw new Error('rate limited');
+    return { repository: { pullRequest: { closingIssuesReferences: { nodes: closing } } } };
+  };
   return { rest, graphql, paginate: async (method) => lists.get(method) || [] };
 }
 
@@ -144,6 +147,20 @@ assert('no source issue', o.sourceIssueNumbers({ head: { ref: 'feat/x' }, body: 
   );
   assert('GitHub-linked closing issue counts even if the body hides it', r.some((x) => x.includes('#77 opened by @stranger')));
 
+  const graphFail = await o.outsiderOriginReasons(fakeGithub({ issue: maintainerIssue, closing: 'error' }), 'o', 'r', internalPr(), []).then(() => null, (e) => e);
+  assert('a failed closing-issues lookup fails closed (throws)', graphFail instanceof Error);
+
+  assert('referenced issues in a request', o.referencedIssueNumbers('implement what #500 proposes, see o/r#7 and https://github.com/o/r/issues/9', 'o', 'r').join() === '500,7,9');
+  assert('references to other repos and non-issues are ignored', o.referencedIssueNumbers('x/y#3, color #fff, a#b', 'o', 'r').length === 0);
+  r = await o.outsiderIssueReasons(
+    fakeGithub({ issues: { 600: maintainerIssue, 500: { user: { login: 'stranger' } } } }), 'o', 'r', 600, '@claude implement what #500 proposes'
+  );
+  assert('an outsider issue the request points at counts', r.some((x) => x.includes('referenced issue #500 opened by @stranger')));
+  r = await o.outsiderIssueReasons(
+    fakeGithub({ issue: maintainerIssue, timeline: [{ event: 'labeled', label: { name: o.OUTSIDER_ORIGIN_LABEL } }] }), 'o', 'r', 600
+  );
+  assert('an issue flagged earlier stays outsider (sticky)', r.some((x) => x.includes('flagged')));
+
   r = await o.outsiderOriginReasons(fakeGithub({ issueError: 410 }), 'o', 'r', internalPr(), []);
   assert('a deleted or transferred source issue (410) does not crash provenance', Array.isArray(r));
 
@@ -168,6 +185,10 @@ assert('no source issue', o.sourceIssueNumbers({ head: { ref: 'feat/x' }, body: 
   assert('pyproject and .github/actions are sensitive', sensitive.length === 2 && sensitive.includes('src/praisonai-agents/pyproject.toml'));
   assert('trusted-copy paths are sensitive', o.outsiderSensitivePaths([{ filename: '.trusted/scripts/x.js' }, { filename: '.trusted-actions/a/action.yml' }]).length === 2);
   assert('Claude Code config is sensitive', o.outsiderSensitivePaths([{ filename: '.claude/settings.json' }, { filename: '.mcp.json' }, { filename: 'src/CLAUDE.md' }]).length === 3);
+  assert('agent instructions and auto-run files are sensitive', o.outsiderSensitivePaths([
+    { filename: 'AGENTS.md' }, { filename: 'CLAUDE.local.md' }, { filename: 'src/sitecustomize.py' }, { filename: 'noxfile.py' },
+    { filename: 'pytest.ini' }, { filename: 'tox.ini' }, { filename: '.gitmodules' }, { filename: '.gitattributes' },
+  ]).length === 8);
   assert('plain source is not sensitive', !o.outsiderSensitivePaths([files[0]]).length);
   assert('renaming a sensitive file away is still sensitive',
     o.outsiderSensitivePaths([{ filename: 'tests/fixtures.py', previous_filename: 'tests/conftest.py', status: 'renamed' }]).includes('tests/conftest.py'));

@@ -35,7 +35,9 @@ const SENSITIVE_PATH_PATTERNS = [
   // Actions and scripts run with the workflow's tokens, like workflows do.
   /^\.github\/(workflows|actions|scripts|prompts)\//,
   /^\.trusted/, // where workflows keep main's actions and scripts during a PR run
-  /(^|\/)(\.claude\/|\.mcp\.json$|CLAUDE\.md$)/, // Claude Code config: hooks, MCP servers, instructions
+  /(^|\/)(\.claude\/|\.mcp\.json$|CLAUDE(\.local)?\.md$)/, // Claude Code config: hooks, MCP servers, instructions
+  /(^|\/)(sitecustomize|usercustomize|noxfile)\.py$/, // run at interpreter start / by test runners
+  /(^|\/)(pytest\.ini|tox\.ini|\.gitmodules|\.gitattributes)$/,
   /praisonaiagents\/(auth|approval|policy|sandbox)\//,
   /^src\/praisonai-agents\/pyproject\.toml$/,
   /^src\/praisonai\/pyproject\.toml$/,

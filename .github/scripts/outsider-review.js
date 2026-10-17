@@ -33,7 +33,9 @@ const OUTSIDER_ORIGIN_LABEL = 'origin/outsider';
 const OUTSIDER_SENSITIVE_PATTERNS = [
   /^\.github\//,
   /^\.trusted/, // where workflows keep main's actions and scripts during a PR run
-  /(^|\/)(\.claude\/|\.mcp\.json$|CLAUDE\.md$)/, // Claude Code config: hooks, MCP servers, instructions
+  /(^|\/)(\.claude\/|\.mcp\.json$|CLAUDE(\.local)?\.md$|AGENTS\.md$)/, // agent config and instructions
+  /(^|\/)(sitecustomize|usercustomize|noxfile)\.py$/, // run at interpreter start / by test runners
+  /(^|\/)(pytest\.ini|tox\.ini|\.gitmodules|\.gitattributes)$/,
   /(^|\/)(pyproject\.toml|setup\.py|setup\.cfg|MANIFEST\.in|requirements[^/]*\.txt|Pipfile(\.lock)?)$/,
   /(^|\/)(uv|poetry)\.lock$/,
   /(^|\/)(package(-lock)?\.json|yarn\.lock|pnpm-lock\.yaml|\.npmrc)$/,
@@ -95,8 +97,9 @@ async function closingIssueNumbers(github, owner, repo, prNumber) {
     return (data?.repository?.pullRequest?.closingIssuesReferences?.nodes || [])
       .filter((n) => (n.repository?.nameWithOwner || '').toLowerCase() === here)
       .map((n) => n.number);
-  } catch {
-    return [];
+  } catch (err) {
+    // Fail closed like the permission lookup: an unknown link must not mean "none".
+    throw new Error(`closingIssuesReferences lookup failed: ${err.message}`);
   }
 }
 
@@ -216,9 +219,36 @@ async function issueReasons(github, owner, repo, issueNumber, isWriter, label = 
   return reasons;
 }
 
-/** Why an issue Claude is asked to work on is outsider-influenced ([] when not). */
-async function outsiderIssueReasons(github, owner, repo, issueNumber) {
-  return issueReasons(github, owner, repo, issueNumber, makePermissionLookup(github, owner, repo));
+/**
+ * Why an issue Claude is asked to work on is outsider-influenced ([] when not):
+ * the issue itself, anything it was flagged as before, and every issue the
+ * request points at ("implement what #500 proposes").
+ */
+async function outsiderIssueReasons(github, owner, repo, issueNumber, requestText = '') {
+  const isWriter = makePermissionLookup(github, owner, repo);
+  const reasons = await issueReasons(github, owner, repo, issueNumber, isWriter);
+  for (const n of referencedIssueNumbers(requestText, owner, repo)) {
+    if (n !== issueNumber) reasons.push(...(await issueReasons(github, owner, repo, n, isWriter, 'referenced issue')));
+  }
+  for (const n of [issueNumber, ...referencedIssueNumbers(requestText, owner, repo)]) {
+    if (await wasLabelled(github, owner, repo, n, OUTSIDER_ORIGIN_LABEL)) {
+      reasons.push(`#${n} was flagged ${OUTSIDER_ORIGIN_LABEL} earlier`);
+      break;
+    }
+  }
+  return reasons;
+}
+
+/** Every #N, owner/repo#N (this repo) and issue/PR URL in this repo mentioned in text. */
+function referencedIssueNumbers(text, owner, repo) {
+  const here = `${owner}/${repo}`.toLowerCase();
+  const numbers = new Set();
+  const re = /(?:([\w.-]+\/[\w.-]+)#|https:\/\/github\.com\/([\w.-]+\/[\w.-]+)\/(?:issues|pull)\/|(?<![\w/])#)(\d+)/g;
+  for (const m of (text || '').matchAll(re)) {
+    const target = (m[1] || m[2] || '').toLowerCase();
+    if (!target || target === here) numbers.add(Number(m[3]));
+  }
+  return [...numbers].slice(0, 20);
 }
 
 async function outsiderLogins(logins, isWriter) {
@@ -348,6 +378,7 @@ module.exports = {
   maintainerApprovedHead,
   outsiderOriginReasons,
   outsiderIssueReasons,
+  referencedIssueNumbers,
   outsiderSensitivePaths,
   riskFlags,
   formatRiskFlags,
