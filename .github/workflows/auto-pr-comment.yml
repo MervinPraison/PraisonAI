@@ -193,7 +193,7 @@ jobs:
             await ps.ensurePipelineLabels(github, context.repo.owner, context.repo.repo, core);
             await ps.syncPipelineLabels(github, context.repo.owner, context.repo.repo, pr, core);
 
-  # Scheduled + manual: post missing or stale FINAL @claude on open internal PRs (forks are skipped)
+  # Scheduled + manual: post missing or stale FINAL @claude on all open PRs (fork reviews are read-only)
   post-missing-claude-final:
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
