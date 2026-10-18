@@ -72,9 +72,14 @@ class BaseFrameworkAdapter(_CoreBaseFrameworkAdapter):
         """Build a provider model object from spec and shared llm_config."""
         from ..inc import PraisonAIModel
 
+        model, base, key = self._llm_settings(spec, llm_config)
+        return PraisonAIModel(model=model, base_url=base, api_key=key).get_model()
+
+    def _llm_settings(self, spec: Any, llm_config: Optional[List[Dict]]):
+        """Return ``(model, base_url, api_key)`` for spec over shared llm_config."""
         # Delegate model-name precedence to core (single source of truth); core
         # returns the model string and discards base/key by design, so we derive
-        # them locally and upgrade to a provider object.
+        # them locally.
         model = super()._resolve_llm(spec, llm_config)
 
         # Per-agent base_url/api_key win over the shared llm_config so a role
@@ -85,8 +90,7 @@ class BaseFrameworkAdapter(_CoreBaseFrameworkAdapter):
         if llm_config and len(llm_config) > 0:
             base = base or llm_config[0].get("base_url")
             key = key or llm_config[0].get("api_key")
-
-        return PraisonAIModel(model=model, base_url=base, api_key=key).get_model()
+        return model, base, key
 
 
 # Guards the legacy class-level patch path (below). Only used as a fallback when

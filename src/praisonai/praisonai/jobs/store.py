@@ -17,15 +17,26 @@ from .models import Job, JobStatus
 
 logger = logging.getLogger(__name__)
 
-# Per-process identity stamped on persisted jobs ("<pid>:<token>"). The token
-# is regenerated after fork so each worker owns only the rows it wrote.
+# Per-process identity stamped on persisted jobs ("<pid>:<start>:<token>"). The
+# token is regenerated after fork so each worker owns only the rows it wrote;
+# <start> is the process start time so a reused pid is not mistaken for the owner.
 _OWNER: Dict[str, Any] = {"pid": None, "id": None}
+
+
+def _proc_start(pid: int) -> str:
+    """Process start time from /proc (Linux), or "" when unavailable."""
+    try:
+        with open(f"/proc/{pid}/stat") as f:
+            return f.read().rsplit(")", 1)[1].split()[19]
+    except (OSError, IndexError):
+        return ""
 
 
 def _owner_id() -> str:
     pid = os.getpid()
     if _OWNER["pid"] != pid:
-        _OWNER["pid"], _OWNER["id"] = pid, f"{pid}:{uuid.uuid4().hex}"
+        _OWNER["pid"] = pid
+        _OWNER["id"] = f"{pid}:{_proc_start(pid)}:{uuid.uuid4().hex}"
     return _OWNER["id"]
 
 
@@ -33,10 +44,13 @@ def _owner_alive(owner: Optional[str]) -> bool:
     """True when ``owner`` is a different, still-running process."""
     if not owner or owner == _owner_id():
         return False
+    parts = owner.split(":")
     try:
-        pid = int(owner.split(":", 1)[0])
+        pid = int(parts[0])
     except ValueError:
         return False
+    if len(parts) == 3 and parts[1] and parts[1] != _proc_start(pid):
+        return False  # owner exited and its pid was reused (or is gone)
     if pid == os.getpid() or os.name != "posix":
         # Same pid with another token is our dead predecessor (e.g. container
         # restart); no safe liveness probe off POSIX, so keep the old behaviour.
@@ -322,7 +336,11 @@ class SqliteJobStore(JobStore):
             try:
                 self._conn.execute("ALTER TABLE jobs ADD COLUMN owner TEXT")
             except sqlite3.OperationalError:
-                pass  # another worker added it concurrently
+                # Fine if another worker added it concurrently; anything else
+                # (e.g. a lock timeout) would leave every write broken.
+                columns = {row[1] for row in self._conn.execute("PRAGMA table_info(jobs)")}
+                if "owner" not in columns:
+                    raise
         self._conn.commit()
         self._lock = threading.Lock()
         # Reconcile jobs that were still QUEUED/RUNNING when the previous

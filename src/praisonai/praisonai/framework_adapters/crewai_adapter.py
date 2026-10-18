@@ -219,9 +219,12 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                 if config.get('memory'):
                     crew_kwargs["memory"] = True
                 if config.get('process') == 'hierarchical':
-                    from crewai import Process
+                    from crewai import LLM, Process
                     crew_kwargs["process"] = Process.hierarchical
-                    crew_kwargs["manager_llm"] = self._resolve_llm(config.get('manager_llm'), llm_config)
+                    # crewai.LLM keeps the model name (a bare SDK client would
+                    # drop it and CrewAI would fall back to its default model).
+                    model, base, key = self._llm_settings(config.get('manager_llm'), llm_config)
+                    crew_kwargs["manager_llm"] = LLM(model=model, base_url=base, api_key=key)
                 crew = Crew(**crew_kwargs)
 
                 logger.debug("Final Crew Configuration:")

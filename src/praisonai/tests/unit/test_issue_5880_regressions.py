@@ -87,6 +87,60 @@ def test_reconcile_skips_live_owner_and_fails_dead_owner(tmp_path):
         live.wait()
 
 
+@pytest.mark.skipif(not os.path.exists("/proc/self/stat"), reason="needs /proc")
+def test_reconcile_detects_reused_pid(tmp_path):
+    from praisonai.jobs.store import SqliteJobStore, _proc_start
+
+    db = str(tmp_path / "jobs.db")
+    SqliteJobStore(db)
+    live = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        same = Job(prompt="same", status=JobStatus.RUNNING)
+        reused = Job(prompt="reused", status=JobStatus.RUNNING)
+        _insert(db, same, f"{live.pid}:{_proc_start(live.pid)}:tok")
+        _insert(db, reused, f"{live.pid}:1:tok")  # same pid, different start time
+
+        store = SqliteJobStore(db)
+        assert asyncio.run(store.get(same.id)).status == JobStatus.RUNNING
+        assert asyncio.run(store.get(reused.id)).status == JobStatus.FAILED
+    finally:
+        live.kill()
+        live.wait()
+
+
+def test_owner_migration_failure_is_not_swallowed(tmp_path, monkeypatch):
+    import sqlite3
+
+    from praisonai.jobs.store import SqliteJobStore
+
+    db = str(tmp_path / "jobs.db")
+    conn = sqlite3.connect(db)
+    conn.execute("CREATE TABLE jobs (id TEXT PRIMARY KEY, status TEXT NOT NULL, "
+                 "session_id TEXT, idempotency_key TEXT, created_at TEXT, "
+                 "completed_at TEXT, data TEXT NOT NULL)")
+    conn.commit()
+    locker = sqlite3.connect(db, timeout=0)
+    locker.execute("BEGIN EXCLUSIVE")
+    try:
+        monkeypatch.setattr(sqlite3, "connect",
+                            lambda path, **kw: conn.__class__(path, timeout=0.1, **kw))
+        with pytest.raises(sqlite3.OperationalError):
+            SqliteJobStore(db)
+    finally:
+        locker.rollback()
+        locker.close()
+        conn.close()
+
+
+def test_manager_llm_settings_keep_model_name():
+    from praisonai.framework_adapters.crewai_adapter import CrewAIAdapter
+
+    shared = [{"model": "gpt-4o", "base_url": "https://shared", "api_key": "sk"}]
+    assert CrewAIAdapter()._llm_settings("openai/gpt-4o-mini", shared) == (
+        "openai/gpt-4o-mini", "https://shared", "sk"
+    )
+
+
 # --- Gap 3: agent_file confined to cwd by default ---------------------------
 
 def test_agent_file_defaults_to_cwd_root(tmp_path, monkeypatch):
