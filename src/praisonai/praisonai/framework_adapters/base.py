@@ -77,10 +77,14 @@ class BaseFrameworkAdapter(_CoreBaseFrameworkAdapter):
         # them locally and upgrade to a provider object.
         model = super()._resolve_llm(spec, llm_config)
 
-        base = key = None
+        # Per-agent base_url/api_key win over the shared llm_config so a role
+        # pointed at a different endpoint/tenant is not silently re-routed.
+        spec_llm = spec if isinstance(spec, dict) else {}
+        base = spec_llm.get("base_url")
+        key = spec_llm.get("api_key")
         if llm_config and len(llm_config) > 0:
-            base = llm_config[0].get("base_url")
-            key = llm_config[0].get("api_key")
+            base = base or llm_config[0].get("base_url")
+            key = key or llm_config[0].get("api_key")
 
         return PraisonAIModel(model=model, base_url=base, api_key=key).get_model()
 
