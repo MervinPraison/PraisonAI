@@ -50,9 +50,21 @@ def test_with_state_works_on_deepcopy():
 def test_async_lock_uncontended_and_contended():
     state = AsyncSafeState([])
 
+    executor_calls = []
+
     async def main():
+        loop = asyncio.get_running_loop()
+        real_run_in_executor = loop.run_in_executor
+
+        def spy(*args, **kwargs):
+            executor_calls.append(args)
+            return real_run_in_executor(*args, **kwargs)
+
+        loop.run_in_executor = spy
         async with state.async_lock() as value:
             value.append("fast")
+        # Uncontended acquisition must not hop through the executor.
+        assert executor_calls == []
         # Contended: a sync holder on another thread forces the executor path.
         held, release = threading.Event(), threading.Event()
 
@@ -68,6 +80,8 @@ def test_async_lock_uncontended_and_contended():
         async with state.async_lock() as value:
             value.append("slow")
         t.join()
+        # Contended acquisition falls back to the executor.
+        assert len(executor_calls) == 1
 
     asyncio.run(main())
     assert state.value == ["fast", "slow"]
