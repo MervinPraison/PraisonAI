@@ -948,8 +948,14 @@ Respond with ONLY a valid JSON tool call in this format:
         Returns:
             AgentErrorKind: Typed error classification
         """
+        if isinstance(error, (ValueError, TypeError, KeyError)):
+            return "format_error"
+
         error_str = str(error).lower()
         error_type = type(error).__name__.lower()
+        status = getattr(error, "status_code", None)
+        if status is None:
+            status = getattr(getattr(error, "response", None), "status_code", None)
         
         # Check for permanent auth errors first (non-retryable)
         if any(indicator in error_str for indicator in [
@@ -975,11 +981,19 @@ Respond with ONLY a valid JSON tool call in this format:
         ]):
             return "billing"
         
-        # Rate limiting 
-        if any(indicator in error_str for indicator in [
-            "rate limit", "ratelimit", "too many request", "resource_exhausted",
-            "usage limit", "429"
-        ]) or "429" in str(getattr(error, "status_code", "")):
+        # Explicit provider status takes precedence over message heuristics.
+        if status == 429:
+            return "rate_limit"
+        if status in (500, 502, 503, 504, 529):
+            return "overloaded"
+
+        # Fall back to message classification only without an HTTP status.
+        if status is None and (
+            any(indicator in error_str for indicator in [
+                "rate limit", "ratelimit", "too many request", "resource_exhausted",
+                "usage limit",
+            ]) or re.search(r"\b429\b", error_str)
+        ):
             return "rate_limit"
         
         # Context length exceeded
@@ -1006,6 +1020,11 @@ Respond with ONLY a valid JSON tool call in this format:
         ]):
             return "format_error"
         
+        # Preserve the specific context/model classifications above, but never
+        # replay an otherwise invalid request unchanged.
+        if status in (400, 404, 413, 422):
+            return "format_error"
+
         # Empty or missing response content
         if any(indicator in error_str for indicator in [
             "empty response", "no response", "no content", "blank output",
@@ -1015,11 +1034,12 @@ Respond with ONLY a valid JSON tool call in this format:
             return "empty_response"
         
         # Service overloaded
-        if any(indicator in error_str for indicator in [
-            "overloaded", "service unavailable", "temporarily unavailable",
-            "server overloaded", "server busy", "try again later",
-            "503", "502", "500"
-        ]):
+        if status is None and (
+            any(indicator in error_str for indicator in [
+                "overloaded", "service unavailable", "temporarily unavailable",
+                "server overloaded", "server busy", "try again later",
+            ]) or re.search(r"\b(?:500|502|503|504|529)\b", error_str)
+        ):
             return "overloaded"
         
         # Timeout (potential idle timeout)
