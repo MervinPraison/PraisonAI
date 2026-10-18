@@ -1009,13 +1009,6 @@ Respond with ONLY a valid JSON tool call in this format:
         ]):
             return "model_not_found"
         
-        # Preserve semantic provider errors above and response decoding failures;
-        # only otherwise-unclassified programming/validation errors fail fast.
-        if isinstance(error, (ValueError, TypeError, KeyError)) and not isinstance(
-            error, (json.JSONDecodeError, UnicodeDecodeError)
-        ):
-            return "format_error"
-
         # Format errors (checked before empty_response so "malformed response"
         # and "*parse error*" are classified as format rather than empty output)
         if any(indicator in error_str for indicator in [
@@ -1053,6 +1046,13 @@ Respond with ONLY a valid JSON tool call in this format:
         ]):
             return "idle_timeout"
         
+        # Preserve semantic provider errors above and response decoding failures;
+        # only otherwise-unclassified programming/validation errors fail fast.
+        if isinstance(error, (ValueError, TypeError, KeyError)) and not isinstance(
+            error, (json.JSONDecodeError, UnicodeDecodeError)
+        ):
+            return "format_error"
+
         # Default fallback
         return "unknown"
     

@@ -85,6 +85,22 @@ def test_value_error_context_keeps_compaction_classification():
     assert decision.reason == "context_overflow"
 
 
+@pytest.mark.parametrize("message, expected", [
+    ("empty response", "empty_response"),
+    ("request timed out", "idle_timeout"),
+    ("temporarily unavailable", "overloaded"),
+])
+def test_value_error_transient_messages_keep_existing_recovery(message, expected):
+    llm = make_llm()
+    error = ValueError(message)
+    assert llm.classify_error_kind(error) == expected
+    boundary = Mock(side_effect=[error, "recovered"])
+    with patch("time.sleep") as sleep:
+        assert llm._call_with_retry(boundary) == "recovered"
+    assert boundary.call_count == 2
+    sleep.assert_called_once()
+
+
 @pytest.mark.parametrize("error", [
     json.JSONDecodeError("Expecting value", "", 0),
     UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
