@@ -1,9 +1,11 @@
 """Deterministic request/programming errors must not replay provider calls."""
 import asyncio
+import json
 from unittest.mock import AsyncMock, Mock, patch
 
-import litellm
 import pytest
+
+litellm = pytest.importorskip("litellm", reason="optional LLM provider dependency")
 
 from praisonaiagents.llm import LLM
 from praisonaiagents.llm.llm import LLMResponseError
@@ -73,6 +75,27 @@ def test_programming_error_is_not_retryable(error):
 def test_existing_provider_recovery_categories_remain(error_type, message, expected):
     error = error_type(message, llm_provider="openai", model="gpt-4o-mini")
     assert make_llm().classify_error_kind(error) == expected
+
+
+def test_value_error_context_keeps_compaction_classification():
+    llm = make_llm()
+    error = ValueError("context length exceeded")
+    assert llm.classify_error_kind(error) == "context_overflow"
+    decision = llm.resolve_failover_decision(error, {"attempt": 1})
+    assert decision.reason == "context_overflow"
+
+
+@pytest.mark.parametrize("error", [
+    json.JSONDecodeError("Expecting value", "", 0),
+    UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte"),
+])
+def test_response_decode_errors_keep_existing_retry_behavior(error):
+    llm = make_llm()
+    boundary = Mock(side_effect=[error, "recovered"])
+    with patch("time.sleep") as sleep:
+        assert llm._call_with_retry(boundary) == "recovered"
+    assert boundary.call_count == 2
+    sleep.assert_called_once()
 
 
 def test_message_status_fallback_does_not_match_embedded_digits():

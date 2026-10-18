@@ -948,9 +948,6 @@ Respond with ONLY a valid JSON tool call in this format:
         Returns:
             AgentErrorKind: Typed error classification
         """
-        if isinstance(error, (ValueError, TypeError, KeyError)):
-            return "format_error"
-
         error_str = str(error).lower()
         error_type = type(error).__name__.lower()
         status = getattr(error, "status_code", None)
@@ -1012,6 +1009,13 @@ Respond with ONLY a valid JSON tool call in this format:
         ]):
             return "model_not_found"
         
+        # Preserve semantic provider errors above and response decoding failures;
+        # only otherwise-unclassified programming/validation errors fail fast.
+        if isinstance(error, (ValueError, TypeError, KeyError)) and not isinstance(
+            error, (json.JSONDecodeError, UnicodeDecodeError)
+        ):
+            return "format_error"
+
         # Format errors (checked before empty_response so "malformed response"
         # and "*parse error*" are classified as format rather than empty output)
         if any(indicator in error_str for indicator in [
