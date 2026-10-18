@@ -12,7 +12,6 @@ from __future__ import annotations
 import importlib.util
 import sys
 import threading
-from pathlib import Path
 
 _SIBLING_LOCK = threading.Lock()
 
@@ -42,6 +41,8 @@ def _ensure_sibling(module_name: str) -> None:
     dir_name = _SIBLINGS.get(module_name)
     if dir_name is None:
         return
+
+    from pathlib import Path  # deferred: only the monorepo-dev fallback needs it
 
     wrapper_src = Path(__file__).resolve().parents[1]  # .../src/praisonai
     sibling_root = wrapper_src.parent / dir_name
