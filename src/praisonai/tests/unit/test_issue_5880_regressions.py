@@ -108,6 +108,53 @@ def test_reconcile_detects_reused_pid(tmp_path):
         live.wait()
 
 
+@pytest.mark.skipif(os.name != "posix", reason="needs kill(pid, 0)")
+def test_unreadable_start_time_is_unknown_not_dead(tmp_path, monkeypatch):
+    import praisonai.jobs.store as store_mod
+
+    db = str(tmp_path / "jobs.db")
+    store_mod.SqliteJobStore(db)
+    live = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        job = Job(prompt="hidden", status=JobStatus.RUNNING)
+        _insert(db, job, f"{live.pid}:12345:tok")
+        # e.g. /proc mounted with hidepid: another worker's stat is unreadable
+        real = store_mod._proc_start
+        monkeypatch.setattr(store_mod, "_proc_start",
+                            lambda pid: "" if pid == live.pid else real(pid))
+        store = store_mod.SqliteJobStore(db)
+        assert asyncio.run(store.get(job.id)).status == JobStatus.RUNNING
+    finally:
+        live.kill()
+        live.wait()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="needs ps")
+def test_reused_pid_detected_without_proc(tmp_path, monkeypatch):
+    import praisonai.jobs.store as store_mod
+
+    real_isdir = os.path.isdir
+    monkeypatch.setattr(os.path, "isdir", lambda p: False if p == "/proc" else real_isdir(p))
+    db = str(tmp_path / "jobs.db")
+    store_mod.SqliteJobStore(db)
+    live = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        start = store_mod._proc_start(live.pid)
+        if not start:
+            pytest.skip("ps lstart unavailable")
+        assert ":" not in start
+        same = Job(prompt="same", status=JobStatus.RUNNING)
+        reused = Job(prompt="reused", status=JobStatus.RUNNING)
+        _insert(db, same, f"{live.pid}:{start}:tok")
+        _insert(db, reused, f"{live.pid}:Mon1Jan000000001970:tok")
+        store = store_mod.SqliteJobStore(db)
+        assert asyncio.run(store.get(same.id)).status == JobStatus.RUNNING
+        assert asyncio.run(store.get(reused.id)).status == JobStatus.FAILED
+    finally:
+        live.kill()
+        live.wait()
+
+
 def test_owner_migration_failure_is_not_swallowed(tmp_path, monkeypatch):
     import sqlite3
 

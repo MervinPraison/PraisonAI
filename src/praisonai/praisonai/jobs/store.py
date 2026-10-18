@@ -24,12 +24,25 @@ _OWNER: Dict[str, Any] = {"pid": None, "id": None}
 
 
 def _proc_start(pid: int) -> str:
-    """Process start time from /proc (Linux), or "" when unavailable."""
-    try:
-        with open(f"/proc/{pid}/stat") as f:
-            return f.read().rsplit(")", 1)[1].split()[19]
-    except (OSError, IndexError):
+    """Process start time (/proc on Linux, ``ps`` elsewhere), or "" when unknown."""
+    if os.path.isdir("/proc"):
+        try:
+            with open(f"/proc/{pid}/stat") as f:
+                return f.read().rsplit(")", 1)[1].split()[19]
+        except (OSError, IndexError):
+            return ""
+    if os.name != "posix":
         return ""
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True,
+            text=True, timeout=5, env={**os.environ, "LC_ALL": "C"},
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return "".join(ch for ch in out if ch.isalnum())  # no ":" in the owner id
 
 
 def _owner_id() -> str:
@@ -49,8 +62,12 @@ def _owner_alive(owner: Optional[str]) -> bool:
         pid = int(parts[0])
     except ValueError:
         return False
-    if len(parts) == 3 and parts[1] and parts[1] != _proc_start(pid):
-        return False  # owner exited and its pid was reused (or is gone)
+    if len(parts) == 3 and parts[1]:
+        start = _proc_start(pid)
+        if start and start != parts[1]:
+            return False  # owner exited and its pid was reused
+        # Unreadable start time (hidepid, other user, pid namespace) is
+        # "unknown", not "dead": fall through to the kill(pid, 0) probe.
     if pid == os.getpid() or os.name != "posix":
         # Same pid with another token is our dead predecessor (e.g. container
         # restart); no safe liveness probe off POSIX, so keep the old behaviour.
