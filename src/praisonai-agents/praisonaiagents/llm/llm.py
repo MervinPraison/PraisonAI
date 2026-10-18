@@ -1794,10 +1794,9 @@ Respond with ONLY a valid JSON tool call in this format:
             return None
         
         if self._claude_memory_tool is None:
-            from ..tools.claude_memory_tool import ClaudeMemoryTool
-            
             if isinstance(self.claude_memory, bool):
-                # Create default memory tool
+                # Create default memory tool (only the default needs the import)
+                from ..tools.claude_memory_tool import ClaudeMemoryTool
                 self._claude_memory_tool = ClaudeMemoryTool()
             else:
                 # Use provided memory tool instance
