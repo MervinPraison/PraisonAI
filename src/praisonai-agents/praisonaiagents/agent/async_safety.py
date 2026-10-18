@@ -142,6 +142,9 @@ class DualLock:
         on the acquisition, and on cancellation ensure the mutex is released
         once the worker finishes so no caller waits indefinitely.
         """
+        # Uncontended fast path: take the mutex without an executor hop.
+        if self._thread_lock.acquire(blocking=False):
+            return
         future = loop.run_in_executor(None, self._thread_lock.acquire)
         try:
             await asyncio.shield(future)
@@ -300,13 +303,26 @@ class AsyncSafeState:
             
     def __enter__(self):
         """Support for synchronous context manager protocol (backward compatibility)."""
-        self._sync_guard = self._lock.sync()
-        self._sync_guard.__enter__()
+        guard = self._lock.sync()
+        guard.__enter__()
+        # Per-thread guard stack: a single shared slot would let a concurrent
+        # thread overwrite our guard, so our __exit__ would close theirs.
+        self._sync_guards().append(guard)
         return self.value
-        
+
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Support for synchronous context manager protocol (backward compatibility)."""
-        return self._sync_guard.__exit__(exc_type, exc_val, exc_tb)
+        return self._sync_guards().pop().__exit__(exc_type, exc_val, exc_tb)
+
+    def _sync_guards(self) -> list:
+        """Return this thread's stack of active ``with state:`` guards."""
+        tls = self.__dict__.get("_tls")
+        if tls is None:
+            tls = self.__dict__.setdefault("_tls", threading.local())
+        stack = getattr(tls, "stack", None)
+        if stack is None:
+            stack = tls.stack = []
+        return stack
         
     async def __aenter__(self):
         """Support for asynchronous context manager protocol."""

@@ -4467,7 +4467,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # Add user message to chat history BEFORE LLM call so handoffs can access it.
                 # Use atomic check-then-act to prevent TOCTOU race conditions (matches sync chat()).
                 if self._add_to_chat_history_if_not_duplicate("user", normalized_content):
-                    self._persist_message("user", normalized_content)
+                    await self._apersist_message("user", normalized_content)
 
                 # --- Proactive Context Budget Management (async custom LLM path) ---
                 try:
