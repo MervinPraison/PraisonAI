@@ -7,6 +7,8 @@ import pytest
 
 litellm = pytest.importorskip("litellm", reason="optional LLM provider dependency")
 
+import httpx
+
 from praisonaiagents.llm import LLM
 from praisonaiagents.llm.llm import LLMResponseError
 
@@ -112,6 +114,32 @@ def test_response_decode_errors_keep_existing_retry_behavior(error):
         assert llm._call_with_retry(boundary) == "recovered"
     assert boundary.call_count == 2
     sleep.assert_called_once()
+
+
+@pytest.mark.parametrize("message, expected", [
+    ("context length exceeded", "context_overflow"),
+    ("model not found", "model_not_found"),
+])
+def test_server_error_preserves_specific_provider_semantics(message, expected):
+    error = litellm.InternalServerError(
+        message, llm_provider="openai", model="gpt-4o-mini"
+    )
+    assert make_llm().classify_error_kind(error) == expected
+
+
+@pytest.mark.parametrize("status, message, expected", [
+    (503, "rate limit", "overloaded"),
+    (400, "upstream 429", "format_error"),
+    (504, "gateway timeout", "idle_timeout"),
+    (504, "gateway failure", "overloaded"),
+    (500, "empty response", "empty_response"),
+    (503, "invalid format", "format_error"),
+])
+def test_http_status_and_message_precedence(status, message, expected):
+    request = httpx.Request("POST", "http://127.0.0.1:1/v1/responses")
+    response = httpx.Response(status, request=request)
+    error = httpx.HTTPStatusError(message, request=request, response=response)
+    assert make_llm().classify_error_kind(error) == expected
 
 
 def test_message_status_fallback_does_not_match_embedded_digits():

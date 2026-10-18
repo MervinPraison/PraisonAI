@@ -981,9 +981,6 @@ Respond with ONLY a valid JSON tool call in this format:
         # Explicit provider status takes precedence over message heuristics.
         if status == 429:
             return "rate_limit"
-        if status in (500, 502, 503, 504, 529):
-            return "overloaded"
-
         # Fall back to message classification only without an HTTP status.
         if status is None and (
             any(indicator in error_str for indicator in [
@@ -1030,13 +1027,13 @@ Respond with ONLY a valid JSON tool call in this format:
         ]):
             return "empty_response"
         
-        # Service overloaded
-        if status is None and (
+        # Preserve specific provider semantics before generic server failures.
+        if status in (500, 502, 503, 529) or (status is None and (
             any(indicator in error_str for indicator in [
                 "overloaded", "service unavailable", "temporarily unavailable",
                 "server overloaded", "server busy", "try again later",
             ]) or re.search(r"\b(?:500|502|503|504|529)\b", error_str)
-        ):
+        )):
             return "overloaded"
         
         # Timeout (potential idle timeout)
@@ -1045,6 +1042,11 @@ Respond with ONLY a valid JSON tool call in this format:
             "request timeout", "deadline exceeded"
         ]):
             return "idle_timeout"
+
+        # An otherwise-unclassified gateway failure is still transient, but
+        # an explicit timeout message above keeps its existing recovery path.
+        if status == 504:
+            return "overloaded"
         
         # Preserve semantic provider errors above and response decoding failures;
         # only otherwise-unclassified programming/validation errors fail fast.
