@@ -1077,11 +1077,15 @@ class YAMLWorkflowParser:
         # Build routes dictionary with resolved agents
         routes = {}
         for route_key, agent_ids in route_config.items():
-            if isinstance(agent_ids, list):
-                routes[route_key] = [self._agents[aid] for aid in agent_ids if aid in self._agents]
-            else:
-                if agent_ids in self._agents:
-                    routes[route_key] = [self._agents[agent_ids]]
+            if not isinstance(agent_ids, list):
+                agent_ids = [agent_ids]
+            try:
+                routes[route_key] = [self._agents[aid] for aid in agent_ids]
+            except KeyError as exc:
+                raise ValueError(
+                    f"Agent '{exc.args[0]}' in route '{route_key}' "
+                    "not defined in agents section"
+                ) from exc
         
         return route(routes)
     
