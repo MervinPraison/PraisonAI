@@ -1,5 +1,7 @@
 """A supplied claude_memory object must not require the default implementation (issue #5895)."""
 
+import sys
+
 from praisonaiagents.llm.llm import LLM
 
 
@@ -27,6 +29,13 @@ def test_supplied_adapter_is_used_and_cached():
     llm = _llm(adapter)
     assert llm._get_claude_memory_tool() is adapter
     assert llm._get_claude_memory_tool() is adapter
+
+
+def test_supplied_adapter_does_not_import_default(monkeypatch):
+    # A None entry in sys.modules makes any import of the default module fail.
+    monkeypatch.setitem(sys.modules, "praisonaiagents.tools.claude_memory_tool", None)
+    adapter = _Adapter()
+    assert _llm(adapter)._get_claude_memory_tool() is adapter
 
 
 def test_supplied_adapter_reaches_completion_params():
