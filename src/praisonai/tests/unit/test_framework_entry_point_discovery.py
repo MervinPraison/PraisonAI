@@ -103,7 +103,7 @@ def test_agents_generator_uses_registry_default_when_framework_omitted(monkeypat
         adapter_registry=registry,
     )
     monkeypatch.setattr(gen, "_validate_agents_config", lambda _config: None)
-    monkeypatch.setattr(gen, "_build_tools_dict", lambda _config: {})
+    monkeypatch.setattr(gen, "_build_tools_and_run_ctx", lambda _config: ({}, {}))
     monkeypatch.setattr(
         gen,
         "_validate_cli_backend_compatibility",
