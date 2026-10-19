@@ -566,15 +566,25 @@ class CheckpointService:
             pre = await self._save_unlocked("[pre-restore] auto-save", allow_empty=False)
             if not pre.success and pre.error != "No changes to checkpoint":
                 return CheckpointResult.fail(f"Pre-restore snapshot failed: {pre.error}")
+            if pre.success:
+                # The reset below moves HEAD off the snapshot; pin it with a ref
+                # so gc never prunes it while it is off the HEAD timeline.
+                try:
+                    await self._run_git(
+                        "update-ref", f"refs/pre-restore/{pre.checkpoint.id}", pre.checkpoint.id
+                    )
+                except Exception as e:
+                    logger.debug(f"Could not pin pre-restore checkpoint: {e}")
+                logger.info(f"Saved unsaved work as checkpoint {pre.checkpoint.short_id} before restore")
             return await self._restore_unlocked(checkpoint_id)
 
     async def _restore_unlocked(self, checkpoint_id: str) -> CheckpointResult:
         """Reset the workspace to ``checkpoint_id``. Caller must hold the op lock."""
         try:
-            # Clean untracked files
-            await self._run_git("clean", "-f", "-d")
-            
-            # Reset to checkpoint
+            # No ``git clean``: the pre-restore snapshot already committed every
+            # untracked file, so the only ones left are those it could not
+            # capture (e.g. over ``max_file_size``). Deleting them would lose
+            # work with no recoverable copy; ``reset --hard`` removes the rest.
             await self._run_git("reset", "--hard", checkpoint_id)
             
             # Get checkpoint info

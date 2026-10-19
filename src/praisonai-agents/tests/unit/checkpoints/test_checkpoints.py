@@ -337,6 +337,30 @@ class TestCheckpointService:
         assert (await service.restore(pre.id)).success
         with open(unsaved) as f:
             assert f.read() == "precious"
+        # Pinned so gc cannot prune it while it is off the HEAD timeline.
+        assert await service._run_git("rev-parse", f"refs/pre-restore/{pre.id}") == pre.id
+
+    @pytest.mark.asyncio
+    async def test_service_restore_keeps_oversized_unsaved_files(self, temp_workspace, temp_storage):
+        """Files too large to snapshot are not deleted by restore() (#5898)."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage,
+            max_file_size=10,
+        )
+        await service.initialize()
+
+        with open(os.path.join(temp_workspace, "a.txt"), "w") as f:
+            f.write("a")
+        saved = await service.save("base")
+
+        big = os.path.join(temp_workspace, "big.bin")
+        with open(big, "w") as f:
+            f.write("x" * 100)
+
+        assert (await service.restore(saved.checkpoint.id)).success
+        with open(big) as f:
+            assert f.read() == "x" * 100
 
     @pytest.mark.asyncio
     async def test_service_list_checkpoints(self, temp_workspace, temp_storage):
