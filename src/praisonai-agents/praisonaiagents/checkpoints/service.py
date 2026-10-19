@@ -94,7 +94,10 @@ class CheckpointService:
             storage_dir: Where to store checkpoint data
             enabled: Whether checkpoints are enabled
             auto_checkpoint: Auto-checkpoint before file modifications
-            max_checkpoints: Maximum checkpoints to keep
+            max_checkpoints: Maximum checkpoints kept in the in-memory view
+                (``get_checkpoint``) and searched by ``restore(step=...)``.
+                The shadow git repo retains every commit, so this does not
+                bound disk usage; use ``delete_all()`` to reclaim storage.
             user_name: Git user.name for commits (default: "PraisonAI Checkpoints")
             user_email: Git user.email for commits (default: "checkpoints@praison.ai")
             max_file_size: Skip staging files larger than this many bytes
@@ -116,6 +119,11 @@ class CheckpointService:
         # shadow object store is periodically pruned during long sessions.
         self._saves_since_gc = 0
         self._checkpoints: List[Checkpoint] = []
+        # Serialises git operations that touch HEAD/index/worktree so
+        # concurrent save()/restore() calls don't race on git's lock files.
+        # Created lazily per event loop to stay loop-agnostic.
+        self._op_lock: Optional[asyncio.Lock] = None
+        self._op_lock_loop: Optional[asyncio.AbstractEventLoop] = None
         self._event_handlers: Dict[CheckpointEvent, List[Callable]] = {
             event: [] for event in CheckpointEvent
         }
@@ -152,6 +160,14 @@ class CheckpointService:
             except Exception as e:
                 logger.warning(f"Event handler error: {e}")
     
+    def _get_op_lock(self) -> asyncio.Lock:
+        """Return the operation lock bound to the currently running loop."""
+        loop = asyncio.get_running_loop()
+        if self._op_lock is None or self._op_lock_loop is not loop:
+            self._op_lock = asyncio.Lock()
+            self._op_lock_loop = loop
+        return self._op_lock
+
     async def initialize(self) -> bool:
         """
         Initialize the shadow git repository.
@@ -446,6 +462,11 @@ class CheckpointService:
         if step is not None:
             message = f"[step-{step}] {_STEP_TAG_RE.sub('', message)}"
         
+        async with self._get_op_lock():
+            return await self._save_unlocked(message, allow_empty)
+
+    async def _save_unlocked(self, message: str, allow_empty: bool) -> CheckpointResult:
+        """Commit the current workspace state. Caller must hold the op lock."""
         try:
             # Stage all changes
             await self._run_git("add", "-A")
@@ -538,6 +559,17 @@ class CheckpointService:
         if checkpoint_id is None:
             return CheckpointResult.fail("No checkpoint id or step provided")
         
+        async with self._get_op_lock():
+            # Snapshot uncommitted work first so the restore itself can be
+            # undone via restore(<pre-restore id>). Abort rather than destroy
+            # work if the snapshot fails for any reason other than "no changes".
+            pre = await self._save_unlocked("[pre-restore] auto-save", allow_empty=False)
+            if not pre.success and pre.error != "No changes to checkpoint":
+                return CheckpointResult.fail(f"Pre-restore snapshot failed: {pre.error}")
+            return await self._restore_unlocked(checkpoint_id)
+
+    async def _restore_unlocked(self, checkpoint_id: str) -> CheckpointResult:
+        """Reset the workspace to ``checkpoint_id``. Caller must hold the op lock."""
         try:
             # Clean untracked files
             await self._run_git("clean", "-f", "-d")
@@ -640,11 +672,13 @@ class CheckpointService:
                     "diff", "--stat", "--numstat", from_id, to_id
                 )
             else:
-                # Diff against working directory
-                await self._run_git("add", "-A")  # Stage to include untracked
-                diff_output = await self._run_git(
-                    "diff", "--stat", "--numstat", "--cached", from_id
-                )
+                # Diff against working directory; staging mutates the index so
+                # it must not interleave with save()/restore().
+                async with self._get_op_lock():
+                    await self._run_git("add", "-A")  # Stage to include untracked
+                    diff_output = await self._run_git(
+                        "diff", "--stat", "--numstat", "--cached", from_id
+                    )
             
             # Parse diff output
             files = self._parse_diff_output(diff_output)
