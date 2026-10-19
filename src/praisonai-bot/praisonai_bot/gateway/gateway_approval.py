@@ -118,6 +118,12 @@ class GatewayApprovalBackend:
                 "Approval timeout for request %s (tool=%s) — DENIED",
                 request_id, request.tool_name,
             )
+            # Settle the notified channel so a stale "pending" card is not
+            # left looking actionable: tell it the action did NOT run.
+            if self._notify_url:
+                asyncio.create_task(
+                    self._notify(request_id, request, status="timed_out"),
+                )
             return ApprovalDecision(
                 approved=False,
                 reason=f"Approval timed out after {self._timeout}s",
@@ -130,13 +136,20 @@ class GatewayApprovalBackend:
             approver="gateway:human",
         )
 
-    async def _notify(self, request_id: str, request: ApprovalRequest) -> None:
-        """POST a notification to the configured webhook (fire-and-forget)."""
+    async def _notify(
+        self, request_id: str, request: ApprovalRequest, status: str = "pending",
+    ) -> None:
+        """POST a notification to the configured webhook (fire-and-forget).
+
+        ``status`` is ``"pending"`` when the request is created and
+        ``"timed_out"`` when it expires unanswered (the tool was not run).
+        """
         try:
             import aiohttp
 
             payload = {
                 "request_id": request_id,
+                "status": status,
                 "tool_name": request.tool_name,
                 "arguments": request.arguments,
                 "agent_name": request.agent_name,
