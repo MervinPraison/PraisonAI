@@ -1044,7 +1044,7 @@ wheels = [
 
 [[package]]
 name = "praisonai-mcp"
-version = "0.1.14"
+version = "0.1.15"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -1084,7 +1084,7 @@ provides-extras = ["server", "auth", "all"]
 
 [[package]]
 name = "praisonaiagents"
-version = "1.7.13"
+version = "1.7.14"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },
