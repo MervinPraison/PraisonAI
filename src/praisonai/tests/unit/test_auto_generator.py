@@ -108,6 +108,20 @@ class TestAutoGeneratorTaskScopedAllowList:
             )
         assert out["tools"] == ["read_file", "scrape_page"]
 
+    def test_prompt_fallback_list_is_the_enforced_list(self):
+        # With no recommended tools the prompt falls back to read_file/write_file;
+        # the saved YAML must be filtered by that same list, not left open.
+        generator = self._generator()
+        with patch.object(generator, "_available_tools", return_value=[]), \
+             patch.object(generator, "_discover_tools_for_topic", return_value=[]):
+            prompt = generator.get_user_content()
+        assert "read_file, write_file" in prompt
+        with patch.object(generator, "_dangerous_tool_names", return_value=set()):
+            out = generator._enforce_tool_allowlist(
+                {"tools": ["read_file", "write_file", "scrape_page"]}
+            )
+        assert out["tools"] == ["read_file", "write_file"]
+
 
 class TestAutoGeneratorToolsPreservation:
     """Test suite for tools preservation in generated YAML."""
