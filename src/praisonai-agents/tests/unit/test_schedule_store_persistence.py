@@ -87,3 +87,53 @@ def test_remove_failed_save_keeps_job(tmp_path):
             s.remove_by_name(job.name)
         emit.assert_not_called()
     assert s.get(job.id) is not None
+
+
+def _log_many(d, prefix, n):
+    s = FileScheduleStore(store_dir=d, max_history=1000)
+    for i in range(n):
+        s.log_run(f"{prefix}{i}", "succeeded")
+
+
+def test_history_overlapping_processes_keep_all_records(tmp_path):
+    import multiprocessing as mp
+    d = str(tmp_path)
+    ctx = mp.get_context("spawn")
+    procs = [ctx.Process(target=_log_many, args=(d, p, 20)) for p in ("a", "b")]
+    for p in procs:
+        p.start()
+    for p in procs:
+        p.join(60)
+        assert p.exitcode == 0
+    ids = {r.job_id for r in FileScheduleStore(store_dir=d, max_history=1000).get_history()}
+    assert ids == {f"{p}{i}" for p in ("a", "b") for i in range(20)}
+
+
+def test_unreadable_history_is_not_overwritten(tmp_path):
+    d = str(tmp_path)
+    s = FileScheduleStore(store_dir=d)
+    s.log_run("j1", "succeeded")
+    with mock.patch.object(FileScheduleStore, "_read_history", return_value=None):
+        s.log_run("j2", "succeeded")
+    assert [r.job_id for r in FileScheduleStore(store_dir=d).get_history()] == ["j1"]
+    # The unsaved record is retried once history is readable again.
+    s.log_run("j3", "succeeded")
+    assert [r.job_id for r in FileScheduleStore(store_dir=d).get_history()] == ["j3", "j2", "j1"]
+
+
+def test_failed_history_save_is_retried(tmp_path):
+    d = str(tmp_path)
+    s = FileScheduleStore(store_dir=d)
+    with mock.patch("praisonaiagents.utils.atomic_io.os.replace", _fail_replace):
+        s.log_run("j1", "succeeded")
+    s.log_run("j2", "succeeded")
+    assert [r.job_id for r in FileScheduleStore(store_dir=d).get_history()] == ["j2", "j1"]
+
+
+def test_mark_run_contains_store_write_error(tmp_path):
+    from praisonaiagents.scheduler.runner import ScheduleRunner
+    s = FileScheduleStore(store_dir=str(tmp_path))
+    job = _make_job()
+    s.add(job)
+    with mock.patch("praisonaiagents.utils.atomic_io.os.replace", _fail_replace):
+        ScheduleRunner(s).mark_run(job)  # must not raise

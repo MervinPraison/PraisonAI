@@ -42,6 +42,8 @@ class FileScheduleStore:
         self._lock = threading.RLock()
         self._jobs: Dict[str, ScheduleJob] = {}
         self._history: List[RunRecord] = []
+        # Run records whose history write failed; merged into the next save.
+        self._unsaved: List[RunRecord] = []
         # In-memory record of leases we currently hold, so ``complete`` can
         # release them. Cross-process leases live in the persisted job
         # (``lease_until`` / ``lease_owner``) which is the source of truth.
@@ -305,12 +307,18 @@ class FileScheduleStore:
         with self._lock, self._file_lock():
             # Reload under the cross-process lock so concurrent writers (e.g.
             # the scheduler daemon and a CLI process) don't drop each other's
-            # records (last-writer-wins).
-            self._history = []
-            self._load_history()
-            self._history.insert(0, record)
-            self._history = self._history[:self._max_history]
-            self._save_history()
+            # records (last-writer-wins). Records whose earlier save failed are
+            # carried forward so they are retried, not discarded.
+            pending = ([record] + self._unsaved)[:self._max_history]
+            on_disk = self._read_history()
+            if on_disk is None:
+                # Unreadable history: never overwrite saved records with a
+                # partial view. Keep the new record in memory for a retry.
+                self._history = ([record] + self._history)[:self._max_history]
+                self._unsaved = pending
+                return
+            self._history = (pending + on_disk)[:self._max_history]
+            self._unsaved = [] if self._save_history() else pending
 
     def get_history(
         self,
@@ -424,22 +432,27 @@ class FileScheduleStore:
 
     def _load_history(self) -> None:
         """Load execution history from history.json."""
+        self._history = self._read_history() or []
+
+    def _read_history(self) -> Optional[List[RunRecord]]:
+        """Read history.json; ``[]`` if absent, ``None`` if unreadable."""
         if not os.path.exists(self._history_path):
-            return
+            return []
         try:
             with open(self._history_path, "r") as f:
                 data = json.load(f)
-            for d in data:
-                record = RunRecord.from_dict(d)
-                self._history.append(record)
+            return [RunRecord.from_dict(d) for d in data]
         except Exception as e:
             logger.warning("Failed to load history from %s: %s", self._history_path, e)
+            return None
 
-    def _save_history(self) -> None:
-        """Save execution history to history.json."""
+    def _save_history(self) -> bool:
+        """Save execution history to history.json; ``True`` on success."""
         try:
             os.makedirs(self._dir, exist_ok=True)
             data = [r.to_dict() for r in self._history]
             atomic_write_json(self._history_path, data, indent=2)
+            return True
         except Exception as e:
             logger.warning("Failed to save history to %s: %s", self._history_path, e)
+            return False
