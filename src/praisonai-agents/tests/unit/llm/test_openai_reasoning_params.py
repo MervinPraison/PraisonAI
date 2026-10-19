@@ -78,3 +78,34 @@ def test_streaming_path_omits_null_max_tokens():
     sent = _sent(client._sync_client.chat.completions.create)
     assert "max_tokens" not in sent
     assert "temperature" not in sent
+
+
+async def _empty_stream():
+    return
+    yield
+
+
+def test_async_streaming_path_maps_max_tokens():
+    client = _client()
+    client._async_client.chat.completions.create = AsyncMock(return_value=_empty_stream())
+    asyncio.run(client.process_stream_response_async(
+        messages=[{"role": "user", "content": "hi"}],
+        model="o3-mini", temperature=None, max_tokens=100,
+    ))
+    sent = _sent(client._async_client.chat.completions.create)
+    assert "max_tokens" not in sent
+    assert "temperature" not in sent
+    assert sent["max_completion_tokens"] == 100
+
+
+def test_tools_streaming_path_maps_max_tokens():
+    client = _client()
+    client._sync_client.chat.completions.create.return_value = iter(())
+    list(client.chat_completion_with_tools_stream(
+        messages=[{"role": "user", "content": "hi"}],
+        model="o3-mini", temperature=None, max_tokens=100,
+    ))
+    sent = _sent(client._sync_client.chat.completions.create)
+    assert "max_tokens" not in sent
+    assert "temperature" not in sent
+    assert sent["max_completion_tokens"] == 100
