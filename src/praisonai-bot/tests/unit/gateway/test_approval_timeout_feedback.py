@@ -31,10 +31,34 @@ async def test_gateway_timeout_sends_timed_out_notify():
         decision = await backend.request_approval(
             ApprovalRequest(tool_name="rm", arguments={}, risk_level="high"),
         )
-        await asyncio.sleep(0)  # let fire-and-forget tasks run
+        for _ in range(3):
+            await asyncio.sleep(0)  # let fire-and-forget tasks run
 
     assert decision.approved is False
     assert decision.approver == "gateway:timeout"
+    assert sent == ["pending", "timed_out"]
+
+
+@pytest.mark.asyncio
+async def test_gateway_timed_out_waits_for_slow_pending_notify():
+    backend = GatewayApprovalBackend(
+        ExecApprovalManager(durable=False), timeout=0.01,
+        notify_url="http://example.invalid/hook",
+    )
+    sent = []
+
+    async def fake_notify(request_id, request, status="pending"):
+        if status == "pending":
+            await asyncio.sleep(0.1)  # initial webhook still in flight at timeout
+        sent.append(status)
+
+    with patch.object(backend, "_notify", side_effect=fake_notify):
+        await backend.request_approval(
+            ApprovalRequest(tool_name="rm", arguments={}, risk_level="high"),
+        )
+        assert sent == []
+        await asyncio.sleep(0.2)
+
     assert sent == ["pending", "timed_out"]
 
 

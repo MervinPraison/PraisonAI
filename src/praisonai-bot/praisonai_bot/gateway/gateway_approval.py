@@ -103,8 +103,9 @@ class GatewayApprovalBackend:
         )
 
         # Fire optional notification (fire-and-forget)
+        pending_notify = None
         if self._notify_url:
-            asyncio.create_task(self._notify(request_id, request))
+            pending_notify = asyncio.create_task(self._notify(request_id, request))
 
         # Wait for resolution (fail-closed on timeout)
         try:
@@ -120,9 +121,9 @@ class GatewayApprovalBackend:
             )
             # Settle the notified channel so a stale "pending" card is not
             # left looking actionable: tell it the action did NOT run.
-            if self._notify_url:
+            if pending_notify is not None:
                 asyncio.create_task(
-                    self._notify(request_id, request, status="timed_out"),
+                    self._notify_timed_out(pending_notify, request_id, request),
                 )
             return ApprovalDecision(
                 approved=False,
@@ -135,6 +136,14 @@ class GatewayApprovalBackend:
             reason=resolution.reason,
             approver="gateway:human",
         )
+
+    async def _notify_timed_out(
+        self, pending: asyncio.Task, request_id: str, request: ApprovalRequest,
+    ) -> None:
+        """Send ``timed_out`` only after ``pending`` lands, so the receiver
+        never sees the settle before the card it settles."""
+        await asyncio.gather(pending, return_exceptions=True)
+        await self._notify(request_id, request, status="timed_out")
 
     async def _notify(
         self, request_id: str, request: ApprovalRequest, status: str = "pending",
