@@ -16,6 +16,7 @@ from typing import Dict, Iterator, List, Optional
 from .models import ScheduleJob, RunRecord
 from .due import is_due as _is_due, is_misfire as _is_misfire
 from .hook_emit import emit_schedule_add, emit_schedule_remove
+from ..utils.atomic_io import atomic_write_json
 
 logger = get_logger(__name__)
 
@@ -60,7 +61,7 @@ class FileScheduleStore:
             if job.id in self._jobs:
                 raise ValueError(f"Job '{job.id}' already exists")
             self._jobs[job.id] = job
-            self._save()
+            self._save_or_rollback(job.id)
         # Emit SCHEDULE_ADD outside the store locks: a hook must never be able
         # to deadlock the cross-process file lock by calling back in.
         emit_schedule_add(job)
@@ -120,7 +121,7 @@ class FileScheduleStore:
                     job._lease_until = getattr(existing, "_lease_until", 0.0) or 0.0
                     job._lease_owner = getattr(existing, "_lease_owner", None)
             self._jobs[job.id] = job
-            self._save()
+            self._save_or_rollback(job.id)
 
     def remove(self, job_id: str) -> bool:
         removed = None
@@ -128,7 +129,7 @@ class FileScheduleStore:
             self._reload_locked()
             if job_id in self._jobs:
                 removed = self._jobs.pop(job_id)
-                self._save()
+                self._save_or_rollback(job_id)
         if removed is None:
             return False
         emit_schedule_remove(removed)
@@ -150,7 +151,7 @@ class FileScheduleStore:
                     if principal is not None and job.principal != principal:
                         continue
                     removed = self._jobs.pop(jid)
-                    self._save()
+                    self._save_or_rollback(jid)
                     break
         if removed is None:
             return False
@@ -255,7 +256,7 @@ class FileScheduleStore:
             emit_schedule_remove(job)
         # Record suppressed occurrences so a missed run is visible in history
         # rather than silently dropped. Logged outside the file lock (log_run
-        # takes only the thread lock) to keep the critical section short.
+        # takes it itself; flock is not re-entrant across file handles).
         for job_id, job_name in missed:
             self.log_run(
                 job_id=job_id,
@@ -301,11 +302,14 @@ class FileScheduleStore:
             delivered=delivered,
             timestamp=time.time(),
         )
-        with self._lock:
+        with self._lock, self._file_lock():
+            # Reload under the cross-process lock so concurrent writers (e.g.
+            # the scheduler daemon and a CLI process) don't drop each other's
+            # records (last-writer-wins).
+            self._history = []
+            self._load_history()
             self._history.insert(0, record)
-            # Prune to max_history
-            if len(self._history) > self._max_history:
-                self._history = self._history[:self._max_history]
+            self._history = self._history[:self._max_history]
             self._save_history()
 
     def get_history(
@@ -392,6 +396,17 @@ class FileScheduleStore:
         except Exception as e:
             logger.warning("Failed to load schedule store from %s: %s", self._path, e)
 
+    def _save_or_rollback(self, job_id: str) -> None:
+        """Persist jobs or restore on-disk state and raise (file lock held).
+
+        Keeps memory consistent with disk so a failed write never reports
+        success (or fires lifecycle hooks) for a change that will vanish on
+        restart.
+        """
+        if not self._save():
+            self._reload_locked()
+            raise OSError(f"Failed to persist schedule job '{job_id}'")
+
     def _save(self) -> bool:
         """Persist jobs to disk.
 
@@ -401,10 +416,7 @@ class FileScheduleStore:
         try:
             os.makedirs(self._dir, exist_ok=True)
             data = [j.to_dict() for j in self._jobs.values()]
-            tmp = self._path + ".tmp"
-            with open(tmp, "w") as f:
-                json.dump(data, f, indent=2)
-            os.replace(tmp, self._path)
+            atomic_write_json(self._path, data, indent=2)
             return True
         except Exception as e:
             logger.warning("Failed to save schedule store to %s: %s", self._path, e)
@@ -428,9 +440,6 @@ class FileScheduleStore:
         try:
             os.makedirs(self._dir, exist_ok=True)
             data = [r.to_dict() for r in self._history]
-            tmp = self._history_path + ".tmp"
-            with open(tmp, "w") as f:
-                json.dump(data, f, indent=2)
-            os.replace(tmp, self._history_path)
+            atomic_write_json(self._history_path, data, indent=2)
         except Exception as e:
             logger.warning("Failed to save history to %s: %s", self._history_path, e)
