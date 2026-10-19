@@ -1081,7 +1081,7 @@ class AgentsGenerator:
         self._validate_agents_config(config)
         
         # Build tools dictionary using shared logic
-        tools_dict = self._build_tools_dict(config)
+        tools_dict, run_ctx = self._build_tools_and_run_ctx(config)
         
         # Select framework and resolve adapter variant. Registry is the single
         # source of truth for the default, so no literal framework name here.
@@ -1114,6 +1114,10 @@ class AgentsGenerator:
             'config': config,
             'topic': topic,
             'tools_dict': tools_dict,
+            # Per-run closures travel with this call's prep (not via ``self``) so
+            # concurrent runs on one generator never pick up each other's
+            # tool-timeout wrap/resolvers.
+            'run_ctx': run_ctx,
         }
 
     def _run_adapter_setup(self, adapter):
@@ -1127,6 +1131,11 @@ class AgentsGenerator:
     
     def _build_tools_dict(self, config):
         """Shared tool resolution logic for sync and async paths."""
+        tools_dict, self._run_ctx = self._build_tools_and_run_ctx(config)
+        return tools_dict
+
+    def _build_tools_and_run_ctx(self, config):
+        """Resolve tools and return ``(tools_dict, run_ctx)`` for one run."""
         tools_dict = self.tool_resolver.resolve_all_from_yaml(config)
         for tool in self.tools:
             if isinstance(tool, type):
@@ -1218,14 +1227,14 @@ class AgentsGenerator:
                 lambda agent_key, _cfg=config: self.resolve_agent_tool_timeout(agent_key, _cfg)
             )
 
-        self._run_ctx = {
+        run_ctx = {
             "_tool_timeout_wrap": wrap,
             "_agent_tool_wrap_resolver": resolver,
             "_native_tool_timeout_resolver": native_tool_timeout_resolver,
         }
-        return tools_dict
+        return tools_dict, run_ctx
 
-    def _dispatch_cli_config(self):
+    def _dispatch_cli_config(self, run_ctx=None):
         """Merge the private per-run context onto the user cli_config for adapters.
 
         Adapters read ``_tool_timeout_wrap`` / ``_agent_tool_wrap_resolver`` off
@@ -1234,7 +1243,8 @@ class AgentsGenerator:
         ``self.cli_config`` (which stays "user overrides only").
         """
         base = self.cli_config or {}
-        run_ctx = getattr(self, "_run_ctx", None)
+        if run_ctx is None:
+            run_ctx = getattr(self, "_run_ctx", None)
         if not run_ctx:
             return base
         return {**base, **run_ctx}
@@ -1687,11 +1697,11 @@ class AgentsGenerator:
                 "without running them; use generate_crew_and_kickoff()."
             )
         model_name = adapter._pick_model(self.config_list)
-        # Thread the per-agent tool_timeout wrap resolver (stashed in _run_ctx by
+        # Thread the per-agent tool_timeout wrap resolver (carried in prep by
         # _prepare_for_run) exactly as the real run paths do, so agents built for
         # evaluation carry the same heterogeneous per-agent timeout guards a
         # normal run would apply — not a different (unguarded) tool policy.
-        run_ctx = getattr(self, "_run_ctx", None) or {}
+        run_ctx = prep.get('run_ctx') or {}
         agents, _tasks = builder(
             prep['config'],
             prep['topic'],
@@ -1700,7 +1710,7 @@ class AgentsGenerator:
             getattr(self, 'task_callback', None),
             model_name,
             agent_tool_wrap_resolver=run_ctx.get("_agent_tool_wrap_resolver"),
-            cli_config=self._dispatch_cli_config(),
+            cli_config=self._dispatch_cli_config(run_ctx),
         )
         # _build_agents_and_tasks returns a name->agent mapping; callers expect
         # a flat list in definition order.
@@ -1770,7 +1780,7 @@ class AgentsGenerator:
                     tools_dict=prep['tools_dict'],
                     agent_callback=getattr(self, 'agent_callback', None),
                     task_callback=getattr(self, 'task_callback', None),
-                    cli_config=self._dispatch_cli_config(),
+                    cli_config=self._dispatch_cli_config(prep.get('run_ctx')),
                 )
 
     async def _aload_config(self):
@@ -1839,7 +1849,7 @@ class AgentsGenerator:
                     tools_dict=prep['tools_dict'],
                     agent_callback=getattr(self, 'agent_callback', None),
                     task_callback=getattr(self, 'task_callback', None),
-                    cli_config=self._dispatch_cli_config(),
+                    cli_config=self._dispatch_cli_config(prep.get('run_ctx')),
                 )
 
 

@@ -209,6 +209,32 @@ def test_dispatch_cli_config_merges_run_ctx_without_mutating_user_config():
         gen.close()
 
 
+def test_build_tools_and_run_ctx_returns_per_run_context_without_touching_self():
+    # Concurrent runs on one generator must not race on ``self._run_ctx``: the
+    # run paths take the per-run closures from the returned context and pass
+    # it to dispatch explicitly, so another run cannot overwrite them (#5904).
+    gen = _make_generator()
+
+    class _FakeResolver:
+        def resolve_all_from_yaml(self, config):
+            return {"plain": lambda: "ok"}
+
+    gen.tool_resolver = _FakeResolver()
+    gen.tools = []
+    gen._run_ctx = {"_tool_timeout_wrap": "stale"}
+
+    try:
+        gen.cli_config = {"tool_timeout": 5}
+        _tools, run_ctx = gen._build_tools_and_run_ctx({"roles": {"a": {}}})
+        assert callable(run_ctx["_tool_timeout_wrap"])
+        assert gen._run_ctx == {"_tool_timeout_wrap": "stale"}
+
+        dispatched = gen._dispatch_cli_config(run_ctx)
+        assert dispatched["_tool_timeout_wrap"] is run_ctx["_tool_timeout_wrap"]
+    finally:
+        gen.close()
+
+
 def test_dispatch_cli_config_returns_base_when_no_run_ctx():
     # Before any _build_tools_dict call there is no per-run context; dispatch
     # must return the user config unchanged rather than fabricating closure keys.

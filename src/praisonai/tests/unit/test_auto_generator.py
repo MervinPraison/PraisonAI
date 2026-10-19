@@ -84,6 +84,45 @@ class TestAutoGeneratorDefaultModel:
             assert generator.config_list[0]['model'] == 'gpt-4'
 
 
+class TestAutoGeneratorTaskScopedAllowList:
+    """The prompt allow-list is enforced on the model's output (#5904)."""
+
+    def _generator(self):
+        with patch.dict(os.environ, {'OPENAI_API_KEY': 'test-key'}):
+            return AutoGenerator(topic="Summarise a local file", framework="praisonai")
+
+    def test_out_of_scope_tool_is_dropped(self):
+        generator = self._generator()
+        generator._allowed_tools = ["read_file"]
+        with patch.object(generator, "_dangerous_tool_names", return_value=set()):
+            out = generator._enforce_tool_allowlist(
+                {"tools": ["read_file", "scrape_page"]}
+            )
+        assert out["tools"] == ["read_file"]
+
+    def test_no_prompt_allow_list_keeps_tools(self):
+        generator = self._generator()
+        with patch.object(generator, "_dangerous_tool_names", return_value=set()):
+            out = generator._enforce_tool_allowlist(
+                {"tools": ["read_file", "scrape_page"]}
+            )
+        assert out["tools"] == ["read_file", "scrape_page"]
+
+    def test_prompt_fallback_list_is_the_enforced_list(self):
+        # With no recommended tools the prompt falls back to read_file/write_file;
+        # the saved YAML must be filtered by that same list, not left open.
+        generator = self._generator()
+        with patch.object(generator, "_available_tools", return_value=[]), \
+             patch.object(generator, "_discover_tools_for_topic", return_value=[]):
+            prompt = generator.get_user_content()
+        assert "read_file, write_file" in prompt
+        with patch.object(generator, "_dangerous_tool_names", return_value=set()):
+            out = generator._enforce_tool_allowlist(
+                {"tools": ["read_file", "write_file", "scrape_page"]}
+            )
+        assert out["tools"] == ["read_file", "write_file"]
+
+
 class TestAutoGeneratorToolsPreservation:
     """Test suite for tools preservation in generated YAML."""
     
