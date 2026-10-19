@@ -163,3 +163,55 @@ def test_cleanup_prunes_durable_store():
         assert store.get("running") is not None
     finally:
         m.shutdown()
+
+
+def test_submit_after_shutdown_fails_job_and_frees_id():
+    m = BackgroundJobManager(max_workers=1)
+    m.shutdown()
+    with pytest.raises(RuntimeError):
+        m.start_job(lambda: "A", job_id="x")
+    assert m.get_status("x") == JobStatus.FAILED
+    with pytest.raises(RuntimeError):
+        m.get_result("x")  # resolved, not blocking forever
+
+
+def test_callback_base_exception_still_resolves_result():
+    class Stop(BaseException):
+        pass
+
+    def boom(_info):
+        raise Stop()
+
+    m = BackgroundJobManager(max_workers=1)
+    try:
+        m.start_job(lambda: "A", job_id="x", on_complete=boom)
+        assert m.get_result("x", timeout=5) == "A"
+    finally:
+        m.shutdown()
+
+
+def test_func_base_exception_fails_job_and_resolves_result():
+    m = BackgroundJobManager(max_workers=1)
+    try:
+        m.start_job(lambda: (_ for _ in ()).throw(SystemExit(3)), job_id="x")
+        with pytest.raises(SystemExit):
+            m.get_result("x", timeout=5)
+        assert m.get_status("x") == JobStatus.FAILED
+    finally:
+        m.shutdown()
+
+
+def test_queued_job_dropped_at_shutdown_is_cancelled():
+    m = BackgroundJobManager(max_workers=1)
+    gate = threading.Event()
+    try:
+        m.start_job(gate.wait, job_id="a")
+        _wait_status(m, "a", JobStatus.RUNNING)
+        m.start_job(lambda: "B", job_id="b")
+        m._executor.shutdown(wait=False, cancel_futures=True)
+        assert m.get_status("b") == JobStatus.CANCELLED
+        with pytest.raises(CancelledError):
+            m.get_result("b")
+    finally:
+        gate.set()
+        m.shutdown()
