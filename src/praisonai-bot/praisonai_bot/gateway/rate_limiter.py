@@ -233,6 +233,9 @@ class RedisAuthRateLimiter:
             return None
 
     def allow(self, endpoint: str, identity: str) -> bool:
+        # A lockout earned locally during an outage must outlive Redis recovery.
+        if self._local.time_until_allowed(endpoint, identity) > 0:
+            return False
         bucket, lockout = self._keys(endpoint, identity)
         res = self._redis(lambda: self._client.eval(
             _ALLOW_LUA, 2, bucket, lockout,

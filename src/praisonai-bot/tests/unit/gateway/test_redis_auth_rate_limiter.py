@@ -2,6 +2,8 @@
 
 import time
 
+import pytest
+
 from praisonai_bot.gateway.rate_limiter import (
     AuthRateLimiter,
     RedisAuthRateLimiter,
@@ -86,3 +88,28 @@ def test_redis_outage_falls_back_to_local_limits():
 
 def test_builder_defaults_to_in_process_limiter():
     assert type(build_auth_rate_limiter(None, max_attempts=3)) is AuthRateLimiter
+
+
+def test_local_lockout_survives_redis_recovery():
+    redis = FakeRedis()
+    redis.fail = True
+    limiter = RedisAuthRateLimiter(redis, max_attempts=1, retry_after=0.0)
+    assert limiter.allow("auth", "ip")
+    assert not limiter.allow("auth", "ip")  # locally locked out during outage
+    redis.fail = False
+    assert not limiter.allow("auth", "ip")  # Redis is back, lockout still holds
+    assert limiter.time_until_allowed("auth", "ip") > 0
+
+
+def test_real_lua_script_executes():
+    """Run the actual ``_ALLOW_LUA`` script on a Lua-capable Redis fake."""
+    fakeredis = pytest.importorskip("fakeredis")
+    pytest.importorskip("lupa")
+    client = fakeredis.FakeRedis(decode_responses=True)
+    a, b = (RedisAuthRateLimiter(client, max_attempts=2) for _ in range(2))
+    assert [a.allow("auth", "ip"), b.allow("auth", "ip"), a.allow("auth", "ip")] == [
+        True, True, False,
+    ]
+    assert b.time_until_allowed("auth", "ip") > 0
+    a.reset("auth", "ip")
+    assert b.allow("auth", "ip")
