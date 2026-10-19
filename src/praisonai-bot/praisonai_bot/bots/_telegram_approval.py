@@ -412,6 +412,10 @@ class TelegramApproval(DurableApprovalMixin):
         if decision.approved:
             status_emoji = "✅"
             status_text = "Approved"
+        elif (decision.metadata or {}).get("timeout"):
+            # Unanswered: make it explicit nothing ran, not a human denial.
+            status_emoji = "⌛"
+            status_text = "Timed out — not run"
         else:
             status_emoji = "❌"
             status_text = "Denied"
