@@ -91,6 +91,24 @@ PERMISSION_PRESETS = {
     "off": frozenset(),
 }
 
+# Optional host hook (Issue #5912): a runner that bounds concurrent work (e.g.
+# the gateway's admission gate) binds a zero-arg factory here for the duration
+# of an admitted turn. The registry enters ``factory()`` — a sync *and* async
+# context manager — around the backend's human wait so a turn parked on a
+# person does not occupy a run slot. Unbound (the default) is a no-op.
+HUMAN_WAIT_SCOPE: contextvars.ContextVar[Optional[Callable[[], object]]] = contextvars.ContextVar(
+    "praisonai_approval_human_wait_scope", default=None
+)
+
+
+def _human_wait_scope() -> object:
+    factory = HUMAN_WAIT_SCOPE.get()
+    if factory is None:
+        import contextlib
+        return contextlib.nullcontext()
+    return factory()
+
+
 class ApprovalRegistry:
     """Per-agent approval configuration.
 
@@ -671,16 +689,17 @@ class ApprovalRegistry:
             liveness=liveness,
         )
 
-        # Prefer sync method if available
-        if hasattr(backend, "request_approval_sync"):
-            decision = backend.request_approval_sync(request)
-        else:
-            # Use shared utility for consistent async-to-sync bridging
-            from .utils import run_coroutine_safely
-            decision = run_coroutine_safely(
-                backend.request_approval(request),
-                timeout=self.timeout
-            )
+        with _human_wait_scope():
+            # Prefer sync method if available
+            if hasattr(backend, "request_approval_sync"):
+                decision = backend.request_approval_sync(request)
+            else:
+                # Use shared utility for consistent async-to-sync bridging
+                from .utils import run_coroutine_safely
+                decision = run_coroutine_safely(
+                    backend.request_approval(request),
+                    timeout=self.timeout
+                )
 
         # Live-authority gate: a resolution that lands after the originating
         # turn was stopped/superseded is dropped fail-closed — the tool does not
@@ -746,10 +765,11 @@ class ApprovalRegistry:
         )
 
         try:
-            decision = await asyncio.wait_for(
-                backend.request_approval(request),
-                timeout=self.timeout,
-            )
+            async with _human_wait_scope():
+                decision = await asyncio.wait_for(
+                    backend.request_approval(request),
+                    timeout=self.timeout,
+                )
         except asyncio.TimeoutError:
             decision = ApprovalDecision(approved=False, reason="Approval timed out")
 

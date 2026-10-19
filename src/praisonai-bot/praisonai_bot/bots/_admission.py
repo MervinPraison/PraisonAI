@@ -111,6 +111,115 @@ class AdmissionRejected(Exception):
         self.message = message
 
 
+class _TurnSlot:
+    """The run slot held by one admitted turn, lent back during human waits.
+
+    Issue #5912: a turn blocked on a human approval consumes no compute, so
+    while it waits its slot is released to other turns and re-acquired (without
+    re-running the admission policy) once the decision arrives. All state
+    transitions run on the gate's event loop; a sync approval in a worker
+    thread hops onto it and blocks only that thread.
+    """
+
+    def __init__(self, gate: "AdmissionGate", sem: asyncio.Semaphore, scope: str):
+        self._gate = gate
+        self._sem = sem
+        self._scope = scope
+        self._loop = asyncio.get_running_loop()
+        self._lock = asyncio.Lock()
+        self._waits = 0
+        self._lent = False
+        self.held = True
+        self.closed = False
+
+    def human_wait(self) -> "_HumanWait":
+        return _HumanWait(self)
+
+    async def _suspend(self) -> None:
+        async with self._lock:
+            self._waits += 1
+            if self._waits == 1 and self.held and not self.closed:
+                self.held = False
+                self._lent = True
+                self._gate.awaiting_human += 1
+                self._gate._give_slot(self._scope)
+                self._sem.release()
+
+    async def _resume(self) -> None:
+        async with self._lock:
+            if not self._finish_wait():
+                return
+            await self._sem.acquire()
+            if self.closed:  # turn ended while we waited for a slot
+                self._sem.release()
+                return
+            self.held = True
+            self._gate._take_slot(self._scope)
+
+    def _finish_wait(self) -> bool:
+        """End one wait; ``True`` when the slot must now be re-acquired."""
+        self._waits -= 1
+        if self._waits or not self._lent:
+            return False
+        self._lent = False
+        self._gate.awaiting_human -= 1
+        return not self.closed
+
+    def _run_blocking(self, coro) -> bool:
+        """Run ``coro`` on the gate loop from another thread; ``False`` if unsafe."""
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is self._loop or self._loop.is_closed():
+            # On the gate loop itself we cannot block; leave the slot held.
+            coro.close()
+            return False
+        try:
+            asyncio.run_coroutine_threadsafe(coro, self._loop).result()
+            return True
+        except Exception as e:  # pragma: no cover — never break the approval
+            logger.debug("AdmissionGate: human-wait slot transfer failed: %s", e)
+            return False
+
+
+class _HumanWait:
+    """Sync + async context manager entered around one human approval wait."""
+
+    def __init__(self, slot: _TurnSlot):
+        self._slot = slot
+        self._entered = False
+
+    def __enter__(self) -> "_HumanWait":
+        self._entered = self._slot._run_blocking(self._slot._suspend())
+        return self
+
+    def __exit__(self, *exc) -> None:
+        if self._entered:
+            self._slot._run_blocking(self._slot._resume())
+
+    async def __aenter__(self) -> "_HumanWait":
+        slot = self._slot
+        if asyncio.get_running_loop() is slot._loop:
+            await slot._suspend()
+            self._entered = True
+        else:
+            self._entered = slot._run_blocking(slot._suspend())
+        return self
+
+    async def __aexit__(self, exc_type, *exc) -> None:
+        if not self._entered:
+            return
+        slot = self._slot
+        if asyncio.get_running_loop() is not slot._loop:
+            slot._run_blocking(slot._resume())
+        elif exc_type is not None and issubclass(exc_type, asyncio.CancelledError):
+            # A cancelled turn must unwind now, not wait for a slot to free.
+            slot._finish_wait()
+        else:
+            await slot._resume()
+
+
 class AdmissionGate:
     """Gateway-wide admission gate enforcing a concurrency ceiling + wait queue.
 
@@ -169,6 +278,8 @@ class AdmissionGate:
         # Live counters.
         self._in_flight = 0
         self._queued = 0
+        # Admitted turns parked on a human approval, not holding a slot (#5912).
+        self.awaiting_human = 0
         # Live per-scope counters (only populated when the sub-limit is active),
         # keyed by the caller-supplied scope (the session_id at the call sites).
         self._scope_in_flight: "Dict[str, int]" = {}
@@ -222,6 +333,7 @@ class AdmissionGate:
             "queue_depth": self._queue_depth,
             "in_flight": self._in_flight,
             "queued": self._queued,
+            "awaiting_human": self.awaiting_human,
             "admitted": self.admitted,
             "rejected": self.rejected,
             "shed": self.shed,
@@ -339,17 +451,41 @@ class AdmissionGate:
                 if scope:
                     self._dec_scope(self._scope_queued, scope)
 
-        self._in_flight += 1
-        if scope:
-            self._scope_in_flight[scope] = self._scope_in_flight.get(scope, 0) + 1
+        self._take_slot(scope)
         self.admitted += 1
+        # Issue #5912: lend the slot back while the turn is parked on a human
+        # approval, so pending approvals cannot starve the ceiling.
+        slot = _TurnSlot(self, sem, scope)
+        token = None
+        try:
+            from praisonaiagents.approval.registry import HUMAN_WAIT_SCOPE
+        except ImportError:  # pragma: no cover — older core without the hook
+            HUMAN_WAIT_SCOPE = None
+        if HUMAN_WAIT_SCOPE is not None:
+            token = HUMAN_WAIT_SCOPE.set(slot.human_wait)
         try:
             yield
         finally:
-            self._in_flight -= 1
-            if scope:
-                self._dec_scope(self._scope_in_flight, scope)
-            sem.release()
+            if token is not None:
+                try:
+                    HUMAN_WAIT_SCOPE.reset(token)
+                except ValueError:  # pragma: no cover — exited in another context
+                    pass
+            slot.closed = True
+            if slot.held:
+                slot.held = False
+                self._give_slot(scope)
+                sem.release()
+
+    def _take_slot(self, scope: str) -> None:
+        self._in_flight += 1
+        if scope:
+            self._scope_in_flight[scope] = self._scope_in_flight.get(scope, 0) + 1
+
+    def _give_slot(self, scope: str) -> None:
+        self._in_flight -= 1
+        if scope:
+            self._dec_scope(self._scope_in_flight, scope)
 
     @staticmethod
     def _dec_scope(counter: "Dict[str, int]", scope: str) -> None:
