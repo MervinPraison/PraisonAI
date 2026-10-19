@@ -317,7 +317,12 @@ class FileScheduleStore:
                 self._history = ([record] + self._history)[:self._max_history]
                 self._unsaved = pending
                 return
-            self._history = (pending + on_disk)[:self._max_history]
+            # Retried records may be older than ones other processes wrote
+            # since; sort so history stays newest-first before trimming.
+            merged = sorted(
+                pending + on_disk, key=lambda r: r.timestamp, reverse=True
+            )
+            self._history = merged[:self._max_history]
             self._unsaved = [] if self._save_history() else pending
 
     def get_history(

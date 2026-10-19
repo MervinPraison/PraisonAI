@@ -130,6 +130,21 @@ def test_failed_history_save_is_retried(tmp_path):
     assert [r.job_id for r in FileScheduleStore(store_dir=d).get_history()] == ["j2", "j1"]
 
 
+def test_retried_record_does_not_hide_newer_records(tmp_path):
+    d = str(tmp_path)
+    a = FileScheduleStore(store_dir=d, max_history=2)
+    b = FileScheduleStore(store_dir=d, max_history=2)
+    with mock.patch.object(store_mod.time, "time", return_value=100.0):
+        with mock.patch("praisonaiagents.utils.atomic_io.os.replace", _fail_replace):
+            a.log_run("old", "succeeded")
+    with mock.patch.object(store_mod.time, "time", return_value=200.0):
+        b.log_run("newer", "succeeded")
+    with mock.patch.object(store_mod.time, "time", return_value=300.0):
+        a.log_run("newest", "succeeded")
+    ids = [r.job_id for r in FileScheduleStore(store_dir=d).get_history()]
+    assert ids == ["newest", "newer"]
+
+
 def test_mark_run_contains_store_write_error(tmp_path):
     from praisonaiagents.scheduler.runner import ScheduleRunner
     s = FileScheduleStore(store_dir=str(tmp_path))
