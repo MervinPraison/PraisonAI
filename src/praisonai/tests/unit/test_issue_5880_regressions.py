@@ -166,17 +166,24 @@ def test_owner_migration_failure_is_not_swallowed(tmp_path, monkeypatch):
                  "session_id TEXT, idempotency_key TEXT, created_at TEXT, "
                  "completed_at TEXT, data TEXT NOT NULL)")
     conn.commit()
-    locker = sqlite3.connect(db, timeout=0)
-    locker.execute("BEGIN EXCLUSIVE")
-    try:
-        monkeypatch.setattr(sqlite3, "connect",
-                            lambda path, **kw: conn.__class__(path, timeout=0.1, **kw))
-        with pytest.raises(sqlite3.OperationalError):
-            SqliteJobStore(db)
-    finally:
-        locker.rollback()
-        locker.close()
-        conn.close()
+    conn.close()
+    reached = []
+
+    class LockedAlter(sqlite3.Connection):
+        # Fail exactly at the migration (not at an earlier PRAGMA) so the test
+        # guards the error handler rather than passing before it runs.
+        def execute(self, sql, *args):
+            if sql.startswith("ALTER TABLE"):
+                reached.append(sql)
+                raise sqlite3.OperationalError("database is locked")
+            return super().execute(sql, *args)
+
+    real_connect = sqlite3.connect
+    monkeypatch.setattr(sqlite3, "connect",
+                        lambda path, **kw: real_connect(path, factory=LockedAlter, **kw))
+    with pytest.raises(sqlite3.OperationalError, match="locked"):
+        SqliteJobStore(db)
+    assert reached, "migration was never attempted"
 
 
 def test_manager_llm_settings_keep_model_name():
