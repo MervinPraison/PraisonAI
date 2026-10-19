@@ -149,12 +149,18 @@ class BackgroundJobManager:
         """
         if self._store is None:
             return
-        try:
-            self._store.upsert(job)
-        except Exception as e:  # noqa: BLE001 — persistence must never crash worker
-            logger.debug(
-                "Persisting job %s failed (non-fatal): %s", job.job_id, e,
-            )
+        # Check-and-write under the lock: a finished job whose id was reused
+        # must not overwrite the newer job's persisted record.
+        with self._lock:
+            current = self._jobs.get(job.job_id)
+            if current is not None and current is not job:
+                return
+            try:
+                self._store.upsert(job)
+            except Exception as e:  # noqa: BLE001 — persistence must never crash worker
+                logger.debug(
+                    "Persisting job %s failed (non-fatal): %s", job.job_id, e,
+                )
     
     @property
     def active_jobs(self) -> int:
@@ -283,40 +289,46 @@ class BackgroundJobManager:
         # The worker writes only to its own ``job_info`` (never re-looked-up by
         # id) so a later job reusing the id, or eviction, cannot be corrupted.
         job = job_info
+        # Result handle owned by the manager (not the executor) so cancel_job
+        # can wake get_result waiters even while ``func`` is still running.
+        done: Future = Future()
 
         def _run_job():
             with self._lock:
+                if job.status == JobStatus.CANCELLED:  # cancelled while pending
+                    return
                 job.status = JobStatus.RUNNING
                 job.started_at = time.time()
             self._persist(job)
-            
+
             try:
                 result = func()
-                with self._lock:
-                    # Cancelled while running: discard the late outcome.
-                    if job.status == JobStatus.CANCELLED:
-                        return None
-                    job.status = JobStatus.COMPLETED
-                    job.completed_at = time.time()
-                    job.result = result
-                self._persist(job)
-                _fire_complete()
-                return result
-            except Exception as e:
+            except BaseException as e:
                 with self._lock:
                     if job.status == JobStatus.CANCELLED:
-                        return None
+                        return
                     job.status = JobStatus.FAILED
                     job.completed_at = time.time()
                     job.error = str(e)
                 self._persist(job)
                 _fire_complete()
-                raise
-        
-        future = self._executor.submit(_run_job)
+                done.set_exception(e)
+                return
+            with self._lock:
+                # Cancelled while running: discard the late outcome.
+                if job.status == JobStatus.CANCELLED:
+                    return
+                job.status = JobStatus.COMPLETED
+                job.completed_at = time.time()
+                job.result = result
+            self._persist(job)
+            _fire_complete()
+            done.set_result(result)
+
         with self._lock:
-            self._futures[job_id] = future
-        
+            self._futures[job_id] = done
+        self._executor.submit(_run_job)
+
         return job_id
     
     def get_status(self, job_id: str) -> JobStatus:
@@ -382,9 +394,6 @@ class BackgroundJobManager:
         """
         with self._lock:
             future = self._futures.get(job_id)
-            job = self._jobs.get(job_id)
-        if job is not None and job.status == JobStatus.CANCELLED:
-            raise CancelledError(f"Job {job_id} was cancelled")
         if future is None:
             # Evicted from memory: answer terminal outcomes from the durable store
             job = self._store.get(job_id) if self._store else None
@@ -397,13 +406,10 @@ class BackgroundJobManager:
             raise RuntimeError(job.error or f"Job {job_id} {job.status.value}")
         
         try:
-            result = future.result(timeout=timeout)
+            return future.result(timeout=timeout)
         except FuturesTimeoutError:
             # Distinct from builtin TimeoutError on Python 3.10.
             raise TimeoutError(f"Job {job_id} did not complete within {timeout} seconds")
-        if job is not None and job.status == JobStatus.CANCELLED:
-            raise CancelledError(f"Job {job_id} was cancelled")
-        return result
     
     def cancel_job(self, job_id: str) -> bool:
         """
@@ -421,21 +427,18 @@ class BackgroundJobManager:
             True if cancellation was successful, False otherwise
         """
         with self._lock:
-            if job_id not in self._futures:
+            job = self._jobs.get(job_id)
+            future = self._futures.get(job_id)
+            if future is None or job is None or job.status not in (
+                JobStatus.PENDING, JobStatus.RUNNING,
+            ):
                 return False
-            future = self._futures[job_id]
-            cancelled = future.cancel() or (
-                self._jobs[job_id].status == JobStatus.RUNNING
-            )
-            if cancelled:
-                self._jobs[job_id].status = JobStatus.CANCELLED
-                self._jobs[job_id].completed_at = time.time()
-                job = self._jobs[job_id]
-            else:
-                job = None
-        if job is not None:
-            self._persist(job)
-        return cancelled
+            job.status = JobStatus.CANCELLED
+            job.completed_at = time.time()
+            # Wakes any get_result waiter with CancelledError right away.
+            future.cancel()
+        self._persist(job)
+        return True
 
     def reconcile_on_start(
         self,
