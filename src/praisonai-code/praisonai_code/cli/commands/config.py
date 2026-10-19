@@ -681,6 +681,18 @@ def config_provenance(
         resolver = get_resolver()
         provenance = resolver.resolve_with_provenance()
 
+        # The TOML layers above are not what picks the model for a bare
+        # run/chat/code invocation; surface the model the run will actually
+        # dispatch, tagged with the step of the resolution chain that won.
+        if key in (None, "run.model"):
+            from ..configuration.model_resolver import explain_default_model
+            model, model_source = explain_default_model()
+            provenance["run.model"] = {
+                "value": model,
+                "layer": "model-resolver",
+                "source": model_source,
+            }
+
         if key:
             entry = provenance.get(key)
             if entry is None:
