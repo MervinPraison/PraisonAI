@@ -115,10 +115,13 @@ class _TurnSlot:
     """The run slot held by one admitted turn, lent back during human waits.
 
     Issue #5912: a turn blocked on a human approval consumes no compute, so
-    while it waits its slot is released to other turns and re-acquired (without
-    re-running the admission policy) once the decision arrives. All state
-    transitions run on the gate's event loop; a sync approval in a worker
-    thread hops onto it and blocks only that thread.
+    while it waits its slot is released to other turns. Resuming never blocks:
+    the turn takes a free slot or, when none is free, borrows one that the next
+    released slot repays. A sync approval parked in a pool worker therefore
+    cannot deadlock against a turn waiting for that worker, and every parallel
+    approval branch returns already holding the slot. All state transitions run
+    on the gate's event loop and never suspend; a sync approval in a worker
+    thread hops onto it.
     """
 
     def __init__(self, gate: "AdmissionGate", sem: asyncio.Semaphore, scope: str):
@@ -126,9 +129,7 @@ class _TurnSlot:
         self._sem = sem
         self._scope = scope
         self._loop = asyncio.get_running_loop()
-        self._lock = asyncio.Lock()
         self._waits = 0
-        self._lent = False
         self.held = True
         self.closed = False
 
@@ -136,34 +137,34 @@ class _TurnSlot:
         return _HumanWait(self)
 
     async def _suspend(self) -> None:
-        async with self._lock:
-            self._waits += 1
-            if self._waits == 1 and self.held and not self.closed:
-                self.held = False
-                self._lent = True
-                self._gate.awaiting_human += 1
-                self._gate._give_slot(self._scope)
-                self._sem.release()
+        self._waits += 1
+        if self._waits == 1 and self.held and not self.closed:
+            self.held = False
+            self._gate.awaiting_human += 1
+            self._gate._give_slot(self._scope)
+            self._gate._release(self._sem)
 
     async def _resume(self) -> None:
-        async with self._lock:
-            if not self._finish_wait():
-                return
-            await self._sem.acquire()
-            if self.closed:  # turn ended while we waited for a slot
-                self._sem.release()
-                return
-            self.held = True
-            self._gate._take_slot(self._scope)
-
-    def _finish_wait(self) -> bool:
-        """End one wait; ``True`` when the slot must now be re-acquired."""
         self._waits -= 1
-        if self._waits or not self._lent:
-            return False
-        self._lent = False
+        if self.held or self.closed:
+            return
+        if self._sem.locked():
+            self._gate._debt += 1  # borrow; repaid by the next released slot
+        else:
+            await self._sem.acquire()  # a permit is free: returns without suspending
+        self.held = True
         self._gate.awaiting_human -= 1
-        return not self.closed
+        self._gate._take_slot(self._scope)
+
+    def close(self) -> None:
+        """End the turn: free the slot if held, else drop the human-wait count."""
+        self.closed = True
+        if self.held:
+            self.held = False
+            self._gate._give_slot(self._scope)
+            self._gate._release(self._sem)
+        else:
+            self._gate.awaiting_human -= 1
 
     def _run_blocking(self, coro) -> bool:
         """Run ``coro`` on the gate loop from another thread; ``False`` if unsafe."""
@@ -207,17 +208,14 @@ class _HumanWait:
             self._entered = slot._run_blocking(slot._suspend())
         return self
 
-    async def __aexit__(self, exc_type, *exc) -> None:
+    async def __aexit__(self, *exc) -> None:
         if not self._entered:
             return
         slot = self._slot
-        if asyncio.get_running_loop() is not slot._loop:
-            slot._run_blocking(slot._resume())
-        elif exc_type is not None and issubclass(exc_type, asyncio.CancelledError):
-            # A cancelled turn must unwind now, not wait for a slot to free.
-            slot._finish_wait()
-        else:
+        if asyncio.get_running_loop() is slot._loop:
             await slot._resume()
+        else:
+            slot._run_blocking(slot._resume())
 
 
 class AdmissionGate:
@@ -280,6 +278,8 @@ class AdmissionGate:
         self._queued = 0
         # Admitted turns parked on a human approval, not holding a slot (#5912).
         self.awaiting_human = 0
+        # Slots borrowed by resumed turns when none was free; repaid first (#5912).
+        self._debt = 0
         # Live per-scope counters (only populated when the sub-limit is active),
         # keyed by the caller-supplied scope (the session_id at the call sites).
         self._scope_in_flight: "Dict[str, int]" = {}
@@ -471,11 +471,7 @@ class AdmissionGate:
                     HUMAN_WAIT_SCOPE.reset(token)
                 except ValueError:  # pragma: no cover — exited in another context
                     pass
-            slot.closed = True
-            if slot.held:
-                slot.held = False
-                self._give_slot(scope)
-                sem.release()
+            slot.close()
 
     def _take_slot(self, scope: str) -> None:
         self._in_flight += 1
@@ -486,6 +482,13 @@ class AdmissionGate:
         self._in_flight -= 1
         if scope:
             self._dec_scope(self._scope_in_flight, scope)
+
+    def _release(self, sem: asyncio.Semaphore) -> None:
+        """Return a slot permit, first repaying any slot borrowed on resume."""
+        if self._debt:
+            self._debt -= 1
+        else:
+            sem.release()
 
     @staticmethod
     def _dec_scope(counter: "Dict[str, int]", scope: str) -> None:
