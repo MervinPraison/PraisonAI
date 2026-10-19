@@ -2022,7 +2022,7 @@ class WebSocketGateway:
         # Lazy-import approval machinery so it doesn't slow down startup
         # or fail if optional deps are missing.
         from .exec_approval import Resolution, get_exec_approval_manager
-        from .rate_limiter import AuthRateLimiter
+        from .rate_limiter import build_auth_rate_limiter
         from .pairing_routes import create_pairing_routes
 
         _approval_mgr = get_exec_approval_manager()
@@ -2033,8 +2033,15 @@ class WebSocketGateway:
             await _approval_mgr.rehydrate()
         except Exception:
             logger.exception("Failed to rehydrate pending gateway approvals")
-        _approval_rate = AuthRateLimiter(max_attempts=10, window_seconds=60)
-        _ws_upgrade_rate = AuthRateLimiter(max_attempts=10, window_seconds=60)
+        # Issue #5914: when ``push.redis`` is configured the auth limiters share
+        # buckets across replicas so limits are cluster-wide, not per-replica.
+        _auth_redis = getattr(getattr(self.config, "push", None), "redis", None)
+        _approval_rate = build_auth_rate_limiter(
+            _auth_redis, max_attempts=10, window_seconds=60
+        )
+        _ws_upgrade_rate = build_auth_rate_limiter(
+            _auth_redis, max_attempts=10, window_seconds=60
+        )
         # Issue #2620: pre-auth concurrent-connection budget per source IP.
         from .rate_limiter import PreauthConnectionBudget
         _preauth_budget = PreauthConnectionBudget(
@@ -2228,11 +2235,12 @@ class WebSocketGateway:
         # ── Magic Link Authentication ────────────────────────────────────
         from .magic_link import MagicLinkStore
         from .cookie_auth import create_auth_manager_from_env
-        from .rate_limiter import AuthRateLimiter
         
         # Initialize magic link store and rate limiter
         _magic_store = MagicLinkStore()
-        _magic_rate = AuthRateLimiter(max_attempts=5, window_seconds=60)
+        _magic_rate = build_auth_rate_limiter(
+            _auth_redis, max_attempts=5, window_seconds=60
+        )
         
         async def magic_link_handler(request):
             """Handle GET /?link=<nonce> magic link authentication."""

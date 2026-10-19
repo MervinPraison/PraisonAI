@@ -1,5 +1,6 @@
 """
-Thread-safe in-memory rate limiter for PraisonAI gateway endpoints.
+Thread-safe rate limiters for PraisonAI gateway endpoints (in-memory, or
+Redis-backed and cluster-wide via ``build_auth_rate_limiter``).
 
 Protects authentication and approval endpoints against brute-force attacks
 by tracking request counts within sliding time windows.
@@ -9,10 +10,13 @@ This is a *heavy implementation* and lives in the wrapper, not the core SDK.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from dataclasses import dataclass, field
 from typing import Dict, Tuple
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -168,6 +172,123 @@ class AuthRateLimiter:
             removed += 1
 
         return removed
+
+
+# Atomic fixed-window + lockout check, same semantics as ``AuthRateLimiter.allow``.
+# KEYS[1]=bucket, KEYS[2]=lockout; ARGV = window_ms, max_attempts, lockout_ms.
+_ALLOW_LUA = """
+if redis.call('EXISTS', KEYS[2]) == 1 then return 0 end
+local c = redis.call('INCR', KEYS[1])
+if c == 1 then redis.call('PEXPIRE', KEYS[1], ARGV[1]) end
+if c > tonumber(ARGV[2]) then
+  redis.call('SET', KEYS[2], '1', 'PX', ARGV[3])
+  redis.call('DEL', KEYS[1])
+  return 0
+end
+return 1
+"""
+
+
+class RedisAuthRateLimiter:
+    """Cluster-wide ``AuthRateLimiter`` backed by Redis (Issue #5914).
+
+    Shares buckets/lockouts across every gateway replica so ``max_attempts``
+    is a total, not a per-replica budget. Keys expire via Redis TTLs, so no
+    pruning is needed. If Redis is unreachable the call falls back to a local
+    ``AuthRateLimiter`` (per-replica limits still apply — never fail open) and
+    Redis is skipped for ``retry_after`` seconds so an outage cannot stall the
+    event loop on every request.
+    """
+
+    def __init__(
+        self,
+        client,
+        max_attempts: int = 5,
+        window_seconds: float = 60.0,
+        lockout_seconds: float = 300.0,
+        prefix: str = "praison:authrl:",
+        retry_after: float = 5.0,
+    ) -> None:
+        self._client = client
+        self._max = max_attempts
+        self._window_ms = max(1, int(window_seconds * 1000))
+        self._lockout_ms = max(1, int(lockout_seconds * 1000))
+        self._prefix = prefix
+        self._retry_after = retry_after
+        self._down_until = 0.0
+        self._local = AuthRateLimiter(max_attempts, window_seconds, lockout_seconds)
+
+    def _keys(self, endpoint: str, identity: str) -> Tuple[str, str]:
+        base = f"{self._prefix}{endpoint}:{identity}"
+        return f"{base}:b", f"{base}:l"
+
+    def _redis(self, fn):
+        if time.time() < self._down_until:
+            return None
+        try:
+            return fn()
+        except Exception as e:
+            self._down_until = time.time() + self._retry_after
+            logger.warning("Redis auth rate limiter unavailable, using local: %s", e)
+            return None
+
+    def allow(self, endpoint: str, identity: str) -> bool:
+        bucket, lockout = self._keys(endpoint, identity)
+        res = self._redis(lambda: self._client.eval(
+            _ALLOW_LUA, 2, bucket, lockout,
+            self._window_ms, self._max, self._lockout_ms,
+        ))
+        if res is None:
+            return self._local.allow(endpoint, identity)
+        return int(res) == 1
+
+    def reset(self, endpoint: str, identity: str) -> None:
+        self._local.reset(endpoint, identity)
+        self._redis(lambda: self._client.delete(*self._keys(endpoint, identity)))
+
+    def time_until_allowed(self, endpoint: str, identity: str) -> float:
+        _, lockout = self._keys(endpoint, identity)
+        ttl = self._redis(lambda: self._client.pttl(lockout))
+        remote = int(ttl) / 1000.0 if ttl is not None and int(ttl) > 0 else 0.0
+        return max(remote, self._local.time_until_allowed(endpoint, identity))
+
+    def prune(self) -> int:
+        return self._local.prune()
+
+
+def build_auth_rate_limiter(redis_config=None, **kwargs):
+    """Return a Redis-backed limiter when ``redis_config`` is set, else local.
+
+    Mirrors ``build_turn_lock``: reuses the gateway's ``push.redis`` config, so
+    no new surface is added. With no Redis configured (or the ``redis``
+    package missing) this is today's in-process ``AuthRateLimiter``.
+    """
+    if redis_config is None:
+        return AuthRateLimiter(**kwargs)
+    try:
+        import redis
+
+        url = getattr(redis_config, "url", None)
+        opts = dict(decode_responses=True, socket_timeout=0.5, socket_connect_timeout=0.5)
+        if url:
+            client = redis.Redis.from_url(url, **opts)
+        else:
+            client = redis.Redis(
+                host=getattr(redis_config, "host", "localhost"),
+                port=getattr(redis_config, "port", 6379),
+                db=getattr(redis_config, "db", 0),
+                password=getattr(redis_config, "password", None),
+                **opts,
+            )
+    except Exception as e:
+        logger.warning(
+            "gateway.push.redis set but Redis auth rate limiter unavailable (%s); "
+            "auth limits are per-process only. Install with: pip install redis", e
+        )
+        return AuthRateLimiter(**kwargs)
+    kwargs.pop("max_keys", None)
+    prefix = getattr(redis_config, "prefix", "praison:") or "praison:"
+    return RedisAuthRateLimiter(client, prefix=f"{prefix}authrl:", **kwargs)
 
 
 class PreauthConnectionBudget:
