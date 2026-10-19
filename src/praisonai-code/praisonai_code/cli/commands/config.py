@@ -684,14 +684,19 @@ def config_provenance(
         # The TOML layers above are not what picks the model for a bare
         # run/chat/code invocation; surface the model the run will actually
         # dispatch, tagged with the step of the resolution chain that won.
+        # A configured agent.model wins over the resolver, as in `run`.
         if key in (None, "run.model"):
-            from ..configuration.model_resolver import explain_default_model
-            model, model_source = explain_default_model()
-            provenance["run.model"] = {
-                "value": model,
-                "layer": "model-resolver",
-                "source": model_source,
-            }
+            configured = provenance.get("agent.model") or {}
+            if configured.get("value"):
+                provenance["run.model"] = dict(configured)
+            else:
+                from ..configuration.model_resolver import explain_default_model
+                model, model_source = explain_default_model()
+                provenance["run.model"] = {
+                    "value": model,
+                    "layer": "model-resolver",
+                    "source": model_source,
+                }
 
         if key:
             entry = provenance.get(key)

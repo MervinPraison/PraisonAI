@@ -50,5 +50,18 @@ def test_config_provenance_includes_run_model(monkeypatch):
     monkeypatch.setenv("MODEL_NAME", "gpt-env")
     result = CliRunner().invoke(app, ["provenance", "run.model"])
     assert result.exit_code == 0, result.output
-    assert "gpt-env" in result.output
-    assert "env:MODEL_NAME" in result.output
+    # MODEL_NAME feeds agent.model via the config env layer, as `run` sees it.
+    assert "run.model = gpt-env" in result.output
+    assert "layer: environment" in result.output
+
+
+def test_config_provenance_prefers_configured_agent_model(monkeypatch):
+    from praisonai_code.cli.commands.config import app
+
+    model_resolver.set_recent_model("claude-recent")
+    monkeypatch.setenv("PRAISONAI_CONFIG_CONTENT", '{"agent": {"model": "gpt-configured"}}')
+    result = CliRunner().invoke(app, ["provenance", "run.model"])
+    assert result.exit_code == 0, result.output
+    assert "run.model = gpt-configured" in result.output
+    assert "layer: env-config" in result.output
+    assert "claude-recent" not in result.output
