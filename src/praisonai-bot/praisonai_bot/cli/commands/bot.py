@@ -5,6 +5,7 @@ Provides commands for starting messaging bots with full agent capabilities.
 Inspired by moltbot's comprehensive CLI options.
 """
 
+from types import SimpleNamespace
 from typing import List, Optional
 
 import typer
@@ -236,15 +237,19 @@ def bot_run(
         thinking=thinking,
     )
 
-    extra = dict(channel_fields)
-    if port is not None:
-        extra["webhook_port"] = port
+    extra = {} if port is None else {"webhook_port": port}
+    # Route the fields through the same ``channel.model_extra`` path a YAML
+    # channel uses, so a field named like a ``start_generic`` parameter (e.g.
+    # an IRC plugin's ``channel``) still reaches the adapter instead of
+    # colliding with it.
+    channel = SimpleNamespace(model_extra=channel_fields) if channel_fields else None
     handler = BotHandler()
     handler.start_generic(
         platform=platform,
         token=token,
         agent_file=agent,
         capabilities=capabilities,
+        channel=channel,
         **extra,
     )
 

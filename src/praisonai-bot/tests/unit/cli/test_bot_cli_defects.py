@@ -410,11 +410,12 @@ class TestGenericRun:
 
     def test_declared_channel_fields_become_flags(self, clean_env, monkeypatch):
         """A channel's ``config_fields`` are scriptable flags on ``bot run`` (#5925)."""
-        seen: list[dict] = []
+        _StubGenericBot.instances.clear()
+        import praisonai_bot.bots as bots_pkg
+
+        monkeypatch.setattr(bots_pkg, "Bot", _StubGenericBot, raising=False)
         monkeypatch.setattr(
-            BotHandler,
-            "start_generic",
-            lambda self, platform, *a, **kw: seen.append(kw),
+            BotHandler, "_load_agent", lambda self, *a, **kw: object()
         )
         result = CliRunner().invoke(
             bot_app,
@@ -426,9 +427,34 @@ class TestGenericRun:
             ],
         )
         assert result.exit_code == 0, result.output
-        assert seen[0]["account"] == "+15551234567"
-        assert seen[0]["bridge_url"] == "http://bridge:8080"
-        assert seen[0]["webhook_port"] == 9000
+        fwd = _StubGenericBot.instances[0].kwargs
+        assert fwd["account"] == "+15551234567"
+        assert fwd["bridge_url"] == "http://bridge:8080"
+        assert fwd["webhook_port"] == 9000
+
+    def test_field_named_like_a_handler_param_reaches_adapter(
+        self, clean_env, monkeypatch
+    ):
+        """A plugin field called ``channel`` must not collide with ``start_generic``."""
+        from praisonaiagents.bots.protocols import ChannelField
+
+        import praisonai_bot.bots as bots_pkg
+        import praisonai_bot.bots._registry as registry
+
+        class _Desc:
+            config_fields = [ChannelField(name="channel")]
+
+        _StubGenericBot.instances.clear()
+        monkeypatch.setattr(registry, "get_platform_descriptor", lambda name: _Desc)
+        monkeypatch.setattr(bots_pkg, "Bot", _StubGenericBot, raising=False)
+        monkeypatch.setattr(
+            BotHandler, "_load_agent", lambda self, *a, **kw: object()
+        )
+        result = CliRunner().invoke(
+            bot_app, ["run", "--platform", "signal", "--channel", "#praison"]
+        )
+        assert result.exit_code == 0, result.output
+        assert _StubGenericBot.instances[0].kwargs["channel"] == "#praison"
 
     def test_undeclared_channel_flag_is_rejected(self, clean_env, monkeypatch):
         monkeypatch.setattr(
