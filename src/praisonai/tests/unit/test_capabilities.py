@@ -989,3 +989,65 @@ class TestGuardrailFailClosed:
 
         result = asyncio.run(_run())
         assert result.passed is False
+
+
+class TestVideoGenerateKwargs:
+    """video_generate must only send OpenAI Videos API field names upstream.
+
+    LiteLLM forwards unknown keys (e.g. ``duration``) verbatim to
+    OpenAI-compatible ``/v1/videos`` servers, which reject them.
+    """
+
+    @patch('litellm.video_generation')
+    def test_defaults_send_no_duration_or_aspect_ratio(self, mock_gen):
+        from praisonai.capabilities.videos import video_generate
+
+        mock_gen.return_value = SimpleNamespace(id="video_1", status="queued")
+        result = video_generate("a boat", model="openai/my-video-model")
+
+        sent = mock_gen.call_args.kwargs
+        assert "duration" not in sent
+        assert "aspect_ratio" not in sent
+        assert "seconds" not in sent
+        assert result.id == "video_1"
+        assert result.status == "queued"
+
+    @patch('litellm.video_generation')
+    def test_duration_maps_to_seconds(self, mock_gen):
+        from praisonai.capabilities.videos import video_generate
+
+        mock_gen.return_value = SimpleNamespace(id="video_1", status="queued")
+        video_generate("a boat", model="openai/my-video-model", duration=8)
+
+        sent = mock_gen.call_args.kwargs
+        assert sent["seconds"] == "8"
+        assert "duration" not in sent
+
+    @patch('litellm.video_generation')
+    def test_explicit_seconds_and_size_win(self, mock_gen):
+        from praisonai.capabilities.videos import video_generate
+
+        mock_gen.return_value = SimpleNamespace(id="video_1", status="queued")
+        video_generate(
+            "a boat", model="openai/my-video-model", duration=8, seconds="4", size="1344x768"
+        )
+
+        sent = mock_gen.call_args.kwargs
+        assert sent["seconds"] == "4"
+        assert sent["size"] == "1344x768"
+
+    def test_async_uses_same_mapping(self):
+        import asyncio
+        from praisonai.capabilities.videos import avideo_generate
+
+        async def fake(**kwargs):
+            fake.kwargs = kwargs
+            return SimpleNamespace(id="video_2", status="queued")
+
+        with patch('litellm.avideo_generation', fake):
+            asyncio.run(
+                avideo_generate("a boat", model="openai/my-video-model", aspect_ratio="9:16")
+            )
+
+        assert "duration" not in fake.kwargs
+        assert fake.kwargs["aspect_ratio"] == "9:16"
