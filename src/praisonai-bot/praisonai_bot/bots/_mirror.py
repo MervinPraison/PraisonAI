@@ -160,4 +160,24 @@ def coalesce_mirror_turns(history: list) -> list:
     return out
 
 
-__all__ = ["mirror_to_session", "coalesce_mirror_turns"]
+def fold_trailing_user_mirror(history: list, prompt):
+    """Fold a trailing ``user`` mirror into the inbound ``prompt``.
+
+    The agent appends the current prompt as a ``user`` turn, so a history
+    ending in an external-delivery mirror would otherwise send two ``user``
+    turns in a row. Returns ``(history, prompt)``; unchanged when no fold
+    applies.
+    """
+    last = history[-1] if history else None
+    if (
+        isinstance(prompt, str)
+        and isinstance(last, dict)
+        and last.get("mirror")
+        and last.get("role") == "user"
+        and isinstance(last.get("content"), str)
+    ):
+        return history[:-1], f"{last['content']}\n\n{prompt}"
+    return history, prompt
+
+
+__all__ = ["mirror_to_session", "coalesce_mirror_turns", "fold_trailing_user_mirror"]

@@ -65,3 +65,32 @@ def test_executor_forwards_external_authorship_to_accepting_handler():
     ex._deliver = legacy
     assert asyncio.run(ex._dispatch_delivery(object(), "y", authored_by="external"))
     assert seen["legacy"] == "y"
+
+
+def test_reply_after_external_delivery_keeps_role_alternation():
+    """A reply after a command/notice mirror must not send two user turns."""
+
+    class _RecordingAgent:
+        def __init__(self):
+            self.chat_history = []
+            self.sent = None
+
+        def chat(self, prompt):
+            self.sent = self.chat_history + [{"role": "user", "content": prompt}]
+            self.chat_history = self.sent + [{"role": "assistant", "content": "ok"}]
+            return "ok"
+
+    mgr = BotSessionManager(platform="telegram")
+    mgr._histories["alice"] = [
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+    ]
+    assert mirror_to_session(
+        mgr, "alice", "Backup finished", source_label="cron", authored_by="external",
+    )
+    agent = _RecordingAgent()
+    assert asyncio.run(mgr.chat(agent, "alice", "thanks, any errors?")) == "ok"
+
+    roles = [m["role"] for m in agent.sent]
+    assert roles == ["user", "assistant", "user"]
+    assert agent.sent[-1]["content"] == "[cron] Backup finished\n\nthanks, any errors?"
