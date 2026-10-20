@@ -304,7 +304,8 @@ class BackgroundJobManager:
                 job.status = JobStatus.CANCELLED if cancelled else JobStatus.FAILED
                 job.completed_at = time.time()
                 if not cancelled:
-                    job.error = str(error)
+                    # Bare SystemExit()/KeyboardInterrupt() stringify to "".
+                    job.error = str(error) or type(error).__name__
                 if cancelled:
                     done.cancel()
                 else:

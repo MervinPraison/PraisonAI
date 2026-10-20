@@ -203,12 +203,13 @@ def test_func_base_exception_fails_job_and_resolves_result():
 
     try:
         m.start_job(
-            lambda: (_ for _ in ()).throw(SystemExit(3)), job_id="x",
+            lambda: (_ for _ in ()).throw(SystemExit()), job_id="x",
             on_complete=on_complete,
         )
         with pytest.raises(SystemExit):
             m.get_result("x", timeout=5)
         assert m.get_status("x") == JobStatus.FAILED
+        assert m.list_jobs()["x"].error == "SystemExit"  # never an empty error
         assert delivered.wait(5) and seen == [JobStatus.FAILED]  # failure not silent
     finally:
         m.shutdown()
