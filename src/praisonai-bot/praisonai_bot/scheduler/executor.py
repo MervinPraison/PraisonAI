@@ -861,7 +861,7 @@ class ScheduledAgentExecutor:
         delivery = getattr(job, "delivery", None)
         if succeeded and text and not silent and delivery and self._can_deliver(delivery):
             try:
-                delivered = await self._dispatch_delivery(delivery, text)
+                delivered = await self._dispatch_delivery(delivery, text, authored_by="external")
                 if delivered:
                     logger.info(
                         "Delivered backend job '%s' output to %s:%s",
@@ -970,7 +970,7 @@ class ScheduledAgentExecutor:
         delivery = getattr(job, "delivery", None)
         if text and delivery and self._can_deliver(delivery):
             try:
-                delivered = await self._dispatch_delivery(delivery, text)
+                delivered = await self._dispatch_delivery(delivery, text, authored_by="external")
                 if delivered:
                     logger.info(
                         "Delivered command job '%s' output to %s:%s",
@@ -1483,7 +1483,7 @@ class ScheduledAgentExecutor:
             f"{when} (provider rate-limited): {result.error or 'quota exceeded'}"
         )
         try:
-            if await self._dispatch_delivery(delivery, summary):
+            if await self._dispatch_delivery(delivery, summary, authored_by="external"):
                 result.delivered = True
                 self._commit_incident(job, pending)
                 logger.info("Delivered hold notice for job '%s'", job.id)
@@ -1611,7 +1611,7 @@ class ScheduledAgentExecutor:
         return delivery is not None
 
     async def _dispatch_delivery(
-        self, delivery: "DeliveryTarget", text: str,
+        self, delivery: "DeliveryTarget", text: str, authored_by: str = "agent",
     ) -> bool:
         """Deliver ``text`` to ``delivery``, preferring the live adapter.
 
@@ -1629,9 +1629,20 @@ class ScheduledAgentExecutor:
         ``delivered``; a handler that returns ``None`` is treated as delivered,
         preserving the prior behaviour of adapters that report success by not
         raising.
+
+        ``authored_by`` (#5928) is ``"external"`` for non-agent text (command
+        stdout, backend output, system notices) so a session-seeding handler
+        mirrors it honestly; it is only forwarded to handlers that accept it.
         """
         if self._deliver is not None:
-            result = self._deliver(delivery, text)
+            kwargs = {}
+            if authored_by != "agent":
+                try:
+                    if "authored_by" in inspect.signature(self._deliver).parameters:
+                        kwargs["authored_by"] = authored_by
+                except (TypeError, ValueError):  # pragma: no cover - builtins
+                    pass
+            result = self._deliver(delivery, text, **kwargs)
             if inspect.isawaitable(result):
                 result = await result
             return result is not False
@@ -1787,7 +1798,7 @@ class ScheduledAgentExecutor:
             return
         summary = f"✅ Scheduled job '{getattr(job, 'name', job.id)}' recovered."
         try:
-            if await self._dispatch_delivery(delivery, summary):
+            if await self._dispatch_delivery(delivery, summary, authored_by="external"):
                 self._commit_incident(job, pending)
                 logger.info("Delivered recovery note for job '%s'", job.id)
             else:
@@ -1846,7 +1857,7 @@ class ScheduledAgentExecutor:
             f"{result.error or 'unknown error'}"
         )
         try:
-            if await self._dispatch_delivery(delivery, summary):
+            if await self._dispatch_delivery(delivery, summary, authored_by="external"):
                 result.delivered = True
                 self._commit_incident(job, pending)
                 logger.info("Delivered failure summary for job '%s'", job.id)
