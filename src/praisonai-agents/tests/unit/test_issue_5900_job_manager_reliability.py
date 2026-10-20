@@ -168,9 +168,11 @@ def test_cleanup_prunes_durable_store():
 def test_submit_after_shutdown_fails_job_and_frees_id():
     m = BackgroundJobManager(max_workers=1)
     m.shutdown()
+    seen = []
     with pytest.raises(RuntimeError):
-        m.start_job(lambda: "A", job_id="x")
+        m.start_job(lambda: "A", job_id="x", on_complete=seen.append)
     assert m.get_status("x") == JobStatus.FAILED
+    assert [i.status for i in seen] == [JobStatus.FAILED]  # failure not silent
     with pytest.raises(RuntimeError):
         m.get_result("x")  # resolved, not blocking forever
 
@@ -192,11 +194,22 @@ def test_callback_base_exception_still_resolves_result():
 
 def test_func_base_exception_fails_job_and_resolves_result():
     m = BackgroundJobManager(max_workers=1)
+    delivered = threading.Event()
+    seen = []
+
+    def on_complete(info):
+        seen.append(info.status)
+        delivered.set()
+
     try:
-        m.start_job(lambda: (_ for _ in ()).throw(SystemExit(3)), job_id="x")
+        m.start_job(
+            lambda: (_ for _ in ()).throw(SystemExit(3)), job_id="x",
+            on_complete=on_complete,
+        )
         with pytest.raises(SystemExit):
             m.get_result("x", timeout=5)
         assert m.get_status("x") == JobStatus.FAILED
+        assert delivered.wait(5) and seen == [JobStatus.FAILED]  # failure not silent
     finally:
         m.shutdown()
 
@@ -207,11 +220,13 @@ def test_queued_job_dropped_at_shutdown_is_cancelled():
     try:
         m.start_job(gate.wait, job_id="a")
         _wait_status(m, "a", JobStatus.RUNNING)
-        m.start_job(lambda: "B", job_id="b")
+        seen = []
+        m.start_job(lambda: "B", job_id="b", on_complete=seen.append)
         m._executor.shutdown(wait=False, cancel_futures=True)
         assert m.get_status("b") == JobStatus.CANCELLED
         with pytest.raises(CancelledError):
             m.get_result("b")
+        assert seen == []  # cancellations stay silent, like cancel_job()
     finally:
         gate.set()
         m.shutdown()

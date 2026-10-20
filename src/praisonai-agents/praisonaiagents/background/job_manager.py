@@ -310,6 +310,10 @@ class BackgroundJobManager:
                 else:
                     done.set_exception(error)
             self._persist(job)
+            # Failures must reach deliver-back/hook subscribers like any other
+            # failure; cancellations stay silent, matching cancel_job().
+            if not cancelled:
+                _fire_complete()
 
         def _execute():
             with self._lock:
