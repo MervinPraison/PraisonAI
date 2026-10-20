@@ -18,6 +18,7 @@ Each test here fails on the code as it stood before the accompanying fix:
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 
 import pytest
@@ -406,6 +407,41 @@ class TestGenericRun:
         result = CliRunner().invoke(bot_app, ["run", "--platform", "local"])
         assert result.exit_code == 0
         assert seen == ["local"]
+
+    def test_declared_channel_fields_become_flags(self, clean_env, monkeypatch):
+        """A channel's ``config_fields`` are scriptable flags on ``bot run`` (#5925)."""
+        seen: list[dict] = []
+        monkeypatch.setattr(
+            BotHandler,
+            "start_generic",
+            lambda self, platform, *a, **kw: seen.append(kw),
+        )
+        result = CliRunner().invoke(
+            bot_app,
+            [
+                "run", "--platform", "signal",
+                "--account", "+15551234567",
+                "--bridge-url=http://bridge:8080",
+                "--port", "9000",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        assert seen[0]["account"] == "+15551234567"
+        assert seen[0]["bridge_url"] == "http://bridge:8080"
+        assert seen[0]["webhook_port"] == 9000
+
+    def test_undeclared_channel_flag_is_rejected(self, clean_env, monkeypatch):
+        monkeypatch.setattr(
+            BotHandler,
+            "start_generic",
+            lambda self, *a, **kw: pytest.fail("must not start"),
+        )
+        result = CliRunner().invoke(
+            bot_app, ["run", "--platform", "signal", "--server", "x"]
+        )
+        assert result.exit_code == 2
+        plain = re.sub(r"\x1b\[[0-9;]*m|[\s│]", "", result.output)
+        assert "--server" in plain and "--account" in plain
 
     def test_bot_start_does_not_silently_no_op_on_a_verbless_platform(
         self, clean_env, tmp_path
