@@ -299,7 +299,14 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                     return
             
             bot_message = self._convert_message(message)
-            
+
+            # Issue #5929: transcribe an inbound voice note so the turn reaches
+            # the agent (placeholder on disable/failure, never dropped).
+            if not (bot_message.content or "").strip():
+                transcript = await self._transcribe_audio(message)
+                if transcript:
+                    bot_message.content = transcript
+
             # Add channel type for pairing system
             bot_message._channel_type = "discord"
             
@@ -1070,6 +1077,37 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         extra = {cmd: "Custom command" for cmd in self._command_handlers}
         return format_help(self._agent, self.platform, extra)
     
+    async def _transcribe_audio(self, message) -> Optional[str]:
+        """Transcribe the first audio attachment of a Discord message.
+
+        Returns ``None`` when the message carries no audio; otherwise the
+        transcript or the shared voice placeholder (Issue #5929).
+        """
+        audio = next(
+            (
+                a for a in (getattr(message, "attachments", None) or [])
+                if (getattr(a, "content_type", None) or "").lower().startswith("audio/")
+            ),
+            None,
+        )
+        if audio is None:
+            return None
+
+        from ._media import resolve_max_inbound_media_bytes
+        from ._stt import DEFAULT_VOICE_PLACEHOLDER, transcribe_audio_bytes
+
+        max_bytes = resolve_max_inbound_media_bytes(self.config)
+        if not max_bytes or max_bytes <= 0 or (getattr(audio, "size", 0) or 0) > max_bytes:
+            return DEFAULT_VOICE_PLACEHOLDER
+        try:
+            data = await audio.read()
+        except Exception as e:
+            logger.warning("Discord audio download failed: %s", e)
+            return DEFAULT_VOICE_PLACEHOLDER
+        return await transcribe_audio_bytes(
+            data, self.config, filename=getattr(audio, "filename", None)
+        )
+
     def _convert_message(self, message) -> BotMessage:
         """Convert Discord Message to BotMessage."""
         sender = BotUser(

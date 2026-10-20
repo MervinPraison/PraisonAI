@@ -29,6 +29,7 @@ import logging
 import os
 import time
 from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
+from urllib.parse import quote
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent
@@ -321,11 +322,50 @@ class SignalBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             except Exception as e:  # noqa: BLE001 — one bad message must not stop the batch
                 logger.warning("Signal message processing error: %s", e)
 
+    async def _transcribe_audio(self, data_msg: Dict[str, Any]) -> Optional[str]:
+        """Transcribe the first audio attachment of a signal-cli data message.
+
+        Returns ``None`` when there is no audio; otherwise the transcript or
+        the shared voice placeholder (Issue #5929).
+        """
+        audio = next(
+            (
+                a for a in (data_msg.get("attachments") or [])
+                if isinstance(a, dict)
+                and str(a.get("contentType") or "").lower().startswith("audio/")
+                and a.get("id")
+            ),
+            None,
+        )
+        if audio is None:
+            return None
+
+        from ._media import resolve_max_inbound_media_bytes
+        from ._stt import DEFAULT_VOICE_PLACEHOLDER, transcribe_audio_bytes
+
+        max_bytes = resolve_max_inbound_media_bytes(self.config)
+        if not max_bytes or max_bytes <= 0 or self._http_session is None:
+            return DEFAULT_VOICE_PLACEHOLDER
+        # The bridge is operator-configured, so no SSRF guard is needed here.
+        url = f"{self._bridge_url}/v1/attachments/{quote(str(audio['id']), safe='')}"
+        try:
+            async with self._http_session.get(url) as resp:
+                if resp.status != 200:
+                    logger.warning("Signal attachment download failed: HTTP %s", resp.status)
+                    return DEFAULT_VOICE_PLACEHOLDER
+                data = await resp.content.read(max_bytes + 1)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("Signal attachment download failed: %s", e)
+            return DEFAULT_VOICE_PLACEHOLDER
+        return await transcribe_audio_bytes(
+            data, self.config, filename=audio.get("filename")
+        )
+
     async def _handle_envelope(self, item: Dict[str, Any]) -> None:
         """Parse one signal-cli envelope and route it to the agent."""
         envelope = item.get("envelope", item) if isinstance(item, dict) else {}
         data_msg = envelope.get("dataMessage") or {}
-        content = data_msg.get("message")
+        content = data_msg.get("message") or await self._transcribe_audio(data_msg)
         if not content:
             return  # receipts, typing, empty — nothing to answer
 

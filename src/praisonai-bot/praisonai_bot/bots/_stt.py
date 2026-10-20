@@ -163,9 +163,58 @@ def transcribe_media_path(
     return None
 
 
+async def transcribe_audio_bytes(
+    data: bytes,
+    config: Any,
+    *,
+    filename: Optional[str] = None,
+) -> str:
+    """Cache, transcribe and clean up downloaded inbound audio (Issue #5929).
+
+    One call for adapters that already hold the audio bytes (Discord, Signal),
+    so they share the size cap, STT policy and graceful degradation with
+    Telegram/Slack/WhatsApp. Always returns agent-consumable text: the
+    transcript on success, otherwise :data:`DEFAULT_VOICE_PLACEHOLDER` so the
+    voice note is never silently dropped.
+    """
+    import asyncio
+    import os
+
+    from ._media import cache_inbound_media, resolve_max_inbound_media_bytes
+
+    stt_cfg = resolve_stt_config(config)
+    max_bytes = resolve_max_inbound_media_bytes(config)
+    if not stt_cfg.enabled or not data or not max_bytes or len(data) > max_bytes:
+        return DEFAULT_VOICE_PLACEHOLDER
+
+    try:
+        path = cache_inbound_media(
+            data, kind="audio", max_bytes=max_bytes, filename=filename
+        )
+    except Exception as e:
+        logger.warning("Could not cache inbound audio: %s", e)
+        return DEFAULT_VOICE_PLACEHOLDER
+    try:
+        text = await asyncio.to_thread(
+            transcribe_media_path,
+            path,
+            language=stt_cfg.language,
+            model=stt_cfg.model,
+        )
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+    if not text:
+        return DEFAULT_VOICE_PLACEHOLDER
+    return f"[Voice message]: {text}" if stt_cfg.echo_transcripts else text
+
+
 __all__ = [
     "SttConfig",
     "DEFAULT_VOICE_PLACEHOLDER",
     "resolve_stt_config",
     "transcribe_media_path",
+    "transcribe_audio_bytes",
 ]
