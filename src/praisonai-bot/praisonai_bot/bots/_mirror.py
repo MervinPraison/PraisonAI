@@ -1,9 +1,12 @@
 """Outbound delivery mirror for bot sessions.
 
 W1 — When a bot pushes a message via ``Bot.send_message()`` (notifications,
-scheduled deliveries, cross-platform replies), this module appends an
-``{"role": "assistant", "mirror": True}`` entry to the user's session
-so the next inbound turn carries that context.
+scheduled deliveries, cross-platform replies), this module appends a
+``{"mirror": True}`` entry to the user's session so the next inbound turn
+carries that context. The entry's role records true authorship (#5928):
+agent-authored text is an ``assistant`` turn; non-agent text (command stdout,
+system notices) is a labelled ``user`` turn so the model never believes it
+said something it did not.
 
 Standalone helper — designed to be safe to call from any context (sync
 handler, async coroutine, cron job, scheduled delivery). Errors are
@@ -35,6 +38,7 @@ def mirror_to_session(
     source_label: str = "delivery",
     metadata: Optional[dict] = None,
     lock: Optional[threading.RLock] = None,
+    authored_by: str = "agent",
 ) -> bool:
     """Append a mirror entry to ``user_id``'s session history.
 
@@ -55,6 +59,12 @@ def mirror_to_session(
         (e.g. ``"cron"``, ``"web"``, ``"cross_platform"``).
     metadata
         Optional extra metadata to merge into the mirror entry.
+    authored_by
+        ``"agent"`` (default) mirrors the text as an ``assistant`` turn.
+        Anything else (e.g. ``"external"`` for command stdout or system
+        notices) mirrors it as a ``user`` turn prefixed with
+        ``[source_label]`` — inbound context the agent received, not
+        something it said.
 
     Returns
     -------
@@ -73,23 +83,27 @@ def mirror_to_session(
         logger.warning("mirror: storage_key failed: %s", e)
         return False
 
+    if authored_by == "agent":
+        role, content = "assistant", message_text
+    else:
+        role, content = "user", f"[{source_label}] {message_text}"
+    entry: dict = {
+        "role": role,
+        "content": content,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "mirror": True,
+        "mirror_source": source_label,
+    }
+    if metadata:
+        # Filter out reserved fields to preserve entry invariants
+        _reserved = {"role", "content", "timestamp", "mirror", "mirror_source"}
+        entry.update({k: v for k, v in metadata.items() if k not in _reserved})
+
     # Check if the session manager has a thread-safe mirror method
     # This allows the session manager to handle synchronization properly
     # with its internal asyncio locks.
     if hasattr(session_mgr, '_add_mirror_entry_sync'):
         try:
-            entry: dict = {
-                "role": "assistant",
-                "content": message_text,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "mirror": True,
-                "mirror_source": source_label,
-            }
-            if metadata:
-                # Filter out reserved fields to preserve entry invariants
-                _reserved = {"role", "content", "timestamp", "mirror", "mirror_source"}
-                entry.update({k: v for k, v in metadata.items() if k not in _reserved})
-            
             return session_mgr._add_mirror_entry_sync(user_id, entry)
         except Exception as e:
             logger.warning("mirror: _add_mirror_entry_sync failed: %s", e)
@@ -106,19 +120,6 @@ def mirror_to_session(
         try:
             # Load current history
             history = list(session_mgr._load_history(user_id))
-            
-            # Create mirror entry
-            entry: dict = {
-                "role": "assistant",
-                "content": message_text,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                "mirror": True,
-                "mirror_source": source_label,
-            }
-            if metadata:
-                # Filter out reserved fields to preserve entry invariants
-                _reserved = {"role", "content", "timestamp", "mirror", "mirror_source"}
-                entry.update({k: v for k, v in metadata.items() if k not in _reserved})
             history.append(entry)
             
             # Save updated history atomically within the lock
@@ -131,4 +132,32 @@ def mirror_to_session(
     return True
 
 
-__all__ = ["mirror_to_session"]
+def coalesce_mirror_turns(history: list) -> list:
+    """Merge a mirror entry into an adjacent same-role plain-text turn.
+
+    Back-to-back deliveries (or a delivery right after the agent's own reply)
+    leave consecutive same-role turns, which strict-alternation providers
+    reject. Only pairs involving a ``mirror`` entry are merged, so ordinary
+    history is passed through untouched.
+    """
+    out: list = []
+    for msg in history:
+        prev = out[-1] if out else None
+        if (
+            prev is not None
+            and isinstance(msg, dict)
+            and (msg.get("mirror") or prev.get("mirror"))
+            and msg.get("role") == prev.get("role")
+            and msg.get("role") in ("user", "assistant")
+            and isinstance(msg.get("content"), str)
+            and isinstance(prev.get("content"), str)
+            and not msg.get("tool_calls")
+            and not prev.get("tool_calls")
+        ):
+            out[-1] = {**prev, "content": f"{prev['content']}\n\n{msg['content']}"}
+            continue
+        out.append(msg)
+    return out
+
+
+__all__ = ["mirror_to_session", "coalesce_mirror_turns"]

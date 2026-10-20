@@ -7211,7 +7211,7 @@ class WebSocketGateway:
     # ── Scheduled delivery ────────────────────────────────────────────
 
     async def _deliver_scheduled_result(
-        self, delivery: Any, text: str,
+        self, delivery: Any, text: str, authored_by: str = "agent",
     ) -> bool:
         """Route a scheduled job result to the correct channel bot.
 
@@ -7223,6 +7223,8 @@ class WebSocketGateway:
         Args:
             delivery: A ``DeliveryTarget`` with ``channel`` and ``channel_id``.
             text: The agent response to deliver.
+            authored_by: ``"agent"`` or ``"external"`` (non-agent text such as
+                command stdout); decides the seeded mirror role (#5928).
         """
         channel = getattr(delivery, "channel", "") or ""
         channel_id = getattr(delivery, "channel_id", "") or ""
@@ -7275,7 +7277,7 @@ class WebSocketGateway:
                 )
                 # Seed a resumable session so the user's reply in this chat
                 # resumes the job's conversation with full context (#3444).
-                self._seed_continuable_session(delivery, text)
+                self._seed_continuable_session(delivery, text, authored_by)
             else:
                 logger.error(
                     "Failed to deliver scheduled result to %s:%s", channel, channel_id,
@@ -7305,7 +7307,7 @@ class WebSocketGateway:
                 "Delivered scheduled result to %s:%s", channel, channel_id,
             )
             # Seed a resumable session so the user's reply resumes context (#3444).
-            self._seed_continuable_session(delivery, text)
+            self._seed_continuable_session(delivery, text, authored_by)
         except Exception as e:
             logger.error(
                 "Failed to deliver to %s:%s: %s", channel, channel_id, e,
@@ -7313,7 +7315,9 @@ class WebSocketGateway:
             return False
         return True
 
-    def _seed_continuable_session(self, delivery: Any, text: str) -> None:
+    def _seed_continuable_session(
+        self, delivery: Any, text: str, authored_by: str = "agent",
+    ) -> None:
         """Seed a resumable session so a reply to a delivered brief has context.
 
         Issue #3444: a scheduled/automated delivery is one-way by default — the
@@ -7364,12 +7368,14 @@ class WebSocketGateway:
             from praisonai_bot.bots._mirror import mirror_to_session
             # An inbound reply from this chat resolves its session by the chat
             # id, so mirror under ``channel_id`` — byte-identical to the key the
-            # reply will mint — with the delivered brief as the assistant turn.
+            # reply will mint. Authorship decides the role (#5928): an agent
+            # brief is an assistant turn, command/notice text a user turn.
             mirror_to_session(
                 session,
                 user_id=channel_id,
                 message_text=text,
                 source_label="cron",
+                authored_by=authored_by,
             )
             logger.info(
                 "Seeded continuable session for %s:%s", channel, channel_id,

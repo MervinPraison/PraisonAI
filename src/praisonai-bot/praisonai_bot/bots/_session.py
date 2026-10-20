@@ -1419,7 +1419,10 @@ class BotSessionManager:
                     # Agent instance never observe each other's chat_history.
                     async with agent_lock:
                         saved_history = agent.chat_history
-                        agent.chat_history = user_history
+                        # #5928: merge mirror-induced same-role runs so
+                        # strict-alternation providers never see them.
+                        from ._mirror import coalesce_mirror_turns
+                        agent.chat_history = coalesce_mirror_turns(user_history)
 
                         # Per-route toolset scope (Issue #2298): swap the
                         # agent's tools to the policy-allowed subset for this
