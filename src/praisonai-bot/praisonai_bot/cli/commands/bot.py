@@ -5,6 +5,7 @@ Provides commands for starting messaging bots with full agent capabilities.
 Inspired by moltbot's comprehensive CLI options.
 """
 
+from types import SimpleNamespace
 from typing import List, Optional
 
 import typer
@@ -122,8 +123,51 @@ def bot_start(
     handler.start_from_config(resolved)
 
 
-@app.command("run")
+def _channel_field_kwargs(platform: str, args: List[str]) -> dict:
+    """Map ``--field-name value`` flags onto the channel's declared fields.
+
+    Gives ``bot run`` the CLI leg of a plugin channel's ``config_fields`` (the
+    same fields YAML and the onboarding wizard already accept). Only fields
+    the channel's ``ChannelDescriptor`` declares are accepted; anything else
+    fails loudly instead of being silently ignored.
+    """
+    if not args:
+        return {}
+    from praisonai_bot.bots._registry import get_platform_descriptor
+
+    descriptor = get_platform_descriptor(platform)
+    declared = [
+        name for spec in (getattr(descriptor, "config_fields", None) or [])
+        if (name := getattr(spec, "name", None))
+    ]
+    flags = {f"--{name.replace('_', '-')}": name for name in declared}
+    hint = ", ".join(sorted(flags)) or "none"
+
+    values: dict = {}
+    i = 0
+    while i < len(args):
+        flag, sep, value = args[i].partition("=")
+        if flag not in flags:
+            raise typer.BadParameter(
+                f"Unknown option '{flag}' for platform '{platform}'. "
+                f"Channel fields: {hint}"
+            )
+        if not sep:
+            if i + 1 >= len(args) or args[i + 1].startswith("--"):
+                raise typer.BadParameter(f"Option '{flag}' requires a value")
+            i += 1
+            value = args[i]
+        values[flags[flag]] = value
+        i += 1
+    return values
+
+
+@app.command(
+    "run",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
 def bot_run(
+    ctx: typer.Context,
     platform: str = typer.Option(..., "--platform", "-P", help="Registered channel platform to run"),
     token: Optional[str] = typer.Option(None, "--token", "-t", help="Channel token (falls back to the platform's own env var)"),
     port: Optional[int] = typer.Option(None, "--port", "-p", help="Inbound port for webhook-style channels"),
@@ -157,13 +201,18 @@ def bot_run(
     channel — previously reachable only through ``bot start`` YAML. This is
     their first-class verb.
 
+    Each field the channel declares in its ``config_fields`` is accepted as
+    ``--field-name value`` (e.g. ``bridge_url`` -> ``--bridge-url``).
+
     Examples:
         praisonai bot run --platform local
-        praisonai bot run --platform signal --agent agents.yaml
+        praisonai bot run --platform signal --account +15551234567 --agent agents.yaml
         praisonai bot run --platform webhook --port 8080
-        praisonai bot run --platform my-plugin-channel --token $MY_TOKEN
+        praisonai bot run --platform irc --server irc.libera.chat --nickserv-password $NICK_PW
     """
     from ..features.bots_cli import BotHandler
+
+    channel_fields = _channel_field_kwargs(platform.lower().strip(), ctx.args)
 
     capabilities = _build_capabilities(
         model=model,
@@ -189,12 +238,18 @@ def bot_run(
     )
 
     extra = {} if port is None else {"webhook_port": port}
+    # Route the fields through the same ``channel.model_extra`` path a YAML
+    # channel uses, so a field named like a ``start_generic`` parameter (e.g.
+    # an IRC plugin's ``channel``) still reaches the adapter instead of
+    # colliding with it.
+    channel = SimpleNamespace(model_extra=channel_fields) if channel_fields else None
     handler = BotHandler()
     handler.start_generic(
         platform=platform,
         token=token,
         agent_file=agent,
         capabilities=capabilities,
+        channel=channel,
         **extra,
     )
 
