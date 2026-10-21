@@ -36,6 +36,20 @@ def test_achat_offloads_sync_input_guardrail():
     asyncio.run(run())
 
 
+def test_achat_disabled_guardrail_keeps_fast_path(monkeypatch):
+    """No configured validator means no additional worker-thread dispatch."""
+    agent = Agent(name="T", instructions="test", llm="gpt-4o-mini")
+    guardrail = RecordingInputGuardrail()
+
+    def record(prompt):
+        guardrail.validate_input(prompt)
+        return False, None, "stop before provider dispatch"
+
+    monkeypatch.setattr(agent, "_validate_input_with_guardrail", record)
+    asyncio.run(agent.achat("blocked prompt"))
+    assert guardrail.thread_id == threading.get_ident()
+
+
 def test_chat_keeps_sync_input_guardrail_on_caller_thread():
     """The synchronous public API retains its existing execution context."""
     guardrail = RecordingInputGuardrail()
