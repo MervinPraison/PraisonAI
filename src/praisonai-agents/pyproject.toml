@@ -51,7 +51,7 @@ parallel-search = [
 
 memory = [
     "chromadb>=1.0.0",
-    "litellm>=1.83.14",
+    "litellm>=1.83.14,<1.106.0",
 ]
 
 knowledge = [
@@ -68,8 +68,9 @@ graph = [
 ]
 
 # Add LLM dependencies
+# LiteLLM 1.106 Responses imports MCP 2-only types; our MCP extra supports v1.
 llm = [
-    "litellm>=1.83.14",
+    "litellm>=1.83.14,<1.106.0",
     "pydantic>=2.10.0"
 ]
 
