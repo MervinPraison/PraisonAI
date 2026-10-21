@@ -3384,7 +3384,7 @@ Your Goal: {self.goal}"""
             _in_ok, _in_prompt, _in_err = self._validate_input_with_guardrail(prompt)
             if not _in_ok:
                 logging.warning(f"Agent {self.name}: input blocked by guardrail: {_in_err}")
-                return None
+                return self._guardrail_blocked_message(_in_err)
             prompt = _in_prompt
 
         # Check if external managed backend is configured
@@ -4223,7 +4223,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             _in_ok, _in_prompt, _in_err = self._validate_input_with_guardrail(prompt)
             if not _in_ok:
                 logging.warning(f"Agent {self.name}: input blocked by guardrail: {_in_err}")
-                return None
+                return self._guardrail_blocked_message(_in_err)
             prompt = _in_prompt
 
         # Check if external managed backend is configured (async parity with the
@@ -5308,7 +5308,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             _in_ok, _in_prompt, _in_err = self._validate_input_with_guardrail(prompt)
             if not _in_ok:
                 logging.warning(f"Agent {getattr(self, 'name', '')}: input blocked by guardrail: {_in_err}")
-                yield f"[Input blocked by guardrail: {_in_err}]"
+                yield self._guardrail_blocked_message(_in_err)
                 return
             prompt = _in_prompt
 
