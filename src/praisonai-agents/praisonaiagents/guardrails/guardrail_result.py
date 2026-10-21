@@ -10,6 +10,10 @@ from pydantic import BaseModel, Field
 from ..output.models import TaskOutput
 
 
+class _GuardrailBlockedResponse(str):
+    """User-facing text carrying a rejection marker for internal task callers."""
+
+
 class GuardrailResult(BaseModel):
     """Result of a guardrail validation."""
     

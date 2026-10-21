@@ -538,11 +538,16 @@ def _process_task_result(agents_instance, context, agent_output):
     Eliminates duplication in result processing between sync/async paths.
     """
     from .protocols import TaskResult
+    from ..guardrails.guardrail_result import _GuardrailBlockedResponse
     
     task = context.task
     task_id = context.task_id
     executor_agent = context.executor_agent
     llm = context.llm
+
+    if isinstance(agent_output, _GuardrailBlockedResponse):
+        task.status = "failed"
+        return TaskResult(task_output=None, success=False, error="Agent input or output was blocked by a guardrail.")
     
     if agent_output:
         # Store the response in memory

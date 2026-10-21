@@ -7173,7 +7173,10 @@ Answer:"""
         reason = str(error) if error else getattr(self, "_last_guardrail_error", None)
         if reason:
             logging.info(f"Agent {self.name}: guardrail block reason: {reason}")
-        return "I'm sorry, but I can't share that response because it did not pass the safety guardrail."
+        from ..guardrails.guardrail_result import _GuardrailBlockedResponse
+        return _GuardrailBlockedResponse(
+            "I'm sorry, but I can't share that response because it did not pass the safety guardrail."
+        )
 
     def _process_guardrail(self, task_output):
         """Process the guardrail validation for a task output.
