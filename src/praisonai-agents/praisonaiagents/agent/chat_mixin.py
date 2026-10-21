@@ -4219,7 +4219,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Input-side validators may perform blocking LLM calls. Keep them off
         # the event loop, before any backend/LLM dispatch, just like tool guards.
         if hasattr(self, '_validate_input_with_guardrail'):
-            if self._guardrail_fn is None:
+            _input_guard = self._guardrail_fn
+            if (_input_guard is None or not hasattr(_input_guard, "validate_input")
+                    or getattr(_input_guard, "_praison_output_only", False)):
                 _in_ok, _in_prompt, _in_err = self._validate_input_with_guardrail(prompt)
             else:
                 _in_ok, _in_prompt, _in_err = await asyncio.to_thread(

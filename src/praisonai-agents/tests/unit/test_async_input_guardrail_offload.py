@@ -2,6 +2,8 @@
 import asyncio
 import threading
 
+import pytest
+
 from praisonaiagents import Agent
 
 
@@ -36,9 +38,10 @@ def test_achat_offloads_sync_input_guardrail():
     asyncio.run(run())
 
 
-def test_achat_disabled_guardrail_keeps_fast_path(monkeypatch):
-    """No configured validator means no additional worker-thread dispatch."""
-    agent = Agent(name="T", instructions="test", llm="gpt-4o-mini")
+@pytest.mark.parametrize("guardrails", [None, "Check output quality", lambda output: (True, output)])
+def test_achat_disabled_guardrail_keeps_fast_path(monkeypatch, guardrails):
+    """Absent, callable and output-only guards need no worker-thread dispatch."""
+    agent = Agent(name="T", instructions="test", llm="gpt-4o-mini", guardrails=guardrails)
     guardrail = RecordingInputGuardrail()
 
     def record(prompt):
