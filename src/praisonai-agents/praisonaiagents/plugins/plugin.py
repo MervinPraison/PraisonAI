@@ -111,6 +111,66 @@ class PluginInfo:
             "plugin_type": self.plugin_type.value,
         }
 
+
+def core_incompatibility(dependencies: List[str]) -> Optional[str]:
+    """Check a plugin's ``dependencies`` against the running core.
+
+    Only a ``praisonaiagents`` entry (e.g. ``"praisonaiagents>=0.9,<2"``) is
+    checked; other entries are ignored. Returns an actionable reason when the
+    installed core does not satisfy it, else ``None`` (permissive: no entry,
+    an unparseable entry, or ``packaging`` unavailable all mean compatible).
+    """
+    if not dependencies:
+        return None
+    try:
+        from packaging.requirements import InvalidRequirement, Requirement
+        from packaging.utils import canonicalize_name
+        from packaging.version import InvalidVersion, Version
+        from .._version import __version__ as core_version
+    except ImportError:
+        return None
+    if core_version == "unknown":
+        # Wheel installs ship no pyproject.toml; read the installed metadata.
+        try:
+            from importlib.metadata import version
+            core_version = version("praisonaiagents")
+        except Exception:
+            return None
+
+    # Comma-separated manifest headers split "pkg>=1,<2" into ["pkg>=1", "<2"];
+    # rejoin bare specifier fragments onto the preceding requirement.
+    merged: List[str] = []
+    for dep in dependencies:
+        dep = str(dep).strip()
+        if merged and dep[:1] in "<>=!~":
+            merged[-1] = f"{merged[-1]},{dep}"
+        elif dep:
+            merged.append(dep)
+
+    for dep in merged:
+        try:
+            req = Requirement(dep)
+        except InvalidRequirement:
+            continue
+        if canonicalize_name(req.name) != "praisonaiagents" or not req.specifier:
+            continue
+        try:
+            if req.marker and not req.marker.evaluate({"extra": ""}):
+                continue  # e.g. "; sys_platform == 'win32'" on another OS
+        except Exception:
+            continue
+        try:
+            ok = req.specifier.contains(Version(core_version), prereleases=True)
+        except InvalidVersion:
+            return None
+        if not ok:
+            return (
+                f"requires praisonaiagents{req.specifier}, installed {core_version}. "
+                "Update the plugin or praisonaiagents."
+            )
+    return None
+
+
 class Plugin(ABC):
     """
     Base class for PraisonAI plugins.

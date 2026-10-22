@@ -13,7 +13,7 @@ import threading
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple, TYPE_CHECKING
 
-from .plugin import Plugin, PluginHook, PluginInfo, FunctionPlugin
+from .plugin import Plugin, PluginHook, PluginInfo, FunctionPlugin, core_incompatibility
 
 if TYPE_CHECKING:
     from ..hooks.registry import HookRegistry
@@ -288,7 +288,12 @@ class PluginManager:
                 if info.name in self._plugins:
                     logger.warning(f"Plugin '{info.name}' already registered")
                     return False
-                
+
+                reason = core_incompatibility(info.dependencies)
+                if reason:
+                    logger.warning(f"Plugin '{info.name}' disabled: {reason}")
+                    return False
+
                 self._plugins[info.name] = plugin
                 self._enabled[info.name] = self._default_enabled_for_registration(info.name)
                 
