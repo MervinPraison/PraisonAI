@@ -413,13 +413,15 @@ def auth_login(
         previous = CredentialStore().get_credential(provider)
     except Exception:
         previous = None
+    replaced = None
     if previous and previous.api_key != api_key:
         if not key and not key_stdin and not typer.confirm(
             f"Replace existing {provider} key {redact_key(previous.api_key)}?",
             default=True,
         ):
             raise typer.Exit(1)
-        output.print_info(f"Replacing existing {provider} key {redact_key(previous.api_key)}")
+        replaced = redact_key(previous.api_key)
+        output.print_info(f"Replacing existing {provider} key {replaced}")
 
     # Store credential
     try:
@@ -434,11 +436,14 @@ def auth_login(
         output.print_success(f"Stored credentials for {provider}")
         
         if output.is_json_mode:
-            output.print_json({
+            result = {
                 "provider": provider,
                 "status": "stored",
                 "key_redacted": redact_key(api_key)
-            })
+            }
+            if replaced:
+                result["replaced_key_redacted"] = replaced
+            output.print_json(result)
         else:
             output.print_info(f"Key stored: {redact_key(api_key)}")
             

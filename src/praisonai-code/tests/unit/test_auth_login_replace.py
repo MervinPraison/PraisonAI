@@ -33,3 +33,21 @@ def test_scripted_login_replaces_and_reports(tmp_path, monkeypatch):
     assert result.exit_code == 0, result.output
     assert "Replacing existing openai key" in result.output
     assert CredentialStore(path).get_credential("openai").api_key == NEW
+
+
+def test_json_login_reports_replaced_key(tmp_path, monkeypatch):
+    import json
+
+    from praisonai_code.cli.output.console import OutputController, OutputMode
+
+    _setup(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        auth, "get_output_controller", lambda: OutputController(mode=OutputMode.JSON)
+    )
+    result = CliRunner().invoke(
+        auth.app, ["login", "openai", "--key", NEW, "--skip-validation"]
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output[result.output.rindex("{\n"):])
+    assert payload["replaced_key_redacted"].endswith("1111")
+    assert payload["key_redacted"].endswith("2222")
