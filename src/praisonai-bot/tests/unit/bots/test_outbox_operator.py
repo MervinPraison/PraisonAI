@@ -209,3 +209,41 @@ def test_read_only_does_not_recover_sending_rows(tmp_path):
         assert ro.stats().get("sending") == 1
 
     asyncio.run(run())
+
+
+def test_cli_retry_and_purge_do_not_recover_live_sending_rows(tmp_path):
+    """Issue #5953: ``gateway outbox retry``/``purge`` run while the gateway is
+    live must not flip its in-flight 'sending' rows to 'recovered' (which the
+    live drain would then re-send as a duplicate)."""
+    from typer.testing import CliRunner
+
+    from praisonai_bot.cli.commands.gateway import outbox_app
+
+    path = tmp_path / "o.sqlite"
+
+    async def seed():
+        q = OutboundQueue(path=str(path))
+        live = await q.enqueue("m1", "telegram:1", {"text": "a"})
+        failed = await q.enqueue("m2", "telegram:1", {"text": "b"})
+        gone = await q.enqueue("m3", "telegram:1", {"text": "c"})
+        with q._lock, __import__("contextlib").closing(q._connect()) as conn:
+            conn.execute(
+                "UPDATE outbound_queue SET status = 'sending' WHERE id = ?",
+                (q._extract_id_from_key(live),),
+            )
+            conn.execute(
+                "UPDATE outbound_queue SET status = 'failed' WHERE id IN (?, ?)",
+                (q._extract_id_from_key(failed), q._extract_id_from_key(gone)),
+            )
+            conn.commit()
+        return live, failed, gone
+
+    live, failed, gone = asyncio.run(seed())
+    runner = CliRunner()
+    assert runner.invoke(outbox_app, ["retry", failed, "-p", str(path)]).exit_code == 0
+    assert runner.invoke(outbox_app, ["purge", gone, "-p", str(path)]).exit_code == 0
+
+    ro = OutboundQueue(path=str(path), read_only=True)
+    assert ro.status_for("m1") == "sending"
+    assert ro.status_for("m2") == "pending"
+    assert ro.status_for("m3") is None

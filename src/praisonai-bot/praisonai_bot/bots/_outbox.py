@@ -174,7 +174,7 @@ class OutboundQueue:
         dead_letter_policy: Optional[Any] = None,
         read_only: bool = False,
     ) -> None:
-        # Operator inspection (``list``/``stats``) must NEVER run crash recovery
+        # Operator CLI opens (``list``/``stats``/``retry``/``purge``) must NEVER run crash recovery
         # on a live database: flipping in-flight ``sending`` rows to
         # ``recovered`` while the owning gateway is mid-send lets a later drain
         # re-claim and duplicate a message. ``read_only=True`` opens the store
