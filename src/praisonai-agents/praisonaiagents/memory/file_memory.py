@@ -23,6 +23,7 @@ import sys
 import hashlib
 import logging
 from praisonaiagents._logging import get_logger
+from praisonaiagents.utils.safe_path import safe_child
 import threading
 import weakref
 from collections import Counter
@@ -142,6 +143,14 @@ class FileMemory:
             raise ValueError("user_id must not contain path separators or parent references")
         safe = user_id.strip()
         return safe or "default"
+
+    def _episodic_file(self, date: str) -> Path:
+        """Map a YYYY-MM-DD date to its episodic file, rejecting anything else."""
+        try:
+            datetime.strptime(date, "%Y-%m-%d")
+        except (TypeError, ValueError):
+            raise ValueError(f"date must be YYYY-MM-DD, got {date!r}") from None
+        return safe_child(self.episodic_path, date, ".json")
     
     def __init__(
         self,
@@ -753,10 +762,7 @@ class FileMemory:
         if date is None:
             date = datetime.now().strftime("%Y-%m-%d")
         
-        episodic_file = self.episodic_path / f"{date}.json"
-        
-        # Load existing episodic memories for this date
-        episodes = self._read_json(episodic_file, [])
+        episodic_file = self._episodic_file(date)
         
         # Create new item
         item = MemoryItem(
@@ -765,8 +771,11 @@ class FileMemory:
             metadata=metadata or {}
         )
         
-        episodes.append(item.to_dict())
-        self._write_json(episodic_file, episodes)
+        # Read-modify-write under the store lock so concurrent adds are not lost
+        with self._lock:
+            episodes = self._read_json(episodic_file, [])
+            episodes.append(item.to_dict())
+            self._write_json(episodic_file, episodes)
         
         self._log(f"Added episodic memory for {date}: {content[:50]}...")
         
@@ -788,7 +797,7 @@ class FileMemory:
             List of episodic memories
         """
         if date:
-            episodic_file = self.episodic_path / f"{date}.json"
+            episodic_file = self._episodic_file(date)
             data = self._read_json(episodic_file, [])
             return [MemoryItem.from_dict(item) for item in data]
         
@@ -813,7 +822,8 @@ class FileMemory:
             try:
                 file_date = datetime.strptime(episodic_file.stem, "%Y-%m-%d")
                 if file_date < cutoff_date:
-                    episodic_file.unlink()
+                    with self._lock:
+                        episodic_file.unlink(missing_ok=True)
                     removed += 1
             except ValueError:
                 continue
@@ -1193,16 +1203,17 @@ class FileMemory:
                 for i in range(30)
             ]
         
-        for check_date in dates_to_check:
-            episodic_file = self.episodic_path / f"{check_date}.json"
-            if episodic_file.exists():
-                data = self._read_json(episodic_file, [])
-                for i, item in enumerate(data):
-                    if item.get("id") == memory_id:
-                        del data[i]
-                        self._write_json(episodic_file, data)
-                        self._log(f"Deleted episodic memory: {memory_id}")
-                        return True
+        with self._lock:
+            for check_date in dates_to_check:
+                episodic_file = self._episodic_file(check_date)
+                if episodic_file.exists():
+                    data = self._read_json(episodic_file, [])
+                    for i, item in enumerate(data):
+                        if item.get("id") == memory_id:
+                            del data[i]
+                            self._write_json(episodic_file, data)
+                            self._log(f"Deleted episodic memory: {memory_id}")
+                            return True
         
         return False
     
@@ -1440,7 +1451,7 @@ class FileMemory:
         sessions_path = self.user_path / "sessions"
         sessions_path.mkdir(parents=True, exist_ok=True)
         
-        session_file = sessions_path / f"{name}.json"
+        session_file = safe_child(sessions_path, name, ".json")
         
         # Take snapshots under lock for consistent session data
         with self._lock:
@@ -1479,7 +1490,7 @@ class FileMemory:
             Session data including conversation history
         """
         sessions_path = self.user_path / "sessions"
-        session_file = sessions_path / f"{name}.json"
+        session_file = safe_child(sessions_path, name, ".json")
         
         if not session_file.exists():
             raise FileNotFoundError(f"Session '{name}' not found")
@@ -1531,7 +1542,7 @@ class FileMemory:
     def delete_session(self, name: str) -> bool:
         """Delete a saved session."""
         sessions_path = self.user_path / "sessions"
-        session_file = sessions_path / f"{name}.json"
+        session_file = safe_child(sessions_path, name, ".json")
         
         if session_file.exists():
             session_file.unlink()
@@ -1687,7 +1698,7 @@ Summary:"""
         
         from uuid import uuid4
         checkpoint_id = name or f"checkpoint_{int(time.time())}_{uuid4().hex}"
-        checkpoint_file = checkpoints_path / f"{checkpoint_id}.json"
+        checkpoint_file = safe_child(checkpoints_path, checkpoint_id, ".json")
         
         checkpoint_data = {
             "id": checkpoint_id,
@@ -1724,7 +1735,7 @@ Summary:"""
             True if restored successfully
         """
         checkpoints_path = self.user_path / "checkpoints"
-        checkpoint_file = checkpoints_path / f"{checkpoint_id}.json"
+        checkpoint_file = safe_child(checkpoints_path, checkpoint_id, ".json")
         
         if not checkpoint_file.exists():
             self._log(f"Checkpoint '{checkpoint_id}' not found", logging.ERROR)
@@ -1775,7 +1786,7 @@ Summary:"""
     def delete_checkpoint(self, checkpoint_id: str) -> bool:
         """Delete a checkpoint."""
         checkpoints_path = self.user_path / "checkpoints"
-        checkpoint_file = checkpoints_path / f"{checkpoint_id}.json"
+        checkpoint_file = safe_child(checkpoints_path, checkpoint_id, ".json")
         
         if checkpoint_file.exists():
             checkpoint_file.unlink()
