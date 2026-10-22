@@ -35,6 +35,12 @@ def test_plain_names_still_work(memory):
     assert memory.create_checkpoint("ckpt-1") == "ckpt-1"
 
 
+def test_unpadded_episodic_date_is_normalised(memory):
+    memory.add_episodic("event", date="2026-3-5")
+    assert [e.content for e in memory.get_episodic(date="2026-03-05")] == ["event"]
+    assert (memory.episodic_path / "2026-03-05.json").exists()
+
+
 def test_rule_name_cannot_traverse(tmp_path):
     with pytest.raises(ValueError):
         RulesManager(workspace_path=str(tmp_path)).create_rule("../../esc_rule", "x")

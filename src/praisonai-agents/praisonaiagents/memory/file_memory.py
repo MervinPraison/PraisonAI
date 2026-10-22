@@ -147,7 +147,8 @@ class FileMemory:
     def _episodic_file(self, date: str) -> Path:
         """Map a YYYY-MM-DD date to its episodic file, rejecting anything else."""
         try:
-            datetime.strptime(date, "%Y-%m-%d")
+            # Normalise so "2026-3-5" lands in the same file recent reads look for
+            date = datetime.strptime(date, "%Y-%m-%d").strftime("%Y-%m-%d")
         except (TypeError, ValueError):
             raise ValueError(f"date must be YYYY-MM-DD, got {date!r}") from None
         return safe_child(self.episodic_path, date, ".json")
