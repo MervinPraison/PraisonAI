@@ -87,3 +87,22 @@ def test_concurrent_execute_on_warm_instance_keeps_payloads_apart():
     assert asyncio.run(run()) == ["answer:A", "answer:B"]
     assert fs.files == {}  # per-call files cleaned up
     assert not any("dd" in c.split("\n", 1)[0] for c in fs.commands if c.startswith("python "))
+
+
+def test_async_fallback_validates_api_base_off_event_loop(monkeypatch):
+    import threading
+    loop_thread = threading.get_ident()
+    seen = []
+
+    def getaddrinfo(host, port, *a, **k):
+        seen.append(threading.get_ident())
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("10.0.0.5", port))]
+
+    class _NoRoute:
+        pass  # no allm_passthrough_route -> AttributeError -> httpx fallback
+
+    monkeypatch.setattr(pt.socket, "getaddrinfo", getaddrinfo)
+    monkeypatch.setitem(__import__("sys").modules, "litellm", _NoRoute())
+    with pytest.raises(ValueError, match="private/internal"):
+        asyncio.run(pt.apassthrough("/v1/x", api_base="http://internal.example"))
+    assert seen and seen[0] != loop_thread
