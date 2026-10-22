@@ -406,6 +406,21 @@ def auth_login(
         else:
             output.print_success(f"API key validated: {live_msg}")
     
+    # The store holds one credential per provider, so never replace an
+    # existing, different key silently: confirm when the key was typed at the
+    # prompt, and always report what was replaced.
+    try:
+        previous = CredentialStore().get_credential(provider)
+    except Exception:
+        previous = None
+    if previous and previous.api_key != api_key:
+        if not key and not key_stdin and not typer.confirm(
+            f"Replace existing {provider} key {redact_key(previous.api_key)}?",
+            default=True,
+        ):
+            raise typer.Exit(1)
+        output.print_info(f"Replacing existing {provider} key {redact_key(previous.api_key)}")
+
     # Store credential
     try:
         store = CredentialStore()
