@@ -9,6 +9,7 @@ Covers ``OutboundQueue.list`` (with status/target filters), ``stats``,
 """
 
 import asyncio
+from contextlib import closing
 
 from praisonai_bot.bots._outbox import OutboundQueue
 
@@ -155,7 +156,7 @@ def test_purge_refuses_in_flight_sending_entry(tmp_path):
         path = tmp_path / "o.sqlite"
         q = OutboundQueue(path=str(path))
         key = await q.enqueue("m1", "telegram:1", {"text": "a"})
-        with q._lock, __import__("contextlib").closing(q._connect()) as conn:
+        with q._lock, closing(q._connect()) as conn:
             conn.execute(
                 "UPDATE outbound_queue SET status = 'sending' WHERE id = ?",
                 (q._extract_id_from_key(key),),
@@ -197,7 +198,7 @@ def test_read_only_does_not_recover_sending_rows(tmp_path):
         path = tmp_path / "o.sqlite"
         q = OutboundQueue(path=str(path))
         key = await q.enqueue("m1", "telegram:1", {"text": "a"})
-        with q._lock, __import__("contextlib").closing(q._connect()) as conn:
+        with q._lock, closing(q._connect()) as conn:
             conn.execute(
                 "UPDATE outbound_queue SET status = 'sending' WHERE id = ?",
                 (q._extract_id_from_key(key),),
@@ -226,7 +227,7 @@ def test_cli_retry_and_purge_do_not_recover_live_sending_rows(tmp_path):
         live = await q.enqueue("m1", "telegram:1", {"text": "a"})
         failed = await q.enqueue("m2", "telegram:1", {"text": "b"})
         gone = await q.enqueue("m3", "telegram:1", {"text": "c"})
-        with q._lock, __import__("contextlib").closing(q._connect()) as conn:
+        with q._lock, closing(q._connect()) as conn:
             conn.execute(
                 "UPDATE outbound_queue SET status = 'sending' WHERE id = ?",
                 (q._extract_id_from_key(live),),
