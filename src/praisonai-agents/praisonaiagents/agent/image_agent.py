@@ -70,8 +70,8 @@ class ImageAgent(Agent):
             api_version=api_version
         )
         
-        # Only an explicit llm= names an image model; the base Agent's chat default must not leak into image calls
-        self._image_llm_set = llm is not None
+        # Only an explicit llm=/model= names an image model; the base Agent's chat default must not leak into image calls
+        self._image_llm_set = llm is not None or kwargs.get("model") is not None
 
         # Lazy load litellm
         self._litellm = None

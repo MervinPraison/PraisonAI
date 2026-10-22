@@ -8,11 +8,12 @@ import pytest
 from praisonaiagents import ImageAgent
 
 
-@pytest.mark.parametrize("llm,expected", [
-    (None, {"generate": "dall-e-3", "edit": "dall-e-2", "variation": "dall-e-2"}),
-    ("openai/gpt-image-1", dict.fromkeys(("generate", "edit", "variation"), "openai/gpt-image-1")),
+@pytest.mark.parametrize("model_kwargs,expected", [
+    ({}, {"generate": "dall-e-3", "edit": "dall-e-2", "variation": "dall-e-2"}),
+    ({"llm": "openai/gpt-image-1"}, dict.fromkeys(("generate", "edit", "variation"), "openai/gpt-image-1")),
+    ({"model": "openai/gpt-image-1"}, dict.fromkeys(("generate", "edit", "variation"), "openai/gpt-image-1")),
 ])
-def test_image_model_resolution(monkeypatch, tmp_path, llm, expected):
+def test_image_model_resolution(monkeypatch, tmp_path, model_kwargs, expected):
     calls = {}
 
     def record(name):
@@ -21,7 +22,7 @@ def test_image_model_resolution(monkeypatch, tmp_path, llm, expected):
             return {"data": []}
         return call
 
-    agent = ImageAgent(instructions="Create images", llm=llm, verbose=False)
+    agent = ImageAgent(instructions="Create images", verbose=False, **model_kwargs)
     monkeypatch.setattr(agent, "_litellm", record("generate"))
     monkeypatch.setitem(sys.modules, "litellm", types.SimpleNamespace(
         image_edit=record("edit"),
