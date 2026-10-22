@@ -16,6 +16,17 @@ from praisonai_code.runtime import server as server_mod
 from praisonai_code.runtime.server import WarmRuntime
 
 
+def _runtime_live_agent(**kwargs):
+    config = {
+        "name": "RuntimeAgent",
+        "role": "Assistant",
+        "goal": "Complete the task",
+        **kwargs,
+    }
+    server_mod._enable_live_control(config)
+    return _LiveAgent(**config)
+
+
 class _LiveAgent:
     """Agent stand-in that runs until interrupted, recording steering it saw."""
 
@@ -140,13 +151,27 @@ def test_enable_live_control_sets_core_seams():
 @pytest.fixture
 def live_server(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
-    import praisonaiagents
-
-    monkeypatch.setattr(praisonaiagents, "Agent", _LiveAgent, raising=False)
+    monkeypatch.setattr(server_mod, "_apply_cold_path_parity", lambda _config: None)
+    monkeypatch.setattr(
+        WarmRuntime,
+        "_get_agent",
+        lambda self, key: _runtime_live_agent(),
+    )
+    monkeypatch.setattr(
+        WarmRuntime,
+        "_get_session_agent",
+        lambda self, session_id, model=None: _runtime_live_agent(),
+    )
+    shutdown = threading.Event()
     t = threading.Thread(
         target=server_mod.serve_runtime,
-        kwargs={"host": "127.0.0.1", "port": 0, "idle_timeout": 0},
-        daemon=True,
+        kwargs={
+            "host": "127.0.0.1",
+            "port": 0,
+            "idle_timeout": 0,
+            "shutdown_event": shutdown,
+        },
+        daemon=False,
     )
     t.start()
     descriptor = None
@@ -156,8 +181,13 @@ def live_server(tmp_path, monkeypatch):
             break
         time.sleep(0.05)
     assert descriptor is not None, "runtime did not start"
-    yield descriptor
-    RuntimeDescriptor.remove()
+    try:
+        yield descriptor
+    finally:
+        shutdown.set()
+        t.join(timeout=10)
+        assert not t.is_alive(), "warm runtime did not shut down after test"
+        RuntimeDescriptor.remove()
 
 
 def test_client_steer_and_interrupt_over_http(live_server):

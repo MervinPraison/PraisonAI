@@ -619,6 +619,7 @@ def serve_runtime(
     model: Optional[str] = None,
     idle_timeout: float = 1800.0,
     project_path: Optional[str] = None,
+    shutdown_event: Optional[threading.Event] = None,
 ) -> None:
     """Start the warm runtime, write the lockfile, and serve until stopped.
 
@@ -628,6 +629,8 @@ def serve_runtime(
         model: Default model for warm agents.
         idle_timeout: Seconds of inactivity before auto-shutdown (``0`` disables).
         project_path: Project root for the lockfile location.
+        shutdown_event: When set, ``serve_runtime`` stops after the event is signaled
+            (used by tests to tear down ``ThreadingHTTPServer`` cleanly).
     """
     runtime = WarmRuntime(model=model)
     token = secrets.token_urlsafe(32)
@@ -649,11 +652,19 @@ def serve_runtime(
     stop_event = threading.Event()
 
     def _idle_watch() -> None:
-        if idle_timeout and idle_timeout > 0:
-            while not stop_event.wait(timeout=min(idle_timeout, 30.0)):
-                if time.time() - runtime.last_activity > idle_timeout:
+        while not stop_event.is_set():
+            if shutdown_event is not None:
+                if shutdown_event.wait(timeout=0.25):
                     httpd.shutdown()
                     return
+                continue
+            if not idle_timeout or idle_timeout <= 0:
+                return
+            if stop_event.wait(timeout=min(idle_timeout, 30.0)):
+                return
+            if time.time() - runtime.last_activity > idle_timeout:
+                httpd.shutdown()
+                return
 
     watcher = threading.Thread(target=_idle_watch, daemon=True)
     watcher.start()
