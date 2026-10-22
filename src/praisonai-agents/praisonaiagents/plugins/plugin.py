@@ -129,6 +129,13 @@ def core_incompatibility(dependencies: List[str]) -> Optional[str]:
         from .._version import __version__ as core_version
     except ImportError:
         return None
+    if core_version == "unknown":
+        # Wheel installs ship no pyproject.toml; read the installed metadata.
+        try:
+            from importlib.metadata import version
+            core_version = version("praisonaiagents")
+        except Exception:
+            return None
 
     # Comma-separated manifest headers split "pkg>=1,<2" into ["pkg>=1", "<2"];
     # rejoin bare specifier fragments onto the preceding requirement.
@@ -146,6 +153,11 @@ def core_incompatibility(dependencies: List[str]) -> Optional[str]:
         except InvalidRequirement:
             continue
         if canonicalize_name(req.name) != "praisonaiagents" or not req.specifier:
+            continue
+        try:
+            if req.marker and not req.marker.evaluate({"extra": ""}):
+                continue  # e.g. "; sys_platform == 'win32'" on another OS
+        except Exception:
             continue
         try:
             ok = req.specifier.contains(Version(core_version), prereleases=True)

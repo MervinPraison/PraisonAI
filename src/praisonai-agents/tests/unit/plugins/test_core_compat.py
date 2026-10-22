@@ -32,6 +32,22 @@ def test_comma_split_header_fragments_are_rejoined():
     assert core_incompatibility(["praisonaiagents>=0.0.1", "<0.0.2"]) is not None
 
 
+def test_environment_markers_are_honoured():
+    import sys
+    other = "win32" if sys.platform != "win32" else "linux"
+    assert core_incompatibility([f"praisonaiagents>=999; sys_platform == '{other}'"]) is None
+    assert core_incompatibility([f"praisonaiagents>=999; sys_platform == '{sys.platform}'"]) is not None
+
+
+def test_unknown_source_version_falls_back_to_installed_metadata(monkeypatch):
+    import importlib.metadata
+    from praisonaiagents import _version
+    monkeypatch.setattr(_version, "__version__", "unknown")
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: "1.0.0")
+    assert core_incompatibility(["praisonaiagents>=999"]) is not None
+    assert core_incompatibility(["praisonaiagents>=1,<2"]) is None
+
+
 def test_register_skips_incompatible_plugin():
     pm = PluginManager()
     assert pm.register(_P(["praisonaiagents>=999"])) is False
