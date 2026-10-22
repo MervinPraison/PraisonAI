@@ -35,6 +35,7 @@ import os
 import logging
 from praisonaiagents._logging import get_logger
 from pathlib import Path
+from ..utils.safe_path import safe_child
 from typing import Any, Dict, List, Optional, Literal
 from dataclasses import dataclass, field
 
@@ -366,7 +367,7 @@ class DocsManager:
             docs_dir = self.workspace_path / self.DOCS_DIR_NAME.replace("/", os.sep)
         
         docs_dir.mkdir(parents=True, exist_ok=True)
-        file_path = docs_dir / f"{name}.md"
+        file_path = safe_child(docs_dir, name, ".md")
         
         # Build frontmatter
         import yaml

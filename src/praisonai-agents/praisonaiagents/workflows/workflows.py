@@ -27,6 +27,7 @@ import time
 import logging
 import collections
 from praisonaiagents._logging import get_logger
+from praisonaiagents.utils.safe_path import safe_child
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Callable, Tuple, Union
 from dataclasses import dataclass, field
@@ -6564,7 +6565,7 @@ class WorkflowManager:
         import json
         from datetime import datetime
         
-        checkpoint_file = self._get_checkpoints_dir() / f"{name}.json"
+        checkpoint_file = safe_child(self._get_checkpoints_dir(), name, ".json")
         
         checkpoint_data = {
             "name": name,
@@ -6599,7 +6600,7 @@ class WorkflowManager:
         """
         import json
         
-        checkpoint_file = self._get_checkpoints_dir() / f"{name}.json"
+        checkpoint_file = safe_child(self._get_checkpoints_dir(), name, ".json")
         
         if not checkpoint_file.exists():
             self._log(f"Checkpoint '{name}' not found")
@@ -6647,7 +6648,7 @@ class WorkflowManager:
         Returns:
             True if deleted successfully
         """
-        checkpoint_file = self._get_checkpoints_dir() / f"{name}.json"
+        checkpoint_file = safe_child(self._get_checkpoints_dir(), name, ".json")
         
         if checkpoint_file.exists():
             checkpoint_file.unlink()

@@ -78,6 +78,13 @@ def test_existing_providers_still_work(model):
     assert create_llm_provider(model) is not None
 
 
+@pytest.mark.parametrize("model", ["groq/llama3-8b-8192", "cohere/command-r"])
+def test_hosted_prefixes_accepted_by_praisonaimodel_are_registered(model):
+    """groq/ and cohere/ work via PraisonAIModel, so the registry must agree."""
+    provider = create_llm_provider(model)
+    assert provider.config.get("provider") == model.split("/", 1)[0]
+
+
 def test_unknown_provider_still_raises():
     """Adding local routes must not turn the registry into a silent accept-all."""
     with pytest.raises(ValueError) as exc:

@@ -18,6 +18,7 @@ Each test here fails on the code as it stood before the accompanying fix:
 from __future__ import annotations
 
 import asyncio
+import re
 import time
 
 import pytest
@@ -406,6 +407,67 @@ class TestGenericRun:
         result = CliRunner().invoke(bot_app, ["run", "--platform", "local"])
         assert result.exit_code == 0
         assert seen == ["local"]
+
+    def test_declared_channel_fields_become_flags(self, clean_env, monkeypatch):
+        """A channel's ``config_fields`` are scriptable flags on ``bot run`` (#5925)."""
+        _StubGenericBot.instances.clear()
+        import praisonai_bot.bots as bots_pkg
+
+        monkeypatch.setattr(bots_pkg, "Bot", _StubGenericBot, raising=False)
+        monkeypatch.setattr(
+            BotHandler, "_load_agent", lambda self, *a, **kw: object()
+        )
+        result = CliRunner().invoke(
+            bot_app,
+            [
+                "run", "--platform", "signal",
+                "--account", "+15551234567",
+                "--bridge-url=http://bridge:8080",
+                "--port", "9000",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        fwd = _StubGenericBot.instances[0].kwargs
+        assert fwd["account"] == "+15551234567"
+        assert fwd["bridge_url"] == "http://bridge:8080"
+        assert fwd["webhook_port"] == 9000
+
+    def test_field_named_like_a_handler_param_reaches_adapter(
+        self, clean_env, monkeypatch
+    ):
+        """A plugin field called ``channel`` must not collide with ``start_generic``."""
+        from praisonaiagents.bots.protocols import ChannelField
+
+        import praisonai_bot.bots as bots_pkg
+        import praisonai_bot.bots._registry as registry
+
+        class _Desc:
+            config_fields = [ChannelField(name="channel")]
+
+        _StubGenericBot.instances.clear()
+        monkeypatch.setattr(registry, "get_platform_descriptor", lambda name: _Desc)
+        monkeypatch.setattr(bots_pkg, "Bot", _StubGenericBot, raising=False)
+        monkeypatch.setattr(
+            BotHandler, "_load_agent", lambda self, *a, **kw: object()
+        )
+        result = CliRunner().invoke(
+            bot_app, ["run", "--platform", "signal", "--channel", "#praison"]
+        )
+        assert result.exit_code == 0, result.output
+        assert _StubGenericBot.instances[0].kwargs["channel"] == "#praison"
+
+    def test_undeclared_channel_flag_is_rejected(self, clean_env, monkeypatch):
+        monkeypatch.setattr(
+            BotHandler,
+            "start_generic",
+            lambda self, *a, **kw: pytest.fail("must not start"),
+        )
+        result = CliRunner().invoke(
+            bot_app, ["run", "--platform", "signal", "--server", "x"]
+        )
+        assert result.exit_code == 2
+        plain = re.sub(r"\x1b\[[0-9;]*m|[\s│]", "", result.output)
+        assert "--server" in plain and "--account" in plain
 
     def test_bot_start_does_not_silently_no_op_on_a_verbless_platform(
         self, clean_env, tmp_path
