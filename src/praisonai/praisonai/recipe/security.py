@@ -486,7 +486,7 @@ def audit_dependencies(
         if vulns:
             report["passed"] = False
         if scan_error:
-            report["warnings"].append(f"Vulnerability scan did not run: {scan_error}")
+            report["warnings"].append(f"Vulnerability scan incomplete: {scan_error}")
     
     # Check for outdated dependencies
     outdated = _check_outdated(deps)
@@ -558,7 +558,10 @@ def _check_vulnerabilities(
         return [], f"pip-audit failed (exit {result.returncode}): {result.stderr.strip()[:200]}"
 
     vulns = []
+    skipped = []
     for dep in audit_data.get("dependencies", []):
+        if dep.get("skip_reason"):
+            skipped.append(f"{dep.get('name')}: {dep['skip_reason']}")
         for vuln in dep.get("vulns", []):
             vulns.append({
                 "package": dep.get("name"),
@@ -567,7 +570,8 @@ def _check_vulnerabilities(
                 "description": vuln.get("description"),
                 "fix_versions": vuln.get("fix_versions", []),
             })
-    return vulns, None
+    # Packages pip-audit could not check (e.g. private/not on PyPI) are not clean.
+    return vulns, ("skipped " + "; ".join(skipped)) if skipped else None
 
 
 def _check_outdated(deps: List[Dict[str, str]]) -> List[Dict[str, str]]:

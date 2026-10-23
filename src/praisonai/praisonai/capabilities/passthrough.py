@@ -5,7 +5,7 @@ Provides generic API passthrough functionality for provider-specific endpoints.
 """
 
 from dataclasses import dataclass, field
-from typing import Optional, Any, Dict, Tuple
+from typing import Optional, Any, Dict, List, Tuple
 import asyncio
 import threading
 import weakref
@@ -154,16 +154,31 @@ class PassthroughResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
-def _validate_api_base(url: str) -> str:
+def _validate_api_base(url: str) -> List[str]:
     """Validate api_base URL to prevent SSRF attacks.
 
     Resolves the hostname and screens every A/AAAA record so names like
     ``localhost`` or DNS entries pointing at internal addresses are rejected.
+    Returns the screened public IPs so the caller can pin the connection.
     """
     from ..jobs.models import _resolve_and_screen_webhook_host
 
-    _resolve_and_screen_webhook_host(url, label="api_base URL")
-    return url
+    return _resolve_and_screen_webhook_host(url, label="api_base URL")
+
+
+def _build_request(client: Any, method: str, url: str, safe_ips: Optional[List[str]], **kwargs) -> Any:
+    """Build an httpx request, pinning the connect host to a screened IP.
+
+    Pinning stops a DNS re-resolution at connect time from swapping the
+    validated public address for an internal one (DNS rebinding). Host header
+    and TLS SNI keep the original hostname, mirroring webhook delivery.
+    """
+    request = client.build_request(method, url, **kwargs)
+    if safe_ips:
+        request.headers.setdefault("Host", request.url.netloc.decode("ascii"))
+        request.extensions["sni_hostname"] = request.url.host
+        request.url = request.url.copy_with(host=safe_ips[0])
+    return request
 
 
 def passthrough(
@@ -248,19 +263,18 @@ def passthrough(
         )
     except AttributeError:
         # Fallback to a shared httpx client if the passthrough route is missing.
-        url = f"{_validate_api_base(api_base) if api_base else 'https://api.openai.com'}{endpoint}"
+        safe_ips = _validate_api_base(api_base) if api_base else None
+        url = f"{api_base or 'https://api.openai.com'}{endpoint}"
         request_headers = headers or {}
         if api_key:
             request_headers['Authorization'] = f"Bearer {api_key}"
         
-        response = _get_sync_client().request(
-            method=method,
-            url=url,
-            headers=request_headers,
-            json=json_data,
-            data=data,
-            timeout=timeout,
+        client = _get_sync_client()
+        request = _build_request(
+            client, method, url, safe_ips,
+            headers=request_headers, json=json_data, data=data, timeout=timeout,
         )
+        response = client.send(request, follow_redirects=False)
         
         return PassthroughResult(
             data=response.json() if response.headers.get('content-type', '').startswith('application/json') else response.text,
@@ -327,19 +341,19 @@ async def apassthrough(
             metadata=metadata or {},
         )
     except AttributeError:
-        url = f"{_validate_api_base(api_base) if api_base else 'https://api.openai.com'}{endpoint}"
+        # DNS resolution blocks; keep it off the event loop.
+        safe_ips = await asyncio.to_thread(_validate_api_base, api_base) if api_base else None
+        url = f"{api_base or 'https://api.openai.com'}{endpoint}"
         request_headers = headers or {}
         if api_key:
             request_headers['Authorization'] = f"Bearer {api_key}"
         
-        response = await _get_async_client().request(
-            method=method,
-            url=url,
-            headers=request_headers,
-            json=json_data,
-            data=data,
-            timeout=timeout,
+        client = _get_async_client()
+        request = _build_request(
+            client, method, url, safe_ips,
+            headers=request_headers, json=json_data, data=data, timeout=timeout,
         )
+        response = await client.send(request, follow_redirects=False)
         
         return PassthroughResult(
             data=response.json() if response.headers.get('content-type', '').startswith('application/json') else response.text,
