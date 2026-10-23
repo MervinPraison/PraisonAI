@@ -90,3 +90,60 @@ def test_execute_hook_awaits_async_hook_sync_and_async_paths():
     }
     out = asyncio.run(mgr.async_execute_hook(PluginHook.BEFORE_TOOL, "bash", {"a": 1}))
     assert out == {"a": 1, "injected": True}
+
+
+class AsyncLifecyclePlugin(Plugin):
+    def __init__(self):
+        self.calls = []
+
+    @property
+    def info(self):
+        return PluginInfo(name="async_lifecycle")
+
+    async def on_init(self, context):
+        await asyncio.sleep(0)
+        self.calls.append("init")
+
+    async def on_config(self, config):
+        await asyncio.sleep(0)
+        self.calls.append(("config", config))
+        return config
+
+    async def on_shutdown(self):
+        await asyncio.sleep(0)
+        self.calls.append("shutdown")
+
+
+def test_async_lifecycle_callbacks_are_awaited():
+    plugin = AsyncLifecyclePlugin()
+    mgr = PluginManager()
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", RuntimeWarning)
+        assert mgr.register(plugin)
+        mgr.enable("async_lifecycle")
+        mgr.set_plugin_options({"async_lifecycle": {"k": 1}})
+        assert mgr.apply_plugin_options() == 1
+        assert mgr.unregister("async_lifecycle")
+    assert plugin.calls == ["init", ("config", {"k": 1}), "shutdown"]
+
+
+def test_hung_async_hook_is_cancelled_at_deadline(monkeypatch):
+    from praisonaiagents.plugins import manager as manager_mod
+
+    monkeypatch.setattr(manager_mod, "_ASYNC_HOOK_TIMEOUT", 0.05)
+    cancelled = []
+
+    async def hang():
+        try:
+            await asyncio.sleep(10)
+        except asyncio.CancelledError:
+            cancelled.append(True)
+            raise
+
+    start = time.time()
+    try:
+        manager_mod._resolve_awaitable(hang())
+    except (TimeoutError, asyncio.TimeoutError):
+        pass
+    assert time.time() - start < 2
+    assert cancelled == [True]

@@ -262,11 +262,10 @@ class PluginManager:
                 if self._enabled.get(name, False) and name in self._plugin_options
             ]
         for name, plugin, options in targets:
-            on_config = getattr(plugin, "on_config", None)
-            if not callable(on_config):
+            if not callable(getattr(plugin, "on_config", None)):
                 continue
             try:
-                on_config(options)
+                _ResolvingPlugin(plugin).on_config(options)
                 delivered += 1
             except Exception as e:
                 logger.warning(f"Plugin '{name}' on_config failed: {e}")
@@ -298,7 +297,7 @@ class PluginManager:
                 self._enabled[info.name] = self._default_enabled_for_registration(info.name)
                 
                 # Initialize plugin
-                plugin.on_init({})
+                _ResolvingPlugin(plugin).on_init({})
 
                 # Make the initialization observable to the hook system
                 # too. ``plugin.on_init`` is the plugin's *own* callback;
@@ -331,7 +330,7 @@ class PluginManager:
             self._enabled.pop(name, None)
 
         try:
-            plugin.on_shutdown()
+            _ResolvingPlugin(plugin).on_shutdown()
         except Exception as e:
             logger.warning(f"Error during plugin shutdown: {e}")
 
@@ -1014,17 +1013,23 @@ def _emit_plugin_lifecycle(event: "HookEvent", plugin: Plugin) -> None:
         logger.debug("Plugin lifecycle hook failed", exc_info=True)
 
 
+# Deadline for an ``async def`` plugin hook; matches HookRunner's default
+# per-hook timeout so a hung hook is cancelled and frees its worker thread.
+_ASYNC_HOOK_TIMEOUT = 60.0
+
+
 def _resolve_awaitable(value: Any) -> Any:
     """Drive a coroutine returned by an ``async def`` plugin hook to completion.
 
     Hook adapters run on the HookRunner's worker thread (no running loop), so
     the coroutine runs on a private loop there; from a thread with a running
-    loop the shared bridge offloads it instead of deadlocking. Sync hook
-    return values pass through unchanged.
+    loop the shared bridge offloads it instead of deadlocking. The coroutine is
+    bounded by ``_ASYNC_HOOK_TIMEOUT``. Sync hook return values pass through
+    unchanged.
     """
     if asyncio.iscoroutine(value):
         from ..utils.async_bridge import run_coroutine_from_any_context
-        return run_coroutine_from_any_context(value, timeout=None)
+        return run_coroutine_from_any_context(value, timeout=_ASYNC_HOOK_TIMEOUT)
     return value
 
 
