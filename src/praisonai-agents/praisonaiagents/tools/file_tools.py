@@ -511,16 +511,22 @@ class FileTools:
             max_bytes = int(os.environ.get("PRAISONAI_MAX_DOWNLOAD_BYTES", _DEFAULT_MAX_DOWNLOAD_BYTES))
 
             # Create directory if needed
-            os.makedirs(os.path.dirname(safe_path) or ".", exist_ok=True)
+            dest_dir = os.path.dirname(safe_path) or "."
+            os.makedirs(dest_dir, exist_ok=True)
 
-            # Download file
-            with httpx.stream("GET", url, timeout=timeout, follow_redirects=False) as response:
-                response.raise_for_status()
+            # Download into a temp file next to the destination and only
+            # replace the destination on success, so a failed or oversized
+            # download never clobbers an existing file.
+            import tempfile
+            fd, tmp_path = tempfile.mkstemp(dir=dest_dir, suffix=".part")
+            try:
+                with os.fdopen(fd, "wb") as f, \
+                        httpx.stream("GET", url, timeout=timeout, follow_redirects=False) as response:
+                    response.raise_for_status()
 
-                total_size = int(response.headers.get("content-length", 0))
-                downloaded = 0
+                    total_size = int(response.headers.get("content-length", 0))
+                    downloaded = 0
 
-                with open(safe_path, "wb") as f:
                     for chunk in response.iter_bytes(chunk_size=8192):
                         downloaded += len(chunk)
                         if downloaded > max_bytes:
@@ -531,12 +537,15 @@ class FileTools:
                             progress_callback(downloaded, total_size)
 
                 if downloaded > max_bytes:
-                    os.unlink(safe_path)
                     return {
                         "success": False, "path": "", "size": 0,
                         "error": f"Download exceeds {max_bytes} bytes"
                     }
-            
+                os.replace(tmp_path, safe_path)
+            finally:
+                if os.path.exists(tmp_path):
+                    os.unlink(tmp_path)
+
             return {
                 "success": True,
                 "path": safe_path,

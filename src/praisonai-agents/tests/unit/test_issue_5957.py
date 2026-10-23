@@ -106,3 +106,34 @@ def test_download_file_enforces_byte_cap(file_tools, tmp_path, monkeypatch):
     assert not result["success"]
     assert "exceeds" in result["error"]
     assert not (tmp_path / "big.bin").exists()
+
+
+def _stream_ctx(chunks):
+    response = MagicMock()
+    response.headers = {}
+    response.iter_bytes.return_value = iter(chunks)
+    ctx = MagicMock()
+    ctx.__enter__.return_value = response
+    return ctx
+
+
+def test_download_file_cap_keeps_existing_file(file_tools, tmp_path, monkeypatch):
+    monkeypatch.setenv("PRAISONAI_MAX_DOWNLOAD_BYTES", "10000")
+    (tmp_path / "keep.bin").write_bytes(b"original")
+    with patch.object(url_safety.socket, "getaddrinfo", return_value=_addrinfo("93.184.216.34")), \
+            patch("httpx.stream", return_value=_stream_ctx([b"x" * 8192] * 10)):
+        result = file_tools.download_file("https://example.com/big", "keep.bin")
+    assert not result["success"]
+    assert (tmp_path / "keep.bin").read_bytes() == b"original"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["keep.bin"]
+
+
+def test_download_file_success_replaces_destination(file_tools, tmp_path):
+    (tmp_path / "out.bin").write_bytes(b"old")
+    with patch.object(url_safety.socket, "getaddrinfo", return_value=_addrinfo("93.184.216.34")), \
+            patch("httpx.stream", return_value=_stream_ctx([b"new", b"data"])):
+        result = file_tools.download_file("https://example.com/f", "out.bin")
+    assert result["success"]
+    assert result["size"] == 7
+    assert (tmp_path / "out.bin").read_bytes() == b"newdata"
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["out.bin"]
