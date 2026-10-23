@@ -9,10 +9,61 @@ Provides uniform error semantics for consistent handling across:
 - External integrations
 """
 
-from typing import Literal, Protocol, runtime_checkable, Optional, Dict, Any, get_args
+from typing import Literal, Protocol, runtime_checkable, Optional, Dict, Any, Sequence, get_args
 from dataclasses import dataclass, field
+import os
+import re
 import uuid
 import warnings
+
+_API_KEY_TOKEN_PATTERN = re.compile(r"\bsk-[A-Za-z0-9_\-]{12,}\b")
+_SECRET_ENV_VARS = (
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GOOGLE_API_KEY",
+    "GEMINI_API_KEY",
+    "GROQ_API_KEY",
+    "MISTRAL_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "OPENROUTER_API_KEY",
+    "XAI_API_KEY",
+    "COHERE_API_KEY",
+    "AZURE_OPENAI_API_KEY",
+)
+
+
+def sanitize_llm_error_message(
+    message: str,
+    *,
+    extra_secrets: Optional[Sequence[Optional[str]]] = None,
+    preserve_tokens: Optional[Sequence[Optional[str]]] = None,
+) -> str:
+    """Redact API keys and credential literals from an LLM error message."""
+    if not message:
+        return message
+    text = str(message)
+    try:
+        from .trace.redact import redact_string
+        text = redact_string(text, enabled=True)
+    except Exception:
+        pass
+    text = _API_KEY_TOKEN_PATTERN.sub("[REDACTED]", text)
+
+    preserved = {t for t in (preserve_tokens or ()) if t}
+    candidates = []
+    if extra_secrets:
+        candidates.extend(extra_secrets)
+    for env_name in _SECRET_ENV_VARS:
+        candidates.append(os.environ.get(env_name))
+    for secret in candidates:
+        if (
+            isinstance(secret, str)
+            and len(secret) >= 6
+            and secret not in preserved
+            and secret in text
+        ):
+            text = text.replace(secret, "[REDACTED]")
+    return text
 
 
 # Closed error taxonomy for typed failure classification
@@ -167,19 +218,34 @@ class LLMError(PraisonAIError):
         run_id: Optional[str] = None,
         error_category: AgentErrorKind = "unknown",
         is_retryable: bool = False,  # Default to non-retryable unless specified
-        context: Optional[Dict[str, Any]] = None
+        context: Optional[Dict[str, Any]] = None,
+        extra_secrets: Optional[Sequence[Optional[str]]] = None,
     ):
+        model_str = str(model_name) if model_name else "unknown"
+        sanitized_message = sanitize_llm_error_message(
+            str(message),
+            extra_secrets=extra_secrets,
+            preserve_tokens=(model_str,),
+        )
         context = context or {}
-        context["model_name"] = model_name
+        context["model_name"] = model_str
         super().__init__(
-            message, 
-            agent_id=agent_id, 
-            run_id=run_id, 
+            sanitized_message,
+            agent_id=agent_id or "unknown",
+            run_id=run_id,
             error_category=error_category,
             is_retryable=is_retryable,
-            context=context
+            context=context,
         )
-        self.model_name = model_name
+        self.model_name = model_str
+
+    def __str__(self) -> str:
+        if self.model_name and self.model_name != "unknown":
+            return (
+                f"[{self.error_category}] {self.message} "
+                f"(model: {self.model_name}, agent: {self.agent_id}, run: {self.run_id})"
+            )
+        return super().__str__()
 
 
 class BudgetExceededError(PraisonAIError):
@@ -471,5 +537,6 @@ __all__ = [
     "HandoffDepthError", 
     "HandoffTimeoutError",
     "HandoffValidationError",
-    "PraisonAIConfigError"
+    "PraisonAIConfigError",
+    "sanitize_llm_error_message",
 ]

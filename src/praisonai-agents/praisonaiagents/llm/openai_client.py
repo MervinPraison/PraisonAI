@@ -1465,8 +1465,12 @@ class OpenAIClient:
             status = raw.get("status") if isinstance(raw, dict) else getattr(raw, "status", None)
             if status == "failed":
                 raise
-            self.logger.error(f"Error in stream processing: {e}")
-            return None
+            from ..errors import sanitize_llm_error_message
+            self.logger.error(
+                f"Error in stream processing: "
+                f"{sanitize_llm_error_message(str(e), extra_secrets=(self.api_key,), preserve_tokens=(model,))}"
+            )
+            raise
     
     async def process_stream_response_async(
         self,
@@ -1738,8 +1742,12 @@ class OpenAIClient:
             status = raw.get("status") if isinstance(raw, dict) else getattr(raw, "status", None)
             if status == "failed":
                 raise
-            self.logger.error(f"Error in async stream processing: {e}")
-            return None
+            from ..errors import sanitize_llm_error_message
+            self.logger.error(
+                f"Error in async stream processing: "
+                f"{sanitize_llm_error_message(str(e), extra_secrets=(self.api_key,), preserve_tokens=(model,))}"
+            )
+            raise
 
     def _track_token_usage(self, response: Any, model: str, agent_name: Optional[str] = None) -> None:
         """Record token usage from a response into the global collector.
