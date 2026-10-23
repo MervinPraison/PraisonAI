@@ -44,6 +44,8 @@ from ._commands import (
     build_command_access_policy,
 )
 from ._failure import failure_reply_text
+from ._group_policy import decide_group_admission, record_passive_group_message
+from praisonaiagents.bots.admission import MentionFacts
 from ._session import BotSessionManager
 from ._streaming import (
     StreamingConfig,
@@ -451,12 +453,21 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 # Slack reference adapter so a misspelled or not-yet-implemented
                 # command reaches the agent instead of vanishing (Issue #4318).
             
-            should_respond = False
-            if message.guild is None:
-                should_respond = True
-            elif self._client.user.mentioned_in(message) or not self.config.mention_required:
-                should_respond = True
-            
+            # Issue #5962: shared group_policy decision (same as Telegram),
+            # including reply-to-bot as an implicit mention and ``observe``.
+            admission = decide_group_admission(
+                self.config,
+                chat_type="dm" if message.guild is None else "group",
+                mention=MentionFacts(
+                    explicit=self._client.user.mentioned_in(message),
+                    reply_to_bot=self._is_reply_to_bot(message),
+                ),
+                is_command=bot_message.message_type == MessageType.COMMAND,
+            )
+            should_respond = admission.admit
+            if admission.observe:
+                record_passive_group_message(self, bot_message)
+
             if should_respond:
                 for handler in self._message_handlers:
                     try:
@@ -805,6 +816,20 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 display = f"{guild_name}/{ch_name}" if guild_name else ch_name
                 out.append(ChannelRef(id=ch_id, name=display, type="channel"))
         return out
+
+    def _is_reply_to_bot(self, message) -> bool:
+        """Whether a Discord message replies to one of the bot's own messages.
+
+        Issue #5029/#5962: tapping "Reply" on the bot's answer is an implicit
+        mention. Best-effort: an unresolved reference means "not a reply".
+        """
+        try:
+            ref = getattr(message, "reference", None)
+            replied = getattr(ref, "resolved", None) or getattr(ref, "cached_message", None)
+            author = getattr(replied, "author", None)
+            return author is not None and author.id == self._client.user.id
+        except Exception:  # pragma: no cover — defensive
+            return False
 
     async def _send_long_message(self, channel, text: str, reference=None) -> None:
         """Send a long message, splitting with markdown-aware chunking."""
