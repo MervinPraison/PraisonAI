@@ -180,3 +180,26 @@ def test_async_on_init_can_call_back_into_manager_from_running_loop(monkeypatch)
     elapsed = asyncio.run(main())
     assert plugin.seen is True
     assert elapsed < 1.5
+
+
+def test_failed_async_on_init_rolls_back_registration():
+    """A plugin whose on_init fails is not left half-registered."""
+    mgr = PluginManager()
+
+    class FailingInitPlugin(Plugin):
+        @property
+        def info(self):
+            return PluginInfo(name="failing_init")
+
+        async def on_init(self, context):
+            raise RuntimeError("boom")
+
+    assert mgr.register(FailingInitPlugin()) is False
+    assert mgr.get_plugin("failing_init") is None
+
+    class FixedInitPlugin(FailingInitPlugin):
+        async def on_init(self, context):
+            return None
+
+    # A retry is not rejected as "already registered".
+    assert mgr.register(FixedInitPlugin()) is True

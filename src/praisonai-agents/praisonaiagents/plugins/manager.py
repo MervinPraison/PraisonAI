@@ -315,8 +315,13 @@ class PluginManager:
             return True
         except Exception as e:
             logger.error(f"Failed to register plugin: {e}")
+            # Roll back so a failed plugin is not left half-registered.
+            with self._lock:
+                if self._plugins.get(info.name) is plugin:
+                    del self._plugins[info.name]
+                    self._enabled.pop(info.name, None)
             return False
-    
+
     def unregister(self, name: str) -> bool:
         """
         Unregister a plugin.
