@@ -29,6 +29,10 @@ DEFAULT_MAX_LINES = 2000
 # cannot dominate the window.
 DEFAULT_MAX_LINE_CHARS = 2000
 
+# Default byte cap for ``download_file`` so an endless or oversized response
+# cannot fill the disk. Override with PRAISONAI_MAX_DOWNLOAD_BYTES.
+_DEFAULT_MAX_DOWNLOAD_BYTES = 100 * 1024 * 1024
+
 
 def _render_with_line_numbers(lines, start_index, max_line_chars):
     """Render ``lines`` with a right-aligned 1-based line-number gutter.
@@ -485,57 +489,51 @@ class FileTools:
             # Validate destination path
             safe_path = self._validate_path(destination)
             
-            # Validate URL to prevent SSRF
+            # Validate URL to prevent SSRF (shared guard used by all HTTP tools)
             from urllib.parse import urlparse
-            import ipaddress
-            import socket
-            
+            from .url_safety import is_safe_http_url
+
             parsed = urlparse(url)
             if parsed.scheme not in ("http", "https"):
                 return {
                     "success": False, "path": "", "size": 0,
                     "error": f"Unsupported URL scheme: {parsed.scheme}. Only http/https allowed."
                 }
-            
-            hostname = parsed.hostname or ""
-            # Resolve hostname and check for private/reserved IPs
-            try:
-                resolved = socket.getaddrinfo(hostname, parsed.port or 443)
-                for family, _, _, _, sockaddr in resolved:
-                    addr = ipaddress.ip_address(sockaddr[0])
-                    if addr.is_private or addr.is_loopback or addr.is_reserved or addr.is_link_local:
-                        return {
-                            "success": False, "path": "", "size": 0,
-                            "error": f"Access to private/internal addresses is blocked: {hostname}"
-                        }
-            except (socket.gaierror, ValueError):
-                pass  # Let httpx handle DNS failures naturally
-            
-            # Block cloud metadata endpoints
-            _blocked_hosts = {"169.254.169.254", "metadata.google.internal", "metadata.google.com"}
-            if hostname in _blocked_hosts:
+
+            if not is_safe_http_url(url):
                 return {
                     "success": False, "path": "", "size": 0,
-                    "error": f"Access to metadata service is blocked: {hostname}"
+                    "error": f"Access to private/internal addresses is blocked: {parsed.hostname or ''}"
                 }
-            
+
+            max_bytes = int(os.environ.get("PRAISONAI_MAX_DOWNLOAD_BYTES", _DEFAULT_MAX_DOWNLOAD_BYTES))
+
             # Create directory if needed
             os.makedirs(os.path.dirname(safe_path) or ".", exist_ok=True)
-            
+
             # Download file
             with httpx.stream("GET", url, timeout=timeout, follow_redirects=False) as response:
                 response.raise_for_status()
-                
+
                 total_size = int(response.headers.get("content-length", 0))
                 downloaded = 0
-                
+
                 with open(safe_path, "wb") as f:
                     for chunk in response.iter_bytes(chunk_size=8192):
-                        f.write(chunk)
                         downloaded += len(chunk)
-                        
+                        if downloaded > max_bytes:
+                            break
+                        f.write(chunk)
+
                         if progress_callback and total_size:
                             progress_callback(downloaded, total_size)
+
+                if downloaded > max_bytes:
+                    os.unlink(safe_path)
+                    return {
+                        "success": False, "path": "", "size": 0,
+                        "error": f"Download exceeds {max_bytes} bytes"
+                    }
             
             return {
                 "success": True,
