@@ -147,3 +147,36 @@ def test_hung_async_hook_is_cancelled_at_deadline(monkeypatch):
         pass
     assert time.time() - start < 2
     assert cancelled == [True]
+
+
+def test_async_on_init_can_call_back_into_manager_from_running_loop(monkeypatch):
+    """register() must not hold the manager lock while async on_init runs."""
+    from praisonaiagents.plugins import manager as manager_mod
+
+    # A deadlock would otherwise only surface after the 60s deadline.
+    monkeypatch.setattr(manager_mod, "_ASYNC_HOOK_TIMEOUT", 2.0)
+    mgr = PluginManager()
+
+    class ReentrantInitPlugin(Plugin):
+        seen = None
+
+        @property
+        def info(self):
+            return PluginInfo(name="reentrant_init")
+
+        async def on_init(self, context):
+            await asyncio.sleep(0)
+            # Bridged onto another thread when called from a running loop.
+            # enable() takes the manager lock.
+            self.seen = mgr.enable("reentrant_init")
+
+    plugin = ReentrantInitPlugin()
+
+    async def main():
+        start = time.monotonic()
+        assert mgr.register(plugin) is True
+        return time.monotonic() - start
+
+    elapsed = asyncio.run(main())
+    assert plugin.seen is True
+    assert elapsed < 1.5

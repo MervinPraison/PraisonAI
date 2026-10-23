@@ -295,22 +295,27 @@ class PluginManager:
 
                 self._plugins[info.name] = plugin
                 self._enabled[info.name] = self._default_enabled_for_registration(info.name)
-                
-                # Initialize plugin
-                _ResolvingPlugin(plugin).on_init({})
-
-                # Make the initialization observable to the hook system
-                # too. ``plugin.on_init`` is the plugin's *own* callback;
-                # ON_INIT is the runtime event other listeners
-                # (metrics/audit plugins, gateways) subscribe to. Without
-                # this emit the enum member was declared but never fired.
-                _emit_plugin_init(plugin)
-                
-                logger.info(f"Registered plugin: {info.name} v{info.version}")
-                return True
             except Exception as e:
                 logger.error(f"Failed to register plugin: {e}")
                 return False
+
+        # Initialize outside the lock: an ``async def on_init`` may run on
+        # another thread and call back into this manager.
+        try:
+            _ResolvingPlugin(plugin).on_init({})
+
+            # Make the initialization observable to the hook system
+            # too. ``plugin.on_init`` is the plugin's *own* callback;
+            # ON_INIT is the runtime event other listeners
+            # (metrics/audit plugins, gateways) subscribe to. Without
+            # this emit the enum member was declared but never fired.
+            _emit_plugin_init(plugin)
+            
+            logger.info(f"Registered plugin: {info.name} v{info.version}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to register plugin: {e}")
+            return False
     
     def unregister(self, name: str) -> bool:
         """
@@ -844,21 +849,20 @@ class PluginManager:
                 return 0
 
         loaded = 0
-        # Use lock to ensure thread-safe discovery of multiple entry points.
-        # register() also acquires the lock but that's fine (RLock allows re-entry).
-        with self._lock:
-            for ep in entry_points:
-                try:
-                    plugin_cls = ep.load()
-                    if callable(plugin_cls):
-                        plugin = plugin_cls()
-                        if self.register(plugin):
-                            loaded += 1
-                            logger.info(f"Loaded entry_point plugin: {ep.name}")
-                    else:
-                        logger.warning(f"Entry point {ep.name} is not callable")
-                except Exception as e:
-                    logger.error(f"Failed to load plugin from entry point {ep.name}: {e}")
+        # register() is thread-safe on its own; holding the lock here would
+        # keep it held while a plugin's (possibly async) on_init runs.
+        for ep in entry_points:
+            try:
+                plugin_cls = ep.load()
+                if callable(plugin_cls):
+                    plugin = plugin_cls()
+                    if self.register(plugin):
+                        loaded += 1
+                        logger.info(f"Loaded entry_point plugin: {ep.name}")
+                else:
+                    logger.warning(f"Entry point {ep.name} is not callable")
+            except Exception as e:
+                logger.error(f"Failed to load plugin from entry point {ep.name}: {e}")
 
         return loaded
 
