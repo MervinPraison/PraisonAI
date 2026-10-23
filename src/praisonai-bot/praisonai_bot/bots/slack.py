@@ -696,7 +696,9 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                         and event.get("parent_user_id") == self._bot_user.user_id
                     ),
                 ),
-                is_command=bot_message.message_type == MessageType.COMMAND,
+                # Slack message events are always converted as TEXT, so detect
+                # an (unhandled) slash command from the text itself.
+                is_command=text.lstrip().startswith("/"),
             )
             should_respond = admission.admit
             if admission.observe:
@@ -855,6 +857,18 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             text = (decision.get("content") or "").strip()
             if self._bot_user:
                 text = text.replace(f"<@{self._bot_user.user_id}>", "").strip()
+
+            # Issue #5962: an @mention still honours group_policy (e.g.
+            # ``command_only`` must not run the agent for a plain mention).
+            admission = decide_group_admission(
+                self.config,
+                chat_type="dm" if event.get("channel_type") == "im" else "group",
+                mention=MentionFacts(explicit=True),
+                is_command=text.startswith("/"),
+            )
+            if not admission.admit:
+                logger.debug(f"@mention not run: {admission.reason_code}")
+                return
 
             if self._agent:
                 try:

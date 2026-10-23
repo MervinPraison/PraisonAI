@@ -74,3 +74,84 @@ def test_discord_is_reply_to_bot():
     assert bot._is_reply_to_bot(reply) is True
     assert bot._is_reply_to_bot(other) is False
     assert bot._is_reply_to_bot(SimpleNamespace(reference=None)) is False
+
+
+# --- Slack adapter: app_mention + slash-text honour group_policy -----------
+
+
+def _slack_handlers(monkeypatch, policy):
+    """Start a SlackBot against stub slack_bolt modules; return event handlers."""
+    import asyncio
+    import sys
+    from unittest.mock import AsyncMock
+
+    from praisonai_bot.bots.slack import SlackBot
+
+    events = {}
+
+    class _App:
+        def __init__(self, *a, **k):
+            pass
+
+        def event(self, name):
+            def deco(fn):
+                events[name] = fn
+                return fn
+            return deco
+
+        def __getattr__(self, _name):
+            return lambda *a, **k: (lambda fn: fn)
+
+    client = MagicMock()
+    client.auth_test = AsyncMock(return_value={"user_id": "UBOT", "user": "bot"})
+    stubs = {
+        "slack_bolt": MagicMock(),
+        "slack_bolt.async_app": SimpleNamespace(AsyncApp=_App),
+        "slack_bolt.adapter": MagicMock(),
+        "slack_bolt.adapter.socket_mode": MagicMock(),
+        "slack_bolt.adapter.socket_mode.async_handler": MagicMock(),
+        "slack_sdk": MagicMock(),
+        "slack_sdk.web": MagicMock(),
+        "slack_sdk.web.async_client": SimpleNamespace(AsyncWebClient=lambda **k: client),
+    }
+    for name, mod in stubs.items():
+        monkeypatch.setitem(sys.modules, name, mod)
+
+    cfg = _cfg(group_policy=policy, allowed_users=["U1"])
+    bot = SlackBot(token="t", agent=MagicMock(), config=cfg)
+    asyncio.run(bot.start())
+    bot._session = MagicMock()
+    bot._session.chat = AsyncMock(return_value="ok")
+    bot._maybe_stream_reply = AsyncMock(return_value=None)
+    bot._send_response_with_media = AsyncMock()
+    return bot, events
+
+
+def _run(handler, event):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    asyncio.run(handler(event, AsyncMock()))
+
+
+def test_slack_app_mention_respects_command_only(monkeypatch):
+    bot, events = _slack_handlers(monkeypatch, "command_only")
+    _run(events["app_mention"], {"user": "U1", "channel": "C1", "ts": "1.0", "text": "<@UBOT> hello"})
+    bot._session.chat.assert_not_called()
+
+
+def test_slack_app_mention_runs_under_mention_only(monkeypatch):
+    bot, events = _slack_handlers(monkeypatch, "mention_only")
+    _run(events["app_mention"], {"user": "U1", "channel": "C1", "ts": "1.0", "text": "<@UBOT> hello"})
+    bot._session.chat.assert_called_once()
+
+
+def test_slack_unhandled_slash_text_is_a_command(monkeypatch):
+    bot, events = _slack_handlers(monkeypatch, "command_only")
+    bot._debouncer = SimpleNamespace(debounce=lambda _u, t: asyncio_done(t))
+    _run(events["message"], {"user": "U1", "channel": "C1", "channel_type": "channel", "ts": "1.0", "text": "/deploy prod"})
+    bot._session.chat.assert_called_once()
+
+
+async def asyncio_done(value):
+    return value
