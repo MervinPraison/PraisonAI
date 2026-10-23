@@ -542,7 +542,8 @@ class PluginManager:
                 continue
             
             try:
-                method = getattr(plugin, hook.value, None)
+                # Resolving view: an ``async def`` hook is awaited, not dropped.
+                method = getattr(_ResolvingPlugin(plugin), hook.value, None)
                 if method:
                     if hook == PluginHook.BEFORE_TOOL:
                         result = method(args[0], args[1] if len(args) > 1 else {})
@@ -1013,6 +1014,38 @@ def _emit_plugin_lifecycle(event: "HookEvent", plugin: Plugin) -> None:
         logger.debug("Plugin lifecycle hook failed", exc_info=True)
 
 
+def _resolve_awaitable(value: Any) -> Any:
+    """Drive a coroutine returned by an ``async def`` plugin hook to completion.
+
+    Hook adapters run on the HookRunner's worker thread (no running loop), so
+    the coroutine runs on a private loop there; from a thread with a running
+    loop the shared bridge offloads it instead of deadlocking. Sync hook
+    return values pass through unchanged.
+    """
+    if asyncio.iscoroutine(value):
+        from ..utils.async_bridge import run_coroutine_from_any_context
+        return run_coroutine_from_any_context(value, timeout=None)
+    return value
+
+
+class _ResolvingPlugin:
+    """View of a plugin whose method calls resolve ``async def`` hooks."""
+
+    __slots__ = ("_plugin",)
+
+    def __init__(self, plugin: Plugin):
+        self._plugin = plugin
+
+    def __getattr__(self, name: str) -> Any:
+        attr = getattr(self._plugin, name)
+        if not callable(attr):
+            return attr
+
+        def call(*args, **kwargs):
+            return _resolve_awaitable(attr(*args, **kwargs))
+        return call
+
+
 def _write_back(data, attr: str, new_value: dict) -> None:
     """Write a plugin's returned dict back onto the hook payload.
 
@@ -1049,6 +1082,9 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
     from .plugin import GuardrailBlocked, PluginDecision
 
     base = Plugin
+    # Adapters call the plugin through this view so ``async def`` hooks are
+    # awaited instead of returning an unawaited coroutine.
+    resolving_plugin = _ResolvingPlugin(plugin)
 
     def _as_decision(result: Any) -> Optional[HookResult]:
         """Coerce a plugin's return value into a denying ``HookResult``.
@@ -1086,7 +1122,7 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
         return HookResult.allow()
 
     if _overrides("before_agent"):
-        def before_agent_hook(data, _p=plugin):
+        def before_agent_hook(data, _p=resolving_plugin):
             try:
                 new_prompt = _p.before_agent(getattr(data, "prompt", ""),
                                              {"agent_name": getattr(data, "agent_name", None)})
@@ -1101,7 +1137,7 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
         yield HookEvent.BEFORE_AGENT, before_agent_hook
 
     if _overrides("after_agent"):
-        def after_agent_hook(data, _p=plugin):
+        def after_agent_hook(data, _p=resolving_plugin):
             new_resp = _p.after_agent(getattr(data, "response", ""),
                                       {"agent_name": getattr(data, "agent_name", None)})
             if isinstance(new_resp, str) and hasattr(data, "response"):
@@ -1110,7 +1146,7 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
         yield HookEvent.AFTER_AGENT, after_agent_hook
 
     if _overrides("before_llm"):
-        def before_llm_hook(data, _p=plugin):
+        def before_llm_hook(data, _p=resolving_plugin):
             messages = getattr(data, "messages", [])
             try:
                 result = _p.before_llm(messages, {"model": getattr(data, "model", "")})
@@ -1126,7 +1162,7 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
         yield HookEvent.BEFORE_LLM, before_llm_hook
 
     if _overrides("after_llm"):
-        def after_llm_hook(data, _p=plugin):
+        def after_llm_hook(data, _p=resolving_plugin):
             new_resp = _p.after_llm(getattr(data, "response", ""),
                                     {"tokens_used": getattr(data, "tokens_used", 0)})
             if isinstance(new_resp, str) and hasattr(data, "response"):
@@ -1135,7 +1171,7 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
         yield HookEvent.AFTER_LLM, after_llm_hook
 
     if _overrides("before_tool"):
-        def before_tool_hook(data, _p=plugin):
+        def before_tool_hook(data, _p=resolving_plugin):
             args = getattr(data, "tool_input", {}) or {}
             try:
                 new_args = _p.before_tool(getattr(data, "tool_name", ""), args)
@@ -1151,7 +1187,7 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
         yield HookEvent.BEFORE_TOOL, before_tool_hook
 
     if _overrides("after_tool"):
-        def after_tool_hook(data, _p=plugin):
+        def after_tool_hook(data, _p=resolving_plugin):
             try:
                 new_result = _p.after_tool(getattr(data, "tool_name", ""),
                                            getattr(data, "tool_output", None))
@@ -1166,7 +1202,7 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
         yield HookEvent.AFTER_TOOL, after_tool_hook
 
     if _overrides("before_tool_definitions"):
-        def before_tool_definitions_hook(data, _p=plugin):
+        def before_tool_definitions_hook(data, _p=resolving_plugin):
             defs = getattr(data, "tool_definitions", []) or []
             try:
                 new_defs = _p.before_tool_definitions(defs)
@@ -1198,7 +1234,7 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
         return payload
 
     if _overrides("before_message"):
-        def before_message_hook(data, _p=plugin):
+        def before_message_hook(data, _p=resolving_plugin):
             try:
                 new = _p.before_message(_message_payload(data))
             except GuardrailBlocked as e:
@@ -1212,7 +1248,7 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
         yield HookEvent.MESSAGE_RECEIVED, before_message_hook
 
     if _overrides("after_message"):
-        def after_message_hook(data, _p=plugin):
+        def after_message_hook(data, _p=resolving_plugin):
             try:
                 new = _p.after_message(_message_payload(data))
             except GuardrailBlocked as e:
@@ -1229,14 +1265,14 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
         yield HookEvent.MESSAGE_SENDING, after_message_hook
 
     if _overrides("message_sent"):
-        def message_sent_hook(data, _p=plugin):
+        def message_sent_hook(data, _p=resolving_plugin):
             payload = _message_payload(data)
             _p.message_sent(payload)
             return HookResult.allow()
         yield HookEvent.MESSAGE_SENT, message_sent_hook
 
     if _overrides("message_undelivered"):
-        def message_undelivered_hook(data, _p=plugin):
+        def message_undelivered_hook(data, _p=resolving_plugin):
             payload = _message_payload(data)
             payload["error"] = getattr(data, "error", "")
             payload["notice_delivered"] = getattr(data, "notice_delivered", False)
@@ -1245,14 +1281,14 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
         yield HookEvent.MESSAGE_UNDELIVERED, message_undelivered_hook
 
     if _overrides("on_permission_ask"):
-        def on_permission_ask_hook(data, _p=plugin):
+        def on_permission_ask_hook(data, _p=resolving_plugin):
             target = getattr(data, "tool_name", "") or getattr(data, "target", "")
             reason = getattr(data, "reason", "") or "Permission requested"
             return _permission_result(_p.on_permission_ask(target, reason), reason)
         yield HookEvent.ON_PERMISSION_ASK, on_permission_ask_hook
 
     if _overrides("on_config"):
-        def on_config_hook(data, _p=plugin):
+        def on_config_hook(data, _p=resolving_plugin):
             config = getattr(data, "config", None)
             if not isinstance(config, dict):
                 config = getattr(data, "extra", {}) or {}
@@ -1263,7 +1299,7 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
         yield HookEvent.ON_CONFIG, on_config_hook
 
     if _overrides("on_auth"):
-        def on_auth_hook(data, _p=plugin):
+        def on_auth_hook(data, _p=resolving_plugin):
             auth_type = getattr(data, "auth_type", "") or ""
             credentials = getattr(data, "credentials", None) or {}
             new_creds = _p.on_auth(auth_type, credentials)
@@ -1273,7 +1309,7 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
         yield HookEvent.ON_AUTH, on_auth_hook
 
     if _overrides("session_start"):
-        def session_start_hook(data, _p=plugin):
+        def session_start_hook(data, _p=resolving_plugin):
             _p.session_start({
                 "source": getattr(data, "source", None),
                 "session_name": getattr(data, "session_name", None),
@@ -1283,7 +1319,7 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
         yield HookEvent.SESSION_START, session_start_hook
 
     if _overrides("session_end"):
-        def session_end_hook(data, _p=plugin):
+        def session_end_hook(data, _p=resolving_plugin):
             _p.session_end({
                 "reason": getattr(data, "reason", None),
                 "total_turns": getattr(data, "total_turns", None),
@@ -1294,7 +1330,7 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
         yield HookEvent.SESSION_END, session_end_hook
 
     if _overrides("on_error"):
-        def on_error_hook(data, _p=plugin):
+        def on_error_hook(data, _p=resolving_plugin):
             _p.on_error(
                 getattr(data, "error_type", "") or "",
                 getattr(data, "error_message", "") or "",
@@ -1308,7 +1344,7 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
         yield HookEvent.ON_ERROR, on_error_hook
 
     if _overrides("cli_backend_execute"):
-        def cli_backend_execute_hook(data, _p=plugin):
+        def cli_backend_execute_hook(data, _p=resolving_plugin):
             from ..cli_backend.debug import redact_command
             _p.cli_backend_execute({
                 "agent_name": getattr(data, "agent_name", None),
@@ -1366,7 +1402,7 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
         # ``kanban_task_created``) are treated as genuine overrides.
         if parent is not None and own is parent:
             continue
-        yield event, _make_observe_hook(method)
+        yield event, _make_observe_hook(getattr(resolving_plugin, event.value))
 
 
 # Global plugin manager instance
