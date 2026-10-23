@@ -500,7 +500,9 @@ class FileTools:
                     "error": f"Unsupported URL scheme: {parsed.scheme}. Only http/https allowed."
                 }
 
-            if not is_safe_http_url(url):
+            # allow_local=False: download_file never had a local-access opt-in,
+            # so ALLOW_LOCAL_CRAWL must not bypass this check.
+            if not is_safe_http_url(url, allow_local=False):
                 return {
                     "success": False, "path": "", "size": 0,
                     "error": f"Access to private/internal addresses is blocked: {parsed.hostname or ''}"

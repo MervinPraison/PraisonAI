@@ -77,6 +77,14 @@ def test_download_file_uses_shared_ssrf_guard(file_tools, url):
     stream.assert_not_called()
 
 
+def test_download_file_ignores_allow_local_crawl(file_tools, monkeypatch):
+    monkeypatch.setenv("ALLOW_LOCAL_CRAWL", "true")
+    with patch("httpx.stream") as stream:
+        result = file_tools.download_file("http://127.0.0.1/x", "out.bin")
+    assert not result["success"]
+    stream.assert_not_called()
+
+
 def test_download_file_fails_closed_on_unresolvable_host(file_tools):
     with patch.object(url_safety.socket, "getaddrinfo", side_effect=socket.gaierror), \
             patch("httpx.stream") as stream:
