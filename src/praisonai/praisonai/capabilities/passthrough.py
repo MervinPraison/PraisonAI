@@ -6,9 +6,7 @@ Provides generic API passthrough functionality for provider-specific endpoints.
 
 from dataclasses import dataclass, field
 from typing import Optional, Any, Dict, Tuple
-from urllib.parse import urlparse
 import asyncio
-import ipaddress
 import threading
 import weakref
 
@@ -157,23 +155,14 @@ class PassthroughResult:
 
 
 def _validate_api_base(url: str) -> str:
-    """Validate api_base URL to prevent SSRF attacks."""
-    parsed = urlparse(url)
-    if parsed.scheme not in ('http', 'https'):
-        raise ValueError(
-            f"Invalid URL scheme '{parsed.scheme}'. Only http and https are allowed."
-        )
-    hostname = parsed.hostname or ''
-    try:
-        ip = ipaddress.ip_address(hostname)
-        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-            raise ValueError(
-                f"URL points to a private/internal address: {hostname}"
-            )
-    except ValueError as exc:
-        if 'private' in str(exc) or 'internal' in str(exc):
-            raise
-        # hostname is a domain name, not an IP — that's fine
+    """Validate api_base URL to prevent SSRF attacks.
+
+    Resolves the hostname and screens every A/AAAA record so names like
+    ``localhost`` or DNS entries pointing at internal addresses are rejected.
+    """
+    from ..jobs.models import _resolve_and_screen_webhook_host
+
+    _resolve_and_screen_webhook_host(url, label="api_base URL")
     return url
 
 

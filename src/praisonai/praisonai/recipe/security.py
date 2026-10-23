@@ -11,9 +11,11 @@ Provides security features for recipes:
 
 import hashlib
 import json
+import os
 import re
 import subprocess
 import sys
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -479,10 +481,12 @@ def audit_dependencies(
     
     # Check for vulnerabilities using pip-audit if available
     if check_vulnerabilities and deps:
-        vulns = _check_vulnerabilities(deps)
+        vulns, scan_error = _check_vulnerabilities(deps)
         report["vulnerabilities"] = vulns
         if vulns:
             report["passed"] = False
+        if scan_error:
+            report["warnings"].append(f"Vulnerability scan did not run: {scan_error}")
     
     # Check for outdated dependencies
     outdated = _check_outdated(deps)
@@ -515,32 +519,55 @@ def _find_lockfile(recipe_path: Path) -> Optional[Path]:
     return None
 
 
-def _check_vulnerabilities(deps: List[Dict[str, str]]) -> List[Dict[str, Any]]:
-    """Check dependencies for known vulnerabilities."""
-    vulns = []
-    
-    # Try using pip-audit
+def _check_vulnerabilities(
+    deps: List[Dict[str, str]],
+) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """Check the given dependencies for known vulnerabilities with pip-audit.
+
+    Returns ``(vulns, error)``. ``error`` is set when the scan could not run,
+    so callers never mistake a skipped scan for a clean one.
+    """
+    pinned = [f"{d['name']}=={d['version']}" for d in deps if d.get("name") and d.get("version")]
+    if not pinned:
+        return [], "no pinned dependencies to scan"
+
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+        f.write("\n".join(pinned) + "\n")
+        req_path = f.name
     try:
         result = subprocess.run(
-            [sys.executable, "-m", "pip_audit", "--format", "json"],
+            [sys.executable, "-m", "pip_audit", "--format", "json",
+             "--no-deps", "--disable-pip", "--requirement", req_path],
             capture_output=True,
             text=True,
             timeout=60,
         )
-        if result.returncode == 0:
-            audit_data = json.loads(result.stdout)
-            for vuln in audit_data.get("vulnerabilities", []):
-                vulns.append({
-                    "package": vuln.get("name"),
-                    "version": vuln.get("version"),
-                    "vulnerability_id": vuln.get("id"),
-                    "description": vuln.get("description"),
-                    "fix_versions": vuln.get("fix_versions", []),
-                })
-    except (subprocess.TimeoutExpired, FileNotFoundError, json.JSONDecodeError):
-        pass
-    
-    return vulns
+    except subprocess.TimeoutExpired:
+        return [], "pip-audit timed out after 60s"
+    except FileNotFoundError:
+        return [], "Python interpreter not found"
+    finally:
+        os.unlink(req_path)
+
+    # pip-audit exits 1 when vulnerabilities are found, so parse stdout first
+    try:
+        audit_data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        if "No module named" in result.stderr:
+            return [], "pip-audit is not installed (pip install pip-audit)"
+        return [], f"pip-audit failed (exit {result.returncode}): {result.stderr.strip()[:200]}"
+
+    vulns = []
+    for dep in audit_data.get("dependencies", []):
+        for vuln in dep.get("vulns", []):
+            vulns.append({
+                "package": dep.get("name"),
+                "version": dep.get("version"),
+                "vulnerability_id": vuln.get("id"),
+                "description": vuln.get("description"),
+                "fix_versions": vuln.get("fix_versions", []),
+            })
+    return vulns, None
 
 
 def _check_outdated(deps: List[Dict[str, str]]) -> List[Dict[str, str]]:
