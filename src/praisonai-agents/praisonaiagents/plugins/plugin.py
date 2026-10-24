@@ -177,8 +177,9 @@ class Plugin(ABC):
     
     Plugins can extend agent functionality by implementing
     hook methods that are called at various points in the
-    agent lifecycle.
-    
+    agent lifecycle. Hook methods may be ``def`` or ``async def``;
+    coroutines returned by async hooks are awaited by the dispatcher.
+
     Example:
         class MyPlugin(Plugin):
             @property
