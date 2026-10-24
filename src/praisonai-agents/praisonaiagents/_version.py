@@ -38,6 +38,12 @@ def get_version() -> str:
         return match.group(1)
         
     except Exception as e:
+        # Installed wheels ship no pyproject.toml: use the dist metadata.
+        try:
+            from importlib.metadata import version
+            return version("praisonaiagents")
+        except Exception:
+            pass
         # Fallback to "unknown" to avoid breaking imports
         import warnings
         warnings.warn(
