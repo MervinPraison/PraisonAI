@@ -8,7 +8,7 @@ No heavy imports - only stdlib.
 import hashlib
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Tuple, Union
 
-from .budget import estimate_tokens as _budget_estimate_tokens
+from .budget import _truncate_to_tokens, estimate_tokens as _budget_estimate_tokens
 
 if TYPE_CHECKING:
     from ..knowledge.models import SearchResultItem
@@ -156,10 +156,10 @@ def truncate_context(
     # Calculate target character count
     suffix_tokens = _estimate_tokens(suffix)
     target_tokens = max_tokens - suffix_tokens
-    target_chars = target_tokens * 4
+    truncated = _truncate_to_tokens(text, target_tokens, _estimate_tokens)
+    target_chars = len(truncated)
     
     # Truncate at word boundary
-    truncated = text[:target_chars]
     last_space = truncated.rfind(" ")
     if last_space > target_chars * 0.8:
         truncated = truncated[:last_space]
