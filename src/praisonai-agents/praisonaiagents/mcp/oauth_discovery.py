@@ -28,15 +28,26 @@ _LOCALHOST_HOSTS = {"localhost", "127.0.0.1", "::1"}
 
 
 def _require_https(url: str) -> None:
-    """Reject non-HTTPS metadata URLs (loopback HTTP is allowed for testing)."""
+    """Reject OAuth URLs that are not HTTPS or that point at internal hosts.
+
+    Loopback hosts are allowed (over HTTP too) for local testing. Any other
+    host must pass :func:`~praisonaiagents.tools.url_safety.is_safe_http_url`,
+    so private, link-local (cloud metadata) and ambiguous numeric hosts are
+    refused even over HTTPS.
+    """
     parsed = urlparse(url)
-    if parsed.scheme == "https":
+    if parsed.scheme in ("http", "https") and (parsed.hostname or "") in _LOCALHOST_HOSTS:
         return
-    if parsed.scheme == "http" and (parsed.hostname or "") in _LOCALHOST_HOSTS:
-        return
-    raise ValueError(
-        f"Refusing to fetch OAuth metadata over insecure transport: {url!r}"
-    )
+    if parsed.scheme != "https":
+        raise ValueError(
+            f"Refusing OAuth request over insecure transport: {url!r}"
+        )
+    from ..tools.url_safety import is_safe_http_url
+
+    if not is_safe_http_url(url):
+        raise ValueError(
+            f"Refusing OAuth request to a private/internal address: {url!r}"
+        )
 
 
 def parse_www_authenticate(header: Optional[str]) -> Dict[str, str]:
@@ -62,30 +73,31 @@ def parse_www_authenticate(header: Optional[str]) -> Dict[str, str]:
     return params
 
 
-def _get_json(url: str, timeout: float = 10.0) -> Dict[str, Any]:
+def _get_json(url: str, timeout: float = 10.0, max_redirects: int = 3) -> Dict[str, Any]:
     """Fetch and parse a JSON metadata document over HTTPS.
 
-    Redirects are followed but every hop — including the final destination — is
-    re-validated with :func:`_require_https` so a redirect cannot escape the
-    HTTPS/loopback guard to an internal or plaintext endpoint (SSRF-safe).
+    Redirects are followed manually and every hop is validated with
+    :func:`_require_https` *before* it is requested, so a redirect cannot
+    reach an internal or plaintext endpoint (SSRF-safe).
     """
-    _require_https(url)
     import requests  # lazy import — optional dependency
 
-    resp = requests.get(
-        url,
-        headers={"Accept": "application/json"},
-        timeout=timeout,
-        allow_redirects=True,
-    )
-    # Re-validate every redirect hop and the final URL: allow_redirects only
-    # checks the initial URL, so a 30x to http:// or an internal host would
-    # otherwise bypass the guard.
-    for previous in getattr(resp, "history", None) or []:
-        _require_https(previous.url)
-    _require_https(resp.url)
-    resp.raise_for_status()
-    return resp.json()
+    current = url
+    for _ in range(max_redirects + 1):
+        _require_https(current)
+        resp = requests.get(
+            current,
+            headers={"Accept": "application/json"},
+            timeout=timeout,
+            allow_redirects=False,
+        )
+        location = resp.headers.get("Location")
+        if resp.status_code in (301, 302, 303, 307, 308) and location:
+            current = urljoin(current, location)
+            continue
+        resp.raise_for_status()
+        return resp.json()
+    raise ValueError(f"Too many redirects fetching OAuth metadata: {url!r}")
 
 
 def _wellknown_candidates(server_url: str) -> List[str]:

@@ -10,25 +10,12 @@ returned for persistence via :meth:`MCPAuthStorage.set_client_info`.
 """
 
 from typing import Any, Dict, List, Optional
-from urllib.parse import urlparse
 
 from praisonaiagents._logging import get_logger
 
+from .oauth_discovery import _require_https
+
 logger = get_logger("mcp-oauth-registration")
-
-_LOCALHOST_HOSTS = {"localhost", "127.0.0.1", "::1"}
-
-
-def _require_https(url: str) -> None:
-    """Reject non-HTTPS registration URLs (loopback HTTP allowed for testing)."""
-    parsed = urlparse(url)
-    if parsed.scheme == "https":
-        return
-    if parsed.scheme == "http" and (parsed.hostname or "") in _LOCALHOST_HOSTS:
-        return
-    raise ValueError(
-        f"Refusing to register client over insecure transport: {url!r}"
-    )
 
 
 def register_client(
@@ -75,6 +62,7 @@ def register_client(
         json=payload,
         headers={"Content-Type": "application/json", "Accept": "application/json"},
         timeout=timeout,
+        allow_redirects=False,  # never re-send credentials to a redirect target
     )
     resp.raise_for_status()
     client_info = resp.json()

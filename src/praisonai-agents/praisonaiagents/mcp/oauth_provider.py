@@ -268,6 +268,7 @@ class MCPOAuthProvider:
             data=data,
             headers={"Accept": "application/json"},
             timeout=timeout,
+            allow_redirects=False,  # never re-send credentials to a redirect target
         )
         resp.raise_for_status()
         return self._normalize_tokens(
@@ -306,6 +307,7 @@ class MCPOAuthProvider:
                 data=data,
                 headers={"Accept": "application/json"},
                 timeout=10.0,
+                allow_redirects=False,  # never re-send credentials to a redirect target
             )
             resp.raise_for_status()
             new_tokens = self._normalize_tokens(
