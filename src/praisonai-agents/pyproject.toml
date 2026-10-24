@@ -51,7 +51,7 @@ parallel-search = [
 
 memory = [
     "chromadb>=1.0.0",
-    "litellm>=1.83.14",
+    "litellm>=1.83.14,<1.106",  # 1.106 requires mcp>=2.2; mcp is pinned <2
 ]
 
 knowledge = [
@@ -69,7 +69,7 @@ graph = [
 
 # Add LLM dependencies
 llm = [
-    "litellm>=1.83.14",
+    "litellm>=1.83.14,<1.106",  # 1.106 requires mcp>=2.2; mcp is pinned <2
     "pydantic>=2.10.0"
 ]
 
