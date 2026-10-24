@@ -1352,6 +1352,29 @@ Write the complete compiled report:"""
         task_id = getattr(task, 'id', None)
         return await self.achat(prompt, task_name=task_name, task_description=task_description, task_id=task_id)
 
+    def _get_async_tool_executor(self):
+        """Return the per-agent bounded pool that runs sync tools for the async path.
+
+        Sync tools awaited via ``execute_tool_async`` must not run on the loop's
+        shared default executor: ``asyncio.wait_for`` cannot stop a hung thread,
+        so leaked workers would starve every other ``to_thread`` user in the
+        process. A dedicated pool caps the leak at the tool pool size; calls
+        queued behind hung workers time out without ever starting.
+        """
+        executor = self.__dict__.get("_async_tool_executor")
+        if executor is None:
+            import concurrent.futures
+            from .tool_execution import _TOOL_POOL_MAX_WORKERS
+            # setdefault is atomic; a losing racer's pool never spawned a thread.
+            executor = self.__dict__.setdefault(
+                "_async_tool_executor",
+                concurrent.futures.ThreadPoolExecutor(
+                    max_workers=_TOOL_POOL_MAX_WORKERS,
+                    thread_name_prefix=f"atool-{getattr(self, 'name', 'agent')}",
+                ),
+            )
+        return executor
+
     async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
         """Async version of execute_tool with retry policy support.
 
@@ -1551,8 +1574,10 @@ Write the complete compiled report:"""
         # hangs (or no timeout is configured) the middleware worker would block a
         # thread-pool worker indefinitely. Give it a slightly larger grace bound so
         # the inner wait_for surfaces its structured timeout first when configured.
+        # Sync tools may spend up to tool_timeout queued for a worker before their
+        # own tool_timeout starts, so the bound covers both phases.
         tool_timeout = getattr(self, '_tool_timeout', None)
-        worker_timeout = (tool_timeout + 1.0) if tool_timeout and tool_timeout > 0 else None
+        worker_timeout = (2 * tool_timeout + 1.0) if tool_timeout and tool_timeout > 0 else None
 
         def _final_handler(req):
             import concurrent.futures
@@ -1928,11 +1953,24 @@ Write the complete compiled report:"""
                     except Exception:
                         _inject_state = None
 
+                tool_timeout = getattr(self, '_tool_timeout', None)
+                is_async_tool = inspect.iscoroutinefunction(call_target)
+
+                def _timeout_result():
+                    # Non-retryable: a sync tool cannot be cancelled once running,
+                    # so a retry would duplicate its side effects.
+                    logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
+                    return {
+                        "error": f"Tool timed out after {tool_timeout}s",
+                        "timeout": True,
+                        "_praison_retryable": False,
+                    }
+
                 async def _invoke():
                     # Set the tool-progress channel BEFORE dispatch so the sink
                     # propagates into the executor thread via contextvars, mirroring
                     # the sync execute_tool path.
-                    if inspect.iscoroutinefunction(call_target):
+                    if is_async_tool:
                         logging.debug(f"Executing async function: {function_name}")
                         if _inject_state is not None:
                             with with_injection_context(_inject_state), tool_progress_channel(_progress_sink):
@@ -1947,13 +1985,36 @@ Write the complete compiled report:"""
                     # it here propagates cancel_event to the sync tool body too.
                     if _inject_state is not None:
                         with with_injection_context(_inject_state), tool_progress_channel(_progress_sink):
-                            return await loop.run_in_executor(
-                                None, copy_context_to_callable(lambda: call_target(**call_arguments))
-                            )
-                    with tool_progress_channel(_progress_sink):
-                        return await loop.run_in_executor(
-                            None, copy_context_to_callable(lambda: call_target(**call_arguments))
-                        )
+                            run = copy_context_to_callable(lambda: call_target(**call_arguments))
+                    else:
+                        with tool_progress_channel(_progress_sink):
+                            run = copy_context_to_callable(lambda: call_target(**call_arguments))
+                    started = asyncio.Event()
+
+                    def _run():
+                        loop.call_soon_threadsafe(started.set)
+                        return run()
+
+                    future = loop.run_in_executor(self._get_async_tool_executor(), _run)
+                    if not (tool_timeout and tool_timeout > 0):
+                        return await future
+                    # Charge tool_timeout from when the body starts, not from
+                    # submit, so time queued for a pool worker never times out a
+                    # healthy tool (parity with tool_execution.py). The queue wait
+                    # is itself bounded so a pool stuck behind hung workers fails.
+                    try:
+                        await asyncio.wait_for(started.wait(), timeout=tool_timeout)
+                    except asyncio.TimeoutError:
+                        future.cancel()
+                        return _timeout_result()
+                    except asyncio.CancelledError:
+                        # The caller gave up; a still-queued tool must not start later.
+                        future.cancel()
+                        raise
+                    try:
+                        return await asyncio.wait_for(future, timeout=tool_timeout)
+                    except asyncio.TimeoutError:
+                        return _timeout_result()
 
                 # Circuit-breaker parity with the sync path (tool_execution.py).
                 # The async tool path previously had no breaker, so a repeatedly
@@ -2047,10 +2108,12 @@ Write the complete compiled report:"""
                 # cannot kill a stuck sync tool running in the executor (same caveat
                 # the sync path has with future.cancel()), but it stops the awaiting
                 # coroutine from hanging forever, which is the actual defect.
-                tool_timeout = getattr(self, '_tool_timeout', None)
+                # Sync tools enforce their own two-phase timeout inside _invoke.
                 if tool_timeout and tool_timeout > 0:
                     try:
-                        result = await asyncio.wait_for(_invoke_guarded(), timeout=tool_timeout)
+                        result = await asyncio.wait_for(
+                            _invoke_guarded(), timeout=tool_timeout if is_async_tool else None
+                        )
                     except _CircuitBreakerException as cbe:
                         logging.warning(f"Tool '{function_name}' circuit breaker open: {cbe}")
                         return _circuit_open_result()

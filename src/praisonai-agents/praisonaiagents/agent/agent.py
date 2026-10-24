@@ -3278,6 +3278,12 @@ Your Goal: {self.goal}
             if k in ("_db_run_context", "_db_session_init_lock"):
                 # A clone starts outside the source agent's active DB turn.
                 continue
+            elif k in ("_tool_executor", "_async_tool_executor"):
+                # Thread pools can't be copied; the clone lazily builds its own.
+                continue
+            elif k == "_Agent__hook_runner":
+                # Holds locks; rebuilt lazily on first use.
+                object.__setattr__(result, k, None)
             elif k in ("_Agent__cache_lock",):
                 object.__setattr__(result, k, threading.RLock())
             elif k in ("_cost_lock", "_auto_save_lock"):
@@ -8133,6 +8139,9 @@ Answer:"""
                     executor.shutdown(wait=False, cancel_futures=True)
                 else:
                     executor.shutdown(wait=False)
+            async_executor = self.__dict__.pop('_async_tool_executor', None)
+            if async_executor is not None:
+                async_executor.shutdown(wait=False, cancel_futures=True)
         except Exception as e:
             logger.warning(f"ThreadPoolExecutor cleanup failed: {e}")
 
@@ -8282,6 +8291,9 @@ Answer:"""
                         None,
                         lambda: executor.shutdown(wait=False)
                     )
+            async_executor = self.__dict__.pop('_async_tool_executor', None)
+            if async_executor is not None:
+                async_executor.shutdown(wait=False, cancel_futures=True)
 
             # Approval scope cleanup (see close()).
             self._release_approval_scope()
