@@ -293,8 +293,10 @@ class PluginManager:
                     logger.warning(f"Plugin '{info.name}' disabled: {reason}")
                     return False
 
+                # Reserve the name but keep it out of dispatch until on_init succeeds.
                 self._plugins[info.name] = plugin
-                self._enabled[info.name] = self._default_enabled_for_registration(info.name)
+                self._enabled[info.name] = False
+                default_enabled = self._default_enabled_for_registration(info.name)
             except Exception as e:
                 logger.error(f"Failed to register plugin: {e}")
                 return False
@@ -303,6 +305,13 @@ class PluginManager:
         # another thread and call back into this manager.
         try:
             _ResolvingPlugin(plugin).on_init({})
+
+            with self._lock:
+                if self._plugins.get(info.name) is not plugin:
+                    logger.warning(f"Plugin '{info.name}' was unregistered during on_init")
+                    return False
+                # Publish; an explicit enable() made during on_init is kept.
+                self._enabled[info.name] = default_enabled or self._enabled.get(info.name, False)
 
             # Make the initialization observable to the hook system
             # too. ``plugin.on_init`` is the plugin's *own* callback;

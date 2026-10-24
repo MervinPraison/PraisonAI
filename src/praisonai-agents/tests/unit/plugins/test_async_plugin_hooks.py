@@ -203,3 +203,50 @@ def test_failed_async_on_init_rolls_back_registration():
 
     # A retry is not rejected as "already registered".
     assert mgr.register(FixedInitPlugin()) is True
+
+
+def test_plugin_not_dispatched_until_async_on_init_finishes():
+    """Concurrent dispatch during a slow on_init must not reach the plugin."""
+    import threading
+
+    mgr = PluginManager()
+    init_started = threading.Event()
+    release_init = threading.Event()
+
+    class SlowInitPlugin(Plugin):
+        def __init__(self):
+            self.ready = False
+            self.calls_before_ready = 0
+
+        @property
+        def info(self):
+            return PluginInfo(name="slow_init", hooks=[PluginHook.BEFORE_TOOL])
+
+        async def on_init(self, context):
+            init_started.set()
+            await asyncio.get_running_loop().run_in_executor(None, release_init.wait, 5)
+            self.ready = True
+
+        def before_tool(self, tool_name, args):
+            if not self.ready:
+                self.calls_before_ready += 1
+            return {**args, "seen": True}
+
+    plugin = SlowInitPlugin()
+    results = {}
+    t = threading.Thread(target=lambda: results.setdefault("ok", mgr.register(plugin)))
+    t.start()
+    assert init_started.wait(5)
+
+    # During on_init: neither direct dispatch nor registry wiring sees it
+    # (with no enabled plugins execute_hook passes its first arg through).
+    assert mgr.execute_hook(PluginHook.BEFORE_TOOL, "bash", {"a": 1}) == "bash"
+    assert mgr.wire_into_hook_registry(HookRegistry()) == 0
+    assert mgr.is_enabled("slow_init") is False
+
+    release_init.set()
+    t.join(5)
+    assert results["ok"] is True
+    assert mgr.is_enabled("slow_init") is True
+    assert mgr.execute_hook(PluginHook.BEFORE_TOOL, "bash", {"a": 1}) == {"a": 1, "seen": True}
+    assert plugin.calls_before_ready == 0
