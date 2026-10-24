@@ -706,8 +706,12 @@ Launch PraisonAI servers with unified discovery support.
                     "error": {"code": -32601, "message": f"Method not found: {method}"},
                 }
 
-            parts = params.get("message", {}).get("parts", [])
-            text = "".join(p.get("text", "") for p in parts if p.get("type") == "text")
+            message = params.get("message") if isinstance(params, dict) else None
+            parts = message.get("parts") if isinstance(message, dict) else None
+            text = "".join(
+                p["text"] for p in (parts if isinstance(parts, list) else [])
+                if isinstance(p, dict) and p.get("type") == "text" and isinstance(p.get("text"), str)
+            )
             if not text:
                 return {
                     "jsonrpc": "2.0",
@@ -1017,6 +1021,8 @@ Launch PraisonAI servers with unified discovery support.
                     body = await request.json()
                 except Exception:
                     raise HTTPException(status_code=400, detail="Invalid request")
+                if not isinstance(body, dict):
+                    raise HTTPException(status_code=400, detail="Request body must be a JSON object")
                 query = body.get("query", "") or body.get("message", "")
                 try:
                     return {"response": await run_query(query)}

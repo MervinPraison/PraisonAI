@@ -47,6 +47,34 @@ def test_a2a_message_send_runs_agent(agents_file, fake_arun):
     assert fake_arun[0]["framework"] == "praisonai"
 
 
+def test_a2a_missing_text_returns_invalid_params(agents_file, fake_arun):
+    client = TestClient(ServeHandler()._create_a2a_app(
+        {"host": "127.0.0.1", "port": 8082, "file": agents_file}
+    ))
+    for params in ({"message": {"parts": []}}, None, {"message": "x"}):
+        body = client.post("/a2a", json={
+            "jsonrpc": "2.0", "id": 7, "method": "message/send", "params": params,
+        }).json()
+        assert body["id"] == 7
+        assert body["error"]["code"] == -32602
+    assert fake_arun == []
+
+
+def test_a2a_agent_failure_returns_internal_error(agents_file, monkeypatch):
+    import praisonai
+
+    async def _boom(**kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(praisonai, "arun", _boom, raising=False)
+    body = _send(TestClient(ServeHandler()._create_a2a_app(
+        {"host": "127.0.0.1", "port": 8082, "file": agents_file}
+    )), "hi")
+    assert body["id"] == 1
+    assert body["error"]["code"] == -32603
+    assert "boom" in body["error"]["message"]
+
+
 def test_a2a_requires_api_key_off_localhost(agents_file, monkeypatch):
     monkeypatch.delenv("PRAISONAI_SERVE_API_KEY", raising=False)
     with pytest.raises(SystemExit):
@@ -73,6 +101,8 @@ def test_unified_mounts_every_advertised_provider(agents_file, fake_arun):
     assert _advertised_providers(client) == {"agents-api", "a2a", "a2u"}
     assert client.post("/agents", json={"query": "hi"}).json() == {"response": "agent says: hi"}
     assert _send(client, "hey")["result"]["message"]["parts"][0]["text"] == "agent says: hey"
+    for bad in ([], None, "q"):
+        assert client.post("/agents", json=bad).status_code == 400
 
 
 def test_unified_without_yaml_only_advertises_a2u(tmp_path):
