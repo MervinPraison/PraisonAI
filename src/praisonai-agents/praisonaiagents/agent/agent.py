@@ -7085,6 +7085,9 @@ Answer:"""
 
     def _process_handoffs(self):
         """Process handoffs and convert them to tools that can be used by the agent."""
+        if not self.handoffs and not (isinstance(self.tools, list) and self.tools):
+            return
+
         # Import here to avoid circular imports
         from .handoff import Handoff
 
