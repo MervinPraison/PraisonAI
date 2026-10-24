@@ -5,6 +5,7 @@ Detects and prevents agents from getting stuck in repetitive loops.
 """
 
 from praisonaiagents._logging import get_logger
+import threading
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -93,8 +94,13 @@ class DoomLoopDetector:
         self.max_tool_calls = max_tool_calls
         
         self._records: List[ToolCallRecord] = []
+        # Lifetime per-tool totals, reported by get_stats() only. Loop
+        # decisions use the windowed _records so a slow, healthy tool is
+        # never permanently denied.
         self._call_counts: Dict[str, int] = defaultdict(int)
         self._session_id: Optional[str] = None
+        # check_doom_loop is reached from concurrent tool execution.
+        self._lock = threading.RLock()
     
     def set_session(self, session_id: str):
         """Set the current session ID."""
@@ -125,19 +131,18 @@ class DoomLoopDetector:
         Returns:
             The recorded ToolCallRecord
         """
-        self._cleanup_old_records()
-        
         args_hash = self._hash_arguments(arguments or {})
-        
-        record = ToolCallRecord(
-            tool_name=tool_name,
-            arguments_hash=args_hash,
-            session_id=self._session_id,
-        )
-        
-        self._records.append(record)
-        self._call_counts[tool_name] += 1
-        
+
+        with self._lock:
+            self._cleanup_old_records()
+            record = ToolCallRecord(
+                tool_name=tool_name,
+                arguments_hash=args_hash,
+                session_id=self._session_id,
+            )
+            self._records.append(record)
+            self._call_counts[tool_name] += 1
+
         return record
     
     def check(
@@ -155,13 +160,15 @@ class DoomLoopDetector:
         Returns:
             DoomLoopResult indicating if a loop is detected
         """
-        self._cleanup_old_records()
-        
         args_hash = self._hash_arguments(arguments or {})
-        
+
+        with self._lock:
+            self._cleanup_old_records()
+            records = list(self._records)
+
         # Count identical calls in window
         identical_count = sum(
-            1 for r in self._records
+            1 for r in records
             if r.tool_name == tool_name and r.arguments_hash == args_hash
         )
         
@@ -176,7 +183,7 @@ class DoomLoopDetector:
             )
         
         # Check for excessive tool calls
-        total_calls = len(self._records)
+        total_calls = len(records)
         if total_calls >= self.max_tool_calls:
             return DoomLoopResult(
                 is_loop=True,
@@ -185,8 +192,8 @@ class DoomLoopDetector:
                 recommendation="Reduce tool usage or break task into smaller steps",
             )
         
-        # Check for tool-specific excessive calls
-        tool_count = self._call_counts.get(tool_name, 0)
+        # Check for tool-specific excessive calls (within the window)
+        tool_count = sum(1 for r in records if r.tool_name == tool_name)
         if tool_count >= self.max_tool_calls // 2:
             return DoomLoopResult(
                 is_loop=True,
@@ -219,29 +226,32 @@ class DoomLoopDetector:
         Returns:
             DoomLoopResult indicating if a loop is detected
         """
-        result = self.check(tool_name, arguments)
-        if not result.is_loop:
-            self.record(tool_name, arguments)
+        with self._lock:
+            result = self.check(tool_name, arguments)
+            if not result.is_loop:
+                self.record(tool_name, arguments)
         return result
-    
+
     def get_stats(self) -> Dict[str, Any]:
         """Get statistics about tool calls."""
-        self._cleanup_old_records()
-        
-        return {
-            "total_calls": len(self._records),
-            "unique_tools": len(set(r.tool_name for r in self._records)),
-            "call_counts": dict(self._call_counts),
-            "window_seconds": self.window_seconds,
-            "loop_threshold": self.loop_threshold,
-        }
-    
+        with self._lock:
+            self._cleanup_old_records()
+            return {
+                "total_calls": len(self._records),
+                "unique_tools": len(set(r.tool_name for r in self._records)),
+                "call_counts": dict(self._call_counts),
+                "window_seconds": self.window_seconds,
+                "loop_threshold": self.loop_threshold,
+            }
+
     def reset(self):
         """Reset all records."""
-        self._records.clear()
-        self._call_counts.clear()
-    
+        with self._lock:
+            self._records.clear()
+            self._call_counts.clear()
+
     def reset_tool(self, tool_name: str):
         """Reset records for a specific tool."""
-        self._records = [r for r in self._records if r.tool_name != tool_name]
-        self._call_counts.pop(tool_name, None)
+        with self._lock:
+            self._records = [r for r in self._records if r.tool_name != tool_name]
+            self._call_counts.pop(tool_name, None)
