@@ -636,18 +636,18 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
     @router.post("/agents/{agent_id}/register")
     async def register_agent_endpoint(agent_id: str, _: None = Depends(verify_token)) -> Dict[str, Any]:
         """
-        Register an agent for API access.
-        
-        Note: This is a placeholder endpoint. In practice, agents would be
-        registered programmatically when they are created.
+        HTTP registration is not supported; agents are registered in-process.
+
+        Returns 501 so clients can detect that nothing was registered.
         """
-        # In a real implementation, this might load an agent from a configuration
-        # or database. For now, return information about registration.
-        return {
-            "message": f"Agent registration endpoint for '{agent_id}'",
-            "note": "Agents are typically registered programmatically",
-            "status": "info"
-        }
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                f"Dynamic HTTP registration of '{agent_id}' is not supported; "
+                "register agents in-process via "
+                "praisonai.api.agent_invoke.register_agent(...)"
+            ),
+        )
 
     @router.delete("/agents/{agent_id}")
     async def unregister_agent_endpoint(
