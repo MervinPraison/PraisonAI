@@ -268,8 +268,11 @@ class MCPOAuthProvider:
             data=data,
             headers={"Accept": "application/json"},
             timeout=timeout,
+            allow_redirects=False,  # never re-send credentials to a redirect target
         )
-        resp.raise_for_status()
+        from .oauth_discovery import _require_success
+
+        _require_success(resp)
         return self._normalize_tokens(
             resp.json(), token_endpoint=metadata["token_endpoint"]
         )
@@ -285,7 +288,7 @@ class MCPOAuthProvider:
             return False
 
         try:
-            from .oauth_discovery import _require_https
+            from .oauth_discovery import _require_https, _require_success
 
             # Defense in depth: never POST a refresh token / client secret to a
             # persisted endpoint that isn't HTTPS (or loopback).
@@ -306,8 +309,9 @@ class MCPOAuthProvider:
                 data=data,
                 headers={"Accept": "application/json"},
                 timeout=10.0,
+                allow_redirects=False,  # never re-send credentials to a redirect target
             )
-            resp.raise_for_status()
+            _require_success(resp)
             new_tokens = self._normalize_tokens(
                 resp.json(), token_endpoint=token_endpoint
             )

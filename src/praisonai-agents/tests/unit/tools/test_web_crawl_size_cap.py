@@ -72,10 +72,13 @@ def test_urllib_fallback_reads_only_up_to_cap(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "httpx", None)  # force ImportError
     monkeypatch.setattr(w, "_is_safe_crawl_url", lambda url: True)
-    monkeypatch.setattr(
-        urllib.request, "urlopen",
-        lambda url, timeout=None: Resp(b"<html><h1>Hi</h1>" + b"a" * (w._MAX_CRAWL_BYTES * 2) + b"</html>"),
-    )
+    body = b"<html><h1>Hi</h1>" + b"a" * (w._MAX_CRAWL_BYTES * 2) + b"</html>"
+
+    class Opener:
+        def open(self, url, timeout=None):
+            return Resp(body)
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *handlers: Opener())
 
     result = w._crawl_with_httpx(["http://example.com/"])[0]
 

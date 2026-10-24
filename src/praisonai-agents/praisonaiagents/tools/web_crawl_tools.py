@@ -443,12 +443,32 @@ def _crawl_with_httpx(urls: List[str]) -> List[Dict[str, Any]]:
                     else:
                         raise ValueError("Too many redirects")
             except ImportError:
-                # Fallback to urllib
+                # Fallback to urllib, walking redirects by hand so every hop
+                # is SSRF-validated before it is requested (as above).
+                import urllib.error
                 import urllib.request
-                if not _is_safe_crawl_url(url):
-                    raise ValueError("URL blocked by SSRF policy")
-                with urllib.request.urlopen(url, timeout=30) as response:
-                    content = response.read(_MAX_CRAWL_BYTES).decode('utf-8', errors='ignore')
+
+                class _NoRedirect(urllib.request.HTTPRedirectHandler):
+                    def redirect_request(self, *args, **kwargs):
+                        return None  # surface 30x as HTTPError
+
+                opener = urllib.request.build_opener(_NoRedirect)
+                current = url
+                for _ in range(max_redirects + 1):
+                    if not _is_safe_crawl_url(current):
+                        raise ValueError("Redirect target failed SSRF validation")
+                    try:
+                        with opener.open(current, timeout=30) as response:
+                            content = response.read(_MAX_CRAWL_BYTES).decode('utf-8', errors='ignore')
+                        break
+                    except urllib.error.HTTPError as e:
+                        location = e.headers.get("Location")
+                        if e.code not in redirect_statuses or not location:
+                            raise
+                        current = urllib.parse.urljoin(current, location)
+                else:
+                    raise ValueError("Too many redirects")
+                base_url = current
             
             # Convert HTML to structured Markdown using the standard library so
             # headings, lists, links, and code blocks survive on this path.
