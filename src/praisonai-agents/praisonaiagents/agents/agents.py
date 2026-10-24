@@ -2253,13 +2253,11 @@ class AgentTeam(SpawnAnnounceProtocol):
     def save_output_to_file(self, task, task_output):
         if task.output_file:
             try:
-                if task.create_directory:
-                    dir_name = os.path.dirname(task.output_file)
-                    if dir_name:
-                        os.makedirs(dir_name, exist_ok=True)
-                with open(task.output_file, "w") as f:
-                    f.write(str(task_output))
-                if self.verbose >= 1:
+                from ..utils.output_file import write_output_file
+                saved = write_output_file(
+                    task.output_file, str(task_output), create_dirs=task.create_directory
+                )
+                if saved and self.verbose >= 1:
                     logger.info(f"Task output saved to {task.output_file}")
             except Exception as e:
                 display_error(f"Error saving task output to file: {e}")

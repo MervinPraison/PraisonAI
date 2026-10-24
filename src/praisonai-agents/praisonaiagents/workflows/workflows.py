@@ -2221,16 +2221,12 @@ class AgentFlow:
             # Handle output_file - save output to file
             if hasattr(step, 'output_file') and step.output_file and output:
                 try:
-                    import os
+                    from ..utils.output_file import write_output_file
                     output_path = step.output_file
                     # Substitute variables in path
                     for key, value in all_variables.items():
                         output_path = output_path.replace(f"{{{{{key}}}}}", str(value))
-                    # Create directory if needed
-                    os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
-                    with open(output_path, "w") as f:
-                        f.write(str(output))
-                    if verbose:
+                    if write_output_file(output_path, str(output)) and verbose:
                         print(f"📁 Saved output to: {output_path}")
                 except Exception as e:
                     logger.error(f"Failed to save output to file: {e}")
@@ -3410,13 +3406,11 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         # Handle output_file - save output to file
         if hasattr(step, 'output_file') and step.output_file and output and not step_error:
             try:
+                from ..utils.output_file import write_output_file
                 output_path = step.output_file
                 for key, value in all_variables.items():
                     output_path = output_path.replace(f"{{{{{key}}}}}", str(value))
-                os.makedirs(os.path.dirname(output_path) if os.path.dirname(output_path) else ".", exist_ok=True)
-                with open(output_path, "w") as f:
-                    f.write(str(output))
-                if verbose:
+                if write_output_file(output_path, str(output)) and verbose:
                     print(f"📁 Saved output to: {output_path}")
             except Exception as e:
                 logger.error(f"Failed to save output to file: {e}")
