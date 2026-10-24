@@ -4461,7 +4461,10 @@ class AgentTeam(SpawnAnnounceProtocol):
         # Read target agents inside lock to avoid race condition
         with self._spawn_lock:
             target_agents = agent_ids or list(self._spawned_agents.keys())
-        
+            if not target_agents:
+                # Return retained history only for the default target selection.
+                return list(self._completion_events) if agent_ids is None else []
+
         completed_agents = set()
         
         while True:
