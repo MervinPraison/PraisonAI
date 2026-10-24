@@ -3298,7 +3298,7 @@ class ToolExecutionMixin:
         """
         # Import circuit breaker components first (lazy import for performance)
         try:
-            from ..tools.circuit_breaker import get_circuit_breaker, CircuitBreakerConfig, CircuitBreakerException
+            from ..tools.circuit_breaker import get_circuit_breaker, CircuitBreakerConfig, CircuitBreakerException, _NeutralOutcome
         except ImportError:
             # Circuit breaker not available - fallback to direct execution
             logging.debug("Circuit breaker not available, falling back to direct tool execution")
@@ -3327,6 +3327,13 @@ class ToolExecutionMixin:
             # Execute tool through circuit breaker with failure detection wrapper
             def _tool_wrapper():
                 result = self._execute_tool_impl(function_name, arguments)
+                # Caller errors (bad input: ValueError/TypeError/AttributeError,
+                # tagged non-retryable) say nothing about the tool's health: record
+                # them as neither failure nor success, so they can neither open the
+                # breaker for other callers nor close a half-open one.
+                if isinstance(result, dict) and result.get("error") and \
+                   result.get("_praison_retryable") is False:
+                    raise _NeutralOutcome(result)
                 # Convert error dicts to exceptions so circuit breaker can detect failures
                 # Don't treat approval/permission denials as circuit breaker failures
                 if isinstance(result, dict) and result.get("error") and \
@@ -3345,6 +3352,8 @@ class ToolExecutionMixin:
             
             try:
                 return breaker.call(_tool_wrapper)
+            except _NeutralOutcome as n:
+                return n.value
             except Exception as e:
                 # Check if this is our sentinel exception
                 if hasattr(e, 'error_dict'):
