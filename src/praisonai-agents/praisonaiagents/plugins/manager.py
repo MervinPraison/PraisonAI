@@ -143,6 +143,9 @@ class PluginManager:
     def __init__(self, disabled: Optional[bool] = None):
         self._plugins: Dict[str, Plugin] = {}
         self._enabled: Dict[str, bool] = {}
+        # Names whose on_init is running and that have not been explicitly
+        # enabled/disabled yet; register() applies the default only to these.
+        self._initializing: set = set()
         self._single_file_plugins: Dict[str, Dict[str, Any]] = {}  # WordPress-style plugins
         # Per-plugin option maps sourced from the unified project config,
         # delivered to each plugin's on_config hook. {plugin_name: options}.
@@ -296,6 +299,7 @@ class PluginManager:
                 # Reserve the name but keep it out of dispatch until on_init succeeds.
                 self._plugins[info.name] = plugin
                 self._enabled[info.name] = False
+                self._initializing.add(info.name)
                 default_enabled = self._default_enabled_for_registration(info.name)
             except Exception as e:
                 logger.error(f"Failed to register plugin: {e}")
@@ -310,8 +314,10 @@ class PluginManager:
                 if self._plugins.get(info.name) is not plugin:
                     logger.warning(f"Plugin '{info.name}' was unregistered during on_init")
                     return False
-                # Publish; an explicit enable() made during on_init is kept.
-                self._enabled[info.name] = default_enabled or self._enabled.get(info.name, False)
+                # Publish; an explicit enable()/disable() made during on_init is kept.
+                if info.name in self._initializing:
+                    self._initializing.discard(info.name)
+                    self._enabled[info.name] = default_enabled
 
             # Make the initialization observable to the hook system
             # too. ``plugin.on_init`` is the plugin's *own* callback;
@@ -329,6 +335,7 @@ class PluginManager:
                 if self._plugins.get(info.name) is plugin:
                     del self._plugins[info.name]
                     self._enabled.pop(info.name, None)
+                    self._initializing.discard(info.name)
             return False
 
     def unregister(self, name: str) -> bool:
@@ -347,6 +354,7 @@ class PluginManager:
                 return False
             del self._plugins[name]
             self._enabled.pop(name, None)
+            self._initializing.discard(name)
 
         try:
             _ResolvingPlugin(plugin).on_shutdown()
@@ -365,6 +373,7 @@ class PluginManager:
         with self._lock:
             if name in self._enabled:
                 self._enabled[name] = True
+                self._initializing.discard(name)
                 return True
         return False
     
@@ -379,6 +388,7 @@ class PluginManager:
             if name not in self._enabled:
                 return False
             self._enabled[name] = False
+            self._initializing.discard(name)
         try:
             self.unwire_from_hook_registry(name)
         except Exception as e:

@@ -250,3 +250,19 @@ def test_plugin_not_dispatched_until_async_on_init_finishes():
     assert mgr.is_enabled("slow_init") is True
     assert mgr.execute_hook(PluginHook.BEFORE_TOOL, "bash", {"a": 1}) == {"a": 1, "seen": True}
     assert plugin.calls_before_ready == 0
+
+
+def test_disable_during_on_init_is_kept():
+    """A plugin that disables itself in on_init stays disabled after register."""
+    mgr = PluginManager()
+
+    class SelfDisablingPlugin(Plugin):
+        @property
+        def info(self):
+            return PluginInfo(name="self_disabling", hooks=[PluginHook.BEFORE_TOOL])
+
+        async def on_init(self, context):
+            mgr.disable("self_disabling")
+
+    assert mgr.register(SelfDisablingPlugin()) is True
+    assert mgr.is_enabled("self_disabling") is False
