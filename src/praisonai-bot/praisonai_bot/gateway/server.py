@@ -4632,7 +4632,12 @@ class WebSocketGateway:
             _snapshot()
             return result
 
-        return await loop.run_in_executor(None, _call_sync)
+        # Carry the turn's context into the worker so the admission gate's
+        # human-wait hook (#5912) reaches a sync agent's approval wait.
+        import contextvars
+        return await loop.run_in_executor(
+            None, contextvars.copy_context().run, _call_sync
+        )
 
     def _abort_active_turn(self, session_id: str, reason: str = "user") -> bool:
         """Signal (and, if needed, cancel) the in-flight turn for ``session_id``.
