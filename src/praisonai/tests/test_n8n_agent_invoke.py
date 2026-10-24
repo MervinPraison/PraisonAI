@@ -756,6 +756,8 @@ class TestInvokeIdempotency:
         from fastapi.testclient import TestClient
         import praisonai.api.agent_invoke as agent_invoke
 
+        monkeypatch.setenv("PRAISONAI_CALL_AUTH", "disabled")
+        monkeypatch.setenv("PRAISONAI_CALL_BIND_HOST", "127.0.0.1")
         monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
         monkeypatch.setattr(agent_invoke, "_invoke_idempotency_store", None)
         app = FastAPI()
@@ -833,6 +835,60 @@ class TestInvokeIdempotency:
         finally:
             unregister_agent("idem-a")
             unregister_agent("idem-b")
+
+    def test_separator_in_ids_does_not_collide(self, client):
+        from praisonai.api.agent_invoke import unregister_agent
+
+        a = self._register("x:y")
+        b = self._register("x")
+        try:
+            assert client.post("/api/v1/agents/x:y/invoke", json={"message": "hi"},
+                               headers={"Idempotency-Key": "z"}).status_code == 200
+            assert client.post("/api/v1/agents/x/invoke", json={"message": "hi"},
+                               headers={"Idempotency-Key": "y:z"}).status_code == 200
+            assert a.start.call_count == 1 and b.start.call_count == 1
+        finally:
+            unregister_agent("x:y")
+            unregister_agent("x")
+
+    def test_unusable_store_rejects_instead_of_running(self, client, tmp_path, monkeypatch):
+        from praisonai.api.agent_invoke import unregister_agent
+
+        blocker = tmp_path / "not-a-dir"
+        blocker.write_text("")
+        monkeypatch.setenv("PRAISONAI_HOME", str(blocker))
+        agent = self._register("idem-503")
+        try:
+            resp = client.post("/api/v1/agents/idem-503/invoke", json={"message": "hi"},
+                               headers={"Idempotency-Key": "k-3"})
+            assert resp.status_code == 503
+            assert agent.start.call_count == 0
+        finally:
+            unregister_agent("idem-503")
+
+    def test_cancelled_run_keeps_reservation(self, client):
+        import asyncio
+        from praisonai.api.agent_invoke import register_agent, unregister_agent
+
+        class _Agent:
+            calls = 0
+
+            async def astart(self, message):
+                _Agent.calls += 1
+                raise asyncio.CancelledError()
+
+        register_agent("idem-cancel", _Agent())
+        try:
+            headers = {"Idempotency-Key": "k-4"}
+            with pytest.raises(BaseException):
+                client.post("/api/v1/agents/idem-cancel/invoke",
+                            json={"message": "hi"}, headers=headers)
+            retry = client.post("/api/v1/agents/idem-cancel/invoke",
+                                json={"message": "hi"}, headers=headers)
+            assert retry.status_code == 409
+            assert _Agent.calls == 1
+        finally:
+            unregister_agent("idem-cancel")
 
 
 def test_agent_invoke_smoke_test():

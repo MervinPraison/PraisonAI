@@ -7,6 +7,7 @@ enabling bidirectional n8n ↔ PraisonAI integration.
 
 from typing import Any, Dict, Optional, Union
 import inspect
+import json
 import logging
 
 try:
@@ -494,26 +495,33 @@ async def _safe_close_agent(agent: Any) -> None:
 
 _invoke_idempotency_store: Any = None
 _invoke_idempotency_lock = threading.Lock()
+_INVOKE_IDEMPOTENCY_TTL_SECONDS = 86_400.0  # 24h retention window
 
 
 def _get_invoke_idempotency_store() -> Any:
     """Lazily build the durable store that dedups keyed invoke submissions.
 
-    Reuses the same restart-safe ``build_idempotency_store`` the gateway and
-    scheduler delivery paths use, under ``$PRAISONAI_HOME/state`` (falling back
-    to ``~/.praisonai``), so a client retry carrying the same
-    ``Idempotency-Key`` never starts a second agent run.
+    Uses the gateway's restart-safe ``SqliteIdempotencyStore`` directly under
+    ``$PRAISONAI_HOME/state`` (falling back to ``~/.praisonai``), so a client
+    retry carrying the same ``Idempotency-Key`` never starts a second agent run.
+    Built directly rather than via ``build_idempotency_store`` so an unusable
+    database raises (the route answers 503) instead of silently degrading to a
+    per-process in-memory store, and so it never touches the gateway's
+    durability-degraded health facts. The in-flight lease equals the TTL so a
+    long-running agent never loses its reservation to a retry.
     """
     global _invoke_idempotency_store
     with _invoke_idempotency_lock:
         if _invoke_idempotency_store is None:
             from pathlib import Path
-            from praisonai_bot.bots._idempotency import build_idempotency_store
+            from praisonai_bot.bots._idempotency import SqliteIdempotencyStore
 
             base = os.environ.get("PRAISONAI_HOME")
             home = Path(base) if base else Path.home() / ".praisonai"
-            _invoke_idempotency_store = build_idempotency_store(
-                "sqlite", path=home / "state" / "invoke_idempotency.db"
+            _invoke_idempotency_store = SqliteIdempotencyStore(
+                home / "state" / "invoke_idempotency.db",
+                ttl_seconds=_INVOKE_IDEMPOTENCY_TTL_SECONDS,
+                inflight_lease_seconds=_INVOKE_IDEMPOTENCY_TTL_SECONDS,
             )
         return _invoke_idempotency_store
 
@@ -593,8 +601,10 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
 
         import asyncio
         store = None
-        idem_key = f"invoke:{agent_id}:{idempotency_key}" if idempotency_key else None
+        # JSON-encode the pair so ``:`` in either part can't make two agents' keys collide.
+        idem_key = json.dumps(["invoke", agent_id, idempotency_key]) if idempotency_key else None
         succeeded = False
+        failed = False
         if idem_key:
             try:
                 store = _get_invoke_idempotency_store()
@@ -662,12 +672,18 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
                     status_code=500,
                     detail=f"Agent execution failed: {str(e)}"
                 )
+        except Exception:
+            # Only a run that actually failed frees its key. A cancelled request
+            # (``CancelledError`` is not an ``Exception``) keeps the reservation,
+            # since a sync ``start`` keeps running in its worker thread.
+            failed = True
+            raise
         finally:
             # Release the per-request clone's resources (LLM pools, tool-executor
             # threads, MCP subprocesses). No-op when the agent fell back to the
             # shared template. Never masks the response.
             await _safe_close_agent(agent)
-            if store is not None:
+            if store is not None and (succeeded or failed):
                 # Commit the key on success so retries are deduplicated; free it
                 # on failure so the client can retry. Never masks the response.
                 try:
