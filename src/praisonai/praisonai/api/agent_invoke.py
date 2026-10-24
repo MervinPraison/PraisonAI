@@ -492,6 +492,32 @@ async def _safe_close_agent(agent: Any) -> None:
         logger.exception("Agent cleanup failed")
 
 
+_invoke_idempotency_store: Any = None
+_invoke_idempotency_lock = threading.Lock()
+
+
+def _get_invoke_idempotency_store() -> Any:
+    """Lazily build the durable store that dedups keyed invoke submissions.
+
+    Reuses the same restart-safe ``build_idempotency_store`` the gateway and
+    scheduler delivery paths use, under ``$PRAISONAI_HOME/state`` (falling back
+    to ``~/.praisonai``), so a client retry carrying the same
+    ``Idempotency-Key`` never starts a second agent run.
+    """
+    global _invoke_idempotency_store
+    with _invoke_idempotency_lock:
+        if _invoke_idempotency_store is None:
+            from pathlib import Path
+            from praisonai_bot.bots._idempotency import build_idempotency_store
+
+            base = os.environ.get("PRAISONAI_HOME")
+            home = Path(base) if base else Path.home() / ".praisonai"
+            _invoke_idempotency_store = build_idempotency_store(
+                "sqlite", path=home / "state" / "invoke_idempotency.db"
+            )
+        return _invoke_idempotency_store
+
+
 def _supports_async_start(agent: Any) -> bool:
     """Return True if agent.astart is a coroutine function."""
     astart = getattr(agent, "astart", None)
@@ -514,6 +540,7 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
         request: AgentInvokeRequest,
         _: None = Depends(verify_token),
         registry: AgentRegistry = Depends(_registry_dependency),
+        idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     ) -> Union[AgentInvokeResponse, ErrorResponse]:
         """
         Invoke a PraisonAI agent with a message.
@@ -529,8 +556,11 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
             Agent response with result and session information
             
         Raises:
-            HTTPException: If agent not found or execution fails
-            
+            HTTPException: If agent not found or execution fails, or 409 when
+                an ``Idempotency-Key`` was already submitted (in flight or
+                completed within the retention window) — the agent is not
+                re-run. A failed run frees its key so the client can retry.
+
         Example n8n HTTP Request Node configuration:
         ```json
         {
@@ -561,6 +591,28 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
                 detail=f"Agent '{agent_id}' not found"
             )
 
+        import asyncio
+        store = None
+        idem_key = f"invoke:{agent_id}:{idempotency_key}" if idempotency_key else None
+        succeeded = False
+        if idem_key:
+            try:
+                store = _get_invoke_idempotency_store()
+                admitted = await asyncio.to_thread(store.reserve, idem_key)
+            except Exception as e:
+                await _safe_close_agent(agent)
+                logger.error(f"Idempotency store unavailable: {e}")
+                raise HTTPException(
+                    status_code=503,
+                    detail="Idempotency store unavailable; retry later",
+                )
+            if not admitted:
+                await _safe_close_agent(agent)
+                raise HTTPException(
+                    status_code=409,
+                    detail="A run with this Idempotency-Key was already submitted",
+                )
+
         try:
             # Apply per-request agent_config overrides to the isolated clone, or
             # reject unsupported keys with a 400 so the caller isn't silently
@@ -589,6 +641,7 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
                     raise AttributeError(f"Agent {agent_id} must provide start() or async astart()")
 
                 logger.info(f"Agent {agent_id} invoked successfully")
+                succeeded = True
 
                 return AgentInvokeResponse(
                     result=str(result),
@@ -614,6 +667,15 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
             # threads, MCP subprocesses). No-op when the agent fell back to the
             # shared template. Never masks the response.
             await _safe_close_agent(agent)
+            if store is not None:
+                # Commit the key on success so retries are deduplicated; free it
+                # on failure so the client can retry. Never masks the response.
+                try:
+                    await asyncio.to_thread(
+                        store.record if succeeded else store.release, idem_key
+                    )
+                except Exception:
+                    logger.exception("Idempotency store update failed")
 
     @router.get("/agents")
     async def list_agents(

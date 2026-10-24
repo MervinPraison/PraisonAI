@@ -746,6 +746,95 @@ class TestAgentInvokeRouteCleanup:
             unregister_agent("route-shared")
 
 
+@pytest.mark.skipif(not pytest.importorskip("fastapi", minversion="0.68.0"), reason="FastAPI not available")
+class TestInvokeIdempotency:
+    """Idempotency-Key on the invoke route (Issue #5977)."""
+
+    @pytest.fixture
+    def client(self, tmp_path, monkeypatch):
+        from fastapi import FastAPI
+        from fastapi.testclient import TestClient
+        import praisonai.api.agent_invoke as agent_invoke
+
+        monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+        monkeypatch.setattr(agent_invoke, "_invoke_idempotency_store", None)
+        app = FastAPI()
+        app.include_router(agent_invoke.router)
+        return TestClient(app)
+
+    def _register(self, agent_id, side_effect=None):
+        from praisonai.api.agent_invoke import register_agent
+
+        agent = Mock()
+        if side_effect is not None:
+            agent.start.side_effect = side_effect
+        else:
+            agent.start.return_value = "done"
+        register_agent(agent_id, agent)
+        return agent
+
+    def test_same_key_runs_agent_once(self, client):
+        from praisonai.api.agent_invoke import unregister_agent
+
+        agent = self._register("idem-once")
+        try:
+            headers = {"Idempotency-Key": "k-1"}
+            first = client.post("/api/v1/agents/idem-once/invoke",
+                                json={"message": "refund"}, headers=headers)
+            retry = client.post("/api/v1/agents/idem-once/invoke",
+                                json={"message": "refund"}, headers=headers)
+            assert first.status_code == 200
+            assert retry.status_code == 409
+            assert agent.start.call_count == 1
+        finally:
+            unregister_agent("idem-once")
+
+    def test_no_key_runs_every_time(self, client):
+        from praisonai.api.agent_invoke import unregister_agent
+
+        agent = self._register("idem-none")
+        try:
+            for _ in range(2):
+                resp = client.post("/api/v1/agents/idem-none/invoke",
+                                   json={"message": "hi"})
+                assert resp.status_code == 200
+            assert agent.start.call_count == 2
+        finally:
+            unregister_agent("idem-none")
+
+    def test_failed_run_frees_key(self, client):
+        from praisonai.api.agent_invoke import unregister_agent
+
+        agent = self._register("idem-fail", side_effect=[RuntimeError("boom"), "ok"])
+        try:
+            headers = {"Idempotency-Key": "k-2"}
+            first = client.post("/api/v1/agents/idem-fail/invoke",
+                                json={"message": "hi"}, headers=headers)
+            retry = client.post("/api/v1/agents/idem-fail/invoke",
+                                json={"message": "hi"}, headers=headers)
+            assert first.status_code == 500
+            assert retry.status_code == 200
+            assert agent.start.call_count == 2
+        finally:
+            unregister_agent("idem-fail")
+
+    def test_key_is_scoped_per_agent(self, client):
+        from praisonai.api.agent_invoke import unregister_agent
+
+        a = self._register("idem-a")
+        b = self._register("idem-b")
+        try:
+            headers = {"Idempotency-Key": "shared"}
+            assert client.post("/api/v1/agents/idem-a/invoke",
+                               json={"message": "hi"}, headers=headers).status_code == 200
+            assert client.post("/api/v1/agents/idem-b/invoke",
+                               json={"message": "hi"}, headers=headers).status_code == 200
+            assert a.start.call_count == 1 and b.start.call_count == 1
+        finally:
+            unregister_agent("idem-a")
+            unregister_agent("idem-b")
+
+
 def test_agent_invoke_smoke_test():
     """Smoke test to verify agent invoke module can be imported and used."""
     try:
