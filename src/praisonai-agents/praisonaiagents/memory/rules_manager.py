@@ -516,14 +516,7 @@ class RulesManager:
                     dir_prefix = rules_dir_name.split("/")[0].strip(".")
                     self._rules[f"gitroot_{dir_prefix}:{rule.name}"] = rule
         
-        # 6. Load subdirectory rules (walk up from cwd to workspace/git root).
-        # Skipped when cwd is outside that tree, so ancestors such as the
-        # user's home directory are never scanned.
-        stop_at = (git_root if git_root else self.workspace_path).resolve()
-        current = Path.cwd().resolve()
-        if not current.is_relative_to(stop_at):
-            current = stop_at
-        while current != stop_at and current != current.parent:
+main
             # Check .praisonai/rules/
             subdir_rules_dir = current / self.RULES_DIR_NAME.replace("/", os.sep)
             subdir_rules = self._discover_rules_in_dir(subdir_rules_dir)
