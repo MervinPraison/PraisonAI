@@ -50,6 +50,15 @@ def _require_https(url: str) -> None:
         )
 
 
+def _require_success(resp: Any) -> None:
+    """Raise unless ``resp`` is 2xx (credential POSTs don't follow redirects)."""
+    resp.raise_for_status()
+    if not 200 <= resp.status_code < 300:
+        raise ValueError(
+            f"Unexpected HTTP {resp.status_code} from OAuth endpoint {resp.url!r}"
+        )
+
+
 def parse_www_authenticate(header: Optional[str]) -> Dict[str, str]:
     """
     Parse a ``WWW-Authenticate`` challenge header into its parameters.

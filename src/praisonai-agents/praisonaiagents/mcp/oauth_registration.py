@@ -13,7 +13,7 @@ from typing import Any, Dict, List, Optional
 
 from praisonaiagents._logging import get_logger
 
-from .oauth_discovery import _require_https
+from .oauth_discovery import _require_https, _require_success
 
 logger = get_logger("mcp-oauth-registration")
 
@@ -64,7 +64,7 @@ def register_client(
         timeout=timeout,
         allow_redirects=False,  # never re-send credentials to a redirect target
     )
-    resp.raise_for_status()
+    _require_success(resp)
     client_info = resp.json()
 
     if not client_info.get("client_id"):

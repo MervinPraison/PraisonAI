@@ -58,7 +58,7 @@ class TestWellKnownCandidates:
 
 
 class TestEndpointHttpsValidation:
-    def test_rejects_plaintext_advertised_endpoints(self, monkeypatch):
+    def test_rejects_plaintext_advertised_endpoints(self, monkeypatch, public_dns):
         from praisonaiagents.mcp import oauth_discovery
 
         monkeypatch.setattr(
@@ -72,7 +72,7 @@ class TestEndpointHttpsValidation:
                 "token_endpoint": "http://auth.example.com/token",
             },
         )
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="insecure transport"):
             oauth_discovery.discover_oauth_metadata("https://api.example.com/mcp")
 
     def test_accepts_all_https_endpoints(self, monkeypatch, public_dns):
@@ -172,6 +172,29 @@ class TestProviderTokenReuse:
         provider = MCPOAuthProvider("example", url, storage=storage)
         assert provider.get_valid_token() == "tok123"
         assert provider.ensure_authenticated() == "tok123"
+
+    def test_refresh_redirect_keeps_saved_tokens(self, storage, monkeypatch, public_dns):
+        import requests
+        from praisonaiagents.mcp.oauth_provider import MCPOAuthProvider
+
+        url = "https://api.example.com/mcp"
+        tokens = {
+            "access_token": "old",
+            "refresh_token": "r1",
+            "token_endpoint": "https://auth.example.com/token",
+        }
+        storage.set_tokens("example", tokens, server_url=url)
+        storage.set_client_info("example", {"client_id": "c1"}, server_url=url)
+
+        resp = requests.Response()
+        resp.status_code = 307
+        resp.url = tokens["token_endpoint"]
+        resp._content = b'{"detail": "redirect"}'
+        monkeypatch.setattr(requests, "post", lambda *a, **k: resp)
+
+        provider = MCPOAuthProvider("example", url, storage=storage)
+        assert provider._try_refresh(storage.get_for_url("example", url)) is False
+        assert storage.get_for_url("example", url)["tokens"]["access_token"] == "old"
 
     def test_expired_token_without_refresh_returns_none(self, storage):
         import time
