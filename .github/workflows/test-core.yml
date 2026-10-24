@@ -5,6 +5,7 @@ on:
     branches: [ main, develop ]
     paths:
       - 'src/**'
+      - 'examples/**'
       - 'src/praisonai-deploy/infra/**'
       - 'src/praisonai-bot/infra/**'
       - 'scripts/check_helm_charts.sh'
@@ -15,6 +16,7 @@ on:
     branches: [ main, develop ]
     paths:
       - 'src/**'
+      - 'examples/**'
       - 'src/praisonai-deploy/infra/**'
       - 'src/praisonai-bot/infra/**'
       - 'scripts/check_helm_charts.sh'
