@@ -4,6 +4,7 @@ This class extends the base Agent class to provide specific functionality for im
 including support for different image models, sizes, and quality settings.
 """
 import asyncio
+import os
 from typing import Optional, Any, Dict, Union, List
 from ..agent.agent import Agent
 from pydantic import BaseModel, Field
@@ -46,6 +47,7 @@ class ImageAgent(Agent):
         **kwargs
     ):
         """Initialize ImageAgent with parameters."""
+        self._explicit_image_llm = llm
         # Set default role and goal if not provided
         role = role or "Image Generation Assistant"
         goal = goal or "Generate high-quality images based on text descriptions"
@@ -74,6 +76,18 @@ class ImageAgent(Agent):
         self._litellm = None
         # Configure logging based on verbose level
         self._configure_logging(verbose)
+
+    def _image_model_name(self) -> str:
+        """Model id for LiteLLM image APIs (not the chat ``llm_model`` default)."""
+        raw = (
+            getattr(self, "_explicit_image_llm", None)
+            or os.getenv("PRAISONAI_IMAGE_MODEL")
+            or "dall-e-2"
+        )
+        if hasattr(raw, "model"):
+            return str(raw.model)
+        return str(raw)
+
     def _configure_logging(self, verbose: Union[bool, int]) -> None:
         """Configure logging levels based on verbose setting."""
         # Only suppress logs if not in debug mode
@@ -130,12 +144,8 @@ class ImageAgent(Agent):
         config = self.image_config.dict(exclude_none=True)
         config.update(kwargs)
         
-        # Get the model name robustly from the parent Agent's property
-        model_info = self.llm_model
-        model_name = model_info.model if hasattr(model_info, 'model') else str(model_info)
-        
-        # Use the model name in config
-        config['model'] = model_name
+        model_name = self._image_model_name()
+        config["model"] = model_name
         # Filter parameters based on the provider to avoid unsupported parameter errors
         custom_llm_provider = None
         try:
@@ -264,8 +274,8 @@ class ImageAgent(Agent):
             import litellm
             litellm.telemetry = False
             
-            model_name = self.llm or self.model or "dall-e-2"
-            
+            model_name = self._image_model_name()
+
             config = {
                 "model": model_name,
                 "image": image,
@@ -339,8 +349,8 @@ class ImageAgent(Agent):
             import litellm
             litellm.telemetry = False
             
-            model_name = self.llm or self.model or "dall-e-2"
-            
+            model_name = self._image_model_name()
+
             config = {
                 "model": model_name,
                 "image": image,
