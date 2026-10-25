@@ -7,6 +7,7 @@ This module provides a safe interface for executing shell commands with:
 - Resource limits
 """
 
+import re
 import subprocess
 import shlex
 import logging
@@ -87,6 +88,36 @@ def _find_shell_syntax(command: str):
                     return token
         i += 1
     return None
+
+
+# Credential-looking variable names are withheld from model-driven commands:
+# a gateway serving untrusted chat would otherwise hand `env` / `echo $X` every
+# LLM key, channel token and its own GATEWAY_AUTH_TOKEN. Operators who need one
+# inside a command name it in PRAISONAI_SHELL_ENV_ALLOWLIST (comma-separated).
+_SECRET_NAME_PARTS = frozenset({"TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "CREDENTIALS", "APIKEY"})
+_ENV_REF = re.compile(r"\$(\w+|\{[^}]*\})")
+
+
+def _is_secret_name(name: str) -> bool:
+    upper = name.upper()
+    return upper.endswith("_KEY") or any(part in _SECRET_NAME_PARTS for part in upper.split("_"))
+
+
+def _build_subprocess_env(extra_env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """Parent environment minus secret-looking names, plus explicit *extra_env*."""
+    allow = {n.strip() for n in os.environ.get("PRAISONAI_SHELL_ENV_ALLOWLIST", "").split(",") if n.strip()}
+    process_env = {k: v for k, v in os.environ.items() if k in allow or not _is_secret_name(k)}
+    if extra_env:
+        process_env.update(extra_env)
+    return process_env
+
+
+def _expandvars(value: str, env: Dict[str, str]) -> str:
+    """``os.path.expandvars`` against *env* rather than ``os.environ``."""
+    def _sub(match):
+        name = match.group(1).strip("{}")
+        return env.get(name, match.group(0))
+    return _ENV_REF.sub(_sub, value) if "$" in value else value
 
 
 class ShellTools:
@@ -187,24 +218,23 @@ class ShellTools:
             if not command:
                 return {"error": "Empty command", "stdout": "", "stderr": "", "exit_code": 1}
             
+            # Set up process environment (secrets stripped, explicit env kept)
+            process_env = _build_subprocess_env(env)
+
             # Expand tilde and environment variables in command arguments
-            # (shell=False means the shell won't do this for us)
-            command = [os.path.expanduser(os.path.expandvars(arg)) for arg in command]
-            
+            # (shell=False means the shell won't do this for us). Expansion
+            # uses the scrubbed env so `echo $OPENAI_API_KEY` cannot leak it.
+            command = [os.path.expanduser(_expandvars(arg, process_env)) for arg in command]
+
             # Expand tilde in cwd (subprocess doesn't do this)
             if cwd:
                 cwd = os.path.expanduser(cwd)
-                cwd = os.path.expandvars(cwd)  # Also expand $HOME, $USER, etc.
+                cwd = _expandvars(cwd, process_env)  # Also expand $HOME, $USER, etc.
                 if not os.path.isdir(cwd):
                     # Fallback: try home directory, then current working directory
                     fallback = os.path.expanduser("~") if os.path.isdir(os.path.expanduser("~")) else os.getcwd()
                     logging.warning(f"Working directory '{cwd}' does not exist, using '{fallback}'")
                     cwd = fallback
-            
-            # Set up process environment
-            process_env = os.environ.copy()
-            if env:
-                process_env.update(env)
 
             if run_in_background:
                 return self._start_background(command, cwd, process_env)
