@@ -1,5 +1,6 @@
 """Rejected input has the same fixed string contract as rejected output."""
 import asyncio
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -33,9 +34,17 @@ def test_rejected_input_returns_fixed_guardrail_message(entry):
 
 
 @pytest.mark.parametrize("is_async", [False, True])
-def test_team_does_not_complete_or_save_rejected_input(tmp_path, is_async):
-    """A text apology must not become a successful task or persisted output."""
-    agent = Agent(name="T", instructions="test", llm="gpt-4o-mini", guardrails=RejectInput())
+@pytest.mark.parametrize("blocked_stage", ["input", "output"])
+def test_team_does_not_complete_or_save_rejected_turn(tmp_path, is_async, blocked_stage):
+    """Input and output blocks must not become successful tasks or saved output."""
+    guardrails = RejectInput() if blocked_stage == "input" else lambda output: (False, "rejected")
+    agent = Agent(name="T", instructions="test", llm="gpt-4o-mini", guardrails=guardrails)
+    if blocked_stage == "output":
+        agent.max_guardrail_retries = 0
+        agent._using_custom_llm = True
+        agent.llm_instance = MagicMock()
+        agent.llm_instance.get_response.return_value = "rejected model output"
+        agent.llm_instance.get_response_async = AsyncMock(return_value="rejected model output")
     path = tmp_path / "output.txt"
     task = Task(name="blocked", description="blocked prompt", agent=agent,
                 output_file=str(path), max_retries=1)
