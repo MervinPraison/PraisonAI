@@ -23,7 +23,7 @@ __all__ = [
     'recipe',
     'embed',
     'embedding',
-    'DB',  # Short alias for PraisonAIDB — recommended for simplicity
+    'DB',  # Deprecated alias for PraisonAIDB — prefer `from praisonaiagents import db`
     'ManagedAgent',
     'ManagedConfig',
     'AnthropicManagedAgent',
