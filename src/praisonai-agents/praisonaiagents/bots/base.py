@@ -51,12 +51,13 @@ from __future__ import annotations
 
 import asyncio
 import re
+import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Union
 
-from .protocols import PlatformCapabilities
+from .protocols import HealthResult, PlatformCapabilities, ProbeResult
 
 __all__ = [
     "SendErrorKind",
@@ -469,6 +470,12 @@ class BasePlatformAdapter(ABC):
     typing heartbeat, edit/delete fallbacks, formatting). Override any default
     only when the platform can do better.
 
+    The base also satisfies the runtime surface ``Bot``/``BotOS`` drive
+    (``start`` / ``stop`` / ``send_message`` / ``probe`` / ``health``) with
+    defaults built on those primitives, so a minimal subclass runs under the
+    gateway as-is. ``Bot`` builds adapters with ``token=`` / ``agent=`` /
+    ``config=`` keyword arguments, so a subclass ``__init__`` should accept them.
+
     Declare platform features by setting the class attribute
     :attr:`capabilities` to a :class:`PlatformCapabilities` instance. The
     default delivery path reads capabilities via ``getattr`` so it degrades
@@ -550,19 +557,92 @@ class BasePlatformAdapter(ABC):
         ``start`` should run its inbound source (poll/listen/socket) and only
         return when the channel is stopped cleanly, raising on an unexpected
         drop so the supervisor can reconnect with backoff. Concrete adapters
-        override this with their platform run loop.
+        with a blocking platform loop override this.
+
+        Default: :meth:`connect` (passing ``is_reconnect`` on supervised
+        restarts), raise if it fails so the supervisor backs off, then hold
+        until :meth:`stop` — suitable for push/callback transports whose
+        ``connect`` registers their inbound listener.
         """
-        raise NotImplementedError(
-            "adapter must implement start() to run its inbound loop"
-        )
+        is_reconnect = getattr(self, "_base_started_at", None) is not None
+        if not await self.connect(is_reconnect=is_reconnect):
+            raise ConnectionError(f"{type(self).__name__}.connect() failed")
+        self._base_stop_event = asyncio.Event()
+        self._base_started_at = time.time()
+        await self._base_stop_event.wait()
 
     async def stop(self) -> None:
         """Signal the inbound loop to stop and tear down the connection.
 
-        Default delegates to :meth:`disconnect`. Adapters with an explicit
-        stop event override this to unblock their run loop first.
+        Default releases the default :meth:`start` wait, then delegates to
+        :meth:`disconnect`. Adapters with their own run loop override this to
+        unblock it first.
         """
+        event = getattr(self, "_base_stop_event", None)
+        if event is not None:
+            event.set()
         await self.disconnect()
+
+    def _base_running(self) -> bool:
+        event = getattr(self, "_base_stop_event", None)
+        return event is not None and not event.is_set()
+
+    async def send_message(
+        self,
+        channel_id: Any,
+        content: Union[str, Dict[str, Any]],
+        reply_to: Optional[str] = None,
+        thread_id: Optional[str] = None,
+    ) -> SendResult:
+        """Runtime send entry point (``Bot.send_message``).
+
+        Default routes through :meth:`deliver` so formatting, chunking, typing
+        and retry apply; ``thread_id`` is forwarded in ``metadata``.
+        """
+        return await self.deliver(
+            channel_id,
+            content,
+            reply_to=reply_to,
+            metadata={"thread_id": thread_id} if thread_id else None,
+        )
+
+    async def probe(self) -> ProbeResult:
+        """Check connectivity/credentials without processing messages.
+
+        Default: ok while the default :meth:`start` is running; otherwise a
+        :meth:`connect` / :meth:`disconnect` round-trip.
+        """
+        platform = getattr(self, "platform_name", "") or ""
+        if self._base_running():
+            return ProbeResult(ok=True, platform=platform)
+        t0 = time.monotonic()
+        error: Optional[str] = None
+        try:
+            ok = bool(await self.connect())
+            if ok:
+                await self.disconnect()
+            else:
+                error = "connect() returned False"
+        except Exception as exc:
+            ok, error = False, str(exc)
+        return ProbeResult(
+            ok=ok,
+            platform=platform,
+            elapsed_ms=(time.monotonic() - t0) * 1000,
+            error=error,
+        )
+
+    async def health(self) -> HealthResult:
+        """Report health. Default reflects the default run state and uptime."""
+        running = self._base_running()
+        started = getattr(self, "_base_started_at", None)
+        return HealthResult(
+            ok=running,
+            platform=getattr(self, "platform_name", "") or "",
+            is_running=running,
+            uptime_seconds=(time.time() - started) if running and started else None,
+            error=None if running else "not running",
+        )
 
     # ------------------------------------------------------------------ #
     # Identity canonicalization seam.                                     #
