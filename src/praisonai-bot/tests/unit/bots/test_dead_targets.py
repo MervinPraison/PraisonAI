@@ -504,6 +504,24 @@ class TestProactiveDurability:
         assert bot.sends[-1] == ("-1001", "hi")  # retry was not suppressed
 
     @pytest.mark.asyncio
+    async def test_failed_send_result_object_treated_as_failure(self):
+        # A SendResult with status "failed" (e.g. BasePlatformAdapter's default
+        # send_message after deliver() exhausts retries) is a failed send too.
+        from praisonaiagents.bots.base import SendResult
+
+        bot = _FakeBot()
+        bot.result = SendResult(ok=False, error="rate_limited")
+        router = DeliveryRouterFor(bot)
+
+        ok1 = await router.deliver("telegram", "hi", idempotency_key="job-sr")
+        assert ok1 is False
+
+        bot.result = SendResult(ok=True)
+        ok2 = await router.deliver("telegram", "hi", idempotency_key="job-sr")
+        assert ok2 is True
+        assert bot.sends[-1] == ("-1001", "hi")
+
+    @pytest.mark.asyncio
     async def test_none_send_result_still_succeeds(self):
         # Lightweight adapters return None/void on success (raising on failure);
         # None must remain a success signal so those paths do not regress.

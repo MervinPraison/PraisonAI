@@ -50,6 +50,7 @@ Example::
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import re
 import time
 from abc import ABC, abstractmethod
@@ -565,11 +566,26 @@ class BasePlatformAdapter(ABC):
         ``connect`` registers their inbound listener.
         """
         is_reconnect = getattr(self, "_base_started_at", None) is not None
-        if not await self.connect(is_reconnect=is_reconnect):
-            raise ConnectionError(f"{type(self).__name__}.connect() failed")
-        self._base_stop_event = asyncio.Event()
-        self._base_started_at = time.time()
-        await self._base_stop_event.wait()
+        # Created before connecting so a stop() racing connect() is not lost.
+        stop_event = self._base_stop_event = asyncio.Event()
+        # Until connect() returns, a stop()'s disconnect may precede the
+        # connection, so teardown is still owed.
+        stopped_early = True
+        try:
+            if not await self.connect(is_reconnect=is_reconnect):
+                raise ConnectionError(f"{type(self).__name__}.connect() failed")
+            stopped_early = stop_event.is_set()
+            self._base_started_at = time.time()
+            self._base_connected = True
+            await stop_event.wait()
+        finally:
+            self._base_connected = False
+            # Cancelled by the supervisor, failed, or stopped mid-connect:
+            # stop() did not (effectively) disconnect, so do it here.
+            if stopped_early or not stop_event.is_set():
+                stop_event.set()
+                with contextlib.suppress(Exception):
+                    await self.disconnect()
 
     async def stop(self) -> None:
         """Signal the inbound loop to stop and tear down the connection.
@@ -584,8 +600,7 @@ class BasePlatformAdapter(ABC):
         await self.disconnect()
 
     def _base_running(self) -> bool:
-        event = getattr(self, "_base_stop_event", None)
-        return event is not None and not event.is_set()
+        return getattr(self, "_base_connected", False)
 
     async def send_message(
         self,
@@ -619,12 +634,15 @@ class BasePlatformAdapter(ABC):
         error: Optional[str] = None
         try:
             ok = bool(await self.connect())
-            if ok:
-                await self.disconnect()
-            else:
+            if not ok:
                 error = "connect() returned False"
         except Exception as exc:
             ok, error = False, str(exc)
+        finally:
+            # Also on failure/cancellation (preflight timeout), so a partially
+            # opened client or listener is released.
+            with contextlib.suppress(Exception):
+                await self.disconnect()
         return ProbeResult(
             ok=ok,
             platform=platform,

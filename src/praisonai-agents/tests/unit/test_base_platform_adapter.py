@@ -389,6 +389,39 @@ class TestRuntimeContractDefaults:
         with pytest.raises(ConnectionError):
             run(NoConnect().start())
 
+    def test_stop_during_connect_is_honoured(self):
+        async def scenario():
+            gate = asyncio.Event()
+
+            class SlowConnect(RecordingBot):
+                async def connect(self, *, is_reconnect=False):
+                    await gate.wait()
+                    return await super().connect(is_reconnect=is_reconnect)
+
+            bot = SlowConnect()
+            task = asyncio.ensure_future(bot.start())
+            await asyncio.sleep(0.01)
+            await bot.stop()
+            gate.set()
+            await asyncio.wait_for(task, 1)
+            assert not bot.connected
+
+        run(scenario())
+
+    def test_cancelled_start_disconnects(self):
+        async def scenario():
+            bot = RecordingBot()
+            task = asyncio.ensure_future(bot.start())
+            await asyncio.sleep(0.01)
+            assert bot.connected
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert not bot.connected
+            assert not (await bot.health()).is_running
+
+        run(scenario())
+
     def test_send_message_routes_through_deliver(self):
         bot = RecordingBot()
         res = run(bot.send_message("c1", "hello", reply_to="r1", thread_id="t1"))
@@ -406,3 +439,15 @@ class TestRuntimeContractDefaults:
 
         res = run(BadCreds().probe())
         assert not res.ok and "401" in res.error
+
+    def test_probe_timeout_still_disconnects(self):
+        class Hangs(RecordingBot):
+            async def connect(self, *, is_reconnect=False):
+                self.connected = True  # partially opened resource
+                await asyncio.sleep(10)
+                return True
+
+        bot = Hangs()
+        with pytest.raises(asyncio.TimeoutError):
+            run(asyncio.wait_for(bot.probe(), 0.05))
+        assert not bot.connected
