@@ -131,26 +131,44 @@ class SmartRetriever:
         if not self._knowledge:
             return result
         
+        has_filters = bool(include_glob or exclude_glob or path_filter or metadata_filters)
+        if path_filter:
+            import re
+            try:
+                re.compile(path_filter)
+            except re.error as e:
+                # Fail closed: silently dropping the filter would return every
+                # chunk while still reporting the result as filtered.
+                raise ValueError(f"Invalid path_filter regex {path_filter!r}: {e}") from e
+        
+        # Filters are applied after the store truncates, so over-fetch when any
+        # is set (same rule as Memory's metadata_filter search) -- otherwise a
+        # filter whose matches sit just below the top_k cut returns nothing.
+        fetch_k = top_k * 3 if strategy in ("reranked", "hybrid") else top_k
+        if has_filters:
+            fetch_k = max(fetch_k, top_k * 10)
+        
         # Get initial results from knowledge store
-        search_results = self._search(
+        search_results, error = self._search(
             query=query,
-            top_k=top_k * 3 if strategy in ("reranked", "hybrid") else top_k,
+            top_k=fetch_k,
             user_id=user_id,
             agent_id=agent_id,
         )
         # Surface a store failure on the result. Without this the caller sees an
         # empty chunk list and cannot tell whether the knowledge base had no
-        # match or was never reached.
-        if getattr(self, "_last_error", None):
+        # match or was never reached. The error is returned rather than stored
+        # on self so concurrent calls on one retriever cannot see each other's.
+        if error:
             result.retrieval_failed = True
-            result.error = self._last_error
-            result.metadata["retrieval_error"] = self._last_error
+            result.error = error
+            result.metadata["retrieval_error"] = error
         
         chunks = self._normalize_results(search_results)
         result.total_found = len(chunks)
         
         # Apply filters
-        if include_glob or exclude_glob or path_filter or metadata_filters:
+        if has_filters:
             chunks = self._apply_filters(
                 chunks,
                 include_glob=include_glob,
@@ -176,23 +194,22 @@ class SmartRetriever:
         top_k: int,
         user_id: Optional[str] = None,
         agent_id: Optional[str] = None,
-    ) -> Any:
-        """Perform search on knowledge store."""
-        self._last_error = None
+    ) -> tuple:
+        """Perform search on knowledge store. Returns ``(results, error)``."""
         try:
             return self._knowledge.search(
                 query,
                 user_id=user_id,
                 agent_id=agent_id,
                 limit=top_k,
-            )
+            ), None
         except Exception as e:
             # Record the failure rather than returning a bare [] that is
             # indistinguishable from "nothing matched". Knowledge.search itself
             # re-raises, so reaching here means the store really is broken --
             # misconfigured, unreachable, or refusing auth -- and the agent is
             # about to answer with no context at all.
-            self._last_error = f"{type(e).__name__}: {e}"
+            error = f"{type(e).__name__}: {e}"
             # Do not log the raw query: it may carry personal data, credentials
             # or proprietary text, and this line lands at ERROR in application
             # logs. The exception text is enough to diagnose the store; the
@@ -200,9 +217,9 @@ class SmartRetriever:
             logger.error(
                 "Knowledge retrieval failed (query length %d): %s. "
                 "Returning no chunks; the answer will not use the knowledge base.",
-                len(query or ""), self._last_error,
+                len(query or ""), error,
             )
-            return []
+            return [], error
     
     def _normalize_results(self, results: Any) -> List[Dict[str, Any]]:
         """Normalize search results to list of dicts."""
@@ -275,12 +292,8 @@ class SmartRetriever:
                     continue
             
             # Check path filter regex
-            if path_filter:
-                try:
-                    if not re.search(path_filter, filepath):
-                        continue
-                except re.error:
-                    pass
+            if path_filter and not re.search(path_filter, filepath):
+                continue
             
             # Check metadata filters
             if metadata_filters:
