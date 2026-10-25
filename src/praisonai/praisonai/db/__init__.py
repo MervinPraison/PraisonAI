@@ -3,7 +3,6 @@ PraisonAI Database - Ultra-simple persistence for agents.
 
 RECOMMENDED (simplified import):
     from praisonaiagents import Agent, db, MemoryConfig
-    # or: from praisonai import Agent, db, MemoryConfig
 
     agent = Agent(
         name="Assistant",
@@ -43,7 +42,6 @@ _DEPRECATION_MSG = (
     "Importing from 'praisonai.db' is deprecated and will be removed in v3.0. "
     "Use the simplified import instead:\n"
     "  from praisonaiagents import Agent, db\n"
-    "  # or: from praisonai import Agent, db\n"
     "Then use: db=db(database_url='...')"
 )
 
