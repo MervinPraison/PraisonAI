@@ -197,7 +197,9 @@ class ExecutionMixin:
                 start_time = time_module.time()
                 started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
                 
+                from ..guardrails.guardrail_result import _GuardrailBlockedResponse
                 response = await self.achat(prompt, **kwargs)
+                blocked = isinstance(response, _GuardrailBlockedResponse)
                 response_str = str(response) if response else ""
                 
                 # Auto-save session after chat. Offloaded to a worker thread so
@@ -210,7 +212,8 @@ class ExecutionMixin:
                 # Wrap in AutonomyResult for consistent API
                 from .autonomy import AutonomyResult
                 return AutonomyResult(
-                    success=True,
+                    success=not blocked,
+                    error=response_str if blocked else None,
                     output=response_str,
                     completion_reason="caller_mode",
                     iterations=1,
@@ -672,7 +675,12 @@ class ExecutionMixin:
         from rich.console import Console
         from rich.panel import Panel
         from rich.markdown import Markdown
-        
+        from ..guardrails.guardrail_result import _GuardrailBlockedResponse
+
+        _in_ok, prompt, _in_err = self._validate_input_with_guardrail(prompt)
+        if not _in_ok:
+            return self._guardrail_blocked_message(_in_err)
+
         console = _get_console()()
         
         # Step 1: Create the plan
@@ -715,6 +723,8 @@ class ExecutionMixin:
             
             # Execute the step
             result = self.chat(step_prompt, **kwargs)
+            if isinstance(result, _GuardrailBlockedResponse):
+                return result
             results.append({"step": i + 1, "description": step.description, "result": result})
             
             # Update context for next step (use full result, not truncated)
@@ -853,6 +863,10 @@ Write the complete compiled report:"""
                     kwargs['stream'] = self.stream
                 else:
                     kwargs['stream'] = sys.stdout.isatty()
+            _in_ok, prompt, _in_err = self._validate_input_with_guardrail(prompt)
+            if not _in_ok:
+                blocked = self._guardrail_blocked_message(_in_err)
+                return iter((blocked,)) if kwargs.get('stream') else blocked
             return self._delegate_to_backend(prompt, **kwargs)
         
         # ─────────────────────────────────────────────────────────────────────
@@ -890,7 +904,9 @@ Write the complete compiled report:"""
                 self._load_history_context()
                 
                 # Use chat() — all tools, approval, doom-loop per-tool work
+                from ..guardrails.guardrail_result import _GuardrailBlockedResponse
                 response = self.chat(prompt, **kwargs)
+                blocked = isinstance(response, _GuardrailBlockedResponse)
                 response_str = str(response) if response else ""
                 
                 # Auto-save session after chat
@@ -899,7 +915,8 @@ Write the complete compiled report:"""
                 # Wrap in AutonomyResult for consistent API
                 from .autonomy import AutonomyResult
                 return AutonomyResult(
-                    success=True,
+                    success=not blocked,
+                    error=response_str if blocked else None,
                     output=response_str,
                     completion_reason="caller_mode",
                     iterations=1,
