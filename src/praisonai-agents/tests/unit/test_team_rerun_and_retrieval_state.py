@@ -8,7 +8,6 @@
 
 import asyncio
 import threading
-import time
 
 import pytest
 
@@ -64,18 +63,56 @@ def test_restored_checkpoint_is_resumed_not_reset():
     assert task.status == "completed"
 
 
-class _SlowKnowledge:
-    def search(self, query, **kw):
-        time.sleep(0.05)
-        return [{"text": f"d{i}", "score": 1.0, "metadata": {}} for i in range(20)]
+def test_rerun_keeps_caller_defined_task_variables():
+    team, task, calls = _team()
+    task.description = "Summarise {{ticket}}"
+    task.variables = {"ticket": "T-1"}
+    team.start(output="silent")
+    team.start(output="silent")
+    assert task.variables == {"ticket": "T-1"}
+    assert all("T-1" in str(p) and "{{ticket}}" not in str(p) for p in calls)
+
+
+def test_rerun_repropagates_current_team_variables():
+    team, task, calls = _team()
+    task.description = "Summarise {{ticket}}"
+    team.variables = {"ticket": "T-1"}
+    team.start(output="silent")
+    team.variables = {"ticket": "T-2"}
+    team.start(output="silent")
+    assert "T-2" in str(calls[1])
+
+
+def test_fresh_run_after_resume_drops_earlier_content():
+    team, task, calls = _team()
+    team.start("ticket A", output="silent")
+    team._restore_serialised_task_state(team._serialisable_task_state())
+    team.start(output="silent")  # resume: completed task skipped
+    team.start("ticket B", output="silent")
+    assert task.context == ["ticket B"]
 
 
 def test_rag_retrieve_override_does_not_mutate_config():
-    rag = RAG(knowledge=_SlowKnowledge(), config=RAGConfig(top_k=5))
+    # Hold the top_k=1 call inside search() until a default call has finished,
+    # so the default call is guaranteed to run while the override is active.
+    override_in_search = threading.Event()
+    default_done = threading.Event()
+
+    class Knowledge:
+        def search(self, query, **kw):
+            if query == "override":
+                override_in_search.set()
+                default_done.wait(2)
+            return [{"text": f"d{i}", "score": 1.0, "metadata": {}} for i in range(20)]
+
+    rag = RAG(knowledge=Knowledge(), config=RAGConfig(top_k=5))
     out = {}
-    ta = threading.Thread(target=lambda: out.setdefault("a", rag.retrieve("q", top_k=1)))
-    tb = threading.Thread(target=lambda: (time.sleep(0.02), out.setdefault("b", rag.retrieve("q"))))
-    ta.start(); tb.start(); ta.join(); tb.join()
+    ta = threading.Thread(target=lambda: out.setdefault("a", rag.retrieve("override", top_k=1)))
+    ta.start()
+    assert override_in_search.wait(2)
+    out["b"] = rag.retrieve("default")
+    default_done.set()
+    ta.join()
     assert rag.config.top_k == 5
     assert out["a"].metadata["top_k"] == 1
     assert out["b"].metadata["top_k"] == 5
@@ -101,22 +138,27 @@ def test_invalid_path_filter_fails_closed():
 
 
 def test_store_error_is_not_shared_across_concurrent_calls():
-    gate = threading.Event()
+    # Hold the good call inside search() until the failing call has fully
+    # recorded its error, the interleaving that leaked it via instance state.
+    good_in_search = threading.Event()
+    bad_done = threading.Event()
 
     class Store:
         def search(self, query, **kw):
             if query == "bad":
-                gate.wait(1)
                 raise RuntimeError("down")
-            gate.set()
-            time.sleep(0.05)
+            good_in_search.set()
+            bad_done.wait(2)
             return [{"text": "ok", "metadata": {}, "score": 1.0}]
 
     retriever = SmartRetriever(Store())
     out = {}
-    ta = threading.Thread(target=lambda: out.setdefault("bad", retriever.retrieve("bad")))
-    tb = threading.Thread(target=lambda: out.setdefault("good", retriever.retrieve("good")))
-    ta.start(); tb.start(); ta.join(); tb.join()
+    tg = threading.Thread(target=lambda: out.setdefault("good", retriever.retrieve("good")))
+    tg.start()
+    assert good_in_search.wait(2)
+    out["bad"] = retriever.retrieve("bad")
+    bad_done.set()
+    tg.join()
     assert out["bad"].retrieval_failed is True
     assert out["good"].retrieval_failed is False
 

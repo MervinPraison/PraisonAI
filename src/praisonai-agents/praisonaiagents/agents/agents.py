@@ -1729,10 +1729,21 @@ class AgentTeam(SpawnAnnounceProtocol):
             except Exception as e:
                 logger.error(f"Error in on_task_start callback: {e}")
 
-        # Apply global variables to task if not already set. Use a shallow copy so a
-        # task mutating its variables doesn't leak back into the shared AgentTeam state.
+        self._propagate_variables(task, task_id)
+
+    def _propagate_variables(self, task, task_id):
+        """Apply global variables to a task that has none of its own.
+
+        Uses a shallow copy so a task mutating its variables doesn't leak back
+        into the shared AgentTeam state. The copy is remembered so a later fresh
+        ``start()`` can drop it (and re-propagate current values) without
+        touching caller-defined ``Task.variables``.
+        """
         if self.variables and not getattr(task, 'variables', None):
             task.variables = self.variables.copy()
+            if not hasattr(self, "_propagated_variables"):
+                self._propagated_variables = {}
+            self._propagated_variables[task_id] = task.variables
 
     def _run_task_complete_hook(self, task, task_output):
         """Run the on_task_complete hook. Shared by run_task and arun_task."""
@@ -1759,8 +1770,7 @@ class AgentTeam(SpawnAnnounceProtocol):
             except Exception as e:
                 logger.error(f"Error in on_task_start callback: {e}")
 
-        if self.variables and not getattr(task, 'variables', None):
-            task.variables = self.variables.copy()
+        self._propagate_variables(task, task_id)
 
     async def _arun_task_complete_hook(self, task, task_output):
         """Async-aware on_task_complete hook for arun_task (see _arun_task_start_hook)."""
@@ -2902,17 +2912,30 @@ class AgentTeam(SpawnAnnounceProtocol):
         without this a second ``start()`` on the same team executed nothing and
         returned the previous run's output. Resetting only once a previous run
         has finished keeps ``restore_session_state()`` + ``start()`` resuming,
-        and also drops the ``content`` the previous run appended to task context.
+        and also drops the ``content`` earlier runs appended to task context.
+        Caller-defined ``Task.variables`` are kept; only copies propagated from
+        the team's ``variables`` are cleared so current values re-propagate.
         """
+        injected = getattr(self, "_injected_content", [])
         if getattr(self, "_previous_run_finished", False):
-            self._reset_task_state_for_item()
-            for task, item in getattr(self, "_injected_content", ()):
+            propagated = getattr(self, "_propagated_variables", {})
+            for task_id, task in self.tasks.items():
+                task.status = "not started"
+                task.result = None
+                if hasattr(task, "retry_count"):
+                    task.retry_count = 0
+                if task_id in propagated and getattr(task, "variables", None) is propagated[task_id]:
+                    task.variables = {}
+            propagated.clear()
+            for task, item in injected:
                 try:
                     task.context.remove(item)
                 except (AttributeError, ValueError):
                     pass
+            injected = []
+        # A resumed run keeps the tracked entries so the next fresh run removes them.
         self._previous_run_finished = False
-        self._injected_content = []
+        self._injected_content = injected
 
     def _restore_task_state(self, snapshot):
         """Restore per-task run state captured by ``_snapshot_task_state``."""
