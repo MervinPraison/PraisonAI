@@ -96,6 +96,7 @@ def _find_shell_syntax(command: str):
 # inside a command name it in PRAISONAI_SHELL_ENV_ALLOWLIST (comma-separated).
 _SECRET_NAME_PARTS = frozenset({"TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "CREDENTIALS", "APIKEY"})
 _ENV_REF = re.compile(r"\$(\w+|\{[^}]*\})")
+_ENV_REF_NT = re.compile(r"\$(\w+|\{[^}]*\})|%(\w+)%")
 
 
 def _is_secret_name(name: str) -> bool:
@@ -113,10 +114,21 @@ def _build_subprocess_env(extra_env: Optional[Dict[str, str]] = None) -> Dict[st
 
 
 def _expandvars(value: str, env: Dict[str, str]) -> str:
-    """``os.path.expandvars`` against *env* rather than ``os.environ``."""
+    """``os.path.expandvars`` against *env* rather than ``os.environ``.
+
+    On Windows ``%VAR%`` is expanded too and names are case-insensitive,
+    matching ``ntpath.expandvars``.
+    """
+    windows = platform.system() == 'Windows'
+    if windows:
+        env = {k.upper(): v for k, v in env.items()}
+
     def _sub(match):
-        name = match.group(1).strip("{}")
-        return env.get(name, match.group(0))
+        name = (match.group(1) or match.group(2)).strip("{}")
+        return env.get(name.upper() if windows else name, match.group(0))
+
+    if windows:
+        return _ENV_REF_NT.sub(_sub, value) if ("$" in value or "%" in value) else value
     return _ENV_REF.sub(_sub, value) if "$" in value else value
 
 
