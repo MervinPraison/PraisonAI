@@ -7686,6 +7686,14 @@ class WebSocketGateway:
             return None
 
         cfg = (self._loaded_config or {}).get("scheduler", {}) or {}
+        if not isinstance(cfg, dict):
+            # A malformed (e.g. hot-reloaded) ``scheduler:`` block must not
+            # kill the tick loop — fall back to the fail-closed defaults.
+            logger.warning(
+                "Ignoring non-mapping 'scheduler:' config (%s); using defaults",
+                type(cfg).__name__,
+            )
+            cfg = {}
         denied = cfg.get("denied_toolsets")
         denied_toolsets = (
             set(denied) if isinstance(denied, (list, tuple, set))
@@ -7762,16 +7770,33 @@ class WebSocketGateway:
             # keeps a long-lived gateway from pinning stale unattended-run
             # settings. Falls back to ``run_loop`` when the executor predates
             # per-tick policy refresh.
+            # A tick that raises (store I/O such as EMFILE on the lock file, a
+            # bad config) is logged and retried with capped backoff instead of
+            # ending the task — otherwise scheduling would silently stop for
+            # good while chat channels keep the gateway looking healthy.
+            failures = 0
             try:
                 while True:
-                    executor._run_policy = self._build_run_policy()
-                    await executor.tick_all()
-                    await asyncio.sleep(interval)
+                    try:
+                        executor._run_policy = self._build_run_policy()
+                        await executor.tick_all()
+                        failures = 0
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        failures += 1
+                        logger.exception(
+                            "Scheduler tick failed (%d in a row)", failures,
+                        )
+                    await asyncio.sleep(
+                        min(interval * 2 ** min(failures, 10), 300.0) if failures
+                        else interval
+                    )
             except asyncio.CancelledError:
                 pass
 
         self._scheduler_task = asyncio.create_task(_run())
-        logger.info("Scheduler tick started (interval=15s)")
+        logger.info("Scheduler tick started (interval=%ss)", interval)
     
     async def _start_session_cleanup(self) -> None:
         """Start periodic cleanup of expired sessions."""

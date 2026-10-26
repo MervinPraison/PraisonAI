@@ -1427,6 +1427,10 @@ Write the complete compiled report:"""
                 _loop_detection.record_tool_outcome(
                     _ld_history, function_name, arguments, _result, _ld_config
                 )
+            # Per-turn tool count for autonomy completion heuristics (sync
+            # parity with tool_execution.py). Counted only once the tool has
+            # actually run, so a BEFORE_TOOL-blocked call cannot count.
+            self._autonomy_turn_tool_count = getattr(self, '_autonomy_turn_tool_count', 0) + 1
             return _result
 
         # Enforce BEFORE_TOOL/AFTER_TOOL security hooks for every async caller,

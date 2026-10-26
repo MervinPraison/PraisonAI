@@ -107,7 +107,8 @@ class LoopGuardConfig:
     mutating_halt_threshold: int = 7
     
     # Time-based limits
-    max_time_per_turn: float = 120.0  # Max seconds per chat turn
+    # Max seconds per chat turn; ExecutionConfig.max_execution_time overrides (0 = no limit there).
+    max_time_per_turn: float = 600.0
     
     # No-progress detection
     no_progress_warn: int = 4
