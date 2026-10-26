@@ -114,8 +114,45 @@ def test_secret_env_is_not_passed_into_the_jail(monkeypatch, tmp_path):
     assert "sk-leak" not in result["stdout"] and "ghp-leak" not in result["stdout"]
     assert "OPENAI_API_KEY" not in seen["env"]
     assert "PATH" in seen["env"]
-    # An explicitly passed env entry is the allow-list.
-    assert seen["env"]["ALLOWED_TOKEN"] == "ok"
+    # An explicitly passed env entry is the allow-list, applied inside the jail
+    # only -- never on the launcher process.
+    assert "ALLOWED_TOKEN=ok" in result["stdout"]
+    assert "ALLOWED_TOKEN" not in seen["env"]
+
+
+def test_caller_env_never_reaches_the_launcher(monkeypatch, tmp_path):
+    # LD_PRELOAD on bwrap itself would run code before containment starts.
+    seen = {}
+
+    class _W:
+        backend = "bubblewrap"
+
+        def wrap(self, argv):
+            seen["argv"] = list(argv)
+            return ["/bin/true"]
+
+        def cleanup(self):
+            pass
+
+    monkeypatch.setattr(os_sandbox, "build_wrapper", lambda **kw: _W())
+    real_popen = shell_exec.subprocess.Popen
+
+    def _popen(argv, env=None, **kw):
+        seen["env"] = env
+        return real_popen(argv, env=env, **kw)
+
+    monkeypatch.setattr(shell_exec.subprocess, "Popen", _popen)
+    monkeypatch.delenv("LD_PRELOAD", raising=False)
+    shell_exec._run_real_shell(
+        "true", str(tmp_path), 10, {"LD_PRELOAD": "/tmp/x.so"}, 1000, contained=True
+    )
+    assert "LD_PRELOAD" not in seen["env"]
+    assert seen["argv"][:2] == ["/usr/bin/env", "LD_PRELOAD=/tmp/x.so"]
+
+    bad = shell_exec._run_real_shell(
+        "true", str(tmp_path), 10, {"-i": "x"}, 1000, contained=True
+    )
+    assert bad["success"] is False
 
 
 def test_bubblewrap_isolates_host_processes(monkeypatch):

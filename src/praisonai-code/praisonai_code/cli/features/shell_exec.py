@@ -83,6 +83,7 @@ _ONE_CHAR_OPS = ("|", ">", "<", ";", "&", "`")
 # default, but stdout goes back to the model, so ``env | grep KEY`` would put
 # credentials in the transcript and the provider request.
 _SECRET_ENV_RE = re.compile(r"KEY|TOKEN|SECRET|PASSW|CREDENTIAL", re.IGNORECASE)
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def find_shell_syntax(command: str) -> Optional[str]:
@@ -290,6 +291,16 @@ def _run_real_shell(
     wrapper = None
     if contained:
         from .os_sandbox import build_wrapper
+
+        if env:
+            # Apply the caller's env inside the jail only. Set on the launcher
+            # (bwrap / sandbox-exec), ``LD_PRELOAD`` and friends would load
+            # code outside the jail before containment starts.
+            bad = [k for k in env if not _ENV_NAME_RE.match(k)]
+            if bad:
+                return _refusal(command, "", f"Invalid environment variable name(s): {bad}")
+            argv = ["/usr/bin/env", *(f"{k}={v}" for k, v in env.items()), *argv]
+            env = None
 
         paths = list(writable_paths or [_workspace()])
         wrapper = build_wrapper(writable_paths=paths, network=network)
