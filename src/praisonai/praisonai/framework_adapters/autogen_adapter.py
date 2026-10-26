@@ -12,8 +12,9 @@ from .base import BaseFrameworkAdapter, warn_unsupported_fields
 logger = logging.getLogger(__name__)
 
 # Extended YAML fields every AutoGen-family backend consumes. The rest are
-# dropped and surfaced via warn_unsupported_fields.
-_AUTOGEN_SUPPORTED_FIELDS = frozenset({"llm", "function_calling_llm"})
+# dropped and surfaced via warn_unsupported_fields. AutoGen has no separate
+# function-calling model, so ``function_calling_llm`` is deliberately absent.
+_AUTOGEN_SUPPORTED_FIELDS = frozenset({"llm"})
 
 
 def _owning_registry(adapter):
@@ -260,10 +261,20 @@ class AutoGenAdapter(BaseFrameworkAdapter):
             # Surface any extended YAML fields this backend silently drops
             warn_unsupported_fields(self, spec.extras)
 
+            # Per-agent ``llm`` (model string or dict) overlays the shared entry
+            agent_llm = spec.extras.get("llm")
+            if isinstance(agent_llm, str) and agent_llm.strip():
+                agent_llm = {"model": agent_llm.strip()}
+            if isinstance(agent_llm, dict) and agent_llm:
+                shared = dict(llm_config[0]) if llm_config else {}
+                agent_llm_config = {"config_list": [{**shared, **agent_llm}]}
+            else:
+                agent_llm_config = llm_config_dict
+
             # Create AutoGen assistant agent
             agents[spec.key] = autogen.AssistantAgent(
                 name=spec.role,
-                llm_config=llm_config_dict,
+                llm_config=agent_llm_config,
                 system_message=spec.backstory +
                              ". Must Reply \"TERMINATE\" in the end when everything is done.",
             )
