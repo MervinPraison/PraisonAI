@@ -22,7 +22,7 @@ def _hello(**device):
         "device_id": device_id_from_public_key(PUB),
         "public_key": PUB,
         "signature": "sig",
-        "signed_at": 1700000000.5,
+        "signed_at": 1700000000,
         "nonce": "n-1",
     }
     block.update(device)
@@ -40,7 +40,7 @@ def test_hello_decodes_device():
     assert isinstance(frame.device, DeviceAuth)
     assert frame.device.device_id == device_id_from_public_key(PUB)
     assert frame.device.nonce == "n-1"
-    assert frame.device.signed_at == 1700000000.5
+    assert frame.device.signed_at == 1700000000
 
 
 def test_spoofed_device_id_is_unauthorized():
@@ -55,7 +55,7 @@ def test_spoofed_device_id_is_unauthorized():
     {"signed_at": True},
     {"signed_at": "now"},
     {"signed_at": float("nan")},
-    {"signed_at": 10**400},
+    {"signed_at": 1700000000.5},
     {"public_key": "not base64!"},
     {"public_key": "dGVzdC1wdWJsaWMta2V5\n"},
 ])
@@ -75,11 +75,11 @@ def test_wire_format_is_pinned():
     assert device_id_from_public_key(PUB) == (
         "c88e80202a4d650841e48649b4c3f553e48131b415db680476fd0d65632ff2b0"
     )
-    d = DeviceAuth(device_id_from_public_key(PUB), PUB, "sig", 1700000000.5, "n-1")
+    d = DeviceAuth(device_id_from_public_key(PUB), PUB, "sig", 1700000000, "n-1")
     assert d.signing_payload("a") == (
         b"praisonai-device-v1\n"
         b"c88e80202a4d650841e48649b4c3f553e48131b415db680476fd0d65632ff2b0\n"
-        b"n-1\n1700000000.5\na"
+        b"n-1\n1700000000\na"
     )
 
 
@@ -99,7 +99,7 @@ def test_ed25519_round_trip():
         serialization.Encoding.Raw, serialization.PublicFormat.Raw
     )
     pub = base64.b64encode(raw).decode()
-    unsigned = DeviceAuth(device_id_from_public_key(pub), pub, "", 1.0, "nonce")
+    unsigned = DeviceAuth(device_id_from_public_key(pub), pub, "", 1700000000, "nonce")
     sig = base64.b64encode(key.sign(unsigned.signing_payload("a"))).decode()
 
     frame = decode_client_frame({

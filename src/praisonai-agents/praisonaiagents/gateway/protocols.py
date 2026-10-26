@@ -377,13 +377,14 @@ class DeviceAuth:
         device_id: Fingerprint of ``public_key`` (see :func:`device_id_from_public_key`).
         public_key: Standard base64 (padded) of the device's raw public key.
         signature: Standard base64 (padded) signature over :meth:`signing_payload`.
-        signed_at: Unix timestamp at which the device signed the challenge.
+        signed_at: Integer Unix seconds at which the device signed the challenge
+            (an integer so every client language renders identical signed bytes).
         nonce: The server-issued challenge nonce being answered.
     """
     device_id: str
     public_key: str
     signature: str
-    signed_at: float
+    signed_at: int
     nonce: str
 
     def signing_payload(self, agent_id: str) -> bytes:
@@ -396,7 +397,7 @@ class DeviceAuth:
             "praisonai-device-v1",
             self.device_id,
             self.nonce,
-            repr(float(self.signed_at)),
+            str(int(self.signed_at)),
             agent_id,
         )).encode("utf-8")
 
@@ -1010,19 +1011,11 @@ def _decode_device(data: Any) -> DeviceAuth:
     public_key = _require_str(data.get("public_key"), field_name="device.public_key")
     device_id = _require_str(data.get("device_id"), field_name="device.device_id")
     signed_at = data.get("signed_at")
-    try:
-        valid = (
-            not isinstance(signed_at, bool)
-            and isinstance(signed_at, (int, float))
-            and math.isfinite(float(signed_at))
-        )
-    except OverflowError:
-        valid = False
-    if not valid:
+    if isinstance(signed_at, bool) or not isinstance(signed_at, int):
         raise FrameDecodeError(
             HelloError(
                 code=ConnectErrorCode.CONFIGURATION_ERROR,
-                message="Field 'device.signed_at' must be a finite number",
+                message="Field 'device.signed_at' must be an integer (Unix seconds)",
                 next_step=ConnectRecoveryStep.DO_NOT_RETRY,
             )
         )
@@ -1048,7 +1041,7 @@ def _decode_device(data: Any) -> DeviceAuth:
         device_id=device_id,
         public_key=public_key,
         signature=_require_str(data.get("signature"), field_name="device.signature"),
-        signed_at=float(signed_at),
+        signed_at=signed_at,
         nonce=_require_str(data.get("nonce"), field_name="device.nonce"),
     )
 
