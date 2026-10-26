@@ -472,22 +472,16 @@ class ActionOrchestrator:
                     }
                 run_cwd = candidate
 
-            # Honour PRAISON_SHELL like the basic execute_command does. The
-            # plan was already approved, so the un-gated runner is used; under
-            # ``sandboxed`` every command is contained, operators or not.
-            mode = shell_exec.resolve_mode()
-            if mode != shell_exec.MODE_OFF:
-                _operator = shell_exec.find_shell_syntax(step.target)
-                if mode == shell_exec.MODE_SANDBOXED:
-                    res = shell_exec._run_sandboxed(
-                        step.target, _operator, str(run_cwd), 30, None, 0,
-                        writable_paths=[str(workspace)],
-                        runner=shell_exec._run_real_shell,
-                    )
-                else:
-                    res = shell_exec._run_real_shell(
-                        step.target, str(run_cwd), 30, None, 0, contained=False
-                    )
+            # Under PRAISON_SHELL=sandboxed every command is contained,
+            # operators or not. The plan was already approved, so the
+            # un-gated runner is used. Other modes keep the argv executor.
+            if shell_exec.resolve_mode() == shell_exec.MODE_SANDBOXED:
+                res = shell_exec._run_sandboxed(
+                    step.target, shell_exec.find_shell_syntax(step.target),
+                    str(run_cwd), 30, None, 0,
+                    writable_paths=[str(workspace)],
+                    runner=shell_exec._run_real_shell,
+                )
                 return {
                     "command": step.target,
                     "stdout": res.get("stdout", ""),

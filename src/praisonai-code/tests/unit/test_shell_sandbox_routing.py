@@ -197,6 +197,30 @@ def test_acp_off_mode_still_refuses_operators(monkeypatch):
         _sanitize_command("echo a | cat")
 
 
+def test_acp_unsafe_mode_keeps_operator_block(tmp_path, monkeypatch):
+    from praisonai_code.cli.features import action_orchestrator as ao
+    from praisonai_code.cli.features.agent_tools import _sanitize_command
+
+    # ``unsafe`` must not turn approved ACP steps into an un-gated real shell.
+    monkeypatch.setenv(shell_exec.MODE_ENV_VAR, shell_exec.MODE_UNSAFE)
+    monkeypatch.setattr(
+        shell_exec, "_run_real_shell",
+        lambda *a, **k: pytest.fail("real shell must not run under unsafe ACP"),
+    )
+    with pytest.raises(ValueError):
+        _sanitize_command("echo a | cat")
+    orch = ao.ActionOrchestrator(
+        SimpleNamespace(config=SimpleNamespace(workspace=str(tmp_path)))
+    )
+    step = ao.ActionStep(
+        id="s", action_type=ao.ActionType.SHELL_COMMAND,
+        description="run", target="echo a; touch pwned",
+    )
+    result = asyncio.run(orch._apply_step(step))
+    assert result["returncode"] != 0
+    assert not (tmp_path / "pwned").exists()
+
+
 @pytest.mark.skipif(os_sandbox.describe_backend() == "none", reason="no OS sandbox backend")
 def test_plain_command_cannot_escape_to_home(tmp_path, monkeypatch):
     os_sandbox.reset_probe_cache()
