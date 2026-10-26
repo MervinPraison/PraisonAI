@@ -66,9 +66,9 @@ def _emit_subagent_stop(
         logger.debug("SUBAGENT_STOP hook failed", exc_info=True)
 
 
-def _messenger_delivery(messenger: Any, deliver: str) -> Callable[[Any], None]:
+def _messenger_delivery(messenger: Any) -> Callable[[Any], None]:
     """Build an ``on_complete`` callback that sends a finished job's result
-    through the turn's outbound messenger (the gateway's DeliveryRouter).
+    back to the turn's own chat (``"origin"``) through its outbound messenger.
 
     Raises when the send is not accepted so the job manager leaves the job
     un-``delivered`` instead of recording a delivery that never happened.
@@ -88,7 +88,7 @@ def _messenger_delivery(messenger: Any, deliver: str) -> Callable[[Any], None]:
             text = result
         if not text:
             return
-        outcome = _run_async(messenger.send(deliver, str(text)))
+        outcome = _run_async(messenger.send("origin", str(text)))
         if not getattr(outcome, "ok", False):
             raise RuntimeError(getattr(outcome, "summary", "") or "delivery failed")
 
@@ -143,10 +143,11 @@ def create_subagent_tool(
             ``deliver`` target finishes. This is the observable completion
             signal a gateway (e.g. ``BotOS``) subscribes to in order to
             route the result back to the originating chat without an active
-            turn. When ``None`` (the default) and the spawning turn has an
-            outbound messenger registered (a running gateway), the result is
-            sent through that messenger; otherwise background jobs remain
-            pull-only via ``subagent_result``.
+            turn. When ``None`` (the default), ``deliver="origin"`` targets
+            the turn's own chat, the spawning turn has an outbound messenger
+            registered (a running gateway) and the send policy allows it, the
+            result is sent back through that messenger; otherwise background
+            jobs remain pull-only via ``subagent_result``.
         
     Returns:
         Tool definition dictionary
@@ -407,9 +408,23 @@ def create_subagent_tool(
                 if on_job_complete is not None:
                     job_on_complete = on_job_complete
                 else:
+                    # Auto-send only back to the turn's own chat and only if
+                    # the send policy allows it (as ``send_message`` does);
+                    # any other target needs an explicit ``on_job_complete``.
+                    from .messaging_tools import _check_send_policy
+
                     messenger = get_outbound_messenger()
-                    if messenger is not None:
-                        job_on_complete = _messenger_delivery(messenger, deliver)
+                    same_chat = (
+                        (not chat_id or chat_id == ctx.chat_id)
+                        and (not platform or platform == ctx.platform)
+                    )
+                    if (
+                        messenger is not None
+                        and deliver == "origin"
+                        and same_chat
+                        and _check_send_policy(deliver) is None
+                    ):
+                        job_on_complete = _messenger_delivery(messenger)
 
             job_id = job_manager.start_job(
                 _job,

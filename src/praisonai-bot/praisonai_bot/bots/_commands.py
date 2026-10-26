@@ -1611,10 +1611,14 @@ def handle_tasks_command(
     except Exception as e:  # noqa: BLE001
         return f"❌ Could not list tasks: {e}"
     try:
-        jobs = [
-            j for j in (job_manager.list_jobs().values() if job_manager else ())
-            if _mine(j)
-        ]
+        jobs = sorted(
+            (
+                j for j in (job_manager.list_jobs().values() if job_manager else ())
+                if _mine(j)
+            ),
+            key=lambda j: j.created_at,
+            reverse=True,
+        )
     except Exception:  # noqa: BLE001
         jobs = []
 

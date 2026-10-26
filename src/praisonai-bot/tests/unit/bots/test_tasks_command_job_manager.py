@@ -56,3 +56,20 @@ def test_ownerless_jobs_hidden():
         assert out == "💤 No background tasks."
     finally:
         jm.shutdown()
+
+
+def test_newest_jobs_listed_first_when_over_limit():
+    jm = BackgroundJobManager()
+    try:
+        ids = []
+        for _ in range(25):
+            job = jm.start_job(
+                lambda: "x", origin={"deliver": "origin", "user_id": "alice"}
+            )
+            jm.get_result(job, timeout=5)
+            ids.append(job)
+        out = handle_tasks_command("alice", None, runner=BackgroundRunner(), job_manager=jm)
+        assert ids[-1] in out
+        assert ids[0] not in out
+    finally:
+        jm.shutdown()

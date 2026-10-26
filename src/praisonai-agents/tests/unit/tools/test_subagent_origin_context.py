@@ -35,7 +35,7 @@ class _FakeMessenger:
         return []
 
 
-def _spawn_in_turn(messenger, **kwargs):
+def _spawn_in_turn(messenger, deliver="origin", **kwargs):
     tool = create_subagent_tool(agent_factory=lambda **kw: _StubAgent())
     ctx = set_session_context(
         platform="telegram", chat_id="100", thread_id="7", user_id="alice"
@@ -43,7 +43,7 @@ def _spawn_in_turn(messenger, **kwargs):
     msg = register_outbound_messenger(messenger)
     try:
         return tool["function"](
-            task="summarise", background=True, deliver="origin", **kwargs
+            task="summarise", background=True, deliver=deliver, **kwargs
         )
     finally:
         clear_outbound_messenger(msg)
@@ -78,12 +78,46 @@ def test_origin_filled_from_session_context_and_delivered_once():
 
 
 def test_explicit_origin_arguments_win():
-    handle = _spawn_in_turn(_FakeMessenger(), platform="slack", chat_id="C9")
+    messenger = _FakeMessenger()
+    handle = _spawn_in_turn(messenger, platform="slack", chat_id="C9")
     info = _wait_info(handle["job_id"])
     assert info.origin["platform"] == "slack"
     assert info.origin["chat_id"] == "C9"
     assert info.origin["thread_id"] == ""
     assert info.origin["user_id"] == "alice"
+    # A different chat is not the turn's chat: never send it to chat "100".
+    assert messenger.sent == []
+    assert info.delivered is False
+
+
+def test_non_origin_target_is_not_auto_sent():
+    messenger = _FakeMessenger()
+    handle = _spawn_in_turn(messenger, deliver="telegram:999")
+    info = _wait_info(handle["job_id"])
+    assert messenger.sent == []
+    assert info.delivered is False
+
+
+def test_send_policy_denial_blocks_auto_send():
+    from praisonaiagents.gateway.protocols import SendDecision
+    from praisonaiagents.session.context import (
+        clear_send_policy,
+        register_send_policy,
+    )
+
+    class _Deny:
+        def evaluate(self, target, **kw):
+            return SendDecision(allow=False, reason="no")
+
+    messenger = _FakeMessenger()
+    token = register_send_policy(_Deny())
+    try:
+        handle = _spawn_in_turn(messenger)
+    finally:
+        clear_send_policy(token)
+    info = _wait_info(handle["job_id"])
+    assert messenger.sent == []
+    assert info.delivered is False
 
 
 def test_rejected_send_is_not_marked_delivered():
