@@ -92,6 +92,17 @@ def _make_emitter(sink: Any, run_id: str, full_content: bool):
     return ContextTraceEmitter(**kwargs)
 
 
+def _enter_run_scope(run_id: str):
+    """Enter the SDK's run scope when it has one (schema 1.1); else ``None``."""
+    try:
+        from praisonaiagents.trace.context_events import _run_scope
+    except ImportError:
+        return None
+    scope = _run_scope(run_id)
+    scope.__enter__()
+    return scope
+
+
 @contextlib.contextmanager
 def record(
     run_id: Optional[str] = None,
@@ -124,6 +135,9 @@ def record(
     sink: Any = _ForkTagSink(writer, _forked_from) if _forked_from else writer
     emitter = _make_emitter(sink, run_id, bool(full_content))
     token = set_context_emitter(emitter)
+    # Schema 1.1 SDKs stamp ``run_id`` through a run scope; nested teams and
+    # flows inherit it, so every event in the recording shares this id.
+    run_scope = _enter_run_scope(run_id)
     started = time.time()
     rec = Recording(run_id=run_id, path=writer.path, emitter=emitter, writer=writer, live=live)
 
@@ -145,4 +159,6 @@ def record(
             )
         finally:
             writer.close()
+            if run_scope is not None:
+                run_scope.__exit__(None, None, None)
             reset_context_emitter(token)

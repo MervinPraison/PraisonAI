@@ -322,3 +322,23 @@ def test_save_replay_is_a_known_yaml_field():
     from praisonai.config.schema import YAMLConfig
 
     assert "save_replay" in YAMLConfig.model_fields
+
+
+def test_record_stamps_run_id_on_every_event(tmp_path, monkeypatch):
+    """Every event in a recording shares the recording's run_id (schema 1.1 SDKs)."""
+    import json
+
+    import pytest
+
+    ce = pytest.importorskip("praisonaiagents.trace.context_events")
+    if not hasattr(ce, "_run_scope"):
+        pytest.skip("SDK predates schema 1.1 run scopes")
+    monkeypatch.setenv("PRAISONAI_TRACES_DIR", str(tmp_path))
+    from praisonai.replay import record
+
+    with record(run_id="run-scope-test") as rec:
+        ce.get_context_emitter().agent_start("Solo", {})
+        ce.get_context_emitter().agent_end("Solo", {})
+    events = [json.loads(line) for line in open(rec.path)]
+    assert events and {e.get("run_id") for e in events} == {"run-scope-test"}
+    assert ce._run_id_var.get() is None  # scope closed after the block
