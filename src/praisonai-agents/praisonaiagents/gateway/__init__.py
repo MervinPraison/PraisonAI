@@ -228,6 +228,10 @@ _LAZY_IMPORTS = {
     "StopResult": ("praisonaiagents.gateway.protocols", "StopResult"),
     # Schema-validated inbound frame codec (Issue #2831)
     "HelloParams": ("praisonaiagents.gateway.protocols", "HelloParams"),
+    # Device-identity handshake contract (Issue #5998)
+    "DeviceAuth": ("praisonaiagents.gateway.protocols", "DeviceAuth"),
+    "DeviceIdentityProtocol": ("praisonaiagents.gateway.protocols", "DeviceIdentityProtocol"),
+    "device_id_from_public_key": ("praisonaiagents.gateway.protocols", "device_id_from_public_key"),
     "HelloResult": ("praisonaiagents.gateway.protocols", "HelloResult"),
     "HelloError": ("praisonaiagents.gateway.protocols", "HelloError"),
     "ConnectErrorCode": ("praisonaiagents.gateway.protocols", "ConnectErrorCode"),
@@ -586,6 +590,9 @@ __all__ = [
     "StopResult",
     # Schema-validated inbound frame codec (Issue #2831)
     "HelloParams",
+    "DeviceAuth",
+    "DeviceIdentityProtocol",
+    "device_id_from_public_key",
     "HelloResult",
     "HelloError",
     "ConnectErrorCode",
