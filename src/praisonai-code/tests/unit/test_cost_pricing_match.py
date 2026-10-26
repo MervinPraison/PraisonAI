@@ -1,6 +1,8 @@
 """Model price matching for the CLI cost tracker (Issue #6043)."""
 
 import os
+import sys
+import types
 
 os.environ.setdefault("LITELLM_LOCAL_MODEL_COST_MAP", "True")
 
@@ -35,12 +37,21 @@ def test_longest_prefix_key_wins(no_litellm):
     assert get_pricing("openai/gpt-4o-2024-08-06") is DEFAULT_PRICING["gpt-4o"]
 
 
-def test_litellm_price_map_used_for_models_missing_from_table():
-    pricing = get_pricing("gpt-4.1-mini")
-    if pricing.model_name == "default":
-        pytest.skip("litellm price map unavailable")
+def test_litellm_price_map_used_for_models_missing_from_table(monkeypatch):
+    fake = types.SimpleNamespace(model_cost={
+        "gpt-4.1-mini": {
+            "input_cost_per_token": 4e-07,
+            "output_cost_per_token": 1.6e-06,
+            "max_input_tokens": 1047576,
+        },
+    })
+    monkeypatch.setitem(sys.modules, "litellm", fake)
+
+    pricing = get_pricing("openai/gpt-4.1-mini")
     assert pricing.priced
-    assert pricing.input_price_per_1m < DEFAULT_PRICING["gpt-4"].input_price_per_1m
+    assert pricing.input_price_per_1m == 0.4
+    assert pricing.output_price_per_1m == 1.6
+    assert pricing.context_window == 1047576
 
 
 def test_unknown_model_is_flagged_unpriced(no_litellm):
