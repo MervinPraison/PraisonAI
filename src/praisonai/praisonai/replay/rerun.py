@@ -299,6 +299,8 @@ def _check_flow_order(
     recording: it would run fresh and replace the reused output the target
     expects as its input. Steps are matched by graph node id (``node_ids``,
     id(step) -> node id), so unnamed patterns such as ``If`` are covered too.
+    A target nested in a pattern is checked up to that pattern: the last
+    top-level step the recording started before the target.
     """
     if any(getattr(s, "next_steps", None) or getattr(s, "branch_condition", None) for s in steps):
         return
@@ -314,7 +316,11 @@ def _check_flow_order(
         ran = set(started_before)
         top = [node_ids.get(id(step)) for step in steps]
         if recorded[-1] in top:
-            for step, node_id in zip(steps, top[: top.index(recorded[-1])]):
+            anchor = top.index(recorded[-1])
+        else:  # nested target: its container is the last top-level step that started
+            anchor = max((i for i, node_id in enumerate(top) if node_id in ran), default=-1)
+        if anchor > 0:
+            for step, node_id in zip(steps, top[:anchor]):
                 if node_id not in ran:
                     raise RerunError(
                         f"Step {node_id or type(step).__name__!r} comes before {recorded[-1]!r} in "

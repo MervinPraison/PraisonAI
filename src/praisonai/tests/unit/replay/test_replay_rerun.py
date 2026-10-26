@@ -551,3 +551,35 @@ def test_flow_rerun_rejects_redacted_variables(traces_dir, fx):
 
     with pytest.raises(RerunError, match="'api_key'.*redacted"):
         rerun(AgentFlow(steps=[research, draft, polish]), str(src), "step:draft", input="topic")
+
+
+def _nested_flow(ran, extra=False):
+    from praisonaiagents import AgentFlow
+    from praisonaiagents.workflows import StepResult
+    from praisonaiagents.workflows.workflows import If
+
+    def step(name):
+        def handler(ctx):
+            ran.append(name)
+            return StepResult(output=name)
+        handler.__name__ = name
+        return handler
+
+    steps = [step("research")] + ([step("extra")] if extra else [])
+    return AgentFlow(steps=steps + [If(condition="1 > 0", then_steps=[step("draft")]), step("polish")])
+
+
+def test_flow_rerun_of_a_nested_target_rejects_a_step_inserted_before_its_container(traces_dir):
+    """research -> If[draft] recorded; research -> extra -> If[draft] would feed draft extra's output."""
+    from praisonai.replay import record
+    from praisonai.replay.rerun import RerunError, rerun
+
+    ran = []
+    with record(full_content=True) as rec:
+        _nested_flow(ran).start("x")
+    ran.clear()
+    with pytest.raises(RerunError, match="did not run in the recording"):
+        rerun(_nested_flow(ran, extra=True), rec.path, "step:draft", input="x")
+    assert ran == []
+    rerun(_nested_flow(ran), rec.path, "step:draft", input="x")  # the same flow still re-runs
+    assert ran == ["draft", "polish"]

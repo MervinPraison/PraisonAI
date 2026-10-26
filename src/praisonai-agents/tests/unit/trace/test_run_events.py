@@ -854,3 +854,38 @@ class TestStepVariables:
         ends = {e.node_id: e.data for e in _of(recorder, "step_end")}
         variables = next(d["variables"] for n, d in ends.items() if n.endswith("research"))
         assert variables == {"customer_id": 42}
+
+    def test_cache_hit_step_end_leaves_out_the_output_variable(self, recorder):
+        """The step cache stores the output variable (the full output); a cached
+        step_end must trace only what the handler set, like the cold run."""
+        from praisonaiagents.workflows import StepResult
+        from praisonaiagents.workflows.workflows import AgentFlow
+
+        def research(ctx):
+            return StepResult(output="the full step output " * 50, variables={"customer_id": 42})
+
+        flow = AgentFlow(name="v", steps=[research], cache=True)
+        flow.run("go")
+        flow.run("go")  # cache hit
+        ends = [e.data for e in _of(recorder, "step_end")]
+        assert [d["status"] for d in ends] == ["completed", "cached"]
+        for d in ends:
+            assert d["variables"] == {"customer_id": 42}
+            assert "the full step output" not in str(d["variables"])
+
+    def test_nested_step_records_a_variable_changed_in_place(self, recorder):
+        """A list the step appends to (same object) still counts as set by it."""
+        from praisonaiagents.workflows import StepResult
+        from praisonaiagents.workflows.workflows import AgentFlow, If
+
+        def seed(ctx):
+            return StepResult(output="s", variables={"items": ["a"]})
+
+        def add(ctx):
+            ctx.variables["items"].append("b")
+            return StepResult(output="m")
+
+        AgentFlow(name="v", steps=[seed, If(condition="1 > 0", then_steps=[add])]).run("go")
+        ends = {e.node_id: e.data for e in _of(recorder, "step_end")}
+        variables = next(d.get("variables") for n, d in ends.items() if n.endswith("add"))
+        assert variables == {"items": ["a", "b"]}

@@ -760,6 +760,14 @@ def _replay_step_begin(flow, step, name=None, pattern=None):
             "started": time.perf_counter()}
 
 
+def _differs(a: Any, b: Any) -> bool:
+    """``a != b`` that treats a failing or ambiguous comparison as "changed"."""
+    try:
+        return bool(a != b)
+    except Exception:
+        return True
+
+
 def _replay_step_end(span, status, output=None, variables=None):
     """Emit ``step_end`` for a span from :func:`_replay_step_begin`."""
     if span is None:
@@ -2036,12 +2044,15 @@ class AgentFlow:
                         step.status = cached_record["status"]
                     if _cached.get("variables"):
                         all_variables.update(_cached["variables"])
+                    # The cache also holds the step's output variable (its full
+                    # output): trace only what the handler set, like a cold run.
+                    _out_var = step.output_variable or f"{step.name}_output"
                     self._notify_step_complete(
                         _replay, step.name, StepResult(
                             output=previous_output or "",
                             stop_workflow=bool(_cached.get("stop")),
                         ), "cached", previous_output,
-                        variables=_cached.get("variables"),
+                        variables={k: v for k, v in (_cached.get("variables") or {}).items() if k != _out_var},
                     )
                     if _cached.get("stop"):
                         if verbose:
@@ -3123,7 +3134,12 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 step, previous_output, input, all_variables, model, verbose, index,
                 stream=stream, depth=depth,
             )
-        before = dict(all_variables)
+        # A deep copy (recording only), so a list or dict the step changed in
+        # place still counts as set by it; fall back to identity if uncopyable.
+        try:
+            before, by_value = copy.deepcopy(all_variables), True
+        except Exception:
+            before, by_value = dict(all_variables), False
         try:
             result = self._execute_leaf_step(
                 step, previous_output, input, all_variables, model, verbose, index,
@@ -3142,7 +3158,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         if is_dict:
             step_vars = {
                 k: v for k, v in (result.get("variables") or {}).items()
-                if k not in before or before[k] is not v
+                if k not in before or (_differs(before[k], v) if by_value else before[k] is not v)
             }
             step_vars.pop(getattr(step, "output_variable", None) or f"{result.get('step')}_output", None)
         _replay_step_end(span, status, result.get("output") if is_dict else None, step_vars)
