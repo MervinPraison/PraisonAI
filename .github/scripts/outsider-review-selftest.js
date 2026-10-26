@@ -189,6 +189,13 @@ assert('no source issue', o.sourceIssueNumbers({ head: { ref: 'feat/x' }, body: 
   // must not make the run outsider: a number that names nothing here carries no content.
   r = await o.referencedIssueReasons(fakeGithub({ issueError: 404 }), 'o', 'r', 'see upstream #5987 and #6366');
   assert('a referenced number that does not exist here (404) is not outsider influence', r.length === 0);
+  {
+    // The issue exists (writer-owned) but its comments call 404: that must not silently skip the comment check.
+    const g = fakeGithub({ issues: { 12: maintainerIssue } });
+    g.paginate = async (method) => { if (method === 'issues.listComments') throw Object.assign(new Error('nf'), { status: 404 }); return []; };
+    r = await o.referencedIssueReasons(g, 'o', 'r', 'see #12');
+    assert('a 404 after the issue was found still fails closed (only a missing issue is ignored)', r.some((x) => x.includes('#12 is unavailable')));
+  }
   r = await o.referencedIssueReasons(fakeGithub({ issueError: 410 }), 'o', 'r', 'see #12');
   assert('a referenced issue that was deleted (410) still fails closed', r.some((x) => x.includes('unavailable (HTTP 410)')));
   r = await o.referencedIssueReasons(
