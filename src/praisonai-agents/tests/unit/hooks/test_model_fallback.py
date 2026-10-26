@@ -275,3 +275,80 @@ def test_async_fallback_passes_override_and_leaves_shared_state(monkeypatch):
     assert used[0] is not original_dispatcher
     assert agent.llm == "gpt-4o-mini"            # shared model untouched
     assert agent._unified_dispatcher is original_dispatcher  # shared cache untouched
+
+
+# --- Custom-LLM path (Issue #6030) ---------------------------------------------
+
+class _Unavailable(Exception):
+    status_code = 503
+
+
+class _StubLLM:
+    def __init__(self, model, fail, calls):
+        self.model, self._fail, self._calls = model, fail, calls
+
+    def _respond(self):
+        self._calls.append(self.model)
+        if self._fail:
+            raise self._fail
+        return f"answer from {self.model}"
+
+    def get_response(self, **kwargs):
+        return self._respond()
+
+    async def get_response_async(self, **kwargs):
+        return self._respond()
+
+
+def _custom_agent(primary_error, fallbacks):
+    from praisonaiagents import Agent
+
+    calls = []
+    primary = _StubLLM("primary-model", primary_error, calls)
+    agent = Agent(name="c", instructions="x", llm=primary, output="silent")
+    agent.fallback_models = [_StubLLM(m, None, calls) for m in fallbacks]
+    seen = []
+    agent._hook_runner.registry.register_function(
+        HookEvent.MODEL_FALLBACK, lambda inp: seen.append(inp) or HookResult.allow()
+    )
+    return agent, primary, calls, seen
+
+
+def test_custom_llm_sync_falls_back_on_outage():
+    agent, primary, calls, seen = _custom_agent(_Unavailable("503 overloaded"), ["backup"])
+    assert agent.chat("hello") == "answer from backup"
+    assert calls == ["primary-model", "backup"]
+    assert len(seen) == 1 and seen[0].fallback_index == 0
+    assert agent.llm_instance is primary  # shared state untouched
+
+
+def test_custom_llm_async_falls_back_on_outage():
+    agent, primary, calls, seen = _custom_agent(_Unavailable("503 overloaded"), ["backup"])
+    assert asyncio.run(agent.achat("hello")) == "answer from backup"
+    assert calls == ["primary-model", "backup"]
+    assert len(seen) == 1
+    assert agent.llm_instance is primary
+
+
+def test_custom_llm_non_fallback_error_does_not_walk_chain():
+    err = Exception("401 Unauthorized: invalid api key")
+    err.status_code = 401
+    agent, _, calls, seen = _custom_agent(err, ["backup"])
+    assert agent.chat("hello") is None
+    assert calls == ["primary-model"]
+    assert seen == []
+
+
+def test_fallback_llm_for_drops_connection_settings_across_providers(monkeypatch):
+    import praisonaiagents.llm.llm as llm_mod
+
+    built = []
+    monkeypatch.setattr(llm_mod, "LLM", lambda **kw: built.append(kw) or kw)
+    agent = _DummyAgent()
+    agent.llm = "ollama/llama3"
+    agent._llm_init_params = {"model": "ollama/llama3", "base_url": "http://h", "api_key": "k", "max_iter": 3}
+    agent._fallback_llm_for("ollama/qwen")
+    agent._fallback_llm_for("openai/gpt-4o-mini")
+    assert built[0] == {"model": "ollama/qwen", "base_url": "http://h", "api_key": "k", "max_iter": 3}
+    assert built[1] == {"model": "openai/gpt-4o-mini", "max_iter": 3}
+    assert agent._llm_init_params["model"] == "ollama/llama3"
