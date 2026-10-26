@@ -5,11 +5,13 @@ import pytest
 from praisonaiagents.tools import github_tools
 
 
-def _fake_git_factory(responses, calls):
+def _fake_git_factory(responses, calls, cwds=None):
     """Build a fake subprocess.run that records calls and serves canned output."""
+    cwds = cwds if cwds is not None else []
 
-    def fake_run(cmd, check=False, capture_output=False, text=False):
+    def fake_run(cmd, check=False, capture_output=False, text=False, cwd=None):
         calls.append(cmd)
+        cwds.append(cwd)
         assert cmd[0] == "git"
         key = tuple(cmd[1:])
         # Match on a prefix of the git args
@@ -256,3 +258,48 @@ def test_create_branch_accepts_slash_names(monkeypatch):
     checkouts = [c for c in calls if c[:2] == ["git", "checkout"]]
     assert checkouts, "expected a checkout for a valid branch name"
     assert ["git", "checkout", "-B", "feature/new-thing"] in checkouts
+
+
+def test_repo_path_used_as_cwd_for_every_git_call(monkeypatch):
+    responses = {
+        ("status", "--porcelain"): ("M file\n", 0),
+        ("rev-parse", "--abbrev-ref", "HEAD"): ("praisonai/work\n", 0),
+        ("symbolic-ref", "refs/remotes/origin/HEAD"): ("refs/remotes/origin/main\n", 0),
+    }
+    calls, cwds = [], []
+    monkeypatch.setattr(subprocess, "run", _fake_git_factory(responses, calls, cwds))
+    result = _run_tool(github_tools.github_commit_and_push, "fix", repo_path="/repo")
+    assert "Successfully" in result
+    assert calls and all(c == "/repo" for c in cwds)
+
+
+def test_never_stages_untracked_with_add_dot(monkeypatch):
+    responses = {
+        ("status", "--porcelain"): ("M file\n", 0),
+        ("rev-parse", "--abbrev-ref", "HEAD"): ("praisonai/work\n", 0),
+        ("symbolic-ref", "refs/remotes/origin/HEAD"): ("refs/remotes/origin/main\n", 0),
+    }
+    calls = _call(monkeypatch, responses)
+    _run_tool(github_tools.github_commit_and_push, "fix", paths=["new.py"])
+    adds = [c for c in calls if c[:2] == ["git", "add"]]
+    assert ["git", "add", "-u"] in adds
+    assert ["git", "add", "--", "new.py"] in adds
+    assert ["git", "add", "."] not in adds
+    # untracked files are not considered when checking for changes
+    status = [c for c in calls if c[:2] == ["git", "status"]]
+    assert all("--untracked-files=no" in c for c in status)
+
+
+def test_refusal_leaves_index_untouched(monkeypatch):
+    responses = {
+        ("status", "--porcelain"): ("M file\n", 0),
+        ("rev-parse", "--abbrev-ref", "HEAD"): ("release/v2\n", 0),
+        ("symbolic-ref", "refs/remotes/origin/HEAD"): ("refs/remotes/origin/main\n", 0),
+        ("config", "user.email"): ("me@example.com\n", 0),
+        ("merge-base", "origin/main", "HEAD"): ("abc\n", 0),
+        ("log", "--format=%ae", "abc..HEAD"): ("other@x.com\n", 0),
+    }
+    calls = _call(monkeypatch, responses)
+    result = _run_tool(github_tools.github_commit_and_push, "fix", branch="release/v2")
+    assert "Error" in result
+    assert not [c for c in calls if c[:2] == ["git", "add"]]
