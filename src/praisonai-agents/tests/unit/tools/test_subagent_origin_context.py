@@ -90,6 +90,15 @@ def test_explicit_origin_arguments_win():
     assert info.delivered is False
 
 
+def test_explicit_other_thread_is_not_auto_sent():
+    messenger = _FakeMessenger()
+    handle = _spawn_in_turn(messenger, thread_id="99")
+    info = _wait_info(handle["job_id"])
+    assert info.origin["thread_id"] == "99"
+    assert messenger.sent == []
+    assert info.delivered is False
+
+
 def test_non_origin_target_is_not_auto_sent():
     messenger = _FakeMessenger()
     handle = _spawn_in_turn(messenger, deliver="telegram:999")

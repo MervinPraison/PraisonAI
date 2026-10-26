@@ -417,6 +417,7 @@ def create_subagent_tool(
                     same_chat = (
                         (not chat_id or chat_id == ctx.chat_id)
                         and (not platform or platform == ctx.platform)
+                        and (not thread_id or thread_id == ctx.thread_id)
                     )
                     if (
                         messenger is not None
