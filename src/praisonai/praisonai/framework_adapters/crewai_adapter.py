@@ -209,11 +209,23 @@ class CrewAIAdapter(BaseFrameworkAdapter):
 
                 # Create the crew (kickoff is driven by run/arun so the same
                 # crew can be executed synchronously or asynchronously).
-                crew = Crew(
-                    agents=list(agents.values()),
-                    tasks=tasks,
-                    verbose=True
-                )
+                # Honour the top-level memory/process/manager_llm/verbose keys
+                # CrewAI supports natively instead of silently dropping them.
+                crew_kwargs = {
+                    "agents": list(agents.values()),
+                    "tasks": tasks,
+                    "verbose": config.get('verbose', True),
+                }
+                if config.get('memory'):
+                    crew_kwargs["memory"] = True
+                if config.get('process') == 'hierarchical':
+                    from crewai import LLM, Process
+                    crew_kwargs["process"] = Process.hierarchical
+                    # crewai.LLM keeps the model name (a bare SDK client would
+                    # drop it and CrewAI would fall back to its default model).
+                    model, base, key = self._llm_settings(config.get('manager_llm'), llm_config)
+                    crew_kwargs["manager_llm"] = LLM(model=model, base_url=base, api_key=key)
+                crew = Crew(**crew_kwargs)
 
                 logger.debug("Final Crew Configuration:")
                 logger.debug(f"Agents: {crew.agents}")

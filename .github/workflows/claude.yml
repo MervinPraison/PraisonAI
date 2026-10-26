@@ -558,13 +558,17 @@ jobs:
             const o = require(path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/outsider-review.js'));
             const { owner, repo } = context.repo;
             const since = process.env.STARTED_AT || new Date(0).toISOString();
+            // Claude's job is over (its token revoked, its processes killed); later
+            // activity belongs to other runs. Unknown: count everything up to now.
+            const until = (await o.jobCompletedAt(github, owner, repo, context.runId, 'claude-response')) || new Date().toISOString();
+            core.info(`Outsider run window: ${since} .. ${until}`);
             // Issues and PRs created, edited, commented on or pushed to since then.
             const touched = await github.paginate(github.rest.issues.listForRepo, { owner, repo, state: 'all', since, per_page: 100 });
             const app = new Set(['praisonai-triage-agent[bot]']);
             for (const item of touched) {
               let flag = true;
               try {
-                flag = await o.touchedByRun(github, owner, repo, item, since, app);
+                flag = await o.touchedByRun(github, owner, repo, item, since, app, until);
               } catch (err) {
                 core.warning(`#${item.number}: ${err.message}; flagging it to be safe`);
               }
