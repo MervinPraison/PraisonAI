@@ -11,9 +11,52 @@ on:
         description: 'Fail if performance regresses'
         required: false
         default: 'true'
+  pull_request:
+    paths:
+      - 'src/praisonai-agents/praisonaiagents/agent/**'
+      - 'src/praisonai-agents/praisonaiagents/llm/**'
+      - 'src/praisonai-agents/benchmarks/simple_benchmark.py'
+      - 'src/praisonai-agents/benchmarks/thresholds.json'
+      - '.github/workflows/benchmark.yml'
+
+permissions:
+  contents: read
 
 jobs:
+  instantiation-gate:
+    # Fails the PR when Agent instantiation exceeds benchmarks/thresholds.json.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install praisonaiagents
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e src/praisonai-agents
+
+      - name: Check instantiation threshold
+        run: |
+          cd src/praisonai-agents
+          python benchmarks/simple_benchmark.py --skip-crewai --json --fail-over-threshold > simple.json
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import json
+          data = json.load(open('simple.json'))
+          budget = json.load(open('benchmarks/thresholds.json'))['praisonai_instantiation_us_max']
+          print(f"PraisonAI instantiation: {data['results']['PraisonAI']:.2f} us (budget {budget} us)")
+          PY
+
   benchmark:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     
@@ -44,7 +87,8 @@ jobs:
           python benchmarks/import_time.py 2>&1 | tee import_time_output.txt
           
           # Extract import time
-          IMPORT_TIME=$(grep -oP 'Median:\s+\K[\d.]+' import_time_output.txt || echo "0")
+          IMPORT_TIME=$(grep -oP 'Median:\s+\K[\d.]+' import_time_output.txt | head -1)
+          [ -n "$IMPORT_TIME" ] || { echo "::error::Could not parse import time"; exit 1; }
           echo "import_time=$IMPORT_TIME" >> $GITHUB_OUTPUT
           
           # Check threshold (200ms)
@@ -66,7 +110,8 @@ jobs:
           python benchmarks/memory_usage.py 2>&1 | tee memory_output.txt
           
           # Extract peak memory
-          PEAK_MEMORY=$(grep -oP 'Peak:\s+\K[\d.]+' memory_output.txt || echo "0")
+          PEAK_MEMORY=$(grep -oP 'Peak:\s+\K[\d.]+' memory_output.txt | head -1)
+          [ -n "$PEAK_MEMORY" ] || { echo "::error::Could not parse peak memory"; exit 1; }
           echo "peak_memory=$PEAK_MEMORY" >> $GITHUB_OUTPUT
           
           # Check threshold (30MB)
@@ -83,10 +128,8 @@ jobs:
         id: simple
         run: |
           cd src/praisonai-agents
-          python benchmarks/simple_benchmark.py 2>&1 | tee simple_output.txt
-          
-          # Extract PraisonAI time
-          PRAISON_TIME=$(grep -oP 'PraisonAI\s+\K[\d.]+' simple_output.txt | head -1 || echo "0")
+          python benchmarks/simple_benchmark.py --json > simple.json
+          PRAISON_TIME=$(python -c "import json; print(f\"{json.load(open('simple.json'))['results']['PraisonAI']:.2f}\")")
           echo "praison_time=$PRAISON_TIME" >> $GITHUB_OUTPUT
 
       - name: Run Tools Benchmark
@@ -96,7 +139,8 @@ jobs:
           python benchmarks/tools_benchmark.py 2>&1 | tee tools_output.txt
           
           # Extract PraisonAI time with tools
-          PRAISON_TOOLS_TIME=$(grep -oP 'PraisonAI\s+\K[\d.]+' tools_output.txt | head -1 || echo "0")
+          PRAISON_TOOLS_TIME=$(grep -oP 'PraisonAI\s+\K[\d.]+' tools_output.txt | head -1)
+          [ -n "$PRAISON_TOOLS_TIME" ] || { echo "::error::Could not parse tools benchmark"; exit 1; }
           echo "praison_tools_time=$PRAISON_TOOLS_TIME" >> $GITHUB_OUTPUT
 
       - name: Run Parameter Impact Benchmark
@@ -133,7 +177,7 @@ jobs:
           echo "|--------|-------|-----------|--------|" >> $GITHUB_STEP_SUMMARY
           echo "| Import Time | ${{ steps.import_time.outputs.import_time }}ms | <200ms | ${{ steps.import_time.outputs.import_passed == 'true' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Peak Memory | ${{ steps.memory.outputs.peak_memory }}MB | <30MB | ${{ steps.memory.outputs.memory_passed == 'true' && '✅' || '❌' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Agent Instantiation | ${{ steps.simple.outputs.praison_time }}μs | - | ℹ️ |" >> $GITHUB_STEP_SUMMARY
+          echo "| Agent Instantiation | ${{ steps.simple.outputs.praison_time }}μs | see thresholds.json | ℹ️ |" >> $GITHUB_STEP_SUMMARY
           echo "| Agent with Tools | ${{ steps.tools.outputs.praison_tools_time }}μs | - | ℹ️ |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Lazy Import Check" >> $GITHUB_STEP_SUMMARY
