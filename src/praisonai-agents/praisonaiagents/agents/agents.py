@@ -2879,14 +2879,19 @@ class AgentTeam(SpawnAnnounceProtocol):
         Captures the fields that ``run_task``/``arun_task`` mutate during a run
         (``status``, ``result``, ``retry_count``) plus caller-defined
         ``variables``, keeping the public Task API backward-compatible.
+        ``propagated`` records whether those variables were copied from the
+        team's ``variables`` so a restore keeps that ownership tracking.
         """
         snapshot = {}
+        propagated = getattr(self, "_propagated_variables", {})
         for task_id, task in getattr(self, "tasks", {}).items():
+            variables = getattr(task, "variables", None)
             snapshot[task_id] = {
                 "status": getattr(task, "status", None),
                 "result": getattr(task, "result", None),
                 "retry_count": getattr(task, "retry_count", None),
-                "variables": getattr(task, "variables", None),
+                "variables": variables,
+                "propagated": variables is not None and propagated.get(task_id) is variables,
             }
         return snapshot
 
@@ -2939,6 +2944,7 @@ class AgentTeam(SpawnAnnounceProtocol):
 
     def _restore_task_state(self, snapshot):
         """Restore per-task run state captured by ``_snapshot_task_state``."""
+        propagated = {}
         for task_id, state in snapshot.items():
             task = self.tasks.get(task_id)
             if task is None:
@@ -2948,6 +2954,9 @@ class AgentTeam(SpawnAnnounceProtocol):
             if state["retry_count"] is not None:
                 task.retry_count = state["retry_count"]
             task.variables = state["variables"]
+            if state.get("propagated"):
+                propagated[task_id] = task.variables
+        self._propagated_variables = propagated
 
     def _build_batch_result(self, batch_id, items):
         """Aggregate per-item results into a batch summary dict.

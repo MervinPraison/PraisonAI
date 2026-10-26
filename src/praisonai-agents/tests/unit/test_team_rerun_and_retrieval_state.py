@@ -83,6 +83,17 @@ def test_rerun_repropagates_current_team_variables():
     assert "T-2" in str(calls[1])
 
 
+def test_team_variables_repropagate_after_batch():
+    team, task, calls = _team()
+    task.description = "Summarise {{ticket}}"
+    team.variables = {"ticket": "T-1"}
+    team.start(output="silent")
+    team.start_for_each([{"ticket": "X"}])
+    team.variables = {"ticket": "T-2"}
+    team.start(output="silent")
+    assert "T-2" in str(calls[-1])
+
+
 def test_fresh_run_after_resume_drops_earlier_content():
     team, task, calls = _team()
     team.start("ticket A", output="silent")
