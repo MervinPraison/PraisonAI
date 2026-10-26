@@ -992,6 +992,11 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 else:
                     logger.info(f"No prior state for session: {resume_session}")
 
+            # ``praisonai replay rerun``: restore recorded tasks before NODE and
+            # reset the rest (no-op unless a re-run is in progress).
+            from praisonai.replay._hook import apply_rerun_seed
+            apply_rerun_seed(team)
+
             # Bridge the team's aggregate per-step events onto the CLI
             # structured output stream so `--output stream-json` on a YAML/team
             # run emits the same per-agent NDJSON events as a single-agent run.

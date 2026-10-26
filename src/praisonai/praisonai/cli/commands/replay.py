@@ -4,6 +4,10 @@ Replay command group for PraisonAI CLI.
 Provides context replay functionality:
 - replay list: List available traces
 - replay context <session_id>: Interactive replay of a trace
+- replay flow <run|yaml> --format ascii|json|mermaid: Agent flow / static graph
+- replay view [run|yaml] [--live]: Open PraisonAI Replay (aiui) on a run
+- replay export <run> --format html|json|mermaid|otel: Export a run
+- replay rerun <run> --from NODE: Re-run from a node, reusing earlier outputs
 """
 
 from typing import Optional
@@ -465,19 +469,42 @@ def replay_delete(
 def replay_flow(
     session_id: str = typer.Argument(
         ...,
-        help="Session ID or path to trace file",
+        help="Session ID, path to trace file, or a YAML definition (static graph)",
     ),
     format: str = typer.Option(
         "ascii",
         "--format",
         "-f",
-        help="Output format: ascii, json",
+        help="Output format: ascii, json, mermaid",
     ),
 ):
-    """Visualize agent flow from a context trace."""
+    """Visualize agent flow from a context trace, or a YAML definition before it runs."""
     from ..output.console import get_output_controller
     
     output = get_output_controller()
+
+    if format not in ("ascii", "json", "mermaid"):
+        output.print_error(f"Unknown format: {format} (use ascii, json or mermaid)")
+        raise typer.Exit(2)
+
+    from praisonai.replay.yaml_run import is_yaml_path
+
+    if is_yaml_path(session_id):
+        _print_static_flow(output, session_id, format)
+        return
+
+    if format == "mermaid":
+        from praisonai.replay.events import load_events
+        from praisonai.replay.export import to_mermaid
+
+        try:
+            raw_events = load_events(session_id)
+        except FileNotFoundError:
+            output.print_error(f"Trace not found: {session_id}")
+            raise typer.Exit(1)
+        # Plain echo: Rich would treat mermaid's [brackets] as markup.
+        typer.echo(to_mermaid(raw_events), nl=False)
+        return
     
     try:
         from praisonai.replay import ContextTraceReader
@@ -505,6 +532,33 @@ def replay_flow(
     
     # ASCII visualization
     _print_ascii_flow(output, flow_data, session_id)
+
+
+def _print_static_flow(output, yaml_file: str, format: str) -> None:
+    """Static graph of a YAML definition (nothing is executed)."""
+    from praisonai.replay.yaml_run import static_graph, static_mermaid
+
+    try:
+        if format == "mermaid":
+            typer.echo(static_mermaid(yaml_file), nl=False)
+            return
+        graph, _flow = static_graph(yaml_file)
+    except Exception as e:
+        output.print_error(f"Could not read {yaml_file}: {e}")
+        raise typer.Exit(1)
+
+    if format == "json":
+        output.print_json(graph)
+        return
+
+    typer.echo(f"\n  STATIC GRAPH: {yaml_file}  ({graph.get('kind')}, {graph.get('process')})\n")
+    for node in graph.get("nodes", []):
+        typer.echo(f"  [{node.get('kind')}] {node.get('label')}  ({node.get('id')})")
+    typer.echo("")
+    for edge in graph.get("edges", []):
+        label = f" [{edge['label']}]" if edge.get("label") else ""
+        typer.echo(f"  {edge.get('source')} --{edge.get('kind')}--> {edge.get('target')}{label}")
+    typer.echo("")
 
 
 def _build_flow_from_events(events) -> dict:
@@ -828,3 +882,328 @@ def replay_cleanup(
         output.print_success(f"Deleted {deleted} old traces.")
     else:
         output.print_info("No traces needed cleanup.")
+
+
+# ---------------------------------------------------------------------------
+# PraisonAI Replay: view / export / rerun
+# ---------------------------------------------------------------------------
+
+_AIUI_INSTALL_HINT = 'pip install "praisonai[ui]"'
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+_EXPORT_FORMATS = ("html", "json", "mermaid", "otel")
+
+
+def _aiui_installed() -> bool:
+    import importlib.util
+
+    try:
+        return importlib.util.find_spec("praisonaiui") is not None
+    except (ImportError, ValueError):
+        return False
+
+
+def _replay_app_path():
+    """The bundled ``praisonai/ui_replay/default_app.py`` preset."""
+    from pathlib import Path
+
+    import praisonai
+
+    return Path(praisonai.__file__).resolve().parent / "ui_replay" / "default_app.py"
+
+
+def _spawn_aiui(app_path, host: str, port: int, env: dict):
+    """Start ``aiui run`` for the replay app (falls back to ``python -m praisonaiui.cli``)."""
+    import shutil
+    import subprocess
+    import sys
+
+    args = ["run", str(app_path), "--port", str(port), "--host", host]
+    exe = shutil.which("aiui")
+    cmd = [exe, *args] if exe else [sys.executable, "-m", "praisonaiui.cli", *args]
+    return subprocess.Popen(cmd, env=env)
+
+
+def _open_browser(url: str, host: str, port: int, timeout: float = 20.0) -> None:
+    """Open ``url`` once the server accepts connections (in a daemon thread)."""
+    import socket
+    import threading
+    import time
+    import webbrowser
+
+    probe_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+
+    def _wait_then_open():
+        deadline = time.time() + timeout
+        while time.time() < deadline:
+            try:
+                with socket.create_connection((probe_host, port), timeout=0.5):
+                    break
+            except OSError:
+                time.sleep(0.25)
+        webbrowser.open(url)
+
+    threading.Thread(target=_wait_then_open, name="replay-open-browser", daemon=True).start()
+
+
+def _replay_url(host: str, port: int, run_id: Optional[str], live: bool) -> str:
+    url_host = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+    if ":" in url_host and not url_host.startswith("["):
+        url_host = f"[{url_host}]"
+    url = f"http://{url_host}:{port}/#/replay"
+    params = []
+    if run_id:
+        params.append(f"run={run_id}")
+    if live:
+        params.append("live=1")
+    return url + ("?" + "&".join(params) if params else "")
+
+
+def _start_yaml_run(yaml_file: str, run_id: str):
+    """Run a YAML definition recorded live in a background thread."""
+    import threading
+
+    from praisonai.replay.yaml_run import run_yaml_recorded
+
+    def _target():
+        try:
+            run_yaml_recorded(yaml_file, run_id=run_id, live=True)
+            typer.echo(f"Run finished: {run_id}")
+        except Exception as e:  # the viewer keeps serving the partial trace
+            typer.echo(f"Run failed: {e}", err=True)
+
+    thread = threading.Thread(target=_target, name="replay-yaml-run", daemon=True)
+    thread.start()
+    return thread
+
+
+@app.command("view")
+def replay_view(
+    target: Optional[str] = typer.Argument(
+        None,
+        help="Run id, trace .jsonl path, or a YAML file to run and watch (default: recent runs)",
+    ),
+    live: bool = typer.Option(
+        False,
+        "--live",
+        help="Follow the run as it is written (implied for a YAML file)",
+    ),
+    port: int = typer.Option(8090, "--port", "-p", help="Port for the replay UI"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
+):
+    """Open PraisonAI Replay (timeline + map) for a run in the browser.
+
+    Examples:
+        praisonai replay view
+        praisonai replay view run-1a2b3c4d5e6f
+        praisonai replay view agents.yaml        # runs it, recorded, and follows it live
+    """
+    import os
+    from pathlib import Path
+
+    from praisonai.replay.events import SAFE_RUN_ID, resolve_trace_path
+    from praisonai.replay.recorder import new_run_id
+    from praisonai.replay.storage import resolve_traces_dir
+    from praisonai.replay.yaml_run import is_yaml_path
+
+    if not _aiui_installed():
+        typer.echo("ERROR: PraisonAI Replay needs PraisonAI UI (aiui), which is not installed.", err=True)
+        typer.echo(f"Install with:\n  {_AIUI_INSTALL_HINT}", err=True)
+        raise typer.Exit(1)
+
+    if host not in _LOOPBACK_HOSTS:
+        typer.echo(
+            f"WARNING: serving replay on {host} makes your traces (prompts, outputs, tool "
+            "arguments) reachable from the network. Use --host 127.0.0.1 to keep them local.",
+            err=True,
+        )
+
+    traces_dir = resolve_traces_dir()
+    run_id: Optional[str] = None
+    yaml_file: Optional[str] = None
+
+    if target and is_yaml_path(target):
+        yaml_file = target
+        run_id = new_run_id()
+        live = True
+    elif target:
+        path = resolve_trace_path(target)
+        if str(target).endswith(".jsonl") or "/" in str(target):
+            traces_dir = path.parent
+        run_id = path.stem
+        if not SAFE_RUN_ID.match(run_id):
+            typer.echo(f"ERROR: not a valid run id: {run_id}", err=True)
+            raise typer.Exit(2)
+        if not path.exists() and not live:
+            typer.echo(f"ERROR: Trace not found: {target}", err=True)
+            typer.echo("Use 'praisonai replay list' to see available traces (or --live to wait for it).", err=True)
+            raise typer.Exit(1)
+
+    app_path = _replay_app_path()
+    if not app_path.exists():
+        typer.echo(f"ERROR: bundled replay app missing: {app_path}", err=True)
+        raise typer.Exit(1)
+
+    env = os.environ.copy()
+    env["PRAISONAI_TRACES_DIR"] = str(Path(traces_dir))
+    url = _replay_url(host, port, run_id, live)
+
+    if yaml_file:
+        typer.echo(f"Running {yaml_file} as {run_id} (recording live to {Path(traces_dir) / (run_id + '.jsonl')})")
+        _start_yaml_run(yaml_file, run_id)
+
+    typer.echo(f"PraisonAI Replay: {url}")
+    proc = _spawn_aiui(app_path, host, port, env)
+    _open_browser(url, host, port)
+    code = _wait_for_server(proc)
+    if code:
+        raise typer.Exit(code)
+
+
+def _wait_for_server(proc) -> int:
+    """Wait for the aiui server; never leave it running after this CLI exits."""
+    import signal
+    import threading
+
+    previous = None
+    if threading.current_thread() is threading.main_thread():
+        def _on_term(signum, _frame):
+            raise SystemExit(128 + signum)
+
+        previous = signal.signal(signal.SIGTERM, _on_term)
+    try:
+        return proc.wait()
+    except KeyboardInterrupt:
+        return 0
+    finally:
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+        if previous is not None:
+            signal.signal(signal.SIGTERM, previous)
+
+
+def _load_raw_events(output, run: str):
+    from praisonai.replay.events import load_events
+
+    try:
+        events = load_events(run)
+    except FileNotFoundError:
+        output.print_error(f"Trace not found: {run}")
+        output.print_info("Use 'praisonai replay list' to see available traces.")
+        raise typer.Exit(1)
+    if not events:
+        output.print_error(f"No events in trace: {run}")
+        raise typer.Exit(1)
+    return events
+
+
+@app.command("export")
+def replay_export(
+    run: str = typer.Argument(..., help="Run id or path to trace file"),
+    format: str = typer.Option("html", "--format", "-f", help="html, json, mermaid or otel (OTLP-JSON)"),
+    output_file: Optional[str] = typer.Option(
+        None, "--output", "-o", help="Write to FILE (default: stdout; html: ./<run>.html)"
+    ),
+    no_redact: bool = typer.Option(
+        False, "--no-redact", help="Export as recorded, without removing secrets/PII"
+    ),
+):
+    """Export a run: a self-contained HTML replay, JSON, Mermaid or OTLP-JSON.
+
+    Everything is redacted by default; --no-redact exports the trace as recorded.
+    """
+    import json
+    from pathlib import Path
+
+    from ..output.console import get_output_controller
+    from praisonai.replay import export as exporter
+    from praisonai.replay.events import SAFE_RUN_ID, run_id_of
+
+    output = get_output_controller()
+    if format not in _EXPORT_FORMATS:
+        output.print_error(f"Unknown format: {format} (use {', '.join(_EXPORT_FORMATS)})")
+        raise typer.Exit(2)
+
+    events = _load_raw_events(output, run)
+    redact = not no_redact
+    if format == "html":
+        text = exporter.to_html(events, redact=redact)
+        if not output_file:
+            # The run id comes from the trace: never let it pick a path outside ./
+            name = run_id_of(events, Path(run).stem)
+            if not SAFE_RUN_ID.match(name):
+                name = Path(run).stem if SAFE_RUN_ID.match(Path(run).stem) else "replay"
+            output_file = f"{name}.html"
+    elif format == "json":
+        text = exporter.to_json(events, redact=redact)
+    elif format == "mermaid":
+        text = exporter.to_mermaid(events, redact=redact)
+    else:
+        text = json.dumps(exporter.to_otlp_json(events, redact=redact), indent=2)
+
+    if output_file:
+        Path(output_file).write_text(text, encoding="utf-8")
+        typer.echo(f"Wrote {format} export to {output_file}")
+    else:
+        typer.echo(text, nl=not text.endswith("\n"))
+
+
+@app.command("rerun")
+def replay_rerun(
+    run: str = typer.Argument(..., help="Run id or path to the recorded trace"),
+    from_node: str = typer.Option(..., "--from", help="Node id to re-run from (e.g. task:write, step:draft)"),
+    file: Optional[str] = typer.Option(
+        None, "--file", help="YAML definition (default: the one recorded with the run)"
+    ),
+):
+    """Re-run a recorded run from NODE: earlier nodes reuse their recorded output.
+
+    The new run is recorded with workflow_start.data.forked_from = {run_id, node_id}.
+    """
+    from pathlib import Path
+
+    from ..output.console import get_output_controller
+    from praisonai.replay.events import session_meta
+    from praisonai.replay.recorder import new_run_id
+    from praisonai.replay.rerun import RerunError, plan_rerun
+    from praisonai.replay.yaml_run import run_yaml_recorded, yaml_kind
+
+    output = get_output_controller()
+    events = _load_raw_events(output, run)
+    try:
+        plan = plan_rerun(events, from_node)
+    except RerunError as e:
+        output.print_error(str(e))
+        raise typer.Exit(1)
+
+    meta = session_meta(events)
+    definition = file or meta.get("yaml_path") or meta.get("agents_file") or meta.get("workflow")
+    if not definition:
+        output.print_error("This run did not record its definition; pass it with --file agents.yaml")
+        raise typer.Exit(1)
+    if not Path(definition).expanduser().is_file():
+        output.print_error(f"Definition not found: {definition} (pass --file)")
+        raise typer.Exit(1)
+    if yaml_kind(definition) != plan.kind:
+        output.print_error(
+            f"{definition} defines a {yaml_kind(definition)} but {from_node} is a {plan.kind} node; "
+            "pass the definition that recorded this run with --file."
+        )
+        raise typer.Exit(1)
+
+    seeded = []
+    new_id = new_run_id()
+    reused = ", ".join(plan.outputs) or "nothing"
+    typer.echo(f"Re-running {plan.source_run_id} from {from_node} as {new_id} (reusing: {reused})")
+    try:
+        rec, result = run_yaml_recorded(definition, run_id=new_id, plan=plan, on_seeded=seeded.append)
+    except Exception as e:
+        output.print_error(f"Re-run failed: {e}")
+        raise typer.Exit(1)
+    if not seeded:
+        output.print_warning("The definition was run, but the recorded outputs could not be applied to it.")
+    typer.echo(str(result) if result is not None else "")
+    typer.echo(f"Recorded: {rec.run_id} ({rec.path})")

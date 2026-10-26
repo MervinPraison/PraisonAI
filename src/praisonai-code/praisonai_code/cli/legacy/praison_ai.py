@@ -889,29 +889,31 @@ class PraisonAI:
             except Exception:
                 pass  # Continue even if flow display fails
             
-            # Initialize trace variables for cleanup
-            trace_writer = None
-            trace_emitter = None
-            trace_emitter_token = None
-            
-            # Get save flag for replay trace
-            save_replay = getattr(args, 'save', False)
-            
-            # Initialize replay trace writer if --save flag is set
+            # Replay trace: --save, or ``save_replay: true`` in the YAML. Recording
+            # lives in the wrapper (praisonai.replay.record); reach it through the
+            # bridge so a standalone praisonai-code install still runs, untraced.
+            import contextlib
             import uuid
+            from praisonai_code._wrapper_bridge import optional_wrapper_attr
+
             run_id = f"run-{uuid.uuid4().hex[:12]}"
+            save_replay = getattr(args, 'save', False)
+            if not save_replay:
+                yaml_wants_replay = optional_wrapper_attr('praisonai.replay.yaml_run', 'yaml_wants_replay')
+                if yaml_wants_replay is not None:
+                    save_replay = yaml_wants_replay(self.agent_file, self.agent_yaml)
+
+            replay_stack = contextlib.ExitStack()
+            recording = None
             if save_replay:
                 try:
-                    from praisonai_code._wrapper_bridge import import_wrapper_module
-                    _mod = import_wrapper_module('praisonai.replay')
-                    ContextTraceWriter = getattr(_mod, 'ContextTraceWriter')
-                    from praisonaiagents.trace.context_events import ContextTraceEmitter, set_context_emitter
-                    
-                    trace_writer = ContextTraceWriter(session_id=run_id)
-                    trace_emitter = ContextTraceEmitter(sink=trace_writer, session_id=run_id)
-                    # Set as global emitter so agents can access it
-                    trace_emitter_token = set_context_emitter(trace_emitter)
-                    trace_emitter.session_start({"agents_file": self.agent_file, "run_id": run_id})
+                    record = optional_wrapper_attr('praisonai.replay', 'record')
+                    if record is None:
+                        raise ImportError("praisonai.replay is not installed")
+                    meta = {"agents_file": self.agent_file, "run_id": run_id}
+                    if self.agent_file and os.path.isfile(self.agent_file):
+                        meta["yaml_path"] = os.path.abspath(self.agent_file)
+                    recording = replay_stack.enter_context(record(run_id, meta=meta))
                     print(f"[cyan]📝 Replay trace enabled: {run_id}[/cyan]")
                 except ImportError as e:
                     import logging
@@ -919,8 +921,8 @@ class PraisonAI:
                 except Exception as e:
                     import logging
                     logging.warning(f"Failed to initialize trace writer: {e}")
-            
-            try:
+
+            with replay_stack:
                 AgentsGenerator = _get_agents_generator()
                 # Extract CLI configuration for YAML CLI parity 
                 cli_config = self._extract_cli_config_for_yaml()
@@ -934,29 +936,9 @@ class PraisonAI:
                 ) as agents_generator:
                     result = agents_generator.generate_crew_and_kickoff()
                 print(result)
-                
-                # Close trace writer on success
-                if trace_emitter:
-                    trace_emitter.session_end()
-                    print(f"[cyan]📝 Replay trace saved: {run_id}[/cyan]")
-                if trace_writer:
-                    trace_writer.close()
-                # Reset global emitter
-                if trace_emitter_token:
-                    from praisonaiagents.trace.context_events import reset_context_emitter
-                    reset_context_emitter(trace_emitter_token)
-                
-                return result
-            except Exception as e:
-                # Cleanup trace on error
-                if trace_emitter:
-                    trace_emitter.session_end()
-                if trace_writer:
-                    trace_writer.close()
-                if trace_emitter_token:
-                    from praisonaiagents.trace.context_events import reset_context_emitter
-                    reset_context_emitter(trace_emitter_token)
-                raise
+            if recording is not None:
+                print(f"[cyan]📝 Replay trace saved: {run_id}[/cyan]")
+            return result
 
     def parse_args(self):
         """
