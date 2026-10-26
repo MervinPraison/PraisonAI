@@ -310,8 +310,9 @@ class RunJournal:
 
         A run left ``running`` belonged to a process that exited without
         recording a terminal outcome. Nothing resumes these automatically;
-        callers resume one turn with ``ExecutionConfig(resume_run_id=...)``
-        and the run's recorded ``task`` as the prompt.
+        callers resume one turn with
+        ``ExecutionConfig(durable=True, resume_run_id=..., journal_path=...)``
+        (same journal) and the run's recorded ``task`` as the prompt.
         """
         with self._lock:
             rows = self._conn.execute(

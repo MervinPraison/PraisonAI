@@ -8560,7 +8560,8 @@ class WebSocketGateway:
                           every gateway turn is journalled to the core ``RunJournal``.
                           The gateway does not auto-resume on boot: an interrupted turn
                           can be resumed by run id via
-                          ``ExecutionConfig(resume_run_id=...)`` with the same prompt,
+                          ``ExecutionConfig(durable=True, resume_run_id=...)`` (same
+                          ``journal_path``) with the same prompt,
                           replaying recorded tool results. When ``False`` (explicit
                           ``durable_runs: false`` / ``reliability: "off"`` / no durable
                           store) the execution hot path is unchanged (zero-overhead).
@@ -8670,7 +8671,8 @@ class WebSocketGateway:
             # agent with ``ExecutionConfig(durable=True)`` so every turn is
             # journalled to the core ``RunJournal``. A turn interrupted by a crash
             # stays ``running`` in the journal; resuming it by run id
-            # (``ExecutionConfig(resume_run_id=...)``) replays recorded tool results
+            # (``ExecutionConfig(durable=True, resume_run_id=...)``, same journal)
+            # replays recorded tool results
             # instead of re-executing them. Nothing here resumes runs on boot.
             # Default-off/zero-overhead when neither flag is set; a lazy
             # import keeps the SDK cost off the hot path for non-durable gateways.
