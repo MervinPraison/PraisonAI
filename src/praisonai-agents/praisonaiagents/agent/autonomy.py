@@ -106,6 +106,9 @@ class AutonomyConfig:
         track_changes: Whether to track filesystem changes via shadow git.
             Defaults to True when level="full_auto", False otherwise.
             When enabled, agent.undo()/redo()/diff() become available.
+        snapshot: Take a pre-run workspace snapshot in run_autonomous() so
+            agent.undo() can restore it. Requires track_changes. Off by default
+            because snapshotting walks the whole project.
         sandbox: Optional SandboxConfig, carried for forward compatibility.
             NOT IMPLEMENTED: nothing currently reads this field, and no sandbox
             is auto-enabled at any autonomy level. To isolate execution, set it
@@ -141,6 +144,7 @@ class AutonomyConfig:
     track_changes: Optional[bool] = None  # None = auto (True for full_auto)
     sandbox: Optional[Any] = None  # SandboxConfig (lazy import to avoid circular)
     snapshot_dir: Optional[str] = None  # Defaults to ~/.praisonai/snapshots
+    snapshot: bool = False  # Pre-run snapshot for undo() (slow on large repos)
     # Default tools for autonomy mode (auto-populated with code intelligence tools)
     default_tools: Optional[List[Any]] = None  # None = auto (uses get_autonomy_default_tools())
     # Spend kill-switches — independent of turn/time caps. None = unlimited
@@ -238,6 +242,7 @@ class AutonomyConfig:
             track_changes=data.get("track_changes"),
             sandbox=data.get("sandbox"),
             snapshot_dir=data.get("snapshot_dir"),
+            snapshot=data.get("snapshot", False),
             default_tools=data.get("default_tools"),
             max_budget_usd=data.get("max_budget_usd"),
             max_tokens=data.get("max_tokens"),

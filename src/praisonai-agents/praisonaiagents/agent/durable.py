@@ -574,7 +574,8 @@ def _open_durable_run(agent: Any, prompt: str) -> DurableRunContext:
             journal.close()
             raise ValueError(
                 "Resume prompt does not match the prompt recorded for durable "
-                f"run {run_id!r}"
+                f"run {run_id!r}; resume with RunJournal.run_meta(run_id).task "
+                "(resuming autonomous/goal loops by run id is not supported)"
             )
 
     journal.open_run(

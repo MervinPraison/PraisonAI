@@ -4343,6 +4343,7 @@ Summary:"""
             "clear_context": config.clear_context,
             "track_changes": config.effective_track_changes,
             "snapshot_dir": config.snapshot_dir,
+            "snapshot": config.snapshot,
             "default_tools": config.default_tools,
             "max_budget_usd": config.max_budget_usd,
             "max_tokens": config.max_tokens,
@@ -4430,15 +4431,16 @@ Summary:"""
     def undo(self) -> bool:
         """Undo the last set of file changes.
         
-        Restores files to the state before the last autonomous iteration.
-        Requires ``autonomy=AutonomyConfig(track_changes=True)``.
+        Restores files to the state before the last autonomous run.
+        Requires ``autonomy=AutonomyConfig(track_changes=True, snapshot=True)``
+        so run_autonomous() records a pre-run snapshot.
         
         Returns:
             True if undo was successful, False if nothing to undo.
             
         Example::
         
-            agent = Agent(autonomy="full_auto")
+            agent = Agent(autonomy=AutonomyConfig(level="full_auto", snapshot=True))
             result = agent.start("Refactor utils.py")
             agent.undo()  # Restore original files
         """
@@ -4740,7 +4742,7 @@ Summary:"""
         # Take initial snapshot before autonomous execution starts
         # NOTE: Snapshot tracking is disabled by default for performance (G12 fix)
         # FileSnapshot.track() walks entire project and is too slow for large codebases
-        # Enable with autonomy={"snapshot": True} if needed
+        # Enable with AutonomyConfig(snapshot=True) / autonomy={"snapshot": True}
         if self._file_snapshot is not None and self.autonomy_config.get("snapshot", False):
             try:
                 snap_info = self._file_snapshot.track(message="pre-autonomous")
