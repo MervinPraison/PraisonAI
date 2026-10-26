@@ -8154,12 +8154,9 @@ class WebSocketGateway:
 
         def _redeliver(job: Any) -> None:
             origin = job.origin or {}
-            route = str(origin.get("deliver") or "")
-            if ":" not in route:
-                platform, chat_id = origin.get("platform"), origin.get("chat_id")
-                if not (platform and chat_id):
-                    return  # no route: mark delivered so it does not resurface
-                route = f"{platform}:{chat_id}"
+            routes = self._resolve_job_routes(origin)
+            if not routes:
+                return  # nothing deliverable: mark delivered so it does not resurface
             if job.status == JobStatus.LOST:
                 task = str(origin.get("task") or "")[:80]
                 text = (
@@ -8172,17 +8169,58 @@ class WebSocketGateway:
                 text = BotOS._summarize_job_result(job.result)
                 if not text:
                     return
-            ok = asyncio.run_coroutine_threadsafe(
-                self._deliver_lost_run_notice(route, text, f"job:{job.job_id}"),
-                loop,
-            ).result(timeout=60)
-            if not ok:
-                raise RuntimeError(f"delivery to {route} failed")
+            delivered = False
+            for route in routes:
+                ok = asyncio.run_coroutine_threadsafe(
+                    self._deliver_lost_run_notice(
+                        route, text, f"job:{job.job_id}:{route}",
+                    ),
+                    loop,
+                ).result(timeout=60)
+                delivered = delivered or bool(ok)
+            if not delivered:
+                raise RuntimeError(f"delivery to {routes} failed")
 
         counts = await asyncio.to_thread(
             lambda: get_job_manager().reconcile_on_start(redeliver=_redeliver)
         )
         return counts.get("redelivered", 0)
+
+    def _resolve_job_routes(self, origin: Dict[str, Any]) -> List[str]:
+        """Resolve a background job's saved ``deliver`` target to concrete routes.
+
+        Mirrors the live delivery rules (``BotOS.on_background_job_complete``):
+        ``origin`` keeps the thread, ``all`` fans out to every home channel, and
+        platform names / aliases resolve through the router. Returns ``[]`` only
+        when nothing can ever be delivered (no target requested, or ``origin``
+        without chat fields); a target that does not resolve *now* raises so the
+        job is retried on the next boot instead of being marked delivered.
+        """
+        deliver = str(origin.get("deliver") or "")
+        if not deliver:
+            return []
+        if deliver == "origin":
+            platform, chat_id = origin.get("platform"), origin.get("chat_id")
+            if not (platform and chat_id):
+                logger.warning("Background job origin has no chat; dropping notice")
+                return []
+            thread_id = origin.get("thread_id")
+            return [f"{platform}:{chat_id}:{thread_id}" if thread_id else f"{platform}:{chat_id}"]
+        router = self.delivery_router
+        if deliver == "all":
+            directory = getattr(router, "directory", None)
+            targets = directory.describe_targets() if directory is not None else []
+            routes = [
+                f"{t['platform']}:{t['channel_id']}"
+                for t in targets if t.get("kind") == "home"
+            ]
+            if not routes:
+                raise RuntimeError("deliver='all' has no home channels")
+            return routes
+        if router is None:
+            return [deliver]
+        platform, chat_id, thread_id = router.resolve(deliver)
+        return [f"{platform}:{chat_id}:{thread_id}" if thread_id else f"{platform}:{chat_id}"]
 
     async def _deliver_lost_run_notice(
         self, channel_target: str, text: str, run_id: str,

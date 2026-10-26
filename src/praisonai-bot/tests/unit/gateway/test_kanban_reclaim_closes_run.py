@@ -45,3 +45,24 @@ def test_crash_loop_trips_circuit_breaker(store):
         _crash(store, "k2")
         store.reclaim_stale_claims()
     assert store.get_task("k2").status == "blocked"
+
+
+def test_reclaim_bookkeeping_commits_with_the_reclaim(store, monkeypatch):
+    """No window where the task is 'ready' but the old attempt is unaccounted."""
+    store.create_task({"id": "k3", "title": "atomic", "status": "ready",
+                       "workspace_kind": "default", "max_retries": 1})
+    run_id = _crash(store, "k3")
+    seen = []
+    emit = store._emit_hook
+
+    def _spy(event, task_id, **payload):
+        if event == "kanban_task_moved":
+            run = next(r for r in store.get_runs(task_id) if r.id == run_id)
+            seen.append((run.outcome, store.get_task(task_id).status))
+        return emit(event, task_id, **payload)
+
+    monkeypatch.setattr(store, "_emit_hook", _spy)
+    assert store.reclaim_stale_claims() == ["k3"]
+    # At the first post-commit announcement the run is already closed and the
+    # circuit breaker already tripped, so no dispatcher could claim it as ready.
+    assert seen == [("crashed", "blocked")]

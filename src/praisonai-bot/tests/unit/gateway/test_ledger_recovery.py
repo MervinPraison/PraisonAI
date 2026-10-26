@@ -316,4 +316,30 @@ def test_reconcile_background_jobs_notifies_lost_job_once(tmp_path, monkeypatch)
     target, text, run_id = sent[0]
     assert target == "telegram:12345"
     assert "audit all 40 repos" in text and "interrupted" in text
-    assert run_id == "job:job-42"
+    assert run_id == "job:job-42:telegram:12345"
+
+
+def test_resolve_job_routes_keeps_thread_and_resolves_targets():
+    """Recovery uses the live delivery rules: thread kept, aliases resolved."""
+    gateway = _make_gateway()
+    origin = {"platform": "slack", "chat_id": "C1", "thread_id": "T9"}
+    assert gateway._resolve_job_routes({**origin, "deliver": "origin"}) == ["slack:C1:T9"]
+    assert gateway._resolve_job_routes({"deliver": ""}) == []
+    assert gateway._resolve_job_routes({"deliver": "origin"}) == []
+
+    class _Router:
+        def resolve(self, target):
+            if target == "ops":
+                return ("slack", "C2", None)
+            raise ValueError(target)
+
+    gateway._delivery_router = _Router()
+    try:
+        assert gateway._resolve_job_routes({**origin, "deliver": "ops"}) == ["slack:C2"]
+        # Not resolvable now: raise so the job is retried, not marked delivered.
+        with pytest.raises(ValueError):
+            gateway._resolve_job_routes({**origin, "deliver": "nowhere"})
+        with pytest.raises(RuntimeError):
+            gateway._resolve_job_routes({**origin, "deliver": "all"})
+    finally:
+        gateway._delivery_router = None
