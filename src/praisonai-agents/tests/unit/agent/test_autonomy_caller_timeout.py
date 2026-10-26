@@ -51,6 +51,40 @@ def test_start_caller_mode_enforces_timeout():
     assert result.completion_reason == "timeout"
 
 
+def test_start_caller_mode_timeout_interrupt_text_is_not_success():
+    """The LLM tool loop returns this text instead of raising on cancel."""
+    agent = _agent()
+
+    def interrupted_chat(prompt, cancel_token=None, **kwargs):
+        while not cancel_token.is_set():
+            time.sleep(0.01)
+        return f"Task interrupted: {cancel_token.reason}"
+
+    agent.chat = interrupted_chat
+    result = agent.start("x", timeout=0.1)
+    assert result.success is False
+    assert result.completion_reason == "timeout"
+
+
+def test_start_caller_mode_timeout_keeps_interrupt_controller():
+    """A positive timeout must not hide stop requests on the agent's controller."""
+    from praisonaiagents.agent.interrupt import InterruptController
+
+    agent = _agent()
+    agent.interrupt_controller = InterruptController()
+    agent.interrupt_controller.request("user")  # stop requested before the run
+
+    def chat(prompt, cancel_token=None, **kwargs):
+        cancel_token.check()
+        return "ran anyway"
+
+    agent.chat = chat
+    started = time.time()
+    with pytest.raises(InterruptedError, match="user"):
+        agent.start("x", timeout=5)
+    assert time.time() - started < 2
+
+
 @pytest.mark.parametrize("timeout", [None, 5])
 def test_astart_caller_mode_accepts_timeout(timeout):
     agent = _agent()

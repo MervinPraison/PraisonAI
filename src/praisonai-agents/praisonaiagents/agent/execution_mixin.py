@@ -29,6 +29,39 @@ from typing import List, Optional, Any, Dict, Union, Generator, TYPE_CHECKING
 from .server_registry import _server_registry
 
 
+class _TimeoutCancelToken:
+    """cancel_token for caller-mode ``start(timeout=...)``.
+
+    Set when the timeout elapses or when ``inner`` (the agent's own
+    per-turn interrupt token, if any) is set.
+    """
+
+    def __init__(self, timeout, inner=None):
+        self.timed_out = threading.Event()
+        self._inner = inner
+        self._timer = threading.Timer(timeout, self.timed_out.set)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def is_set(self) -> bool:
+        return self.timed_out.is_set() or (self._inner is not None and self._inner.is_set())
+
+    @property
+    def reason(self):
+        if self.timed_out.is_set():
+            return "timeout"
+        return getattr(self._inner, "reason", None)
+
+    def check(self) -> None:
+        if self.is_set():
+            raise InterruptedError(f"Operation cancelled: {self.reason or 'unknown'}")
+
+    def close(self) -> None:
+        self._timer.cancel()
+        if self._inner is not None:
+            self._inner.close()
+
+
 def cleanup_launch_registration(agent_id: str) -> None:
     """Remove launch() endpoints registered for ``agent_id`` from the shared
     HTTP state that ``Agent.launch()`` actually populates.
@@ -875,25 +908,29 @@ Write the complete compiled report:"""
                 # chat() has no timeout param: enforce it via cooperative
                 # cancellation (cancel_token), unless the caller supplied one.
                 timeout = kwargs.pop('timeout', None)
-                timer = cancel = None
+                cancel = None
                 if timeout is not None and timeout > 0 and kwargs.get('cancel_token') is None:
-                    from .interrupt import InterruptController
-                    cancel = kwargs['cancel_token'] = InterruptController()
-                    timer = threading.Timer(timeout, cancel.request, args=("timeout",))
-                    timer.daemon = True
-                    timer.start()
+                    # Still honour stop requests on the agent's own controller
+                    inner = self._turn_cancel_token(
+                        getattr(self, "interrupt_controller", None), explicit=False
+                    )
+                    cancel = kwargs['cancel_token'] = _TimeoutCancelToken(timeout, inner)
 
                 # Use chat() — all tools, approval, doom-loop per-tool work
                 try:
                     response = self.chat(prompt, **kwargs)
                 except InterruptedError:
-                    if cancel is None or cancel.reason != "timeout":
+                    if cancel is None or not cancel.timed_out.is_set():
                         raise
                     return self._caller_mode_timeout_result(start_time, started_at)
                 finally:
-                    if timer is not None:
-                        timer.cancel()
+                    if cancel is not None:
+                        cancel.close()
                 response_str = str(response) if response else ""
+                # The LLM tool loop returns this text instead of raising when
+                # the timeout stops it, so the run did not finish.
+                if cancel is not None and response_str.startswith("Task interrupted: timeout"):
+                    return self._caller_mode_timeout_result(start_time, started_at)
                 
                 # Auto-save session after chat
                 self._auto_save_session()
