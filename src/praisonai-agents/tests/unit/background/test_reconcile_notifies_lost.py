@@ -92,3 +92,22 @@ def test_repeat_call_skips_jobs_live_in_this_process(tmp_path):
     finally:
         gate.set()
         mgr.shutdown()
+
+
+def test_job_completing_during_scan_is_not_marked_lost(tmp_path):
+    store = _store(tmp_path)
+    mgr = BackgroundJobManager(store=store)
+    job_id = mgr.start_job(lambda: "done", origin=ORIGIN)
+    mgr.get_result(job_id, timeout=5)
+    # Stale RUNNING snapshot, as if listed before the worker finished.
+    stale = JobInfo(job_id=job_id, status=JobStatus.RUNNING, origin=ORIGIN)
+    mgr._store = type("S", (), {
+        "list_unreconciled": lambda self: [stale],
+        "upsert": store.upsert, "get": store.get,
+    })()
+    sent = []
+    counts = mgr.reconcile_on_start(redeliver=sent.append)
+    assert counts["lost"] == 0 and sent == []
+    assert mgr.get_job_info(job_id).status == JobStatus.COMPLETED
+    assert store.get(job_id).status == JobStatus.COMPLETED
+    mgr.shutdown()

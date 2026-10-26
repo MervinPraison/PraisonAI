@@ -536,12 +536,12 @@ class BackgroundJobManager:
 
         for job in unreconciled:
             # A repeat call (e.g. the gateway's boot pass after the lazy one in
-            # get_job_manager) must not touch jobs started by this process.
+            # get_job_manager) must not touch jobs started by this process,
+            # whatever their status: the snapshot may predate a completion.
+            # Only start_job registers a future, so it marks ownership.
             with self._lock:
-                live = self._jobs.get(job.job_id)
-            if live is not None and live.status in (
-                JobStatus.PENDING, JobStatus.RUNNING,
-            ):
+                owned = job.job_id in self._futures
+            if owned:
                 continue
             # A job left RUNNING (or still PENDING) when its process died was
             # orphaned by the crash. Transition it to the terminal LOST state

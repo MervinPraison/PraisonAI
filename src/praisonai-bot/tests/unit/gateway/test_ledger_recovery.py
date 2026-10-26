@@ -343,3 +343,45 @@ def test_resolve_job_routes_keeps_thread_and_resolves_targets():
             gateway._resolve_job_routes({**origin, "deliver": "all"})
     finally:
         gateway._delivery_router = None
+
+
+def test_reconcile_background_jobs_retries_until_every_route_succeeds(tmp_path, monkeypatch):
+    """A partial fan-out failure leaves the job undelivered for the next boot."""
+    import praisonaiagents.background.job_manager as jm
+    from praisonaiagents.background.job_manager import JobInfo, JobStatus
+    from praisonaiagents.background.sqlite_store import SqliteBackgroundJobStore
+
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+    pre = SqliteBackgroundJobStore()
+    pre.upsert(JobInfo(
+        job_id="job-7", status=JobStatus.RUNNING, started_at=1.0,
+        origin={"deliver": "all", "task": "nightly report"},
+    ))
+    pre.close()
+    monkeypatch.setattr(jm, "_global_job_manager", None)
+
+    gateway = _make_gateway()
+    monkeypatch.setattr(
+        gateway, "_resolve_job_routes",
+        lambda origin: ["slack:C1", "telegram:42"],
+    )
+    down = {"telegram:42"}
+    sent = []
+
+    async def _notice(target, text, run_id):
+        if target in down:
+            return False
+        sent.append(target)
+        return True
+
+    monkeypatch.setattr(gateway, "_deliver_lost_run_notice", _notice)
+    try:
+        assert asyncio.run(gateway._reconcile_background_jobs()) == 0
+        assert not jm._global_job_manager.get_job_info("job-7").delivered
+        down.clear()
+        assert asyncio.run(gateway._reconcile_background_jobs()) == 1
+    finally:
+        mgr, jm._global_job_manager = jm._global_job_manager, None
+        if mgr is not None:
+            mgr.shutdown(wait=False)
+    assert "telegram:42" in sent

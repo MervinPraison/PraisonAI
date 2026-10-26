@@ -8169,7 +8169,9 @@ class WebSocketGateway:
                 text = BotOS._summarize_job_result(job.result)
                 if not text:
                     return
-            delivered = False
+            # Every route must succeed before the job is marked delivered; the
+            # per-route outbox key skips routes that already went out on retry.
+            failed = []
             for route in routes:
                 ok = asyncio.run_coroutine_threadsafe(
                     self._deliver_lost_run_notice(
@@ -8177,9 +8179,10 @@ class WebSocketGateway:
                     ),
                     loop,
                 ).result(timeout=60)
-                delivered = delivered or bool(ok)
-            if not delivered:
-                raise RuntimeError(f"delivery to {routes} failed")
+                if not ok:
+                    failed.append(route)
+            if failed:
+                raise RuntimeError(f"delivery to {failed} failed")
 
         counts = await asyncio.to_thread(
             lambda: get_job_manager().reconcile_on_start(redeliver=_redeliver)
