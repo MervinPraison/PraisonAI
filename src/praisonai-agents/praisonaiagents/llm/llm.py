@@ -817,6 +817,7 @@ Respond with ONLY a valid JSON tool call in this format:
         # Rate limiting and retry settings
         self._rate_limiter = extra_settings.get('rate_limiter', None)
         self._max_retries = extra_settings.get('max_retries', 3)
+        # Fixed delay applies only when explicitly configured; otherwise use jitter.
         self._retry_delay = extra_settings.get('retry_delay', 60)
         self._retry_delay_explicit = 'retry_delay' in extra_settings
         

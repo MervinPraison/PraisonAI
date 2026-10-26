@@ -7,6 +7,15 @@ import pytest
 from praisonaiagents.llm.llm import LLM
 
 
+@pytest.mark.parametrize("attempt,expected", [(1, 3), (2, 9), (3, 27), (10, 60)])
+def test_explicit_none_and_attempt_cap(monkeypatch, attempt, expected):
+    """None selects jitter with the same one-based attempts and 60-second cap."""
+    llm = LLM(model="openai/gpt-4o-mini", retry_delay=None)
+    monkeypatch.setattr("praisonaiagents.llm.error_classifier.random.uniform", lambda low, high: high)
+    decision = llm.resolve_failover_decision(RateLimited(), {"attempt": attempt, "max_retries": 20})
+    assert decision.backoff_ms == expected * 1000
+
+
 class RateLimited(Exception):
     """Provider-like exception exposing the authoritative HTTP response."""
     status_code = 429
