@@ -553,7 +553,7 @@ class TestRegisterRole:
             {"type": "start_session", "goal": "Test"}, conn
         )
         assert response["code"] == "NO_EXTENSION"
-        conn.websocket.send_text.assert_not_awaited()
+        conn.websocket.send_json.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_ws_no_origin_cli_start_session(self):
@@ -571,8 +571,8 @@ class TestRegisterRole:
             {"type": "start_session", "goal": "Test"}, cli
         )
         assert response["status"] == "running"
-        ext.websocket.send_text.assert_awaited_once()
-        cli.websocket.send_text.assert_not_awaited()
+        ext.websocket.send_json.assert_awaited_once()
+        cli.websocket.send_json.assert_not_awaited()
         if server._sessions:
             server._sessions.close()
 
