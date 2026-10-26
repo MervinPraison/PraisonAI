@@ -298,43 +298,38 @@ class ShellTools:
                     result['stderr_artifact'] = stderr_path
                 return result
             
-            except _CommandCancelled:
+            except _CommandCancelled as e:
                 # A cooperative interrupt (/stop, Ctrl-C) fired while the child
                 # was still running. Kill the whole process group so descendants
                 # do not keep mutating state, then report an interrupted outcome.
                 self._kill_process_tree(process)
-                return {
-                    'stdout': '',
-                    'stderr': 'Command interrupted by user',
-                    'exit_code': -1,
-                    'success': False,
-                    'interrupted': True,
-                    'execution_time': time.time() - start_time
-                }
+                result = self._partial_result(
+                    e, 'Command interrupted by user', max_output_size, spill, spill_dir
+                )
+                result.update(interrupted=True, execution_time=time.time() - start_time)
+                return result
 
-            except _StreamDrainTimeout:
+            except _StreamDrainTimeout as e:
                 # The direct child already exited; only an inherited pipe kept a
                 # reader blocked. Report a timeout but do NOT kill — the direct
                 # child's PID is gone (and may have been recycled), so killing it
                 # would be unsafe and misleading.
-                return {
-                    'stdout': '',
-                    'stderr': f'Command output streaming timed out after {timeout} seconds',
-                    'exit_code': -1,
-                    'success': False,
-                    'execution_time': timeout
-                }
+                result = self._partial_result(
+                    e, f'Command output streaming timed out after {timeout} seconds',
+                    max_output_size, spill, spill_dir,
+                )
+                result.update(timed_out=True, execution_time=timeout)
+                return result
 
-            except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired as e:
                 # Kill process on timeout
                 self._kill_process_tree(process)
-                return {
-                    'stdout': '',
-                    'stderr': f'Command timed out after {timeout} seconds',
-                    'exit_code': -1,
-                    'success': False,
-                    'execution_time': timeout
-                }
+                result = self._partial_result(
+                    e, f'Command timed out after {timeout} seconds',
+                    max_output_size, spill, spill_dir,
+                )
+                result.update(timed_out=True, execution_time=timeout)
+                return result
                 
         except Exception as e:
             # Name the exception type and log the traceback. Some exceptions
@@ -356,6 +351,26 @@ class ShellTools:
                 'execution_time': 0
             }
     
+    def _partial_result(self, exc, reason, max_output_size, spill, spill_dir):
+        """Build a failed result that keeps output captured before ``exc``."""
+        stdout, stdout_path = self._handle_overflow(
+            getattr(exc, 'partial_stdout', ''), "stdout", max_output_size, spill, spill_dir
+        )
+        stderr, stderr_path = self._handle_overflow(
+            getattr(exc, 'partial_stderr', ''), "stderr", max_output_size, spill, spill_dir
+        )
+        result: Dict[str, Union[str, int, bool]] = {
+            'stdout': stdout,
+            'stderr': f"{stderr.rstrip()}\n{reason}" if stderr.strip() else reason,
+            'exit_code': -1,
+            'success': False,
+        }
+        if stdout_path:
+            result['stdout_artifact'] = stdout_path
+        if stderr_path:
+            result['stderr_artifact'] = stderr_path
+        return result
+
     def _start_background(self, command, cwd, process_env):
         """Start *command* detached, writing stdout+stderr to a log file."""
         import tempfile
@@ -602,18 +617,25 @@ class ShellTools:
         t_out.start()
         t_err.start()
 
+        def _with_partial(exc):
+            # Keep whatever the command already printed: on a timeout/interrupt
+            # the real error usually lives in the output produced so far.
+            exc.partial_stdout = "".join(stdout_chunks)
+            exc.partial_stderr = "".join(stderr_chunks)
+            return exc
+
         deadline = None if timeout is None else time.monotonic() + timeout
         if cancel_event is None:
             try:
                 process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired as exc:
                 # The direct child is still running. Disable any further emission
                 # and re-raise TimeoutExpired so the caller's timeout path KILLS
                 # the process before returning — a recorded read error must not
                 # short-circuit that cleanup (otherwise the still-running child
                 # leaks with its pipes open).
                 stop_emitting.set()
-                raise
+                raise _with_partial(exc)
         else:
             # Poll in short slices so a cooperative interrupt aborts the child
             # promptly (within the poll interval) rather than only on timeout.
@@ -621,12 +643,12 @@ class ShellTools:
             while True:
                 if cancel_event.is_set():
                     stop_emitting.set()
-                    raise _CommandCancelled()
+                    raise _with_partial(_CommandCancelled())
                 if deadline is not None:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         stop_emitting.set()
-                        raise subprocess.TimeoutExpired(process.args, timeout)
+                        raise _with_partial(subprocess.TimeoutExpired(process.args, timeout))
                     wait_slice = min(_POLL, remaining)
                 else:
                     wait_slice = _POLL
@@ -658,7 +680,7 @@ class ShellTools:
             # Stop emitting and signal a drain-timeout so the caller reports a
             # timeout WITHOUT trying to kill an already-exited process.
             stop_emitting.set()
-            raise _StreamDrainTimeout()
+            raise _with_partial(_StreamDrainTimeout())
 
         if read_errors:
             raise read_errors[0]

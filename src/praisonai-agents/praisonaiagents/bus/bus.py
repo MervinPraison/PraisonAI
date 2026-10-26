@@ -8,7 +8,7 @@ import asyncio
 from praisonaiagents._logging import get_logger
 import threading
 from typing import Any, Callable, Dict, List, Optional, Set, Union
-from ..utils.async_bridge import run_coroutine_from_any_context
+from ..utils.async_bridge import run_coroutine_from_any_context, spawn_background
 from dataclasses import dataclass, field
 from .event import Event, EventType
 
@@ -235,11 +235,14 @@ class EventBus:
                 if sub.is_async:
                     # Schedule async callback safely
                     try:
-                        loop = asyncio.get_running_loop()
-                        loop.create_task(sub.callback(event))
+                        asyncio.get_running_loop()
                     except RuntimeError:
                         # No running loop, use safe async bridge
                         run_coroutine_from_any_context(sub.callback(event))
+                    else:
+                        # Keep a strong ref and log failures under this
+                        # subscriber's id, like the sync path below.
+                        spawn_background(sub.callback(event), f"subscriber {sub.id}")
                 else:
                     sub.callback(event)
             except Exception as e:

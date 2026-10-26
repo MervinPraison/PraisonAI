@@ -16,6 +16,12 @@ from praisonaiagents.ui.a2a.types import (
     Artifact,
 )
 
+# Terminal states are final: once reached, status can no longer change.
+TERMINAL_STATES = frozenset({TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED})
+
+# Upper bound on stored tasks; oldest terminal tasks are evicted beyond this.
+_MAX_TASKS = 10_000
+
 
 class TaskStore:
     """
@@ -59,7 +65,16 @@ class TaskStore:
         )
         
         self._tasks[task_id] = task
+        self._evict()
         return task
+    
+    def _evict(self):
+        """Drop the oldest terminal tasks once the store exceeds its cap."""
+        excess = len(self._tasks) - _MAX_TASKS
+        if excess <= 0:
+            return
+        for tid in [t.id for t in self._tasks.values() if t.status.state in TERMINAL_STATES][:excess]:
+            del self._tasks[tid]
     
     def get_task(self, task_id: str) -> Optional[Task]:
         """
@@ -88,11 +103,14 @@ class TaskStore:
             message: Optional status message
             
         Returns:
-            Updated Task if found, None otherwise
+            Updated Task if found, None otherwise. A task already in a
+            terminal state is returned unchanged.
         """
         task = self._tasks.get(task_id)
         if not task:
             return None
+        if task.status.state in TERMINAL_STATES:
+            return task
         
         # Create new status
         new_status = TaskStatus(

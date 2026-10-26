@@ -497,3 +497,22 @@ class TestEventType:
         bus.publish(EventType.SESSION_CREATED, {})
         
         assert len(received) == 1
+
+
+class TestAsyncSubscriberErrors:
+    """In-loop async subscriber failures are logged by the bus (issue #5990)."""
+
+    @pytest.mark.asyncio
+    async def test_async_subscriber_error_is_logged(self, caplog):
+        import logging
+        bus = EventBus()
+
+        async def boom(event):
+            raise ValueError("boom")
+
+        sub_id = bus.subscribe(boom)
+        with caplog.at_level(logging.ERROR):
+            bus.publish("test.event", {})
+            for _ in range(5):
+                await asyncio.sleep(0)
+        assert any(sub_id in r.getMessage() and "boom" in r.getMessage() for r in caplog.records)

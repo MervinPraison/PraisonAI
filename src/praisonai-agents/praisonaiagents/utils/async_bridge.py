@@ -121,3 +121,27 @@ async def run_sync_in_executor(func, *args, **kwargs) -> Any:
         return await loop.run_in_executor(None, wrapper)
     else:
         return await loop.run_in_executor(None, func, *args)
+
+# Strong refs to fire-and-forget tasks: the event loop only keeps weak refs,
+# so an unreferenced task can be garbage-collected before it finishes.
+_background_tasks: "set[asyncio.Task]" = set()
+
+
+def spawn_background(coro: Awaitable[Any], label: str = "background task") -> "asyncio.Task":
+    """
+    Schedule *coro* on the running loop without awaiting it.
+
+    Keeps a strong reference until the task finishes and logs any exception
+    with *label*, instead of leaving it to asyncio's "Task exception was never
+    retrieved" warning at GC time. Must be called with a running loop.
+    """
+    task = asyncio.get_running_loop().create_task(coro)
+    _background_tasks.add(task)
+
+    def _done(t: "asyncio.Task") -> None:
+        _background_tasks.discard(t)
+        if not t.cancelled() and t.exception() is not None:
+            logger.error("Error in %s: %s", label, t.exception(), exc_info=t.exception())
+
+    task.add_done_callback(_done)
+    return task
