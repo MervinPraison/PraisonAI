@@ -1984,18 +1984,20 @@ class AgentTeam(SpawnAnnounceProtocol):
                     if self._depends_on_pending(task, tasks_to_run):
                         await self._gather_with_isolation([c for _, c in tasks_to_run])
                         tasks_to_run = []
-                        # A just-flushed prerequisite may now be failed; don't
-                        # queue a dependent that would run with missing context
-                        # unless it opted into graceful degradation.
-                        if self._deps_failed(task_id) and not self._should_continue_on_dep_failure(task_id):
-                            self.tasks[task_id].status = "failed"
-                            continue
+                    # The predecessor may have run synchronously (no batch),
+                    # or may just have finished in the batch flushed above.
+                    if self._deps_failed(task_id) and not self._should_continue_on_dep_failure(task_id):
+                        task.status = "failed"
+                        continue
                     tasks_to_run.append((task_id, self.arun_task(task_id)))
                 else:
                     # If we encounter a sync task, we must wait for the previous async tasks to finish.
                     if tasks_to_run:
                         await self._gather_with_isolation([c for _, c in tasks_to_run])
                         tasks_to_run = []
+                    if self._deps_failed(task_id) and not self._should_continue_on_dep_failure(task_id):
+                        task.status = "failed"
+                        continue
                     
                     # Run sync task in an executor to avoid blocking the event loop
                     # Use copy_context_to_callable to propagate contextvars (needed for trace emission)
@@ -2491,6 +2493,9 @@ class AgentTeam(SpawnAnnounceProtocol):
         
         if self.process == "workflow":
             for task_id in process.workflow():
+                if self._deps_failed(task_id) and not self._should_continue_on_dep_failure(task_id):
+                    self.tasks[task_id].status = "failed"
+                    continue
                 self.run_task(task_id)
         elif self.process == "sequential":
             for task_id in process.sequential():
