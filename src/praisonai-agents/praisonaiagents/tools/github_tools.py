@@ -161,9 +161,10 @@ def github_commit_and_push(
 ) -> str:
     """Stage tracked changes, commit them, and push to the remote repository safely.
 
-    Only changes to already-tracked files are staged (``git add -u``); new
-    files are committed only when listed in ``paths``. Staging happens after
-    the safety checks below, so a refusal leaves the index untouched.
+    Only changes to already-tracked files under the working directory are
+    staged (``git add -u -- .``); new files are committed only when listed in
+    ``paths``. Staging happens after the safety checks below, so a refusal
+    leaves the index untouched.
 
     Pushes are safe by construction. Before pushing, these rules are enforced:
 
@@ -194,7 +195,9 @@ def github_commit_and_push(
         ).lower() in ("1", "true", "yes")
 
         # Check if there are changes to commit (tracked changes or explicit paths)
-        status = _git("status", "--porcelain", "--untracked-files=no", cwd=repo_path)
+        status = _git(
+            "status", "--porcelain", "--untracked-files=no", "--", ".", cwd=repo_path
+        )
         if not status.stdout.strip() and not paths:
             return "No changes to commit."
 
@@ -247,8 +250,10 @@ def github_commit_and_push(
             except subprocess.CalledProcessError:
                 _git("checkout", "-b", target_branch, cwd=repo_path)
 
-        # Stage tracked changes plus explicitly listed paths (never ``git add .``)
-        _git("add", "-u", cwd=repo_path)
+        # Stage tracked changes under cwd plus explicitly listed paths (never
+        # ``git add .``). The ``.`` pathspec keeps ``-u`` from reaching sibling
+        # directories when run from a repository subdirectory.
+        _git("add", "-u", "--", ".", cwd=repo_path)
         if paths:
             _git("add", "--", *paths, cwd=repo_path)
 

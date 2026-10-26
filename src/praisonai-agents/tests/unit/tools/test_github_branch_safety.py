@@ -282,7 +282,9 @@ def test_never_stages_untracked_with_add_dot(monkeypatch):
     calls = _call(monkeypatch, responses)
     _run_tool(github_tools.github_commit_and_push, "fix", paths=["new.py"])
     adds = [c for c in calls if c[:2] == ["git", "add"]]
-    assert ["git", "add", "-u"] in adds
+    # scoped to cwd so a subdirectory call cannot stage sibling edits
+    assert ["git", "add", "-u", "--", "."] in adds
+    assert ["git", "add", "-u"] not in adds
     assert ["git", "add", "--", "new.py"] in adds
     assert ["git", "add", "."] not in adds
     # untracked files are not considered when checking for changes
