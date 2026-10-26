@@ -444,32 +444,6 @@ def test_flow_rerun_rejects_step_inserted_before_target(traces_dir, fx):
     assert ran == []
 
 
-def test_flow_rerun_allows_a_recorded_skipped_step_before_target(traces_dir, fx):
-    """A step that ran but was skipped is part of the recording, not an insertion."""
-    from praisonaiagents import AgentFlow
-    from praisonaiagents.workflows import StepResult
-
-    from praisonai.replay.rerun import rerun
-
-    evs = fx.flow_events()
-    for ev in evs:
-        if ev["event_type"] == "step_end" and ev.get("node_id") == "step:research":
-            ev["data"]["status"] = "skipped"
-    src = fx.write_trace(traces_dir, "run-flow01", evs)
-
-    def research(ctx):
-        return StepResult(output="r")
-
-    def draft(ctx):
-        return StepResult(output="d")
-
-    def polish(ctx):
-        return StepResult(output="p")
-
-    rec, _ = rerun(AgentFlow(steps=[research, draft, polish]), str(src), "step:draft", input="topic")
-    assert rec.path.exists()
-
-
 def test_recorded_handler_variables_survive_a_rerun(traces_dir):
     """End to end: core records StepResult.variables on step_end; rerun restores them."""
     import json
@@ -583,3 +557,43 @@ def test_flow_rerun_of_a_nested_target_rejects_a_step_inserted_before_its_contai
     assert ran == []
     rerun(_nested_flow(ran), rec.path, "step:draft", input="x")  # the same flow still re-runs
     assert ran == ["draft", "polish"]
+
+
+def test_flow_rerun_keeps_a_recorded_skip_skipped(traces_dir):
+    """A step skipped by its should_run is re-checked on re-run from the restored
+    state: the same condition skips it again and the target gets the same input."""
+    from praisonaiagents import AgentFlow, Task
+    from praisonaiagents.workflows import StepResult
+
+    from praisonai.replay import record
+    from praisonai.replay.rerun import rerun
+
+    ran, inputs = [], []
+
+    def make():
+        def research(ctx):
+            ran.append("research")
+            return StepResult(output="notes", variables={"mode": "brief"})
+
+        def extra(ctx):
+            ran.append("extra")
+            return StepResult(output="EXTRA")
+
+        def draft(ctx):
+            ran.append("draft")
+            inputs.append(ctx.previous_result)
+            return StepResult(output="draft")
+
+        return AgentFlow(steps=[
+            research,
+            Task(name="extra", handler=extra, should_run=lambda ctx: ctx.variables.get("mode") == "long"),
+            draft,
+        ])
+
+    with record(full_content=True) as rec:
+        make().start("x")
+    assert ran == ["research", "draft"]
+    ran.clear()
+    rerun(make(), rec.path, "step:draft", input="x")
+    assert ran == ["draft"]  # research reused, extra still skipped
+    assert inputs[0] == inputs[1] == "notes"
