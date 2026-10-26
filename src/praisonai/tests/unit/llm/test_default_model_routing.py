@@ -54,7 +54,7 @@ def clean_env(monkeypatch):
         ("ANTHROPIC_API_KEY", "sk-ant-test", "anthropic/claude-3-5-sonnet-latest"),
         ("GEMINI_API_KEY", "test", "gemini/gemini-1.5-flash"),
         ("GOOGLE_API_KEY", "test", "google/gemini-1.5-flash"),
-        ("GROQ_API_KEY", "test", "groq/llama-3.3-70b-versatile"),
+        ("GROQ_API_KEY", "test", "groq/openai/gpt-oss-120b"),
         ("COHERE_API_KEY", "test", "cohere/command-r"),
     ],
 )

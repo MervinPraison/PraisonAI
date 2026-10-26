@@ -78,7 +78,7 @@ def test_existing_providers_still_work(model):
     assert create_llm_provider(model) is not None
 
 
-@pytest.mark.parametrize("model", ["groq/llama3-8b-8192", "cohere/command-r"])
+@pytest.mark.parametrize("model", ["groq/openai/gpt-oss-20b", "cohere/command-r"])
 def test_hosted_prefixes_accepted_by_praisonaimodel_are_registered(model):
     """groq/ and cohere/ work via PraisonAIModel, so the registry must agree."""
     provider = create_llm_provider(model)

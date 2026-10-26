@@ -104,7 +104,7 @@ jobs:
       env:
         OPENAI_API_KEY: ${{ secrets.GROQ_API_KEY }}
         GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        OPENAI_MODEL_NAME: "llama-3.3-70b-versatile"
+        OPENAI_MODEL_NAME: "openai/gpt-oss-120b"
         OPENAI_API_BASE: "https://api.groq.com/openai/v1/"
         OPENAI_API_BASE_URL: "https://api.groq.com/openai/v1/"
         PRAISONAI_NON_INTERACTIVE: "true"
@@ -138,7 +138,7 @@ jobs:
       env:
         OPENAI_API_KEY: ${{ secrets.GROQ_API_KEY }}
         GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        OPENAI_MODEL_NAME: "llama-3.3-70b-versatile"
+        OPENAI_MODEL_NAME: "openai/gpt-oss-120b"
         OPENAI_API_BASE: "https://api.groq.com/openai/v1/"
         OPENAI_API_BASE_URL: "https://api.groq.com/openai/v1/"
         LOGLEVEL: "debug"
@@ -159,7 +159,7 @@ jobs:
       env:
         OPENAI_API_KEY: ${{ secrets.GROQ_API_KEY }}
         GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        OPENAI_MODEL_NAME: "llama-3.3-70b-versatile"
+        OPENAI_MODEL_NAME: "openai/gpt-oss-120b"
         OPENAI_API_BASE: "https://api.groq.com/openai/v1/"
         OPENAI_API_BASE_URL: "https://api.groq.com/openai/v1/"
         PRAISONAI_NON_INTERACTIVE: "true"
@@ -189,7 +189,7 @@ jobs:
       env:
         OPENAI_API_KEY: ${{ secrets.GROQ_API_KEY }}
         GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        OPENAI_MODEL_NAME: "llama-3.3-70b-versatile"
+        OPENAI_MODEL_NAME: "openai/gpt-oss-120b"
         OPENAI_API_BASE: "https://api.groq.com/openai/v1/"
         OPENAI_API_BASE_URL: "https://api.groq.com/openai/v1/"
         LOGLEVEL: "debug"
@@ -223,7 +223,7 @@ jobs:
         # Test YAML loading and agent generation
         python3 -c '
         from praisonai.agents_generator import AgentsGenerator
-        config = [{"model": "llama-3.3-70b-versatile", "base_url": "https://api.groq.com/openai/v1/"}]
+        config = [{"model": "openai/gpt-oss-120b", "base_url": "https://api.groq.com/openai/v1/"}]
         generator = AgentsGenerator("test_agents.yaml", "${{ matrix.framework }} ", config)
         print("Agent generation test passed!")
         ' || exit 1
@@ -232,7 +232,7 @@ jobs:
       env:
         OPENAI_API_KEY: ${{ secrets.GROQ_API_KEY }}
         GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        OPENAI_MODEL_NAME: "llama-3.3-70b-versatile"
+        OPENAI_MODEL_NAME: "openai/gpt-oss-120b"
         OPENAI_API_BASE: "https://api.groq.com/openai/v1/"
         OPENAI_API_BASE_URL: "https://api.groq.com/openai/v1/"
         LOGLEVEL: "debug"
@@ -292,7 +292,7 @@ jobs:
       env:
         OPENAI_API_KEY: ${{ secrets.GROQ_API_KEY }}
         GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        OPENAI_MODEL_NAME: "llama-3.3-70b-versatile"
+        OPENAI_MODEL_NAME: "openai/gpt-oss-120b"
         OPENAI_API_BASE: "https://api.groq.com/openai/v1/"
         OPENAI_API_BASE_URL: "https://api.groq.com/openai/v1/"
         LOGLEVEL: "debug"
@@ -340,7 +340,7 @@ jobs:
             
             # Initialize the LLM with rate limiting
             llm = RateLimitedChatOpenAI(
-                model=os.getenv('OPENAI_MODEL_NAME', 'llama-3.3-70b-versatile'),
+                model=os.getenv('OPENAI_MODEL_NAME', 'openai/gpt-oss-120b'),
                 base_url=os.getenv('OPENAI_API_BASE', 'https://api.groq.com/openai/v1/'),
                 api_key=os.getenv('OPENAI_API_KEY'),
                 temperature=0.7
@@ -421,7 +421,7 @@ jobs:
       env:
         OPENAI_API_KEY: ${{ secrets.GROQ_API_KEY }}
         GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-        OPENAI_MODEL_NAME: "llama-3.3-70b-versatile"
+        OPENAI_MODEL_NAME: "openai/gpt-oss-120b"
         OPENAI_API_BASE: "https://api.groq.com/openai/v1/"
         OPENAI_API_BASE_URL: "https://api.groq.com/openai/v1/"
         LOGLEVEL: "debug"

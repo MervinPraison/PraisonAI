@@ -16,7 +16,7 @@ const PROVIDERS = [
   'anthropic/claude-3-5-sonnet-latest',
   'gemini/gemini-1.5-flash',
   'ollama/llama3.2',
-  'groq/llama-3.3-70b-versatile',
+  'groq/openai/gpt-oss-120b',
   'mistral/mistral-large-latest',
 ];
 

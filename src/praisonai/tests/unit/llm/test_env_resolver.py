@@ -246,12 +246,12 @@ class TestProviderMapping:
 
     def test_groq_model_mapping(self):
         env = {
-            "MODEL_NAME": "groq/llama-3.1-70b-versatile",
+            "MODEL_NAME": "groq/openai/gpt-oss-120b",
             "GROQ_API_KEY": "gsk-test-key"
         }
         with patch.dict(os.environ, env, clear=True):
             ep = resolve_llm_endpoint()
-            assert ep.model == "groq/llama-3.1-70b-versatile"
+            assert ep.model == "groq/openai/gpt-oss-120b"
             assert ep.api_key == "gsk-test-key"
             assert ep.base_url == "https://api.groq.com/openai/v1"
 

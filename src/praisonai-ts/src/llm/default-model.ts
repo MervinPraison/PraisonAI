@@ -27,7 +27,7 @@ export const PROVIDER_DEFAULT_MODELS: ReadonlyArray<readonly [string, string]> =
   ['ANTHROPIC_API_KEY', 'anthropic/claude-3-5-sonnet-latest'],
   ['GEMINI_API_KEY', 'gemini/gemini-1.5-flash'],
   ['GOOGLE_API_KEY', 'google/gemini-1.5-flash'],
-  ['GROQ_API_KEY', 'groq/llama-3.3-70b-versatile'],
+  ['GROQ_API_KEY', 'groq/openai/gpt-oss-120b'],
   ['COHERE_API_KEY', 'cohere/command-r'],
   ['OLLAMA_HOST', 'ollama/llama3.2'],
 ] as const;

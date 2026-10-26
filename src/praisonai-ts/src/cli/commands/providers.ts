@@ -62,7 +62,7 @@ const PROVIDER_MODELS: Record<string, string[]> = {
   anthropic: ['claude-sonnet-4-20250514', 'claude-3-5-sonnet-20241022', 'claude-3-opus-20240229', 'claude-3-haiku-20240307', 'claude-opus-4-5'],
   google: ['gemini-2.0-flash', 'gemini-1.5-pro', 'gemini-1.5-flash'],
   xai: ['grok-4', 'grok-3', 'grok-3-fast', 'grok-3-mini'],
-  groq: ['llama-3.3-70b-versatile', 'mixtral-8x7b-32768', 'gemma2-9b-it'],
+  groq: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
   mistral: ['mistral-large-latest', 'mistral-medium-latest', 'mistral-small-latest'],
   deepseek: ['deepseek-chat', 'deepseek-reasoner'],
   cerebras: ['llama3.1-8b', 'llama3.3-70b'],

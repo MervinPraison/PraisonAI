@@ -81,7 +81,7 @@ def _build_provider_defaults() -> tuple:
             ("ANTHROPIC_API_KEY", "anthropic/claude-3-5-sonnet-latest"),
             ("GEMINI_API_KEY", "gemini/gemini-1.5-flash"),
             ("GOOGLE_API_KEY", "google/gemini-1.5-flash"),
-            ("GROQ_API_KEY", "groq/llama-3.3-70b-versatile"),
+            ("GROQ_API_KEY", "groq/openai/gpt-oss-120b"),
             ("COHERE_API_KEY", "cohere/command-r"),
             ("OPENROUTER_API_KEY", "openrouter/openai/gpt-4o-mini"),
             ("OLLAMA_HOST", "ollama/llama3.2"),

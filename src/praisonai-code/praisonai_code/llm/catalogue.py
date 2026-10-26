@@ -232,7 +232,7 @@ PROVIDER_ENV_CATALOGUE: Dict[str, tuple] = {
     "anthropic":  (("ANTHROPIC_API_KEY",),            "anthropic/claude-3-5-sonnet-latest",   "anthropic/"),
     "gemini":     (("GEMINI_API_KEY",),               "gemini/gemini-1.5-flash",              "gemini/"),
     "google":     (("GOOGLE_API_KEY",),               "google/gemini-1.5-flash",              "google/"),
-    "groq":       (("GROQ_API_KEY",),                 "groq/llama-3.3-70b-versatile",         "groq/"),
+    "groq":       (("GROQ_API_KEY",),                 "groq/openai/gpt-oss-120b",             "groq/"),
     "cohere":     (("COHERE_API_KEY",),               "cohere/command-r",                     "cohere/"),
     "openrouter": (("OPENROUTER_API_KEY",),           "openrouter/openai/gpt-4o-mini",        "openrouter/"),
     "ollama":     (("OLLAMA_HOST",),                  "ollama/llama3.2",                      "ollama/"),

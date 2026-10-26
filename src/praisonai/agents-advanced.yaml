@@ -6,7 +6,7 @@ roles:
     goal: Analyze data on lung diseases
     role: Research Analyst
     llm:  
-      model: "groq/llama3-70b-8192"
+      model: "groq/openai/gpt-oss-120b"
     function_calling_llm: 
       model: "google/gemini-1.5-flash-001"
     allow_delegation: False

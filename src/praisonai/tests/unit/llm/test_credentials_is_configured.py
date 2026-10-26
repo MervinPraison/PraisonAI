@@ -32,7 +32,7 @@ class TestProviderKeyVarsForModel:
         assert _provider_key_vars_for_model("google/gemini-1.5-flash") == ("GOOGLE_API_KEY",)
 
     def test_groq(self):
-        assert _provider_key_vars_for_model("groq/llama-3.3-70b-versatile") == ("GROQ_API_KEY",)
+        assert _provider_key_vars_for_model("groq/openai/gpt-oss-120b") == ("GROQ_API_KEY",)
 
     def test_openai(self):
         assert _provider_key_vars_for_model("gpt-4o-mini") == ("OPENAI_API_KEY",)

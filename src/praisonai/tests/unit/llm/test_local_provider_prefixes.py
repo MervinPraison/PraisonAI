@@ -116,7 +116,7 @@ def test_local_adapter_allows_streaming_with_tools():
         ("claude-3-5-sonnet-latest", "anthropic"),
         ("anthropic/claude-3-5-sonnet-latest", "anthropic"),
         ("gemini/gemini-1.5-flash", "gemini"),
-        ("groq/llama-3.3-70b-versatile", "openai"),
+        ("groq/openai/gpt-oss-120b", "openai"),
     ],
 )
 def test_existing_providers_unchanged(model, expected):
