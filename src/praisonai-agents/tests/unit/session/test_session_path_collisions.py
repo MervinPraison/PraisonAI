@@ -93,3 +93,18 @@ def test_sqlite_backfill_indexes_hashed_filenames(tmp_path):
         "alice.smith@example.com", "narwhal record")
     store = SqliteSessionStore(session_dir=str(tmp_path), db_path=":memory:")
     assert [h.session_id for h in store.search("narwhal")] == ["alice.smith@example.com"]
+
+
+def test_spill_recovery_does_not_wait_on_own_lock(store, monkeypatch, tmp_path):
+    import time
+
+    spill = tmp_path / "spill"
+    spill.mkdir()
+    monkeypatch.setattr(store, "_spill_dir", lambda: str(spill))
+    # Legacy name of "alice.smith" belongs to another id, so it is never migrated.
+    _write_legacy(store, "alice_smith", "alice:smith", "theirs")
+    (spill / "alice_smith.1.json").write_text(json.dumps({"session_id": "alice.smith", "messages": [
+        {"role": "user", "content": "spilled", "timestamp": 2.0}]}), encoding="utf-8")
+    start = time.monotonic()
+    assert [m["content"] for m in store.get_chat_history("alice.smith")] == ["spilled"]
+    assert time.monotonic() - start < store.lock_timeout

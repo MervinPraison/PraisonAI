@@ -907,7 +907,7 @@ class DefaultSessionStore:
 
     def _get_session_path(self, session_id: str) -> str:
         """Get the file path for a session (injective mapping, Issue #6024)."""
-        path = os.path.join(self.session_dir, f"{_safe_session_filename(session_id)}.json")
+        path = self._session_file_path(session_id)
         legacy = os.path.join(self.session_dir, f"{_legacy_session_filename(session_id)}.json")
         # Migrate a pre-#6024 file only when it is provably this id's own.
         # Recheck under the destination lock so a racing worker that already
@@ -923,6 +923,10 @@ class DefaultSessionStore:
             except (OSError, ValueError, AttributeError):
                 pass
         return path
+
+    def _session_file_path(self, session_id: str) -> str:
+        """Session file path without legacy migration (takes no lock)."""
+        return os.path.join(self.session_dir, f"{_safe_session_filename(session_id)}.json")
 
     def _owns_file(self, session_id: str, filepath: str, session: SessionData) -> bool:
         """Return False if the loaded file belongs to another session id.
@@ -942,9 +946,7 @@ class DefaultSessionStore:
             "Session file %s belongs to session %r, not %r; starting fresh",
             filepath, session.session_id, session_id,
         )
-        owner_path = os.path.join(
-            self.session_dir, f"{_safe_session_filename(session.session_id)}.json"
-        )
+        owner_path = self._session_file_path(session.session_id)
         moved = False
         if owner_path != filepath:
             with FileLock(owner_path, self.lock_timeout):
@@ -1400,7 +1402,9 @@ class DefaultSessionStore:
         new_messages = [m for _, msgs in recovered for m in msgs]
         if new_messages:
             session.messages.extend(new_messages)
-            filepath = self._get_session_path(session_id)
+            # Callers already hold this path's lock; the migrating lookup
+            # would take it again and stall for ``lock_timeout``.
+            filepath = self._session_file_path(session_id)
             session.updated_at = datetime.now(timezone.utc).isoformat()
             # Recovered turns extend the active window like any other append, so
             # they must go through the same retention policy (compact/truncate)
