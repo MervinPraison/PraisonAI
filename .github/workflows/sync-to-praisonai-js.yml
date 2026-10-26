@@ -96,11 +96,11 @@ jobs:
             --head "$branch" \
             --title "$msg" \
             --body "$(cat <<EOF
-Automated sync from [\`MervinPraison/PraisonAI\`](https://github.com/MervinPraison/PraisonAI) \`${SOURCE_PATH}/\` into the npm mirror repo.
+          Automated sync from [\`MervinPraison/PraisonAI\`](https://github.com/MervinPraison/PraisonAI) \`${SOURCE_PATH}/\` into the npm mirror repo.
 
-Canonical development is in the monorepo; this PR updates the public \`praisonai-js\` checkout.
+          Canonical development is in the monorepo; this PR updates the public \`praisonai-js\` checkout.
 
-Excludes from rsync source: \`node_modules/\`, \`dist/\`, \`coverage/\`. \`.github/\` on praisonai-js is unchanged.
-EOF
-)"
+          Excludes from rsync source: \`node_modules/\`, \`dist/\`, \`coverage/\`. \`.github/\` on praisonai-js is unchanged.
+          EOF
+          )"
           echo "Opened PR on ${TARGET_REPO} (${branch} → ${TARGET_BRANCH})."
