@@ -92,11 +92,46 @@ class BackgroundJobStore(Protocol):
 
         Specifically: jobs left ``PENDING`` or ``RUNNING`` at the last write
         (their process died before or during the run — both are orphaned and
-        reconciled to ``LOST``) and jobs ``COMPLETED`` with an ``origin`` that
-        were never marked ``delivered``. Returned in a stable order for
+        reconciled to ``LOST``) and jobs ``COMPLETED`` or ``LOST`` with an
+        ``origin`` that were never marked ``delivered``. Returned in a stable order for
         deterministic replay.
         """
         ...
+
+
+def _emit_job_completed(info: "JobInfo") -> None:
+    """Emit the JOB_COMPLETED hook for a job that reached a terminal state.
+
+    Fired for every background job, not only the ones carrying a ``deliver``
+    target: ``on_complete`` is a delivery callback the gateway may or may not
+    install, whereas ``HookEvent.JOB_COMPLETED`` is the observability contract
+    plugins subscribe to. Also fired once when restart reconciliation marks an
+    orphaned job ``LOST``. Best-effort -- a missing hooks package or a raising
+    subscriber never affects the job's own result.
+    """
+    try:
+        from praisonaiagents.hooks import fire_hook
+
+        fire_hook(
+            "job_completed",
+            {
+                "job_id": info.job_id,
+                "status": getattr(info.status, "value", str(info.status)),
+                "result": info.result,
+                "error": info.error,
+                "agent_name": "background",
+                "session_id": str(info.origin.get("session_id", "") or ""),
+                "deliver": str(info.origin.get("deliver", "") or ""),
+                "platform": str(info.origin.get("platform", "") or ""),
+                "chat_id": str(info.origin.get("chat_id", "") or ""),
+                "thread_id": str(info.origin.get("thread_id", "") or ""),
+            },
+        )
+    except Exception as e:  # noqa: BLE001 - observability must not break the job
+        logger.debug(
+            "JOB_COMPLETED hook emit for job %s failed (non-fatal): %s",
+            info.job_id, e,
+        )
 
 
 class BackgroundJobManager:
@@ -239,43 +274,8 @@ class BackgroundJobManager:
         # and first run still leaves a recoverable trace (reconciled as LOST).
         self._persist(job_info)
         
-        def _emit_job_completed() -> None:
-            """Emit the JOB_COMPLETED hook for a job that reached a terminal state.
-
-            Fired for every background job, not only the ones carrying a
-            ``deliver`` target: ``on_complete`` is a delivery callback the
-            gateway may or may not install, whereas ``HookEvent.JOB_COMPLETED``
-            is the observability contract plugins subscribe to. Best-effort --
-            a missing hooks package or a raising subscriber never affects the
-            job's own result.
-            """
-            info = job_info
-            try:
-                from praisonaiagents.hooks import fire_hook
-
-                fire_hook(
-                    "job_completed",
-                    {
-                        "job_id": info.job_id,
-                        "status": getattr(info.status, "value", str(info.status)),
-                        "result": info.result,
-                        "error": info.error,
-                        "agent_name": "background",
-                        "session_id": str(info.origin.get("session_id", "") or ""),
-                        "deliver": str(info.origin.get("deliver", "") or ""),
-                        "platform": str(info.origin.get("platform", "") or ""),
-                        "chat_id": str(info.origin.get("chat_id", "") or ""),
-                        "thread_id": str(info.origin.get("thread_id", "") or ""),
-                    },
-                )
-            except Exception as e:  # noqa: BLE001 - observability must not break the job
-                logger.debug(
-                    "JOB_COMPLETED hook emit for job %s failed (non-fatal): %s",
-                    job_id, e,
-                )
-
         def _fire_complete() -> None:
-            _emit_job_completed()
+            _emit_job_completed(job_info)
             if on_complete is None:
                 return
             info = job_info
@@ -499,21 +499,24 @@ class BackgroundJobManager:
           :attr:`JobStatus.LOST` (a terminal, queryable state) and persisted.
           The abandoned work is not automatically re-run — that decision is
           left to the caller, who can inspect ``LOST`` jobs and re-submit.
-        - A job that ``COMPLETED`` with an ``origin`` but was never
-          ``delivered`` has ``redeliver`` invoked with its :class:`JobInfo`,
-          re-firing the deliver-back-to-origin the crash interrupted. On a
-          successful redeliver the job is marked ``delivered`` and persisted so
-          it is not delivered twice on the next restart.
+          ``JOB_COMPLETED`` fires once with ``status="lost"``.
+        - A job that is ``COMPLETED`` or ``LOST`` with an ``origin`` but was
+          never ``delivered`` has ``redeliver`` invoked with its
+          :class:`JobInfo`, so the origin gets the result or an "interrupted"
+          notice. On a successful redeliver the job is marked ``delivered`` and
+          persisted so it is not delivered twice on the next restart.
 
         Every persisted job is also re-hydrated into this manager's in-memory
         map so it remains queryable by id after the restart.
 
         No-op (returns zero counts) when no store is configured. Safe to call
-        once at startup, mirroring ``OutboundQueue.drain`` wiring.
+        again (jobs live in this process are skipped), mirroring
+        ``OutboundQueue.drain`` wiring.
 
         Args:
-            redeliver: Callable invoked with a COMPLETED-but-undelivered
-                :class:`JobInfo` to replay its deliver-back. Best-effort — an
+            redeliver: Callable invoked with a COMPLETED- or LOST-but-undelivered
+                :class:`JobInfo` (check ``status``) to replay its deliver-back
+                or announce the interruption. Best-effort — an
                 exception it raises is logged and the job is left undelivered
                 for a future retry, never crashing startup. When ``None``,
                 undelivered jobs are re-hydrated but not delivered.
@@ -532,6 +535,14 @@ class BackgroundJobManager:
             return counts
 
         for job in unreconciled:
+            # A repeat call (e.g. the gateway's boot pass after the lazy one in
+            # get_job_manager) must not touch jobs started by this process.
+            with self._lock:
+                live = self._jobs.get(job.job_id)
+            if live is not None and live.status in (
+                JobStatus.PENDING, JobStatus.RUNNING,
+            ):
+                continue
             # A job left RUNNING (or still PENDING) when its process died was
             # orphaned by the crash. Transition it to the terminal LOST state
             # *before* it becomes visible in the in-memory map, so a concurrent
@@ -542,6 +553,8 @@ class BackgroundJobManager:
             if orphaned:
                 prior_status = job.status.value
                 job.status = JobStatus.LOST
+                if job.error is None:
+                    job.error = "Interrupted by a process restart"
                 if job.completed_at is None:
                     job.completed_at = time.time()
 
@@ -556,8 +569,13 @@ class BackgroundJobManager:
                     "Reconciled orphaned %s job %s as LOST",
                     prior_status, job.job_id,
                 )
-            elif (
-                job.status == JobStatus.COMPLETED
+                # LOST is persisted before the emit, so a crash loop observes
+                # each orphan exactly once.
+                _emit_job_completed(job)
+
+            # A COMPLETED result or a LOST notice still owed to the origin.
+            if (
+                job.status in (JobStatus.COMPLETED, JobStatus.LOST)
                 and job.origin
                 and not job.delivered
             ):
@@ -569,8 +587,8 @@ class BackgroundJobManager:
                     self._persist(job)
                     counts["redelivered"] += 1
                     logger.info(
-                        "Re-delivered undelivered completed job %s to origin",
-                        job.job_id,
+                        "Re-delivered undelivered %s job %s to origin",
+                        job.status.value, job.job_id,
                     )
                 except Exception as e:  # noqa: BLE001 — redeliver is best-effort
                     logger.warning(

@@ -1069,6 +1069,10 @@ class SQLiteKanbanStore:
         recently heartbeating are left untouched (the worker may extend its
         own lease via heartbeat()).
 
+        Each reclaim closes the interrupted run as ``crashed``, counts it via
+        :meth:`record_failure` (so a crash loop trips the circuit breaker) and
+        adds an ``interrupted`` comment.
+
         Args:
             stale_timeout_seconds: Heartbeat staleness threshold.
 
@@ -1157,6 +1161,7 @@ class SQLiteKanbanStore:
                         'reason': reason,
                     }
                     self._log_event(conn, row['id'], 'reclaimed', reclaim_details[row['id']])
+                    reclaim_details[row['id']]['run_id'] = row.get('current_run_id')
 
         # Reclamation is a real running -> ready transition, so it announces
         # KANBAN_TASK_MOVED like any other move (tagged with why it happened).
@@ -1169,6 +1174,17 @@ class SQLiteKanbanStore:
                 reclaimed=True,
                 reason=detail.get('reason'),
             )
+            # Issue #6038: the interrupted attempt is a crash, not a silent
+            # restart. Close its run, count it toward the circuit breaker and
+            # leave a comment the next attempt sees in get_retry_context.
+            error = (
+                f"Worker {detail.get('worker_id')} was interrupted "
+                f"({detail.get('reason')}); task reclaimed and will restart from scratch"
+            )
+            if detail.get('run_id') is not None:
+                self.close_run(detail['run_id'], RunOutcome.CRASHED, error=error)
+            self.record_failure(task_id, error=error)
+            self.add_comment(task_id, 'system', f"interrupted: {error}")
         return reclaimed
 
     # ------------------------------------------------------------------

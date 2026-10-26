@@ -2456,17 +2456,21 @@ class WebSocketGateway:
 
             # Burst coalescing (#5867): buffer the delivery under its group key
             # and acknowledge it now; one run fires for the whole burst. The
-            # delivery is recorded as accepted so a sender retry stays deduped.
+            # key stays reserved (a retry while pending is deduped) and is only
+            # recorded once the burst runs; a failed or cancelled run releases
+            # it, and a crash leaves it to expire, so the sender can retry
+            # (#6038).
             group = hook.resolve_coalesce_key(payload)
             if group is not None:
-                pending = self._get_hook_coalescer().submit(group, hook, payload)
+                pending = self._get_hook_coalescer().submit(
+                    group, hook, payload, idempotency_key=idem,
+                )
                 if pending is None:
                     self._hook_release(idem)
                     return JSONResponse(
                         {"ok": False, "error": "too many pending coalesced groups"},
                         status_code=503, headers={"Retry-After": "30"},
                     )
-                self._hook_record(idem)
                 return JSONResponse(
                     {"ok": True, "coalesced": True, "pending": pending},
                     status_code=202,
@@ -2669,6 +2673,13 @@ class WebSocketGateway:
             await self._recover_orphaned_runs()
         except Exception:
             logger.exception("Failed to recover orphaned runs on boot")
+
+        # Issue #6038: tell the origin chat about background jobs a restart
+        # interrupted (or finished but never delivered).
+        try:
+            await self._reconcile_background_jobs()
+        except Exception:
+            logger.exception("Failed to reconcile background jobs on boot")
 
         logger.info(f"Gateway started on ws://{self._host}:{self._port}")
 
@@ -6083,15 +6094,24 @@ class WebSocketGateway:
         if self._hook_coalescer is None:
             from .hook_coalescer import HookCoalescer
 
-            async def _dispatch(hook: Any, payload: Dict[str, Any], count: int) -> None:
+            async def _dispatch(hook: Any, payload: Dict[str, Any], count: int) -> bool:
                 result = await self._run_hook(hook, payload, coalesced=count)
                 if not result.get("ok", False):
                     logger.error(
                         "Coalesced hook '%s' run failed: %s",
                         hook.path, result.get("error"),
                     )
+                    return False
+                return True
 
-            self._hook_coalescer = HookCoalescer(_dispatch)
+            def _settle(keys: List[str], ok: bool) -> None:
+                for key in keys:
+                    if ok:
+                        self._hook_record(key)
+                    else:
+                        self._hook_release(key)
+
+            self._hook_coalescer = HookCoalescer(_dispatch, settle=_settle)
         return self._hook_coalescer
 
     async def _run_hook(
@@ -8037,7 +8057,10 @@ class WebSocketGateway:
 
         Best-effort and default-safe: a no-op when core lacks the ledger or the
         ledger DB does not exist yet, so gateways that never used the ledger are
-        unaffected. Idempotency is keyed on the ``run_id`` so a crash loop
+        unaffected. The gateway does not write the ledger itself; it is
+        populated by code using the public ``praisonaiagents.runs`` ledger at
+        its default path. Background jobs are recovered separately by
+        :meth:`_reconcile_background_jobs`. Idempotency is keyed on the ``run_id`` so a crash loop
         notifies at most once per interrupted run.
         """
         ledger = self._open_run_ledger()
@@ -8105,6 +8128,61 @@ class WebSocketGateway:
                     close()
                 except Exception:  # pragma: no cover - defensive
                     pass
+
+    async def _reconcile_background_jobs(self) -> int:
+        """Notify origins of background jobs a previous process left behind.
+
+        Issue #6038: ``get_job_manager()`` reconciles orphaned jobs to ``LOST``
+        lazily and with no ``redeliver``, so the chat that spawned the job was
+        never told. Run the reconcile pass at boot with a ``redeliver`` that
+        sends an "interrupted" notice (or the undelivered result) through the
+        durable outbox. A job is only marked delivered once that succeeds.
+        No-op when no job store exists yet.
+        """
+        try:
+            from praisonaiagents.background.job_manager import (
+                JobStatus, get_job_manager,
+            )
+            from praisonaiagents.paths import get_runs_dir
+        except Exception as exc:  # pragma: no cover - old/absent core
+            logger.debug("background jobs unavailable for boot recovery: %s", exc)
+            return 0
+        if not (get_runs_dir() / "background_jobs.db").exists():
+            return 0
+
+        loop = asyncio.get_running_loop()
+
+        def _redeliver(job: Any) -> None:
+            origin = job.origin or {}
+            route = str(origin.get("deliver") or "")
+            if ":" not in route:
+                platform, chat_id = origin.get("platform"), origin.get("chat_id")
+                if not (platform and chat_id):
+                    return  # no route: mark delivered so it does not resurface
+                route = f"{platform}:{chat_id}"
+            if job.status == JobStatus.LOST:
+                task = str(origin.get("task") or "")[:80]
+                text = (
+                    f"Your background task '{task}' was interrupted by a "
+                    "restart and did not finish. Please resend it to retry."
+                )
+            else:
+                from praisonai_bot.bots.botos import BotOS
+
+                text = BotOS._summarize_job_result(job.result)
+                if not text:
+                    return
+            ok = asyncio.run_coroutine_threadsafe(
+                self._deliver_lost_run_notice(route, text, f"job:{job.job_id}"),
+                loop,
+            ).result(timeout=60)
+            if not ok:
+                raise RuntimeError(f"delivery to {route} failed")
+
+        counts = await asyncio.to_thread(
+            lambda: get_job_manager().reconcile_on_start(redeliver=_redeliver)
+        )
+        return counts.get("redelivered", 0)
 
     async def _deliver_lost_run_notice(
         self, channel_target: str, text: str, run_id: str,
