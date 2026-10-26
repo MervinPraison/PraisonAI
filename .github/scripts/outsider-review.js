@@ -299,7 +299,8 @@ async function jobCompletedAt(github, owner, repo, runId, jobName) {
     const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
       owner, repo, run_id: runId, per_page: 100,
     });
-    return jobs.find((j) => j.name === jobName)?.completed_at || null;
+    // A reusable workflow's jobs are named '<caller job> / <job>'.
+    return jobs.find((j) => j.name === jobName || j.name.endsWith(` / ${jobName}`))?.completed_at || null;
   } catch {
     return null;
   }

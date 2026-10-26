@@ -208,6 +208,8 @@ assert('no source issue', o.sourceIssueNumbers({ head: { ref: 'feat/x' }, body: 
     const jobs = [{ name: 'issue-triage', completed_at: '2026-10-17T10:00:01Z' }, { name: 'claude-response', completed_at: '2026-10-17T10:20:00Z' }];
     const g = { rest: { actions: { listJobsForWorkflowRun: 'jobs' } }, paginate: async () => jobs };
     assert('the Claude job end time bounds the run window', (await o.jobCompletedAt(g, 'o', 'r', 1, 'claude-response')) === '2026-10-17T10:20:00Z');
+    const hub = { rest: g.rest, paginate: async () => [{ name: 'claude / claude-response', completed_at: '2026-10-17T10:21:00Z' }] };
+    assert('a reusable workflow job (caller / job) is found', (await o.jobCompletedAt(hub, 'o', 'r', 1, 'claude-response')) === '2026-10-17T10:21:00Z');
     assert('an unfinished or missing job gives no bound', (await o.jobCompletedAt(g, 'o', 'r', 1, 'nope')) === null);
     const bad = { rest: { actions: { listJobsForWorkflowRun: 'jobs' } }, paginate: async () => { throw new Error('403'); } };
     assert('a jobs lookup failure gives no bound (caller counts up to now)', (await o.jobCompletedAt(bad, 'o', 'r', 1, 'claude-response')) === null);
