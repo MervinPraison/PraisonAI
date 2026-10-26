@@ -191,6 +191,10 @@ assert('no source issue', o.sourceIssueNumbers({ head: { ref: 'feat/x' }, body: 
   assert('a referenced number that does not exist here (404) is not outsider influence', r.length === 0);
   r = await o.referencedIssueReasons(fakeGithub({ issueError: 410 }), 'o', 'r', 'see #12');
   assert('a referenced issue that was deleted (410) still fails closed', r.some((x) => x.includes('unavailable (HTTP 410)')));
+  r = await o.referencedIssueReasons(
+    fakeGithub({ issues: { 500: maintainerIssue }, timeline: [{ event: 'labeled', label: { name: o.OUTSIDER_ORIGIN_LABEL } }] }), 'o', 'r', 'implement #500'
+  );
+  assert('a referenced issue flagged earlier stays outsider (outsider comment since deleted)', r.some((x) => x.includes('#500 was flagged')));
   r = await o.referencedIssueReasons(fakeGithub({ issues: { 500: { user: { login: 'stranger' } } } }), 'o', 'r', 'implement #500');
   assert('a referenced outsider issue still counts', r.some((x) => x.includes('referenced issue #500 opened by @stranger')));
   r = await o.outsiderIssueReasons(

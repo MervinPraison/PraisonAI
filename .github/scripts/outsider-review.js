@@ -287,6 +287,10 @@ async function referencedIssueReasons(github, owner, repo, text) {
   const reasons = [];
   for (const n of referencedIssueNumbers(text, owner, repo)) {
     reasons.push(...(await issueReasons(github, owner, repo, n, isWriter, 'referenced issue', { missingOk: true })));
+    // Sticky like everywhere else: a deleted outsider comment must not clear the flag.
+    if (await wasLabelled(github, owner, repo, n, OUTSIDER_ORIGIN_LABEL)) {
+      reasons.push(`referenced issue #${n} was flagged ${OUTSIDER_ORIGIN_LABEL} earlier`);
+    }
   }
   return reasons;
 }
