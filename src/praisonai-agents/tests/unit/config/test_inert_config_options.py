@@ -149,6 +149,17 @@ def test_rerank_model_leaves_reranking_to_backend():
     assert rag.reranker is None
 
 
+def test_rerank_model_backend_reranking_reported():
+    class BackendRerankKnowledge(StubKnowledge):
+        config = {"reranker": {"default_rerank": True, "provider": "cohere"}}
+
+    a = Agent(name="r", instructions="x", llm="gpt-4o-mini", knowledge=BackendRerankKnowledge(),
+              retrieval_config={"rerank": True, "rerank_model": "cohere/rerank-v3"})
+    assert a.rag.reranker is None
+    assert a.rag.retrieve("q").metadata["reranked"] is True
+    assert a.rag.retrieve("q", rerank=False).metadata["reranked"] is False
+
+
 @pytest.mark.asyncio
 async def test_rerank_true_async():
     pack = await _rag({"rerank": True}).aretrieve("capital of france")

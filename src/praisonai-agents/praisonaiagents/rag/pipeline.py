@@ -199,6 +199,17 @@ class RAG:
         
         return results
     
+    def _reranked(self, rerank: bool) -> bool:
+        """Whether a reranker actually ran: the local one, or a backend
+        reranker configured on the knowledge (e.g. mem0 with rerank_model)."""
+        if not rerank:
+            return False
+        if self.reranker:
+            return True
+        cfg = getattr(self.knowledge, "config", None)
+        backend = cfg.get("reranker") if isinstance(cfg, dict) else None
+        return bool(isinstance(backend, dict) and backend.get("default_rerank") and backend.get("provider"))
+
     def _rerank(
         self,
         query: str,
@@ -395,7 +406,7 @@ class RAG:
                 "num_results": len(results),
                 "num_citations": len(citations),
                 "retrieval_strategy": self.config.retrieval_strategy.value,
-                "reranked": bool(eff_rerank and self.reranker),
+                "reranked": self._reranked(eff_rerank),
                 "top_k": eff_top_k,
             },
         )
@@ -495,7 +506,7 @@ class RAG:
                 "num_results": len(results),
                 "num_citations": len(citations),
                 "retrieval_strategy": self.config.retrieval_strategy.value,
-                "reranked": bool(self.config.rerank and self.reranker),
+                "reranked": self._reranked(self.config.rerank),
             },
         )
     
