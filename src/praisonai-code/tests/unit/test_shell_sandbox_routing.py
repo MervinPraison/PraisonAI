@@ -196,6 +196,37 @@ def test_contained_command_stops_on_cancel(monkeypatch, tmp_path):
     assert "interrupted" in result["error"]
 
 
+def test_interrupted_and_timed_out_output_is_capped(monkeypatch, tmp_path):
+    import threading
+
+    class _W:
+        backend = "bubblewrap"
+
+        def wrap(self, argv):
+            return list(argv)
+
+        def cleanup(self):
+            pass
+
+    monkeypatch.setattr(os_sandbox, "build_wrapper", lambda **kw: _W())
+    noisy = "head -c 50000 /dev/zero | tr '\\0' x; sleep 20"
+
+    timed_out = shell_exec._run_real_shell(
+        noisy, str(tmp_path), 1, None, 100, contained=True
+    )
+    assert timed_out["exit_code"] == 124
+    assert len(timed_out["stdout"]) < 200
+
+    cancel = threading.Event()
+    monkeypatch.setattr(shell_exec, "_cancel_event", lambda: cancel)
+    threading.Timer(0.5, cancel.set).start()
+    interrupted = shell_exec._run_real_shell(
+        noisy, str(tmp_path), 30, None, 100, contained=True
+    )
+    assert interrupted["exit_code"] == 130
+    assert len(interrupted["stdout"]) < 200
+
+
 def test_acp_honours_sandboxed_mode(recorded, tmp_path, monkeypatch):
     from praisonai_code.cli.features import action_orchestrator as ao
     from praisonai_code.cli.features.agent_tools import _sanitize_command

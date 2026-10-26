@@ -324,6 +324,13 @@ def _run_real_shell(
     if os.name == "posix":
         popen_kwargs["start_new_session"] = True
 
+    # Bound every result, including interrupted and timed-out ones.
+    def _cap(text: str) -> str:
+        if max_output_size and len(text) > max_output_size:
+            half = max_output_size // 2
+            return text[:half] + "\n... [output truncated] ...\n" + text[-half:]
+        return text
+
     proc = None
     try:
         proc = subprocess.Popen(
@@ -342,7 +349,7 @@ def _run_real_shell(
             out, err = proc.communicate()
             return {
                 "command": command,
-                "stdout": out or "",
+                "stdout": _cap(out or ""),
                 "stderr": "Command interrupted by user",
                 "exit_code": 130,
                 "success": False,
@@ -354,7 +361,7 @@ def _run_real_shell(
             out, err = proc.communicate()
             return {
                 "command": command,
-                "stdout": out or "",
+                "stdout": _cap(out or ""),
                 "stderr": f"Command timed out after {timeout}s",
                 "exit_code": 124,
                 "success": False,
@@ -374,12 +381,6 @@ def _run_real_shell(
     completed.stdout = out
     completed.stderr = err
     completed.returncode = proc.returncode
-
-    def _cap(text: str) -> str:
-        if max_output_size and len(text) > max_output_size:
-            half = max_output_size // 2
-            return text[:half] + "\n... [output truncated] ...\n" + text[-half:]
-        return text
 
     return {
         "command": command,
