@@ -345,3 +345,35 @@ def test_team_yaml_static_graph_uses_the_run_ids(tmp_path):
     ids = {n["id"] for n in graph["nodes"]}
     assert {"agent:Researcher", "agent:Writer", "task:0", "task:1"} <= ids
     assert not any(i.startswith("step:") for i in ids)
+
+
+# ---------------------------------------------------------------------------
+# watch: a page with a Run button (the server is never started here)
+# ---------------------------------------------------------------------------
+
+def test_watch_needs_aiui(monkeypatch):
+    from praisonai.cli.commands import replay as replay_cli
+
+    monkeypatch.setattr(replay_cli, "_aiui_installed", lambda: False)
+    result = _invoke("watch", "agents.yaml")
+    assert result.exit_code == 1 and "praisonai[ui]" in result.output
+
+
+def test_watch_rejects_a_non_yaml_file(monkeypatch):
+    from praisonai.cli.commands import replay as replay_cli
+
+    monkeypatch.setattr(replay_cli, "_aiui_installed", lambda: True)
+    result = _invoke("watch", "notes.txt")
+    assert result.exit_code == 2 and "not a YAML file" in result.output
+
+
+def test_watch_serves_the_yaml_with_a_run_button(monkeypatch):
+    from praisonai.cli.commands import replay as replay_cli
+    from praisonai.replay import live
+
+    calls = []
+    monkeypatch.setattr(replay_cli, "_aiui_installed", lambda: True)
+    monkeypatch.setattr(live, "watch", lambda target, **kw: calls.append((target, kw)))
+    result = _invoke("watch", "agents.yaml", "--port", "8123", "--no-browser")
+    assert result.exit_code == 0, result.output
+    assert calls == [("agents.yaml", {"host": "127.0.0.1", "port": 8123, "open_browser": False})]

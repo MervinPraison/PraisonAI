@@ -29,11 +29,18 @@ Usage:
     with record(live=True) as rec:
         agent.start("Say hello")
     html = export.to_html(load_events(rec.path))
+
+    # Watch it live: a page with a Run button (or mount it in your own app)
+    from praisonai.replay import watch, replay_app
+    watch(flow)                                  # opens the browser
+    app.mount("/replay", replay_app(flow))       # FastAPI / Starlette
 """
 
 __all__ = [
     "record",
     "Recording",
+    "watch",
+    "replay_app",
     "TraceStepCache",
     "load_events",
     "ContextTraceWriter",
@@ -56,6 +63,10 @@ def __getattr__(name: str):
     if name in ("record", "Recording"):
         from . import recorder
         return getattr(recorder, name)
+
+    if name in ("watch", "replay_app"):
+        from . import live
+        return getattr(live, name)
 
     if name == "TraceStepCache":
         from .rerun import TraceStepCache

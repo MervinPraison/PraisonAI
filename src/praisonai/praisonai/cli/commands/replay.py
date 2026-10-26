@@ -6,6 +6,7 @@ Provides context replay functionality:
 - replay context <session_id>: Interactive replay of a trace
 - replay flow <run|yaml> --format ascii|json|mermaid: Agent flow / static graph
 - replay view [run|yaml] [--live]: Open PraisonAI Replay (aiui) on a run
+- replay watch [yaml]: A page with a Run button that draws each run live
 - replay export <run> --format html|json|mermaid|otel: Export a run
 - replay rerun <run> --from NODE: Re-run from a node, reusing earlier outputs
 """
@@ -1098,6 +1099,35 @@ def _load_raw_events(output, run: str):
         output.print_error(f"No events in trace: {run}")
         raise typer.Exit(1)
     return events
+
+
+@app.command("watch")
+def replay_watch(
+    yaml_file: Optional[str] = typer.Argument(None, help="agents.yaml to run from the page (default: just view recorded runs)"),
+    port: int = typer.Option(8090, "--port", "-p", help="Port for the page"),
+    host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to"),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Do not open the browser"),
+):
+    """Open a page with a Run button: each run is recorded and drawn live, step by step.
+
+    Examples:
+        praisonai replay watch agents.yaml
+        praisonai replay watch               # recorded runs only
+    """
+    from praisonai.replay.live import watch
+    from praisonai.replay.yaml_run import is_yaml_path
+
+    if not _aiui_installed():
+        typer.echo(f"ERROR: PraisonAI Replay needs PraisonAI UI (aiui). Install with:\n  {_AIUI_INSTALL_HINT}", err=True)
+        raise typer.Exit(1)
+    if yaml_file and not is_yaml_path(yaml_file):
+        typer.echo(f"ERROR: not a YAML file: {yaml_file}", err=True)
+        raise typer.Exit(2)
+    try:
+        watch(yaml_file, host=host, port=port, open_browser=not no_browser)
+    except ImportError as e:
+        typer.echo(f"ERROR: {e}", err=True)
+        raise typer.Exit(1)
 
 
 @app.command("export")
