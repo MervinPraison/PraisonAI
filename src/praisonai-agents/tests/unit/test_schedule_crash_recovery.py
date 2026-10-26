@@ -133,3 +133,33 @@ def test_one_shot_in_flight_past_lease_not_refired_by_same_process(make_store):
     assert store.claim_due(t0, owner_id="A", lease_seconds=1)
     # Same ticker polls again while its run is still going.
     assert store.claim_due(t0 + 5, owner_id="A", lease_seconds=1) == []
+
+
+def test_future_one_shot_survives_poll_before_its_time(make_store):
+    store = make_store()
+    future = (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()
+    job = ScheduleJob(
+        name="later", message="ping",
+        schedule=Schedule(kind="at", at=future), delete_after_run=True,
+    )
+    store.add(job)
+    assert store.claim_due(time.time(), owner_id="A") == []
+    assert make_store().get(job.id) is not None
+
+
+def test_resumed_failed_one_shot_runs_again(make_store):
+    store = make_store()
+    job = _one_shot()
+    store.add(job)
+    claimed = store.claim_due(time.time(), owner_id="A")
+    ScheduleRunner(store).mark_run(claimed[0], status="failed", error="boom")
+    store.complete(job.id, "A")
+    resumed = make_store()
+    kept = resumed.get(job.id)
+    kept.enabled = True
+    resumed.update(kept)
+    retry = resumed.claim_due(time.time() + 10, owner_id="B")
+    assert [j.id for j in retry] == [job.id]
+    ScheduleRunner(resumed).mark_run(retry[0])
+    resumed.complete(job.id, "B")
+    assert make_store().get(job.id) is None

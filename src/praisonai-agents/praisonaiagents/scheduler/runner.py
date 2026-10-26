@@ -133,9 +133,13 @@ class ScheduleRunner:
                 self._store.remove(job.id)
             else:
                 # Keep a failed spent job visible (disabled) instead of
-                # deleting it, so the user can see and re-run it.
+                # deleting it, so the user can see and re-run it. Undo the
+                # spent fire (history keeps the failed row) so resuming it
+                # runs it again instead of retiring it unrun.
                 job.enabled = False
                 job._retiring = 0
+                job.run_count = max(0, job.run_count - 1)
+                job.last_run_at = None
                 self._store.update(job)
         except OSError as e:
             logger.error("Failed to persist run state for job %r: %s", job.id, e)
