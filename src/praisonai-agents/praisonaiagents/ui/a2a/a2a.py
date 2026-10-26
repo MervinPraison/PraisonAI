@@ -6,11 +6,11 @@ Exposes PraisonAI Agents via the A2A (Agent2Agent) protocol.
 
 import asyncio
 from praisonaiagents._logging import get_logger
-from typing import List, Optional, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 from praisonaiagents.ui.a2a.types import AgentCard
 from praisonaiagents.ui.a2a.agent_card import generate_agent_card
-from praisonaiagents.ui.a2a.task_store import TaskStore
+from praisonaiagents.ui.a2a.task_store import TaskStore, TERMINAL_STATES
 
 if TYPE_CHECKING:
     from praisonaiagents import Agent, AgentTeam
@@ -98,6 +98,8 @@ class A2A:
         
         # Initialize task store
         self.task_store = TaskStore()
+        # Strong refs to background tasks so they aren't GC'd and can be cancelled
+        self._running: Dict[str, asyncio.Task] = {}
         
         # Router cache
         self._router: Optional["APIRouter"] = None
@@ -290,12 +292,17 @@ class A2A:
                     self.task_store.add_to_history(task_id, response_msg)
                     self.task_store.add_artifact(task_id, artifact)
                     self.task_store.update_status(task_id, TaskState.COMPLETED)
+                except asyncio.CancelledError:
+                    self.task_store.update_status(task_id, TaskState.CANCELLED)
+                    raise
                 except Exception as e:
                     logger.error(f"Background agent error: {e}")
                     self.task_store.update_status(task_id, TaskState.FAILED)
             
             user_input = extract_user_input([message])
-            asyncio.create_task(_background_process(task.id, user_input))
+            bg = asyncio.create_task(_background_process(task.id, user_input))
+            self._running[task.id] = bg
+            bg.add_done_callback(lambda _t, tid=task.id: self._running.pop(tid, None))
             
             return JSONResponse(content={
                 "jsonrpc": "2.0",
@@ -305,6 +312,9 @@ class A2A:
         
         # Update to working
         self.task_store.update_status(task.id, TaskState.WORKING)
+        # Keep the task while we wait on the agent: a cancel can make it
+        # terminal (and evictable) before we build the response.
+        self.task_store._pinned.add(task.id)
         
         try:
             # Extract user input text
@@ -333,6 +343,8 @@ class A2A:
         except Exception as e:
             logger.error(f"Agent error in message/send: {e}")
             updated_task = self.task_store.update_status(task.id, TaskState.FAILED)
+        finally:
+            self.task_store._pinned.discard(task.id)
         
         # Return JSON-RPC response
         return JSONResponse(content={
@@ -410,9 +422,19 @@ class A2A:
         if not task_id:
             return _jsonrpc_error(request_id, -32602, "Invalid params: 'id' required")
         
-        task = self.task_store.cancel_task(task_id)
-        if not task:
+        existing = self.task_store.get_task(task_id)
+        if not existing:
             return _jsonrpc_error(request_id, -32000, f"Task not found: {task_id}")
+        if existing.status.state in TERMINAL_STATES:
+            return _jsonrpc_error(
+                request_id, -32002,
+                f"Task not cancelable: already {existing.status.state.value}",
+            )
+        
+        task = self.task_store.cancel_task(task_id)
+        running = self._running.get(task_id)
+        if running:
+            running.cancel()
         
         return JSONResponse(content={
             "jsonrpc": "2.0",

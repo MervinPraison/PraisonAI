@@ -6529,7 +6529,8 @@ Summary:"""
                     # In async context - prefer async hook if available
                     if hasattr(self._memory_instance, 'aon_memory_write'):
                         # Schedule async hook without blocking (fire and forget)
-                        asyncio.create_task(self._memory_instance.aon_memory_write(action, memory_type, content, metadata))
+                        from ..utils.async_bridge import spawn_background
+                        spawn_background(self._memory_instance.aon_memory_write(action, memory_type, content, metadata), "aon_memory_write")
                     elif hasattr(self._memory_instance, 'on_memory_write'):
                         self._memory_instance.on_memory_write(action, memory_type, content, metadata)
                 except RuntimeError:
