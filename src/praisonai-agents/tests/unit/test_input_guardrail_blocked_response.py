@@ -63,6 +63,7 @@ def test_team_does_not_complete_or_save_rejected_turn(tmp_path, is_async, blocke
 
 @pytest.mark.parametrize("stream", [False, True])
 def test_start_backend_rejection_never_dispatches(monkeypatch, stream):
+    """Reject backend prompts before delegation in either streaming mode."""
     agent = Agent(name="T", instructions="test", llm="gpt-4o-mini", guardrails=RejectInput())
     agent.backend = object()
     delegate = MagicMock(return_value="backend output")
@@ -76,6 +77,7 @@ def test_start_backend_rejection_never_dispatches(monkeypatch, stream):
 
 @pytest.mark.parametrize("stream", [False, True])
 def test_backend_receives_validated_prompt(monkeypatch, stream):
+    """Pass the once-validated prompt and original return shape to the backend."""
     agent = Agent(name="T", instructions="test", llm="gpt-4o-mini")
     agent.backend = object()
     monkeypatch.setattr(agent, "_validate_input_with_guardrail",
@@ -88,6 +90,7 @@ def test_backend_receives_validated_prompt(monkeypatch, stream):
 
 
 def test_planning_rejects_before_creating_plan(monkeypatch):
+    """No planner runs for rejected input."""
     agent = Agent(name="T", instructions="test", llm="gpt-4o-mini", guardrails=RejectInput())
     planner = MagicMock()
     planner.create_plan_sync.return_value = None
@@ -99,6 +102,7 @@ def test_planning_rejects_before_creating_plan(monkeypatch):
 
 @pytest.mark.parametrize("blocked", [False, True])
 def test_planning_stops_after_blocked_step(monkeypatch, blocked):
+    """Only accepted steps proceed to later steps and compilation."""
     from types import SimpleNamespace
 
     agent = Agent(name="T", instructions="test", llm="gpt-4o-mini")
@@ -126,6 +130,7 @@ def test_planning_stops_after_blocked_step(monkeypatch, blocked):
 @pytest.mark.parametrize("blocked", [False, True])
 @pytest.mark.parametrize("is_async", [False, True])
 def test_caller_mode_preserves_rejection_status(monkeypatch, blocked, is_async):
+    """Sync and async caller results distinguish safe rejection from success."""
     agent = Agent(name="T", instructions="test", llm="gpt-4o-mini", autonomy=True)
     response = agent._guardrail_blocked_message() if blocked else "normal response"
     monkeypatch.setattr(agent, "chat", lambda *a, **k: response)
@@ -136,6 +141,31 @@ def test_caller_mode_preserves_rejection_status(monkeypatch, blocked, is_async):
     assert result.success is (not blocked)
     assert result.output == response
     assert result.error == (response if blocked else None)
+
+
+@pytest.mark.parametrize("autonomy", [False, True])
+@pytest.mark.parametrize("blocked", [False, True])
+def test_async_outcome_preserves_guardrail_failure(monkeypatch, autonomy, blocked):
+    """Canonical outcomes must not turn rejected caller results into success."""
+    agent = Agent(name="T", instructions="test", llm="gpt-4o-mini", autonomy=autonomy)
+    response = agent._guardrail_blocked_message() if blocked else "normal response"
+    monkeypatch.setattr(agent, "achat", AsyncMock(return_value=response))
+    monkeypatch.setattr(agent, "_auto_save_session", lambda: None)
+    outcome = asyncio.run(agent.astart("prompt", return_outcome=True))
+    assert outcome.reason == ("failed" if blocked else "completed")
+    assert outcome.error == (str(response) if blocked else None)
+
+
+def test_planning_outcome_preserves_guardrail_failure(monkeypatch):
+    """A rejected planning request is failed even before a provider stop reason exists."""
+    agent = Agent(name="T", instructions="test", llm="gpt-4o-mini", guardrails=RejectInput())
+    agent.planning = True
+    monkeypatch.setattr(agent, "_get_planning_agent", MagicMock())
+    outcome = agent.run("blocked prompt", return_outcome=True)
+    assert outcome.reason == "failed"
+    assert outcome.output == agent._guardrail_blocked_message()
+    assert outcome.error == outcome.output
+    agent._get_planning_agent.assert_not_called()
 
 
 def test_plain_text_is_not_classified_by_its_message(monkeypatch):
