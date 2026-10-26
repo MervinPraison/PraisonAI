@@ -82,6 +82,31 @@ def test_output_direction_applies_to_char_cap():
     assert "line 199" not in out
 
 
+def short_lines() -> str:
+    """Return ten one-character lines."""
+    return "\n".join("abcdefghij")
+
+
+def big_dict() -> dict:
+    """Return a dict with one large field."""
+    return {"body": "START" + "x" * 45000 + "END"}
+
+
+def test_line_cap_applies_to_short_lines():
+    a = Agent(name="t", instructions="x", llm="gpt-4o-mini", tools=[short_lines],
+              tool_config=ToolConfig(output_max_lines=5, output_direction="head"), output="silent")
+    lines = str(a.execute_tool("short_lines", {})).splitlines()
+    assert lines[:5] == list("abcde")
+    assert "j" not in lines
+
+
+def test_output_direction_applies_to_dict_results():
+    a = Agent(name="t", instructions="x", llm="gpt-4o-mini", tools=[big_dict],
+              tool_config=ToolConfig(output_limit=40000, output_direction="head"), output="silent")
+    out = str(a.execute_tool("big_dict", {}))
+    assert "START" in out and "END" not in out
+
+
 # --- rerank=True on Agent.rag -----------------------------------------------
 
 class StubKnowledge:
@@ -129,3 +154,12 @@ async def test_rerank_true_async():
     pack = await _rag({"rerank": True}).aretrieve("capital of france")
     assert pack.metadata["reranked"] is True
     assert pack.context.index("paris") < pack.context.index("bananas")
+
+
+def test_simple_reranker_accepts_search_result_items():
+    from praisonaiagents.knowledge.models import SearchResultItem
+    from praisonaiagents.rag.retriever import SimpleReranker
+    hits = [SearchResultItem(text="bananas are yellow", score=0.9),
+            SearchResultItem(text="paris is the capital of france", score=0.8)]
+    ranked = SimpleReranker().rerank("capital of france", hits)
+    assert ranked[0]["text"].startswith("paris")

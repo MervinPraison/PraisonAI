@@ -1760,10 +1760,15 @@ class ToolExecutionMixin:
                         else:
                             truncated = self._truncate_tool_output(function_name, truncated, tool_call_id)
                     
-                    if len(truncated) < len(result_str):
+                    # A triggered line cap applies even when its marker makes the
+                    # preview no shorter than the original (many short lines).
+                    line_capped = capped_str is not result_str
+                    if line_capped or len(truncated) < len(result_str):
                         logging.debug(f"Truncated {function_name} output from {len(result_str)} to {len(truncated)} chars")
-                        # For dicts, truncate large string fields (e.g., raw_content from search)
-                        if isinstance(result, dict):
+                        # For dicts, truncate large string fields (e.g., raw_content from search).
+                        # Field truncation keeps both ends, so a line cap or a head/tail
+                        # direction uses the string preview instead.
+                        if isinstance(result, dict) and direction == "both" and not line_capped:
                             max_field_chars = getattr(self, 'tool_output_limit', DEFAULT_TOOL_OUTPUT_LIMIT) if not self.context_manager else None
                             result = self._truncate_dict_fields(result, function_name, max_field_chars, tool_call_id)
                             # Per-field truncation only shortens individual fields
