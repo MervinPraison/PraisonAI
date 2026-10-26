@@ -195,10 +195,12 @@ async function maintainerApprovedHead(github, owner, repo, prNumber, headSha) {
 }
 
 /** Outsider authorship of an issue and its comments ([] for a PR number). */
-async function issueReasons(github, owner, repo, issueNumber, isWriter, label = 'issue') {
+async function issueReasons(github, owner, repo, issueNumber, isWriter, label = 'issue', { missingOk = false } = {}) {
   const reasons = [];
+  let found = false;
   try {
     const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number: issueNumber });
+    found = true;
     if (issue.pull_request) {
       // A PR as the source: its head and author matter too.
       const { data: src } = await github.rest.pulls.get({ owner, repo, pull_number: issueNumber });
@@ -214,6 +216,11 @@ async function issueReasons(github, owner, repo, issueNumber, isWriter, label = 
     if (outsiders.length) reasons.push(`${label} #${issueNumber} has comments from ${outsiders.map((l) => '@' + l).join(', ')}`);
   } catch (err) {
     if (err.status !== 404 && err.status !== 410) throw err;
+    // A number merely mentioned that names nothing here (e.g. another repo's #N) has no
+    // content to inject; a deleted issue (410) did, so it still fails closed.
+    // Only the issue lookup itself may come back missing; a 404 from a later call
+    // (comments, the PR behind it) would otherwise skip checks and fail open.
+    if (missingOk && err.status === 404 && !found) return reasons;
     // Deleted, transferred or never existed: who wrote it is unknown, so fail closed.
     reasons.push(`${label} #${issueNumber} is unavailable (HTTP ${err.status}); provenance unknown`);
   }
@@ -267,12 +274,26 @@ async function outsiderIssueReasons(github, owner, repo, issueNumber, requestTex
   const isWriter = makePermissionLookup(github, owner, repo);
   const reasons = await issueReasons(github, owner, repo, issueNumber, isWriter);
   for (const n of referencedIssueNumbers(requestText, owner, repo)) {
-    if (n !== issueNumber) reasons.push(...(await issueReasons(github, owner, repo, n, isWriter, 'referenced issue')));
+    if (n !== issueNumber) reasons.push(...(await issueReasons(github, owner, repo, n, isWriter, 'referenced issue', { missingOk: true })));
   }
   for (const n of [issueNumber, ...referencedIssueNumbers(requestText, owner, repo)]) {
     if (await wasLabelled(github, owner, repo, n, OUTSIDER_ORIGIN_LABEL)) {
       reasons.push(`#${n} was flagged ${OUTSIDER_ORIGIN_LABEL} earlier`);
       break;
+    }
+  }
+  return reasons;
+}
+
+/** Outsider influence from issues a request points at ("implement #500"); missing numbers are ignored. */
+async function referencedIssueReasons(github, owner, repo, text) {
+  const isWriter = makePermissionLookup(github, owner, repo);
+  const reasons = [];
+  for (const n of referencedIssueNumbers(text, owner, repo)) {
+    reasons.push(...(await issueReasons(github, owner, repo, n, isWriter, 'referenced issue', { missingOk: true })));
+    // Sticky like everywhere else: a deleted outsider comment must not clear the flag.
+    if (await wasLabelled(github, owner, repo, n, OUTSIDER_ORIGIN_LABEL)) {
+      reasons.push(`referenced issue #${n} was flagged ${OUTSIDER_ORIGIN_LABEL} earlier`);
     }
   }
   return reasons;
@@ -418,6 +439,7 @@ module.exports = {
   outsiderOriginReasons,
   outsiderIssueReasons,
   referencedIssueNumbers,
+  referencedIssueReasons,
   touchedByRun,
   outsiderSensitivePaths,
   riskFlags,

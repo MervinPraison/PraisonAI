@@ -185,6 +185,32 @@ assert('no source issue', o.sourceIssueNumbers({ head: { ref: 'feat/x' }, body: 
   const editFail = await (async () => { const g = runGh([]); g.graphql = async () => { throw new Error('rate'); }; return o.touchedByRun(g, 'o', 'r', item(), SINCE, APP).then(() => null, (e) => e); })();
   assert('an edit-history lookup failure fails closed (throws)', editFail instanceof Error);
 
+  // A request mentioning another repo's numbers as bare #N (Docs issues cite PraisonAI PRs this way)
+  // must not make the run outsider: a number that names nothing here carries no content.
+  r = await o.referencedIssueReasons(fakeGithub({ issueError: 404 }), 'o', 'r', 'see upstream #5987 and #6366');
+  assert('a referenced number that does not exist here (404) is not outsider influence', r.length === 0);
+  {
+    // The issue exists (writer-owned) but its comments call 404: that must not silently skip the comment check.
+    const g = fakeGithub({ issues: { 12: maintainerIssue } });
+    g.paginate = async (method) => { if (method === 'issues.listComments') throw Object.assign(new Error('nf'), { status: 404 }); return []; };
+    r = await o.referencedIssueReasons(g, 'o', 'r', 'see #12');
+    assert('a 404 after the issue was found still fails closed (only a missing issue is ignored)', r.some((x) => x.includes('#12 is unavailable')));
+  }
+  r = await o.referencedIssueReasons(fakeGithub({ issueError: 410 }), 'o', 'r', 'see #12');
+  assert('a referenced issue that was deleted (410) still fails closed', r.some((x) => x.includes('unavailable (HTTP 410)')));
+  r = await o.referencedIssueReasons(
+    fakeGithub({ issues: { 500: maintainerIssue }, timeline: [{ event: 'labeled', label: { name: o.OUTSIDER_ORIGIN_LABEL } }] }), 'o', 'r', 'implement #500'
+  );
+  assert('a referenced issue flagged earlier stays outsider (outsider comment since deleted)', r.some((x) => x.includes('#500 was flagged')));
+  r = await o.referencedIssueReasons(fakeGithub({ issues: { 500: { user: { login: 'stranger' } } } }), 'o', 'r', 'implement #500');
+  assert('a referenced outsider issue still counts', r.some((x) => x.includes('referenced issue #500 opened by @stranger')));
+  r = await o.outsiderIssueReasons(
+    fakeGithub({ issues: { 600: maintainerIssue } }), 'o', 'r', 600, 'Docs for upstream #5987 (PraisonAI)'
+  );
+  assert('maintainer issue citing missing numbers is not outsider', r.length === 0);
+  r = await o.outsiderOriginReasons(fakeGithub({ issueError: 404 }), 'o', 'r', internalPr(), []);
+  assert('a missing SOURCE issue (404) still fails closed', r.some((x) => x.includes('unavailable (HTTP 404)')));
+
   r = await o.outsiderOriginReasons(fakeGithub({ issueError: 410 }), 'o', 'r', internalPr(), []);
   assert('a deleted or transferred source issue (410) counts as unknown, so outsider', r.some((x) => x.includes('unavailable (HTTP 410)')));
 
