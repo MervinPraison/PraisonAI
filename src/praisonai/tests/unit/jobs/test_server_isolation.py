@@ -8,7 +8,7 @@ from praisonai.jobs import server
 from praisonai.jobs.store import InMemoryJobStore
 
 
-def test_second_app_does_not_clobber_first():
+def test_second_app_does_not_clobber_first(monkeypatch):
     a, b = InMemoryJobStore(), InMemoryJobStore()
     default_store = server._store
     app_a = server.create_app(store=a)
@@ -22,6 +22,11 @@ def test_second_app_does_not_clobber_first():
     # Injected stores must not leak into the process defaults.
     assert server._store is default_store
 
+    async def _no_agent(job):
+        return "ok"
+
+    # Stub agent execution so the test checks routing/storage only.
+    monkeypatch.setattr(app_a.state.job_executor, "_run_agent", _no_agent)
     with TestClient(app_a) as client:
         job_id = client.post("/api/v1/runs", json={"prompt": "hi"}).json()["job_id"]
     assert len(a._jobs) == 1 and job_id in a._jobs
