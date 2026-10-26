@@ -11,6 +11,7 @@ The ``praisonai`` wrapper provides backward-compatible shims.
 
 from __future__ import annotations
 
+import hashlib
 import math
 import time
 import uuid
@@ -347,10 +348,82 @@ class SessionObserverProtocol(Protocol):
         ...
 
 
+# ---------------------------------------------------------------------------
+# Device identity (Issue #5998)
+#
+# A per-device keypair signs a server-issued challenge nonce so the gateway can
+# derive a stable ``device_id`` and approve/revoke devices individually instead
+# of sharing one gateway-wide secret. Core only fixes the wire shape, the
+# fingerprint and the exact bytes that are signed; signature verification,
+# device storage and per-device tokens live in the wrapper gateway.
+# ---------------------------------------------------------------------------
+
+def device_id_from_public_key(public_key: str) -> str:
+    """Return the stable device id (SHA-256 fingerprint) of an encoded public key."""
+    return hashlib.sha256(public_key.encode("utf-8")).hexdigest()
+
+
+@dataclass
+class DeviceAuth:
+    """Device-identity proof carried in a ``hello`` frame.
+
+    Attributes:
+        device_id: Fingerprint of ``public_key`` (see :func:`device_id_from_public_key`).
+        public_key: The device's encoded public key.
+        signature: Signature over :meth:`signing_payload`.
+        signed_at: Unix timestamp at which the device signed the challenge.
+        nonce: The server-issued challenge nonce being answered.
+    """
+    device_id: str
+    public_key: str
+    signature: str
+    signed_at: float
+    nonce: str
+
+    def signing_payload(self, agent_id: str) -> bytes:
+        """Canonical bytes the device signs and the gateway verifies.
+
+        Binds the nonce to this device, the signing time and the target agent so
+        a captured proof cannot be replayed for another device or agent.
+        """
+        return "\n".join((
+            "praisonai-device-v1",
+            self.device_id,
+            self.nonce,
+            repr(float(self.signed_at)),
+            agent_id,
+        )).encode("utf-8")
+
+
+@runtime_checkable
+class DeviceIdentityProtocol(Protocol):
+    """Seam for per-device challenge/response auth (implemented in the wrapper).
+
+    Implementations must approve only on an exact device-key match — never on
+    network reachability alone — and record how each device was approved.
+    """
+
+    def issue_challenge(self) -> str:
+        """Return a fresh single-use challenge nonce for a connecting client."""
+        ...
+
+    def verify(self, device: DeviceAuth, *, agent_id: str) -> Optional[str]:
+        """Verify ``device`` against an issued nonce; return its role, or ``None`` if rejected."""
+        ...
+
+    def list_devices(self) -> List[Dict[str, Any]]:
+        """List known devices (id, role, approval path, last seen)."""
+        ...
+
+    def revoke(self, device_id: str) -> bool:
+        """Revoke one device; return ``False`` if it was unknown."""
+        ...
+
+
 @dataclass
 class HelloParams:
     """Parameters for initiating a versioned handshake.
-    
+
     Attributes:
         agent_id: The agent to connect to
         protocol_min: Minimum protocol version the client supports
@@ -358,6 +431,7 @@ class HelloParams:
         capabilities: Optional list of capability tokens the client supports
         session_id: Optional session to resume
         since: Optional cursor for event replay
+        device: Optional device-identity proof (Issue #5998)
     """
     agent_id: str
     protocol_min: int
@@ -365,6 +439,7 @@ class HelloParams:
     capabilities: List[str] = field(default_factory=list)
     session_id: Optional[str] = None
     since: Optional[int] = None
+    device: Optional[DeviceAuth] = None
 
     type: str = field(default="hello", init=False)
 
@@ -897,6 +972,9 @@ def _decode_hello(data: Dict[str, Any]) -> "HelloParams":
     if since is not None:
         since = _coerce_int(since, field_name="since")
 
+    device_data = data.get("device")
+    device = _decode_device(device_data) if device_data is not None else None
+
     return HelloParams(
         agent_id=agent_id,
         protocol_min=client_min,
@@ -904,6 +982,50 @@ def _decode_hello(data: Dict[str, Any]) -> "HelloParams":
         capabilities=capabilities,
         session_id=_as_opt_str(data.get("session_id")),
         since=since,
+        device=device,
+    )
+
+
+def _decode_device(data: Any) -> DeviceAuth:
+    """Validate a ``hello.device`` block into :class:`DeviceAuth`.
+
+    Shape errors are configuration errors; a ``device_id`` that is not the
+    fingerprint of ``public_key`` is rejected as unauthorized so a client can
+    never claim another device's id.
+    """
+    if not isinstance(data, dict):
+        raise FrameDecodeError(
+            HelloError(
+                code=ConnectErrorCode.CONFIGURATION_ERROR,
+                message="Field 'device' must be an object",
+                next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+            )
+        )
+    public_key = _require_str(data.get("public_key"), field_name="device.public_key")
+    device_id = _require_str(data.get("device_id"), field_name="device.device_id")
+    signed_at = data.get("signed_at")
+    if isinstance(signed_at, bool) or not isinstance(signed_at, (int, float)) or not math.isfinite(signed_at):
+        raise FrameDecodeError(
+            HelloError(
+                code=ConnectErrorCode.CONFIGURATION_ERROR,
+                message="Field 'device.signed_at' must be a finite number",
+                next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+            )
+        )
+    if device_id != device_id_from_public_key(public_key):
+        raise FrameDecodeError(
+            HelloError(
+                code=ConnectErrorCode.AUTH_UNAUTHORIZED,
+                message="device.device_id does not match the public key fingerprint",
+                next_step=ConnectRecoveryStep.REAUTHENTICATE,
+            )
+        )
+    return DeviceAuth(
+        device_id=device_id,
+        public_key=public_key,
+        signature=_require_str(data.get("signature"), field_name="device.signature"),
+        signed_at=float(signed_at),
+        nonce=_require_str(data.get("nonce"), field_name="device.nonce"),
     )
 
 
