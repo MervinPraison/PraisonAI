@@ -6347,10 +6347,16 @@ class WebSocketGateway:
         ``visibility`` (a ``SessionVisibility`` value) opts the session into
         sharing; ``None`` keeps the existing/default ``private`` setting.
         """
-        session = self._create_session(agent_id, client_id, session_id)
         if visibility is not None:
+            # Validate before anything is created or persisted.
             from praisonaiagents.gateway.protocols import SessionVisibility
-            session._visibility = SessionVisibility(visibility).value
+            visibility = SessionVisibility(visibility).value
+        session = self._create_session(agent_id, client_id, session_id, visibility)
+        if visibility is not None and session._visibility != visibility:
+            # Resumed/active session: restricting visibility must also revoke
+            # access the new setting no longer allows.
+            session._visibility = visibility
+            self._enforce_session_visibility(session)
         return session
 
     def _create_session(
@@ -6358,6 +6364,7 @@ class WebSocketGateway:
         agent_id: str,
         client_id: Optional[str],
         session_id: Optional[str],
+        visibility: Optional[str] = None,
     ) -> GatewaySession:
         sid = session_id or str(uuid.uuid4())
         
@@ -6420,9 +6427,10 @@ class WebSocketGateway:
             _agent_id=agent_id,
             _client_id=client_id,
             _max_messages=self.config.session_config.max_messages,
+            _visibility=visibility or "private",
         )
         self._sessions[sid] = session
-        
+
         # Persist initial session state if store is configured
         if self._session_store:
             try:
@@ -6553,6 +6561,29 @@ class WebSocketGateway:
             for cid in list(self._session_observers.get(session_id, {}))
             if cid != exclude and cid in self._clients and self._client_has_scope(cid, scope)
         ]
+
+    def _enforce_session_visibility(self, session: GatewaySession) -> None:
+        """Revoke observer access the session's visibility no longer allows.
+
+        ``private`` drops every observer; ``read_only`` demotes members to
+        viewers (unbinding them so they can no longer send).
+        """
+        from praisonaiagents.gateway.protocols import (
+            SessionSharingRole,
+            SessionVisibility,
+        )
+
+        sid = session.session_id
+        visibility = SessionVisibility(session._visibility)
+        if visibility is SessionVisibility.PRIVATE:
+            self._drop_session_observers(sid)
+        elif visibility is SessionVisibility.READ_ONLY:
+            roster = self._session_observers.get(sid, {})
+            for cid, role in list(roster.items()):
+                if role is not SessionSharingRole.VIEWER:
+                    roster[cid] = SessionSharingRole.VIEWER
+                    if self._client_sessions.get(cid) == sid:
+                        self._client_sessions.pop(cid, None)
 
     def _drop_session_observers(self, session_id: str) -> None:
         """Forget every observer of a closed session (unbinding members)."""

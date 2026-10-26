@@ -10,7 +10,7 @@ import asyncio
 
 import pytest
 
-from praisonaiagents.gateway import GatewayConfig
+from praisonaiagents.gateway import GatewayConfig, OperatorScope
 from praisonaiagents.gateway.protocols import (
     SessionObserverProtocol,
     SessionSharingRole,
@@ -117,6 +117,48 @@ def test_visibility_survives_persistence_round_trip():
     session = _owned(gw, visibility="shared")
     restored = type(session).from_dict(session.to_dict())
     assert restored._visibility == "shared"
+
+
+class _Store:
+    def __init__(self):
+        self.saved = []
+
+    def add_message(self, session_id, role, content, metadata=None):
+        self.saved.append(metadata["session_data"])
+
+
+def test_initial_stored_snapshot_keeps_visibility():
+    gw = _gateway()
+    gw._session_store = _Store()
+    gw.create_session("agent", client_id="owner", visibility="shared")
+    assert gw._session_store.saved[0]["visibility"] == "shared"
+
+
+def test_invalid_visibility_creates_nothing():
+    gw = _gateway()
+    gw._session_store = _Store()
+    with pytest.raises(ValueError):
+        gw.create_session("agent", client_id="owner", session_id="s1", visibility="bogus")
+    assert gw.get_session("s1") is None
+    assert gw._session_store.saved == []
+
+
+def test_restricting_visibility_revokes_access():
+    gw = _gateway()
+    session = _owned(gw, visibility="shared")
+    sid = session.session_id
+    gw.attach(sid, "ann", role="member")
+    gw.attach(sid, "bob", role="viewer")
+
+    # shared -> read_only: the member is demoted and can no longer send.
+    gw.create_session("agent", client_id="owner", session_id=sid, visibility="read_only")
+    assert ("ann", SessionSharingRole.VIEWER) in gw.observers(sid)
+    assert "ann" not in gw._client_sessions
+
+    # read_only -> private: every observer is dropped.
+    gw.create_session("agent", client_id="owner", session_id=sid, visibility="private")
+    assert gw.observers(sid) == [("owner", SessionSharingRole.OWNER)]
+    assert gw._observer_targets(sid, OperatorScope.READ) == []
 
 
 def test_observer_leaving_does_not_close_owner_session():
