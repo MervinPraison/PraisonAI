@@ -55,6 +55,9 @@ def test_spoofed_device_id_is_unauthorized():
     {"signed_at": True},
     {"signed_at": "now"},
     {"signed_at": float("nan")},
+    {"signed_at": 10**400},
+    {"public_key": "not base64!"},
+    {"public_key": "dGVzdC1wdWJsaWMta2V5\n"},
 ])
 def test_malformed_device_rejected(bad):
     with pytest.raises(FrameDecodeError) as exc:
@@ -65,6 +68,19 @@ def test_malformed_device_rejected(bad):
 def test_device_must_be_object():
     with pytest.raises(FrameDecodeError):
         decode_client_frame({"type": "hello", "agent_id": "a", "device": "x"})
+
+
+def test_wire_format_is_pinned():
+    # Literal vectors: changing the fingerprint or signed bytes breaks clients.
+    assert device_id_from_public_key(PUB) == (
+        "c88e80202a4d650841e48649b4c3f553e48131b415db680476fd0d65632ff2b0"
+    )
+    d = DeviceAuth(device_id_from_public_key(PUB), PUB, "sig", 1700000000.5, "n-1")
+    assert d.signing_payload("a") == (
+        b"praisonai-device-v1\n"
+        b"c88e80202a4d650841e48649b4c3f553e48131b415db680476fd0d65632ff2b0\n"
+        b"n-1\n1700000000.5\na"
+    )
 
 
 def test_signing_payload_binds_agent_and_nonce():

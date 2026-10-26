@@ -11,6 +11,7 @@ The ``praisonai`` wrapper provides backward-compatible shims.
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import math
 import time
@@ -359,8 +360,13 @@ class SessionObserverProtocol(Protocol):
 # ---------------------------------------------------------------------------
 
 def device_id_from_public_key(public_key: str) -> str:
-    """Return the stable device id (SHA-256 fingerprint) of an encoded public key."""
-    return hashlib.sha256(public_key.encode("utf-8")).hexdigest()
+    """Return the stable device id: hex SHA-256 of the raw public-key bytes.
+
+    ``public_key`` must be standard base64 (RFC 4648, padded, no whitespace) of
+    the raw key bytes. Hashing the decoded bytes keeps the id independent of
+    how a client spells the encoding. Raises ``ValueError`` on invalid base64.
+    """
+    return hashlib.sha256(base64.b64decode(public_key, validate=True)).hexdigest()
 
 
 @dataclass
@@ -369,8 +375,8 @@ class DeviceAuth:
 
     Attributes:
         device_id: Fingerprint of ``public_key`` (see :func:`device_id_from_public_key`).
-        public_key: The device's encoded public key.
-        signature: Signature over :meth:`signing_payload`.
+        public_key: Standard base64 (padded) of the device's raw public key.
+        signature: Standard base64 (padded) signature over :meth:`signing_payload`.
         signed_at: Unix timestamp at which the device signed the challenge.
         nonce: The server-issued challenge nonce being answered.
     """
@@ -1004,7 +1010,15 @@ def _decode_device(data: Any) -> DeviceAuth:
     public_key = _require_str(data.get("public_key"), field_name="device.public_key")
     device_id = _require_str(data.get("device_id"), field_name="device.device_id")
     signed_at = data.get("signed_at")
-    if isinstance(signed_at, bool) or not isinstance(signed_at, (int, float)) or not math.isfinite(signed_at):
+    try:
+        valid = (
+            not isinstance(signed_at, bool)
+            and isinstance(signed_at, (int, float))
+            and math.isfinite(float(signed_at))
+        )
+    except OverflowError:
+        valid = False
+    if not valid:
         raise FrameDecodeError(
             HelloError(
                 code=ConnectErrorCode.CONFIGURATION_ERROR,
@@ -1012,7 +1026,17 @@ def _decode_device(data: Any) -> DeviceAuth:
                 next_step=ConnectRecoveryStep.DO_NOT_RETRY,
             )
         )
-    if device_id != device_id_from_public_key(public_key):
+    try:
+        fingerprint = device_id_from_public_key(public_key)
+    except ValueError:
+        raise FrameDecodeError(
+            HelloError(
+                code=ConnectErrorCode.CONFIGURATION_ERROR,
+                message="Field 'device.public_key' must be padded standard base64",
+                next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+            )
+        ) from None
+    if device_id != fingerprint:
         raise FrameDecodeError(
             HelloError(
                 code=ConnectErrorCode.AUTH_UNAUTHORIZED,
