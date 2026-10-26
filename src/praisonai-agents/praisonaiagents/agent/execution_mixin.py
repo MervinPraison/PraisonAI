@@ -196,8 +196,22 @@ class ExecutionMixin:
                 from datetime import datetime, timezone
                 start_time = time_module.time()
                 started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-                
-                response = await self.achat(prompt, **kwargs)
+
+                # achat() has no timeout param: enforce it as a run budget here
+                timeout = kwargs.pop('timeout', None)
+                if timeout is not None and timeout > 0:
+                    task = asyncio.ensure_future(self.achat(prompt, **kwargs))
+                    try:
+                        done, _ = await asyncio.wait({task}, timeout=timeout)
+                    except asyncio.CancelledError:
+                        task.cancel()
+                        raise
+                    if task not in done:
+                        task.cancel()
+                        return self._caller_mode_timeout_result(start_time, started_at)
+                    response = task.result()
+                else:
+                    response = await self.achat(prompt, **kwargs)
                 response_str = str(response) if response else ""
                 
                 # Auto-save session after chat. Offloaded to a worker thread so
@@ -230,6 +244,21 @@ class ExecutionMixin:
         
         kwargs['stream'] = stream_requested
         return await self.achat(prompt, **kwargs)
+
+    @staticmethod
+    def _caller_mode_timeout_result(start_time, started_at):
+        """AutonomyResult for a caller-mode run that exceeded ``timeout``."""
+        from .autonomy import AutonomyResult
+        return AutonomyResult(
+            success=False,
+            output="Task timed out",
+            completion_reason="timeout",
+            iterations=1,
+            stage="direct",
+            actions=[],
+            duration_seconds=time.time() - start_time,
+            started_at=started_at,
+        )
 
     async def _astart_with_outcome(self, prompt, timeout=None, **kwargs):
         """Run astart() and normalise its result/exception into a RunOutcome.
@@ -843,8 +872,29 @@ Write the complete compiled report:"""
                 # Load history from past sessions
                 self._load_history_context()
                 
+                # chat() has no timeout param: enforce it via cooperative
+                # cancellation (cancel_token), unless the caller supplied one.
+                timeout = kwargs.pop('timeout', None)
+                timer = cancel = None
+                if timeout is not None and timeout > 0 and kwargs.get('cancel_token') is None:
+                    from .interrupt import InterruptController
+                    cancel = kwargs['cancel_token'] = InterruptController()
+                    timer = threading.Timer(timeout, cancel.request, args=("timeout",))
+                    timer.daemon = True
+                    timer.start()
+
                 # Use chat() — all tools, approval, doom-loop per-tool work
-                response = self.chat(prompt, **kwargs)
+                try:
+                    response = self.chat(prompt, **kwargs)
+                except InterruptedError:
+                    if cancel is None or cancel.reason != "timeout":
+                        raise
+                    response = None
+                finally:
+                    if timer is not None:
+                        timer.cancel()
+                if cancel is not None and cancel.reason == "timeout":
+                    return self._caller_mode_timeout_result(start_time, started_at)
                 response_str = str(response) if response else ""
                 
                 # Auto-save session after chat
@@ -920,7 +970,6 @@ Write the complete compiled report:"""
                 # Show animated status during LLM call if verbose
                 if self.verbose and is_tty:
                     from ..main import PRAISON_COLORS, sync_display_callbacks, _callbacks_lock
-                    import threading
                     import time as time_module
                     
                     console = _get_console()()
