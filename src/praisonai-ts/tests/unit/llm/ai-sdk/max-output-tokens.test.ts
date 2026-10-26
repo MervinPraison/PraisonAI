@@ -2,11 +2,12 @@
  * AI SDK >= 5 renamed `maxTokens` to `maxOutputTokens` and ignores the old key.
  * Every call into the SDK must send `maxOutputTokens`, or neither SAFE_DEFAULTS'
  * cap nor a caller's `maxTokens` ever reaches the model. One test per changed
- * call: AISDKBackend.generateText / streamText / generateObject, and the
- * generateText / streamText helpers in src/ai/generate-text.ts.
+ * call: AISDKBackend.generateText / streamText / generateObject, the
+ * generateText / streamText helpers in src/ai/generate-text.ts, and the
+ * generateObject / streamObject helpers in src/ai/generate-object.ts.
  */
 
-const calls: Record<string, any[]> = { generateText: [], streamText: [], generateObject: [] };
+const calls: Record<string, any[]> = { generateText: [], streamText: [], generateObject: [], streamObject: [] };
 
 jest.mock('ai', () => ({
   generateText: jest.fn(async (opts: any) => {
@@ -26,11 +27,19 @@ jest.mock('ai', () => ({
     calls.generateObject.push(opts);
     return { object: { ok: true }, usage: undefined };
   }),
+  streamObject: jest.fn((opts: any) => {
+    calls.streamObject.push(opts);
+    return {};
+  }),
 }));
+
+// generate-object.ts resolves a model string through the provider package.
+jest.mock('@ai-sdk/openai', () => ({ openai: (id: string) => ({ id }) }), { virtual: true });
 
 import { AISDKBackend } from '../../../../src/llm/providers/ai-sdk/backend';
 import { SAFE_DEFAULTS } from '../../../../src/llm/providers/ai-sdk/types';
 import { generateText, streamText } from '../../../../src/ai/generate-text';
+import { generateObject, streamObject } from '../../../../src/ai/generate-object';
 
 const messages = [{ role: 'user', content: 'hi' }];
 
@@ -85,5 +94,19 @@ describe('ai/generate-text helpers send maxTokens as maxOutputTokens', () => {
   it('streamText', async () => {
     await streamText({ model: {} as any, prompt: 'hi', maxTokens: 400 } as any);
     expect(calls.streamText[0].maxOutputTokens).toBe(400);
+  });
+});
+
+describe('ai/generate-object helpers send maxTokens as maxOutputTokens', () => {
+  beforeEach(() => { for (const k of Object.keys(calls)) calls[k].length = 0; });
+
+  it('generateObject', async () => {
+    await generateObject({ model: 'gpt-4o', schema: {} as any, prompt: 'hi', maxTokens: 500 } as any);
+    expect(calls.generateObject[0].maxOutputTokens).toBe(500);
+  });
+
+  it('streamObject', async () => {
+    await streamObject({ model: 'gpt-4o', schema: {} as any, prompt: 'hi', maxTokens: 600 } as any);
+    expect(calls.streamObject[0].maxOutputTokens).toBe(600);
   });
 });
