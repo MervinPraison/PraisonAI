@@ -114,3 +114,29 @@ def test_astart_caller_mode_enforces_timeout():
     assert time.time() - started < 2
     assert result.success is False
     assert result.completion_reason == "timeout"
+
+
+def test_start_caller_mode_interrupt_text_without_timeout_is_success():
+    """A completed answer that merely quotes the interrupt text stays a success."""
+    agent = _agent()
+    agent.chat = lambda prompt, **kwargs: "Task interrupted: timeout (quoted)"
+    result = agent.start("x", timeout=5)
+    assert result.success is True
+    assert result.completion_reason == "caller_mode"
+
+
+def test_astart_caller_mode_timeout_waits_for_achat_cleanup():
+    agent = _agent()
+    cleaned = []
+
+    async def slow_achat(prompt, **kwargs):
+        try:
+            await asyncio.sleep(5)
+        finally:
+            await asyncio.sleep(0.05)
+            cleaned.append(True)
+
+    agent.achat = slow_achat
+    result = asyncio.run(agent.astart("x", timeout=0.1))
+    assert result.completion_reason == "timeout"
+    assert cleaned == [True]

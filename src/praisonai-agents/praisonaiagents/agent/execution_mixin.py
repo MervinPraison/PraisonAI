@@ -241,6 +241,10 @@ class ExecutionMixin:
                         raise
                     if task not in done:
                         task.cancel()
+                        # Let achat()'s cleanup finish and collect its outcome
+                        for exc in await asyncio.gather(task, return_exceptions=True):
+                            if isinstance(exc, Exception):
+                                logger.debug("achat() cleanup after timeout failed: %s", exc)
                         return self._caller_mode_timeout_result(start_time, started_at)
                     response = task.result()
                 else:
@@ -929,7 +933,11 @@ Write the complete compiled report:"""
                 response_str = str(response) if response else ""
                 # The LLM tool loop returns this text instead of raising when
                 # the timeout stops it, so the run did not finish.
-                if cancel is not None and response_str.startswith("Task interrupted: timeout"):
+                if (
+                    cancel is not None
+                    and cancel.timed_out.is_set()
+                    and response_str.startswith("Task interrupted: timeout")
+                ):
                     return self._caller_mode_timeout_result(start_time, started_at)
                 
                 # Auto-save session after chat
