@@ -909,3 +909,31 @@ class TestStepVariables:
         ends = {e.node_id: e.data for e in _of(recorder, "step_end")}
         variables = next(d.get("variables") for n, d in ends.items() if n.endswith("add"))
         assert variables == {"items": ["a", "b"]}
+
+    def test_skipped_or_cached_nested_step_does_not_copy_the_scope(self, recorder, monkeypatch):
+        """Only a nested step that really runs snapshots the variables; a cache
+        hit still records what the handler set."""
+        from praisonaiagents.workflows import StepResult, Task
+        from praisonaiagents.workflows import workflows as wf
+
+        copies = []
+        real = wf._isolate_scope
+        monkeypatch.setattr(wf, "_isolate_scope", lambda v: copies.append(1) or real(v))
+
+        def research(ctx):
+            return StepResult(output="notes", variables={"customer_id": 42})
+
+        def never(ctx):
+            return StepResult(output="x")
+
+        steps = [wf.If(condition="1 > 0", then_steps=[
+            research, Task(name="never", handler=never, should_run=lambda ctx: False),
+        ])]
+        flow = wf.AgentFlow(name="v", steps=steps, variables={"items": list(range(1000))}, cache=True)
+        flow.run("go")
+        assert len(copies) == 1  # research ran; the skipped step copied nothing
+        copies.clear()
+        flow.run("go")  # research is a cache hit
+        assert copies == []
+        cached = [e.data for e in _of(recorder, "step_end") if e.data["status"] == "cached"]
+        assert [d.get("variables") for d in cached] == [{"customer_id": 42}]

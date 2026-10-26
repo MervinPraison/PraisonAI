@@ -768,6 +768,15 @@ def _differs(a: Any, b: Any) -> bool:
         return True
 
 
+def _snapshot_scope(span, variables):
+    """Before a recorded leaf step really runs (not skipped or cached), keep a
+    per-value deep copy of the scope on its span, so a list or dict the step
+    changes in place still counts as set by it; only an uncopyable value is
+    shared by reference."""
+    if span is not None:
+        span["before"] = _isolate_scope(variables)
+
+
 def _replay_step_end(span, status, output=None, variables=None):
     """Emit ``step_end`` for a span from :func:`_replay_step_begin`."""
     if span is None:
@@ -3134,10 +3143,6 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 step, previous_output, input, all_variables, model, verbose, index,
                 stream=stream, depth=depth,
             )
-        # A per-value deep copy (recording only), so a list or dict the step
-        # changed in place still counts as set by it; only an uncopyable value
-        # is shared by reference.
-        before = _isolate_scope(all_variables)
         try:
             result = self._execute_leaf_step(
                 step, previous_output, input, all_variables, model, verbose, index,
@@ -3152,6 +3157,8 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             else "failed" if is_dict and result.get("error") else "completed"
         )
         # Variables this step set, minus its output variable, for replay's step_end.
+        # A cache hit leaves all_variables untouched, so it is its own baseline.
+        before = span.pop("before", all_variables)
         step_vars = {}
         if is_dict:
             step_vars = {
@@ -3202,6 +3209,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 }
         cache = getattr(self, "_step_cache", None)
         if cache is None:
+            _snapshot_scope(_replay, all_variables)
             return self._execute_single_step_uncached(
                 step, previous_output, input, all_variables, model, verbose, index,
                 stream=stream, depth=depth,
@@ -3228,6 +3236,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 _replay["status"] = "cached"
             # Copy: a caller mutating a returned result must not edit the cache.
             return dict(hit)
+        _snapshot_scope(_replay, all_variables)
         result = self._execute_single_step_uncached(
             step, previous_output, input, all_variables, model, verbose, index,
             stream=stream, depth=depth,
