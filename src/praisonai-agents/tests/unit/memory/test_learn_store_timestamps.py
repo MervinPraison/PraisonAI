@@ -58,3 +58,23 @@ def test_list_all_orders_by_instant_not_raw_string(tmp_path):
 
     ordered = [e.id for e in store.list_all()]  # reverse=True: most recent first
     assert ordered == ["later", "earlier"]
+
+
+def test_prune_evicts_never_used_entry_before_used_one(tmp_path):
+    """At equal use_count, a never-used entry (last_used=None) is evicted first."""
+    store = InsightStore(store_path=str(tmp_path / "store.json"), max_entries=1)
+    store._entries = {
+        "never": LearnEntry(
+            id="never", content="n", use_count=0, last_used=None,
+            created_at="2024-01-01T00:00:00+00:00",
+        ),
+        "used": LearnEntry(
+            id="used", content="u", use_count=0,
+            last_used="2024-06-01T00:00:00+00:00",
+            created_at="2024-01-01T00:00:00+00:00",
+        ),
+    }
+
+    store.prune(save=False)
+    assert "never" not in store._entries
+    assert "used" in store._entries

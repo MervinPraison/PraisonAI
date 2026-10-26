@@ -317,15 +317,16 @@ class BaseStore(ABC):
     def _timestamp_sort_key(value: str) -> tuple:
         """Comparable key that orders ISO timestamps chronologically in UTC.
 
-        Naive values are treated as UTC (matching how older stores were written),
-        and unparseable values sort into a separate bucket so a store holding a
-        mix of naive, offset-aware, and malformed timestamps never sorts wrong or
-        raises on comparison.
+        Naive values are treated as UTC (matching how older stores were written).
+        Missing or unparseable values sort as the oldest instant, so prune()
+        evicts them first (an entry never used sorts before used ones, as it did
+        under the previous raw-string sort) and list_all() lists them last. A
+        datetime is never compared against a string, so mixed data never raises.
         """
         try:
             parsed = datetime.fromisoformat(value)
         except (ValueError, TypeError):
-            return (1, value)
+            return (-1, value)
         if parsed.tzinfo is None:
             parsed = parsed.replace(tzinfo=timezone.utc)
         return (0, parsed.astimezone(timezone.utc))
