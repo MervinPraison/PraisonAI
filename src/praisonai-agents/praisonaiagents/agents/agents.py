@@ -356,6 +356,39 @@ def _record_skipped_task(agents_instance, task):
     task.status = "completed"
 
 
+def _trace_task_begin(agents_instance, task):
+    """Emit ``task_start``; returns a span for ``_trace_task_end`` (None when off)."""
+    from ..trace.context_events import get_context_emitter
+    emitter = get_context_emitter()
+    if not emitter._enabled:
+        return None
+    from ..workflows.diagram import task_node_id
+    node_id = task_node_id(agents_instance.tasks, task)
+    agent = getattr(getattr(task, "agent", None), "name", None)
+    emitter.task_start(
+        getattr(task, "name", None), getattr(task, "description", None),
+        agent=agent, node_id=node_id,
+    )
+    return emitter, node_id, agent, time.perf_counter()
+
+
+def _trace_task_end(span, task, status):
+    """Emit ``task_end`` (completed / failed / skipped) for a ``_trace_task_begin`` span."""
+    if span is None:
+        return
+    emitter, node_id, agent, started = span
+    result = getattr(task, "result", None)
+    emitter.task_end(
+        getattr(task, "name", None),
+        status,
+        retries=getattr(task, "retry_count", 0) or 0,
+        duration_ms=(time.perf_counter() - started) * 1000,
+        output=getattr(result, "raw", None) if result is not None else None,
+        agent=agent,
+        node_id=node_id,
+    )
+
+
 def _task_should_skip(agents_instance, task):
     """Return True when a task's should_run gate evaluates falsy.
 
@@ -1539,7 +1572,19 @@ class AgentTeam(SpawnAnnounceProtocol):
             agent_name=getattr(getattr(task, "agent", None), "name", None),
             context={"kind": "task_output_review", "prompt": prompt},
         )
-        decision = backend.request_approval_sync(request)
+        from ..trace.context_events import _approval_begin, _approval_end, get_context_emitter
+        _approval = None
+        if get_context_emitter()._enabled:
+            from ..workflows.diagram import task_node_id
+            _approval = _approval_begin(
+                request, kind="task_output_review", node_id=task_node_id(self.tasks, task),
+            )
+        try:
+            decision = backend.request_approval_sync(request)
+        except BaseException as exc:
+            _approval_end(_approval, error=exc)
+            raise
+        _approval_end(_approval, decision)
 
         if getattr(decision, "approved", False):
             return task_output, False
@@ -1740,6 +1785,18 @@ class AgentTeam(SpawnAnnounceProtocol):
             logger.info(f"Task with ID {task_id} is already completed")
             return
 
+        _span = _trace_task_begin(self, task)
+        _status = "failed"
+        try:
+            if await self._arun_task_body(task_id, task) == "skipped":
+                _status = "skipped"
+            elif task.status == "completed":
+                _status = "completed"
+        finally:
+            _trace_task_end(_span, task, _status)
+
+    async def _arun_task_body(self, task_id, task):
+        """Body of :meth:`arun_task`; returns ``"skipped"`` for a gated-out task."""
         # Call on_task_start callback and propagate variables (async-aware, mirrors run_task)
         await self._arun_task_start_hook(task, task_id)
 
@@ -1747,7 +1804,7 @@ class AgentTeam(SpawnAnnounceProtocol):
         if await _atask_should_skip(self, task):
             logger.info(f"Task {task_id} skipped by should_run gate")
             _record_skipped_task(self, task)
-            return
+            return "skipped"
 
         # Use per-task max_retries if available
         task_max = getattr(task, "max_retries", self.max_retries)
@@ -2201,7 +2258,12 @@ class AgentTeam(SpawnAnnounceProtocol):
         # Re-entrant on the owning thread so batch runs (astart_for_each) can hold
         # the guard across the whole batch while still calling astart() per item.
         with self._guard_execution():
-            return await self._astart_impl(content=content, return_dict=return_dict, **kwargs)
+            from ..trace.context_events import _workflow_scope
+            with _workflow_scope("team", self.name, self.process,
+                                 graph_fn=self.to_graph, run_id=self.run_id) as _run:
+                result = await self._astart_impl(content=content, return_dict=return_dict, **kwargs)
+                self._mark_run_status(_run)
+                return result
 
     async def _astart_impl(self, content=None, return_dict=False, **kwargs):
         # Track execution via telemetry
@@ -2318,6 +2380,18 @@ class AgentTeam(SpawnAnnounceProtocol):
             logger.info(f"Task with ID {task_id} is already completed")
             return
 
+        _span = _trace_task_begin(self, task)
+        _status = "failed"
+        try:
+            if self._run_task_body(task_id, task) == "skipped":
+                _status = "skipped"
+            elif task.status == "completed":
+                _status = "completed"
+        finally:
+            _trace_task_end(_span, task, _status)
+
+    def _run_task_body(self, task_id, task):
+        """Body of :meth:`run_task`; returns ``"skipped"`` for a gated-out task."""
         # Call on_task_start callback and propagate variables (shared with arun_task)
         self._run_task_start_hook(task, task_id)
 
@@ -2325,7 +2399,7 @@ class AgentTeam(SpawnAnnounceProtocol):
         if _task_should_skip(self, task):
             logger.info(f"Task {task_id} skipped by should_run gate")
             _record_skipped_task(self, task)
-            return
+            return "skipped"
 
         # Use per-task max_retries if available
         task_max = getattr(task, "max_retries", self.max_retries)
@@ -2534,8 +2608,20 @@ class AgentTeam(SpawnAnnounceProtocol):
         # Re-entrant on the owning thread so batch runs (start_for_each) can hold
         # the guard across the whole batch while still calling start() per item.
         with self._guard_execution():
-            return self._start_impl(content=content, return_dict=return_dict,
-                                    output=output, **kwargs)
+            from ..trace.context_events import _workflow_scope
+            with _workflow_scope("team", self.name, self.process,
+                                 graph_fn=self.to_graph, run_id=self.run_id) as _run:
+                result = self._start_impl(content=content, return_dict=return_dict,
+                                          output=output, **kwargs)
+                self._mark_run_status(_run)
+                return result
+
+    def _mark_run_status(self, run_state):
+        """Record a failed replay run when any task ended failed (tracing on only)."""
+        if run_state is not None and any(
+            getattr(t, "status", None) == "failed" for t in self.tasks.values()
+        ):
+            run_state["status"] = "failed"
 
     def _start_impl(self, content=None, return_dict=False, output=None, **kwargs):
         # Track execution via telemetry

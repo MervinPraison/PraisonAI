@@ -689,29 +689,41 @@ class ApprovalRegistry:
             liveness=liveness,
         )
 
-        with _human_wait_scope():
-            # Prefer sync method if available
-            if hasattr(backend, "request_approval_sync"):
-                decision = backend.request_approval_sync(request)
-            else:
-                # Use shared utility for consistent async-to-sync bridging
-                from .utils import run_coroutine_safely
-                decision = run_coroutine_safely(
-                    backend.request_approval(request),
-                    timeout=self.timeout
-                )
+        # Replay: a person is actually being asked (the fast paths above are not).
+        from ..trace.context_events import _approval_begin, _approval_end
+        _trace = _approval_begin(request)
+        try:
+            with _human_wait_scope():
+                # Prefer sync method if available
+                if hasattr(backend, "request_approval_sync"):
+                    decision = backend.request_approval_sync(request)
+                else:
+                    # Use shared utility for consistent async-to-sync bridging
+                    from .utils import run_coroutine_safely
+                    decision = run_coroutine_safely(
+                        backend.request_approval(request),
+                        timeout=self.timeout
+                    )
 
-        # Live-authority gate: a resolution that lands after the originating
-        # turn was stopped/superseded is dropped fail-closed — the tool does not
-        # run and no durable session/always grant is persisted.
-        stale = self._reject_if_stale(request)
-        if stale is not None:
-            return stale
+            # Live-authority gate: a resolution that lands after the originating
+            # turn was stopped/superseded is dropped fail-closed — the tool does not
+            # run and no durable session/always grant is persisted.
+            stale = self._reject_if_stale(request)
+            if stale is not None:
+                decision = stale
+                return stale
 
-        if decision.approved:
-            self.mark_approved(tool_name, arguments, agent_name, scope_id)
-        self._persist_scoped_decision(agent_name, tool_name, arguments, decision, scope_id)
-        return decision
+            if decision.approved:
+                self.mark_approved(tool_name, arguments, agent_name, scope_id)
+            self._persist_scoped_decision(agent_name, tool_name, arguments, decision, scope_id)
+            return decision
+        except BaseException as exc:
+            _approval_end(_trace, error=exc)
+            _trace = None
+            raise
+        finally:
+            if _trace is not None:
+                _approval_end(_trace, decision)
 
     async def approve_async(
         self,
@@ -764,26 +776,38 @@ class ApprovalRegistry:
             liveness=liveness,
         )
 
+        # Replay: a person is actually being asked (the fast paths above are not).
+        from ..trace.context_events import _approval_begin, _approval_end
+        _trace = _approval_begin(request)
         try:
-            async with _human_wait_scope():
-                decision = await asyncio.wait_for(
-                    backend.request_approval(request),
-                    timeout=self.timeout,
-                )
-        except asyncio.TimeoutError:
-            decision = ApprovalDecision(approved=False, reason="Approval timed out")
+            try:
+                async with _human_wait_scope():
+                    decision = await asyncio.wait_for(
+                        backend.request_approval(request),
+                        timeout=self.timeout,
+                    )
+            except asyncio.TimeoutError:
+                decision = ApprovalDecision(approved=False, reason="Approval timed out")
 
-        # Live-authority gate: a resolution that lands after the originating
-        # turn was stopped/superseded is dropped fail-closed — the tool does not
-        # run and no durable session/always grant is persisted.
-        stale = self._reject_if_stale(request)
-        if stale is not None:
-            return stale
+            # Live-authority gate: a resolution that lands after the originating
+            # turn was stopped/superseded is dropped fail-closed — the tool does not
+            # run and no durable session/always grant is persisted.
+            stale = self._reject_if_stale(request)
+            if stale is not None:
+                decision = stale
+                return stale
 
-        if decision.approved:
-            self.mark_approved(tool_name, arguments, agent_name, scope_id)
-        self._persist_scoped_decision(agent_name, tool_name, arguments, decision, scope_id)
-        return decision
+            if decision.approved:
+                self.mark_approved(tool_name, arguments, agent_name, scope_id)
+            self._persist_scoped_decision(agent_name, tool_name, arguments, decision, scope_id)
+            return decision
+        except BaseException as exc:
+            _approval_end(_trace, error=exc)
+            _trace = None
+            raise
+        finally:
+            if _trace is not None:
+                _approval_end(_trace, decision)
 
     @staticmethod
     def _reject_if_stale(request: ApprovalRequest) -> Optional[ApprovalDecision]:

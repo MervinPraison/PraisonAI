@@ -630,6 +630,27 @@ class Handoff:
                 None, lambda: self.agent.chat(prompt, tools=effective_tools)
             )
     
+    def _trace_handoff(self, source_agent: 'Agent', context: Optional[Dict[str, Any]], reason: Optional[str] = None) -> None:
+        """Record the hand-off on the replay trace (no-op when tracing is off)."""
+        from ..trace.context_events import get_context_emitter
+        emitter = get_context_emitter()
+        if not emitter._enabled:
+            return
+        context = dict(context or {})
+        if reason is None:
+            reason = context.get("reason") or context.get("task") or context.get("prompt")
+        policy = getattr(self.config, "context_policy", None)
+        emitter.agent_handoff(
+            getattr(source_agent, "name", None) or "agent",
+            getattr(self.agent, "name", None),
+            reason=emitter._preview(reason) if reason is not None else None,
+            context_passed={
+                "context_policy": getattr(policy, "value", policy),
+                "args": context,
+            },
+            kind="handoff",
+        )
+
     def _check_safety(self, source_agent: 'Agent') -> None:
         """
         Check safety constraints before handoff.
@@ -778,6 +799,7 @@ class Handoff:
             # Track handoff chain
             _push_handoff(source_agent.name)
             pushed = True
+            self._trace_handoff(source_agent, kwargs, reason=prompt)
             
             # Execute on_handoff callback
             self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
@@ -888,6 +910,7 @@ class Handoff:
                 self._check_safety(source_agent)
                 _push_handoff(source_agent.name)
                 pushed = True
+                self._trace_handoff(source_agent, kwargs, reason=prompt)
                 
                 # Execute callback
                 self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
@@ -1016,6 +1039,7 @@ class Handoff:
                 # Track handoff chain
                 _push_handoff(source_agent.name)
                 pushed = True
+                self._trace_handoff(source_agent, kwargs, reason=None)
                 
                 # Execute on_handoff callback
                 self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
@@ -1632,6 +1656,7 @@ class TypedHandoff(Handoff, Generic[T]):
             # Track handoff chain
             _push_handoff(source_agent.name)
             pushed = True
+            self._trace_handoff(source_agent, kwargs, reason=None)
             
             # Execute on_handoff callback
             self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
@@ -1747,6 +1772,7 @@ class TypedHandoff(Handoff, Generic[T]):
                 self._check_safety(source_agent)
                 _push_handoff(source_agent.name)
                 pushed = True
+                self._trace_handoff(source_agent, kwargs, reason=None)
                 
                 # Execute callback
                 self._execute_callback(self.config.on_handoff or self.on_handoff, source_agent, kwargs)
