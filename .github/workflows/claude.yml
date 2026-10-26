@@ -353,9 +353,7 @@ jobs:
                 const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
                 const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number: number, per_page: 100 });
                 origin = await o.outsiderOriginReasons(github, owner, repo, pr, comments);
-                for (const n of o.referencedIssueNumbers(request, owner, repo)) {
-                  origin.push(...(await o.outsiderIssueReasons(github, owner, repo, n)));
-                }
+                origin.push(...(await o.referencedIssueReasons(github, owner, repo, request)));
               } else {
                 origin = await o.outsiderIssueReasons(github, owner, repo, number, request);
               }
