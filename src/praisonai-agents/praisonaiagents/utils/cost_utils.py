@@ -86,7 +86,9 @@ def calculate_llm_cost(
     Returns:
         Estimated cost in USD (float)
     """
-    # A cost reported by the provider/client is authoritative (including 0.0)
+    # A positive cost reported by the provider/client is authoritative. A
+    # reported 0.0 is ignored so unpriced models (custom base_url, proxies)
+    # still accrue the fallback estimate and the budget guard keeps working.
     reported = _extract_reported_cost(response)
     if reported is not None:
         return round(reported, 6)
@@ -188,7 +190,8 @@ def _extract_reported_cost(response: Any) -> Optional[float]:
     """Return a provider/client-reported cost from a response, if present.
 
     Checks ``usage.cost`` (e.g. OpenRouter) and litellm's
-    ``_hidden_params["response_cost"]``. Only real numbers are accepted.
+    ``_hidden_params["response_cost"]``. Only real, positive numbers are
+    accepted; zero means "unknown" and falls back to the local estimate.
     """
     if response is None:
         return None
@@ -196,7 +199,7 @@ def _extract_reported_cost(response: Any) -> Optional[float]:
         _get(_get(response, "usage"), "cost"),
         _get(_get(response, "_hidden_params"), "response_cost"),
     ):
-        if not isinstance(value, bool) and isinstance(value, (int, float)) and value >= 0:
+        if not isinstance(value, bool) and isinstance(value, (int, float)) and value > 0:
             return float(value)
     return None
 

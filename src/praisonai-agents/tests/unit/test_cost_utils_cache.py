@@ -58,9 +58,20 @@ def test_provider_reported_cost_is_authoritative():
     assert cost == pytest.approx(0.0123)
 
 
-def test_reported_zero_cost_wins():
-    response = SimpleNamespace(usage=None, _hidden_params={"response_cost": 0.0})
-    assert calculate_llm_cost(1_000_000, 1_000_000, "gpt-4o", response=response) == 0.0
+def test_reported_zero_cost_falls_back_to_estimate():
+    # A 0.0 from an unpriced model/proxy must not disable the budget guard
+    response = SimpleNamespace(usage=SimpleNamespace(cost=0.0), _hidden_params={"response_cost": 0.0})
+    assert calculate_llm_cost(1_000_000, 1_000_000, "unknown-model", response=response) == pytest.approx(4.0)
+
+
+def test_reported_zero_cost_does_not_disable_budget_guard():
+    from praisonaiagents import Agent
+
+    agent = Agent(name="b", instructions="x", llm="custom-proxy-model")
+    response = SimpleNamespace(
+        usage=SimpleNamespace(prompt_tokens=1_000_000, completion_tokens=0, cost=0.0)
+    )
+    assert agent._calculate_llm_cost(1_000_000, 0, response=response) > 0
 
 
 def test_mock_response_does_not_leak_into_cost():
