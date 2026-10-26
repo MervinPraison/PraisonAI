@@ -1,3 +1,5 @@
+> **Superseded.** Historical result from 2025-12-19, kept for reference only. Package versions and methodology differ from current runs; do not cite. Current results: [praisonai-agents/benchmarks/BENCHMARK_RESULTS.md](../../../praisonai-agents/benchmarks/BENCHMARK_RESULTS.md).
+
 # PraisonAI CLI - Benchmark Results
 
 **Generated:** 2025-12-19 16:04:40

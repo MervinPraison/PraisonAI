@@ -183,7 +183,12 @@ def create_app(
         from praisonai._api_auth import build_api_key_middleware
 
         app.add_middleware(build_api_key_middleware(jobs_api_key, {"/health"}))
-    
+    else:
+        logger.warning(
+            "Jobs API has no PRAISONAI_JOBS_API_KEY: any local process can submit "
+            "jobs to this server. Set PRAISONAI_JOBS_API_KEY on shared hosts."
+        )
+
     # Add jobs router
     jobs_router = create_router(store, executor)
     app.include_router(jobs_router)
