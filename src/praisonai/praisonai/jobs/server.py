@@ -19,7 +19,8 @@ from .router import create_router
 
 logger = logging.getLogger(__name__)
 
-# Global instances (for single-process deployment)
+# Process-default instances, used only when create_app() is not given its own
+# store/executor (and by the kanban jobs bridge). Never overwritten by create_app.
 _store: Optional[JobStore] = None
 _executor: Optional[JobExecutor] = None
 _store_lock = threading.Lock()
@@ -62,31 +63,35 @@ def get_store() -> JobStore:
     return _store
 
 
+def _build_executor(store: JobStore) -> JobExecutor:
+    return JobExecutor(
+        store=store,
+        max_concurrent=int(os.environ.get("PRAISONAI_MAX_CONCURRENT_JOBS", "10")),
+        default_timeout=int(os.environ.get("PRAISONAI_JOB_TIMEOUT", "3600"))
+    )
+
+
 def get_executor() -> JobExecutor:
     """Get or create the job executor."""
     global _executor
     if _executor is None:
         with _executor_lock:
             if _executor is None:
-                _executor = JobExecutor(
-                    store=get_store(),
-                    max_concurrent=int(os.environ.get("PRAISONAI_MAX_CONCURRENT_JOBS", "10")),
-                    default_timeout=int(os.environ.get("PRAISONAI_JOB_TIMEOUT", "3600"))
-                )
+                _executor = _build_executor(get_store())
     return _executor
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
-    executor = get_executor()
+    executor = app.state.job_executor
     await executor.start()
     logger.info("Jobs API server started")
-    
-    yield
-    
-    await executor.stop()
-    logger.info("Jobs API server stopped")
+    try:
+        yield
+    finally:
+        await executor.stop()
+        logger.info("Jobs API server stopped")
 
 
 def create_app(
@@ -105,19 +110,23 @@ def create_app(
     Returns:
         FastAPI application
     """
-    global _store, _executor
-    
-    if store:
-        _store = store
-    if executor:
-        _executor = executor
-    
+    # Each app owns its store/executor; process defaults are used only when
+    # nothing is injected, so building a second app never rewires the first.
+    if store is None and executor is None:
+        store, executor = get_store(), get_executor()
+    elif executor is None:
+        executor = _build_executor(store)
+    elif store is None:
+        store = executor.store
+
     app = FastAPI(
         title="PraisonAI Jobs API",
         description="Async Jobs API for long-running agent tasks",
         version="1.0.0",
         lifespan=lifespan
     )
+    app.state.job_store = store
+    app.state.job_executor = executor
     
     # Add CORS middleware with secure defaults
     if cors_origins is None:
@@ -176,7 +185,7 @@ def create_app(
         app.add_middleware(build_api_key_middleware(jobs_api_key, {"/health"}))
     
     # Add jobs router
-    jobs_router = create_router(get_store(), get_executor())
+    jobs_router = create_router(store, executor)
     app.include_router(jobs_router)
     
     # Health check endpoint
@@ -185,17 +194,14 @@ def create_app(
         """Health check endpoint."""
         return {
             "status": "healthy",
-            "store": get_store().__class__.__name__,
-            "executor_stats": get_executor().get_stats()
+            "store": store.__class__.__name__,
+            "executor_stats": executor.get_stats()
         }
     
     # Stats endpoint
     @app.get("/stats")
     async def get_stats():
         """Get server statistics."""
-        store = get_store()
-        executor = get_executor()
-        
         stats = {
             "executor": executor.get_stats()
         }
