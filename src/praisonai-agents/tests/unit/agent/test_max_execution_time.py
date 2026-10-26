@@ -28,6 +28,10 @@ def calls(monkeypatch):
     from litellm import ModelResponse
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    # Agent caches its env-derived default model per process; keep the fake
+    # key's Anthropic default from leaking into later tests.
+    monkeypatch.setattr(Agent, "_default_model", None)
+    monkeypatch.setattr(Agent, "_default_model_checked", False)
     state = {"n": 0}
 
     def fake(*a, **k):

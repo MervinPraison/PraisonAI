@@ -14,6 +14,7 @@ pytest.importorskip("litellm")
 from praisonaiagents import Agent  # noqa: E402
 from praisonaiagents.config.feature_configs import ExecutionConfig  # noqa: E402
 from praisonaiagents.errors import BudgetExceededError  # noqa: E402
+from praisonaiagents.utils.cost_utils import calculate_llm_cost  # noqa: E402
 
 MODEL = "anthropic/claude-3-5-sonnet-20240620"
 USAGE = {"prompt_tokens": 1500, "completion_tokens": 1500, "total_tokens": 3000}
@@ -47,6 +48,10 @@ def _tool_call(model, n):
 def calls(monkeypatch):
     """Stub litellm; answer with a tool call while ``tool_rounds`` remain."""
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    # Agent caches its env-derived default model per process; keep the fake
+    # key's Anthropic default from leaking into later tests.
+    monkeypatch.setattr(Agent, "_default_model", None)
+    monkeypatch.setattr(Agent, "_default_model_checked", False)
     state = {"n": 0, "tool_rounds": 0}
 
     def fake(*a, **k):
@@ -166,7 +171,9 @@ def test_fallback_model_spend_is_counted(calls, monkeypatch):
         agent.fallback_models = [backup]
         assert run(agent) == "ok"
         assert agent.cost_summary["llm_calls"] == 1
-        assert agent.total_cost > 0
+        # Priced as the model that answered, not the (pricier) primary.
+        assert agent.total_cost == pytest.approx(calculate_llm_cost(1500, 1500, backup))
+        assert agent.total_cost != pytest.approx(calculate_llm_cost(1500, 1500, MODEL))
 
 
 def test_retry_after_exhaustion_sends_no_request(calls):

@@ -2218,8 +2218,8 @@ Your Goal: {self.goal}"""
             return max_retries
         return 2
 
-    def _extract_llm_usage(self, response):
-        """Return ``(prompt_tokens, completion_tokens, cost_usd)`` for one LLM response."""
+    def _extract_llm_usage(self, response, model=None):
+        """Return ``(prompt_tokens, completion_tokens, cost_usd)`` for one LLM response priced as ``model``."""
         usage = getattr(response, 'usage', None) if response else None
         if not usage:
             return 0, 0, 0.0
@@ -2227,7 +2227,7 @@ Your Goal: {self.goal}"""
         prompt_tokens = getattr(usage, 'prompt_tokens', 0) or getattr(usage, 'input_tokens', 0) or 0
         completion_tokens = getattr(usage, 'completion_tokens', 0) or getattr(usage, 'output_tokens', 0) or 0
         # Calculate cost using litellm (if available) or fallback pricing
-        cost_usd = self._calculate_llm_cost(prompt_tokens, completion_tokens, response=response)
+        cost_usd = self._calculate_llm_cost(prompt_tokens, completion_tokens, response=response, model=model)
         return prompt_tokens, completion_tokens, cost_usd
 
     def _record_llm_usage(self, prompt_tokens, completion_tokens, cost_usd):
@@ -2282,9 +2282,12 @@ Your Goal: {self.goal}"""
                     agent_id=self.name
                 )
         from ..llm.llm import _usage_sink
+        llm = llm if llm is not None else self.llm_instance
+        # A fallback model is priced as itself, not as the primary ``self.llm``.
+        model = None if llm is self.llm_instance else getattr(llm, 'model', None)
         token = _usage_sink.set((
-            llm if llm is not None else self.llm_instance,
-            lambda response: self._record_llm_usage(*self._extract_llm_usage(response)),
+            llm,
+            lambda response: self._record_llm_usage(*self._extract_llm_usage(response, model)),
         ))
         try:
             yield
