@@ -121,10 +121,12 @@ def _sanitize_command(command: str) -> str:
     # argument, where it is not an operator at all. Reuse the single scanner
     # so the ACP path and the basic ``execute_command`` path agree on what
     # counts as shell syntax.
-    from .shell_exec import MODE_ENV_VAR, find_shell_syntax
+    from .shell_exec import MODE_ENV_VAR, MODE_OFF, find_shell_syntax, resolve_mode
 
     operator = find_shell_syntax(command)
-    if operator is not None:
+    # With a real shell enabled the orchestrator runs operators through it
+    # (contained under ``sandboxed``), so only refuse them when it is off.
+    if operator is not None and resolve_mode() == MODE_OFF:
         raise ValueError(
             f"This command contains the shell operator {operator!r}, which the "
             f"ACP executor does not interpret (it runs argv directly, not via a "

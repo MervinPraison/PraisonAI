@@ -50,6 +50,15 @@ __all__ = [
 # (pty allocation, /dev/null, temp files created by compilers and test runners).
 _ALWAYS_WRITABLE_DARWIN = ("/dev",)
 
+# Credential directories hidden from the child. The rest of the filesystem
+# stays readable (toolchains need it), but command output returns to the model,
+# so ``cat ~/.aws/credentials`` must not work inside the jail.
+_SECRET_DIRS = ("~/.ssh", "~/.aws", "~/.gnupg", "~/.config/gcloud", "~/.azure")
+
+
+def _secret_dirs() -> List[str]:
+    return [p for p in (_resolve(d) for d in _SECRET_DIRS) if os.path.isdir(p)]
+
 
 class SandboxUnavailable(RuntimeError):
     """Raised when containment was required but no backend can enforce it."""
@@ -108,6 +117,8 @@ def _seatbelt_profile(writable: Sequence[str], network: bool) -> str:
         for p in subpaths:
             lines.append(f"    (subpath {_sb_quote(p)})")
         lines.append(")")
+    for p in _secret_dirs():
+        lines.append(f"(deny file-read* file-write* (subpath {_sb_quote(p)}))")
     if not network:
         lines.append("(deny network*)")
         # Unix-domain sockets are modelled as network-outbound to a path; keep
@@ -148,6 +159,8 @@ def _build_bubblewrap(writable: Sequence[str], network: bool) -> Optional[Sandbo
     for p in writable:
         if os.path.exists(p):
             argv += ["--bind", p, p]
+    for p in _secret_dirs():
+        argv += ["--tmpfs", p]
     if not network:
         argv += ["--unshare-net"]
     return SandboxWrapper(

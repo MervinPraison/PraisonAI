@@ -30,9 +30,14 @@ Three modes, selected by ``PRAISON_SHELL`` (or the ``mode=`` argument):
     agent what to do instead.  Simple commands run exactly as before.
 
 ``sandboxed``
-    A real ``/bin/sh -c`` runs inside OS-native containment (Seatbelt on macOS,
-    bubblewrap on Linux) whose enforcement has been *measured* this process --
-    see :mod:`praisonai_code.cli.features.os_sandbox`.  If containment cannot be
+    *Every* command -- with or without shell operators -- runs as a real
+    ``/bin/sh -c`` inside OS-native containment (Seatbelt on macOS, bubblewrap
+    on Linux) whose enforcement has been *measured* this process -- see
+    :mod:`praisonai_code.cli.features.os_sandbox`.  The writable set is the
+    configured workspace (``PRAISONAI_WORKSPACE``, else the process cwd) plus
+    the temp dir, never the model-chosen ``cwd``; a ``cwd`` outside it is
+    refused.  Secret-looking environment variables (``*KEY*``, ``*TOKEN*``,
+    ``*SECRET*``, ...) are not passed into the jail.  If containment cannot be
     proven, this mode refuses to run rather than quietly degrading to an
     uncontained shell.
 
@@ -47,7 +52,9 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
+import tempfile
 from typing import Dict, Optional, Union
 
 logger = logging.getLogger(__name__)
@@ -71,6 +78,11 @@ _VALID_MODES = (MODE_OFF, MODE_SANDBOXED, MODE_UNSAFE)
 # is reported as ``&&`` rather than ``&``.
 _TWO_CHAR_OPS = ("&&", "||", ">>", "2>", "$(", "<<")
 _ONE_CHAR_OPS = ("|", ">", "<", ";", "&", "`")
+
+# Environment variables withheld from a contained shell. Network is off by
+# default, but stdout goes back to the model, so ``env | grep KEY`` would put
+# credentials in the transcript and the provider request.
+_SECRET_ENV_RE = re.compile(r"KEY|TOKEN|SECRET|PASSW|CREDENTIAL", re.IGNORECASE)
 
 
 def find_shell_syntax(command: str) -> Optional[str]:
@@ -238,7 +250,7 @@ def _run_real_shell(
     if contained:
         from .os_sandbox import build_wrapper
 
-        paths = list(writable_paths or [cwd or os.getcwd()])
+        paths = list(writable_paths or [_workspace()])
         wrapper = build_wrapper(writable_paths=paths, network=network)
         if wrapper is None:  # pragma: no cover - guarded by caller
             return _refusal(command, "", "No OS sandbox backend available")
@@ -246,6 +258,8 @@ def _run_real_shell(
         backend = wrapper.backend
 
     proc_env = os.environ.copy()
+    if contained:
+        proc_env = {k: v for k, v in proc_env.items() if not _SECRET_ENV_RE.search(k)}
     if env:
         proc_env.update(env)
 
@@ -358,6 +372,69 @@ def _approved_real_shell(*args, **kwargs):
 _APPROVED_REAL_SHELL = None
 
 
+def _workspace() -> str:
+    """The configured workspace: the jail's writable root."""
+    return os.environ.get("PRAISONAI_WORKSPACE") or os.getcwd()
+
+
+def _within(path: str, roots) -> bool:
+    real = os.path.realpath(path)
+    for root in roots:
+        root = os.path.realpath(root)
+        if real == root or real.startswith(root.rstrip(os.sep) + os.sep):
+            return True
+    return False
+
+
+def _run_sandboxed(
+    command: str,
+    operator: Optional[str],
+    cwd: Optional[str],
+    timeout: int,
+    env: Optional[Dict[str, str]],
+    max_output_size: int,
+    writable_paths=None,
+    network: bool = False,
+    runner=None,
+) -> Dict[str, Union[str, int, bool]]:
+    """Run ``command`` contained, or refuse. Never falls back to uncontained.
+
+    ``runner`` defaults to the approval-gated real shell; the ACP executor,
+    whose plan was already approved, passes :func:`_run_real_shell`.
+    """
+    from .os_sandbox import probe_enforcement
+
+    enforcing, _backend, detail = probe_enforcement()
+    if not enforcing:
+        reason = (
+            f"{MODE_ENV_VAR}=sandboxed was requested but containment could "
+            f"not be proven on this machine ({detail}). Refusing to run "
+            f"uncontained -- a sandbox that is assumed but not enforcing is "
+            f"worse than none. Set {MODE_ENV_VAR}=unsafe to accept an "
+            f"uncontained shell deliberately."
+        )
+        if operator:
+            return _shell_syntax_refusal(command, operator, MODE_SANDBOXED, detail=reason)
+        return _refusal(command, "", reason)
+
+    # The writable root is the configured workspace, not the model-chosen cwd:
+    # ``cwd="/"`` must not make ``/`` writable.
+    writable = list(writable_paths or [_workspace()])
+    if cwd is None:
+        cwd = writable[0]
+    elif not _within(cwd, writable + [tempfile.gettempdir()]):
+        return _refusal(
+            command, "",
+            f"Refused: cwd {cwd!r} is outside the sandbox workspace "
+            f"{writable[0]!r}. Run the command from inside the workspace.",
+        )
+
+    return (runner or _approved_real_shell)(
+        command, cwd, timeout, env, max_output_size,
+        contained=True, writable_paths=writable, network=network,
+    )
+
+
 def run_shell_command(
     command: str,
     cwd: Optional[str] = None,
@@ -377,6 +454,14 @@ def run_shell_command(
     operator = find_shell_syntax(command)
     effective = resolve_mode(mode)
 
+    # Containment is a property of the mode, not of the command's syntax:
+    # ``rm -rf build`` has no operator but must still run inside the jail.
+    if effective == MODE_SANDBOXED:
+        return _run_sandboxed(
+            command, operator, cwd, timeout, env, max_output_size,
+            writable_paths=writable_paths, network=network,
+        )
+
     if operator is None:
         return _delegate(
             command,
@@ -389,28 +474,6 @@ def run_shell_command(
 
     if effective == MODE_OFF:
         return _shell_syntax_refusal(command, operator, MODE_OFF)
-
-    if effective == MODE_SANDBOXED:
-        from .os_sandbox import probe_enforcement
-
-        enforcing, backend, detail = probe_enforcement()
-        if not enforcing:
-            return _shell_syntax_refusal(
-                command,
-                operator,
-                MODE_SANDBOXED,
-                detail=(
-                    f"{MODE_ENV_VAR}=sandboxed was requested but containment could "
-                    f"not be proven on this machine ({detail}). Refusing to run a "
-                    f"real shell uncontained -- a sandbox that is assumed but not "
-                    f"enforcing is worse than none. Set {MODE_ENV_VAR}=unsafe to "
-                    f"accept an uncontained shell deliberately."
-                ),
-            )
-        return _approved_real_shell(
-            command, cwd, timeout, env, max_output_size,
-            contained=True, writable_paths=writable_paths, network=network,
-        )
 
     return _approved_real_shell(
         command, cwd, timeout, env, max_output_size, contained=False,
@@ -442,6 +505,10 @@ def execute_command(
     Returns:
         Dict with ``stdout``, ``stderr``, ``exit_code``, ``success``, ``error``.
     """
+    # The mode and the jail are operator decisions; the model's tool call must
+    # not be able to pick ``mode="unsafe"`` or ``writable_paths=["/"]``.
+    for key in ("mode", "writable_paths", "network"):
+        kwargs.pop(key, None)
     return run_shell_command(
         command,
         cwd=cwd,

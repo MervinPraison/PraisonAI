@@ -445,17 +445,8 @@ class ActionOrchestrator:
         elif step.action_type == ActionType.SHELL_COMMAND:
             import subprocess
             import shlex
-            
-            # Block shell injection characters
-            banned_chars = [';', '&', '|', '$', '`']
-            if any(char in step.target for char in banned_chars):
-                return {
-                    "command": step.target,
-                    "stdout": "",
-                    "stderr": "Command contains blocked shell characters",
-                    "returncode": -1
-                }
-                
+            from . import shell_exec
+
             # Honor an optional per-step working directory (relative to the
             # workspace). Reject anything that escapes the workspace so a
             # command can't be run outside the sandbox.
@@ -481,13 +472,44 @@ class ActionOrchestrator:
                     }
                 run_cwd = candidate
 
+            # Honour PRAISON_SHELL like the basic execute_command does. The
+            # plan was already approved, so the un-gated runner is used; under
+            # ``sandboxed`` every command is contained, operators or not.
+            mode = shell_exec.resolve_mode()
+            if mode != shell_exec.MODE_OFF:
+                _operator = shell_exec.find_shell_syntax(step.target)
+                if mode == shell_exec.MODE_SANDBOXED:
+                    res = shell_exec._run_sandboxed(
+                        step.target, _operator, str(run_cwd), 30, None, 0,
+                        writable_paths=[str(workspace)],
+                        runner=shell_exec._run_real_shell,
+                    )
+                else:
+                    res = shell_exec._run_real_shell(
+                        step.target, str(run_cwd), 30, None, 0, contained=False
+                    )
+                return {
+                    "command": step.target,
+                    "stdout": res.get("stdout", ""),
+                    "stderr": res.get("stderr") or res.get("error") or "",
+                    "returncode": res.get("exit_code", -1),
+                }
+
+            # Block shell injection characters
+            banned_chars = [';', '&', '|', '$', '`']
+            if any(char in step.target for char in banned_chars):
+                return {
+                    "command": step.target,
+                    "stdout": "",
+                    "stderr": "Command contains blocked shell characters",
+                    "returncode": -1
+                }
+
             # Defence in depth: this executor runs argv directly, so any
             # shell operator here would be handed to the program as a literal
             # argument and the step would report success for work that never
             # happened. Fail instead of lying.
-            from .shell_exec import MODE_ENV_VAR, find_shell_syntax
-
-            _operator = find_shell_syntax(step.target)
+            _operator = shell_exec.find_shell_syntax(step.target)
             if _operator is not None:
                 return {
                     "command": step.target,
@@ -496,7 +518,7 @@ class ActionOrchestrator:
                         f"Refused: shell operator {_operator!r} is not "
                         f"interpreted by this executor, so running the command "
                         f"would drop it silently. Split the command into "
-                        f"separate steps, or set {MODE_ENV_VAR}=sandboxed."
+                        f"separate steps, or set {shell_exec.MODE_ENV_VAR}=sandboxed."
                     ),
                     "returncode": 126,
                 }
