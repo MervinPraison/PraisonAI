@@ -115,11 +115,8 @@ class PolicyConfig:
             rules_dir = os.path.dirname(self.rules_file)
             os.makedirs(rules_dir, exist_ok=True)
             
-            # Atomic write: tmp file + rename
-            tmp_file = self.rules_file + ".tmp"
-            with open(tmp_file, "w") as f:
-                json.dump({"rules": existing}, f, indent=2)
-            os.replace(tmp_file, self.rules_file)
+            from ..utils.atomic_io import atomic_write_json
+            atomic_write_json(self.rules_file, {"rules": existing}, indent=2)
             
             logger.debug(f"Saved learned rule: {resource} -> {action}")
             return True
