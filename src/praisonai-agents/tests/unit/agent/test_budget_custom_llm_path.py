@@ -142,6 +142,33 @@ def test_sink_ignores_other_llm_instances(calls):
     assert agent.cost_summary["llm_calls"] == 0
 
 
+class _Unavailable(Exception):
+    status_code = 503
+
+
+def test_fallback_model_spend_is_counted(calls, monkeypatch):
+    """A turn answered by a ``fallback_models`` entry is still billed to the agent."""
+    backup = "anthropic/claude-3-haiku-20240307"
+
+    def fake(*a, **k):
+        calls["n"] += 1
+        if k.get("model") != backup:
+            raise _Unavailable("503 overloaded")
+        return _text(backup)
+
+    async def afake(*a, **k):
+        return fake(*a, **k)
+
+    monkeypatch.setattr(_litellm(), "completion", fake)
+    monkeypatch.setattr(_litellm(), "acompletion", afake)
+    for run in (lambda a: a.chat("hi"), lambda a: asyncio.run(a.achat("hi"))):
+        agent = _agent(retry=False)  # fail over at once, no backoff sleeps
+        agent.fallback_models = [backup]
+        assert run(agent) == "ok"
+        assert agent.cost_summary["llm_calls"] == 1
+        assert agent.total_cost > 0
+
+
 def test_retry_after_exhaustion_sends_no_request(calls):
     agent = _agent(execution=ExecutionConfig(max_budget=0.001))
     with pytest.raises(BudgetExceededError):

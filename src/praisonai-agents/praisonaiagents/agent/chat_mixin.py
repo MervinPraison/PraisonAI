@@ -2022,7 +2022,8 @@ Your Goal: {self.goal}"""
         llm_kwargs, tools_ran = self._track_tool_runs(llm_kwargs)
         while True:
             try:
-                return llm.get_response(**llm_kwargs)
+                with self._llm_usage_sink(llm):
+                    return llm.get_response(**llm_kwargs)
             except (ToolExecutionError, BudgetExceededError, InterruptedError):
                 raise
             except Exception as e:
@@ -2041,7 +2042,8 @@ Your Goal: {self.goal}"""
         llm_kwargs, tools_ran = self._track_tool_runs(llm_kwargs)
         while True:
             try:
-                return await llm.get_response_async(**llm_kwargs)
+                with self._llm_usage_sink(llm):
+                    return await llm.get_response_async(**llm_kwargs)
             except (ToolExecutionError, BudgetExceededError, InterruptedError):
                 raise
             except Exception as e:
@@ -2262,8 +2264,8 @@ Your Goal: {self.goal}"""
                 self._on_budget_exceeded(current_cost, self._max_budget)
 
     @contextlib.contextmanager
-    def _llm_usage_sink(self):
-        """Route every call the custom LLM makes in this block into ``_record_llm_usage``.
+    def _llm_usage_sink(self, llm=None):
+        """Route every call ``llm`` (default: the custom LLM) makes in this block into ``_record_llm_usage``.
 
         Refuses to start when ``max_budget`` is already spent (``"stop"`` mode),
         so retrying after ``BudgetExceededError`` sends no further paid request.
@@ -2281,7 +2283,7 @@ Your Goal: {self.goal}"""
                 )
         from ..llm.llm import _usage_sink
         token = _usage_sink.set((
-            self.llm_instance,
+            llm if llm is not None else self.llm_instance,
             lambda response: self._record_llm_usage(*self._extract_llm_usage(response)),
         ))
         try:
@@ -3999,8 +4001,7 @@ Your Goal: {self.goal}"""
                     if hasattr(self, '_drain_steering_messages') and getattr(self, '_message_steering', None) is not None:
                         llm_kwargs['steering_drain'] = self._drain_steering_messages
 
-                    with self._llm_usage_sink():
-                        response_text = self._custom_llm_get_response(llm_kwargs)
+                    response_text = self._custom_llm_get_response(llm_kwargs)
 
                     self._add_to_chat_history("assistant", response_text)
                     # Persist assistant message to DB
@@ -4735,8 +4736,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if hasattr(self, '_drain_steering_messages') and getattr(self, '_message_steering', None) is not None:
                         llm_kwargs['steering_drain'] = self._drain_steering_messages
 
-                    with self._llm_usage_sink():
-                        response_text = await self._custom_llm_get_response_async(llm_kwargs)
+                    response_text = await self._custom_llm_get_response_async(llm_kwargs)
 
                     # LLM call succeeded - now it's safe to commit any compacted history
                     if effective_history is not self.chat_history:
