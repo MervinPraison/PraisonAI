@@ -6,6 +6,7 @@ Zero dependencies beyond stdlib.
 """
 
 import copy
+import hashlib
 import json
 from praisonaiagents._logging import get_logger
 import os
@@ -29,6 +30,27 @@ from typing import Any, Callable, Dict, List, Optional
 from ..paths import get_sessions_dir
 
 logger = get_logger(__name__)
+
+
+
+def _legacy_session_filename(session_id: str) -> str:
+    """Pre-#6024 lossy filename (many ids -> one name); kept only for migration."""
+    return "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id)
+
+
+def _safe_session_filename(session_id: str) -> str:
+    """Injective, filesystem-safe filename stem for a session id (Issue #6024).
+
+    Ids already made of ``[A-Za-z0-9_-]`` keep their exact legacy name; any
+    other id gets a readable prefix plus a digest of the full id, so ids that
+    differ only in ``.``/``@``/``:``/… never share a file.
+    """
+    readable = _legacy_session_filename(session_id)
+    if readable == session_id:
+        return readable
+    digest = hashlib.sha256(session_id.encode("utf-8")).hexdigest()[:16]
+    return f"{readable[:64]}~{digest}"
+
 
 # Module-level sentinel to track if we've warned about degraded locking
 _WARNED_NO_FCNTL = False
@@ -884,10 +906,45 @@ class DefaultSessionStore:
         )
 
     def _get_session_path(self, session_id: str) -> str:
-        """Get the file path for a session."""
-        # Sanitize session_id for filesystem
-        safe_id = "".join(c if c.isalnum() or c in "-_" else "_" for c in session_id)
-        return os.path.join(self.session_dir, f"{safe_id}.json")
+        """Get the file path for a session (injective mapping, Issue #6024)."""
+        path = os.path.join(self.session_dir, f"{_safe_session_filename(session_id)}.json")
+        legacy = os.path.join(self.session_dir, f"{_legacy_session_filename(session_id)}.json")
+        # Migrate a pre-#6024 file only when it is provably this id's own.
+        if legacy != path and not os.path.exists(path) and os.path.exists(legacy):
+            try:
+                with open(legacy, "r", encoding="utf-8") as f:
+                    owner = json.load(f).get("session_id")
+                if owner == session_id:
+                    os.replace(legacy, path)
+            except (OSError, ValueError, AttributeError):
+                pass
+        return path
+
+    def _owns_file(self, session_id: str, filepath: str, session: SessionData) -> bool:
+        """Return False if the loaded file belongs to another session id.
+
+        A foreign file (e.g. a pre-#6024 legacy collision) is never served to
+        the caller; it is moved to its owner's own path when that is free so a
+        later write here cannot destroy the owner's history.
+        """
+        if not session.session_id:
+            session.session_id = session_id
+            return True
+        if session.session_id == session_id:
+            return True
+        logger.warning(
+            "Session file %s belongs to session %r, not %r; starting fresh",
+            filepath, session.session_id, session_id,
+        )
+        owner_path = os.path.join(
+            self.session_dir, f"{_safe_session_filename(session.session_id)}.json"
+        )
+        if owner_path != filepath and not os.path.exists(owner_path):
+            try:
+                os.replace(filepath, owner_path)
+            except OSError:
+                pass
+        return False
     
     def _load_session(self, session_id: str) -> SessionData:
         """Load session from disk with file locking."""
@@ -952,7 +1009,10 @@ class DefaultSessionStore:
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return SessionData.from_dict(data)
+            session = SessionData.from_dict(data)
+            if not self._owns_file(session_id, filepath, session):
+                return SessionData(session_id=session_id)
+            return session
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
             # Malformed content — the parsed data is unusable, but the raw file
             # may still hold recoverable bytes. Quarantine it aside so the next
@@ -1122,9 +1182,7 @@ class DefaultSessionStore:
         try:
             spill_dir = self._spill_dir()
             os.makedirs(spill_dir, exist_ok=True)
-            safe_id = "".join(
-                c if c.isalnum() or c in "-_" else "_" for c in session_id
-            )
+            safe_id = _safe_session_filename(session_id)
             # A monotonic ms timestamp keeps files sortable/attributable, but a
             # short random token guarantees uniqueness so consecutive failures
             # within the same PID+millisecond never overwrite an earlier spill
@@ -1235,13 +1293,15 @@ class DefaultSessionStore:
             spill_dir = self._spill_dir()
             if not os.path.isdir(spill_dir):
                 return
-            safe_id = "".join(
-                c if c.isalnum() or c in "-_" else "_" for c in session_id
+            # Also match pre-#6024 spill names; the session_id check below
+            # rejects any spill that belongs to a colliding id.
+            prefixes = (
+                f"{_safe_session_filename(session_id)}.",
+                f"{_legacy_session_filename(session_id)}.",
             )
-            prefix = f"{safe_id}."
             candidates = sorted(
                 f for f in os.listdir(spill_dir)
-                if f.startswith(prefix) and f.endswith(".json")
+                if f.startswith(prefixes) and f.endswith(".json")
             )
         except (IOError, OSError):
             return
