@@ -43,6 +43,142 @@ _TOOL_ARGUMENTS_PARSE_FAILED = object()
 # Bounded shrink-and-retry steps after a provider context-overflow rejection.
 _CONTEXT_OVERFLOW_SHRINK_STEPS = 3
 
+
+# ---------------------------------------------------------------------------
+# Replay llm_request / llm_response for the LiteLLM path. The agent's
+# OpenAI-client path records its own pair around the whole dispatch (which can
+# reach this class through the LiteLLM adapter); ``_llm_call_open`` makes sure
+# that call is not counted twice. A no-op returning None when tracing is off.
+# ---------------------------------------------------------------------------
+
+def _replay_llm_begin(llm: Any, params: Dict[str, Any]):
+    from ..trace.context_events import get_context_emitter
+    emitter = get_context_emitter()
+    if not emitter._enabled or emitter._llm_call_open():
+        return None
+    agent = getattr(llm, "current_agent_name", None) or emitter._current_agent()
+    model = params.get("model") or getattr(llm, "model", None)
+    messages = params.get("messages")
+    messages = messages if isinstance(messages, list) else None
+    emitter._emit(emitter._llm_request_event(
+        agent, len(messages) if messages else 0, 0, model=model, messages=messages,
+    ))
+    return {"emitter": emitter, "agent": agent, "model": model,
+            "started": time.perf_counter(), "content": [], "usage": None, "finish": None}
+
+
+def _replay_usage_tokens(usage: Any) -> tuple:
+    if not usage:
+        return 0, 0
+    get = usage.get if isinstance(usage, dict) else (lambda k, d=None: getattr(usage, k, d))
+    return int(get("prompt_tokens", 0) or 0), int(get("completion_tokens", 0) or 0)
+
+
+def _replay_observe(span: Dict[str, Any], response: Any, chunk: bool) -> None:
+    """Collect content / finish reason / usage from a response or a stream chunk."""
+    try:
+        get = response.get if isinstance(response, dict) else (lambda k, d=None: getattr(response, k, d))
+        usage = get("usage", None)
+        if usage:
+            span["usage"] = usage
+        choices = get("choices", None) or []
+        if not choices:
+            return
+        first = choices[0]
+        fget = first.get if isinstance(first, dict) else (lambda k, d=None: getattr(first, k, d))
+        if fget("finish_reason", None):
+            span["finish"] = fget("finish_reason", None)
+        body = fget("delta" if chunk else "message", None)
+        if body is not None:
+            content = body.get("content") if isinstance(body, dict) else getattr(body, "content", None)
+            if isinstance(content, str) and content:
+                span["content"].append(content)
+    except Exception:
+        pass  # Tracing must never break a model call.
+
+
+def _replay_llm_end(span: Optional[Dict[str, Any]], error: Optional[BaseException] = None) -> None:
+    if span is None or span.get("done"):
+        return
+    span["done"] = True
+    emitter = span["emitter"]
+    prompt_tokens, completion_tokens = _replay_usage_tokens(span.get("usage"))
+    cost = 0.0
+    if prompt_tokens or completion_tokens:
+        try:
+            import litellm
+            prompt_cost, completion_cost = litellm.cost_per_token(
+                model=span["model"], prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            )
+            cost = float(prompt_cost or 0) + float(completion_cost or 0)
+        except Exception:
+            cost = 0.0  # Unknown price: leave it unknown rather than guess.
+    emitter._emit(emitter._llm_response_event(
+        span["agent"],
+        duration_ms=(time.perf_counter() - span["started"]) * 1000,
+        finish_reason="error" if error is not None else span.get("finish"),
+        response_content=str(error) if error is not None else "".join(span["content"]),
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        cost_usd=cost,
+        model=span["model"],
+    ))
+
+
+class _ReplayStream:
+    """Pass-through for a LiteLLM stream that records ``llm_response`` when it ends."""
+
+    __slots__ = ("_stream", "_iter", "_span")
+
+    def __init__(self, stream: Any, span: Dict[str, Any]) -> None:
+        self._stream = stream
+        self._iter = None
+        self._span = span
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._iter is None:
+            self._iter = iter(self._stream)
+        try:
+            chunk = next(self._iter)
+        except StopIteration:
+            _replay_llm_end(self._span)
+            raise
+        except BaseException as exc:
+            _replay_llm_end(self._span, exc)
+            raise
+        _replay_observe(self._span, chunk, chunk=True)
+        return chunk
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._iter is None:
+            self._iter = self._stream.__aiter__()
+        try:
+            chunk = await self._iter.__anext__()
+        except StopAsyncIteration:
+            _replay_llm_end(self._span)
+            raise
+        except BaseException as exc:
+            _replay_llm_end(self._span, exc)
+            raise
+        _replay_observe(self._span, chunk, chunk=True)
+        return chunk
+
+    def close(self):
+        _replay_llm_end(self._span)
+        close = getattr(self._stream, "close", None)
+        if callable(close):
+            return close()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._stream, name)
+
 # Default per-request timeout (seconds) when ``timeout`` is not passed. Without
 # it litellm falls back to its 6000s ceiling, so a provider that accepts the
 # connection but never answers blocks the turn for ~100 minutes per attempt.
@@ -1736,15 +1872,25 @@ Respond with ONLY a valid JSON tool call in this format:
         # entirely, so scripted turns never reach (or trip) the guard.
         check_model_request(self.model, "litellm.completion")
         import litellm
-        for step in range(_CONTEXT_OVERFLOW_SHRINK_STEPS + 1):
-            try:
-                response = self._call_with_retry(litellm.completion, **completion_params)
-                break
-            except Exception as e:
-                if not self._shrink_on_context_overflow(e, completion_params, step):
-                    raise
+        _replay = _replay_llm_begin(self, completion_params)
+        try:
+            for step in range(_CONTEXT_OVERFLOW_SHRINK_STEPS + 1):
+                try:
+                    response = self._call_with_retry(litellm.completion, **completion_params)
+                    break
+                except Exception as e:
+                    if not self._shrink_on_context_overflow(e, completion_params, step):
+                        raise
+        except BaseException as exc:
+            _replay_llm_end(_replay, exc)
+            raise
         if not completion_params.get("stream"):
             self._track_token_usage(response, self._response_model_for_tracking(response))
+            if _replay is not None:
+                _replay_observe(_replay, response, chunk=False)
+                _replay_llm_end(_replay)
+        elif _replay is not None:
+            response = _ReplayStream(response, _replay)
         return response
 
     async def _acompletion_with_retry(self, **completion_params):
@@ -1765,18 +1911,28 @@ Respond with ONLY a valid JSON tool call in this format:
         """
         check_model_request(self.model, "litellm.acompletion")
         import litellm
-        for step in range(_CONTEXT_OVERFLOW_SHRINK_STEPS + 1):
-            try:
-                response = await self._call_with_retry_async(
-                    litellm.acompletion,
-                    **completion_params,
-                )
-                break
-            except Exception as e:
-                if not self._shrink_on_context_overflow(e, completion_params, step):
-                    raise
+        _replay = _replay_llm_begin(self, completion_params)
+        try:
+            for step in range(_CONTEXT_OVERFLOW_SHRINK_STEPS + 1):
+                try:
+                    response = await self._call_with_retry_async(
+                        litellm.acompletion,
+                        **completion_params,
+                    )
+                    break
+                except Exception as e:
+                    if not self._shrink_on_context_overflow(e, completion_params, step):
+                        raise
+        except BaseException as exc:
+            _replay_llm_end(_replay, exc)
+            raise
         if not completion_params.get("stream"):
             self._track_token_usage(response, self._response_model_for_tracking(response))
+            if _replay is not None:
+                _replay_observe(_replay, response, chunk=False)
+                _replay_llm_end(_replay)
+        elif _replay is not None:
+            response = _ReplayStream(response, _replay)
         return response
 
     def _supports_web_search(self) -> bool:
