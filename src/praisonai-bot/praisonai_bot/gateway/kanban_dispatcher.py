@@ -11,11 +11,13 @@ import logging
 import math
 import os
 import re
+import signal
 import subprocess
+import threading
 import time
 from typing import Dict, Any, List, Optional
 
-from .._guarded_subprocess import run_guarded
+from .._guarded_subprocess import _kill_process_group, run_guarded
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +87,17 @@ class KanbanDispatcher:
         self.running_tasks: Dict[str, subprocess.Popen] = {}
         self._task_runs: Dict[str, int] = {}  # task_id -> open run_id
         self.worker_id = f"gateway_{os.getpid()}"
+
+    # Serialises blocking git/SQLite work handed to worker threads, so two
+    # integrations never run git concurrently in the same base checkout.
+    _blocking_lock = threading.Lock()
+
+    async def _run_blocking(self, fn, *args):
+        """Run a blocking (git / SQLite) helper off the event loop."""
+        def _locked():
+            with self._blocking_lock:
+                return fn(*args)
+        return await asyncio.to_thread(_locked)
 
     def _close_run_safe(self, store, run_id, outcome, *, summary=None, metadata=None, error=None) -> bool:
         """Close a run, swallowing errors so dispatch stays resilient.
@@ -196,8 +209,9 @@ class KanbanDispatcher:
         if not store:
             return 0
         
-        # Clean up completed processes first
-        self._cleanup_completed_tasks(store)
+        # Clean up completed processes first. Integration runs several git
+        # commands, so keep it off the event loop.
+        await self._run_blocking(self._cleanup_completed_tasks, store)
 
         # Prove liveness for our own children before the reclaim sweep runs,
         # so a healthy long-running worker is never mistaken for a stale one.
@@ -257,8 +271,24 @@ class KanbanDispatcher:
                         )
                     continue
 
-                # Spawn worker process
-                success = await self._spawn_worker(task, store)
+                # Spawn worker process. If the dispatcher is stopped while the
+                # worktree is being prepared, no worker exists yet: close the
+                # run and hand the claim back before propagating.
+                try:
+                    success = await self._spawn_worker(task, store)
+                except asyncio.CancelledError:
+                    self._close_run_safe(
+                        store, run_id, 'failed',
+                        error='Dispatcher stopped before worker spawn',
+                    )
+                    try:
+                        store.release_claim(task.id, self.worker_id)
+                    except Exception as release_err:
+                        logger.error(
+                            "Failed to release claim for %s on cancel: %s",
+                            task.id, release_err,
+                        )
+                    raise
                 if not success:
                     # Failed to spawn: close run as failed, count it, and only
                     # release the claim for retry when the failure was recorded
@@ -664,6 +694,11 @@ class KanbanDispatcher:
             return f"worktree removal error: {e}"
         return None
 
+    def _discard_worktree(self, path: str, branch: str) -> None:
+        """Remove a worktree and branch that no worker ever used."""
+        if self._remove_worktree(path, force=True) is None:
+            self._run_git("branch", "-D", branch)
+
     def _commit_worktree_changes(self, path: str, branch: str) -> None:
         """Commit any uncommitted edits the worker left in its worktree.
 
@@ -804,7 +839,22 @@ class KanbanDispatcher:
             # cwd so nothing regresses.
             worktree_path = None
             if getattr(task, 'workspace_kind', 'default') == 'worktree':
-                worktree_path = self._prepare_worktree(task, store)
+                prep = asyncio.ensure_future(
+                    self._run_blocking(self._prepare_worktree, task, store)
+                )
+                try:
+                    worktree_path = await asyncio.shield(prep)
+                except asyncio.CancelledError:
+                    # The thread keeps running after cancellation. Let it
+                    # finish, then drop the fresh (unused) worktree and branch
+                    # so a retry can recreate them with `worktree add -b`.
+                    path = await asyncio.shield(prep)
+                    if path:
+                        await self._run_blocking(
+                            self._discard_worktree, path,
+                            f"kanban/{self._safe_task_id(task.id)}",
+                        )
+                    raise
                 if worktree_path:
                     if not hasattr(self, '_worktrees'):
                         self._worktrees = {}
@@ -833,6 +883,9 @@ class KanbanDispatcher:
                     stderr=subprocess.STDOUT,
                     text=True,
                     cwd=worktree_path,
+                    # Own process group so shutdown can stop the worker's
+                    # descendants too (POSIX; ignored on Windows).
+                    start_new_session=(os.name != 'nt'),
                 )
             # parent FD closed here; child still has its duped copy
             
@@ -1085,30 +1138,27 @@ class KanbanDispatcher:
             while self.running_tasks and (time.time() - start_time) < timeout:
                 store = self._get_kanban_store()
                 if store:
-                    self._cleanup_completed_tasks(store)
+                    await self._run_blocking(self._cleanup_completed_tasks, store)
                 await asyncio.sleep(1)
             
-            # Force terminate remaining tasks
+            # Force terminate remaining tasks: signal every worker group
+            # first, then wait for them together off the event loop.
             store = self._get_kanban_store()
             for task_id, process in self.running_tasks.items():
                 logger.warning(f"Force terminating task {task_id}")
-                try:
-                    process.terminate()
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
+                _terminate_worker(process)
+            await asyncio.gather(*(
+                asyncio.to_thread(_wait_quiet, process, 5)
+                for process in self.running_tasks.values()
+            ))
+            for task_id, process in self.running_tasks.items():
+                if process.poll() is None:
                     logger.warning(f"Task {task_id} did not terminate in 5s; sending SIGKILL")
-                    try:
-                        process.kill()
-                    except OSError as kill_err:
-                        logger.error(f"Failed to kill task {task_id}: {kill_err}")
-                except OSError as os_err:
-                    logger.error(f"OS error while terminating task {task_id}: {os_err}")
-                    try:
-                        process.kill()
-                    except OSError as kill_err:
-                        logger.error(f"Failed to kill task {task_id}: {kill_err}")
-                # KeyboardInterrupt, SystemExit, CancelledError now propagate as intended
+                # Even if the worker exited, a descendant may have ignored
+                # SIGTERM, so always finish off the whole group.
+                _kill_worker_group(process)
 
+            for task_id in list(self.running_tasks):
                 # Close any open run for the interrupted attempt so we do not
                 # leave dangling task_runs rows / stale current_run_id pointers.
                 run_id = self._task_runs.pop(task_id, None)
@@ -1122,6 +1172,49 @@ class KanbanDispatcher:
             self._task_runs.clear()
         
         logger.info("Kanban dispatcher shutdown complete")
+
+
+def _terminate_worker(process: subprocess.Popen) -> None:
+    """Ask a worker and its descendants to exit (SIGTERM to its group)."""
+    try:
+        if os.name != 'nt':
+            os.killpg(process.pid, signal.SIGTERM)
+        else:
+            process.terminate()
+    except OSError:
+        try:
+            process.terminate()
+        except OSError as err:
+            logger.error(f"Failed to terminate worker {process.pid}: {err}")
+
+
+def _kill_worker_group(process: subprocess.Popen) -> None:
+    """SIGKILL a worker's group, even after the worker itself was reaped.
+
+    The worker leads its own session, so its group id equals its pid and the
+    group stays addressable while any descendant is alive.
+    """
+    if os.name == 'nt':
+        if process.poll() is None:
+            _kill_process_group(process)
+        return
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except OSError:
+        pass  # group already empty
+    if process.poll() is None:
+        try:
+            process.kill()
+        except OSError:
+            pass
+
+
+def _wait_quiet(process: subprocess.Popen, timeout: float) -> None:
+    """Wait for a process, ignoring a timeout (the caller escalates)."""
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        pass
 
 
 # Global dispatcher management functions
