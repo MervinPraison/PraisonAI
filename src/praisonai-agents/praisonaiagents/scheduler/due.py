@@ -341,3 +341,26 @@ def is_due(
         return now >= next_run
 
     return False
+
+
+def lease_state(job: Any, now: float, owner_id: str) -> str | None:
+    """Classify a job's claim lease for an atomic ``claim_due``.
+
+    Returns:
+        ``"busy"`` when another owner holds an unexpired lease, or this owner
+        still holds one on a spent (retiring) job whose run is in flight;
+        ``"abandoned"`` when a lease expired without ``complete`` — the run
+        crashed or the process died mid-run; ``"done"`` when a spent job's
+        run finished (lease released) but it was not removed yet; ``None``
+        when the job is free to be evaluated for due-ness.
+    """
+    lease_until = getattr(job, "_lease_until", 0.0) or 0.0
+    lease_owner = getattr(job, "_lease_owner", None)
+    retiring = getattr(job, "_retiring", 0)
+    if lease_owner is not None and lease_until > now:
+        if lease_owner != owner_id or retiring:
+            return "busy"
+        return None
+    if lease_owner is not None:
+        return "abandoned"
+    return "done" if retiring else None

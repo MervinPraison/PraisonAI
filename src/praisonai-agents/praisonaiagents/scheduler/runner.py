@@ -62,8 +62,10 @@ class ScheduleRunner:
 
         Args:
             owner_id: Stable identifier for this ticker (process/host).
-            lease_seconds: Lease window; a claim not completed expires after
-                this so a crashed run is eventually retried.
+            lease_seconds: Lease window. A claim not completed within it is
+                recorded as an ``abandoned`` run: a one-shot / spent job is
+                retried once (at-least-once), a recurring job runs at its next
+                slot (at-most-once per slot).
         """
         claim = getattr(self._store, "claim_due", None)
         if callable(claim):
@@ -85,7 +87,11 @@ class ScheduleRunner:
         duration: float = 0.0,
         delivered: bool = False,
     ) -> None:
-        """Update ``last_run_at``, log history, and optionally delete one-shot jobs.
+        """Update ``last_run_at``, log history, and retire spent jobs.
+
+        A spent job (one-shot, ``max_runs`` met) is removed after a run that
+        did not fail; a failed one is kept, disabled, so it stays visible in
+        ``schedule list`` and can be re-enabled or removed by the user.
 
         Args:
             job: The job that was executed.
@@ -97,10 +103,9 @@ class ScheduleRunner:
         """
         job.last_run_at = time.time()
         # Count this fire exactly once. An atomic ``claim_due`` already
-        # incremented ``run_count`` when it reserved the job (and needs to, so
-        # ``should_retire()`` can drop a spent job before a competitor reclaims
-        # it); it flags the job with ``_run_counted`` so we do not double-count
-        # here. The non-atomic ``get_due_jobs`` path never sets that flag, so
+        # incremented ``run_count`` when it reserved the job (so
+        # ``should_retire()`` can mark a spent job as retiring); it flags the
+        # job with ``_run_counted`` so we do not double-count here. The non-atomic ``get_due_jobs`` path never sets that flag, so
         # ``mark_run`` remains the single incrementer there.
         if getattr(job, "_run_counted", False):
             job._run_counted = False
@@ -122,9 +127,15 @@ class ScheduleRunner:
         # The run already happened (its claim was persisted), so a failed write
         # here is reported, not raised: one bad write must not stop the loop.
         try:
-            if job.should_retire(job.last_run_at):
+            if not job.should_retire(job.last_run_at):
+                self._store.update(job)
+            elif status != "failed":
                 self._store.remove(job.id)
             else:
+                # Keep a failed spent job visible (disabled) instead of
+                # deleting it, so the user can see and re-run it.
+                job.enabled = False
+                job._retiring = 0
                 self._store.update(job)
         except OSError as e:
             logger.error("Failed to persist run state for job %r: %s", job.id, e)

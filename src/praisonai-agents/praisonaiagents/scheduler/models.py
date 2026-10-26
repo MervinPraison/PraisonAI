@@ -587,6 +587,11 @@ class ScheduleJob:
         if lease_until:
             d["lease_until"] = lease_until
             d["lease_owner"] = getattr(self, "_lease_owner", None)
+        # Spent job claimed for its final run: 1 = first attempt, 2 = the one
+        # retry after a crashed (abandoned) attempt. Omitted otherwise.
+        retiring = getattr(self, "_retiring", 0)
+        if retiring:
+            d["retiring"] = retiring
         return d
 
     @classmethod
@@ -645,4 +650,5 @@ class ScheduleJob:
         # Restore atomic-claim lease metadata if present (see ``to_dict``).
         job._lease_until = d.get("lease_until", 0.0) or 0.0
         job._lease_owner = d.get("lease_owner")
+        job._retiring = d.get("retiring", 0) or 0
         return job

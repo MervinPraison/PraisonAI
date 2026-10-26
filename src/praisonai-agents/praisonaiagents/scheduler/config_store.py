@@ -15,7 +15,7 @@ import time
 from typing import Dict, Iterator, List, Optional
 
 from .models import ScheduleJob, RunRecord
-from .due import is_due as _is_due, is_misfire as _is_misfire, resolve_schedule_timezone
+from .due import is_due as _is_due, is_misfire as _is_misfire, lease_state as _lease_state, resolve_schedule_timezone
 from .hook_emit import emit_schedule_add, emit_schedule_remove
 
 logger = get_logger(__name__)
@@ -187,25 +187,37 @@ class ConfigYamlScheduleStore:
         job that is due and not already leased by someone else we:
 
         * advance ``last_run_at`` to ``now`` (pre-advancing the schedule so a
-          later poll no longer sees it as due — at-least-once → at-most-once),
+          later poll no longer sees it as due),
         * take a lease (``lease_until = now + lease_seconds``, ``lease_owner``),
           persisting both in the same atomic write,
-        * remove one-shot jobs (``delete_after_run``) immediately so no other
-          ticker can pick them up.
+        * mark spent jobs (one-shot, ``max_runs`` met) as retiring instead of
+          deleting them; the lease keeps competitors out and ``mark_run``
+          removes them once the run completes.
 
-        A crashed run leaves a lease that expires after ``lease_seconds``; the
-        job then becomes due again and is retried. Losers of the race simply do
-        not see the job in their returned list.
+        A lease that expires without ``complete`` is an abandoned (crashed)
+        run and is recorded as ``abandoned`` history. A retiring job is then
+        re-offered once (at-least-once across crashes) and retired if that
+        attempt is abandoned too; a recurring job is at-most-once per slot and
+        next runs at its following slot. Losers of the race simply do not see
+        the job in their returned list.
         """
         claimed: List[ScheduleJob] = []
-        # One-shots auto-deleted by this claim. Emitted after the lock below;
-        # a later ``remove(job.id)`` by the runner is then a no-op, so a spent
-        # one-shot yields exactly one SCHEDULE_REMOVE.
+        # Spent jobs retired by this claim. Emitted after the lock below.
         auto_removed: List[ScheduleJob] = []
-        # (job_id, job_name) for occurrences suppressed by the misfire policy.
-        # Logged as ``missed`` history after the lock so a dropped occurrence is
-        # observable instead of vanishing silently.
+        # (job_id, job_name, status) for occurrences suppressed by the misfire
+        # policy (``missed``) or runs whose lease expired (``abandoned``).
+        # Logged after the lock so a lost run is observable, not silent.
         missed: List[tuple] = []
+
+        def take(job: ScheduleJob) -> None:
+            job._lease_until = now + lease_seconds
+            job._lease_owner = owner_id
+            # ``run_count`` is counted at claim; flag it so ``mark_run`` does
+            # not double-count the same fire.
+            job._run_counted = True
+            self._held_leases[job.id] = owner_id
+            claimed.append(job)
+
         with self._lock, self._file_lock():
             # Re-read from disk so we observe cross-process claims/leases.
             self._reload_locked()
@@ -213,10 +225,30 @@ class ConfigYamlScheduleStore:
             for job in list(self._jobs.values()):
                 if not job.enabled:
                     continue
-                lease_until = getattr(job, "_lease_until", 0.0) or 0.0
-                lease_owner = getattr(job, "_lease_owner", None)
-                # An unexpired lease held by another owner blocks the claim.
-                if lease_until > now and lease_owner != owner_id:
+                state = _lease_state(job, now, owner_id)
+                if state == "busy" or (
+                    # Our own spent-job run outlived its lease but is still in
+                    # flight: re-offering it would fire it twice.
+                    state == "abandoned"
+                    and getattr(job, "_retiring", 0)
+                    and self._held_leases.get(job.id) == owner_id
+                ):
+                    continue
+                if state == "abandoned":
+                    missed.append((job.id, job.name, "abandoned"))
+                    job._lease_until = 0.0
+                    job._lease_owner = None
+                    changed = True
+                    if getattr(job, "_retiring", 0) == 1:
+                        # First attempt of a spent job crashed: retry once.
+                        job._retiring = 2
+                        take(job)
+                        continue
+                if getattr(job, "_retiring", 0):
+                    # Run finished (or its retry was abandoned too): retire.
+                    auto_removed.append(self._jobs.pop(job.id))
+                    self._job_state.pop(job.id, None)
+                    changed = True
                     continue
                 if not _is_due(job, now, self._default_timezone):
                     # A job past its ``until`` end instant is not due, but must
@@ -235,26 +267,17 @@ class ConfigYamlScheduleStore:
                 # again on the next poll.
                 if _is_misfire(job, now, self._default_timezone):
                     job.last_run_at = now
-                    missed.append((job.id, job.name))
+                    missed.append((job.id, job.name, "missed"))
                     changed = True
                     continue
                 # Win the claim: pre-advance + lease atomically.
                 job.last_run_at = now
-                # Count the fire here (needed so ``should_retire()`` can drop a
-                # spent job before a competitor reclaims it) and flag it so the
-                # later ``mark_run`` does not double-count the same fire.
                 job.run_count += 1
-                job._run_counted = True
-                job._lease_until = now + lease_seconds
-                job._lease_owner = owner_id
-                self._held_leases[job.id] = owner_id
-                claimed.append(job)
-                changed = True
                 if job.should_retire(now):
-                    # Spent (one-shot, run-count met, or past ``until``): remove
-                    # now so no competitor re-claims it.
-                    auto_removed.append(self._jobs.pop(job.id))
-                    self._job_state.pop(job.id, None)
+                    # Spent: keep it (leased) so a crash cannot lose it.
+                    job._retiring = 1
+                take(job)
+                changed = True
             if changed:
                 if not self._save():
                     # The lease/last_run_at advance was NOT persisted (full
@@ -270,10 +293,10 @@ class ConfigYamlScheduleStore:
             emit_schedule_remove(job)
         # Record suppressed occurrences so a missed run is visible in history
         # rather than silently dropped (log_run takes only the thread lock).
-        for job_id, job_name in missed:
+        for job_id, job_name, status in missed:
             self.log_run(
                 job_id=job_id,
-                status="missed",
+                status=status,
                 job_name=job_name,
             )
         return claimed
