@@ -208,3 +208,27 @@ def test_live_turn_fans_out_to_observers_gated_by_scope():
     assert ("token_stream", "tok") in _shape(viewer_ws)
     assert _shape(viewer_ws)[-1] == expected_tail
     assert blind_ws.sent == []
+
+
+def test_member_driven_turn_reaches_owner_and_replay():
+    async def _run():
+        gw = _gateway()
+        owner_ws = _client(gw, "owner")
+        member_ws = _client(gw, "ann", scopes=["read", "write"])
+        session = _owned(gw, visibility="shared")
+        gw.attach(session.session_id, "ann", role="member")
+
+        agent = _EmitterAgent()
+        session.mark_executing(True)
+        await session.queue_message("hi")
+        await gw._run_session_queue(session, agent, "ann")
+        return owner_ws, member_ws, session
+
+    owner_ws, member_ws, session = asyncio.run(_run())
+
+    for ws in (owner_ws, member_ws):
+        types = [f["type"] for f in ws.sent]
+        assert "token_stream" in types
+        assert ws.sent[-1]["content"] == "echo:hi"
+    # Recorded once (via the owner's copy), not zero or twice.
+    assert [e.type for e in session._events].count("response") == 1

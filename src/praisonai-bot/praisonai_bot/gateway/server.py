@@ -6566,12 +6566,21 @@ class WebSocketGateway:
         scope: OperatorScope,
         exclude: Optional[str] = None,
     ) -> List[str]:
-        """Connected observers of ``session_id`` that hold ``scope`` (fan-out)."""
-        return [
+        """Connected fan-out targets of ``session_id`` other than ``exclude``.
+
+        The owner is always included (as for its own turns), so a turn a
+        member drives still reaches the owner and its replay buffer;
+        observers additionally need ``scope``.
+        """
+        session = self._sessions.get(session_id)
+        owner = session.client_id if session is not None else None
+        targets = [owner] if owner and owner != exclude and owner in self._clients else []
+        targets += [
             cid
             for cid in list(self._session_observers.get(session_id, {}))
             if cid != exclude and cid in self._clients and self._client_has_scope(cid, scope)
         ]
+        return targets
 
     def _enforce_session_visibility(self, session: GatewaySession) -> None:
         """Revoke observer access the session's visibility no longer allows.
