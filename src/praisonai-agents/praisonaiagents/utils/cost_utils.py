@@ -89,9 +89,10 @@ def calculate_llm_cost(
     # A positive cost reported by the provider/client is authoritative. A
     # reported 0.0 is ignored so unpriced models (custom base_url, proxies)
     # still accrue the fallback estimate and the budget guard keeps working.
+    # Not rounded: a tiny positive cost must not collapse to 0.0.
     reported = _extract_reported_cost(response)
     if reported is not None:
-        return round(reported, 6)
+        return reported
 
     usage = _get(response, "usage")
     if cached_tokens is None:

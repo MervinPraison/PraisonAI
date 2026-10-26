@@ -58,6 +58,13 @@ def test_provider_reported_cost_is_authoritative():
     assert cost == pytest.approx(0.0123)
 
 
+def test_tiny_reported_cost_is_not_rounded_to_zero():
+    usage = SimpleNamespace(prompt_tokens=10, completion_tokens=1, cost=2e-7)
+    cost = calculate_llm_cost(10, 1, "gpt-4o-mini", response=SimpleNamespace(usage=usage))
+    assert cost == pytest.approx(2e-7)
+    assert cost > 0
+
+
 def test_reported_zero_cost_falls_back_to_estimate():
     # A 0.0 from an unpriced model/proxy must not disable the budget guard
     response = SimpleNamespace(usage=SimpleNamespace(cost=0.0), _hidden_params={"response_cost": 0.0})
