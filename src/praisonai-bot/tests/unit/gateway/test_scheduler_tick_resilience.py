@@ -56,3 +56,6 @@ def test_non_mapping_scheduler_block_uses_defaults():
     policy = gw._build_run_policy()
     assert policy is not None
     assert policy.deliver_on_failure is True
+    assert policy.scan_assembled_prompt is True
+    from praisonai.scheduler.run_policy import DEFAULT_DENIED_TOOLSETS
+    assert policy.denied_toolsets == set(DEFAULT_DENIED_TOOLSETS)

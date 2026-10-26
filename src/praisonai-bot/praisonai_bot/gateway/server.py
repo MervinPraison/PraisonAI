@@ -7789,7 +7789,7 @@ class WebSocketGateway:
                             "Scheduler tick failed (%d in a row)", failures,
                         )
                     await asyncio.sleep(
-                        min(interval * 2 ** failures, 300.0) if failures
+                        min(interval * 2 ** min(failures, 10), 300.0) if failures
                         else interval
                     )
             except asyncio.CancelledError:
