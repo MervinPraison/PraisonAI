@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import inspect
 import logging
 import math
 import os
@@ -4636,17 +4637,29 @@ class WebSocketGateway:
                 except Exception:
                     pass
 
-        async def _call_async(fn: Any) -> Any:
+        def _kwargs_for(fn: Any) -> Dict[str, Any]:
+            # Issue #5884: decide the calling convention *before* invoking, so
+            # an application ``TypeError`` raised inside the entry point is
+            # never mistaken for a missing ``cancel_token`` and replayed.
+            if not _kw:
+                return _kw
             try:
-                result = await fn(content, **_kw)
-            except TypeError:
-                if not _kw:
-                    raise
-                # Entry point predates cancel_token: fall back to the shared
-                # attribute for this turn (best-effort, non-isolated).
-                if hasattr(agent, "interrupt_controller"):
-                    agent.interrupt_controller = interrupt
-                result = await fn(content)
+                params = inspect.signature(fn).parameters.values()
+            except (TypeError, ValueError):
+                return _kw
+            if any(
+                p.name == "cancel_token" or p.kind is inspect.Parameter.VAR_KEYWORD
+                for p in params
+            ):
+                return _kw
+            # Entry point predates cancel_token: fall back to the shared
+            # attribute for this turn (best-effort, non-isolated).
+            if hasattr(agent, "interrupt_controller"):
+                agent.interrupt_controller = interrupt
+            return {}
+
+        async def _call_async(fn: Any) -> Any:
+            result = await fn(content, **_kwargs_for(fn))
             # No ``await`` between the turn completing and the snapshot: the
             # single-threaded loop cannot run another turn in between.
             _snapshot()
@@ -4660,14 +4673,7 @@ class WebSocketGateway:
         loop = asyncio.get_running_loop()
 
         def _call_sync() -> Any:
-            try:
-                result = agent.chat(content, **_kw)
-            except TypeError:
-                if not _kw:
-                    raise
-                if hasattr(agent, "interrupt_controller"):
-                    agent.interrupt_controller = interrupt
-                result = agent.chat(content)
+            result = agent.chat(content, **_kwargs_for(agent.chat))
             # Snapshot in *this* worker thread, immediately after the turn
             # produced its result, before the thread returns to the pool and a
             # concurrent turn can overwrite the agent's shared metrics.
