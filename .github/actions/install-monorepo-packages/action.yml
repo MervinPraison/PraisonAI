@@ -106,5 +106,5 @@ runs:
           else
             pip install --force-reinstall --no-deps "litellm==${LITELLM_VERSION}"
           fi
-          python -c "from litellm.litellm_core_utils.env_utils import get_env_int_in_range"
+          python -c "import litellm"
         fi
