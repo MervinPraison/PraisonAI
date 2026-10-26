@@ -401,10 +401,8 @@ class HookConfig:
         deliver_only: When ``True`` the rendered ``message`` *is* the delivered
             content, routed straight through ``deliver_to`` with no LLM turn.
         coalesce: Optional :class:`CoalesceConfig` (or mapping) that collapses
-            a burst of deliveries for the same entity into one run and replies
-            ``202`` immediately, running the agent in the background. Use it
-            for providers with short delivery timeouts (GitHub: 10 s). ``None``
-            (default) runs once per delivery and replies after the turn.
+            a burst of deliveries for the same entity into one run. ``None``
+            (default) runs once per delivery.
     """
 
     path: str
