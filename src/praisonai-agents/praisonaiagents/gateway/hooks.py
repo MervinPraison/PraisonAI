@@ -364,7 +364,9 @@ class HookConfig:
             first registered agent when omitted.
         action: ``"agent"`` runs a turn, ``"wake"`` nudges a session.
         auth: Optional bearer token / shared secret required on the request.
-            When omitted the gateway's own ``auth_token`` is used.
+            When omitted the gateway's own ``auth_token`` is used, unless
+            ``secret`` is set: a valid signature then authenticates on its own
+            (so a GitHub webhook needs no token in its URL).
         session_key: Template for the session id, so related events share
             context, e.g. ``"hook:gmail:{message_id}"``.
         idempotency_key: Template for the dedup key, e.g. ``"{message_id}"``.
@@ -399,8 +401,10 @@ class HookConfig:
         deliver_only: When ``True`` the rendered ``message`` *is* the delivered
             content, routed straight through ``deliver_to`` with no LLM turn.
         coalesce: Optional :class:`CoalesceConfig` (or mapping) that collapses
-            a burst of deliveries for the same entity into one run. ``None``
-            (default) runs once per delivery.
+            a burst of deliveries for the same entity into one run and replies
+            ``202`` immediately, running the agent in the background. Use it
+            for providers with short delivery timeouts (GitHub: 10 s). ``None``
+            (default) runs once per delivery and replies after the turn.
     """
 
     path: str

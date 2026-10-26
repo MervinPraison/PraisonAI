@@ -2403,10 +2403,6 @@ class WebSocketGateway:
             if hook is None or not getattr(hook, "enabled", True):
                 return JSONResponse({"error": "hook not found"}, status_code=404)
 
-            auth_err = _check_hook_auth(request, hook)
-            if auth_err:
-                return auth_err
-
             import json
 
             # Read the raw body once so an HMAC signature can be verified over
@@ -2415,14 +2411,25 @@ class WebSocketGateway:
 
             # Provider signature verification (#3165). Fail-closed: when a
             # ``secret`` is configured, a missing/invalid signature is rejected
-            # with 401 before any agent runs. A hook without ``secret`` is
-            # unaffected (backward compatible).
+            # with 401 before any agent runs. A valid signature *is* the
+            # authentication (#6034): signed providers such as GitHub cannot
+            # send a bearer token, so the gateway-token fallback is skipped. An
+            # explicit hook ``auth`` is still required on top. A hook without
+            # ``secret`` keeps the standard auth (backward compatible).
             verify = getattr(hook, "verify_signature", None)
             if callable(verify) and getattr(hook, "secret", None):
                 if not verify(raw_body, dict(request.headers)):
                     return JSONResponse(
                         {"error": "invalid signature"}, status_code=401,
                     )
+                auth_err = (
+                    _check_hook_auth(request, hook)
+                    if getattr(hook, "auth", None) else None
+                )
+            else:
+                auth_err = _check_hook_auth(request, hook)
+            if auth_err:
+                return auth_err
 
             try:
                 payload = json.loads(raw_body) if raw_body else {}
