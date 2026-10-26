@@ -547,6 +547,9 @@ class GatewaySession:
     # interrupted by a gateway restart. ``None`` for direct-client sessions,
     # which resume on reconnect and need no server-initiated channel notice.
     _channel_target: Optional[str] = None
+    # Issue #5997: ``SessionVisibility`` value. ``private`` keeps today's 1:1
+    # owner binding; ``shared``/``read_only`` let other clients attach.
+    _visibility: str = "private"
     
     @property
     def session_id(self) -> str:
@@ -701,6 +704,7 @@ class GatewaySession:
             "pending_inbox": pending_inbox,
             "is_executing": self._is_executing,
             "channel_target": self._channel_target,
+            "visibility": self._visibility,
         }
     
     @classmethod
@@ -751,6 +755,7 @@ class GatewaySession:
         # Issue #3379: restore the channel origin so a boot-time resume can
         # notify the originating channel about an interrupted turn.
         session._channel_target = data.get("channel_target")
+        session._visibility = data.get("visibility", "private")
         
         return session
 
@@ -1214,6 +1219,9 @@ class WebSocketGateway:
         # refreshed on every inbound frame, dropped on teardown.
         self._client_last_seen: Dict[str, float] = {}  # client_id -> last activity ts
         self._client_sessions: Dict[str, str] = {}  # client_id -> session_id
+        # Issue #5997: non-owner observers per shared session (session_id ->
+        # {client_id: SessionSharingRole}). The owner stays ``session.client_id``.
+        self._session_observers: Dict[str, Dict[str, Any]] = {}
         self._client_scopes: Dict[str, List[str]] = {}  # client_id -> operator scopes
         # Issue #3467: in-flight turn registry so a running turn can be aborted
         # (by a WS ``abort`` frame or a portable ``/stop`` chat command) and so
@@ -2008,9 +2016,7 @@ class WebSocketGateway:
                 await self._teardown_client_conn(client_id)
                 self._client_scopes.pop(client_id, None)
                 self._client_auth_generation.pop(client_id, None)
-                session_id = self._client_sessions.pop(client_id, None)
-                if session_id:
-                    self.close_session(session_id)
+                self._release_client_session(client_id)
                 
                 await self.emit(GatewayEvent(
                     type=EventType.DISCONNECT,
@@ -4502,10 +4508,10 @@ class WebSocketGateway:
             })
 
         elif msg_type == "leave":
-            session_id = self._client_sessions.pop(client_id, None)
+            # Close an owned session (kept persisted for resumption); an
+            # attached observer only detaches from the shared session.
+            session_id = self._release_client_session(client_id)
             if session_id:
-                # Close session but keep it persisted for resumption
-                self.close_session(session_id, persist=True)
                 await self._send_to_client(client_id, {
                     "type": "left",
                     "session_id": session_id,
@@ -4875,7 +4881,9 @@ class WebSocketGateway:
                 relay_callback = None
                 relay_futures: List[Any] = []
                 emitter = getattr(agent, 'stream_emitter', None)
-                if emitter is not None and client_id:
+                if emitter is not None and (
+                    client_id or self._session_observers.get(session.session_id)
+                ):
                     relay_callback = self._make_stream_relay(
                         client_id, session, relay_futures
                     )
@@ -4974,13 +4982,18 @@ class WebSocketGateway:
                 outcome: Dict[str, Any] = {"status": outcome_status}
                 if turn_error is not None:
                     outcome["error"] = turn_error
-                await self._send_to_client(client_id, {
+                final_frame = {
                     "type": "response",
                     "status": "final",
                     "content": response,
                     "outcome": outcome,
                     "session_id": session.session_id,
-                })
+                }
+                await self._send_to_client(client_id, final_frame)
+                for observer_id in self._observer_targets(
+                    session.session_id, OperatorScope.READ, exclude=client_id
+                ):
+                    await self._send_to_client(observer_id, dict(final_frame))
         finally:
             session.mark_executing(False)
             session._inflight_unstarted = False
@@ -5082,13 +5095,20 @@ class WebSocketGateway:
                     target=client_id,
                 )
                 
-                # No get_event_loop() in the threaded callback.
-                fut = asyncio.run_coroutine_threadsafe(
-                    gateway._send_to_client(client_id, gw_event.to_dict()),
-                    loop,
+                # Issue #5997: fan out to the owner plus every attached
+                # observer whose scopes allow this event class.
+                targets = [client_id] if client_id else []
+                targets += gateway._observer_targets(
+                    sid, gateway._event_required_scope(gw_event), exclude=client_id
                 )
-                if pending is not None:
-                    pending.append(fut)
+                for target in targets:
+                    # No get_event_loop() in the threaded callback.
+                    fut = asyncio.run_coroutine_threadsafe(
+                        gateway._send_to_client(target, gw_event.to_dict()),
+                        loop,
+                    )
+                    if pending is not None:
+                        pending.append(fut)
             except Exception:
                 logger.warning("Stream relay error (non-fatal)", exc_info=True)
 
@@ -5135,9 +5155,7 @@ class WebSocketGateway:
         # stale scope/session entries that accumulate until shutdown.
         self._client_scopes.pop(client_id, None)
         self._client_auth_generation.pop(client_id, None)
-        session_id = self._client_sessions.pop(client_id, None)
-        if session_id:
-            self.close_session(session_id)
+        self._release_client_session(client_id)
         if ws is not None:
             try:
                 await ws.close(
@@ -5207,9 +5225,7 @@ class WebSocketGateway:
         await self._teardown_client_conn(client_id)
         self._client_scopes.pop(client_id, None)
         self._client_auth_generation.pop(client_id, None)
-        session_id = self._client_sessions.pop(client_id, None)
-        if session_id:
-            self.close_session(session_id)
+        self._release_client_session(client_id)
         if ws is not None:
             try:
                 await ws.close(
@@ -5261,9 +5277,7 @@ class WebSocketGateway:
         await self._teardown_client_conn(client_id)
         self._client_scopes.pop(client_id, None)
         self._client_auth_generation.pop(client_id, None)
-        session_id = self._client_sessions.pop(client_id, None)
-        if session_id:
-            self.close_session(session_id)
+        self._release_client_session(client_id)
         self._reaped_connections += 1
         if ws is not None:
             try:
@@ -5514,7 +5528,11 @@ class WebSocketGateway:
                     "tool_result_stream",
                 ]:
                     session_id = self._client_sessions.get(client_id)
-                    if session_id:
+                    # An attached member's fan-out copy is not recorded again
+                    # in the session's replay buffer (issue #5997).
+                    if session_id and client_id not in self._session_observers.get(
+                        session_id, {}
+                    ):
                         session = self._sessions.get(session_id)
                         if session:
                             event = GatewayEvent(
@@ -6322,8 +6340,25 @@ class WebSocketGateway:
         agent_id: str,
         client_id: Optional[str] = None,
         session_id: Optional[str] = None,
+        visibility: Optional[str] = None,
     ) -> GatewaySession:
-        """Create a new session or resume an existing one."""
+        """Create a new session or resume an existing one.
+
+        ``visibility`` (a ``SessionVisibility`` value) opts the session into
+        sharing; ``None`` keeps the existing/default ``private`` setting.
+        """
+        session = self._create_session(agent_id, client_id, session_id)
+        if visibility is not None:
+            from praisonaiagents.gateway.protocols import SessionVisibility
+            session._visibility = SessionVisibility(visibility).value
+        return session
+
+    def _create_session(
+        self,
+        agent_id: str,
+        client_id: Optional[str],
+        session_id: Optional[str],
+    ) -> GatewaySession:
         sid = session_id or str(uuid.uuid4())
         
         # Check if session exists in memory first
@@ -6443,10 +6478,103 @@ class WebSocketGateway:
         
         # Remove from active sessions
         self._sessions.pop(session_id, None)
+        self._drop_session_observers(session_id)
         
         logger.info(f"Session closed: {session_id}")
         return True
     
+    # ── Shared-session observers (SessionObserverProtocol, issue #5997) ──
+
+    def attach(self, session_id: str, client_id: str, role: Any = "viewer") -> None:
+        """Attach ``client_id`` to a shared session as ``member`` or ``viewer``.
+
+        Honours the session's ``SessionVisibility``: ``private`` sessions
+        refuse observers, ``read_only`` admits viewers only. A member is bound
+        to the session so its ``message`` frames co-drive it (still gated by
+        the ``write`` scope) and stay sender-attributed.
+        """
+        from praisonaiagents.gateway.protocols import (
+            SessionSharingRole,
+            SessionVisibility,
+        )
+
+        session = self._sessions.get(session_id)
+        if session is None:
+            raise KeyError(f"Unknown session: {session_id}")
+        role = SessionSharingRole(role)
+        if role is SessionSharingRole.OWNER or client_id == session.client_id:
+            raise ValueError("The owner is bound at session creation, not attached")
+        visibility = SessionVisibility(session._visibility)
+        if visibility is SessionVisibility.PRIVATE:
+            raise PermissionError(f"Session {session_id} is private")
+        if visibility is SessionVisibility.READ_ONLY and role is not SessionSharingRole.VIEWER:
+            raise PermissionError(f"Session {session_id} is read-only; attach as viewer")
+        bound = self._client_sessions.get(client_id)
+        if bound is not None and bound != session_id:
+            raise ValueError(f"Client {client_id} is already bound to session {bound}")
+
+        self._session_observers.setdefault(session_id, {})[client_id] = role
+        if role is SessionSharingRole.MEMBER:
+            self._client_sessions[client_id] = session_id
+        elif bound == session_id:
+            # Demoted member -> viewer: it may no longer send.
+            self._client_sessions.pop(client_id, None)
+
+    def detach(self, session_id: str, client_id: str) -> None:
+        """Stop ``client_id`` observing ``session_id`` (no-op if not attached)."""
+        roster = self._session_observers.get(session_id)
+        if not roster or roster.pop(client_id, None) is None:
+            return
+        if not roster:
+            self._session_observers.pop(session_id, None)
+        if self._client_sessions.get(client_id) == session_id:
+            self._client_sessions.pop(client_id, None)
+
+    def observers(self, session_id: str) -> List[Tuple[str, Any]]:
+        """Return ``(client_id, role)`` pairs for the owner and attached observers."""
+        from praisonaiagents.gateway.protocols import SessionSharingRole
+
+        session = self._sessions.get(session_id)
+        roster: List[Tuple[str, Any]] = []
+        if session is not None and session.client_id:
+            roster.append((session.client_id, SessionSharingRole.OWNER))
+        roster.extend(self._session_observers.get(session_id, {}).items())
+        return roster
+
+    def _observer_targets(
+        self,
+        session_id: str,
+        scope: OperatorScope,
+        exclude: Optional[str] = None,
+    ) -> List[str]:
+        """Connected observers of ``session_id`` that hold ``scope`` (fan-out)."""
+        return [
+            cid
+            for cid in list(self._session_observers.get(session_id, {}))
+            if cid != exclude and cid in self._clients and self._client_has_scope(cid, scope)
+        ]
+
+    def _drop_session_observers(self, session_id: str) -> None:
+        """Forget every observer of a closed session (unbinding members)."""
+        for cid in self._session_observers.pop(session_id, {}):
+            if self._client_sessions.get(cid) == session_id:
+                self._client_sessions.pop(cid, None)
+
+    def _release_client_session(self, client_id: str) -> Optional[str]:
+        """Unbind a departing client; close its session only if it owns it.
+
+        Detaches the client from every shared session it observes, so a
+        member or viewer leaving never tears down someone else's session.
+        Returns the session the client was bound to (if any).
+        """
+        bound = self._client_sessions.get(client_id)
+        for sid in [s for s, r in self._session_observers.items() if client_id in r]:
+            self.detach(sid, client_id)
+        session_id = self._client_sessions.pop(client_id, None)
+        if session_id:
+            self.close_session(session_id)
+        return bound
+
     def list_sessions(self, agent_id: Optional[str] = None) -> List[str]:
         """List session IDs, optionally filtered by agent."""
         if agent_id:
