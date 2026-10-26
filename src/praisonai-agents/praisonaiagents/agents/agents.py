@@ -1729,10 +1729,21 @@ class AgentTeam(SpawnAnnounceProtocol):
             except Exception as e:
                 logger.error(f"Error in on_task_start callback: {e}")
 
-        # Apply global variables to task if not already set. Use a shallow copy so a
-        # task mutating its variables doesn't leak back into the shared AgentTeam state.
+        self._propagate_variables(task, task_id)
+
+    def _propagate_variables(self, task, task_id):
+        """Apply global variables to a task that has none of its own.
+
+        Uses a shallow copy so a task mutating its variables doesn't leak back
+        into the shared AgentTeam state. The copy is remembered so a later fresh
+        ``start()`` can drop it (and re-propagate current values) without
+        touching caller-defined ``Task.variables``.
+        """
         if self.variables and not getattr(task, 'variables', None):
             task.variables = self.variables.copy()
+            if not hasattr(self, "_propagated_variables"):
+                self._propagated_variables = {}
+            self._propagated_variables[task_id] = task.variables
 
     def _run_task_complete_hook(self, task, task_output):
         """Run the on_task_complete hook. Shared by run_task and arun_task."""
@@ -1759,8 +1770,7 @@ class AgentTeam(SpawnAnnounceProtocol):
             except Exception as e:
                 logger.error(f"Error in on_task_start callback: {e}")
 
-        if self.variables and not getattr(task, 'variables', None):
-            task.variables = self.variables.copy()
+        self._propagate_variables(task, task_id)
 
     async def _arun_task_complete_hook(self, task, task_output):
         """Async-aware on_task_complete hook for arun_task (see _arun_task_start_hook)."""
@@ -2260,12 +2270,16 @@ class AgentTeam(SpawnAnnounceProtocol):
         # Re-entrant on the owning thread so batch runs (astart_for_each) can hold
         # the guard across the whole batch while still calling astart() per item.
         with self._guard_execution():
-            from ..trace.context_events import _workflow_scope
-            with _workflow_scope("team", self._replay_name(), self.process,
-                                 graph_fn=self.to_graph, run_id=self.run_id) as _run:
-                result = await self._astart_impl(content=content, return_dict=return_dict, **kwargs)
-                self._mark_run_status(_run)
-                return result
+            self._reset_if_previous_run_finished()
+            try:
+                from ..trace.context_events import _workflow_scope
+                with _workflow_scope("team", self._replay_name(), self.process,
+                                     graph_fn=self.to_graph, run_id=self.run_id) as _run:
+                    result = await self._astart_impl(content=content, return_dict=return_dict, **kwargs)
+                    self._mark_run_status(_run)
+                    return result
+            finally:
+                self._previous_run_finished = True
 
     async def _astart_impl(self, content=None, return_dict=False, **kwargs):
         # Track execution via telemetry
@@ -2279,6 +2293,7 @@ class AgentTeam(SpawnAnnounceProtocol):
                     if not task.context:
                         task.context = []
                     task.context.append(content)
+                    self._injected_content.append((task, content))
 
         if self.planning:
             await self._arun_with_planning()
@@ -2613,13 +2628,17 @@ class AgentTeam(SpawnAnnounceProtocol):
         # Re-entrant on the owning thread so batch runs (start_for_each) can hold
         # the guard across the whole batch while still calling start() per item.
         with self._guard_execution():
-            from ..trace.context_events import _workflow_scope
-            with _workflow_scope("team", self._replay_name(), self.process,
-                                 graph_fn=self.to_graph, run_id=self.run_id) as _run:
-                result = self._start_impl(content=content, return_dict=return_dict,
-                                          output=output, **kwargs)
-                self._mark_run_status(_run)
-                return result
+            self._reset_if_previous_run_finished()
+            try:
+                from ..trace.context_events import _workflow_scope
+                with _workflow_scope("team", self._replay_name(), self.process,
+                                     graph_fn=self.to_graph, run_id=self.run_id) as _run:
+                    result = self._start_impl(content=content, return_dict=return_dict,
+                                              output=output, **kwargs)
+                    self._mark_run_status(_run)
+                    return result
+            finally:
+                self._previous_run_finished = True
 
     def _replay_name(self) -> str:
         """Run label for Replay: the team's name, else its agents joined ("A + B")."""
@@ -2664,6 +2683,7 @@ class AgentTeam(SpawnAnnounceProtocol):
                     if not task.context:
                         task.context = []
                     task.context.append(content)
+                    self._injected_content.append((task, content))
         
         # ─────────────────────────────────────────────────────────────
         # Verbose Mode: Show Rich panels for multi-agent workflow
@@ -2859,14 +2879,19 @@ class AgentTeam(SpawnAnnounceProtocol):
         Captures the fields that ``run_task``/``arun_task`` mutate during a run
         (``status``, ``result``, ``retry_count``) plus caller-defined
         ``variables``, keeping the public Task API backward-compatible.
+        ``propagated`` records whether those variables were copied from the
+        team's ``variables`` so a restore keeps that ownership tracking.
         """
         snapshot = {}
+        propagated = getattr(self, "_propagated_variables", {})
         for task_id, task in getattr(self, "tasks", {}).items():
+            variables = getattr(task, "variables", None)
             snapshot[task_id] = {
                 "status": getattr(task, "status", None),
                 "result": getattr(task, "result", None),
                 "retry_count": getattr(task, "retry_count", None),
-                "variables": getattr(task, "variables", None),
+                "variables": variables,
+                "propagated": variables is not None and propagated.get(task_id) is variables,
             }
         return snapshot
 
@@ -2885,8 +2910,41 @@ class AgentTeam(SpawnAnnounceProtocol):
                 task.retry_count = 0
             task.variables = {}
 
+    def _reset_if_previous_run_finished(self):
+        """Make a repeated ``start()``/``astart()`` a fresh run.
+
+        ``run_task``/``arun_task`` skip tasks whose status is "completed", so
+        without this a second ``start()`` on the same team executed nothing and
+        returned the previous run's output. Resetting only once a previous run
+        has finished keeps ``restore_session_state()`` + ``start()`` resuming,
+        and also drops the ``content`` earlier runs appended to task context.
+        Caller-defined ``Task.variables`` are kept; only copies propagated from
+        the team's ``variables`` are cleared so current values re-propagate.
+        """
+        injected = getattr(self, "_injected_content", [])
+        if getattr(self, "_previous_run_finished", False):
+            propagated = getattr(self, "_propagated_variables", {})
+            for task_id, task in self.tasks.items():
+                task.status = "not started"
+                task.result = None
+                if hasattr(task, "retry_count"):
+                    task.retry_count = 0
+                if task_id in propagated and getattr(task, "variables", None) is propagated[task_id]:
+                    task.variables = {}
+            propagated.clear()
+            for task, item in injected:
+                try:
+                    task.context.remove(item)
+                except (AttributeError, ValueError):
+                    pass
+            injected = []
+        # A resumed run keeps the tracked entries so the next fresh run removes them.
+        self._previous_run_finished = False
+        self._injected_content = injected
+
     def _restore_task_state(self, snapshot):
         """Restore per-task run state captured by ``_snapshot_task_state``."""
+        propagated = {}
         for task_id, state in snapshot.items():
             task = self.tasks.get(task_id)
             if task is None:
@@ -2896,6 +2954,9 @@ class AgentTeam(SpawnAnnounceProtocol):
             if state["retry_count"] is not None:
                 task.retry_count = state["retry_count"]
             task.variables = state["variables"]
+            if state.get("propagated"):
+                propagated[task_id] = task.variables
+        self._propagated_variables = propagated
 
     def _build_batch_result(self, batch_id, items):
         """Aggregate per-item results into a batch summary dict.
@@ -3244,6 +3305,9 @@ class AgentTeam(SpawnAnnounceProtocol):
             if state.get("variables"):
                 task.variables = state["variables"]
             restored += 1
+        if restored:
+            # A restored checkpoint is meant to be resumed, not reset.
+            self._previous_run_finished = False
         return restored
 
     @staticmethod
