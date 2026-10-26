@@ -907,6 +907,7 @@ Methods:
 * <code title="cli">praisonai replay rerun <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
 * <code title="cli">praisonai replay show <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
 * <code title="cli">praisonai replay view <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
+* <code title="cli">praisonai replay watch <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
 * <code title="cli">praisonai run <a href="./src/praisonai/praisonai/cli/main.py">--help</a></code>
 * <code title="cli">praisonai schedule add <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
 * <code title="cli">praisonai schedule blueprint <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
