@@ -724,6 +724,31 @@ class TestLiteLLMPath:
         response = _of(recorder, "llm_response")
         assert len(response) == 1 and response[0].data["finish_reason"] == "error"
 
+    def test_responses_api_calls_record_events(self, recorder, monkeypatch):
+        """OpenAI models on the LiteLLM path go through the Responses API."""
+        from praisonaiagents.llm.llm import LLM
+
+        usage = types.SimpleNamespace(input_tokens=7, output_tokens=2)
+        monkeypatch.setattr(LLM, "_call_responses_api_impl", lambda self, **p: types.SimpleNamespace(usage=usage))
+        monkeypatch.setattr(LLM, "_extract_from_responses_output", lambda self, r: ("answer", None, None))
+        monkeypatch.setattr(LLM, "_stream_responses_api_impl",
+                            lambda self, params, *a, **k: ("streamed", None, types.SimpleNamespace(usage=usage)))
+
+        async def acall(self, **p):
+            return types.SimpleNamespace(usage=usage)
+        monkeypatch.setattr(LLM, "_call_responses_api_async_impl", acall)
+
+        llm = self._llm()
+        params = {"model": "gpt-4o-mini", "input": [{"role": "user", "content": "hi"}]}
+        llm._call_responses_api(**params)
+        llm._stream_responses_api(dict(params), verbose=False)
+        asyncio.run(llm._call_responses_api_async(**params))
+        requests, responses = _of(recorder, "llm_request"), _of(recorder, "llm_response")
+        assert len(requests) == len(responses) == 3
+        assert requests[0].messages_count == 1
+        assert [r.data["response_content"] for r in responses] == ["answer", "streamed", "answer"]
+        assert all((r.prompt_tokens, r.completion_tokens) == (7, 2) for r in responses)
+
     def test_control_disabled_tracing_leaves_the_stream_untouched(self, fake_litellm):
         llm = self._llm()
         stream = llm._completion_with_retry(model="gpt-4o-mini", messages=[], stream=True)

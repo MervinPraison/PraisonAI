@@ -58,7 +58,8 @@ def _replay_llm_begin(llm: Any, params: Dict[str, Any]):
         return None
     agent = getattr(llm, "current_agent_name", None) or emitter._current_agent()
     model = params.get("model") or getattr(llm, "model", None)
-    messages = params.get("messages")
+    # Chat Completions sends ``messages``; the Responses API sends ``input``.
+    messages = params.get("messages", params.get("input"))
     messages = messages if isinstance(messages, list) else None
     emitter._emit(emitter._llm_request_event(
         agent, len(messages) if messages else 0, 0, model=model, messages=messages,
@@ -71,7 +72,10 @@ def _replay_usage_tokens(usage: Any) -> tuple:
     if not usage:
         return 0, 0
     get = usage.get if isinstance(usage, dict) else (lambda k, d=None: getattr(usage, k, d))
-    return int(get("prompt_tokens", 0) or 0), int(get("completion_tokens", 0) or 0)
+    # Chat Completions names, then the Responses API names.
+    prompt = get("prompt_tokens", None) or get("input_tokens", 0)
+    completion = get("completion_tokens", None) or get("output_tokens", 0)
+    return int(prompt or 0), int(completion or 0)
 
 
 def _replay_observe(span: Dict[str, Any], response: Any, chunk: bool) -> None:
@@ -124,6 +128,19 @@ def _replay_llm_end(span: Optional[Dict[str, Any]], error: Optional[BaseExceptio
         cost_usd=cost,
         model=span["model"],
     ))
+
+
+def _replay_stream_result(span: Dict[str, Any], result: Any) -> None:
+    """Finish a span from a streamed Responses API ``(text, tools, final)`` tuple."""
+    try:
+        text, final = result[0], result[2] if len(result) > 2 else None
+        if isinstance(text, str) and text:
+            span["content"].append(text)
+        if final is not None:
+            span["usage"] = getattr(final, "usage", None)
+    except Exception:
+        pass
+    _replay_llm_end(span)
 
 
 class _ReplayStream:
@@ -7792,6 +7809,32 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         return params
 
     def _call_responses_api(self, **params) -> Any:
+        """``litellm.responses()`` with retry, recorded on the replay trace."""
+        span = _replay_llm_begin(self, params)
+        if span is None:
+            return self._call_responses_api_impl(**params)
+        try:
+            response = self._call_responses_api_impl(**params)
+        except BaseException as exc:
+            _replay_llm_end(span, exc)
+            raise
+        self._replay_observe_responses(span, response)
+        _replay_llm_end(span)
+        return response
+
+    def _replay_observe_responses(self, span: Dict[str, Any], response: Any) -> None:
+        """Usage and text of a Responses API result, for the replay trace."""
+        try:
+            span["usage"] = getattr(response, "usage", None) or (
+                response.get("usage") if isinstance(response, dict) else None
+            )
+            text = self._extract_from_responses_output(response)[0]
+            if isinstance(text, str) and text:
+                span["content"].append(text)
+        except Exception:
+            pass  # Tracing must never break a model call.
+
+    def _call_responses_api_impl(self, **params) -> Any:
         """
         Call ``litellm.responses()`` synchronously with retry support.
         Returns a ``ResponsesAPIResponse`` object.
@@ -7805,6 +7848,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         return self._call_with_retry(litellm.responses, **params)
 
     async def _call_responses_api_async(self, **params) -> Any:
+        """``litellm.aresponses()`` with retry, recorded on the replay trace."""
+        span = _replay_llm_begin(self, params)
+        if span is None:
+            return await self._call_responses_api_async_impl(**params)
+        try:
+            response = await self._call_responses_api_async_impl(**params)
+        except BaseException as exc:
+            _replay_llm_end(span, exc)
+            raise
+        self._replay_observe_responses(span, response)
+        _replay_llm_end(span)
+        return response
+
+    async def _call_responses_api_async_impl(self, **params) -> Any:
         """
         Call ``litellm.aresponses()`` asynchronously with retry support.
         Returns a ``ResponsesAPIResponse`` object.
@@ -7934,7 +7991,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except Exception:
             logging.debug("Responses stream cleanup failed", exc_info=True)
 
-    def _stream_responses_api(
+    def _stream_responses_api(self, params: Dict[str, Any], *args: Any, **kwargs: Any) -> tuple:
+        """Streamed ``litellm.responses()``, recorded on the replay trace."""
+        span = _replay_llm_begin(self, params)
+        if span is None:
+            return self._stream_responses_api_impl(params, *args, **kwargs)
+        try:
+            result = self._stream_responses_api_impl(params, *args, **kwargs)
+        except BaseException as exc:
+            _replay_llm_end(span, exc)
+            raise
+        _replay_stream_result(span, result)
+        return result
+
+    def _stream_responses_api_impl(
         self,
         params: Dict[str, Any],
         verbose: bool = True,
@@ -8087,7 +8157,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
         return response_text, tool_calls if tool_calls else None, _final_response
 
-    async def _stream_responses_api_async(
+    async def _stream_responses_api_async(self, params: Dict[str, Any], *args: Any, **kwargs: Any) -> tuple:
+        """Async streamed ``litellm.aresponses()``, recorded on the replay trace."""
+        span = _replay_llm_begin(self, params)
+        if span is None:
+            return await self._stream_responses_api_async_impl(params, *args, **kwargs)
+        try:
+            result = await self._stream_responses_api_async_impl(params, *args, **kwargs)
+        except BaseException as exc:
+            _replay_llm_end(span, exc)
+            raise
+        _replay_stream_result(span, result)
+        return result
+
+    async def _stream_responses_api_async_impl(
         self,
         params: Dict[str, Any],
         stream_callback: Optional[Callable] = None,
