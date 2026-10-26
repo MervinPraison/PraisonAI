@@ -26,7 +26,7 @@ from pydantic import BaseModel
 import time
 import json
 import xml.etree.ElementTree as ET
-from ..errors import AgentErrorKind, FailoverDecision, IdleTimeoutBreaker, ToolExecutionError
+from ..errors import AgentErrorKind, BudgetExceededError, FailoverDecision, IdleTimeoutBreaker, ToolExecutionError
 from ..model_harness.guard import check_model_request
 # Gap 2: Tool call execution imports
 from ..tools.call_executor import ToolCall, create_tool_call_executor
@@ -343,6 +343,11 @@ except ImportError:
 # (Agent.chat → _chat_completion) are separate code paths, not duplicate
 # API calls per request. This is a DRY/maintenance concern, not a billing issue.
 from ..tools.hosted import is_hosted_tool  # noqa: E402
+
+# ``(llm, callback)`` bound by the owning Agent for one custom-LLM turn. Every
+# tracked call made by that ``llm`` reports its response to ``callback`` so the
+# Agent's cost/token counters and ``max_budget`` cover the whole tool loop.
+_usage_sink = contextvars.ContextVar("praisonai_llm_usage_sink", default=None)
 
 
 class LLMResponseError(Exception):
@@ -3988,7 +3993,9 @@ Respond with ONLY a valid JSON tool call in this format:
                                         # Mark that fallback completed successfully
                                         fallback_completed = True
                                         streaming_success = False
-                                        
+
+                                    except BudgetExceededError:
+                                        raise
                                     except Exception as fallback_error:
                                         # If non-streaming also fails, create a graceful fallback with partial streaming data
                                         logging.warning(f"Non-streaming fallback also failed: {fallback_error}")
@@ -4514,7 +4521,7 @@ Respond with ONLY a valid JSON tool call in this format:
                         final_response_text = response_text.strip() if response_text else ""
                         break
                         
-                except (LLMResponseError, ToolExecutionError):
+                except (LLMResponseError, ToolExecutionError, BudgetExceededError):
                     raise
                 except Exception as e:
                     logging.error(f"Error in LLM iteration {iteration_count}: {e}")
@@ -4861,6 +4868,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             interaction_displayed = True
                         return _prepare_return_value(response_text)
                     continue
+                except BudgetExceededError:
+                    raise
                 except Exception as e:
                     _get_display_functions()['display_error'](f"Error in LLM response: {str(e)}")
                     return None
@@ -6856,6 +6865,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def _track_token_usage(self, response: Any, model: str) -> Optional[TokenMetrics]:
         """Extract and track token usage from LLM response."""
+        try:
+            return self._collect_token_metrics(response, model)
+        finally:
+            # Outside the collector's error swallowing so the Agent's budget
+            # check can raise BudgetExceededError and stop the tool loop.
+            sink = _usage_sink.get()
+            if sink is not None and sink[0] is self:
+                sink[1](response)
+
+    def _collect_token_metrics(self, response: Any, model: str) -> Optional[TokenMetrics]:
         if not TokenMetrics or not get_token_collector:
             return None
 

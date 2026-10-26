@@ -400,6 +400,24 @@ class AutonomyResult:
         """
         return self.output or ""
 
+
+def _timeout_result(timeout_seconds, iterations, stage, actions, start_time, started_at):
+    """Return a ``timeout`` AutonomyResult once a run is past ``timeout_seconds``, else None."""
+    import time
+    if not timeout_seconds or (time.time() - start_time) <= timeout_seconds:
+        return None
+    return AutonomyResult(
+        success=False,
+        output="Task timed out",
+        completion_reason="timeout",
+        iterations=iterations,
+        stage=stage,
+        actions=actions,
+        duration_seconds=time.time() - start_time,
+        started_at=started_at,
+    )
+
+
 class DoomLoopTracker:
     """Tracks actions to detect doom loops with graduated recovery.
     

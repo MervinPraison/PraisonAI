@@ -12,7 +12,7 @@ from collections import OrderedDict
 import inspect
 
 # Decomposed agent functionality - real implementations in mixin files
-from .chat_mixin import ChatMixin
+from .chat_mixin import ChatMixin, _deadline_scope
 from .execution_mixin import ExecutionMixin
 from .memory_mixin import MemoryMixin
 from .async_memory_mixin import AsyncMemoryMixin
@@ -4113,7 +4113,9 @@ Summary:"""
         step budget from ``ExecutionConfig.max_steps`` was reached and the run was
         truncated), a provider block/refusal/truncation
         (``"content_filtered" | "refused" | "length_truncated"``) derived from the
-        LLM ``finish_reason``/refusal signal, or ``"error"``. Lets CLI/CI callers
+        LLM ``finish_reason``/refusal signal, ``"timeout"`` (the turn passed
+        ``ExecutionConfig.max_execution_time`` or the ``run_autonomous``
+        deadline), or ``"error"``. Lets CLI/CI callers
         branch on the terminal reason instead of parsing a magic string. Reads
         from whichever backend (OpenAI-native or LiteLLM) executed the last turn.
         """
@@ -4731,7 +4733,7 @@ Summary:"""
             if result.success:
                 print(result.output)
         """
-        from .autonomy import AutonomyResult
+        from .autonomy import AutonomyResult, _timeout_result
         import time as time_module
         from datetime import datetime, timezone
         
@@ -4805,17 +4807,10 @@ Summary:"""
                 )
                 
                 # Check timeout
-                if timeout_seconds and (time_module.time() - start_time) > timeout_seconds:
-                    return AutonomyResult(
-                        success=False,
-                        output="Task timed out",
-                        completion_reason="timeout",
-                        iterations=iterations,
-                        stage=stage,
-                        actions=actions_taken,
-                        duration_seconds=time_module.time() - start_time,
-                        started_at=started_at,
-                    )
+                _timed_out = _timeout_result(
+                    timeout_seconds, iterations, stage, actions_taken, start_time, started_at)
+                if _timed_out is not None:
+                    return _timed_out
                 
                 # G2: Check for interrupt request (cooperative cancellation) - sync version
                 if self.interrupt_controller and self.interrupt_controller.is_set():
@@ -4838,9 +4833,13 @@ Summary:"""
                 # Reset the per-turn warning latch and inject any queued nudge.
                 turn_prompt = self._consume_self_correction(prompt)
                 try:
-                    response = self.chat(turn_prompt)
+                    with _deadline_scope(timeout_seconds and timeout_seconds - (time_module.time() - start_time)):
+                        response = self.chat(turn_prompt)
                 except Exception as e:
-                    return AutonomyResult(
+                    # The run deadline cancels an overrunning turn; report it as a timeout.
+                    return _timeout_result(
+                        timeout_seconds, iterations, stage, actions_taken, start_time, started_at
+                    ) or AutonomyResult(
                         success=False,
                         output=str(e),
                         completion_reason="error",
@@ -4851,6 +4850,12 @@ Summary:"""
                         error=str(e),
                         started_at=started_at,
                     )
+                
+                # A turn that overran the run deadline must not count as progress.
+                _timed_out = _timeout_result(
+                    timeout_seconds, iterations, stage, actions_taken, start_time, started_at)
+                if _timed_out is not None:
+                    return _timed_out
                 
                 response_str = str(response)
                 
@@ -5236,7 +5241,7 @@ Summary:"""
             
             asyncio.run(main())
         """
-        from .autonomy import AutonomyResult
+        from .autonomy import AutonomyResult, _timeout_result
         import time as time_module
         from datetime import datetime, timezone
         import asyncio
@@ -5288,17 +5293,10 @@ Summary:"""
                 iterations += 1
                 
                 # Check timeout
-                if timeout_seconds and (time_module.time() - start_time) > timeout_seconds:
-                    return AutonomyResult(
-                        success=False,
-                        output="Task timed out",
-                        completion_reason="timeout",
-                        iterations=iterations,
-                        stage=stage,
-                        actions=actions_taken,
-                        duration_seconds=time_module.time() - start_time,
-                        started_at=started_at,
-                    )
+                _timed_out = _timeout_result(
+                    timeout_seconds, iterations, stage, actions_taken, start_time, started_at)
+                if _timed_out is not None:
+                    return _timed_out
                 
                 # G2: Check for interrupt request (cooperative cancellation)
                 if self.interrupt_controller and self.interrupt_controller.is_set():
@@ -5322,9 +5320,13 @@ Summary:"""
                 # Reset the per-turn warning latch and inject any queued nudge.
                 turn_prompt = self._consume_self_correction(prompt)
                 try:
-                    response = await self.achat(turn_prompt)
+                    with _deadline_scope(timeout_seconds and timeout_seconds - (time_module.time() - start_time)):
+                        response = await self.achat(turn_prompt)
                 except Exception as e:
-                    return AutonomyResult(
+                    # The run deadline cancels an overrunning turn; report it as a timeout.
+                    return _timeout_result(
+                        timeout_seconds, iterations, stage, actions_taken, start_time, started_at
+                    ) or AutonomyResult(
                         success=False,
                         output=str(e),
                         completion_reason="error",
@@ -5335,6 +5337,12 @@ Summary:"""
                         error=str(e),
                         started_at=started_at,
                     )
+                
+                # A turn that overran the run deadline must not count as progress.
+                _timed_out = _timeout_result(
+                    timeout_seconds, iterations, stage, actions_taken, start_time, started_at)
+                if _timed_out is not None:
+                    return _timed_out
                 
                 response_str = str(response)
                 
