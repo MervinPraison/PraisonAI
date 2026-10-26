@@ -30,6 +30,7 @@ import threading
 from collections import OrderedDict
 from typing import Any, Callable, Dict, Iterator, List, Optional, Union
 
+from praisonaiagents.trace.redact import REDACTED_VALUE
 from praisonaiagents.workflows.step_cache import StepCacheProtocol
 
 from .events import as_dicts, etype, load_events, pair_spans, run_id_of
@@ -66,6 +67,7 @@ class RerunPlan:
         kind: str,
         outputs: "OrderedDict[str, Any]",
         variables: Optional[Dict[str, Dict[str, Any]]] = None,
+        started_before: Optional[List[str]] = None,
     ):
         self.source_run_id = source_run_id
         self.node_id = node_id
@@ -73,6 +75,9 @@ class RerunPlan:
         self.outputs = outputs
         # Variable updates a step's handler made, when its step_end recorded them.
         self.variables = variables or {}
+        # Every node of the target's kind that STARTED before it, whatever its
+        # status (skipped and failed steps too): what the recorded run executed.
+        self.started_before = list(started_before or [])
 
     @property
     def forked_from(self) -> Dict[str, str]:
@@ -150,6 +155,10 @@ def plan_rerun(events: Union[str, List[Any]], node_id: str) -> RerunPlan:
 
     outputs: "OrderedDict[str, Any]" = OrderedDict()
     variables: Dict[str, Dict[str, Any]] = {}
+    started_before = [
+        s["start"]["node_id"] for s in nodes
+        if s["type"] == target["type"] and s["seq"] < target["seq"]
+    ]
     for span in nodes:
         if span["type"] != target["type"] or span["end"] is None:
             continue
@@ -164,8 +173,16 @@ def plan_rerun(events: Union[str, List[Any]], node_id: str) -> RerunPlan:
         outputs[span["start"]["node_id"]] = _recover_output(span, evs)
         recorded_vars = (span["end"].get("data") or {}).get("variables")
         if isinstance(recorded_vars, dict):
+            # A redacted value cannot be restored: the marker would replace the
+            # real value in the re-run's variables.
+            hidden = [k for k, v in recorded_vars.items() if REDACTED_VALUE in repr(v)]
+            if hidden:
+                raise RerunError(
+                    f"{span['start']['node_id']} set {', '.join(map(repr, hidden))}, which the "
+                    "recording redacted, so it cannot be restored; re-run from that node or earlier."
+                )
             variables[span["start"]["node_id"]] = recorded_vars
-    return RerunPlan(run_id_of(evs), node_id, kind, outputs, variables)
+    return RerunPlan(run_id_of(evs), node_id, kind, outputs, variables, started_before)
 
 
 # ---------------------------------------------------------------------------
@@ -268,11 +285,22 @@ def _flow_step_names(steps: Any) -> set:
     return names
 
 
-def _check_flow_order(steps: List[Any], recorded: List[str]) -> None:
+def _check_flow_order(
+    steps: List[Any],
+    recorded: List[str],
+    started_before: Optional[List[str]] = None,
+    node_ids: Optional[Dict[int, str]] = None,
+) -> None:
     """Reject a sequential flow whose top-level steps are not in the recorded order.
 
     Only checked when the flow runs strictly in sequence: ``next_steps`` /
     ``branch_condition`` jumps or a repeated node (``#2``) can revisit steps.
+    Also rejects a step inserted before the target that never ran in the
+    recording: it would run fresh and replace the reused output the target
+    expects as its input. Steps are matched by graph node id (``node_ids``,
+    id(step) -> node id), so unnamed patterns such as ``If`` are covered too.
+    A target nested in a pattern is checked up to that pattern: the last
+    top-level step the recording started before the target.
     """
     if any(getattr(s, "next_steps", None) or getattr(s, "branch_condition", None) for s in steps):
         return
@@ -284,6 +312,20 @@ def _check_flow_order(steps: List[Any], recorded: List[str]) -> None:
             value = getattr(step, attr, None)
             if isinstance(value, str):
                 position.setdefault(value, index)
+    if started_before is not None and node_ids is not None and recorded:
+        ran = set(started_before)
+        top = [node_ids.get(id(step)) for step in steps]
+        if recorded[-1] in top:
+            anchor = top.index(recorded[-1])
+        else:  # nested target: its container is the last top-level step that started
+            anchor = max((i for i, node_id in enumerate(top) if node_id in ran), default=-1)
+        if anchor > 0:
+            for step, node_id in zip(steps, top[:anchor]):
+                if node_id not in ran:
+                    raise RerunError(
+                        f"Step {node_id or type(step).__name__!r} comes before {recorded[-1]!r} in "
+                        "this flow but did not run in the recording; re-run against the flow that recorded it."
+                    )
     last = -1
     for node_id in recorded:  # nested steps have no top-level position: skipped
         index = position.get(_step_name(node_id))
@@ -299,6 +341,7 @@ def _check_flow_order(steps: List[Any], recorded: List[str]) -> None:
 
 def seed_flow(flow: Any, plan: RerunPlan) -> TraceStepCache:
     """Install a :class:`TraceStepCache` for ``plan`` on an AgentFlow."""
+    from praisonaiagents.workflows.diagram import _flow_graph
     from praisonaiagents.workflows.step_cache import resolve_step_cache
 
     # A different or edited flow would silently run unmatched steps fresh.
@@ -307,7 +350,9 @@ def seed_flow(flow: Any, plan: RerunPlan) -> TraceStepCache:
     for node_id in recorded:
         if _step_name(node_id) not in names:
             raise RerunError(f"Recorded node {node_id!r} does not match any step in this flow.")
-    _check_flow_order(getattr(flow, "steps", None) or [], recorded)
+    _check_flow_order(
+        getattr(flow, "steps", None) or [], recorded, plan.started_before, _flow_graph(flow).ids,
+    )
 
     cache = TraceStepCache(plan.outputs, plan.variables).bind(flow)
     flow.cache = cache

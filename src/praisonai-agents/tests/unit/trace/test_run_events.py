@@ -821,3 +821,119 @@ class TestTeamRunLabel:
 
         team = AgentTeam(agents=[Agent(name="Researcher", output="silent")], name="EV brief")
         assert team._replay_name() == "EV brief"
+
+
+class TestStepVariables:
+    """step_end records the variables a step set, so a re-run can restore them."""
+
+    def test_step_end_records_handler_variables_redacted(self, recorder):
+        from praisonaiagents.workflows import StepResult
+        from praisonaiagents.workflows.workflows import AgentFlow
+
+        def research(ctx):
+            return StepResult(output="notes", variables={"customer_id": 42, "api_key": "sk-abcdefghijklmnop1234"})
+
+        def draft(ctx):
+            return StepResult(output="draft")
+
+        AgentFlow(name="v", steps=[research, draft]).run("go")
+        ends = {e.node_id: e.data for e in _of(recorder, "step_end")}
+        assert ends["step:research"]["variables"]["customer_id"] == 42
+        assert "sk-abcdefghijklmnop1234" not in str(ends["step:research"]["variables"])
+        assert "variables" not in ends["step:draft"]
+
+    def test_nested_step_end_records_handler_variables(self, recorder):
+        """Steps run through _execute_single_step_internal (patterns, hierarchical) record them too."""
+        from praisonaiagents.workflows import StepResult
+        from praisonaiagents.workflows.workflows import AgentFlow, If
+
+        def research(ctx):
+            return StepResult(output="notes", variables={"customer_id": 42})
+
+        AgentFlow(name="v", steps=[If(condition="1 > 0", then_steps=[research])]).run("go")
+        ends = {e.node_id: e.data for e in _of(recorder, "step_end")}
+        variables = next(d["variables"] for n, d in ends.items() if n.endswith("research"))
+        assert variables == {"customer_id": 42}
+
+    def test_cache_hit_step_end_leaves_out_the_output_variable(self, recorder):
+        """The step cache stores the output variable (the full output); a cached
+        step_end must trace only what the handler set, like the cold run."""
+        from praisonaiagents.workflows import StepResult
+        from praisonaiagents.workflows.workflows import AgentFlow
+
+        def research(ctx):
+            return StepResult(output="the full step output " * 50, variables={"customer_id": 42})
+
+        flow = AgentFlow(name="v", steps=[research], cache=True)
+        flow.run("go")
+        flow.run("go")  # cache hit
+        ends = [e.data for e in _of(recorder, "step_end")]
+        assert [d["status"] for d in ends] == ["completed", "cached"]
+        for d in ends:
+            assert d["variables"] == {"customer_id": 42}
+            assert "the full step output" not in str(d["variables"])
+
+    def test_nested_step_records_a_variable_changed_in_place(self, recorder):
+        """A list the step appends to (same object) still counts as set by it."""
+        from praisonaiagents.workflows import StepResult
+        from praisonaiagents.workflows.workflows import AgentFlow, If
+
+        def seed(ctx):
+            return StepResult(output="s", variables={"items": ["a"]})
+
+        def add(ctx):
+            ctx.variables["items"].append("b")
+            return StepResult(output="m")
+
+        AgentFlow(name="v", steps=[seed, If(condition="1 > 0", then_steps=[add])]).run("go")
+        ends = {e.node_id: e.data for e in _of(recorder, "step_end")}
+        variables = next(d.get("variables") for n, d in ends.items() if n.endswith("add"))
+        assert variables == {"items": ["a", "b"]}
+
+    def test_uncopyable_variable_does_not_hide_an_in_place_change(self, recorder):
+        """One variable that cannot be deep-copied must not stop the others being compared by value."""
+        import threading
+        from praisonaiagents.workflows import StepResult
+        from praisonaiagents.workflows.workflows import AgentFlow, If
+
+        def seed(ctx):
+            return StepResult(output="s", variables={"items": ["a"]})
+
+        def add(ctx):
+            ctx.variables["items"].append("b")
+            return StepResult(output="m")
+
+        flow = AgentFlow(name="v", steps=[seed, If(condition="1 > 0", then_steps=[add])],
+                         variables={"lock": threading.Lock()})
+        flow.run("go")
+        ends = {e.node_id: e.data for e in _of(recorder, "step_end")}
+        variables = next(d.get("variables") for n, d in ends.items() if n.endswith("add"))
+        assert variables == {"items": ["a", "b"]}
+
+    def test_skipped_or_cached_nested_step_does_not_copy_the_scope(self, recorder, monkeypatch):
+        """Only a nested step that really runs snapshots the variables; a cache
+        hit still records what the handler set."""
+        from praisonaiagents.workflows import StepResult, Task
+        from praisonaiagents.workflows import workflows as wf
+
+        copies = []
+        real = wf._isolate_scope
+        monkeypatch.setattr(wf, "_isolate_scope", lambda v: copies.append(1) or real(v))
+
+        def research(ctx):
+            return StepResult(output="notes", variables={"customer_id": 42})
+
+        def never(ctx):
+            return StepResult(output="x")
+
+        steps = [wf.If(condition="1 > 0", then_steps=[
+            research, Task(name="never", handler=never, should_run=lambda ctx: False),
+        ])]
+        flow = wf.AgentFlow(name="v", steps=steps, variables={"items": list(range(1000))}, cache=True)
+        flow.run("go")
+        assert len(copies) == 1  # research ran; the skipped step copied nothing
+        copies.clear()
+        flow.run("go")  # research is a cache hit
+        assert copies == []
+        cached = [e.data for e in _of(recorder, "step_end") if e.data["status"] == "cached"]
+        assert [d.get("variables") for d in cached] == [{"customer_id": 42}]
