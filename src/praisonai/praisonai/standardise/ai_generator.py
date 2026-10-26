@@ -26,7 +26,7 @@ from .models import ArtifactType, FeatureSlug
 # Setup logger for debug output
 logger = logging.getLogger(__name__)
 if os.environ.get("LOGLEVEL", "").lower() == "debug":
-    logging.basicConfig(level=logging.DEBUG)
+    # Library code must not configure the root logger; only scope our own.
     logger.setLevel(logging.DEBUG)
 from .templates import TemplateGenerator
 from .example_verifier import ExampleVerifier

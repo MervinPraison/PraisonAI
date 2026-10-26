@@ -1,5 +1,5 @@
 {
-  "praisonai_instantiation_us_max": 450,
+  "praisonai_instantiation_us_max": 150,
   "iterations": 100,
   "warmup": 10
 }

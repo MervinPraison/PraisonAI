@@ -2106,6 +2106,29 @@
       "default": null,
       "title": "Rooms"
     },
+    "mcp_servers": {
+      "anyOf": [
+        {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "string"
+              }
+            ]
+          },
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Mcp Servers"
+    },
     "gateway": {
       "anyOf": [
         {

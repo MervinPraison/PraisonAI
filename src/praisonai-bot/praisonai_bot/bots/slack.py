@@ -53,6 +53,8 @@ def _is_missing_metadata_scope(err: BaseException) -> bool:
 
 from .media import split_media_from_output, is_audio_file
 from ._failure import failure_reply_text
+from ._group_policy import decide_group_admission, record_passive_group_message
+from praisonaiagents.bots.admission import MentionFacts
 from ._commands import (
     format_status, 
     format_help, 
@@ -671,20 +673,37 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 except Exception as e:
                     logger.error(f"Message handler error: {e}")
             
-            should_respond = False
             # Dispatch the (possibly redacted) content from the inbound gate so
             # a MESSAGE_RECEIVED hook rewrite reaches the agent, not the raw text.
             text = decision.get("content") or bot_message.content or ""
             channel_type = event.get("channel_type", "")
-            
-            if channel_type == "im":
-                should_respond = True
-            elif self._bot_user and f"<@{self._bot_user.user_id}>" in text:
-                should_respond = True
-                text = text.replace(f"<@{self._bot_user.user_id}>", "").strip()
-            elif not self.config.mention_required:
-                should_respond = True
-            
+            bot_tag = f"<@{self._bot_user.user_id}>" if self._bot_user else ""
+            explicit = bool(bot_tag) and bot_tag in text
+            if explicit:
+                text = text.replace(bot_tag, "").strip()
+
+            # Issue #5962: shared group_policy decision (same as Telegram). A
+            # thread reply under a bot-authored parent is a reply to the bot.
+            admission = decide_group_admission(
+                self.config,
+                chat_type="dm" if channel_type == "im" else "group",
+                mention=MentionFacts(
+                    explicit=explicit,
+                    reply_to_bot=bool(
+                        self._bot_user
+                        and event.get("thread_ts")
+                        and event.get("thread_ts") != event.get("ts")
+                        and event.get("parent_user_id") == self._bot_user.user_id
+                    ),
+                ),
+                # Slack message events are always converted as TEXT, so detect
+                # an (unhandled) slash command from the text itself.
+                is_command=text.lstrip().startswith("/"),
+            )
+            should_respond = admission.admit
+            if admission.observe:
+                record_passive_group_message(self, bot_message)
+
             if should_respond and self._agent:
                 channel_id = event.get("channel", "")
                 msg_ts = event.get("ts", "")
@@ -838,6 +857,18 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             text = (decision.get("content") or "").strip()
             if self._bot_user:
                 text = text.replace(f"<@{self._bot_user.user_id}>", "").strip()
+
+            # Issue #5962: an @mention still honours group_policy (e.g.
+            # ``command_only`` must not run the agent for a plain mention).
+            admission = decide_group_admission(
+                self.config,
+                chat_type="dm" if event.get("channel_type") == "im" else "group",
+                mention=MentionFacts(explicit=True),
+                is_command=text.startswith("/"),
+            )
+            if not admission.admit:
+                logger.debug(f"@mention not run: {admission.reason_code}")
+                return
 
             if self._agent:
                 try:

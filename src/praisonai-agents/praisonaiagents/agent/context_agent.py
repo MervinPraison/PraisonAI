@@ -1777,7 +1777,7 @@ Focus on creating clear, structured metadata that will help with intelligent fil
                     
                     request = urllib.request.Request(api_url, headers=headers)
                     
-                    with urllib.request.urlopen(request) as response:
+                    with urllib.request.urlopen(request, timeout=15) as response:
                         file_data = json.loads(response.read())
                         
                     if file_data.get('content') and file_data.get('encoding') == 'base64':
@@ -2350,7 +2350,7 @@ This PRP provides:
             import urllib.request
             import json
             
-            with urllib.request.urlopen(api_url) as response:
+            with urllib.request.urlopen(api_url, timeout=15) as response:
                 data = json.loads(response.read())
                 
             file_structure = []
