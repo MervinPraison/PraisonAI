@@ -463,7 +463,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         concurrent turns on a shared agent do not share per-turn counters."""
         if self._loop_guard is None:
             from ..escalation.loop_guard import LoopGuard, LoopGuardConfig
-            self._loop_guard = LoopGuard(LoopGuardConfig(enabled=True))
+            config = LoopGuardConfig(enabled=True)
+            limit = getattr(self, "max_execution_time", None)
+            if limit is not None:
+                config.max_time_per_turn = float(limit) if limit > 0 else float("inf")
+            self._loop_guard = LoopGuard(config)
         from .chat_mixin import _current_turn_loop_guard
         turn_guard = _current_turn_loop_guard(self)
         return turn_guard if turn_guard is not None else self._loop_guard
