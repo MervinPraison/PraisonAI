@@ -841,3 +841,16 @@ class TestStepVariables:
         assert ends["step:research"]["variables"]["customer_id"] == 42
         assert "sk-abcdefghijklmnop1234" not in str(ends["step:research"]["variables"])
         assert "variables" not in ends["step:draft"]
+
+    def test_nested_step_end_records_handler_variables(self, recorder):
+        """Steps run through _execute_single_step_internal (patterns, hierarchical) record them too."""
+        from praisonaiagents.workflows import StepResult
+        from praisonaiagents.workflows.workflows import AgentFlow, If
+
+        def research(ctx):
+            return StepResult(output="notes", variables={"customer_id": 42})
+
+        AgentFlow(name="v", steps=[If(condition="1 > 0", then_steps=[research])]).run("go")
+        ends = {e.node_id: e.data for e in _of(recorder, "step_end")}
+        variables = next(d["variables"] for n, d in ends.items() if n.endswith("research"))
+        assert variables == {"customer_id": 42}

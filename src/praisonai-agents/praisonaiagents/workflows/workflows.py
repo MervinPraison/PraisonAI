@@ -3123,6 +3123,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 step, previous_output, input, all_variables, model, verbose, index,
                 stream=stream, depth=depth,
             )
+        before = dict(all_variables)
         try:
             result = self._execute_leaf_step(
                 step, previous_output, input, all_variables, model, verbose, index,
@@ -3136,7 +3137,15 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             "skipped" if is_dict and result.get("skipped")
             else "failed" if is_dict and result.get("error") else "completed"
         )
-        _replay_step_end(span, status, result.get("output") if is_dict else None)
+        # Variables this step set, minus its output variable, for replay's step_end.
+        step_vars = {}
+        if is_dict:
+            step_vars = {
+                k: v for k, v in (result.get("variables") or {}).items()
+                if k not in before or before[k] is not v
+            }
+            step_vars.pop(getattr(step, "output_variable", None) or f"{result.get('step')}_output", None)
+        _replay_step_end(span, status, result.get("output") if is_dict else None, step_vars)
         return result
 
     def _execute_leaf_step(

@@ -500,3 +500,54 @@ def test_recorded_handler_variables_survive_a_rerun(traces_dir):
     rerun(make(0, seen, calls), rec.path, "step:draft", input="topic")
     assert calls == []          # research reused from the recording
     assert seen == [42]         # with the variable it set, not the fresh run's 0
+
+
+def test_flow_rerun_rejects_unnamed_pattern_inserted_before_target(traces_dir, fx):
+    """An If (no name) inserted before the target is caught by its graph node id."""
+    from praisonaiagents import AgentFlow
+    from praisonaiagents.workflows import StepResult
+    from praisonaiagents.workflows.workflows import If
+
+    from praisonai.replay.rerun import RerunError, rerun
+
+    ran = []
+
+    def step(name):
+        def handler(ctx):
+            ran.append(name)
+            return StepResult(output=name)
+        handler.__name__ = name
+        return handler
+
+    src = fx.write_trace(traces_dir, "run-flow01", fx.flow_events())
+    flow = AgentFlow(steps=[step("research"), If(condition="1 > 0", then_steps=[step("extra")]),
+                            step("draft"), step("polish")])
+    with pytest.raises(RerunError, match="did not run in the recording"):
+        rerun(flow, str(src), "step:draft", input="topic")
+    assert ran == []
+
+
+def test_flow_rerun_rejects_redacted_variables(traces_dir, fx):
+    """A redacted variable would be restored as the literal marker: refuse instead."""
+    from praisonaiagents import AgentFlow
+    from praisonaiagents.workflows import StepResult
+
+    from praisonai.replay.rerun import RerunError, rerun
+
+    evs = fx.flow_events()
+    for ev in evs:
+        if ev["event_type"] == "step_end" and ev.get("node_id") == "step:research":
+            ev["data"]["variables"] = {"api_key": "[REDACTED]", "customer_id": 42}
+    src = fx.write_trace(traces_dir, "run-flow01", evs)
+
+    def research(ctx):
+        return StepResult(output="r")
+
+    def draft(ctx):
+        return StepResult(output="d")
+
+    def polish(ctx):
+        return StepResult(output="p")
+
+    with pytest.raises(RerunError, match="'api_key'.*redacted"):
+        rerun(AgentFlow(steps=[research, draft, polish]), str(src), "step:draft", input="topic")
