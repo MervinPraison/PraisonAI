@@ -29,3 +29,17 @@ def test_cost_command_reflects_collected_turn(collector):
     assert "Total tokens:   1100" in out
     assert f"${expected:.4f}" in out
     assert "$0.0000" not in out
+
+
+@pytest.mark.parametrize("command", ["/new", "/clear"])
+def test_new_conversation_resets_cost_totals(collector, command):
+    from praisonaiagents.telemetry.token_collector import TokenMetrics
+
+    tui = AsyncTUI(config=AsyncTUIConfig(model="gpt-4o-mini"))
+    collector.track_tokens("gpt-4o-mini", "a", TokenMetrics(input_tokens=1000, output_tokens=100))
+
+    assert tui._handle_command(command) is True
+    assert tui._handle_command("/cost") is True
+    out = tui.messages[-1].content
+    assert "Total tokens:   0" in out
+    assert "$0.0000" in out

@@ -346,6 +346,9 @@ class InteractiveREPL:
         
         elif cmd == "clear":
             self._conversation_history.clear()
+            from praisonai_code.cli.features.cost_tracker import reset_collected_usage
+
+            reset_collected_usage()
             self.io.success("Conversation cleared.")
             return True
         

@@ -169,6 +169,16 @@ def price_collected_usage(model: Optional[str] = None) -> Dict[str, Any]:
     return usage
 
 
+def reset_collected_usage() -> None:
+    """Clear the token collector so a new conversation starts ``/cost`` at zero."""
+    try:
+        from praisonaiagents.telemetry.token_collector import get_token_collector
+
+        get_token_collector().reset()
+    except Exception:
+        pass
+
+
 def collected_usage_line(model: Optional[str] = None) -> tuple:
     """Return ``(total_tokens, cost_text)`` for interactive ``/cost`` output."""
     usage = price_collected_usage(model)

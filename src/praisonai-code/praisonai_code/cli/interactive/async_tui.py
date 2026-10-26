@@ -1357,6 +1357,9 @@ Tips:
             self.messages.clear()
             self._conversation_history.clear()
             self._reset_agent_context()
+            from praisonai_code.cli.features.cost_tracker import reset_collected_usage
+
+            reset_collected_usage()
             self.messages.append(ChatMessage(role="system", content="Conversation cleared."))
             return True
         
@@ -1364,6 +1367,9 @@ Tips:
             self.messages.clear()
             self._conversation_history.clear()
             self._reset_agent_context()
+            from praisonai_code.cli.features.cost_tracker import reset_collected_usage
+
+            reset_collected_usage()
             self.messages.append(ChatMessage(role="system", content=f"New session: {self.session_id}"))
             return True
         
