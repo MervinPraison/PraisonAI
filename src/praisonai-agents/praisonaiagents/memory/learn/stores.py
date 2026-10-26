@@ -229,7 +229,7 @@ class BaseStore(ABC):
         """List all entries."""
         refreshed = self._refresh_for_retrieval()
         entries = list(self._entries.values())
-        entries.sort(key=lambda x: x.updated_at, reverse=True)
+        entries.sort(key=lambda x: self._timestamp_sort_key(x.updated_at), reverse=True)
         entries = entries[:limit]
         if refreshed:
             self._touch(entries)
@@ -312,7 +312,24 @@ class BaseStore(ABC):
             ref_dt = ref_dt.replace(tzinfo=timezone.utc)
         age_days = (now - ref_dt).total_seconds() / 86400.0
         return age_days > self.retention_days
-    
+
+    @staticmethod
+    def _timestamp_sort_key(value: str) -> tuple:
+        """Comparable key that orders ISO timestamps chronologically in UTC.
+
+        Naive values are treated as UTC (matching how older stores were written),
+        and unparseable values sort into a separate bucket so a store holding a
+        mix of naive, offset-aware, and malformed timestamps never sorts wrong or
+        raises on comparison.
+        """
+        try:
+            parsed = datetime.fromisoformat(value)
+        except (ValueError, TypeError):
+            return (1, value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return (0, parsed.astimezone(timezone.utc))
+
     def prune(self, save: bool = True, protect_id: Optional[str] = None) -> int:
         """Archive stale and least-used/oldest excess entries.
         
@@ -351,7 +368,11 @@ class BaseStore(ABC):
             ]
             remaining = sorted(
                 candidates,
-                key=lambda e: (e.use_count, e.last_used or "", e.created_at),
+                key=lambda e: (
+                    e.use_count,
+                    self._timestamp_sort_key(e.last_used or ""),
+                    self._timestamp_sort_key(e.created_at),
+                ),
             )
             overflow = len(self._entries) - self.max_entries
             for entry in remaining[:overflow]:

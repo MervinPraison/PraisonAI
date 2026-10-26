@@ -27,3 +27,34 @@ def test_prune_handles_legacy_naive_timestamps(tmp_path):
 
     fresh = LearnEntry(id="new", content="new")
     assert store._is_stale(fresh, now) is False
+
+
+def test_prune_evicts_stale_legacy_entry_end_to_end(tmp_path):
+    """prune() archives a stale legacy (naive-timestamp) entry without raising."""
+    store = InsightStore(store_path=str(tmp_path / "store.json"), retention_days=1)
+    store._entries["old"] = LearnEntry(
+        id="old",
+        content="old",
+        created_at="2020-01-01T00:00:00",
+        updated_at="2020-01-01T00:00:00",
+    )
+
+    assert store.prune(save=False) == 1
+    assert "old" not in store._entries
+
+
+def test_list_all_orders_by_instant_not_raw_string(tmp_path):
+    """list_all() orders by the actual UTC instant, even when offsets differ.
+
+    00:30+01:00 is an earlier instant than 00:00+00:00, but a raw-string sort
+    would order them the other way round.
+    """
+    store = InsightStore(store_path=str(tmp_path / "store.json"))
+    store._entries = {
+        "earlier": LearnEntry(id="earlier", content="e", updated_at="2024-01-01T00:30:00+01:00"),
+        "later": LearnEntry(id="later", content="l", updated_at="2024-01-01T00:00:00+00:00"),
+    }
+    store._save()  # persist so list_all's refresh reloads these entries
+
+    ordered = [e.id for e in store.list_all()]  # reverse=True: most recent first
+    assert ordered == ["later", "earlier"]
