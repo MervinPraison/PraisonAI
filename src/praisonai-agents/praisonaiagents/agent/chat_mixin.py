@@ -1926,7 +1926,9 @@ Your Goal: {self.goal}"""
         from ..llm.llm import LLM
         params = dict(getattr(self, '_llm_init_params', None) or {})
         primary = str(params.get('model') or self.llm or '')
-        if primary.split('/', 1)[0] != model.split('/', 1)[0]:
+        # Bare names (no "provider/" prefix) share the configured server.
+        prefix = lambda name: name.split('/', 1)[0] if '/' in name else ''
+        if prefix(primary) != prefix(model):
             for key in ('base_url', 'api_key', 'auth'):
                 params.pop(key, None)
         params['model'] = model
@@ -1946,16 +1948,44 @@ Your Goal: {self.goal}"""
         logging.info(f"[{self.name}] {model_name} unavailable — falling back to {next_model}")
         return next_model, classification.error_category
 
+    @staticmethod
+    def _track_tool_runs(llm_kwargs):
+        """Return ``(llm_kwargs, ran)``; ``ran`` becomes non-empty once a tool executes.
+
+        A fallback replays the whole turn from the original messages, so it is
+        only safe while no tool has run (otherwise side effects would repeat).
+        """
+        import functools
+        import inspect
+        ran = []
+        fn = llm_kwargs.get('execute_tool_fn')
+        if fn is None:
+            return llm_kwargs, ran
+        if inspect.iscoroutinefunction(fn):
+            @functools.wraps(fn)
+            async def tracked(*args, **kwargs):
+                ran.append(True)
+                return await fn(*args, **kwargs)
+        else:
+            @functools.wraps(fn)
+            def tracked(*args, **kwargs):
+                ran.append(True)
+                return fn(*args, **kwargs)
+        return {**llm_kwargs, 'execute_tool_fn': tracked}, ran
+
     def _custom_llm_get_response(self, llm_kwargs):
         """Call ``llm_instance.get_response`` walking ``fallback_models`` on outage."""
         llm, index, current = self.llm_instance, 0, self.llm
         stream_cb = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
+        llm_kwargs, tools_ran = self._track_tool_runs(llm_kwargs)
         while True:
             try:
                 return llm.get_response(**llm_kwargs)
             except (ToolExecutionError, BudgetExceededError, InterruptedError):
                 raise
             except Exception as e:
+                if tools_ran:
+                    raise
                 next_model, category = self._classify_custom_llm_fallback(e, current, index)
                 if next_model is None:
                     raise
@@ -1966,12 +1996,15 @@ Your Goal: {self.goal}"""
         """Async twin of :meth:`_custom_llm_get_response`."""
         llm, index, current = self.llm_instance, 0, self.llm
         stream_cb = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
+        llm_kwargs, tools_ran = self._track_tool_runs(llm_kwargs)
         while True:
             try:
                 return await llm.get_response_async(**llm_kwargs)
             except (ToolExecutionError, BudgetExceededError, InterruptedError):
                 raise
             except Exception as e:
+                if tools_ran:
+                    raise
                 next_model, category = self._classify_custom_llm_fallback(e, current, index)
                 if next_model is None:
                     raise

@@ -300,6 +300,14 @@ class _StubLLM:
         return self._respond()
 
 
+class _ToolThenFailLLM(_StubLLM):
+    """Runs a tool, then fails, like a 503 on the follow-up model request."""
+
+    def get_response(self, execute_tool_fn=None, **kwargs):
+        execute_tool_fn("send_email", {})
+        return self._respond()
+
+
 def _custom_agent(primary_error, fallbacks):
     from praisonaiagents import Agent
 
@@ -352,3 +360,28 @@ def test_fallback_llm_for_drops_connection_settings_across_providers(monkeypatch
     assert built[0] == {"model": "ollama/qwen", "base_url": "http://h", "api_key": "k", "max_iter": 3}
     assert built[1] == {"model": "openai/gpt-4o-mini", "max_iter": 3}
     assert agent._llm_init_params["model"] == "ollama/llama3"
+
+
+def test_fallback_llm_for_keeps_connection_settings_for_bare_names(monkeypatch):
+    import praisonaiagents.llm.llm as llm_mod
+
+    built = []
+    monkeypatch.setattr(llm_mod, "LLM", lambda **kw: built.append(kw) or kw)
+    agent = _DummyAgent()
+    agent.llm = "model-a"
+    agent._llm_init_params = {"model": "model-a", "base_url": "http://custom/v1", "api_key": "k"}
+    agent._fallback_llm_for("model-b")
+    assert built[0] == {"model": "model-b", "base_url": "http://custom/v1", "api_key": "k"}
+
+
+def test_custom_llm_does_not_fall_back_after_a_tool_ran():
+    from praisonaiagents import Agent
+
+    calls, sent = [], []
+    primary = _ToolThenFailLLM("primary-model", _Unavailable("503 overloaded"), calls)
+    agent = Agent(name="c", instructions="x", llm=primary, output="silent")
+    agent.fallback_models = [_StubLLM("backup", None, calls)]
+    agent.execute_tool = lambda name, args, **kw: sent.append(name)
+    assert agent.chat("hello") is None  # existing error handling, no replay
+    assert calls == ["primary-model"]
+    assert sent == ["send_email"]
