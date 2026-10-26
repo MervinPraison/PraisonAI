@@ -28,6 +28,13 @@ const SECURITY_STATUS_CREATOR = 'github-actions[bot]';
 const OUTSIDER_ORIGIN_LABEL = 'origin/outsider';
 // Timeline events that change content Claude or the merge gate reads.
 const CONTENT_EVENTS = new Set(['commented', 'reviewed', 'line-commented', 'commit-commented', 'head_ref_force_pushed', 'renamed']);
+// Label changes that loosen what Claude or the merge gate does (see merge-gate.js):
+// adding a trigger or an override, or removing a stop or manual-only label.
+// Pipeline status labels and the gate's own lock are routine and do not count.
+const LOOSENING_LABELS = {
+  labeled: new Set(['claude', 'merge-gate-ci-only', 'maintainer-accept-example', 'maintainer-accept-core-tools']),
+  unlabeled: new Set(['no-auto-merge', 'claude-conflict-pending', 'auto-merged-by-gate', 'security', 'breaking-change', 'needs-manual-review', 'release']),
+};
 
 // Build, dependency, CI and install-time surface. Code here runs on developer
 // machines, in CI with secrets, or at install time, so an outsider-origin
@@ -259,7 +266,7 @@ async function touchedByRun(github, owner, repo, item, since, appLogins, until =
   for (const e of events) {
     // Only actions that change what Claude or the gate reads. Label syncing by the
     // pipeline also runs as the App and must not count as the outsider run.
-    const content = CONTENT_EVENTS.has(e.event) || (e.event === 'labeled' && e.label?.name === 'claude');
+    const content = CONTENT_EVENTS.has(e.event) || !!LOOSENING_LABELS[e.event]?.has(e.label?.name);
     if (content && isApp(e.actor?.login || e.user?.login) && after(e.created_at || e.submitted_at || e.updated_at)) return true;
     if (e.event === 'committed' && after(e.committer?.date)) return true;
   }
@@ -281,6 +288,21 @@ async function touchedByRun(github, owner, repo, item, since, appLogins, until =
   }
   const edits = data?.repository?.issueOrPullRequest?.userContentEdits?.nodes || [];
   return edits.some((n) => after(n.editedAt) && isApp(n.editor?.login));
+}
+
+/**
+ * When a job of this workflow run finished (null if unknown). It bounds what counts
+ * as that job's activity, so work by later runs is not attributed to it.
+ */
+async function jobCompletedAt(github, owner, repo, runId, jobName) {
+  try {
+    const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+      owner, repo, run_id: runId, per_page: 100,
+    });
+    return jobs.find((j) => j.name === jobName)?.completed_at || null;
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -459,6 +481,7 @@ module.exports = {
   referencedIssueNumbers,
   referencedIssueReasons,
   touchedByRun,
+  jobCompletedAt,
   outsiderSensitivePaths,
   riskFlags,
   formatRiskFlags,

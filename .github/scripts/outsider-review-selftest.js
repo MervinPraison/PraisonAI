@@ -182,6 +182,17 @@ assert('no source issue', o.sourceIssueNumbers({ head: { ref: 'feat/x' }, body: 
     !(await o.touchedByRun(runGh([{ event: 'unlabeled', actor: { login: 'praisonai-triage-agent[bot]' }, label: { name: 'pipeline/blocked:ci' }, created_at: '2026-10-17T10:06:00Z' }]), 'o', 'r', item(), SINCE, APP)));
   assert('the App adding the claude label during the run is touched (it starts a Claude run)',
     await o.touchedByRun(runGh([{ event: 'labeled', actor: { login: 'praisonai-triage-agent[bot]' }, label: { name: 'claude' }, created_at: '2026-10-17T10:06:00Z' }]), 'o', 'r', item(), SINCE, APP));
+  const appLabel = (event, name) => runGh([{ event, actor: { login: 'praisonai-triage-agent[bot]' }, label: { name }, created_at: '2026-10-17T10:06:00Z' }]);
+  assert('the App removing no-auto-merge during the run is touched (it loosens the gate)',
+    await o.touchedByRun(appLabel('unlabeled', 'no-auto-merge'), 'o', 'r', item(), SINCE, APP));
+  assert('the App removing a manual-only label during the run is touched',
+    await o.touchedByRun(appLabel('unlabeled', 'needs-manual-review'), 'o', 'r', item(), SINCE, APP));
+  assert('the App adding a maintainer-accept override during the run is touched',
+    await o.touchedByRun(appLabel('labeled', 'maintainer-accept-core-tools'), 'o', 'r', item(), SINCE, APP));
+  assert('the App adding no-auto-merge (tightening) is not touched',
+    !(await o.touchedByRun(appLabel('labeled', 'no-auto-merge'), 'o', 'r', item(), SINCE, APP)));
+  assert('the gate releasing its own lock label is not touched',
+    !(await o.touchedByRun(appLabel('unlabeled', 'claude-merge-gate-active'), 'o', 'r', item(), SINCE, APP)));
   assert('the App force-pushing during the run is touched',
     await o.touchedByRun(runGh([{ event: 'head_ref_force_pushed', actor: { login: 'praisonai-triage-agent[bot]' }, created_at: '2026-10-17T10:06:00Z' }]), 'o', 'r', item(), SINCE, APP));
   assert('a maintainer comment during the run is not touched',
@@ -192,6 +203,15 @@ assert('no source issue', o.sourceIssueNumbers({ head: { ref: 'feat/x' }, body: 
     !(await o.touchedByRun(runGh([{ event: 'labeled', actor: { login: 'praisonai-triage-agent[bot]' }, created_at: '2026-10-17T09:00:00Z' }]), 'o', 'r', item(), SINCE, APP)));
   const editFail = await (async () => { const g = runGh([]); g.graphql = async () => { throw new Error('rate'); }; return o.touchedByRun(g, 'o', 'r', item(), SINCE, APP).then(() => null, (e) => e); })();
   assert('an edit-history lookup failure fails closed (throws)', editFail instanceof Error);
+
+  {
+    const jobs = [{ name: 'issue-triage', completed_at: '2026-10-17T10:00:01Z' }, { name: 'claude-response', completed_at: '2026-10-17T10:20:00Z' }];
+    const g = { rest: { actions: { listJobsForWorkflowRun: 'jobs' } }, paginate: async () => jobs };
+    assert('the Claude job end time bounds the run window', (await o.jobCompletedAt(g, 'o', 'r', 1, 'claude-response')) === '2026-10-17T10:20:00Z');
+    assert('an unfinished or missing job gives no bound', (await o.jobCompletedAt(g, 'o', 'r', 1, 'nope')) === null);
+    const bad = { rest: { actions: { listJobsForWorkflowRun: 'jobs' } }, paginate: async () => { throw new Error('403'); } };
+    assert('a jobs lookup failure gives no bound (caller counts up to now)', (await o.jobCompletedAt(bad, 'o', 'r', 1, 'claude-response')) === null);
+  }
 
   // A request mentioning another repo's numbers as bare #N (Docs issues cite PraisonAI PRs this way)
   // must not make the run outsider: a number that names nothing here carries no content.
