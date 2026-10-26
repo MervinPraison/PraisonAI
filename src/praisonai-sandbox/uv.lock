@@ -1679,7 +1679,7 @@ wheels = [
 
 [[package]]
 name = "praisonai-sandbox"
-version = "0.1.15"
+version = "0.1.16"
 source = { editable = "." }
 dependencies = [
     { name = "click" },
@@ -1744,7 +1744,7 @@ provides-extras = ["docker", "e2b", "sandlock", "ssh", "tenki", "flyio", "modal"
 
 [[package]]
 name = "praisonaiagents"
-version = "1.7.16"
+version = "1.7.17"
 source = { directory = "../praisonai-agents" }
 dependencies = [
     { name = "aiohttp" },
@@ -1773,8 +1773,8 @@ requires-dist = [
     { name = "fastapi", marker = "extra == 'api'", specifier = ">=0.115.0" },
     { name = "fastapi", marker = "extra == 'mcp'", specifier = ">=0.115.0" },
     { name = "fastapi", marker = "extra == 'os'", specifier = ">=0.115.0" },
-    { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.83.14" },
-    { name = "litellm", marker = "extra == 'memory'", specifier = ">=1.83.14" },
+    { name = "litellm", marker = "extra == 'llm'", specifier = ">=1.83.14,<1.106" },
+    { name = "litellm", marker = "extra == 'memory'", specifier = ">=1.83.14,<1.106" },
     { name = "markitdown", extras = ["all"], marker = "extra == 'knowledge'", specifier = ">=0.1.0" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.20.0,<2" },
     { name = "mcp", marker = "extra == 'parallel-search'", specifier = ">=1.30.0,<2" },
