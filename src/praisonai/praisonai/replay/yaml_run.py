@@ -124,6 +124,18 @@ def static_graph(yaml_path: Union[str, Path]) -> Tuple[Dict[str, Any], Any]:
     flow = load_flow(yaml_path)
     to_graph = _core_diagram("to_graph")
     if to_graph is not None:
+        # A team YAML runs as an AgentTeam (task:/agent: node ids), so build the
+        # same team the run builds; the flow view would give step: ids that
+        # never match the run's events.
+        if yaml_kind(yaml_path) == "team":
+            team = _build_team_from_yaml(yaml_path)
+            if team is not None:
+                try:
+                    graph = to_graph(team)
+                    if isinstance(graph, dict):
+                        return graph, flow
+                except Exception:
+                    pass
         try:
             graph = to_graph(flow)
             if isinstance(graph, dict):
@@ -131,6 +143,31 @@ def static_graph(yaml_path: Union[str, Path]) -> Tuple[Dict[str, Any], Any]:
         except Exception:
             pass
     return _fallback_graph(flow), flow
+
+
+def _build_team_from_yaml(yaml_path: Union[str, Path]) -> Any:
+    """The ``AgentTeam`` a ``praisonai file.yaml`` run would build, without running it.
+
+    Uses the PraisonAI adapter's own builders so task and agent ids match the run.
+    Returns ``None`` when the YAML can't be built offline (e.g. missing tools).
+    """
+    import yaml
+
+    try:
+        from praisonai.framework_adapters.praisonai_adapter import PraisonAIAdapter
+        from praisonai_code.llm.config import build_config_list
+    except Exception:
+        return None
+    try:
+        config = yaml.safe_load(Path(yaml_path).expanduser().read_text(encoding="utf-8")) or {}
+        adapter = PraisonAIAdapter()
+        model = adapter._pick_model(build_config_list())
+        agents, tasks = adapter._build_agents_and_tasks(
+            config, config.get("topic", ""), {}, None, None, model
+        )
+        return adapter._build_team(config, agents, tasks, model)
+    except Exception:
+        return None
 
 
 def static_mermaid(yaml_path: Union[str, Path]) -> str:

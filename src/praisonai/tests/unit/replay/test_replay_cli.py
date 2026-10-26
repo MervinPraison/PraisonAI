@@ -300,3 +300,28 @@ def test_view_stops_the_server_when_the_cli_exits():
     proc = Running()
     assert _wait_for_server(proc) == 0
     assert proc.terminated
+
+
+def test_team_yaml_static_graph_uses_the_run_ids(tmp_path):
+    """A team YAML's map is built from the same AgentTeam a run builds (task:/agent: ids)."""
+    import pytest
+
+    from praisonai.replay import yaml_run
+
+    if yaml_run._core_diagram("to_graph") is None:
+        pytest.skip("SDK has no to_graph (pre schema 1.1)")
+    path = tmp_path / "team.yaml"
+    path.write_text(
+        "framework: praisonai\n"
+        "topic: t\n"
+        "roles:\n"
+        "  researcher:\n    role: Researcher\n    goal: g\n    backstory: b\n"
+        "    tasks:\n      research:\n        description: d\n        expected_output: e\n"
+        "  writer:\n    role: Writer\n    goal: g\n    backstory: b\n"
+        "    tasks:\n      write:\n        description: d\n        expected_output: e\n",
+        encoding="utf-8",
+    )
+    graph, _ = yaml_run.static_graph(path)
+    ids = {n["id"] for n in graph["nodes"]}
+    assert {"agent:Researcher", "agent:Writer", "task:0", "task:1"} <= ids
+    assert not any(i.startswith("step:") for i in ids)
