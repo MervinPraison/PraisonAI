@@ -125,3 +125,41 @@ def test_live_handle_is_never_overwritten(store):
     finally:
         proc.kill()
         proc.wait()
+
+
+def test_reclaim_closes_run_atomically_so_replacement_run_survives(store):
+    store.create_task({"id": "t5", "title": "job", "status": "ready",
+                       "workspace_kind": "default"})
+    assert store.claim_task("t5", "other", ttl_seconds=0, worker_pid=0)
+    old_run = store.start_run("t5", profile="other")
+
+    assert store.reclaim_stale_claims(stale_timeout_seconds=1) == ["t5"]
+    assert store.get_task("t5").current_run_id is None
+
+    # Another dispatcher wins the reclaimed task before ours reacts.
+    assert store.claim_task("t5", "rival", ttl_seconds=60)
+    new_run = store.start_run("t5", profile="rival")
+    KanbanDispatcher()._reclaim_stale_claims(store)
+
+    runs = {r.id: r for r in store.get_runs("t5")}
+    assert runs[old_run].outcome == "crashed"
+    assert runs[new_run].ended_at is None
+
+
+def test_lost_claim_keeps_worktree_tracking_when_work_is_preserved(store):
+    store.create_task({"id": "t6", "title": "job", "status": "ready",
+                       "workspace_kind": "default"})
+    d = _StubDispatcher(store, 30, max_concurrent=1)
+    _run(d.dispatch_once())
+    proc = d.running_tasks["t6"]
+    d._worktrees = {"t6": ("/tmp/wt-t6", "kanban/t6")}
+    d._remove_worktree = lambda path, branch: "worktree has uncommitted changes"
+    try:
+        store.release_claim("t6", d.worker_id)
+        d._heartbeat_children(store)
+        assert "t6" not in d.running_tasks
+        assert d._worktrees == {"t6": ("/tmp/wt-t6", "kanban/t6")}
+        assert any("worktree_preserved" in c.text for c in store.get_comments("t6"))
+    finally:
+        if proc.poll() is None:
+            proc.kill()

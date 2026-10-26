@@ -442,7 +442,20 @@ class KanbanDispatcher:
         except OSError as e:
             logger.error(f"Failed to terminate worker for task {task_id}: {e}")
         self.running_tasks.pop(task_id, None)
-        getattr(self, '_worktrees', {}).pop(task_id, None)
+        entry = getattr(self, '_worktrees', {}).get(task_id)
+        if entry:
+            # Lossless teardown: keep tracking (and say why) if work remains.
+            preserved = self._remove_worktree(*entry)
+            if preserved is None:
+                self._worktrees.pop(task_id, None)
+            else:
+                try:
+                    store.add_comment(
+                        task_id, self.worker_id,
+                        f"worktree_preserved at {entry[0]}: {preserved}",
+                    )
+                except Exception:
+                    pass
         log_path = getattr(self, '_temp_logs', {}).pop(task_id, None)
         if log_path:
             try:
@@ -455,23 +468,6 @@ class KanbanDispatcher:
             error='Claim lost while worker was running; worker terminated',
         ):
             self._task_runs.pop(task_id, None)
-
-    def _close_reclaimed_run(self, store: Any, task_id: str):
-        """Close the dead worker's open run and count it toward the breaker."""
-        try:
-            task = store.get_task(task_id)
-        except Exception as e:
-            logger.debug(f"Could not read reclaimed task {task_id}: {e}")
-            return
-        run_id = getattr(task, 'current_run_id', None)
-        if run_id is not None:
-            self._close_run_safe(
-                store, run_id, 'crashed',
-                error='Worker died or went stale; claim reclaimed',
-            )
-        self._record_failure_safe(
-            store, task_id, error='Worker died or went stale; claim reclaimed'
-        )
 
     def _reclaim_stale_claims(self, store: Any):
         """Sweep running tasks and reclaim those stranded by dead/stale workers."""
@@ -488,7 +484,11 @@ class KanbanDispatcher:
 
         for task_id in reclaimed or []:
             logger.warning(f"Reclaimed stale kanban task {task_id} back to 'ready'")
-            self._close_reclaimed_run(store, task_id)
+            # The store closed the abandoned run as 'crashed' atomically with
+            # the reclaim; count the attempt so the circuit breaker sees it.
+            self._record_failure_safe(
+                store, task_id, error='Worker died or went stale; claim reclaimed'
+            )
             # The running -> ready transition is announced as
             # KANBAN_TASK_MOVED (reclaimed=True) by the store itself;
             # 'KANBAN_TASK_RECLAIMED' was never a HookEvent member and so
