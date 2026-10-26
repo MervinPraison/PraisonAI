@@ -75,10 +75,12 @@ def test_prefetch_false_still_disables_recall(use_async):
 
 
 def test_other_user_records_are_not_recalled():
-    # u2 writes a fact; u1 asks the same question and must not see it.
-    _ask(MemoryConfig(backend="sqlite", user_id="u2"), use_async=False)
+    # u2 writes a fact; u1 asks the same question against the same database
+    # and must not see it, so only the user_id filter keeps them apart.
+    shared = {"short_db": "shared_short.db", "long_db": "shared_long.db"}
+    _ask(MemoryConfig(backend="sqlite", user_id="u2", config=shared), use_async=False)
     model = _ask(
-        MemoryConfig(backend="sqlite", user_id="u1"),
+        MemoryConfig(backend="sqlite", user_id="u1", config=shared),
         use_async=False,
         fact="The project codename is SECRETOWL.",
     )
