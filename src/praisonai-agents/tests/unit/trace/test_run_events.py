@@ -792,3 +792,19 @@ def test_disabled_tracing_never_builds_the_graph():
     with _workflow_scope("team", "t", "sequential", graph_fn=lambda: built.append(1)) as run:
         assert run is None
     assert built == []
+
+
+class TestTeamRunLabel:
+    """An unnamed team is labelled by its agents, not by whichever agent comes first."""
+
+    def test_unnamed_team_is_labelled_by_its_agents(self):
+        from praisonaiagents import Agent, AgentTeam
+
+        team = AgentTeam(agents=[Agent(name="Researcher", output="silent"), Agent(name="Writer", output="silent")])
+        assert team._replay_name() == "Researcher + Writer"
+
+    def test_named_team_keeps_its_name(self):
+        from praisonaiagents import Agent, AgentTeam
+
+        team = AgentTeam(agents=[Agent(name="Researcher", output="silent")], name="EV brief")
+        assert team._replay_name() == "EV brief"

@@ -2259,7 +2259,7 @@ class AgentTeam(SpawnAnnounceProtocol):
         # the guard across the whole batch while still calling astart() per item.
         with self._guard_execution():
             from ..trace.context_events import _workflow_scope
-            with _workflow_scope("team", self.name, self.process,
+            with _workflow_scope("team", self._replay_name(), self.process,
                                  graph_fn=self.to_graph, run_id=self.run_id) as _run:
                 result = await self._astart_impl(content=content, return_dict=return_dict, **kwargs)
                 self._mark_run_status(_run)
@@ -2609,12 +2609,19 @@ class AgentTeam(SpawnAnnounceProtocol):
         # the guard across the whole batch while still calling start() per item.
         with self._guard_execution():
             from ..trace.context_events import _workflow_scope
-            with _workflow_scope("team", self.name, self.process,
+            with _workflow_scope("team", self._replay_name(), self.process,
                                  graph_fn=self.to_graph, run_id=self.run_id) as _run:
                 result = self._start_impl(content=content, return_dict=return_dict,
                                           output=output, **kwargs)
                 self._mark_run_status(_run)
                 return result
+
+    def _replay_name(self) -> str:
+        """Run label for Replay: the team's name, else its agents joined ("A + B")."""
+        if self.name:
+            return self.name
+        names = [getattr(a, "name", None) or "Agent" for a in (self.agents or [])]
+        return " + ".join(names) if names else "Agent team"
 
     def _mark_run_status(self, run_state):
         """Record a failed replay run when any task ended failed (tracing on only)."""
