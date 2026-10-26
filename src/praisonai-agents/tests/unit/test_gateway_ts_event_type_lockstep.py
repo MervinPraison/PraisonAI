@@ -26,12 +26,40 @@ _TS_GATEWAY = (
 )
 
 
-def _ts_event_types() -> dict[str, str]:
-    """Parse ``export enum GatewayEventType { NAME = 'value', ... }`` from TS source."""
-    source = _TS_GATEWAY.read_text(encoding="utf-8")
+_TS_MEMBER = re.compile(r"""([A-Za-z_$][\w$]*)\s*=\s*(['"])(.*?)\2""", re.S)
+
+
+def _parse_ts_enum(source: str) -> dict[str, str]:
+    """Parse ``export enum GatewayEventType { NAME = 'value', ... }`` from TS source.
+
+    Every enum member must be a ``NAME = 'value'`` (or double-quoted) pair; any
+    other entry fails loudly rather than being silently skipped.
+    """
     body = re.search(r"export enum GatewayEventType\s*\{(.*?)\n\}", source, re.S)
-    assert body, f"GatewayEventType enum not found in {_TS_GATEWAY}"
-    return dict(re.findall(r"^\s*([A-Z_]+)\s*=\s*'([^']*)'", body.group(1), re.M))
+    assert body, "GatewayEventType enum not found"
+    text = re.sub(r"/\*.*?\*/|//[^\n]*", "", body.group(1), flags=re.S)
+    members = {}
+    for entry in filter(None, (e.strip() for e in text.split(","))):
+        match = _TS_MEMBER.fullmatch(entry)
+        assert match, f"Unparseable GatewayEventType entry: {entry!r}"
+        members[match.group(1)] = match.group(3)
+    return members
+
+
+def _ts_event_types() -> dict[str, str]:
+    return _parse_ts_enum(_TS_GATEWAY.read_text(encoding="utf-8"))
+
+
+def test_parse_ts_enum_rejects_or_captures_every_entry():
+    src = """export enum GatewayEventType {
+  // comment
+  A = 'a',
+  MESSAGE_V2 = 'message_v2',
+  B = "b",
+}"""
+    assert _parse_ts_enum(src) == {"A": "a", "MESSAGE_V2": "message_v2", "B": "b"}
+    with pytest.raises(AssertionError, match="Unparseable"):
+        _parse_ts_enum("export enum GatewayEventType {\n  A = 'a',\n  C,\n}")
 
 
 @pytest.mark.skipif(not _TS_GATEWAY.exists(), reason="TypeScript SDK not present")
