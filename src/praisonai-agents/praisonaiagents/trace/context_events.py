@@ -9,10 +9,12 @@ Zero Performance Impact:
 - Disabled emitter has near-zero overhead
 - Uses __slots__ for memory efficiency
 
-Schema Version: 1.0
+Schema Version: 1.1 (adds optional run_id / parent_seq / node_id; 1.0 files still load)
 """
 
 import contextvars
+import itertools
+import threading
 import time
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -21,7 +23,7 @@ from typing import Any, Dict, Generator, List, Optional, Protocol, runtime_check
 import json
 
 
-CONTEXT_SCHEMA_VERSION = "1.0"
+CONTEXT_SCHEMA_VERSION = "1.1"
 
 
 # =============================================================================
@@ -36,6 +38,28 @@ _context_emitter: contextvars.ContextVar["ContextTraceEmitter"] = contextvars.Co
 
 # Singleton disabled emitter for default case (zero allocation per call)
 _default_disabled_emitter: Optional["ContextTraceEmitter"] = None
+
+# Per-context run state. These live in contextvars, not on the emitter, so
+# concurrent Parallel/Loop branches (each running in its own copied context, see
+# copy_context_to_callable) and gathered asyncio tasks cannot clobber each
+# other. Values are immutable tuples and are only ever replaced via .set(), so
+# a copied context never shares a mutable object with its parent.
+#
+# Entries are keyed by the owning emitter's ``_uid`` so state set through one
+# emitter never leaks into events of another emitter in the same context.
+_branch_var: contextvars.ContextVar = contextvars.ContextVar(
+    'praisonai_trace_branch', default=None   # (emitter_uid, branch_id)
+)
+_span_var: contextvars.ContextVar = contextvars.ContextVar(
+    'praisonai_trace_spans', default=()      # ((emitter_uid, seq, kind, key), ...)
+)
+_run_id_var: contextvars.ContextVar = contextvars.ContextVar(
+    'praisonai_trace_run_id', default=None
+)
+_llm_open_var: contextvars.ContextVar = contextvars.ContextVar(
+    'praisonai_trace_llm_open', default=None  # (emitter_uid, parent_seq, previous)
+)
+_emitter_uids = itertools.count(1)
 
 
 def get_context_emitter() -> "ContextTraceEmitter":
@@ -114,12 +138,126 @@ def trace_context(emitter: "ContextTraceEmitter") -> Generator["ContextTraceEmit
         reset_context_emitter(token)
 
 
+@contextmanager
+def _run_scope(run_id: Optional[str] = None) -> Generator[str, None, None]:
+    """Stamp ``run_id`` on every event emitted inside the block.
+
+    Nested teams and flows inherit the OUTER run id: when a run id is already
+    in scope it is kept and ``run_id`` is ignored. A fresh uuid is used when no
+    id is given. Yields the effective run id.
+    """
+    outer = _run_id_var.get()
+    if outer is not None:
+        yield outer
+        return
+    if not run_id:
+        import uuid
+        run_id = uuid.uuid4().hex
+    token = _run_id_var.set(run_id)
+    try:
+        yield run_id
+    finally:
+        try:
+            _run_id_var.reset(token)
+        except ValueError:
+            # Exited from a different context than it was entered in.
+            _run_id_var.set(None)
+
+
+@contextmanager
+def _workflow_scope(
+    kind: str,
+    name: Optional[str],
+    process: str,
+    graph_fn=None,
+    run_id: Optional[str] = None,
+) -> Generator[Optional[Dict[str, Any]], None, None]:
+    """Emit ``workflow_start``/``workflow_end`` around a team or flow run.
+
+    Yields ``None`` (and does nothing else, not even building the graph) when
+    the current emitter is disabled. Otherwise yields a mutable dict whose
+    ``"status"`` the caller may set to ``"failed"``; an exception escaping the
+    block always records ``"failed"``.
+    """
+    emitter = get_context_emitter()
+    if not emitter._enabled:
+        yield None
+        return
+    with _run_scope(run_id):
+        graph = None
+        if graph_fn is not None:
+            try:
+                graph = graph_fn()
+            except Exception:
+                graph = None  # A diagram must never break a run.
+        emitter.workflow_start(kind, name, process, graph=graph)
+        state: Dict[str, Any] = {"status": "completed"}
+        started = time.perf_counter()
+        try:
+            yield state
+        except BaseException:
+            state["status"] = "failed"
+            raise
+        finally:
+            emitter.workflow_end(
+                status=state.get("status") or "completed",
+                duration_ms=(time.perf_counter() - started) * 1000,
+            )
+
+
+def _approval_begin(request: Any, kind: str = "tool_call", node_id: Optional[str] = None):
+    """Emit ``approval_requested`` for an ``ApprovalRequest``; token or None."""
+    emitter = get_context_emitter()
+    if not emitter._enabled:
+        return None
+    agent_name = getattr(request, "agent_name", None)
+    tool = getattr(request, "tool_name", None) or ""
+    if node_id is None and kind == "tool_call":
+        node_id = f"tool:{agent_name}/{tool}" if agent_name else None
+    emitter.approval_requested(
+        getattr(request, "approval_id", None) or "",
+        tool,
+        args=getattr(request, "arguments", None),
+        risk=getattr(request, "risk_level", None),
+        kind=kind,
+        agent_name=agent_name,
+        node_id=node_id,
+    )
+    return emitter, request, node_id
+
+
+def _approval_end(token, decision: Any = None, error: Optional[BaseException] = None) -> None:
+    """Emit ``approval_decided`` for a token from :func:`_approval_begin`."""
+    if token is None:
+        return
+    emitter, request, node_id = token
+    if decision is None:
+        approved, reason, approver, modified = False, f"approval failed: {error}", None, False
+    else:
+        approved = bool(getattr(decision, "approved", False))
+        reason = getattr(decision, "reason", None)
+        approver = getattr(decision, "approver", None)
+        modified = bool(getattr(decision, "modified_args", None))
+    emitter.approval_decided(
+        getattr(request, "approval_id", None) or "",
+        approved,
+        reason=reason,
+        approver=approver,
+        modified=modified,
+        agent_name=getattr(request, "agent_name", None),
+        node_id=node_id,
+    )
+
+
 def copy_context_to_callable(func):
     """
     Wrap a callable to copy the current context to the new thread/executor.
     
     This is needed because contextvars are NOT automatically propagated to
     thread pool executors. Use this when calling run_in_executor().
+
+    The whole context is copied, so the replay state (emitter, run id, branch
+    id and the open-span stack that yields ``parent_seq``) reaches the thread.
     
     Usage:
         # Instead of:
@@ -159,6 +297,53 @@ class ContextEventType(str, Enum):
     # Knowledge events for knowledge utilization tracking
     KNOWLEDGE_SEARCH = "knowledge_search"
     KNOWLEDGE_ADD = "knowledge_add"
+    # Run structure (schema 1.1): teams/flows, tasks, flow steps, approvals
+    WORKFLOW_START = "workflow_start"
+    WORKFLOW_END = "workflow_end"
+    TASK_START = "task_start"
+    TASK_END = "task_end"
+    STEP_START = "step_start"
+    STEP_END = "step_end"
+    APPROVAL_REQUESTED = "approval_requested"
+    APPROVAL_DECIDED = "approval_decided"
+
+
+class _UnknownEventType(str):
+    """An ``event_type`` string this version does not know.
+
+    ``from_dict`` keeps the raw value instead of relabelling it, so a trace
+    written by a newer version stays readable. ``.value`` mirrors the Enum API
+    so existing ``event.event_type.value`` callers keep working.
+    """
+
+    __slots__ = ()
+
+    @property
+    def value(self) -> str:
+        return str(self)
+
+
+# Span bookkeeping: which event types open/close a span, and of which kind.
+_SPAN_START = {
+    "session_start": "session",
+    "agent_start": "agent",
+    "tool_call_start": "tool_call",
+    "workflow_start": "workflow",
+    "task_start": "task",
+    "step_start": "step",
+    "approval_requested": "approval",
+}
+_SPAN_END = {
+    "session_end": "session",
+    "agent_end": "agent",
+    "tool_call_end": "tool_call",
+    "workflow_end": "workflow",
+    "task_end": "task",
+    "step_end": "step",
+    "approval_decided": "approval",
+}
+_PREVIEW_LIMIT = 500
+_UNSET = object()
 
 
 @dataclass
@@ -184,6 +369,10 @@ class ContextEvent:
         completion_tokens: Number of tokens in the completion/response
         cost_usd: Estimated cost in USD for this event
         content_hash: SHA256 hash of content for duplicate detection
+        run_id: The team/flow/recorded run this event belongs to (1.1)
+        parent_seq: sequence_num of the enclosing (or, on *_end, the closed)
+            *_start event (1.1)
+        node_id: Graph node the event concerns, e.g. ``agent:Writer`` (1.1)
     """
     event_type: ContextEventType
     timestamp: float
@@ -199,6 +388,9 @@ class ContextEvent:
     completion_tokens: int = 0
     cost_usd: float = 0.0
     content_hash: Optional[str] = None
+    run_id: Optional[str] = None
+    parent_seq: Optional[int] = None
+    node_id: Optional[str] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary for serialization."""
@@ -221,6 +413,12 @@ class ContextEvent:
             result["branch_id"] = self.branch_id
         if self.content_hash is not None:
             result["content_hash"] = self.content_hash
+        if self.run_id is not None:
+            result["run_id"] = self.run_id
+        if self.parent_seq is not None:
+            result["parent_seq"] = self.parent_seq
+        if self.node_id is not None:
+            result["node_id"] = self.node_id
         return result
     
     def to_json(self) -> str:
@@ -232,12 +430,12 @@ class ContextEvent:
         """Create ContextEvent from dictionary."""
         event_type_str = data.get("event_type", "")
         
-        # Convert string to enum
+        # Convert string to enum. An unknown type (written by a newer version)
+        # keeps its raw string rather than being relabelled as something else.
         try:
             event_type = ContextEventType(event_type_str)
         except ValueError:
-            # Fallback for unknown event types
-            event_type = ContextEventType.CONTEXT_SNAPSHOT
+            event_type = _UnknownEventType(event_type_str)
         
         return cls(
             event_type=event_type,
@@ -254,6 +452,9 @@ class ContextEvent:
             completion_tokens=data.get("completion_tokens", 0),
             cost_usd=data.get("cost_usd", 0.0),
             content_hash=data.get("content_hash"),
+            run_id=data.get("run_id"),
+            parent_seq=data.get("parent_seq"),
+            node_id=data.get("node_id"),
         )
 
 
@@ -349,6 +550,28 @@ class ContextListSink:
         return iter(self._events)
 
 
+def _innermost(stack: tuple, uid: int) -> Optional[int]:
+    """Sequence number of the innermost open span owned by emitter ``uid``."""
+    for entry in reversed(stack):
+        if entry[0] == uid:
+            return entry[1]
+    return None
+
+
+def _find_span(stack: tuple, uid: int, kind: str, key: Any) -> Optional[int]:
+    """Index of the innermost open span matching kind+key (else kind only)."""
+    fallback = None
+    for i in range(len(stack) - 1, -1, -1):
+        entry = stack[i]
+        if entry[0] != uid or entry[2] != kind:
+            continue
+        if entry[3] == key:
+            return i
+        if fallback is None:
+            fallback = i
+    return fallback
+
+
 class ContextTraceEmitter:
     """
     Emitter for context trace events.
@@ -367,7 +590,7 @@ class ContextTraceEmitter:
         emitter.session_end()
     """
     
-    __slots__ = ("_sink", "_session_id", "_enabled", "_redact", "_sequence", "_branch_id", "_full_content")
+    __slots__ = ("_sink", "_session_id", "_enabled", "_redact", "_full_content", "_uid", "_counter", "_lock")
     
     # Default limits for truncation (can be overridden with full_content=True)
     # Increased significantly to capture full search results and avoid false truncation
@@ -396,40 +619,124 @@ class ContextTraceEmitter:
         self._session_id = session_id
         self._enabled = enabled
         self._redact = redact
-        self._sequence = 0
-        self._branch_id: Optional[str] = None
         self._full_content = full_content
+        self._uid = next(_emitter_uids)
+        # itertools.count is atomic under the GIL; the lock additionally keeps
+        # the sink's append order equal to sequence order when Parallel/Loop
+        # branches emit from several threads at once (live tailers resume by
+        # sequence number, so an out-of-order line would be skipped).
+        self._counter = itertools.count()
+        self._lock = threading.RLock()
     
-    def _emit(self, event: ContextEvent) -> None:
-        """Internal emit with enabled check and sequence assignment.
+    def _emit(self, event: ContextEvent, span_key: Any = _UNSET) -> None:
+        """Internal emit with enabled check, sequence and span assignment.
+        
+        Stamps ``sequence_num``, ``branch_id``, ``run_id`` and ``parent_seq``.
+        A ``*_start`` event (and ``approval_requested``) opens a span on the
+        per-context stack; the matching ``*_end`` closes it and points its
+        ``parent_seq`` at the start it closes. Every other event points at the
+        innermost open span.
         
         Exception-safe: sink errors are silently caught to prevent
         tracing from crashing agent execution.
         """
         if not self._enabled:
             return
-        event.sequence_num = self._sequence
-        event.branch_id = self._branch_id  # Include branch context
-        self._sequence += 1
-        try:
-            self._sink.emit(event)
-        except Exception:
-            # Tracing should never crash agent execution
-            pass
+        uid = self._uid
+        branch = _branch_var.get()
+        event.branch_id = branch[1] if branch is not None and branch[0] == uid else None
+        if event.run_id is None:
+            event.run_id = _run_id_var.get()
+        etype = event.event_type
+        value = etype.value if isinstance(etype, ContextEventType) else str(etype)
+        if span_key is _UNSET:
+            span_key = event.node_id or event.agent_name
+        with self._lock:
+            seq = next(self._counter)
+            event.sequence_num = seq
+            stack = _span_var.get()
+            kind = _SPAN_START.get(value)
+            if kind is not None:
+                if event.parent_seq is None:
+                    event.parent_seq = _innermost(stack, uid)
+                _span_var.set(stack + ((uid, seq, kind, span_key),))
+            else:
+                kind = _SPAN_END.get(value)
+                if kind is not None:
+                    idx = _find_span(stack, uid, kind, span_key)
+                    if idx is not None:
+                        event.parent_seq = stack[idx][1]
+                        # Close it and anything of ours left open above it
+                        # (a start whose end was skipped by an exception).
+                        _span_var.set(stack[:idx] + tuple(e for e in stack[idx + 1:] if e[0] != uid))
+                elif event.parent_seq is None:
+                    event.parent_seq = _innermost(stack, uid)
+            try:
+                self._sink.emit(event)
+            except Exception:
+                # Tracing should never crash agent execution
+                pass
     
     def set_branch(self, branch_id: str) -> None:
         """Set current branch context for parallel execution tracking.
         
-        All subsequent events will include this branch_id until cleared.
+        All subsequent events emitted from the current context (thread or
+        asyncio task) include this branch_id until cleared. Concurrent
+        branches each run in their own copied context, so they cannot
+        overwrite each other's branch.
         
         Args:
             branch_id: Identifier for the parallel branch (e.g., 'parallel_0', 'loop_5')
         """
-        self._branch_id = branch_id
+        _branch_var.set((self._uid, branch_id))
     
     def clear_branch(self) -> None:
         """Clear the current branch context."""
-        self._branch_id = None
+        _branch_var.set(None)
+    
+    def _preview(self, text: Any) -> Optional[str]:
+        """Truncate to 500 chars and pass through redaction (for previews)."""
+        if text is None:
+            return None
+        text = text if isinstance(text, str) else str(text)
+        if self._redact:
+            from .redact import redact_string
+            text = redact_string(text[: _PREVIEW_LIMIT * 4])
+        return text[:_PREVIEW_LIMIT]
+    
+    def _redact_args(self, args: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Approval args: sensitive keys redacted; text values previewed + redacted."""
+        if not args:
+            return {}
+        if not isinstance(args, dict):
+            return {"value": self._preview(args)}
+        args = self._redact_dict(args)
+        return {k: self._preview(v) if isinstance(v, str) else v for k, v in args.items()}
+    
+    def _current_agent(self) -> Optional[str]:
+        """Name of the innermost open agent span in this context, if any."""
+        uid = self._uid
+        for entry in reversed(_span_var.get()):
+            if entry[0] == uid and entry[2] == "agent":
+                key = entry[3]
+                if isinstance(key, str) and key.startswith("agent:"):
+                    return key[len("agent:"):]
+                return key
+        return None
+    
+    def _llm_call_open(self) -> bool:
+        """True while a caller-emitted ``llm_request`` awaits its response.
+        
+        The agent's OpenAI-client path emits llm_request/llm_response around
+        its whole dispatch, which may itself reach the LiteLLM path; the LLM
+        class checks this so the same call is not counted twice. The marker is
+        only honoured inside the span it was opened in, so one left behind by
+        an exception goes stale as soon as that span closes.
+        """
+        mark = _llm_open_var.get()
+        if mark is None or mark[0] != self._uid:
+            return False
+        return mark[1] == _innermost(_span_var.get(), self._uid)
     
     def _redact_dict(self, data: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """Redact sensitive data from dictionary if enabled."""
@@ -475,6 +782,7 @@ class ContextTraceEmitter:
             session_id=self._session_id,
             agent_name=agent_name,
             data=metadata or {},
+            node_id=f"agent:{agent_name}" if agent_name else None,
         ))
     
     def agent_end(
@@ -491,6 +799,7 @@ class ContextTraceEmitter:
             session_id=self._session_id,
             agent_name=agent_name,
             data=metadata or {},
+            node_id=f"agent:{agent_name}" if agent_name else None,
         ))
     
     def message_added(
@@ -540,6 +849,7 @@ class ContextTraceEmitter:
                 "tool_name": tool_name,
                 "tool_args": self._redact_dict(tool_args) if tool_args else {},
             },
+            node_id=f"tool:{agent_name}/{tool_name}",
         ))
     
     def tool_call_end(
@@ -587,6 +897,7 @@ class ContextTraceEmitter:
                 "duration_ms": duration_ms,
                 "error": error,
             },
+            node_id=f"tool:{agent_name}/{tool_name}",
         ))
     
     def _smart_truncate_result(self, result: str, tool_name: str) -> str:
@@ -686,11 +997,27 @@ class ContextTraceEmitter:
         """
         if not self._enabled:
             return
+        event = self._llm_request_event(
+            agent_name, messages_count, tokens_used, tokens_budget, model, messages
+        )
+        self._emit(event)
+        # Mark the call open so the LLM class does not record it a second time.
+        # The previous marker is kept so a nested agent's call restores it.
+        _llm_open_var.set((self._uid, event.parent_seq, _llm_open_var.get()))
+    
+    def _llm_request_event(
+        self,
+        agent_name: Optional[str],
+        messages_count: int,
+        tokens_used: int,
+        tokens_budget: int = 0,
+        model: Optional[str] = None,
+        messages: Optional[List[Dict[str, Any]]] = None,
+    ) -> ContextEvent:
         data = {"model": model}
         if messages is not None:
             data["messages"] = messages
-        
-        self._emit(ContextEvent(
+        return ContextEvent(
             event_type=ContextEventType.LLM_REQUEST,
             timestamp=time.time(),
             session_id=self._session_id,
@@ -699,7 +1026,8 @@ class ContextTraceEmitter:
             tokens_used=tokens_used,
             tokens_budget=tokens_budget,
             data=data,
-        ))
+            node_id=f"agent:{agent_name}" if agent_name else None,
+        )
     
     def llm_response(
         self,
@@ -711,6 +1039,7 @@ class ContextTraceEmitter:
         prompt_tokens: int = 0,
         completion_tokens: int = 0,
         cost_usd: float = 0.0,
+        model: Optional[str] = None,
     ) -> None:
         """Emit LLM response event.
         
@@ -723,9 +1052,30 @@ class ContextTraceEmitter:
             prompt_tokens: Number of tokens in the prompt/request
             completion_tokens: Number of tokens in the completion/response
             cost_usd: Estimated cost in USD for this LLM call
+            model: Model that served the call (stored as ``data.model``)
         """
         if not self._enabled:
             return
+        self._emit(self._llm_response_event(
+            agent_name, response_tokens, duration_ms, finish_reason,
+            response_content, prompt_tokens, completion_tokens, cost_usd, model,
+        ))
+        mark = _llm_open_var.get()
+        if mark is not None and mark[0] == self._uid:
+            _llm_open_var.set(mark[2])
+    
+    def _llm_response_event(
+        self,
+        agent_name: Optional[str],
+        response_tokens: int = 0,
+        duration_ms: float = 0.0,
+        finish_reason: Optional[str] = None,
+        response_content: Optional[str] = None,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        cost_usd: float = 0.0,
+        model: Optional[str] = None,
+    ) -> ContextEvent:
         # Use completion_tokens if provided, fallback to response_tokens for backward compat
         actual_completion_tokens = completion_tokens if completion_tokens > 0 else response_tokens
         
@@ -748,8 +1098,10 @@ class ContextTraceEmitter:
                 data["response_content"] = f"{head}\n...[{len(response_content):,} chars, showing first/last portions]...\n{tail}"
             else:
                 data["response_content"] = response_content
+        if model is not None:
+            data["model"] = model
         
-        self._emit(ContextEvent(
+        return ContextEvent(
             event_type=ContextEventType.LLM_RESPONSE,
             timestamp=time.time(),
             session_id=self._session_id,
@@ -758,7 +1110,8 @@ class ContextTraceEmitter:
             completion_tokens=actual_completion_tokens,
             cost_usd=cost_usd,
             data=data,
-        ))
+            node_id=f"agent:{agent_name}" if agent_name else None,
+        )
     
     def context_snapshot(
         self,
@@ -790,8 +1143,16 @@ class ContextTraceEmitter:
         to_agent: str,
         reason: Optional[str] = None,
         context_passed: Optional[Dict[str, Any]] = None,
+        kind: str = "handoff",
+        node_id: Optional[str] = None,
     ) -> None:
-        """Emit agent handoff event for tracking agent-to-agent flow."""
+        """Emit agent handoff event for tracking agent-to-agent flow.
+        
+        Args:
+            kind: ``handoff`` (agent hands over), ``delegate`` (the hierarchical
+                manager assigns a task), ``route`` or ``spawn``.
+            node_id: Graph node concerned; defaults to the receiving agent.
+        """
         if not self._enabled:
             return
         self._emit(ContextEvent(
@@ -803,9 +1164,208 @@ class ContextTraceEmitter:
                 "from_agent": from_agent,
                 "to_agent": to_agent,
                 "reason": reason,
-                "context_passed": context_passed or {},
+                "context_passed": self._redact_dict(context_passed) or {},
+                "kind": kind,
             },
+            node_id=node_id or (f"agent:{to_agent}" if to_agent else None),
         ))
+    
+    # ------------------------------------------------------------------
+    # Run structure (schema 1.1). Each method is a no-op when disabled.
+    # ------------------------------------------------------------------
+    
+    def workflow_start(
+        self,
+        kind: str,
+        name: Optional[str],
+        process: str,
+        graph: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """A team, flow or agent run begins. ``graph`` is its static graph."""
+        if not self._enabled:
+            return
+        data: Dict[str, Any] = {"kind": kind, "name": name, "process": process}
+        if graph is not None:
+            data["graph"] = graph
+        if metadata:
+            data.update(metadata)
+        self._emit(ContextEvent(
+            event_type=ContextEventType.WORKFLOW_START,
+            timestamp=time.time(),
+            session_id=self._session_id,
+            data=data,
+        ))
+    
+    def workflow_end(self, status: str = "completed", duration_ms: float = 0.0) -> None:
+        """The innermost open team/flow run ends."""
+        if not self._enabled:
+            return
+        self._emit(ContextEvent(
+            event_type=ContextEventType.WORKFLOW_END,
+            timestamp=time.time(),
+            session_id=self._session_id,
+            data={"status": status, "duration_ms": duration_ms},
+        ))
+    
+    def task_start(
+        self,
+        name: Optional[str],
+        description: Optional[str] = None,
+        agent: Optional[str] = None,
+        node_id: Optional[str] = None,
+    ) -> None:
+        """A team task starts (node_id ``task:<name or index>``)."""
+        if not self._enabled:
+            return
+        self._emit(ContextEvent(
+            event_type=ContextEventType.TASK_START,
+            timestamp=time.time(),
+            session_id=self._session_id,
+            agent_name=agent,
+            data={
+                "name": name,
+                "description_preview": self._preview(description),
+                "agent": agent,
+            },
+            node_id=node_id,
+        ))
+    
+    def task_end(
+        self,
+        name: Optional[str],
+        status: str,
+        retries: int = 0,
+        duration_ms: float = 0.0,
+        output: Any = None,
+        agent: Optional[str] = None,
+        node_id: Optional[str] = None,
+    ) -> None:
+        """A team task ends: ``completed``, ``failed`` or ``skipped``."""
+        if not self._enabled:
+            return
+        self._emit(ContextEvent(
+            event_type=ContextEventType.TASK_END,
+            timestamp=time.time(),
+            session_id=self._session_id,
+            agent_name=agent,
+            data={
+                "name": name,
+                "status": status,
+                "retries": retries,
+                "duration_ms": duration_ms,
+                "output_preview": self._preview(output),
+            },
+            node_id=node_id,
+        ))
+    
+    def step_start(
+        self,
+        name: Optional[str],
+        pattern: Optional[str] = None,
+        node_id: Optional[str] = None,
+        agent: Optional[str] = None,
+    ) -> None:
+        """An AgentFlow step (or a Route/Parallel/Loop/... pattern) starts."""
+        if not self._enabled:
+            return
+        data: Dict[str, Any] = {"name": name}
+        if pattern:
+            data["pattern"] = pattern
+        self._emit(ContextEvent(
+            event_type=ContextEventType.STEP_START,
+            timestamp=time.time(),
+            session_id=self._session_id,
+            agent_name=agent,
+            data=data,
+            node_id=node_id,
+        ))
+    
+    def step_end(
+        self,
+        name: Optional[str],
+        status: str,
+        duration_ms: float = 0.0,
+        output: Any = None,
+        route: Optional[str] = None,
+        node_id: Optional[str] = None,
+        agent: Optional[str] = None,
+    ) -> None:
+        """A flow step ends: ``completed``, ``failed``, ``skipped`` or ``cached``."""
+        if not self._enabled:
+            return
+        data: Dict[str, Any] = {
+            "name": name,
+            "status": status,
+            "duration_ms": duration_ms,
+            "output_preview": self._preview(output),
+        }
+        if route is not None:
+            data["route"] = route
+        self._emit(ContextEvent(
+            event_type=ContextEventType.STEP_END,
+            timestamp=time.time(),
+            session_id=self._session_id,
+            agent_name=agent,
+            data=data,
+            node_id=node_id,
+        ))
+    
+    def approval_requested(
+        self,
+        approval_id: str,
+        tool: str,
+        args: Optional[Dict[str, Any]] = None,
+        risk: Optional[str] = None,
+        kind: str = "tool_call",
+        agent_name: Optional[str] = None,
+        node_id: Optional[str] = None,
+    ) -> None:
+        """A person is asked to approve a tool call or a task's output."""
+        if not self._enabled:
+            return
+        self._emit(ContextEvent(
+            event_type=ContextEventType.APPROVAL_REQUESTED,
+            timestamp=time.time(),
+            session_id=self._session_id,
+            agent_name=agent_name,
+            data={
+                "approval_id": approval_id,
+                "tool": tool,
+                "args": self._redact_args(args),
+                "risk": risk,
+                "kind": kind,
+            },
+            node_id=node_id,
+        ), span_key=approval_id)
+    
+    def approval_decided(
+        self,
+        approval_id: str,
+        approved: bool,
+        reason: Optional[str] = None,
+        approver: Optional[str] = None,
+        modified: bool = False,
+        agent_name: Optional[str] = None,
+        node_id: Optional[str] = None,
+    ) -> None:
+        """The decision for ``approval_id`` (parent_seq = the request)."""
+        if not self._enabled:
+            return
+        self._emit(ContextEvent(
+            event_type=ContextEventType.APPROVAL_DECIDED,
+            timestamp=time.time(),
+            session_id=self._session_id,
+            agent_name=agent_name,
+            data={
+                "approval_id": approval_id,
+                "approved": bool(approved),
+                "reason": reason,
+                "approver": approver,
+                "modified": bool(modified),
+            },
+            node_id=node_id,
+        ), span_key=approval_id)
     
     def memory_store(
         self,
