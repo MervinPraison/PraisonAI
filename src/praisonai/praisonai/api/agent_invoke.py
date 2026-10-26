@@ -7,6 +7,7 @@ enabling bidirectional n8n ↔ PraisonAI integration.
 
 from typing import Any, Dict, Optional, Union
 import inspect
+import json
 import logging
 
 try:
@@ -492,6 +493,39 @@ async def _safe_close_agent(agent: Any) -> None:
         logger.exception("Agent cleanup failed")
 
 
+_invoke_idempotency_store: Any = None
+_invoke_idempotency_lock = threading.Lock()
+_INVOKE_IDEMPOTENCY_TTL_SECONDS = 86_400.0  # 24h retention window
+
+
+def _get_invoke_idempotency_store() -> Any:
+    """Lazily build the durable store that dedups keyed invoke submissions.
+
+    Uses the gateway's restart-safe ``SqliteIdempotencyStore`` directly under
+    ``$PRAISONAI_HOME/state`` (falling back to ``~/.praisonai``), so a client
+    retry carrying the same ``Idempotency-Key`` never starts a second agent run.
+    Built directly rather than via ``build_idempotency_store`` so an unusable
+    database raises (the route answers 503) instead of silently degrading to a
+    per-process in-memory store, and so it never touches the gateway's
+    durability-degraded health facts. The in-flight lease equals the TTL so a
+    long-running agent never loses its reservation to a retry.
+    """
+    global _invoke_idempotency_store
+    with _invoke_idempotency_lock:
+        if _invoke_idempotency_store is None:
+            from pathlib import Path
+            from praisonai_bot.bots._idempotency import SqliteIdempotencyStore
+
+            base = os.environ.get("PRAISONAI_HOME")
+            home = Path(base) if base else Path.home() / ".praisonai"
+            _invoke_idempotency_store = SqliteIdempotencyStore(
+                home / "state" / "invoke_idempotency.db",
+                ttl_seconds=_INVOKE_IDEMPOTENCY_TTL_SECONDS,
+                inflight_lease_seconds=_INVOKE_IDEMPOTENCY_TTL_SECONDS,
+            )
+        return _invoke_idempotency_store
+
+
 def _supports_async_start(agent: Any) -> bool:
     """Return True if agent.astart is a coroutine function."""
     astart = getattr(agent, "astart", None)
@@ -514,6 +548,7 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
         request: AgentInvokeRequest,
         _: None = Depends(verify_token),
         registry: AgentRegistry = Depends(_registry_dependency),
+        idempotency_key: Optional[str] = Header(None, alias="Idempotency-Key"),
     ) -> Union[AgentInvokeResponse, ErrorResponse]:
         """
         Invoke a PraisonAI agent with a message.
@@ -529,8 +564,11 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
             Agent response with result and session information
             
         Raises:
-            HTTPException: If agent not found or execution fails
-            
+            HTTPException: If agent not found or execution fails, or 409 when
+                an ``Idempotency-Key`` was already submitted (in flight or
+                completed within the retention window) — the agent is not
+                re-run. A failed run frees its key so the client can retry.
+
         Example n8n HTTP Request Node configuration:
         ```json
         {
@@ -561,6 +599,30 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
                 detail=f"Agent '{agent_id}' not found"
             )
 
+        import asyncio
+        store = None
+        # JSON-encode the pair so ``:`` in either part can't make two agents' keys collide.
+        idem_key = json.dumps(["invoke", agent_id, idempotency_key]) if idempotency_key else None
+        succeeded = False
+        failed = False
+        if idem_key:
+            try:
+                store = _get_invoke_idempotency_store()
+                admitted = await asyncio.to_thread(store.reserve, idem_key)
+            except Exception as e:
+                await _safe_close_agent(agent)
+                logger.error(f"Idempotency store unavailable: {e}")
+                raise HTTPException(
+                    status_code=503,
+                    detail="Idempotency store unavailable; retry later",
+                )
+            if not admitted:
+                await _safe_close_agent(agent)
+                raise HTTPException(
+                    status_code=409,
+                    detail="A run with this Idempotency-Key was already submitted",
+                )
+
         try:
             # Apply per-request agent_config overrides to the isolated clone, or
             # reject unsupported keys with a 400 so the caller isn't silently
@@ -589,6 +651,7 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
                     raise AttributeError(f"Agent {agent_id} must provide start() or async astart()")
 
                 logger.info(f"Agent {agent_id} invoked successfully")
+                succeeded = True
 
                 return AgentInvokeResponse(
                     result=str(result),
@@ -609,11 +672,26 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
                     status_code=500,
                     detail=f"Agent execution failed: {str(e)}"
                 )
+        except Exception:
+            # Only a run that actually failed frees its key. A cancelled request
+            # (``CancelledError`` is not an ``Exception``) keeps the reservation,
+            # since a sync ``start`` keeps running in its worker thread.
+            failed = True
+            raise
         finally:
             # Release the per-request clone's resources (LLM pools, tool-executor
             # threads, MCP subprocesses). No-op when the agent fell back to the
             # shared template. Never masks the response.
             await _safe_close_agent(agent)
+            if store is not None and (succeeded or failed):
+                # Commit the key on success so retries are deduplicated; free it
+                # on failure so the client can retry. Never masks the response.
+                try:
+                    await asyncio.to_thread(
+                        store.record if succeeded else store.release, idem_key
+                    )
+                except Exception:
+                    logger.exception("Idempotency store update failed")
 
     @router.get("/agents")
     async def list_agents(
@@ -636,18 +714,18 @@ if FASTAPI_AVAILABLE and APIRouter is not None:
     @router.post("/agents/{agent_id}/register")
     async def register_agent_endpoint(agent_id: str, _: None = Depends(verify_token)) -> Dict[str, Any]:
         """
-        Register an agent for API access.
-        
-        Note: This is a placeholder endpoint. In practice, agents would be
-        registered programmatically when they are created.
+        HTTP registration is not supported; agents are registered in-process.
+
+        Returns 501 so clients can detect that nothing was registered.
         """
-        # In a real implementation, this might load an agent from a configuration
-        # or database. For now, return information about registration.
-        return {
-            "message": f"Agent registration endpoint for '{agent_id}'",
-            "note": "Agents are typically registered programmatically",
-            "status": "info"
-        }
+        raise HTTPException(
+            status_code=501,
+            detail=(
+                f"Dynamic HTTP registration of '{agent_id}' is not supported; "
+                "register agents in-process via "
+                "praisonai.api.agent_invoke.register_agent(...)"
+            ),
+        )
 
     @router.delete("/agents/{agent_id}")
     async def unregister_agent_endpoint(

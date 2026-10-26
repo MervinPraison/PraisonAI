@@ -35,6 +35,7 @@ import json
 import logging
 from praisonaiagents._logging import get_logger
 from pathlib import Path
+from ..utils.safe_path import safe_child
 from typing import Any, Dict, List, Optional
 from dataclasses import dataclass, field
 
@@ -272,7 +273,7 @@ class MCPConfigManager:
             mcp_dir = self.workspace_path / self.MCP_DIR_NAME.replace("/", os.sep)
         
         mcp_dir.mkdir(parents=True, exist_ok=True)
-        file_path = mcp_dir / f"{name}.json"
+        file_path = safe_child(mcp_dir, name, ".json")
         
         # Build config
         config = MCPConfig(

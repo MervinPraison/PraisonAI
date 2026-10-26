@@ -1419,7 +1419,13 @@ class BotSessionManager:
                     # Agent instance never observe each other's chat_history.
                     async with agent_lock:
                         saved_history = agent.chat_history
-                        agent.chat_history = user_history
+                        # #5928: merge mirror-induced same-role runs so
+                        # strict-alternation providers never see them, and fold
+                        # a trailing user mirror into this turn's prompt.
+                        from ._mirror import coalesce_mirror_turns, fold_trailing_user_mirror
+                        agent.chat_history, turn_prompt = fold_trailing_user_mirror(
+                            coalesce_mirror_turns(user_history), prompt
+                        )
 
                         # Per-route toolset scope (Issue #2298): swap the
                         # agent's tools to the policy-allowed subset for this
@@ -1513,7 +1519,7 @@ class BotSessionManager:
 
                                 try:
                                     response = await asyncio.wait_for(
-                                        agent.astart(prompt, **astart_kwargs),
+                                        agent.astart(turn_prompt, **astart_kwargs),
                                         timeout=self._run_timeout if self._run_timeout > 0 else None,
                                     )
                                     if hasattr(response, "output"):
@@ -1567,7 +1573,7 @@ class BotSessionManager:
                                     )
                                 ):
                                     _chat_kwargs['attachments'] = attachments
-                                chat_call = partial(agent.chat, prompt, **_chat_kwargs)
+                                chat_call = partial(agent.chat, turn_prompt, **_chat_kwargs)
                                 
                                 # Run with timeout and interruption support
                                 try:

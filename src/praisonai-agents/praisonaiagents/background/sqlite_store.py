@@ -160,6 +160,29 @@ class SqliteBackgroundJobStore:
             ).fetchall()
         return [self._row_to_job(r) for r in rows]
 
+    def delete_older_than(self, ts: float) -> int:
+        """Delete terminal jobs completed before ``ts``; return rows removed.
+
+        Completed jobs with an undelivered ``origin`` are kept so restart
+        reconciliation can still re-deliver them.
+        """
+        with self._lock:
+            cur = self._conn.execute(
+                """
+                DELETE FROM background_jobs
+                WHERE completed_at IS NOT NULL AND completed_at < ?
+                  AND status NOT IN (?, ?)
+                  AND NOT (status = ? AND delivered = 0 AND origin IS NOT NULL)
+                """,
+                (
+                    ts,
+                    JobStatus.PENDING.value,
+                    JobStatus.RUNNING.value,
+                    JobStatus.COMPLETED.value,
+                ),
+            )
+        return cur.rowcount
+
     def close(self) -> None:
         """Close the underlying database connection."""
         with self._lock:

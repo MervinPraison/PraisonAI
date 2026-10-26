@@ -135,6 +135,22 @@ def _get_display_tool_call():
         _display_tool_call = display_tool_call
     return _display_tool_call
 
+def _normalize_chat_params(params: Dict[str, Any]) -> Dict[str, Any]:
+    """Make Chat Completions params acceptable to reasoning models (#5909).
+
+    An unset ``temperature``/``max_tokens`` is omitted rather than sent as
+    JSON ``null``, which reasoning models reject; an explicit ``max_tokens``
+    becomes ``max_completion_tokens`` for them (mirrors ``llm.py``).
+    """
+    for key in ("temperature", "max_tokens"):
+        if key in params and params[key] is None:
+            del params[key]
+    if "max_tokens" in params:
+        from .model_capabilities import is_reasoning_model
+        if is_reasoning_model(params.get("model") or ""):
+            params.setdefault("max_completion_tokens", params.pop("max_tokens"))
+    return params
+
 # Constants
 LOCAL_SERVER_API_KEY_PLACEHOLDER = "not-needed"
 
@@ -1286,7 +1302,7 @@ class OpenAIClient:
             # stream_options so we never clobber an explicit choice.
             stream_options = kwargs.pop("stream_options", {"include_usage": True})
             # Create the response stream
-            response_stream = self.sync_client.chat.completions.create(
+            response_stream = self.sync_client.chat.completions.create(**_normalize_chat_params(dict(
                 model=model,
                 messages=messages,
                 temperature=temperature,
@@ -1294,7 +1310,7 @@ class OpenAIClient:
                 stream=True,
                 stream_options=stream_options,
                 **kwargs
-            )
+            )))
             
             # Emit HEADERS_RECEIVED event (stream object created means headers received)
             if _emit:
@@ -1567,7 +1583,7 @@ class OpenAIClient:
             # stream_options so we never clobber an explicit choice.
             stream_options = kwargs.pop("stream_options", {"include_usage": True})
             # Create the response stream
-            response_stream = await self.async_client.chat.completions.create(
+            response_stream = await self.async_client.chat.completions.create(**_normalize_chat_params(dict(
                 model=model,
                 messages=messages,
                 temperature=temperature,
@@ -1575,7 +1591,7 @@ class OpenAIClient:
                 stream=True,
                 stream_options=stream_options,
                 **kwargs
-            )
+            )))
             
             # Emit HEADERS_RECEIVED event
             if _emit:
@@ -1862,7 +1878,7 @@ class OpenAIClient:
                 params["tool_choice"] = tool_choice
         
         try:
-            return self.sync_client.chat.completions.create(**params)
+            return self.sync_client.chat.completions.create(**_normalize_chat_params(params))
         except Exception as e:
             self.logger.error(f"Error creating completion: {e}")
             raise
@@ -1930,7 +1946,7 @@ class OpenAIClient:
                 params["tool_choice"] = tool_choice
         
         try:
-            return await self.async_client.chat.completions.create(**params)
+            return await self.async_client.chat.completions.create(**_normalize_chat_params(params))
         except Exception as e:
             self.logger.error(f"Error creating async completion: {e}")
             raise
@@ -2751,14 +2767,14 @@ class OpenAIClient:
         while iteration_count < max_iterations:
             try:
                 # Create streaming response
-                response_stream = self.sync_client.chat.completions.create(
+                response_stream = self.sync_client.chat.completions.create(**_normalize_chat_params(dict(
                     model=model,
                     messages=messages,
                     temperature=temperature,
                     tools=formatted_tools if formatted_tools else None,
                     stream=True,
                     **kwargs
-                )
+                )))
                 
                 full_response_text = ""
                 reasoning_content = ""

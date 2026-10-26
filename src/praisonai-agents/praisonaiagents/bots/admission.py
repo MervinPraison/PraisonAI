@@ -307,6 +307,8 @@ def resolve_ingress_admission(
     #    forwards an unset policy does not silently start replying to all group
     #    traffic (a security-relevant regression).
     policy = (group_policy or "mention_only").lower()
+    if policy not in _GROUP_POLICIES:
+        policy = "mention_only"
 
     if policy == "command_only":
         if is_command:
@@ -339,7 +341,7 @@ def resolve_ingress_admission(
             gate=GATE_GROUP_POLICY,
         )
 
-    # respond_all (or any unknown policy): admit everything.
+    # respond_all: admit everything.
     return IngressDecision(
         admit=True, reason_code=REASON_ALLOWED, gate=GATE_GROUP_POLICY
     )

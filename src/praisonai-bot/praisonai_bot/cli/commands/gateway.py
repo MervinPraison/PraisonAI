@@ -2307,7 +2307,9 @@ def outbox_retry(
 
     from praisonai_bot.bots import OutboundQueue
 
-    outbox = OutboundQueue(path=_resolve_outbox_path(path))
+    # read_only: the gateway may be live — never flip its in-flight 'sending'
+    # rows to 'recovered' (duplicate delivery). Targeted ops still work.
+    outbox = OutboundQueue(path=_resolve_outbox_path(path), read_only=True)
     ok = asyncio.run(outbox.retry(key))
     if ok:
         typer.echo("requeued 1 entry")
@@ -2330,7 +2332,9 @@ def outbox_purge(
     """Delete a single outbound entry by key, or all entries with --all."""
     from praisonai_bot.bots import OutboundQueue
 
-    outbox = OutboundQueue(path=_resolve_outbox_path(path))
+    # read_only: the gateway may be live — never flip its in-flight 'sending'
+    # rows to 'recovered' (duplicate delivery). Targeted ops still work.
+    outbox = OutboundQueue(path=_resolve_outbox_path(path), read_only=True)
 
     if all_entries:
         n = outbox.size()

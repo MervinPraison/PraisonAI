@@ -188,15 +188,17 @@ def get_package_versions():
     return versions
 
 
-def save_results(results: dict, filename: str = 'BENCHMARK_RESULTS.md', *,
+def save_results(results: dict, filename: str = 'SIMPLE_BENCHMARK_RESULTS.md', *,
                  iterations: int = ITERATIONS, log=print):
-    """Save benchmark results to a markdown file and update README.
+    """Save benchmark results to a markdown file.
+
+    Writes ``SIMPLE_BENCHMARK_RESULTS.md`` by default so the curated
+    ``BENCHMARK_RESULTS.md`` (from ``performance_benchmark.py``) is never
+    overwritten.
 
     Status messages are emitted via ``log`` (defaults to ``print``). Pass a
     stderr logger when stdout must stay machine-readable (e.g. ``--json``).
     """
-    import os
-    import re
     from datetime import datetime
     
     filepath = os.path.join(os.path.dirname(__file__), filename)
@@ -217,7 +219,6 @@ def save_results(results: dict, filename: str = 'BENCHMARK_RESULTS.md', *,
             ratio_str = f'{ratio:,.0f}x' if ratio >= 100 else f'{ratio:.2f}x'
             table_rows.append(f'| {name} | {avg_str} | {ratio_str} |')
     
-    # Save to BENCHMARK_RESULTS.md
     with open(filepath, 'w') as f:
         f.write('# PraisonAI Agents - Benchmark Results\n\n')
         f.write(f'**Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
@@ -239,37 +240,7 @@ def save_results(results: dict, filename: str = 'BENCHMARK_RESULTS.md', *,
         f.write('```\n')
     
     log(f'\nResults saved to: {filepath}')
-    
-    # Also update the main README.md
-    readme_path = os.path.join(os.path.dirname(__file__), '..', '..', '..', 'README.md')
-    if os.path.exists(readme_path):
-        update_readme(readme_path, table_rows, log=log)
-    
     return filepath
-
-
-def update_readme(readme_path: str, table_rows: list, *, log=print):
-    """Update the performance section in README.md with latest results."""
-    import re
-    
-    with open(readme_path, 'r') as f:
-        content = f.read()
-    
-    # Build the new table
-    new_table = '''| Framework | Avg Time (μs) | Relative |
-|-----------|---------------|----------|
-''' + '\n'.join(table_rows)
-    
-    # Pattern to match the performance table
-    pattern = r'(\| Framework \| Avg Time \(μs\) \| Relative \|\n\|[-|]+\|\n)(\|[^\n]+\|\n)+'
-    
-    if re.search(pattern, content):
-        content = re.sub(pattern, new_table + '\n', content)
-        
-        with open(readme_path, 'w') as f:
-            f.write(content)
-        
-        log(f'README.md updated: {readme_path}')
 
 
 def main():

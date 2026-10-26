@@ -288,7 +288,80 @@ class TestCheckpointService:
         with open(test_file, "r") as f:
             content = f.read()
         assert content == "Version 1"
-    
+
+    @pytest.mark.asyncio
+    async def test_service_concurrent_saves(self, temp_workspace, temp_storage):
+        """Concurrent save() calls on distinct changes all succeed (#5898)."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        async def one(i):
+            with open(os.path.join(temp_workspace, f"f{i}.txt"), "w") as f:
+                f.write(str(i))
+            return await service.save(f"cp{i}")
+
+        results = await asyncio.gather(*[one(i) for i in range(6)])
+        succeeded = [r for r in results if r.success]
+
+        # Files may be swept into an earlier commit; but no save may fail on
+        # git lock contention and every created commit must be distinct.
+        assert all(r.success or "No changes" in r.error for r in results)
+        assert len({r.checkpoint.id for r in succeeded}) == len(succeeded)
+        assert sum(r.success for r in results) >= 1
+
+    @pytest.mark.asyncio
+    async def test_service_restore_snapshots_unsaved_work(self, temp_workspace, temp_storage):
+        """restore() leaves a recoverable pre-restore checkpoint (#5898)."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage
+        )
+        await service.initialize()
+
+        with open(os.path.join(temp_workspace, "a.txt"), "w") as f:
+            f.write("a")
+        saved = await service.save("base")
+
+        unsaved = os.path.join(temp_workspace, "unsaved.txt")
+        with open(unsaved, "w") as f:
+            f.write("precious")
+
+        assert (await service.restore(saved.checkpoint.id)).success
+        assert not os.path.exists(unsaved)
+
+        pre = service._checkpoints[-1]
+        assert pre.message == "[pre-restore] auto-save"
+        assert (await service.restore(pre.id)).success
+        with open(unsaved) as f:
+            assert f.read() == "precious"
+        # Pinned so gc cannot prune it while it is off the HEAD timeline.
+        assert await service._run_git("rev-parse", f"refs/pre-restore/{pre.id}") == pre.id
+
+    @pytest.mark.asyncio
+    async def test_service_restore_keeps_oversized_unsaved_files(self, temp_workspace, temp_storage):
+        """Files too large to snapshot are not deleted by restore() (#5898)."""
+        service = CheckpointService(
+            workspace_dir=temp_workspace,
+            storage_dir=temp_storage,
+            max_file_size=10,
+        )
+        await service.initialize()
+
+        with open(os.path.join(temp_workspace, "a.txt"), "w") as f:
+            f.write("a")
+        saved = await service.save("base")
+
+        big = os.path.join(temp_workspace, "big.bin")
+        with open(big, "w") as f:
+            f.write("x" * 100)
+
+        assert (await service.restore(saved.checkpoint.id)).success
+        with open(big) as f:
+            assert f.read() == "x" * 100
+
     @pytest.mark.asyncio
     async def test_service_list_checkpoints(self, temp_workspace, temp_storage):
         """Test listing checkpoints."""

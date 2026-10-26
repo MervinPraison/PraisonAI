@@ -231,7 +231,14 @@ def load_plugin(filepath: str) -> Optional[Dict[str, Any]]:
     except PluginParseError as e:
         logger.error(f"Invalid plugin header: {e}")
         return None
-    
+
+    # Refuse to exec a plugin built for an incompatible core.
+    from .plugin import core_incompatibility
+    reason = core_incompatibility(metadata.get("dependencies", []))
+    if reason:
+        logger.warning(f"Plugin '{metadata.get('name')}' disabled: {reason}")
+        return None
+
     # Generate unique module name to avoid conflicts
     module_name = f"praison_plugin_{path.stem}_{id(path)}"
     

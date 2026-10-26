@@ -117,7 +117,8 @@ export interface GatewayEvent {
 /**
  * Standard gateway event types.
  * Python parity: `EventType(str, Enum)` in praisonaiagents/gateway/protocols.py,
- * exported from the package as `GatewayEventType`.
+ * exported from the package as `GatewayEventType`. Kept in lockstep by
+ * praisonai-agents/tests/unit/test_gateway_ts_event_type_lockstep.py.
  */
 export enum GatewayEventType {
   // Connection events

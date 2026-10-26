@@ -659,50 +659,52 @@ class ContextManager:
         Returns:
             Tuple of (token_count, metrics)
         """
+        # Heuristic is O(len(text)); hashing the whole text to cache it costs
+        # far more than recomputing it, so only cache the tiktoken path.
+        if not (validate or self.config.estimation_mode == EstimationMode.VALIDATED):
+            return estimate_tokens_heuristic(text), None
+
         # Check cache
         cache_key = hashlib.sha256(text.encode()).hexdigest()
         if cache_key in self._estimation_cache:
             return self._estimation_cache[cache_key], None
-        
+
         heuristic = estimate_tokens_heuristic(text)
         metrics = None
-        
-        if validate or self.config.estimation_mode == EstimationMode.VALIDATED:
-            try:
-                from .tokens import estimate_tokens_accurate
-                accurate = estimate_tokens_accurate(text, self.model)
-                
-                error_pct = abs(heuristic - accurate) / accurate * 100 if accurate > 0 else 0
-                
-                metrics = EstimationMetrics(
-                    heuristic_estimate=heuristic,
-                    accurate_estimate=accurate,
-                    error_pct=error_pct,
-                    estimator_used=EstimationMode.VALIDATED,
+
+        try:
+            from .tokens import estimate_tokens_accurate
+            accurate = estimate_tokens_accurate(text, self.model)
+            
+            error_pct = abs(heuristic - accurate) / accurate * 100 if accurate > 0 else 0
+            
+            metrics = EstimationMetrics(
+                heuristic_estimate=heuristic,
+                accurate_estimate=accurate,
+                error_pct=error_pct,
+                estimator_used=EstimationMode.VALIDATED,
+            )
+            
+            self._estimation_metrics = metrics
+            
+            # Log if mismatch exceeds threshold
+            if self.config.log_estimation_mismatch and error_pct > self.config.mismatch_threshold_pct:
+                import logging
+                get_logger(__name__).warning(
+                    f"Token estimation mismatch: heuristic={heuristic}, accurate={accurate}, error={error_pct:.1f}%"
                 )
-                
-                self._estimation_metrics = metrics
-                
-                # Log if mismatch exceeds threshold
-                if self.config.log_estimation_mismatch and error_pct > self.config.mismatch_threshold_pct:
-                    import logging
-                    get_logger(__name__).warning(
-                        f"Token estimation mismatch: heuristic={heuristic}, accurate={accurate}, error={error_pct:.1f}%"
-                    )
-                
-                # Use accurate if validated mode
-                if self.config.estimation_mode == EstimationMode.ACCURATE:
-                    result = accurate
-                else:
-                    result = heuristic
-            except ImportError:
+            
+            # Use accurate if validated mode
+            if self.config.estimation_mode == EstimationMode.ACCURATE:
+                result = accurate
+            else:
                 result = heuristic
-                metrics = EstimationMetrics(
-                    heuristic_estimate=heuristic,
-                    estimator_used=EstimationMode.HEURISTIC,
-                )
-        else:
+        except ImportError:
             result = heuristic
+            metrics = EstimationMetrics(
+                heuristic_estimate=heuristic,
+                estimator_used=EstimationMode.HEURISTIC,
+            )
         
         # Cache result
         if len(self._estimation_cache) < self._cache_max_size:
