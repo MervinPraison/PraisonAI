@@ -4,12 +4,14 @@ from praisonaiagents.memory.learn.stores import InsightStore, LearnEntry
 
 
 def test_new_entry_timestamps_are_timezone_aware():
+    """New learn entries carry timezone-aware created_at and updated_at."""
     entry = LearnEntry(id="e1", content="hello")
     assert datetime.fromisoformat(entry.created_at).tzinfo is not None
     assert datetime.fromisoformat(entry.updated_at).tzinfo is not None
 
 
 def test_prune_handles_legacy_naive_timestamps(tmp_path):
+    """Pruning treats legacy naive timestamps as UTC instead of raising on the subtraction."""
     store = InsightStore(store_path=str(tmp_path / "store.json"), retention_days=1)
     now = datetime.now(timezone.utc)
 
