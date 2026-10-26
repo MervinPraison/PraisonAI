@@ -259,8 +259,24 @@ class KanbanDispatcher:
                         )
                     continue
 
-                # Spawn worker process
-                success = await self._spawn_worker(task, store)
+                # Spawn worker process. If the dispatcher is stopped while the
+                # worktree is being prepared, no worker exists yet: close the
+                # run and hand the claim back before propagating.
+                try:
+                    success = await self._spawn_worker(task, store)
+                except asyncio.CancelledError:
+                    self._close_run_safe(
+                        store, run_id, 'failed',
+                        error='Dispatcher stopped before worker spawn',
+                    )
+                    try:
+                        store.release_claim(task.id, self.worker_id)
+                    except Exception as release_err:
+                        logger.error(
+                            "Failed to release claim for %s on cancel: %s",
+                            task.id, release_err,
+                        )
+                    raise
                 if not success:
                     # Failed to spawn: close run as failed, count it, and only
                     # release the claim for retry when the failure was recorded
@@ -598,6 +614,11 @@ class KanbanDispatcher:
             return f"worktree removal error: {e}"
         return None
 
+    def _discard_worktree(self, path: str, branch: str) -> None:
+        """Remove a worktree and branch that no worker ever used."""
+        if self._remove_worktree(path, force=True) is None:
+            self._run_git("branch", "-D", branch)
+
     def _commit_worktree_changes(self, path: str, branch: str) -> None:
         """Commit any uncommitted edits the worker left in its worktree.
 
@@ -738,9 +759,22 @@ class KanbanDispatcher:
             # cwd so nothing regresses.
             worktree_path = None
             if getattr(task, 'workspace_kind', 'default') == 'worktree':
-                worktree_path = await self._run_blocking(
-                    self._prepare_worktree, task, store
+                prep = asyncio.ensure_future(
+                    self._run_blocking(self._prepare_worktree, task, store)
                 )
+                try:
+                    worktree_path = await asyncio.shield(prep)
+                except asyncio.CancelledError:
+                    # The thread keeps running after cancellation. Let it
+                    # finish, then drop the fresh (unused) worktree and branch
+                    # so a retry can recreate them with `worktree add -b`.
+                    path = await asyncio.shield(prep)
+                    if path:
+                        await self._run_blocking(
+                            self._discard_worktree, path,
+                            f"kanban/{self._safe_task_id(task.id)}",
+                        )
+                    raise
                 if worktree_path:
                     if not hasattr(self, '_worktrees'):
                         self._worktrees = {}
@@ -1040,7 +1074,9 @@ class KanbanDispatcher:
             for task_id, process in self.running_tasks.items():
                 if process.poll() is None:
                     logger.warning(f"Task {task_id} did not terminate in 5s; sending SIGKILL")
-                    _kill_process_group(process)
+                # Even if the worker exited, a descendant may have ignored
+                # SIGTERM, so always finish off the whole group.
+                _kill_worker_group(process)
 
             for task_id in list(self.running_tasks):
                 # Close any open run for the interrupted attempt so we do not
@@ -1070,6 +1106,27 @@ def _terminate_worker(process: subprocess.Popen) -> None:
             process.terminate()
         except OSError as err:
             logger.error(f"Failed to terminate worker {process.pid}: {err}")
+
+
+def _kill_worker_group(process: subprocess.Popen) -> None:
+    """SIGKILL a worker's group, even after the worker itself was reaped.
+
+    The worker leads its own session, so its group id equals its pid and the
+    group stays addressable while any descendant is alive.
+    """
+    if os.name == 'nt':
+        if process.poll() is None:
+            _kill_process_group(process)
+        return
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except OSError:
+        pass  # group already empty
+    if process.poll() is None:
+        try:
+            process.kill()
+        except OSError:
+            pass
 
 
 def _wait_quiet(process: subprocess.Popen, timeout: float) -> None:

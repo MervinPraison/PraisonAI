@@ -90,38 +90,47 @@ async def test_blocking_work_is_serialised(slow_git):
     assert slow_git["max_active"] == 1
 
 
+async def test_cancel_during_worktree_prep_cleans_up(slow_git):
+    store = SQLiteKanbanStore()
+    store.create_task({"id": "w1", "title": "isolated", "status": "ready",
+                       "workspace_kind": "worktree"})
+    d = _Stub(max_concurrent=1)
+    t = asyncio.create_task(d.dispatch_once())
+    await asyncio.sleep(GIT_DELAY + 0.1)         # inside `git worktree add`
+    t.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await t
+
+    assert "git worktree remove" in slow_git["calls"]
+    assert "git branch -D" in slow_git["calls"]
+    assert not d.running_tasks
+    assert store.get_task("w1").status == "ready"
+    assert all(r.ended_at for r in store.get_runs("w1"))
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
 async def test_shutdown_terminates_worker_descendants(tmp_path, monkeypatch):
     monkeypatch.setenv("PRAISONAI_KANBAN_DB", str(tmp_path / "kanban.db"))
-    pid_file = tmp_path / "grandchild.pid"
+    marker = tmp_path / "survived"
 
     class _Spawner(kd.KanbanDispatcher):
         def _build_execution_command(self, task):
-            # Worker that starts a long-lived grandchild and waits on it.
-            return ["sh", "-c", f"sleep 60 & echo $! > {pid_file}; wait"]
+            # Worker exits on SIGTERM, but its child ignores SIGTERM and
+            # would leave a marker if it outlived shutdown.
+            return ["sh", "-c",
+                    f"(trap '' TERM; sleep 1; touch {marker}) & wait"]
 
     class _Task:
         id, board, title, body = "t1", "default", "t1", ""
 
     d = _Spawner()
     assert await d._spawn_worker(_Task(), store=None)
-    for _ in range(100):
-        if pid_file.exists() and pid_file.read_text().strip():
-            break
-        await asyncio.sleep(0.05)
-    grandchild = int(pid_file.read_text())
+    await asyncio.sleep(0.2)
 
     # Skip the 30 s graceful window; go straight to force-terminate.
     ticks = itertools.count(step=1000)
     monkeypatch.setattr(kd, "time", types.SimpleNamespace(time=lambda: next(ticks)))
     await d._shutdown()
 
-    for _ in range(50):
-        try:
-            os.kill(grandchild, 0)
-        except ProcessLookupError:
-            break
-        await asyncio.sleep(0.05)
-    else:
-        os.kill(grandchild, 9)
-        pytest.fail("worker's grandchild survived shutdown")
+    await asyncio.sleep(1.5)
+    assert not marker.exists(), "worker's descendant survived shutdown"
