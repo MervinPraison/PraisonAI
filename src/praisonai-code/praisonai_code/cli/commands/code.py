@@ -629,43 +629,12 @@ def _print_result_truncated(agent) -> bool:
 def _collect_print_usage(model: Optional[str]) -> dict:
     """Return this run's ``{in, out, cost}`` usage from the token collector.
 
-    Reuses the same collector + pricing path as ``run``'s session accounting so
-    the headless envelope reports real token/cost figures without any new
-    plumbing. Best-effort: any failure yields a zeroed usage block so the
-    envelope shape is stable for scripts.
+    Delegates to the shared cost-tracker helper also used by the interactive
+    ``/cost`` command. ``cost`` is ``None`` when a model has no known price.
     """
-    usage = {"in": 0, "out": 0, "cost": 0.0}
-    try:
-        from praisonaiagents.telemetry.token_collector import get_token_collector
+    from ..features.cost_tracker import price_collected_usage
 
-        summary = get_token_collector().get_session_summary()
-    except Exception:
-        return usage
-
-    totals = (summary or {}).get("total_metrics") or {}
-    usage["in"] = int(totals.get("input_tokens", 0) or 0)
-    usage["out"] = int(totals.get("output_tokens", 0) or 0)
-
-    try:
-        from ..features.cost_tracker import get_pricing
-
-        by_model = (summary or {}).get("by_model") or {}
-        if by_model:
-            cost = 0.0
-            for model_name, metrics in by_model.items():
-                pricing = get_pricing(model_name or model or "default")
-                cost += pricing.calculate_cost(
-                    int((metrics or {}).get("input_tokens", 0) or 0),
-                    int((metrics or {}).get("output_tokens", 0) or 0),
-                )
-            usage["cost"] = cost
-        else:
-            pricing = get_pricing(model or "default")
-            usage["cost"] = pricing.calculate_cost(usage["in"], usage["out"])
-    except Exception:
-        usage["cost"] = 0.0
-
-    return usage
+    return price_collected_usage(model)
 
 
 def _run_print_code(

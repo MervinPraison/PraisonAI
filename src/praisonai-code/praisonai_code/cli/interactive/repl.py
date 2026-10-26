@@ -144,8 +144,6 @@ class InteractiveREPL:
         self._running = False
         self._conversation_history: List[Dict] = []
         self._session_id: Optional[str] = None
-        self._total_tokens = 0
-        self._total_cost = 0.0
         self._registry = None  # Unified command registry (lazy)
         self._pending_context: List[str] = []  # `!!cmd` output for next turn
         self._checkpoints = None  # SessionCheckpointManager (lazy)
@@ -368,8 +366,11 @@ class InteractiveREPL:
             return True
         
         elif cmd == "cost":
-            self.io.info(f"Total tokens: {self._total_tokens}")
-            self.io.info(f"Estimated cost: ${self._total_cost:.4f}")
+            from praisonai_code.cli.features.cost_tracker import collected_usage_line
+
+            tokens, cost_text = collected_usage_line(self.config.model)
+            self.io.info(f"Total tokens: {tokens}")
+            self.io.info(f"Estimated cost: {cost_text}")
             return True
         
         elif cmd == "history":
