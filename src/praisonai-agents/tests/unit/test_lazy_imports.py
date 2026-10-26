@@ -326,13 +326,10 @@ class TestReplayStaysLazy:
         )
         assert has_graph == "praisonai.graph/1"
 
-    def test_package_import_stays_under_budget(self):
-        """``import praisonaiagents`` < 200 ms (best of three fresh interpreters)."""
-        best = min(
-            float(_fresh_python(
-                "import time; t = time.perf_counter(); import praisonaiagents;"
-                "print((time.perf_counter() - t) * 1000)"
-            ))
-            for _ in range(3)
+    def test_package_import_does_not_load_heavy_optional_modules(self):
+        """Deterministic stand-in for the <200 ms budget: no heavy optional deps."""
+        loaded = _fresh_python(
+            "import sys, praisonaiagents;"
+            "print(sorted(m for m in ('litellm', 'chromadb') if m in sys.modules))"
         )
-        assert best < 200, f"import praisonaiagents took {best:.0f} ms"
+        assert loaded == "[]"

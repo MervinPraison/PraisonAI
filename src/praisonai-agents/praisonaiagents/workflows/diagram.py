@@ -159,6 +159,12 @@ class _Graph:
                 "kind": kind,
                 "label": label,
             }
+        elif label:
+            # Two conditions to the same target share one edge; keep both labels.
+            existing = self.edges[edge_id]
+            labels = (existing["label"] or "").split(" / ") if existing["label"] else []
+            if label not in labels:
+                existing["label"] = " / ".join(labels + [label])
         if draw:
             self.ops.append(("edge", source, target, label))
 
@@ -337,8 +343,11 @@ def _flow_step(step: Any, g: _Graph, prev: Optional[str], parent: Optional[str])
 
     if cls in ("Loop", "Repeat"):
         pattern = cls.lower()
+        inner = getattr(step, "step", None)
+        # ``Repeat(step=[a, b])`` runs each member, as ``_execute_repeat`` does.
         inner_steps = getattr(step, "steps", None) or (
-            [getattr(step, "step")] if getattr(step, "step", None) is not None else []
+            list(inner) if isinstance(inner, (list, tuple))
+            else [inner] if inner is not None else []
         )
         over = getattr(step, "over", None)
         iterations = getattr(step, "max_iterations", None)
@@ -536,6 +545,14 @@ def _team_graph(team: Any) -> _Graph:
             condition = getattr(task, "condition", None) or {}
             followers = [x for x in (getattr(task, "next_tasks", None) or []) if x in by_name]
             routed = False
+            # Unified when/then_task/else_task routing, which execution
+            # checks before condition/next_tasks.
+            for attr, branch in (("then_task", str(getattr(task, "when", None) or "then")),
+                                 ("else_task", "else")):
+                target = getattr(task, attr, None)
+                if isinstance(target, str) and target in by_name:
+                    g.edge(node_id, by_name[target], "routes", branch)
+                    routed = True
             if isinstance(condition, dict):
                 for key, targets in condition.items():
                     for target in (targets if isinstance(targets, (list, tuple)) else [targets]):

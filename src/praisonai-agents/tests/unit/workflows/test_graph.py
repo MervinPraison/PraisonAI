@@ -105,6 +105,41 @@ def test_graph_to_mermaid_draws_leaf_nodes_not_groups():
     assert '["parallel"]' not in diagram  # a pattern group is a container
 
 
+def test_team_graph_keeps_when_routes_and_shared_target_labels():
+    from praisonaiagents import Agent, Task
+    from praisonaiagents.agents.agents import AgentTeam
+
+    a = Agent(name="A", instructions="a")
+    tasks = [
+        Task(name="check", description="c", agent=a, is_start=True,
+             when="score > 80", then_task="publish", else_task="revise"),
+        Task(name="revise", description="r", agent=a,
+             condition={"approved": ["publish"], "forced": ["publish"]}),
+        Task(name="publish", description="p", agent=a),
+    ]
+    graph = to_graph(AgentTeam(agents=[a], tasks=tasks, process="workflow"))
+    edges = {e["id"]: e for e in graph["edges"]}
+    assert edges["task:check->task:publish:routes"]["label"] == "score > 80"
+    assert edges["task:check->task:revise:routes"]["label"] == "else"
+    assert "task:check->end:done:next" not in edges
+    assert edges["task:revise->task:publish:routes"]["label"] == "approved / forced"
+
+
+def test_repeat_with_a_step_list_draws_each_member():
+    from praisonaiagents.workflows.workflows import AgentFlow, Repeat
+
+    def draft(ctx):
+        return "d"
+
+    def polish(ctx):
+        return "p"
+
+    graph = to_graph(AgentFlow(steps=[Repeat(step=[draft, polish], until=lambda ctx: True)]))
+    ids = {n["id"] for n in graph["nodes"]}
+    assert {"step:draft", "step:polish"} <= ids
+    assert "step:list" not in ids
+
+
 def test_unsupported_object_is_rejected():
     with pytest.raises(TypeError):
         to_graph(42)

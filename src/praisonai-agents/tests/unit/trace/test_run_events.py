@@ -672,6 +672,19 @@ class TestLiteLLMPath:
         assert r.data["duration_ms"] >= 0
         assert r.cost_usd > 0  # litellm knows gpt-4o-mini's price
 
+    def test_response_records_the_serving_model_and_a_message_snapshot(self, recorder, fake_litellm, monkeypatch):
+        import litellm
+
+        served = _response()
+        served.model = "gpt-4o"  # a failover profile answered
+        monkeypatch.setattr(litellm, "completion", lambda **params: served)
+        messages = [{"role": "user", "content": "hi"}]
+        self._llm()._completion_with_retry(model="gpt-4o-mini", messages=messages)
+        messages.append({"role": "assistant", "content": "later turn"})
+        assert _of(recorder, "llm_response")[0].data["model"] == "gpt-4o"
+        assert _of(recorder, "llm_request")[0].messages_count == 1
+        assert len(_of(recorder, "llm_request")[0].data["messages"]) == 1
+
     def test_streaming_call_records_response_when_the_stream_ends(self, recorder, fake_litellm):
         llm = self._llm()
         stream = llm._completion_with_retry(model="gpt-4o-mini", messages=[], stream=True)

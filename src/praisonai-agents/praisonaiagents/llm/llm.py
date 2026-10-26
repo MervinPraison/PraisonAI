@@ -60,7 +60,8 @@ def _replay_llm_begin(llm: Any, params: Dict[str, Any]):
     model = params.get("model") or getattr(llm, "model", None)
     # Chat Completions sends ``messages``; the Responses API sends ``input``.
     messages = params.get("messages", params.get("input"))
-    messages = messages if isinstance(messages, list) else None
+    # Copy: the caller keeps appending turns to (and shrinking) the live list.
+    messages = list(messages) if isinstance(messages, list) else None
     emitter._emit(emitter._llm_request_event(
         agent, len(messages) if messages else 0, 0, model=model, messages=messages,
     ))
@@ -85,6 +86,11 @@ def _replay_observe(span: Dict[str, Any], response: Any, chunk: bool) -> None:
         usage = get("usage", None)
         if usage:
             span["usage"] = usage
+        # The model that actually served the call (a failover profile may
+        # differ from the requested one), so name and price match it.
+        served = get("model", None)
+        if isinstance(served, str) and served:
+            span["model"] = served
         choices = get("choices", None) or []
         if not choices:
             return
