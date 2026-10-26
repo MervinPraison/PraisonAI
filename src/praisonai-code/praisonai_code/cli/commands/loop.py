@@ -88,8 +88,11 @@ def _run_loop(
         typer.echo("Error: praisonaiagents not installed. Run: pip install praisonaiagents", err=True)
         raise typer.Exit(1)
     
-    # Build autonomy config
+    # Build autonomy config. `loop` always iterates: without an explicit mode
+    # the default level (suggest) maps to single-call "caller" mode, which
+    # would ignore --completion-promise and --max-iterations.
     autonomy_config = {
+        "mode": "iterative",
         "max_iterations": max_iterations,
         "completion_promise": completion_promise,
         "clear_context": clear_context,
