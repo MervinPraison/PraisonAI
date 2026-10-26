@@ -1120,7 +1120,7 @@ def replay_export(
 
     from ..output.console import get_output_controller
     from praisonai.replay import export as exporter
-    from praisonai.replay.events import run_id_of
+    from praisonai.replay.events import SAFE_RUN_ID, run_id_of
 
     output = get_output_controller()
     if format not in _EXPORT_FORMATS:
@@ -1131,7 +1131,12 @@ def replay_export(
     redact = not no_redact
     if format == "html":
         text = exporter.to_html(events, redact=redact)
-        output_file = output_file or f"{run_id_of(events, Path(run).stem)}.html"
+        if not output_file:
+            # The run id comes from the trace: never let it pick a path outside ./
+            name = run_id_of(events, Path(run).stem)
+            if not SAFE_RUN_ID.match(name):
+                name = Path(run).stem if SAFE_RUN_ID.match(Path(run).stem) else "replay"
+            output_file = f"{name}.html"
     elif format == "json":
         text = exporter.to_json(events, redact=redact)
     elif format == "mermaid":

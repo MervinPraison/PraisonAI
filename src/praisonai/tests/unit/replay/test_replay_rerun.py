@@ -385,3 +385,29 @@ def test_flow_rerun_rejects_flow_missing_recorded_steps(traces_dir, fx):
     src = fx.write_trace(traces_dir, "run-flow01", fx.flow_events())
     with pytest.raises(RerunError, match="does not match any step"):
         rerun(AgentFlow(steps=[other]), str(src), "step:draft", input="topic")
+
+
+def test_flow_rerun_rejects_reordered_flow(traces_dir, fx):
+    from praisonaiagents import AgentFlow
+    from praisonaiagents.workflows import StepResult
+
+    from praisonai.replay.rerun import RerunError, rerun
+
+    ran = []
+
+    def research(ctx):
+        ran.append("research")
+        return StepResult(output="r")
+
+    def draft(ctx):
+        ran.append("draft")
+        return StepResult(output="d")
+
+    def polish(ctx):
+        ran.append("polish")
+        return StepResult(output="p")
+
+    src = fx.write_trace(traces_dir, "run-flow01", fx.flow_events())
+    with pytest.raises(RerunError, match="different order"):
+        rerun(AgentFlow(steps=[draft, research, polish]), str(src), "step:draft", input="topic")
+    assert ran == []

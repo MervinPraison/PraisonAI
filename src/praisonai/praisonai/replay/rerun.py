@@ -268,15 +268,46 @@ def _flow_step_names(steps: Any) -> set:
     return names
 
 
+def _check_flow_order(steps: List[Any], recorded: List[str]) -> None:
+    """Reject a sequential flow whose top-level steps are not in the recorded order.
+
+    Only checked when the flow runs strictly in sequence: ``next_steps`` /
+    ``branch_condition`` jumps or a repeated node (``#2``) can revisit steps.
+    """
+    if any(getattr(s, "next_steps", None) or getattr(s, "branch_condition", None) for s in steps):
+        return
+    if any("#" in node_id for node_id in recorded):
+        return
+    position: Dict[str, int] = {}
+    for index, step in enumerate(steps):
+        for attr in ("name", "__name__", "_yaml_step_name"):
+            value = getattr(step, attr, None)
+            if isinstance(value, str):
+                position.setdefault(value, index)
+    last = -1
+    for node_id in recorded:  # nested steps have no top-level position: skipped
+        index = position.get(_step_name(node_id))
+        if index is None:
+            continue
+        if index < last:
+            raise RerunError(
+                f"Recorded node {node_id!r} runs in a different order in this flow; "
+                "re-run against the flow that recorded it."
+            )
+        last = index
+
+
 def seed_flow(flow: Any, plan: RerunPlan) -> TraceStepCache:
     """Install a :class:`TraceStepCache` for ``plan`` on an AgentFlow."""
     from praisonaiagents.workflows.step_cache import resolve_step_cache
 
     # A different or edited flow would silently run unmatched steps fresh.
     names = _flow_step_names(getattr(flow, "steps", None))
-    for node_id in [*plan.outputs, plan.node_id]:
+    recorded = [*plan.outputs, plan.node_id]
+    for node_id in recorded:
         if _step_name(node_id) not in names:
             raise RerunError(f"Recorded node {node_id!r} does not match any step in this flow.")
+    _check_flow_order(getattr(flow, "steps", None) or [], recorded)
 
     cache = TraceStepCache(plan.outputs, plan.variables).bind(flow)
     flow.cache = cache

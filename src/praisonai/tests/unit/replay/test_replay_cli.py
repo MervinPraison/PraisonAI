@@ -139,6 +139,23 @@ def test_export_html_default_file(traces_dir, fx, tmp_path, monkeypatch):
     assert "sk-abcdefghijklmnop1234" not in html
 
 
+def test_export_html_default_file_ignores_unsafe_trace_run_id(traces_dir, fx, tmp_path, monkeypatch):
+    from praisonai.replay import export
+
+    monkeypatch.setattr(export, "aiui_renderer_files", lambda: None)
+    evs = fx.team_events()
+    for ev in evs:
+        ev["run_id"] = "../escaped"
+    fx.write_trace(traces_dir, "run-team01", evs)
+    work = tmp_path / "work"
+    work.mkdir()
+    monkeypatch.chdir(work)
+    result = _invoke("export", "run-team01")
+    assert result.exit_code == 0, result.output
+    assert (work / "run-team01.html").exists()
+    assert not (tmp_path / "escaped.html").exists()
+
+
 @pytest.mark.parametrize("fmt", ["json", "mermaid", "otel"])
 def test_export_formats_to_file(traces_dir, fx, tmp_path, fmt):
     fx.write_trace(traces_dir, "run-team01", fx.team_events())
