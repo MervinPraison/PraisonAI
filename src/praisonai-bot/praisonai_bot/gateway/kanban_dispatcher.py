@@ -199,6 +199,10 @@ class KanbanDispatcher:
         # Clean up completed processes first
         self._cleanup_completed_tasks(store)
 
+        # Prove liveness for our own children before the reclaim sweep runs,
+        # so a healthy long-running worker is never mistaken for a stale one.
+        self._heartbeat_children(store)
+
         # Reclaim stale/crashed claims before dispatching new work so that
         # tasks stranded by dead workers return to 'ready' and get re-dispatched.
         self._reclaim_stale_claims(store)
@@ -221,6 +225,14 @@ class KanbanDispatcher:
         
         spawned = 0
         for task in ready_tasks[:available_slots]:
+            live = self.running_tasks.get(task.id)
+            if live is not None and live.poll() is None:
+                # Never overwrite the handle of a still-running worker.
+                logger.error(
+                    "Task %s is 'ready' but its worker (pid %s) is still running; "
+                    "skipping re-dispatch", task.id, live.pid,
+                )
+                continue
             try:
                 # Try to claim the task atomically with a lease + owner PID.
                 claimed = self._claim_task(store, task)
@@ -394,6 +406,73 @@ class KanbanDispatcher:
                 (pid, datetime.now(timezone.utc).isoformat(), task_id, self.worker_id),
             )
 
+    def _heartbeat_children(self, store: Any):
+        """Renew lease + heartbeat for every child worker that is still alive.
+
+        The spawned worker cannot heartbeat for itself, so the supervisor that
+        holds its ``Popen`` handle does it. If the claim is gone (an operator
+        released or moved the card), the child is terminated rather than left
+        running unowned.
+        """
+        beat = getattr(store, 'heartbeat', None)
+        if beat is None:
+            return
+        for task_id, process in list(self.running_tasks.items()):
+            if process.poll() is not None:
+                continue
+            try:
+                owned = beat(task_id, self.worker_id, ttl_seconds=self.claim_ttl_seconds)
+            except Exception as e:
+                logger.debug(f"Heartbeat for task {task_id} failed: {e}")
+                continue
+            if not owned:
+                logger.warning(
+                    f"Lost claim on task {task_id} while worker {process.pid} "
+                    f"was running; terminating it"
+                )
+                self._terminate_unowned(store, task_id, process)
+
+    def _terminate_unowned(self, store: Any, task_id: str, process: subprocess.Popen):
+        """Stop a child whose claim is no longer ours and forget its tracking."""
+        try:
+            process.terminate()
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+        except OSError as e:
+            logger.error(f"Failed to terminate worker for task {task_id}: {e}")
+        self.running_tasks.pop(task_id, None)
+        getattr(self, '_worktrees', {}).pop(task_id, None)
+        log_path = getattr(self, '_temp_logs', {}).pop(task_id, None)
+        if log_path:
+            try:
+                os.unlink(log_path)
+            except OSError:
+                pass
+        run_id = self._task_runs.get(task_id)
+        if run_id is None or self._close_run_safe(
+            store, run_id, 'failed',
+            error='Claim lost while worker was running; worker terminated',
+        ):
+            self._task_runs.pop(task_id, None)
+
+    def _close_reclaimed_run(self, store: Any, task_id: str):
+        """Close the dead worker's open run and count it toward the breaker."""
+        try:
+            task = store.get_task(task_id)
+        except Exception as e:
+            logger.debug(f"Could not read reclaimed task {task_id}: {e}")
+            return
+        run_id = getattr(task, 'current_run_id', None)
+        if run_id is not None:
+            self._close_run_safe(
+                store, run_id, 'crashed',
+                error='Worker died or went stale; claim reclaimed',
+            )
+        self._record_failure_safe(
+            store, task_id, error='Worker died or went stale; claim reclaimed'
+        )
+
     def _reclaim_stale_claims(self, store: Any):
         """Sweep running tasks and reclaim those stranded by dead/stale workers."""
         reclaim = getattr(store, 'reclaim_stale_claims', None)
@@ -409,6 +488,7 @@ class KanbanDispatcher:
 
         for task_id in reclaimed or []:
             logger.warning(f"Reclaimed stale kanban task {task_id} back to 'ready'")
+            self._close_reclaimed_run(store, task_id)
             # The running -> ready transition is announced as
             # KANBAN_TASK_MOVED (reclaimed=True) by the store itself;
             # 'KANBAN_TASK_RECLAIMED' was never a HookEvent member and so
