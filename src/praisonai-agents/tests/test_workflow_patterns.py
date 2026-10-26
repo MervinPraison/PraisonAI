@@ -1274,12 +1274,13 @@ class TestTaskTools:
 class TestMigratedFeatures:
     """Test features migrated from process='workflow'."""
     
-    def test_step_output_file(self):
+    def test_step_output_file(self, monkeypatch):
         """Test Task with output_file parameter."""
         import tempfile
         import os
         
         with tempfile.TemporaryDirectory() as tmpdir:
+            monkeypatch.setenv("PRAISONAI_PROJECT_ROOT", tmpdir)
             output_path = os.path.join(tmpdir, "output.txt")
             
             def generate_content(ctx: WorkflowContext) -> StepResult:
