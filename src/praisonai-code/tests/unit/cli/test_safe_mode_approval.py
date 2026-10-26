@@ -26,8 +26,8 @@ EDIT_TOOLS = ("edit_file", "apply_patch")
 
 
 def _in_fresh_context(fn):
-    """Approvals are context-local; isolate each scenario."""
-    return contextvars.copy_context().run(fn)
+    """Approvals are context-local; start each scenario from an empty context."""
+    return contextvars.Context().run(fn)
 
 
 def _yaml_grants(groups, workspace):
@@ -94,8 +94,14 @@ def test_safe_mode_keeps_acp_orchestrator_approving(monkeypatch, tmp_path):
     assert _in_fresh_context(run) == "auto"
 
 
-def test_safe_mode_edit_reaches_approval_backend(monkeypatch, tmp_path):
-    """End to end: a deny-all backend is consulted and the file is untouched."""
+@pytest.mark.parametrize("tool_name,args", [
+    ("edit_file", {"filepath": "app.py", "old_string": "DEBUG = False",
+                   "new_string": "DEBUG = True", "force": True}),
+    ("acp_create_file", {"filepath": "app.py", "content": "DEBUG = True\n"}),
+])
+def test_safe_mode_edit_reaches_approval_backend(monkeypatch, tmp_path, tool_name, args):
+    """End to end: a deny-all backend is consulted and the file is untouched,
+    for both the edit tools and the ACP write tools."""
     litellm = pytest.importorskip("litellm")
     from praisonaiagents import Agent
     from praisonaiagents.approval.protocols import ApprovalDecision
@@ -128,9 +134,7 @@ def test_safe_mode_edit_reaches_approval_backend(monkeypatch, tmp_path):
                 choices=[{"finish_reason": "tool_calls", "message": {
                     "role": "assistant", "content": "", "tool_calls": [{
                         "id": "c1", "type": "function", "function": {
-                            "name": "edit_file", "arguments": json.dumps({
-                                "filepath": "app.py", "old_string": "DEBUG = False",
-                                "new_string": "DEBUG = True", "force": True})}}]}}],
+                            "name": tool_name, "arguments": json.dumps(args)}}]}}],
                 usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
             )
         return litellm.ModelResponse(
@@ -160,7 +164,7 @@ def test_safe_mode_edit_reaches_approval_backend(monkeypatch, tmp_path):
     finally:
         registry.set_backend(previous)
 
-    assert "edit_file" in asked
+    assert tool_name in asked
     assert target.read_text() == "DEBUG = False\n"
 
 
