@@ -278,3 +278,61 @@ class TestTelemetryConfig:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+def _fresh_python(code):
+    """Run ``code`` in a fresh interpreter against this checkout; return stdout."""
+    import os
+    import subprocess
+    from pathlib import Path
+
+    root = str(Path(__file__).resolve().parents[2])
+    env = dict(os.environ, PYTHONPATH=root, PYTHONDONTWRITEBYTECODE="1")
+    out = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True,
+                         text=True, timeout=120, check=True)
+    return out.stdout.strip().splitlines()[-1]
+
+
+class TestReplayStaysLazy:
+    """PraisonAI Replay's graph builder must cost nothing until a trace is on."""
+
+    def test_package_import_does_not_load_the_graph_builder(self):
+        loaded = _fresh_python(
+            "import sys, praisonaiagents;"
+            "from praisonaiagents import Agent, AgentTeam, AgentFlow;"
+            "print('praisonaiagents.workflows.diagram' in sys.modules)"
+        )
+        assert loaded == "False"
+
+    def test_an_untraced_run_does_not_load_the_graph_builder(self):
+        loaded = _fresh_python(
+            "import sys\n"
+            "from praisonaiagents import AgentFlow\n"
+            "def step(ctx): return 'ok'\n"
+            "AgentFlow(steps=[step]).run('go');"
+            "print('praisonaiagents.workflows.diagram' in sys.modules)"
+        )
+        assert loaded == "False"
+
+    def test_a_traced_run_builds_the_graph(self):
+        has_graph = _fresh_python(
+            "from praisonaiagents import AgentFlow\n"
+            "from praisonaiagents.trace.context_events import ContextListSink, ContextTraceEmitter, trace_context\n"
+            "sink = ContextListSink()\n"
+            "def step(ctx): return 'ok'\n"
+            "with trace_context(ContextTraceEmitter(sink=sink, session_id='s')):\n"
+            "    AgentFlow(steps=[step]).run('go')\n"
+            "print(sink.get_events()[0].data['graph']['schema'])"
+        )
+        assert has_graph == "praisonai.graph/1"
+
+    def test_package_import_stays_under_budget(self):
+        """``import praisonaiagents`` < 200 ms (best of three fresh interpreters)."""
+        best = min(
+            float(_fresh_python(
+                "import time; t = time.perf_counter(); import praisonaiagents;"
+                "print((time.perf_counter() - t) * 1000)"
+            ))
+            for _ in range(3)
+        )
+        assert best < 200, f"import praisonaiagents took {best:.0f} ms"

@@ -2441,6 +2441,21 @@ class AgentTeam(SpawnAnnounceProtocol):
             except StopIteration:
                 pass
 
+    def to_graph(self) -> Dict[str, Any]:
+        """This team's definition as graph data (``praisonai.graph/1``).
+
+        Covers agents, tasks (context/depends_on, next_tasks, conditions),
+        tools, hand-offs, human review and the hierarchical manager. Node ids
+        are stable across processes and match replay events' ``node_id``.
+        """
+        from ..workflows.diagram import to_graph
+        return to_graph(self)
+
+    def to_mermaid(self) -> str:
+        """Render this team's definition as a mermaid diagram."""
+        from ..workflows.diagram import graph_to_mermaid, to_graph
+        return graph_to_mermaid(to_graph(self))
+
     def get_task_status(self, task_id):
         if task_id in self.tasks:
             return self.tasks[task_id].status

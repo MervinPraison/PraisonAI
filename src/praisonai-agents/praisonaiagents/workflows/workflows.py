@@ -1498,6 +1498,15 @@ class AgentFlow:
         from .diagram import flow_to_mermaid
         return flow_to_mermaid(self)
 
+    def to_graph(self) -> Dict[str, Any]:
+        """This flow's definition as graph data (``praisonai.graph/1``).
+
+        Node ids are stable across processes (derived from step names and
+        positions), and are the ``node_id`` values replay trace events carry.
+        """
+        from .diagram import to_graph
+        return to_graph(self)
+
     @property
     def state(self):
         """The flow's variables as the declared ``state_model``.
