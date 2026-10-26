@@ -104,3 +104,27 @@ def test_async_tool_path_counts_tools():
     assert r.success is True
     assert r.completion_reason == "tool_completion"
     assert r.iterations == 1
+
+
+def test_promise_tag_is_sent_to_model():
+    model = ScriptedModel([DONE_REPLY])
+    _make(model).run_autonomous(PROMPT, completion_promise="DONE", max_iterations=2)
+    assert "<promise>DONE</promise>" in model.requests[0].last_user_message
+
+
+def test_async_blocked_tool_does_not_count_as_tool_completion():
+    from praisonaiagents.hooks import HookEvent, HookRegistry, HookResult
+
+    registry = HookRegistry()
+
+    @registry.on(HookEvent.BEFORE_TOOL)
+    def deny(data):
+        return HookResult.deny("blocked")
+
+    agent = Agent(
+        name="worker", instructions="Do the task.", llm=ScriptedModel(_script(2)),
+        tools=[list_files], output="silent", hooks=registry,
+        autonomy={"level": "full_auto"},
+    )
+    r = asyncio.run(agent.run_autonomous_async(PROMPT, max_iterations=3))
+    assert r.completion_reason != "tool_completion"

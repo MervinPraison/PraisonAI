@@ -1369,10 +1369,6 @@ Write the complete compiled report:"""
         # concurrent turns on the same Agent don't corrupt the buffer (#3307).
         self._record_turn_tool(function_name)
 
-        # Per-turn tool count for autonomy completion heuristics (sync parity
-        # with tool_execution.py).
-        self._autonomy_turn_tool_count = getattr(self, '_autonomy_turn_tool_count', 0) + 1
-
         # Result-aware tool-loop detection (async parity with the sync path in
         # tool_execution.py). Without this, an agent driven via achat()/astart()
         # that repeatedly calls the same tool with the same args gets no
@@ -1431,6 +1427,10 @@ Write the complete compiled report:"""
                 _loop_detection.record_tool_outcome(
                     _ld_history, function_name, arguments, _result, _ld_config
                 )
+            # Per-turn tool count for autonomy completion heuristics (sync
+            # parity with tool_execution.py). Counted only once the tool has
+            # actually run, so a BEFORE_TOOL-blocked call cannot count.
+            self._autonomy_turn_tool_count = getattr(self, '_autonomy_turn_tool_count', 0) + 1
             return _result
 
         # Enforce BEFORE_TOOL/AFTER_TOOL security hooks for every async caller,

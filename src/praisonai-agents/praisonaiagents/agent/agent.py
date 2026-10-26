@@ -4766,6 +4766,11 @@ Summary:"""
         effective_promise = completion_promise
         if effective_promise is None:
             effective_promise = self.autonomy_config.get("completion_promise")
+        # The promise is the only success signal, so tell the model about it
+        # unless the caller already did (e.g. the `loop` CLI instructions).
+        _promise_tag = f"<promise>{effective_promise}</promise>"
+        if effective_promise and _promise_tag not in prompt and _promise_tag not in (self.instructions or ""):
+            prompt = f"{prompt}\n\nWhen the task is fully complete, include {_promise_tag} in your response."
         
         # Get clear_context from config if not explicitly set
         effective_clear_context = clear_context
@@ -5254,6 +5259,11 @@ Summary:"""
         effective_promise = completion_promise
         if effective_promise is None:
             effective_promise = self.autonomy_config.get("completion_promise")
+        # The promise is the only success signal, so tell the model about it
+        # unless the caller already did (e.g. the `loop` CLI instructions).
+        _promise_tag = f"<promise>{effective_promise}</promise>"
+        if effective_promise and _promise_tag not in prompt and _promise_tag not in (self.instructions or ""):
+            prompt = f"{prompt}\n\nWhen the task is fully complete, include {_promise_tag} in your response."
         
         # Get clear_context from config if not explicitly set
         effective_clear_context = clear_context
