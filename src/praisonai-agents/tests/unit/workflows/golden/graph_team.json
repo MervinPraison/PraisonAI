@@ -1,0 +1,186 @@
+{
+  "edges": [
+    {
+      "id": "agent:Researcher->tool:Researcher/search_web:uses",
+      "kind": "uses",
+      "label": null,
+      "source": "agent:Researcher",
+      "target": "tool:Researcher/search_web"
+    },
+    {
+      "id": "agent:Writer->agent:Billing:handoff",
+      "kind": "handoff",
+      "label": null,
+      "source": "agent:Writer",
+      "target": "agent:Billing"
+    },
+    {
+      "id": "task:research->agent:Researcher:assigned",
+      "kind": "assigned",
+      "label": null,
+      "source": "task:research",
+      "target": "agent:Researcher"
+    },
+    {
+      "id": "task:draft->agent:Writer:assigned",
+      "kind": "assigned",
+      "label": null,
+      "source": "task:draft",
+      "target": "agent:Writer"
+    },
+    {
+      "id": "human:you->task:draft:reviews",
+      "kind": "reviews",
+      "label": null,
+      "source": "human:you",
+      "target": "task:draft"
+    },
+    {
+      "id": "task:publish->agent:Writer:assigned",
+      "kind": "assigned",
+      "label": null,
+      "source": "task:publish",
+      "target": "agent:Writer"
+    },
+    {
+      "id": "task:3->agent:Writer:assigned",
+      "kind": "assigned",
+      "label": null,
+      "source": "task:3",
+      "target": "agent:Writer"
+    },
+    {
+      "id": "start:begin->task:research:next",
+      "kind": "next",
+      "label": null,
+      "source": "start:begin",
+      "target": "task:research"
+    },
+    {
+      "id": "task:research->task:draft:next",
+      "kind": "next",
+      "label": null,
+      "source": "task:research",
+      "target": "task:draft"
+    },
+    {
+      "id": "task:draft->task:publish:routes",
+      "kind": "routes",
+      "label": "approved",
+      "source": "task:draft",
+      "target": "task:publish"
+    },
+    {
+      "id": "task:draft->task:research:routes",
+      "kind": "routes",
+      "label": "rejected",
+      "source": "task:draft",
+      "target": "task:research"
+    },
+    {
+      "id": "task:publish->end:done:next",
+      "kind": "next",
+      "label": null,
+      "source": "task:publish",
+      "target": "end:done"
+    },
+    {
+      "id": "task:3->end:done:next",
+      "kind": "next",
+      "label": null,
+      "source": "task:3",
+      "target": "end:done"
+    }
+  ],
+  "kind": "team",
+  "name": "newsroom",
+  "nodes": [
+    {
+      "id": "start:begin",
+      "kind": "start",
+      "label": "Brief",
+      "meta": {},
+      "parent": null
+    },
+    {
+      "id": "agent:Researcher",
+      "kind": "agent",
+      "label": "Researcher",
+      "meta": {
+        "role": "Assistant"
+      },
+      "parent": null
+    },
+    {
+      "id": "tool:Researcher/search_web",
+      "kind": "tool",
+      "label": "search_web",
+      "meta": {},
+      "parent": null
+    },
+    {
+      "id": "agent:Writer",
+      "kind": "agent",
+      "label": "Writer",
+      "meta": {
+        "role": "Assistant"
+      },
+      "parent": null
+    },
+    {
+      "id": "agent:Billing",
+      "kind": "agent",
+      "label": "Billing",
+      "meta": {
+        "role": "Assistant"
+      },
+      "parent": null
+    },
+    {
+      "id": "human:you",
+      "kind": "human",
+      "label": "You",
+      "meta": {},
+      "parent": null
+    },
+    {
+      "id": "task:research",
+      "kind": "task",
+      "label": "research",
+      "meta": {},
+      "parent": null
+    },
+    {
+      "id": "task:draft",
+      "kind": "task",
+      "label": "draft",
+      "meta": {
+        "human_input": true
+      },
+      "parent": null
+    },
+    {
+      "id": "task:publish",
+      "kind": "task",
+      "label": "publish",
+      "meta": {},
+      "parent": null
+    },
+    {
+      "id": "task:3",
+      "kind": "task",
+      "label": "Archive everything afterwards",
+      "meta": {},
+      "parent": null
+    },
+    {
+      "id": "end:done",
+      "kind": "end",
+      "label": "Delivered",
+      "meta": {},
+      "parent": null
+    }
+  ],
+  "process": "workflow",
+  "schema": "praisonai.graph/1"
+}

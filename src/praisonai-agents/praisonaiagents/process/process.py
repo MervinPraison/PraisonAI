@@ -80,6 +80,31 @@ class Process:
                     self._state_lock = asyncio.Lock()
         return self._state_lock
 
+    def _trace_delegate(self, task_id, tasks_summary):
+        """Record the manager's choice as a ``delegate`` hand-off (tracing on only)."""
+        from ..trace.context_events import get_context_emitter
+        emitter = get_context_emitter()
+        if not emitter._enabled:
+            return
+        from ..workflows.diagram import task_node_id
+        task = self.tasks[task_id]
+        agent = getattr(getattr(task, "agent", None), "name", None)
+        emitter.agent_handoff(
+            "Manager",
+            agent,
+            reason=f"Manager delegated task {getattr(task, 'name', None) or task_id}",
+            context_passed={
+                "task_id": task_id,
+                "task_status": [
+                    {"task_id": t.get("task_id"), "name": t.get("name"),
+                     "status": t.get("status"), "agent": t.get("agent")}
+                    for t in tasks_summary
+                ],
+            },
+            kind="delegate",
+            node_id=task_node_id(self.tasks, task),
+        )
+
     def _task_by_name(self, name):
         """Return the task whose name matches, or None. First-match, mirrors prior inline lookup."""
         return next((t for t in self.tasks.values() if t.name == name), None)
@@ -1256,6 +1281,7 @@ Provide a JSON with the structure:
 
             if self.tasks[selected_task_id].status != "completed":
                 logging.info(f"Starting execution of task {selected_task_id}")
+                self._trace_delegate(selected_task_id, tasks_summary)
                 yield selected_task_id
                 logging.info(f"Finished execution of task {selected_task_id}, status: {self.tasks[selected_task_id].status}")
                 # Count a task toward completion only the first time it actually
@@ -1916,6 +1942,7 @@ Provide a JSON with the structure:
 
             if self.tasks[selected_task_id].status != "completed":
                 logging.info(f"Starting execution of task {selected_task_id}")
+                self._trace_delegate(selected_task_id, tasks_summary)
                 yield selected_task_id
                 logging.info(f"Finished execution of task {selected_task_id}, status: {self.tasks[selected_task_id].status}")
                 # Count a task toward completion only the first time it actually

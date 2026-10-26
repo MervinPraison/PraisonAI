@@ -725,6 +725,97 @@ def include(recipe: Optional[str] = None, workflow: Optional[Any] = None, input:
 # Maximum nesting depth for patterns (prevents stack overflow)
 MAX_NESTING_DEPTH = 5
 
+
+# ---------------------------------------------------------------------------
+# Replay step events (step_start / step_end). Every helper is a no-op returning
+# None when the context emitter is disabled, so an untraced run pays one
+# attribute check per step.
+# ---------------------------------------------------------------------------
+
+# The innermost pattern span (Route/If) so it can record the branch it chose.
+_replay_step_span: "contextvars.ContextVar[Optional[dict]]" = contextvars.ContextVar(
+    "praisonai_replay_step_span", default=None
+)
+
+
+def _replay_step_begin(flow, step, name=None, pattern=None):
+    """Emit ``step_start`` for a definition object; returns a span or None."""
+    from ..trace.context_events import get_context_emitter
+    emitter = get_context_emitter()
+    if not emitter._enabled:
+        return None
+    node_id = (getattr(flow, "_replay_node_ids", None) or {}).get(id(step))
+    if name is None:
+        if node_id is not None:
+            name = node_id[len("step:"):] if node_id.startswith("step:") else node_id
+        else:
+            from .diagram import _label
+            name = pattern or _label(step)
+    if node_id is None:
+        node_id = f"step:{name}"
+    agent = getattr(step, "agent", None) if not hasattr(step, "chat") else step
+    agent = getattr(agent, "name", None) if agent is not None else None
+    emitter.step_start(name, pattern=pattern, node_id=node_id, agent=agent)
+    return {"emitter": emitter, "name": name, "node_id": node_id, "agent": agent,
+            "started": time.perf_counter()}
+
+
+def _replay_step_end(span, status, output=None):
+    """Emit ``step_end`` for a span from :func:`_replay_step_begin`."""
+    if span is None:
+        return
+    span["emitter"].step_end(
+        span["name"],
+        status,
+        duration_ms=(time.perf_counter() - span["started"]) * 1000,
+        output=output,
+        route=span.get("route"),
+        node_id=span["node_id"],
+        agent=span["agent"],
+    )
+
+
+def _replay_note_route(label):
+    """Record which branch the enclosing Route/If chose (tracing on only)."""
+    span = _replay_step_span.get()
+    if span is not None:
+        span["route"] = label
+
+
+def _replay_pattern(pattern):
+    """Wrap a pattern executor (``_execute_route`` ...) in step_start/step_end.
+
+    Top-level and nested patterns both reach the executor, so wrapping it here
+    covers every nesting level once.
+    """
+    def decorate(execute):
+        def wrapper(self, step, *args, **kwargs):
+            name = getattr(step, "name", None) if pattern == "discussion" else None
+            span = _replay_step_begin(self, step, name, pattern)
+            if span is None:
+                return execute(self, step, *args, **kwargs)
+            token = _replay_step_span.set(span)
+            try:
+                result = execute(self, step, *args, **kwargs)
+            except BaseException:
+                _replay_step_end(span, "failed")
+                raise
+            finally:
+                _replay_step_span.reset(token)
+            is_dict = isinstance(result, dict)
+            _replay_step_end(
+                span,
+                "failed" if is_dict and result.get("stop") else "completed",
+                result.get("output") if is_dict else None,
+            )
+            return result
+        wrapper.__name__ = execute.__name__
+        wrapper.__qualname__ = execute.__qualname__
+        wrapper.__doc__ = execute.__doc__
+        wrapper.__wrapped__ = execute
+        return wrapper
+    return decorate
+
 @dataclass
 class If:
     """
@@ -1464,19 +1555,26 @@ class AgentFlow:
                 "separate Workflow instance per concurrent run."
             )
         try:
-            if self.tools_run_on is None:
-                return self._run_impl(input, llm, verbose, stream)
-            # One sandbox for the whole run; torn down even if a step raises.
-            with self._shared_compute() as shared:
-                shared.attach(self._collect_agents())
-                # Expose the live sandbox so agents created *during* the run
-                # (e.g. an action-only step's temporary agent) can be attached
-                # too, instead of silently executing tools locally.
-                self._active_shared_compute = shared
-                try:
-                    return self._run_impl(input, llm, verbose, stream)
-                finally:
-                    self._active_shared_compute = None
+            from ..trace.context_events import _workflow_scope
+            _process = "hierarchical" if self.process == "hierarchical" else "flow"
+            with _workflow_scope("flow", self.name, _process, graph_fn=self._replay_graph) as _run:
+                if self.tools_run_on is None:
+                    result = self._run_impl(input, llm, verbose, stream)
+                else:
+                    # One sandbox for the whole run; torn down even if a step raises.
+                    with self._shared_compute() as shared:
+                        shared.attach(self._collect_agents())
+                        # Expose the live sandbox so agents created *during* the run
+                        # (e.g. an action-only step's temporary agent) can be attached
+                        # too, instead of silently executing tools locally.
+                        self._active_shared_compute = shared
+                        try:
+                            result = self._run_impl(input, llm, verbose, stream)
+                        finally:
+                            self._active_shared_compute = None
+                if _run is not None and isinstance(result, dict) and result.get("status") == "failed":
+                    _run["status"] = "failed"
+                return result
         finally:
             # Restore the generation the caller's context carried before this
             # run stamped its own, so a nested Workflow.run() (Include) does not
@@ -1497,6 +1595,15 @@ class AgentFlow:
         """
         from .diagram import flow_to_mermaid
         return flow_to_mermaid(self)
+
+    def to_graph(self) -> Dict[str, Any]:
+        """This flow's definition as graph data (``praisonai.graph/1``).
+
+        Node ids are stable across processes (derived from step names and
+        positions), and are the ``node_id`` values replay trace events carry.
+        """
+        from .diagram import to_graph
+        return to_graph(self)
 
     @property
     def state(self):
@@ -1600,6 +1707,34 @@ class AgentFlow:
 
         visit(self.steps)
         return found
+
+    def _notify_step_start(self, raw_step: Any, step: Any, context: Any) -> Optional[dict]:
+        """Emit replay ``step_start`` then call ``on_step_start``; returns the span."""
+        span = _replay_step_begin(self, raw_step, step.name)
+        if self.on_step_start:
+            try:
+                self.on_step_start(step.name, context)
+            except Exception as e:
+                logger.error(f"on_step_start callback failed: {e}")
+        return span
+
+    def _notify_step_complete(
+        self, span: Optional[dict], step_name: str, step_result: Any, status: str, output: Any = None,
+    ) -> None:
+        """Call ``on_step_complete`` then emit replay ``step_end``."""
+        if self.on_step_complete:
+            try:
+                self.on_step_complete(step_name, step_result)
+            except Exception as e:
+                logger.error(f"on_step_complete callback failed: {e}")
+        _replay_step_end(span, status, output)
+
+    def _replay_graph(self) -> Dict[str, Any]:
+        """Graph for ``workflow_start``; also maps step objects to node ids."""
+        from .diagram import _flow_graph
+        graph = _flow_graph(self)
+        self._replay_node_ids = graph.ids
+        return graph.to_dict()
 
     def _run_impl(
         self,
@@ -1821,6 +1956,7 @@ class AgentFlow:
                 continue
             
             # Normalize single step
+            raw_step = step
             step = self._normalize_single_step(step, i)
             
             # Create context for handlers
@@ -1839,11 +1975,7 @@ class AgentFlow:
 
             # Preserve the preparation hook before the gate: it may populate
             # context variables used by should_run, including on cached runs.
-            if self.on_step_start:
-                try:
-                    self.on_step_start(step.name, context)
-                except Exception as e:
-                    logger.error(f"on_step_start callback failed: {e}")
+            _replay = self._notify_step_start(raw_step, step, context)
 
             # Check should_run condition
             if step.should_run:
@@ -1854,11 +1986,9 @@ class AgentFlow:
                         if hasattr(step, 'status'):
                             step.status = "skipped"
                         self.step_statuses[step.name] = "skipped"
-                        if self.on_step_complete:
-                            try:
-                                self.on_step_complete(step.name, StepResult(output="", skipped=True))
-                            except Exception as e:
-                                logger.error(f"on_step_complete callback failed: {e}")
+                        self._notify_step_complete(
+                            _replay, step.name, StepResult(output="", skipped=True), "skipped",
+                        )
                         i += 1
                         continue
                 except Exception as e:
@@ -1904,16 +2034,12 @@ class AgentFlow:
                         step.status = cached_record["status"]
                     if _cached.get("variables"):
                         all_variables.update(_cached["variables"])
-                    if self.on_step_complete:
-                        try:
-                            self.on_step_complete(
-                                step.name, StepResult(
-                                    output=previous_output or "",
-                                    stop_workflow=bool(_cached.get("stop")),
-                                ),
-                            )
-                        except Exception as e:
-                            logger.error(f"on_step_complete callback failed: {e}")
+                    self._notify_step_complete(
+                        _replay, step.name, StepResult(
+                            output=previous_output or "",
+                            stop_workflow=bool(_cached.get("stop")),
+                        ), "cached", previous_output,
+                    )
                     if _cached.get("stop"):
                         if verbose:
                             print(f"🛑 Workflow stopped at: {step.name}")
@@ -2196,14 +2322,10 @@ class AgentFlow:
                 })
                 # Still notify the step-complete callback so lifecycle observers
                 # see the (failed) terminal step before the workflow aborts.
-                if self.on_step_complete:
-                    try:
-                        self.on_step_complete(
-                            step.name,
-                            StepResult(output=output or "", stop_workflow=True),
-                        )
-                    except Exception as e:
-                        logger.error(f"on_step_complete callback failed: {e}")
+                self._notify_step_complete(
+                    _replay, step.name,
+                    StepResult(output=output or "", stop_workflow=True), "failed", output,
+                )
                 if verbose:
                     print(f"🛑 Workflow stopped: step '{step.name}' failed (on_error='stop')")
                 break
@@ -2212,11 +2334,10 @@ class AgentFlow:
             step_result = StepResult(output=output or "", stop_workflow=stop)
             
             # Call on_step_complete callback
-            if self.on_step_complete:
-                try:
-                    self.on_step_complete(step.name, step_result)
-                except Exception as e:
-                    logger.error(f"on_step_complete callback failed: {e}")
+            self._notify_step_complete(
+                _replay, step.name, step_result,
+                "failed" if step_failed else "completed", output,
+            )
             
             # Handle output_file - save output to file
             if hasattr(step, 'output_file') and step.output_file and output:
@@ -2984,10 +3105,47 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         # them on every run so their conditions and nested Task gates execute;
         # their individual leaves can still reuse cached results.
         if isinstance(step, (Loop, Parallel, Route, Repeat, Discussion, If, Include)):
+            # Pattern executors emit their own replay step events.
             return self._execute_single_step_uncached(
                 step, previous_output, input, all_variables, model, verbose, index,
                 stream=stream, depth=depth,
             )
+        span = _replay_step_begin(self, step)
+        if span is None:
+            return self._execute_leaf_step(
+                step, previous_output, input, all_variables, model, verbose, index,
+                stream=stream, depth=depth,
+            )
+        try:
+            result = self._execute_leaf_step(
+                step, previous_output, input, all_variables, model, verbose, index,
+                stream=stream, depth=depth, _replay=span,
+            )
+        except BaseException:
+            _replay_step_end(span, "failed")
+            raise
+        is_dict = isinstance(result, dict)
+        status = span.get("status") or (
+            "skipped" if is_dict and result.get("skipped")
+            else "failed" if is_dict and result.get("error") else "completed"
+        )
+        _replay_step_end(span, status, result.get("output") if is_dict else None)
+        return result
+
+    def _execute_leaf_step(
+        self,
+        step: Any,
+        previous_output: Optional[str],
+        input: str,
+        all_variables: Dict[str, Any],
+        model: str,
+        verbose: bool,
+        index: int = 0,
+        stream: bool = True,
+        depth: int = 0,
+        _replay: Optional[dict] = None,
+    ) -> Dict[str, Any]:
+        """Leaf-step body of :meth:`_execute_single_step_internal` (gate + cache)."""
         if depth > MAX_NESTING_DEPTH:
             raise ValueError(
                 f"Maximum nesting depth ({MAX_NESTING_DEPTH}) exceeded. "
@@ -3036,6 +3194,8 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             if hasattr(step, "status"):
                 step.status = "completed"
             self.step_statuses[step.name] = "completed"
+            if _replay is not None:
+                _replay["status"] = "cached"
             # Copy: a caller mutating a returned result must not edit the cache.
             return dict(hit)
         result = self._execute_single_step_uncached(
@@ -3423,6 +3583,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
 
         return output, step_error
     
+    @_replay_pattern("route")
     def _execute_route(
         self,
         route_step: Route,
@@ -3453,6 +3614,9 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         
         if matched_route is None:
             matched_route = route_step.default or []
+            _replay_note_route("default")
+        else:
+            _replay_note_route(key)
         
         if verbose:
             route_name = next((k for k in route_step.routes if route_step.routes[k] == matched_route), "default")
@@ -3704,6 +3868,7 @@ CONCISE SUMMARY:"""
                 winners[key] = idx
                 all_variables[key] = value
 
+    @_replay_pattern("parallel")
     def _execute_parallel(
         self,
         parallel_step: Parallel,
@@ -3956,6 +4121,7 @@ CONCISE SUMMARY:"""
         
         return {"steps": results, "output": combined_output, "variables": all_variables, "stop": parallel_stopped}
     
+    @_replay_pattern("loop")
     def _execute_loop(
         self,
         loop_step: Loop,
@@ -4342,6 +4508,7 @@ CONCISE SUMMARY:"""
         # 4. Fallback: wrap as single item
         return [text]
     
+    @_replay_pattern("discussion")
     def _execute_discussion(
         self, discussion, previous_output, input, all_variables, model, verbose, stream=True, depth=0
     ):
@@ -4425,6 +4592,7 @@ CONCISE SUMMARY:"""
             "stop": discussion_stopped,
         }
 
+    @_replay_pattern("repeat")
     def _execute_repeat(
         self,
         repeat_step: Repeat,
@@ -4499,6 +4667,7 @@ CONCISE SUMMARY:"""
         all_variables["repeat_iterations"] = iteration + 1 if repeat_step.max_iterations > 0 else 0
         return {"steps": results, "output": output, "variables": all_variables, "stop": repeat_stopped}
     
+    @_replay_pattern("if")
     def _execute_if(
         self,
         if_step: If,
@@ -4530,6 +4699,7 @@ CONCISE SUMMARY:"""
         
         # Evaluate the condition
         condition_result = self._evaluate_condition(if_step.condition, all_variables, previous_output)
+        _replay_note_route("true" if condition_result else "false")
         
         if verbose:
             branch = "then" if condition_result else "else"
@@ -4583,6 +4753,7 @@ CONCISE SUMMARY:"""
         from praisonaiagents.conditions.evaluator import evaluate_condition
         return evaluate_condition(condition, variables, previous_output)
     
+    @_replay_pattern("include")
     def _execute_include(
         self,
         include_step: Include,

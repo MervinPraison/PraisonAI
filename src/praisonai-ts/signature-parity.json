@@ -2714,7 +2714,7 @@
           "PraisonAIAgents",
           "Agents"
         ],
-        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:804",
+        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:837",
         "resolved_class": "AgentTeam"
       },
       "ts_only": [
@@ -2852,7 +2852,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2484",
+        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2573",
         "resolved_class": "AgentTeam"
       },
       "ts_only": [
@@ -4659,7 +4659,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:514",
+        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:673",
         "resolved_class": "LLM"
       },
       "ts_only": [
