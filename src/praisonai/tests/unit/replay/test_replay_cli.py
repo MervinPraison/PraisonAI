@@ -1,6 +1,7 @@
 """``praisonai replay`` CLI: flow (mermaid / YAML), export, view, and 1.0 traces still readable."""
 
 import json
+import re
 import textwrap
 
 import pytest
@@ -201,8 +202,10 @@ def fake_aiui(monkeypatch):
 def test_view_help():
     result = _invoke("view", "--help")
     assert result.exit_code == 0
+    # Rich forces colour on CI (GITHUB_ACTIONS), which splits flags with ANSI codes.
+    output = re.sub(r"\x1b\[[0-9;]*m", "", result.output)
     for flag in ("--live", "--port", "--host"):
-        assert flag in result.output
+        assert flag in output
 
 
 def test_view_run_opens_replay_page(traces_dir, fx, fake_aiui):
