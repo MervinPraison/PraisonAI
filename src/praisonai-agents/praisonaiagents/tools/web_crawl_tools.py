@@ -465,6 +465,7 @@ def _crawl_with_httpx(urls: List[str]) -> List[Dict[str, Any]]:
                         location = e.headers.get("Location")
                         if e.code not in redirect_statuses or not location:
                             raise
+                        e.close()  # release the redirect response's socket
                         current = urllib.parse.urljoin(current, location)
                 else:
                     raise ValueError("Too many redirects")
