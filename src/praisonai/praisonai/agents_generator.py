@@ -1980,6 +1980,10 @@ class AgentsGenerator:
         parser = YAMLWorkflowParser()
         workflow = parser.parse_string(yaml_content)
 
+        # ``praisonai replay rerun``: reuse recorded step outputs (no-op otherwise).
+        from .replay._hook import apply_rerun_seed
+        apply_rerun_seed(workflow)
+
         # Get input: 'input' is canonical, 'topic' is alias for backward compatibility
         input_data = config.get('input', config.get('topic', ''))
 

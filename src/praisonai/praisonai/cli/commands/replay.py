@@ -7,6 +7,7 @@ Provides context replay functionality:
 - replay flow <run|yaml> --format ascii|json|mermaid: Agent flow / static graph
 - replay view [run|yaml] [--live]: Open PraisonAI Replay (aiui) on a run
 - replay export <run> --format html|json|mermaid|otel: Export a run
+- replay rerun <run> --from NODE: Re-run from a node, reusing earlier outputs
 """
 
 from typing import Optional
@@ -884,7 +885,7 @@ def replay_cleanup(
 
 
 # ---------------------------------------------------------------------------
-# PraisonAI Replay: view / export
+# PraisonAI Replay: view / export / rerun
 # ---------------------------------------------------------------------------
 
 _AIUI_INSTALL_HINT = 'pip install "praisonai[ui]"'
@@ -1143,3 +1144,61 @@ def replay_export(
         typer.echo(f"Wrote {format} export to {output_file}")
     else:
         typer.echo(text, nl=not text.endswith("\n"))
+
+
+@app.command("rerun")
+def replay_rerun(
+    run: str = typer.Argument(..., help="Run id or path to the recorded trace"),
+    from_node: str = typer.Option(..., "--from", help="Node id to re-run from (e.g. task:write, step:draft)"),
+    file: Optional[str] = typer.Option(
+        None, "--file", help="YAML definition (default: the one recorded with the run)"
+    ),
+):
+    """Re-run a recorded run from NODE: earlier nodes reuse their recorded output.
+
+    The new run is recorded with workflow_start.data.forked_from = {run_id, node_id}.
+    """
+    from pathlib import Path
+
+    from ..output.console import get_output_controller
+    from praisonai.replay.events import session_meta
+    from praisonai.replay.recorder import new_run_id
+    from praisonai.replay.rerun import RerunError, plan_rerun
+    from praisonai.replay.yaml_run import run_yaml_recorded, yaml_kind
+
+    output = get_output_controller()
+    events = _load_raw_events(output, run)
+    try:
+        plan = plan_rerun(events, from_node)
+    except RerunError as e:
+        output.print_error(str(e))
+        raise typer.Exit(1)
+
+    meta = session_meta(events)
+    definition = file or meta.get("yaml_path") or meta.get("agents_file") or meta.get("workflow")
+    if not definition:
+        output.print_error("This run did not record its definition; pass it with --file agents.yaml")
+        raise typer.Exit(1)
+    if not Path(definition).expanduser().is_file():
+        output.print_error(f"Definition not found: {definition} (pass --file)")
+        raise typer.Exit(1)
+    if yaml_kind(definition) != plan.kind:
+        output.print_error(
+            f"{definition} defines a {yaml_kind(definition)} but {from_node} is a {plan.kind} node; "
+            "pass the definition that recorded this run with --file."
+        )
+        raise typer.Exit(1)
+
+    seeded = []
+    new_id = new_run_id()
+    reused = ", ".join(plan.outputs) or "nothing"
+    typer.echo(f"Re-running {plan.source_run_id} from {from_node} as {new_id} (reusing: {reused})")
+    try:
+        rec, result = run_yaml_recorded(definition, run_id=new_id, plan=plan, on_seeded=seeded.append)
+    except Exception as e:
+        output.print_error(f"Re-run failed: {e}")
+        raise typer.Exit(1)
+    if not seeded:
+        output.print_warning("The definition was run, but the recorded outputs could not be applied to it.")
+    typer.echo(str(result) if result is not None else "")
+    typer.echo(f"Recorded: {rec.run_id} ({rec.path})")
