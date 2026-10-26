@@ -145,6 +145,10 @@ def _run_scope(run_id: Optional[str] = None) -> Generator[str, None, None]:
     Nested teams and flows inherit the OUTER run id: when a run id is already
     in scope it is kept and ``run_id`` is ignored. A fresh uuid is used when no
     id is given. Yields the effective run id.
+
+    The recording is the run boundary: inside an outer scope (for example
+    ``praisonai.replay.record()``) every team or flow start shares one run id;
+    outside one, a team run is stamped with its own ``AgentTeam.run_id``.
     """
     outer = _run_id_var.get()
     if outer is not None:
