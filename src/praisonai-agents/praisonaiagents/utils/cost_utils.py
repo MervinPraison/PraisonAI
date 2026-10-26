@@ -86,14 +86,31 @@ def calculate_llm_cost(
     Returns:
         Estimated cost in USD (float)
     """
-    # A positive cost reported by the provider/client is authoritative. A
-    # reported 0.0 is ignored so unpriced models (custom base_url, proxies)
-    # still accrue the fallback estimate and the budget guard keeps working.
-    # Not rounded: a tiny positive cost must not collapse to 0.0.
+    # A positive cost reported by the provider/client may raise the figure but
+    # never lower it below the local estimate, so a misreporting endpoint or
+    # proxy cannot make the budget guard undercount. A reported 0.0 is ignored
+    # (unpriced models). Not rounded: a tiny positive cost must not collapse
+    # to 0.0.
+    estimate = _estimate_cost(
+        prompt_tokens, completion_tokens, model, response, use_litellm,
+        cached_tokens, cache_write_tokens,
+    )
     reported = _extract_reported_cost(response)
-    if reported is not None:
-        return reported
+    if reported is None:
+        return estimate
+    return max(reported, estimate)
 
+
+def _estimate_cost(
+    prompt_tokens: int,
+    completion_tokens: int,
+    model: Optional[str],
+    response: Optional[Any],
+    use_litellm: bool,
+    cached_tokens: Optional[int],
+    cache_write_tokens: Optional[int],
+) -> float:
+    """Local cost estimate (fallback table, or litellm when requested)."""
     usage = _get(response, "usage")
     if cached_tokens is None:
         cached_tokens = _usage_int(
@@ -192,7 +209,8 @@ def _extract_reported_cost(response: Any) -> Optional[float]:
 
     Checks ``usage.cost`` (e.g. OpenRouter) and litellm's
     ``_hidden_params["response_cost"]``. Only real, positive numbers are
-    accepted; zero means "unknown" and falls back to the local estimate.
+    accepted; zero means "unknown". The caller never lets this go below the
+    local estimate.
     """
     if response is None:
         return None

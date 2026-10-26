@@ -52,15 +52,35 @@ def test_unknown_model_cache_defaults_to_input_rate():
     assert calculate_llm_cost(1_000_000, 0, "some-model", cached_tokens=500_000) == pytest.approx(1.0)
 
 
-def test_provider_reported_cost_is_authoritative():
-    usage = SimpleNamespace(prompt_tokens=1_000_000, completion_tokens=1_000_000, cost=0.0123)
+def test_reported_cost_above_estimate_wins():
+    # Estimate is 12.5 (1M in @ 2.50 + 1M out @ 10.00); provider says more
+    usage = SimpleNamespace(prompt_tokens=1_000_000, completion_tokens=1_000_000, cost=20.0)
     cost = calculate_llm_cost(1_000_000, 1_000_000, "gpt-4o", response=SimpleNamespace(usage=usage))
-    assert cost == pytest.approx(0.0123)
+    assert cost == pytest.approx(20.0)
+
+
+def test_tiny_reported_cost_cannot_undercut_estimate():
+    # A misreporting endpoint/proxy must not shrink spend below the estimate
+    usage = SimpleNamespace(prompt_tokens=1_000_000, completion_tokens=1_000_000, cost=1e-6)
+    response = SimpleNamespace(usage=usage, _hidden_params={"response_cost": 1e-6})
+    cost = calculate_llm_cost(1_000_000, 1_000_000, "gpt-4o", response=response)
+    assert cost == pytest.approx(12.5)
+
+
+def test_tiny_reported_cost_undercut_does_not_disable_budget_guard():
+    from praisonaiagents import Agent
+
+    agent = Agent(name="b", instructions="x", llm="gpt-4o")
+    response = SimpleNamespace(
+        usage=SimpleNamespace(prompt_tokens=1_000_000, completion_tokens=0, cost=1e-9)
+    )
+    assert agent._calculate_llm_cost(1_000_000, 0, response=response) == pytest.approx(2.5)
 
 
 def test_tiny_reported_cost_is_not_rounded_to_zero():
-    usage = SimpleNamespace(prompt_tokens=10, completion_tokens=1, cost=2e-7)
-    cost = calculate_llm_cost(10, 1, "gpt-4o-mini", response=SimpleNamespace(usage=usage))
+    # Estimate for 1 token rounds to 0.0; the reported 2e-7 must survive
+    usage = SimpleNamespace(prompt_tokens=1, completion_tokens=0, cost=2e-7)
+    cost = calculate_llm_cost(1, 0, "gpt-4o-mini", response=SimpleNamespace(usage=usage))
     assert cost == pytest.approx(2e-7)
     assert cost > 0
 
@@ -126,6 +146,6 @@ def test_streamed_response_keeps_cache_and_reported_cost():
     assert combined.usage.prompt_tokens_details.cached_tokens == 1_000_000
     assert calculate_llm_cost(1_000_000, 0, "gpt-4o", response=combined) == pytest.approx(1.25)
 
-    usage_chunk.usage.cost = 0.02
+    usage_chunk.usage.cost = 2.0
     combined = process_stream_chunks([content, usage_chunk])
-    assert calculate_llm_cost(1_000_000, 0, "gpt-4o", response=combined) == pytest.approx(0.02)
+    assert calculate_llm_cost(1_000_000, 0, "gpt-4o", response=combined) == pytest.approx(2.0)
