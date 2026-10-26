@@ -13,7 +13,7 @@ Each store handles a specific type of learning data:
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
@@ -31,8 +31,8 @@ class LearnEntry:
     id: str
     content: str
     metadata: Dict[str, Any] = field(default_factory=dict)
-    created_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
-    updated_at: str = field(default_factory=lambda: datetime.utcnow().isoformat())
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    updated_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     use_count: int = 0
     last_used: Optional[str] = None
     
@@ -53,8 +53,8 @@ class LearnEntry:
             id=data["id"],
             content=data["content"],
             metadata=data.get("metadata", {}),
-            created_at=data.get("created_at", datetime.utcnow().isoformat()),
-            updated_at=data.get("updated_at", datetime.utcnow().isoformat()),
+            created_at=data.get("created_at", datetime.now(timezone.utc).isoformat()),
+            updated_at=data.get("updated_at", datetime.now(timezone.utc).isoformat()),
             use_count=data.get("use_count", 0),
             last_used=data.get("last_used"),
         )
@@ -154,13 +154,13 @@ class BaseStore(ABC):
                 # Update metadata if provided, but don't create duplicate
                 if metadata:
                     existing_entry.metadata.update(metadata)
-                    existing_entry.updated_at = datetime.utcnow().isoformat()
+                    existing_entry.updated_at = datetime.now(timezone.utc).isoformat()
                     self._save()
                     self._was_updated = True
                 return existing_entry
         
         # No duplicate found, create new entry
-        entry_id = f"{self.store_name}_{len(self._entries)}_{datetime.utcnow().timestamp()}"
+        entry_id = f"{self.store_name}_{len(self._entries)}_{datetime.now(timezone.utc).timestamp()}"
         entry = LearnEntry(
             id=entry_id,
             content=content,
@@ -183,7 +183,7 @@ class BaseStore(ABC):
         """
         if not entries:
             return
-        now = datetime.utcnow().isoformat()
+        now = datetime.now(timezone.utc).isoformat()
         for entry in entries:
             entry.use_count += 1
             entry.last_used = now
@@ -229,7 +229,7 @@ class BaseStore(ABC):
         """List all entries."""
         refreshed = self._refresh_for_retrieval()
         entries = list(self._entries.values())
-        entries.sort(key=lambda x: x.updated_at, reverse=True)
+        entries.sort(key=lambda x: self._timestamp_sort_key(x.updated_at), reverse=True)
         entries = entries[:limit]
         if refreshed:
             self._touch(entries)
@@ -244,7 +244,7 @@ class BaseStore(ABC):
         entry.content = content
         if metadata:
             entry.metadata.update(metadata)
-        entry.updated_at = datetime.utcnow().isoformat()
+        entry.updated_at = datetime.now(timezone.utc).isoformat()
         self._save()
         self._was_updated = True
         return entry
@@ -308,9 +308,29 @@ class BaseStore(ABC):
             ref_dt = datetime.fromisoformat(reference)
         except (ValueError, TypeError):
             return False
+        if ref_dt.tzinfo is None:
+            ref_dt = ref_dt.replace(tzinfo=timezone.utc)
         age_days = (now - ref_dt).total_seconds() / 86400.0
         return age_days > self.retention_days
-    
+
+    @staticmethod
+    def _timestamp_sort_key(value: str) -> tuple:
+        """Comparable key that orders ISO timestamps chronologically in UTC.
+
+        Naive values are treated as UTC (matching how older stores were written).
+        Missing or unparseable values sort as the oldest instant, so prune()
+        evicts them first (an entry never used sorts before used ones, as it did
+        under the previous raw-string sort) and list_all() lists them last. A
+        datetime is never compared against a string, so mixed data never raises.
+        """
+        try:
+            parsed = datetime.fromisoformat(value)
+        except (ValueError, TypeError):
+            return (-1, value)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return (0, parsed.astimezone(timezone.utc))
+
     def prune(self, save: bool = True, protect_id: Optional[str] = None) -> int:
         """Archive stale and least-used/oldest excess entries.
         
@@ -331,7 +351,7 @@ class BaseStore(ABC):
         if self.max_entries <= 0 and self.retention_days <= 0:
             return 0
         
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         evicted: List[LearnEntry] = []
         
         # 1. Staleness: archive entries beyond the retention window
@@ -349,7 +369,11 @@ class BaseStore(ABC):
             ]
             remaining = sorted(
                 candidates,
-                key=lambda e: (e.use_count, e.last_used or "", e.created_at),
+                key=lambda e: (
+                    e.use_count,
+                    self._timestamp_sort_key(e.last_used or ""),
+                    self._timestamp_sort_key(e.created_at),
+                ),
             )
             overflow = len(self._entries) - self.max_entries
             for entry in remaining[:overflow]:
