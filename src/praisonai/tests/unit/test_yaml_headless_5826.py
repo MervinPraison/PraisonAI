@@ -52,6 +52,13 @@ class _MockOpenAI(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
+@pytest.fixture(autouse=True)
+def _project_root(tmp_path, monkeypatch):
+    # Task output_file writes are contained to the project root (#5770); these
+    # runs write under tmp_path, so make it the root.
+    monkeypatch.setenv("PRAISONAI_PROJECT_ROOT", str(tmp_path))
+
+
 @pytest.fixture
 def mock_endpoint(monkeypatch):
     server = HTTPServer(("127.0.0.1", 0), _MockOpenAI)
