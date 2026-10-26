@@ -2336,6 +2336,7 @@ Your Goal: {self.goal}"""
                     messages=messages,
                     response=str(final_response),
                     model=self.llm if isinstance(self.llm, str) else str(self.llm),
+                    tokens_used=_prompt_tokens + _completion_tokens,
                     latency_ms=(time.time() - start_time) * 1000
                 )
                 self._hook_runner.execute_sync(HookEvent.AFTER_LLM, after_llm_input)
@@ -3037,6 +3038,7 @@ Your Goal: {self.goal}"""
                     messages=messages,
                     response=str(final_response),
                     model=self.llm if isinstance(self.llm, str) else str(self.llm),
+                    tokens_used=_prompt_tokens + _completion_tokens,
                     latency_ms=(time.time() - _achat_start_time) * 1000
                 )
                 await self._hook_runner.execute(HookEvent.AFTER_LLM, after_llm_input)
