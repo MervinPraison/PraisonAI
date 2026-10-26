@@ -910,12 +910,16 @@ class DefaultSessionStore:
         path = os.path.join(self.session_dir, f"{_safe_session_filename(session_id)}.json")
         legacy = os.path.join(self.session_dir, f"{_legacy_session_filename(session_id)}.json")
         # Migrate a pre-#6024 file only when it is provably this id's own.
+        # Recheck under the destination lock so a racing worker that already
+        # migrated and wrote here is never clobbered by a stale move.
         if legacy != path and not os.path.exists(path) and os.path.exists(legacy):
             try:
-                with open(legacy, "r", encoding="utf-8") as f:
-                    owner = json.load(f).get("session_id")
-                if owner == session_id:
-                    os.replace(legacy, path)
+                with FileLock(path, self.lock_timeout):
+                    if not os.path.exists(path):
+                        with open(legacy, "r", encoding="utf-8") as f:
+                            owner = json.load(f).get("session_id")
+                        if owner == session_id:
+                            os.replace(legacy, path)
             except (OSError, ValueError, AttributeError):
                 pass
         return path
@@ -924,8 +928,10 @@ class DefaultSessionStore:
         """Return False if the loaded file belongs to another session id.
 
         A foreign file (e.g. a pre-#6024 legacy collision) is never served to
-        the caller; it is moved to its owner's own path when that is free so a
-        later write here cannot destroy the owner's history.
+        the caller; it is moved to its owner's own path (or set aside when that
+        is taken) so a later write here cannot destroy the owner's history.
+        Caller must hold the ``filepath`` lock. Raises ``OSError`` if the file
+        cannot be moved, so writers abort instead of overwriting it.
         """
         if not session.session_id:
             session.session_id = session_id
@@ -939,11 +945,14 @@ class DefaultSessionStore:
         owner_path = os.path.join(
             self.session_dir, f"{_safe_session_filename(session.session_id)}.json"
         )
-        if owner_path != filepath and not os.path.exists(owner_path):
-            try:
-                os.replace(filepath, owner_path)
-            except OSError:
-                pass
+        moved = False
+        if owner_path != filepath:
+            with FileLock(owner_path, self.lock_timeout):
+                if not os.path.exists(owner_path):
+                    os.replace(filepath, owner_path)
+                    moved = True
+        if not moved and self._quarantine_corrupt(filepath) is None:
+            raise OSError(f"cannot move foreign session file {filepath}")
         return False
     
     def _load_session(self, session_id: str) -> SessionData:

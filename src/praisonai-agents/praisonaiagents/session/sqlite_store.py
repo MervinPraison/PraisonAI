@@ -35,7 +35,7 @@ from typing import Any, Dict, List, Optional
 
 from praisonaiagents._logging import get_logger
 
-from .store import DefaultSessionStore, FileLock, SessionData
+from .store import DefaultSessionStore, FileLock, SessionData, _safe_session_filename
 
 logger = get_logger(__name__)
 
@@ -390,6 +390,19 @@ class SqliteSessionStore(DefaultSessionStore):
         except Exception:
             return set()
 
+    def _stored_session_id(self, filename: str) -> Optional[str]:
+        """Return the id stored in ``filename`` if it maps back to that file."""
+        import json
+
+        try:
+            with open(os.path.join(self.session_dir, filename), "r", encoding="utf-8") as f:
+                sid = json.load(f).get("session_id")
+        except (OSError, ValueError, AttributeError):
+            return None
+        if isinstance(sid, str) and f"{_safe_session_filename(sid)}.json" == filename:
+            return sid
+        return None
+
     def _reindex_all(self) -> bool:
         """Backfill the index from existing JSON transcripts.
 
@@ -433,6 +446,9 @@ class SqliteSessionStore(DefaultSessionStore):
             if not filename.endswith(".json"):
                 continue
             sid = filename[:-5]
+            if "~" in sid:
+                # Hashed name (Issue #6024): the real id lives in the file.
+                sid = self._stored_session_id(filename) or sid
             if sid in pending:
                 # Failed restore retries must not be bypassed by a synthetic
                 # empty transcript from the initial/upgrade backfill path.

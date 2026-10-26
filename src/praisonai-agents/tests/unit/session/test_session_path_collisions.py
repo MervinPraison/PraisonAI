@@ -64,3 +64,32 @@ def test_foreign_file_never_served_and_not_destroyed(store):
     assert [m["content"] for m in store.get_chat_history("alice_smith")] == ["mine"]
     # The owner's history was relocated rather than overwritten.
     assert [m["content"] for m in store.get_chat_history("alice.smith")] == ["secret"]
+
+
+def test_failed_foreign_move_aborts_write(store, monkeypatch, tmp_path):
+    monkeypatch.setattr(store, "_spill_dir", lambda: str(tmp_path / "spill"))
+    store.add_user_message("alice.smith", "new")  # owner path taken
+    legacy = _write_legacy(store, "alice_smith", "alice.smith", "secret")
+    monkeypatch.setattr(store, "_quarantine_corrupt", lambda p: None)
+    assert store.add_user_message("alice_smith", "mine") is False
+    with open(legacy, encoding="utf-8") as f:
+        assert json.load(f)["session_id"] == "alice.smith"
+
+
+def test_foreign_file_set_aside_when_owner_path_taken(store):
+    store.add_user_message("alice.smith", "new")
+    legacy = _write_legacy(store, "alice_smith", "alice.smith", "secret")
+    store.add_user_message("alice_smith", "mine")
+    assert [m["content"] for m in store.get_chat_history("alice_smith")] == ["mine"]
+    assert [m["content"] for m in store.get_chat_history("alice.smith")] == ["new"]
+    aside = [p for p in os.listdir(store.session_dir) if p.startswith("alice_smith.json.corrupt-")]
+    assert len(aside) == 1 and os.path.exists(legacy)
+
+
+def test_sqlite_backfill_indexes_hashed_filenames(tmp_path):
+    from praisonaiagents.session.sqlite_store import SqliteSessionStore
+
+    DefaultSessionStore(session_dir=str(tmp_path)).add_user_message(
+        "alice.smith@example.com", "narwhal record")
+    store = SqliteSessionStore(session_dir=str(tmp_path), db_path=":memory:")
+    assert [h.session_id for h in store.search("narwhal")] == ["alice.smith@example.com"]
