@@ -4242,11 +4242,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             except Exception as e:
                 logger.warning(f"Steering check failed, continuing without steering: {e}")
 
-        # Input-side guardrail validation (parity with sync chat()). No-op
-        # unless the guardrail exposes validate_input; runs before any
-        # backend/LLM dispatch so a rejected prompt never reaches the model.
+        # Input-side validators may perform blocking LLM calls. Keep them off
+        # the event loop, before any backend/LLM dispatch, just like tool guards.
         if hasattr(self, '_validate_input_with_guardrail'):
-            _in_ok, _in_prompt, _in_err = self._validate_input_with_guardrail(prompt)
+            _input_guard = self._guardrail_fn
+            if (_input_guard is None or not hasattr(_input_guard, "validate_input")
+                    or getattr(_input_guard, "_praison_output_only", False)):
+                _in_ok, _in_prompt, _in_err = self._validate_input_with_guardrail(prompt)
+            else:
+                _in_ok, _in_prompt, _in_err = await asyncio.to_thread(
+                    self._validate_input_with_guardrail, prompt
+                )
             if not _in_ok:
                 logging.warning(f"Agent {self.name}: input blocked by guardrail: {_in_err}")
                 return None
