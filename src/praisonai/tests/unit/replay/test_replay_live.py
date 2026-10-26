@@ -56,6 +56,44 @@ def test_runner_resets_a_team_before_each_run(traces_dir):
     assert calls == ["reset", ("start", "a"), "reset", ("start", "b")]
 
 
+def test_runner_does_not_carry_earlier_inputs_into_later_team_runs(traces_dir):
+    from praisonai.replay.live import _runner
+
+    class Task:
+        def __init__(self, context):
+            self.context = context
+
+    seen = []
+
+    class Team:
+        tasks = {1: Task(["given"]), 2: Task(None)}
+
+        def _reset_task_state_for_item(self):
+            pass
+
+        def start(self, text):  # like AgentTeam.start: appends the input to each task's context
+            for t in self.tasks.values():
+                t.context = (t.context or []) + [text]
+            seen.append([t.context for t in self.tasks.values()])
+
+    run = _runner(Team())
+    run("solar sails", "run-ctx-a")
+    run("comets", "run-ctx-b")
+    assert seen[1] == [["given", "comets"], ["comets"]]
+
+
+def test_runner_awaits_an_async_callable(traces_dir):
+    from praisonai.replay.live import _runner
+
+    got = []
+
+    async def target(text):
+        got.append(text)
+
+    _runner(target)("hi", "run-async")
+    assert got == ["hi"]
+
+
 def test_runner_accepts_a_plain_callable(traces_dir):
     from praisonai.replay.live import _runner
 

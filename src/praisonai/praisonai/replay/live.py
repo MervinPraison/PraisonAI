@@ -12,6 +12,8 @@ The page is aiui's Replay view without the dashboard around it
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import threading
 import webbrowser
 from pathlib import Path
@@ -43,14 +45,22 @@ def _runner(target: Any) -> Optional[Callable[[str, str], None]]:
     if not callable(call):
         raise TypeError("target must be an Agent, AgentTeam, AgentFlow, a YAML path or a callable(input)")
 
-    # An AgentTeam skips tasks it already completed; each Run starts them afresh.
+    # An AgentTeam skips tasks it already completed and appends each input to
+    # every task's context; each Run starts them afresh with the original context.
     reset = getattr(target, "_reset_task_state_for_item", None)
+    tasks = getattr(target, "tasks", None)
+    tasks = list(tasks.values()) if isinstance(tasks, dict) and callable(reset) else []
+    contexts = [(t, list(t.context) if isinstance(getattr(t, "context", None), list) else None) for t in tasks]
 
     def run(text: str, run_id: str) -> None:
         if callable(reset):
             reset()
+        for task, context in contexts:
+            task.context = list(context) if context is not None else None
         with record(run_id, live=True):
-            call(text)
+            out = call(text)
+            if inspect.isawaitable(out):
+                asyncio.run(out)
 
     return run
 
@@ -118,7 +128,10 @@ def watch(
             f"WARNING: serving on {host} lets anyone who can reach it read your runs"
             + (" and start new ones." if target is not None else ".")
         )
-    url = f"http://{'127.0.0.1' if host in ('0.0.0.0', '::') else host}:{port}/"
+    browser_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
+    if ":" in browser_host and not browser_host.startswith("["):
+        browser_host = f"[{browser_host}]"
+    url = f"http://{browser_host}:{port}/"
     print(f"PraisonAI Replay: {url}  (Ctrl+C to stop)")
     if open_browser:
         threading.Timer(1.0, webbrowser.open, [url]).start()
