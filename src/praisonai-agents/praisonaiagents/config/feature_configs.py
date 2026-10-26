@@ -909,7 +909,8 @@ class ExecutionConfig:
     # ``rate_limiter`` explicitly for burst/TPM control (it takes precedence).
     max_rpm: Optional[int] = None
     
-    # Time limits
+    # Time limits: per-turn wall-clock seconds for the loop guard.
+    # None = loop-guard default (600s); 0 = no time limit.
     max_execution_time: Optional[int] = None
     
     # Retry settings
