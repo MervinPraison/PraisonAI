@@ -395,7 +395,7 @@ class RAG:
                 "num_results": len(results),
                 "num_citations": len(citations),
                 "retrieval_strategy": self.config.retrieval_strategy.value,
-                "reranked": eff_rerank,
+                "reranked": bool(eff_rerank and self.reranker),
                 "top_k": eff_top_k,
             },
         )
@@ -495,7 +495,7 @@ class RAG:
                 "num_results": len(results),
                 "num_citations": len(citations),
                 "retrieval_strategy": self.config.retrieval_strategy.value,
-                "reranked": self.config.rerank,
+                "reranked": bool(self.config.rerank and self.reranker),
             },
         )
     

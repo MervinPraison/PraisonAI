@@ -332,7 +332,7 @@ class SimpleReranker:
         
         scored = []
         for result in results:
-            text = result.get('text', '').lower()
+            text = (result.get('text') or result.get('memory') or '').lower()
             text_words = set(text.split())
             
             # Calculate overlap score
