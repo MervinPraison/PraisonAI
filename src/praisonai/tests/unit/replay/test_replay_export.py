@@ -242,3 +242,18 @@ def test_redaction_keeps_numeric_token_counters():
 
     out = redact_events([{"event_type": "llm_response", "data": {"max_tokens": 50, "token": "abc", "auth": {"x": 1}}}])
     assert out[0]["data"] == {"max_tokens": 50, "token": "[REDACTED]", "auth": "[REDACTED]"}
+
+
+def test_html_inlines_aiui_renderer_as_module_scripts(tmp_path, monkeypatch):
+    """aiui's renderer files use ``export``; inlined as classic scripts they never run."""
+    from praisonai.replay import export
+
+    core = tmp_path / "replay-core.js"
+    view = tmp_path / "replay.js"
+    core.write_text("export const X = 1;\n", encoding="utf-8")
+    view.write_text("export function render() {}\n", encoding="utf-8")
+    monkeypatch.setattr(export, "aiui_renderer_files", lambda: [core, view])
+    events = [{"event_type": "session_start", "session_id": "s", "sequence_num": 0, "timestamp": 1.0, "data": {}}]
+    html = export.to_html(events)
+    assert html.count('<script type="module" data-src=') == 2
+    assert '<script data-src=' not in html

@@ -558,8 +558,10 @@ def to_html(
 
     renderer = aiui_renderer_files()
     if renderer:
+        # aiui's renderer files are ES modules (``export`` statements), so they
+        # must be inlined as module scripts; a classic <script> rejects them.
         scripts = "\n".join(
-            f"<script data-src=\"{_html.escape(p.name)}\">\n{_script_safe(p.read_text(encoding='utf-8'))}\n</script>"
+            f"<script type=\"module\" data-src=\"{_html.escape(p.name)}\">\n{_script_safe(p.read_text(encoding='utf-8'))}\n</script>"
             for p in renderer
         )
     else:
