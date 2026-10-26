@@ -341,8 +341,10 @@ class SignalBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             return None
 
         from ._media import resolve_max_inbound_media_bytes
-        from ._stt import DEFAULT_VOICE_PLACEHOLDER, transcribe_audio_bytes
+        from ._stt import DEFAULT_VOICE_PLACEHOLDER, resolve_stt_config, transcribe_audio_bytes
 
+        if not resolve_stt_config(self.config).enabled:
+            return DEFAULT_VOICE_PLACEHOLDER
         max_bytes = resolve_max_inbound_media_bytes(self.config)
         if not max_bytes or max_bytes <= 0 or self._http_session is None:
             return DEFAULT_VOICE_PLACEHOLDER
@@ -353,7 +355,13 @@ class SignalBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 if resp.status != 200:
                     logger.warning("Signal attachment download failed: HTTP %s", resp.status)
                     return DEFAULT_VOICE_PLACEHOLDER
-                data = await resp.content.read(max_bytes + 1)
+                # read(n) may return a partial chunk; loop to EOF or the cap.
+                data = b""
+                while len(data) <= max_bytes:
+                    chunk = await resp.content.read(max_bytes + 1 - len(data))
+                    if not chunk:
+                        break
+                    data += chunk
         except Exception as e:  # noqa: BLE001
             logger.warning("Signal attachment download failed: %s", e)
             return DEFAULT_VOICE_PLACEHOLDER
@@ -365,8 +373,9 @@ class SignalBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         """Parse one signal-cli envelope and route it to the agent."""
         envelope = item.get("envelope", item) if isinstance(item, dict) else {}
         data_msg = envelope.get("dataMessage") or {}
-        content = data_msg.get("message") or await self._transcribe_audio(data_msg)
-        if not content:
+        content = data_msg.get("message")
+        has_attachments = bool(data_msg.get("attachments"))
+        if not content and not has_attachments:
             return  # receipts, typing, empty — nothing to answer
 
         source = str(envelope.get("source") or envelope.get("sourceNumber") or "")
@@ -387,6 +396,13 @@ class SignalBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             sender_digits = "".join(c for c in source if c.isdigit())
             if sender_digits not in self._allowed_users:
                 logger.debug("Signal: sender %s not in allowlist", source)
+                return
+
+        # Issue #5929: transcribe only after the allowlist gate so rejected
+        # senders trigger no download or STT work.
+        if not content:
+            content = await self._transcribe_audio(data_msg)
+            if not content:
                 return
 
         sender = BotUser(

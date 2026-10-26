@@ -301,14 +301,7 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                     return
             
             bot_message = self._convert_message(message)
-
-            # Issue #5929: transcribe an inbound voice note so the turn reaches
-            # the agent (placeholder on disable/failure, never dropped).
-            if not (bot_message.content or "").strip():
-                transcript = await self._transcribe_audio(message)
-                if transcript:
-                    bot_message.content = transcript
-
+            
             # Add channel type for pairing system
             bot_message._channel_type = "discord"
             
@@ -327,6 +320,14 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 user_allowed = await UnknownUserHandler.handle(bot_message, self._bot_context)
                 if not user_allowed:
                     return
+
+            # Issue #5929: transcribe an inbound voice note so the turn reaches
+            # the agent (placeholder on disable/failure, never dropped). Runs
+            # after the access gates so rejected senders trigger no STT work.
+            if not (bot_message.content or "").strip():
+                transcript = await self._transcribe_audio(message)
+                if transcript:
+                    bot_message.content = transcript
             
             if bot_message.is_command:
                 command = bot_message.command
@@ -1119,8 +1120,10 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             return None
 
         from ._media import resolve_max_inbound_media_bytes
-        from ._stt import DEFAULT_VOICE_PLACEHOLDER, transcribe_audio_bytes
+        from ._stt import DEFAULT_VOICE_PLACEHOLDER, resolve_stt_config, transcribe_audio_bytes
 
+        if not resolve_stt_config(self.config).enabled:
+            return DEFAULT_VOICE_PLACEHOLDER
         max_bytes = resolve_max_inbound_media_bytes(self.config)
         if not max_bytes or max_bytes <= 0 or (getattr(audio, "size", 0) or 0) > max_bytes:
             return DEFAULT_VOICE_PLACEHOLDER
