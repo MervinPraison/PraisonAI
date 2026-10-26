@@ -696,6 +696,7 @@ class Memory(MemoryCoreMixin):
             accuracy, weights, evaluator_quality
         )
         metadata = self._stamp_provenance(metadata, trust, origin)
+        metadata = self._stamp_user_id(metadata)
         logger.info(f"Processed metadata: {metadata}")
         
         # Generate unique ID and timestamp once
@@ -802,6 +803,18 @@ class Memory(MemoryCoreMixin):
         if origin is not None:
             metadata["origin"] = origin
         return metadata
+
+    def _stamp_user_id(self, metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Default ``metadata["user_id"]`` to this store's configured user_id.
+
+        User-scoped search post-filters on ``metadata.user_id``; without the
+        stamp, facts saved via ``agent.store_memory()`` were invisible to the
+        same user's recall (#6040). An explicit metadata user_id still wins.
+        """
+        user_id = self.cfg.get("user_id")
+        if not user_id:
+            return metadata or {}
+        return {"user_id": user_id, **(metadata or {})}
 
     @staticmethod
     def _filter_by_trust(
@@ -1074,6 +1087,7 @@ class Memory(MemoryCoreMixin):
             accuracy, weights, evaluator_quality
         )
         metadata = self._stamp_provenance(metadata, trust, origin)
+        metadata = self._stamp_user_id(metadata)
         logger.info(f"Processed metadata: {metadata}")
         
         # Generate unique ID
