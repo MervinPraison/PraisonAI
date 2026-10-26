@@ -178,8 +178,16 @@ assert('no source issue', o.sourceIssueNumbers({ head: { ref: 'feat/x' }, body: 
     await o.touchedByRun(runGh([{ event: 'committed', committer: { date: '2026-10-17T10:07:00Z' } }]), 'o', 'r', item(), SINCE, APP));
   assert('App editing the body during the run is touched (GraphQL login has no [bot])',
     await o.touchedByRun(runGh([], [{ editedAt: '2026-10-17T10:08:00Z', editor: { login: 'praisonai-triage-agent' } }]), 'o', 'r', item(), SINCE, APP));
+  assert('routine label sync by the App during the run is not touched (shared App identity)',
+    !(await o.touchedByRun(runGh([{ event: 'unlabeled', actor: { login: 'praisonai-triage-agent[bot]' }, label: { name: 'pipeline/blocked:ci' }, created_at: '2026-10-17T10:06:00Z' }]), 'o', 'r', item(), SINCE, APP)));
+  assert('the App adding the claude label during the run is touched (it starts a Claude run)',
+    await o.touchedByRun(runGh([{ event: 'labeled', actor: { login: 'praisonai-triage-agent[bot]' }, label: { name: 'claude' }, created_at: '2026-10-17T10:06:00Z' }]), 'o', 'r', item(), SINCE, APP));
+  assert('the App force-pushing during the run is touched',
+    await o.touchedByRun(runGh([{ event: 'head_ref_force_pushed', actor: { login: 'praisonai-triage-agent[bot]' }, created_at: '2026-10-17T10:06:00Z' }]), 'o', 'r', item(), SINCE, APP));
   assert('a maintainer comment during the run is not touched',
     !(await o.touchedByRun(runGh([{ event: 'commented', user: { login: 'MervinPraison' }, created_at: '2026-10-17T10:06:00Z' }]), 'o', 'r', item(), SINCE, APP)));
+  assert('App activity after the run ended is not touched',
+    !(await o.touchedByRun(runGh([{ event: 'commented', user: { login: 'praisonai-triage-agent[bot]' }, created_at: '2026-10-20T10:00:00Z' }]), 'o', 'r', item(), SINCE, APP, '2026-10-17T10:30:00Z')));
   assert('App activity before the run is not touched',
     !(await o.touchedByRun(runGh([{ event: 'labeled', actor: { login: 'praisonai-triage-agent[bot]' }, created_at: '2026-10-17T09:00:00Z' }]), 'o', 'r', item(), SINCE, APP)));
   const editFail = await (async () => { const g = runGh([]); g.graphql = async () => { throw new Error('rate'); }; return o.touchedByRun(g, 'o', 'r', item(), SINCE, APP).then(() => null, (e) => e); })();
@@ -210,6 +218,21 @@ assert('no source issue', o.sourceIssueNumbers({ head: { ref: 'feat/x' }, body: 
   assert('maintainer issue citing missing numbers is not outsider', r.length === 0);
   r = await o.outsiderOriginReasons(fakeGithub({ issueError: 404 }), 'o', 'r', internalPr(), []);
   assert('a missing SOURCE issue (404) still fails closed', r.some((x) => x.includes('unavailable (HTTP 404)')));
+
+  // A person with write access can clear a wrong flag; bots cannot.
+  const lab = (event, login, t) => ({ event, label: { name: o.OUTSIDER_ORIGIN_LABEL }, actor: { login }, created_at: t });
+  r = await o.outsiderOriginReasons(fakeGithub({ issue: maintainerIssue, timeline: [
+    lab('labeled', 'praisonai-triage-agent[bot]', '2026-10-19T09:30:00Z'), lab('unlabeled', 'MervinPraison', '2026-10-26T10:00:00Z')] }), 'o', 'r', internalPr(), []);
+  assert('a writer removing the flag clears it', !r.some((x) => x.includes('flagged')));
+  r = await o.outsiderOriginReasons(fakeGithub({ issue: maintainerIssue, timeline: [
+    lab('labeled', 'praisonai-triage-agent[bot]', '2026-10-19T09:30:00Z'), lab('unlabeled', 'praisonai-triage-agent[bot]', '2026-10-26T10:00:00Z')] }), 'o', 'r', internalPr(), []);
+  assert('a bot removing the flag does not clear it', r.some((x) => x.includes('flagged')));
+  r = await o.outsiderOriginReasons(fakeGithub({ issue: maintainerIssue, timeline: [
+    lab('labeled', 'praisonai-triage-agent[bot]', '2026-10-19T09:30:00Z'), lab('unlabeled', 'stranger', '2026-10-26T10:00:00Z')] }), 'o', 'r', internalPr(), []);
+  assert('a non-writer removing the flag does not clear it', r.some((x) => x.includes('flagged')));
+  r = await o.outsiderOriginReasons(fakeGithub({ issue: maintainerIssue, timeline: [
+    lab('labeled', 'x[bot]', '2026-10-19T09:30:00Z'), lab('unlabeled', 'MervinPraison', '2026-10-20T10:00:00Z'), lab('labeled', 'x[bot]', '2026-10-21T10:00:00Z')] }), 'o', 'r', internalPr(), []);
+  assert('flagged again after a clear is flagged', r.some((x) => x.includes('flagged')));
 
   r = await o.outsiderOriginReasons(fakeGithub({ issueError: 410 }), 'o', 'r', internalPr(), []);
   assert('a deleted or transferred source issue (410) counts as unknown, so outsider', r.some((x) => x.includes('unavailable (HTTP 410)')));

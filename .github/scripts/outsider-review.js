@@ -26,6 +26,8 @@ const TRUSTED_AUTOMATION = new Set(['Copilot']);
 const SECURITY_STATUS_CONTEXT = 'security/outsider-review';
 const SECURITY_STATUS_CREATOR = 'github-actions[bot]';
 const OUTSIDER_ORIGIN_LABEL = 'origin/outsider';
+// Timeline events that change content Claude or the merge gate reads.
+const CONTENT_EVENTS = new Set(['commented', 'reviewed', 'line-commented', 'commit-commented', 'head_ref_force_pushed', 'renamed']);
 
 // Build, dependency, CI and install-time surface. Code here runs on developer
 // machines, in CI with secrets, or at install time, so an outsider-origin
@@ -164,12 +166,24 @@ async function outsiderOriginReasons(github, owner, repo, pr, comments = []) {
   return reasons;
 }
 
+/**
+ * Was this ever flagged? Timeline events cannot be edited, so deleting the
+ * outsider content does not clear it. Only a person with write access can clear
+ * a wrong flag, by removing the label after it was last added (bots cannot:
+ * every Claude run acts as the App).
+ */
 async function wasLabelled(github, owner, repo, number, label) {
   try {
-    const events = await github.paginate(github.rest.issues.listEventsForTimeline, {
+    const events = (await github.paginate(github.rest.issues.listEventsForTimeline, {
       owner, repo, issue_number: number, per_page: 100,
-    });
-    return events.some((e) => e.event === 'labeled' && e.label?.name === label);
+    })).filter((e) => (e.event === 'labeled' || e.event === 'unlabeled') && e.label?.name === label);
+    const lastAdded = events.map((e) => e.event).lastIndexOf('labeled');
+    if (lastAdded < 0) return false;
+    const isWriter = makePermissionLookup(github, owner, repo);
+    for (const e of events.slice(lastAdded + 1)) {
+      if (e.event === 'unlabeled' && !isAutomation(e.actor?.login) && (await isWriter(e.actor.login))) return false;
+    }
+    return true;
   } catch (err) {
     if (err.status === 404 || err.status === 410) return false;
     throw err;
@@ -233,16 +247,20 @@ async function issueReasons(github, owner, repo, issueNumber, isWriter, label = 
  * commits to it, or edited its text. Unrelated activity by people does not count,
  * so flagging what an outsider run touched does not sweep up other work.
  */
-async function touchedByRun(github, owner, repo, item, since, appLogins) {
+async function touchedByRun(github, owner, repo, item, since, appLogins, until = new Date().toISOString()) {
   const t = new Date(since).getTime();
-  const after = (d) => !!d && new Date(d).getTime() >= t;
+  const end = new Date(until).getTime();
+  const after = (d) => !!d && new Date(d).getTime() >= t && new Date(d).getTime() <= end;
   const isApp = (login) => !!login && (appLogins.has(login) || appLogins.has(`${login}[bot]`));
   if (isApp(item.user?.login) && after(item.created_at)) return true;
   const events = await github.paginate(github.rest.issues.listEventsForTimeline, {
     owner, repo, issue_number: item.number, per_page: 100,
   });
   for (const e of events) {
-    if (isApp(e.actor?.login || e.user?.login) && after(e.created_at || e.submitted_at || e.updated_at)) return true;
+    // Only actions that change what Claude or the gate reads. Label syncing by the
+    // pipeline also runs as the App and must not count as the outsider run.
+    const content = CONTENT_EVENTS.has(e.event) || (e.event === 'labeled' && e.label?.name === 'claude');
+    if (content && isApp(e.actor?.login || e.user?.login) && after(e.created_at || e.submitted_at || e.updated_at)) return true;
     if (e.event === 'committed' && after(e.committer?.date)) return true;
   }
   let data;
