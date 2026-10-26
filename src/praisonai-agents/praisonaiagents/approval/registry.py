@@ -44,6 +44,9 @@ DEFAULT_DANGEROUS_TOOLS: Dict[str, str] = {
     "acp_edit_file": "high",
     "acp_delete_file": "high",
     "execute_query": "high",
+    "github_create_branch": "high",
+    "github_commit_and_push": "high",
+    "github_create_pull_request": "high",
     "evaluate": "medium",
     "crawl": "medium",
     "scrape_page": "medium",
@@ -76,10 +79,11 @@ DOOM_LOOP_TARGET = "__doom_loop__"
 # or set ``PRAISONAI_TOOL_SAFETY=off``; users who want stricter
 # controls can opt into ``approval="safe"`` or ``"read_only"``.
 PERMISSION_PRESETS = {
-    # "default" — blocks delete + shell/code exec. Allows read/create/edit.
+    # "default" — blocks delete + shell/code exec + git push/PR. Allows read/create/edit.
     "default": frozenset({
         "execute_command", "kill_process", "execute_code", "acp_execute_command",
         "delete_file", "move_file", "copy_file", "acp_delete_file",
+        "github_create_branch", "github_commit_and_push", "github_create_pull_request",
     }),
     # "safe" — blocks all dangerous tools (file writes, shell exec, etc.)
     "safe": frozenset(DEFAULT_DANGEROUS_TOOLS.keys()),
