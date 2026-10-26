@@ -135,6 +135,8 @@ def test_reclaim_closes_run_atomically_so_replacement_run_survives(store):
 
     assert store.reclaim_stale_claims(stale_timeout_seconds=1) == ["t5"]
     assert store.get_task("t5").current_run_id is None
+    assert any(e.event_type == "run_closed" and e.task_id == "t5"
+               for e in store.list_events())
 
     # Another dispatcher wins the reclaimed task before ours reacts.
     assert store.claim_task("t5", "rival", ttl_seconds=60)
