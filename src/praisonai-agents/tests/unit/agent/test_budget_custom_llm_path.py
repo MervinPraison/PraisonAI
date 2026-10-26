@@ -9,8 +9,7 @@ import asyncio
 
 import pytest
 
-litellm = pytest.importorskip("litellm")
-from litellm import ModelResponse  # noqa: E402
+pytest.importorskip("litellm")
 
 from praisonaiagents import Agent  # noqa: E402
 from praisonaiagents.config.feature_configs import ExecutionConfig  # noqa: E402
@@ -20,14 +19,24 @@ MODEL = "anthropic/claude-3-5-sonnet-20240620"
 USAGE = {"prompt_tokens": 1500, "completion_tokens": 1500, "total_tokens": 3000}
 
 
+def _litellm():
+    """The litellm module LLM will import now.
+
+    Other tests evict ``litellm`` from sys.modules, so a module-level binding
+    can go stale and stubbing it would let the real client run.
+    """
+    import litellm
+    return litellm
+
+
 def _text(model):
-    return ModelResponse(model=model, usage=USAGE, choices=[{
+    return _litellm().ModelResponse(model=model, usage=USAGE, choices=[{
         "index": 0, "finish_reason": "stop",
         "message": {"role": "assistant", "content": "ok"}}])
 
 
 def _tool_call(model, n):
-    return ModelResponse(model=model, usage=USAGE, choices=[{
+    return _litellm().ModelResponse(model=model, usage=USAGE, choices=[{
         "index": 0, "finish_reason": "tool_calls",
         "message": {"role": "assistant", "content": None, "tool_calls": [{
             "id": f"call_{n}", "type": "function",
@@ -50,6 +59,7 @@ def calls(monkeypatch):
     async def afake(*a, **k):
         return fake(*a, **k)
 
+    litellm = _litellm()
     monkeypatch.setattr(litellm, "completion", fake)
     monkeypatch.setattr(litellm, "acompletion", afake)
     return state

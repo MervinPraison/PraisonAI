@@ -9,8 +9,7 @@ import time
 
 import pytest
 
-litellm = pytest.importorskip("litellm")
-from litellm import ModelResponse  # noqa: E402
+pytest.importorskip("litellm")
 
 from praisonaiagents import Agent  # noqa: E402
 from praisonaiagents.config.feature_configs import ExecutionConfig  # noqa: E402
@@ -23,6 +22,11 @@ USAGE = {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}
 @pytest.fixture
 def calls(monkeypatch):
     """Stub litellm so the model asks for ``slow_step`` on every call."""
+    # Import here, not at module level: other tests evict ``litellm`` from
+    # sys.modules, and LLM then imports a fresh module object at call time.
+    import litellm
+    from litellm import ModelResponse
+
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     state = {"n": 0}
 
