@@ -817,7 +817,8 @@ Respond with ONLY a valid JSON tool call in this format:
         # Rate limiting and retry settings
         self._rate_limiter = extra_settings.get('rate_limiter', None)
         self._max_retries = extra_settings.get('max_retries', 3)
-        self._retry_delay = extra_settings.get('retry_delay', 60)  # Default 60 seconds
+        self._retry_delay = extra_settings.get('retry_delay', 60)
+        self._retry_delay_explicit = 'retry_delay' in extra_settings
         
         # Subscription auth
         self._auth_provider_id = auth
@@ -1066,7 +1067,7 @@ Respond with ONLY a valid JSON tool call in this format:
         else:
             return False
 
-    def _parse_retry_delay(self, error_message: Union[Exception, str]) -> float:
+    def _parse_retry_delay(self, error_message: Union[Exception, str]) -> Optional[float]:
         """Parse retry delay from a rate limit error.
 
         Args:
@@ -1074,7 +1075,7 @@ Respond with ONLY a valid JSON tool call in this format:
                 ``Retry-After`` response header is honoured) or its message
 
         Returns:
-            Retry delay in seconds, or default if not found
+            Provider delay in seconds, explicit fixed delay, or None if unspecified
         """
         # Max delay cap to prevent unbounded sleep (5 minutes default)
         max_delay = 300
@@ -1085,7 +1086,9 @@ Respond with ONLY a valid JSON tool call in this format:
 
         error = error_message if isinstance(error_message, BaseException) else Exception(error_message)
         delay = extract_retry_after(error, cap_seconds=max_delay)
-        return self._retry_delay if delay is None else delay
+        if delay is None and self._retry_delay_explicit:
+            return self._retry_delay
+        return delay
 
     def _is_rate_limit_error(self, error: Exception) -> bool:
         """Check if an exception is a rate limit error.
@@ -1303,9 +1306,10 @@ Respond with ONLY a valid JSON tool call in this format:
 
         # Rate limiting - extract retry delay
         if error_kind == "rate_limit":
-            backoff = self._parse_retry_delay(error)  # Returns seconds
-            if backoff == 0:  # No specific delay found, use exponential backoff
-                backoff = min(2 ** (attempt - 1), 60)  # 1s, 2s, 4s, ... cap at 60s
+            backoff = self._parse_retry_delay(error)
+            if backoff is None:
+                from .error_classifier import ErrorCategory, get_retry_delay
+                backoff = get_retry_delay(ErrorCategory.RATE_LIMIT, attempt)
             return FailoverDecision(
                 action="retry",
                 reason=error_kind, 
