@@ -2852,7 +2852,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2578",
+        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2593",
         "resolved_class": "AgentTeam"
       },
       "ts_only": [
