@@ -78,6 +78,17 @@ def test_plan_refuses_truncated_output_it_cannot_recover(fx):
         plan_rerun(evs, "task:write")
 
 
+def test_plan_refuses_llm_response_the_emitter_shortened(fx):
+    from praisonai.replay.rerun import RerunError, plan_rerun
+
+    full = "Findings: " + "x" * 900
+    evs = fx.team_events()
+    evs[5]["data"]["response_content"] = full[:600] + "\n...[60,000 chars, showing first/last portions]...\n" + "tail"
+    evs[9]["data"]["output_preview"] = full[:500]
+    with pytest.raises(RerunError, match="truncated preview"):
+        plan_rerun(evs, "task:write")
+
+
 # ---------------------------------------------------------------------------
 # AgentFlow: TraceStepCache
 # ---------------------------------------------------------------------------
@@ -333,3 +344,44 @@ def test_plan_rerun_accepts_a_path_object(tmp_path):
     path = tmp_path / "r.jsonl"
     path.write_text("\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8")
     assert plan_rerun(Path(path), "step:b") is not None
+
+
+def test_flow_rerun_restores_recorded_step_variables(traces_dir, fx):
+    from praisonaiagents import AgentFlow
+    from praisonaiagents.workflows import StepResult
+
+    from praisonai.replay.rerun import rerun
+
+    seen = []
+
+    def research(ctx):
+        return StepResult(output="fresh", variables={"customer_id": 0})
+
+    def draft(ctx):
+        seen.append(ctx.variables.get("customer_id"))
+        return StepResult(output="draft")
+
+    def polish(ctx):
+        return StepResult(output="polish")
+
+    evs = fx.flow_events()
+    for ev in evs:
+        if ev["event_type"] == "step_end" and ev.get("node_id") == "step:research":
+            ev["data"]["variables"] = {"customer_id": 42}
+    src = fx.write_trace(traces_dir, "run-flow01", evs)
+    rerun(AgentFlow(steps=[research, draft, polish]), str(src), "step:draft", input="topic")
+    assert seen == [42]
+
+
+def test_flow_rerun_rejects_flow_missing_recorded_steps(traces_dir, fx):
+    from praisonaiagents import AgentFlow
+    from praisonaiagents.workflows import StepResult
+
+    from praisonai.replay.rerun import RerunError, rerun
+
+    def other(ctx):
+        return StepResult(output="x")
+
+    src = fx.write_trace(traces_dir, "run-flow01", fx.flow_events())
+    with pytest.raises(RerunError, match="does not match any step"):
+        rerun(AgentFlow(steps=[other]), str(src), "step:draft", input="topic")

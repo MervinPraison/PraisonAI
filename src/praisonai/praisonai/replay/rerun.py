@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import re
 import threading
 from collections import OrderedDict
 from typing import Any, Callable, Dict, Iterator, List, Optional, Union
@@ -47,6 +48,8 @@ __all__ = [
 #: Previews are truncated to this many characters by the emitter (contract §2).
 PREVIEW_LIMIT = 500
 _REUSABLE = {"completed", "cached"}
+#: The emitter's marker for an ``llm_response`` cut to its head and tail.
+_SHORTENED = re.compile(r"\n\.\.\.\[[\d,]+ chars, showing first/last portions\]\.\.\.\n")
 
 
 class RerunError(RuntimeError):
@@ -56,11 +59,20 @@ class RerunError(RuntimeError):
 class RerunPlan:
     """What to reuse: recorded outputs (in order) for every node before ``node_id``."""
 
-    def __init__(self, source_run_id: str, node_id: str, kind: str, outputs: "OrderedDict[str, Any]"):
+    def __init__(
+        self,
+        source_run_id: str,
+        node_id: str,
+        kind: str,
+        outputs: "OrderedDict[str, Any]",
+        variables: Optional[Dict[str, Dict[str, Any]]] = None,
+    ):
         self.source_run_id = source_run_id
         self.node_id = node_id
         self.kind = kind  # "flow" | "team"
         self.outputs = outputs
+        # Variable updates a step's handler made, when its step_end recorded them.
+        self.variables = variables or {}
 
     @property
     def forked_from(self) -> Dict[str, str]:
@@ -102,6 +114,8 @@ def _recover_output(span: Dict[str, Any], events: List[Dict[str, Any]]) -> Any:
             continue
         content = (ev.get("data") or {}).get("response_content")
         if isinstance(content, str) and content.startswith(head):
+            if _SHORTENED.search(content):
+                break  # the emitter kept only its head and tail: not the full output
             return content
     raise RerunError(
         f"Only a truncated preview of {span['start'].get('node_id')}'s output was recorded, so "
@@ -135,6 +149,7 @@ def plan_rerun(events: Union[str, List[Any]], node_id: str) -> RerunPlan:
             break
 
     outputs: "OrderedDict[str, Any]" = OrderedDict()
+    variables: Dict[str, Dict[str, Any]] = {}
     for span in nodes:
         if span["type"] != target["type"] or span["end"] is None:
             continue
@@ -147,7 +162,10 @@ def plan_rerun(events: Union[str, List[Any]], node_id: str) -> RerunPlan:
         if status not in _REUSABLE:
             continue
         outputs[span["start"]["node_id"]] = _recover_output(span, evs)
-    return RerunPlan(run_id_of(evs), node_id, kind, outputs)
+        recorded_vars = (span["end"].get("data") or {}).get("variables")
+        if isinstance(recorded_vars, dict):
+            variables[span["start"]["node_id"]] = recorded_vars
+    return RerunPlan(run_id_of(evs), node_id, kind, outputs, variables)
 
 
 # ---------------------------------------------------------------------------
@@ -169,13 +187,20 @@ class TraceStepCache(StepCacheProtocol):
     (:func:`seed_flow` does) so it can tell which step is asking -- the flow
     marks the step ``running`` just before it consults the cache.
 
-    ``hits`` lists the step names served from the recording.
+    ``hits`` lists the step names served from the recording. ``variables``
+    (node id -> dict) restores the variable updates a handler made, when the
+    recording kept them.
     """
 
-    def __init__(self, outputs: "OrderedDict[str, Any]"):
+    def __init__(
+        self,
+        outputs: "OrderedDict[str, Any]",
+        variables: Optional[Dict[str, Dict[str, Any]]] = None,
+    ):
+        variables = variables or {}
         self._queues: Dict[str, List[Any]] = {}
         for node_id, output in outputs.items():
-            self._queues.setdefault(_step_name(node_id), []).append(output)
+            self._queues.setdefault(_step_name(node_id), []).append((output, variables.get(node_id) or {}))
         self._flow: Any = None
         self._lock = threading.Lock()
         self.hits: List[str] = []
@@ -204,13 +229,13 @@ class TraceStepCache(StepCacheProtocol):
             if name is None:
                 self.misses += 1
                 return None
-            output = self._queues[name].pop(0)
+            output, recorded_vars = self._queues[name].pop(0)
             self.hits.append(name)
         step = self._step_obj(name)
         var = getattr(step, "output_variable", None) or f"{name}_output"
         return {
             "output": output,
-            "variables": {var: output},
+            "variables": {**recorded_vars, var: output},
             "stop": False,
             "step_record": {"step": name, "output": output, "status": "completed", "retries": 0},
         }
@@ -219,11 +244,41 @@ class TraceStepCache(StepCacheProtocol):
         return None
 
 
+def _flow_step_names(steps: Any) -> set:
+    """Names of every step in a flow, including those nested in patterns."""
+    names: set = set()
+    stack = list(steps or [])
+    while stack:
+        step = stack.pop()
+        for attr in ("name", "__name__", "_yaml_step_name"):  # YAML agent steps run as their step name
+            value = getattr(step, attr, None)
+            if isinstance(value, str):
+                names.add(value)
+        routes = getattr(step, "routes", None)
+        if isinstance(routes, dict):
+            for branch in routes.values():
+                stack.extend(branch if isinstance(branch, list) else [branch])
+        for attr in ("steps", "default", "then_steps", "else_steps"):
+            value = getattr(step, attr, None)
+            if isinstance(value, list):
+                stack.extend(value)
+        inner = getattr(step, "step", None)
+        if inner is not None:
+            stack.append(inner)
+    return names
+
+
 def seed_flow(flow: Any, plan: RerunPlan) -> TraceStepCache:
     """Install a :class:`TraceStepCache` for ``plan`` on an AgentFlow."""
     from praisonaiagents.workflows.step_cache import resolve_step_cache
 
-    cache = TraceStepCache(plan.outputs).bind(flow)
+    # A different or edited flow would silently run unmatched steps fresh.
+    names = _flow_step_names(getattr(flow, "steps", None))
+    for node_id in [*plan.outputs, plan.node_id]:
+        if _step_name(node_id) not in names:
+            raise RerunError(f"Recorded node {node_id!r} does not match any step in this flow.")
+
+    cache = TraceStepCache(plan.outputs, plan.variables).bind(flow)
     flow.cache = cache
     # AgentFlow resolves ``cache=`` once at construction; resolve the new one
     # the same way so the run uses it.
