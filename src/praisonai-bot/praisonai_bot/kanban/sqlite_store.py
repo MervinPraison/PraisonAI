@@ -1141,20 +1141,6 @@ class SQLiteKanbanStore:
                 if result.rowcount > 0:
                     reclaimed.append(row['id'])
                     reason = 'dead' if not worker_alive else 'stale_heartbeat'
-                    # Close the abandoned attempt in the same transaction, so a
-                    # dispatcher that claims the task next can never have its
-                    # own fresh run mistaken for this one.
-                    if row.get('current_run_id') is not None and conn.execute(
-                            "UPDATE task_runs SET outcome = ?, error = ?, ended_at = ? "
-                            "WHERE id = ? AND ended_at IS NULL",
-                            (RunOutcome.CRASHED.value,
-                             f'Worker {reason}; claim reclaimed',
-                             now.isoformat(), row['current_run_id']),
-                    ).rowcount:
-                        self._log_event(conn, row['id'], 'run_closed', {
-                            'run_id': row['current_run_id'],
-                            'outcome': RunOutcome.CRASHED.value,
-                        })
                     reclaim_details[row['id']] = {
                         'worker_id': row['claim_lock'],
                         'worker_pid': pid,

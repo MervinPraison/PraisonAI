@@ -514,11 +514,8 @@ class KanbanDispatcher:
 
         for task_id in reclaimed or []:
             logger.warning(f"Reclaimed stale kanban task {task_id} back to 'ready'")
-            # The store closed the abandoned run as 'crashed' atomically with
-            # the reclaim; count the attempt so the circuit breaker sees it.
-            self._record_failure_safe(
-                store, task_id, error='Worker died or went stale; claim reclaimed'
-            )
+            # The store closed the abandoned run as 'crashed' and counted the
+            # failure atomically with the reclaim, so nothing more to do here.
             # The running -> ready transition is announced as
             # KANBAN_TASK_MOVED (reclaimed=True) by the store itself;
             # 'KANBAN_TASK_RECLAIMED' was never a HookEvent member and so
