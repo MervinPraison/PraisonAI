@@ -353,11 +353,13 @@ class ShellTools:
     
     def _partial_result(self, exc, reason, max_output_size, spill, spill_dir):
         """Build a failed result that keeps output captured before ``exc``."""
+        collect = getattr(exc, 'collect_output', None)
+        stdout, stderr = collect() if collect else ('', '')
         stdout, stdout_path = self._handle_overflow(
-            getattr(exc, 'partial_stdout', ''), "stdout", max_output_size, spill, spill_dir
+            stdout, "stdout", max_output_size, spill, spill_dir
         )
         stderr, stderr_path = self._handle_overflow(
-            getattr(exc, 'partial_stderr', ''), "stderr", max_output_size, spill, spill_dir
+            stderr, "stderr", max_output_size, spill, spill_dir
         )
         result: Dict[str, Union[str, int, bool]] = {
             'stdout': stdout,
@@ -617,11 +619,17 @@ class ShellTools:
         t_out.start()
         t_err.start()
 
-        def _with_partial(exc):
+        def _with_partial(exc, drain=True):
             # Keep whatever the command already printed: on a timeout/interrupt
-            # the real error usually lives in the output produced so far.
-            exc.partial_stdout = "".join(stdout_chunks)
-            exc.partial_stderr = "".join(stderr_chunks)
+            # the real error usually lives in the output produced so far. The
+            # caller collects only AFTER killing the child, so the pipes close
+            # and readline() returns trailing text written without a newline.
+            def _collect():
+                if drain:
+                    for reader in (t_out, t_err):
+                        reader.join(timeout=_DRAIN_GRACE_SECONDS)
+                return "".join(stdout_chunks), "".join(stderr_chunks)
+            exc.collect_output = _collect
             return exc
 
         deadline = None if timeout is None else time.monotonic() + timeout
@@ -680,7 +688,7 @@ class ShellTools:
             # Stop emitting and signal a drain-timeout so the caller reports a
             # timeout WITHOUT trying to kill an already-exited process.
             stop_emitting.set()
-            raise _with_partial(_StreamDrainTimeout())
+            raise _with_partial(_StreamDrainTimeout(), drain=False)
 
         if read_errors:
             raise read_errors[0]

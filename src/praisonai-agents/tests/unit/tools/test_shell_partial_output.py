@@ -41,3 +41,11 @@ def test_interrupt_keeps_partial_output(monkeypatch):
     assert result["interrupted"] is True
     assert "step1 ok" in result["stdout"]
     assert result["stderr"].endswith("Command interrupted by user")
+
+
+def test_timeout_keeps_unterminated_line():
+    # Flushed text without a trailing newline must survive the timeout too.
+    script = "import time,sys;sys.stdout.write('progress');sys.stdout.flush();time.sleep(30)"
+    result = ShellTools().execute_command(f'{sys.executable} -c "{script}"', timeout=2)
+    assert result["timed_out"] is True
+    assert "progress" in result["stdout"]

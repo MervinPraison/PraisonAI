@@ -68,12 +68,16 @@ class TaskStore:
         self._evict()
         return task
     
-    def _evict(self):
-        """Drop the oldest terminal tasks once the store exceeds its cap."""
+    def _evict(self, keep: Optional[str] = None):
+        """Drop the oldest terminal tasks (except *keep*) once over the cap."""
         excess = len(self._tasks) - _MAX_TASKS
         if excess <= 0:
             return
-        for tid in [t.id for t in self._tasks.values() if t.status.state in TERMINAL_STATES][:excess]:
+        old = [
+            t.id for t in self._tasks.values()
+            if t.status.state in TERMINAL_STATES and t.id != keep
+        ]
+        for tid in old[:excess]:
             del self._tasks[tid]
     
     def get_task(self, task_id: str) -> Optional[Task]:
@@ -130,6 +134,8 @@ class TaskStore:
         )
         
         self._tasks[task_id] = updated
+        if state in TERMINAL_STATES:
+            self._evict(keep=task_id)
         return updated
     
     def add_artifact(self, task_id: str, artifact: Artifact) -> Optional[Task]:
@@ -141,11 +147,14 @@ class TaskStore:
             artifact: Artifact to add
             
         Returns:
-            Updated Task if found, None otherwise
+            Updated Task if found, None otherwise. A task in a terminal
+            state is returned unchanged.
         """
         task = self._tasks.get(task_id)
         if not task:
             return None
+        if task.status.state in TERMINAL_STATES:
+            return task
         
         # Get existing artifacts or create new list
         artifacts = list(task.artifacts) if task.artifacts else []
@@ -173,11 +182,14 @@ class TaskStore:
             message: Message to add to history
             
         Returns:
-            Updated Task if found, None otherwise
+            Updated Task if found, None otherwise. A task in a terminal
+            state is returned unchanged.
         """
         task = self._tasks.get(task_id)
         if not task:
             return None
+        if task.status.state in TERMINAL_STATES:
+            return task
         
         # Get existing history or create new list
         history = list(task.history) if task.history else []

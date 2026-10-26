@@ -66,3 +66,42 @@ async def test_cancel_stops_background_task_and_is_not_overwritten():
     assert task.status.state == TaskState.CANCELLED
     assert not task.artifacts
     assert task_id not in a2a._running
+
+
+def test_store_evicts_when_tasks_finish(monkeypatch):
+    from praisonaiagents.ui.a2a import task_store as ts
+    monkeypatch.setattr(ts, "_MAX_TASKS", 2)
+    store = TaskStore()
+    live = [store.create_task(_msg()) for _ in range(4)]
+    for t in live:
+        store.update_status(t.id, TaskState.COMPLETED)
+    assert len(store.list_tasks()) == 2
+    # The task that just finished is kept for the caller's response.
+    assert store.get_task(live[-1].id) is not None
+
+
+@pytest.mark.asyncio
+async def test_cancel_during_sync_send_discards_late_result():
+    import json
+    from praisonaiagents import Agent
+    from praisonaiagents.ui.a2a import A2A
+
+    started, release = threading.Event(), threading.Event()
+    agent = Agent(name="Cancel Test", role="Tester", goal="Test")
+    agent.chat = lambda _text: (started.set(), release.wait(5), "late result")[2]
+    a2a = A2A(agent=agent, url="http://localhost:8000/a2a")
+
+    send = asyncio.create_task(a2a._handle_message_send("1", {
+        "message": {"messageId": "m1", "role": "user", "parts": [{"text": "Hi"}]},
+    }))
+    await asyncio.to_thread(started.wait, 5)
+    task_id = a2a.task_store.list_tasks()[0].id
+    a2a._handle_tasks_cancel("2", {"id": task_id})
+    release.set()
+    result = json.loads((await send).body)["result"]
+
+    task = a2a.task_store.get_task(task_id)
+    assert result["status"]["state"] == TaskState.CANCELLED.value
+    assert task.status.state == TaskState.CANCELLED
+    assert not task.artifacts
+    assert all(m.role == Role.USER for m in task.history or [])
