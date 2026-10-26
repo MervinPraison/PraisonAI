@@ -355,3 +355,99 @@ class TestDeliverAggregatesOutcome:
         bot = QueuingBot()
         result = asyncio.run(bot.deliver("c1", "hello"))
         assert result.status == "sent"
+
+
+class TestRuntimeContractDefaults:
+    """Issue #5984: a minimal subclass satisfies what Bot/BotOS drive."""
+
+    def test_runtime_methods_present(self):
+        bot = RecordingBot()
+        for name in ("start", "stop", "send_message", "probe", "health"):
+            assert callable(getattr(bot, name))
+
+    def test_start_runs_until_stop(self):
+        async def scenario():
+            bot = RecordingBot()
+            task = asyncio.ensure_future(bot.start())
+            await asyncio.sleep(0.01)
+            assert bot.connected and not task.done()
+            health = await bot.health()
+            assert health.ok and health.is_running
+            assert (await bot.probe()).ok
+            await bot.stop()
+            await asyncio.wait_for(task, 1)
+            assert not bot.connected
+            assert not (await bot.health()).is_running
+
+        run(scenario())
+
+    def test_start_raises_when_connect_fails(self):
+        class NoConnect(RecordingBot):
+            async def connect(self, *, is_reconnect=False):
+                return False
+
+        with pytest.raises(ConnectionError):
+            run(NoConnect().start())
+
+    def test_stop_during_connect_is_honoured(self):
+        async def scenario():
+            gate = asyncio.Event()
+
+            class SlowConnect(RecordingBot):
+                async def connect(self, *, is_reconnect=False):
+                    await gate.wait()
+                    return await super().connect(is_reconnect=is_reconnect)
+
+            bot = SlowConnect()
+            task = asyncio.ensure_future(bot.start())
+            await asyncio.sleep(0.01)
+            await bot.stop()
+            gate.set()
+            await asyncio.wait_for(task, 1)
+            assert not bot.connected
+
+        run(scenario())
+
+    def test_cancelled_start_disconnects(self):
+        async def scenario():
+            bot = RecordingBot()
+            task = asyncio.ensure_future(bot.start())
+            await asyncio.sleep(0.01)
+            assert bot.connected
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert not bot.connected
+            assert not (await bot.health()).is_running
+
+        run(scenario())
+
+    def test_send_message_routes_through_deliver(self):
+        bot = RecordingBot()
+        res = run(bot.send_message("c1", "hello", reply_to="r1", thread_id="t1"))
+        assert res.ok and res.status == "sent"
+        assert bot.sends == [("c1", "hello", "r1")]
+
+    def test_probe_round_trips_when_not_running(self):
+        bot = RecordingBot()
+        res = run(bot.probe())
+        assert res.ok and not bot.connected
+
+        class BadCreds(RecordingBot):
+            async def connect(self, *, is_reconnect=False):
+                raise RuntimeError("401 unauthorized")
+
+        res = run(BadCreds().probe())
+        assert not res.ok and "401" in res.error
+
+    def test_probe_timeout_still_disconnects(self):
+        class Hangs(RecordingBot):
+            async def connect(self, *, is_reconnect=False):
+                self.connected = True  # partially opened resource
+                await asyncio.sleep(10)
+                return True
+
+        bot = Hangs()
+        with pytest.raises(asyncio.TimeoutError):
+            run(asyncio.wait_for(bot.probe(), 0.05))
+        assert not bot.connected

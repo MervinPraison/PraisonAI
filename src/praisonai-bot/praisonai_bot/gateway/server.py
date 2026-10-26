@@ -1203,6 +1203,9 @@ class WebSocketGateway:
         self._reaped_connections = 0
         
         self._agents: Dict[str, "Agent"] = {}
+        # Issue #6004: downstream MCP servers from YAML ``mcp_servers:``, one
+        # shared ``MCP`` client per (name, spec) reused across agents/reloads.
+        self._mcp_pool: Dict[str, Any] = {}
         self._sessions: Dict[str, GatewaySession] = {}
         self._clients: Dict[str, Any] = {}  # WebSocket connections
         self._client_conns: Dict[str, _ClientConn] = {}  # client_id -> bounded outbound conn
@@ -3842,6 +3845,14 @@ class WebSocketGateway:
                 self._lifecycle_ledger.mark_exited()
             except Exception:
                 logger.debug("Failed to mark clean exit in lifecycle ledger")
+
+        # Issue #6004: close pooled downstream MCP clients.
+        for mcp_client in self._mcp_pool.values():
+            try:
+                mcp_client.shutdown()
+            except Exception:
+                logger.debug("Failed to shut down pooled MCP client")
+        self._mcp_pool.clear()
 
         # Release PID lock
         if hasattr(self, '_pid_lock') and self._pid_lock:
@@ -8242,6 +8253,67 @@ class WebSocketGateway:
             self._agents[route_id] = room
             logger.info(f"Room registered: {route_id} roster={room.config.roster}")
 
+    @staticmethod
+    def _mcp_pool_key(name: str, spec: Any) -> Tuple[Optional[str], Any]:
+        """Normalise a ``mcp_servers`` entry; return ``(pool_key, spec)``."""
+        import json
+
+        if isinstance(spec, str):
+            spec = {"command": spec}
+        if not isinstance(spec, dict):
+            return None, spec
+        return f"{name}:{json.dumps(spec, sort_keys=True, default=str)}", spec
+
+    def _get_pooled_mcp(self, name: str, spec: Any) -> Any:
+        """Return the shared ``MCP`` client for a ``mcp_servers`` entry.
+
+        One client per (name, spec) is opened and reused by every agent that
+        lists it — and across hot reloads while the spec is unchanged — so N
+        agents do not open N connections. The core ``MCP`` client already
+        restarts a dead stdio server on the next call. Tool names are prefixed
+        with the server name (``<name>_<tool>``) so two servers exposing the
+        same tool cannot shadow each other. Returns ``None`` (with a warning)
+        when the server cannot be started (Issue #6004).
+        """
+        key, spec = self._mcp_pool_key(name, spec)
+        if key is None:
+            logger.warning("mcp_servers.%s must be a mapping or string; skipping", name)
+            return None
+        client = self._mcp_pool.get(key)
+        if client is not None:
+            return client
+        opts = dict(spec)
+        target = opts.pop("url", None) or opts.pop("command", None)
+        if not target:
+            logger.warning("mcp_servers.%s needs a 'command' or 'url'; skipping", name)
+            return None
+        try:
+            from praisonaiagents import MCP
+
+            client = MCP(target, **opts).with_tool_prefix(name)
+        except Exception as exc:
+            logger.warning("Failed to start MCP server '%s': %s", name, exc)
+            return None
+        self._mcp_pool[key] = client
+        return client
+
+    def _warm_mcp_pool(self, mcp_servers_cfg: Optional[Dict[str, Any]]) -> None:
+        """Open every configured MCP client. Blocking; reloads run it off-loop."""
+        for name, spec in (mcp_servers_cfg or {}).items():
+            self._get_pooled_mcp(name, spec)
+
+    def _prune_mcp_pool(self, mcp_servers_cfg: Optional[Dict[str, Any]]) -> None:
+        """Shut down pooled clients the live config no longer references."""
+        live = {
+            self._mcp_pool_key(name, spec)[0]
+            for name, spec in (mcp_servers_cfg or {}).items()
+        }
+        for key in [k for k in self._mcp_pool if k not in live]:
+            try:
+                self._mcp_pool.pop(key).shutdown()
+            except Exception:
+                logger.debug("Failed to shut down retired MCP client")
+
     def _create_agents_from_config(
         self,
         agents_cfg: Dict[str, Dict[str, Any]],
@@ -8249,6 +8321,7 @@ class WebSocketGateway:
         default_model: Optional[str] = None,
         guardrails_cfg: Optional[Dict[str, Any]] = None,
         durable_runs: bool = False,
+        mcp_servers_cfg: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Create and register Agent instances from the agents section of config.
 
@@ -8280,6 +8353,9 @@ class WebSocketGateway:
                           store) the execution hot path is unchanged (zero-overhead).
                           Per-agent ``durable`` in YAML overrides this gateway-wide
                           default.
+            mcp_servers_cfg: Optional top-level ``mcp_servers`` dict. An agent
+                          ``tools:`` entry naming a server gets that server's
+                          shared, pooled ``MCP`` client (Issue #6004).
         """
         from praisonaiagents import Agent
 
@@ -8333,12 +8409,17 @@ class WebSocketGateway:
             
             agent_tools = []
             yaml_tool_names = agent_def.get("tools", [])
-            if yaml_tool_names and tool_resolver:
+            if yaml_tool_names and (tool_resolver or mcp_servers_cfg):
                 for tool_name in yaml_tool_names:
                     if not tool_name or not isinstance(tool_name, str):
                         continue
                     tool_name = tool_name.strip()
-                    resolved = tool_resolver.resolve(tool_name)
+                    if mcp_servers_cfg and tool_name in mcp_servers_cfg:
+                        mcp_client = self._get_pooled_mcp(tool_name, mcp_servers_cfg[tool_name])
+                        if mcp_client is not None:
+                            agent_tools.append(mcp_client)
+                        continue
+                    resolved = tool_resolver.resolve(tool_name) if tool_resolver else None
                     if resolved:
                         agent_tools.append(resolved)
                         logger.debug(f"Resolved tool '{tool_name}' for agent '{agent_id}'")
@@ -10513,7 +10594,13 @@ class WebSocketGateway:
         if self._reload_lock is None:
             self._reload_lock = asyncio.Lock()
         async with self._reload_lock:
-            await self._reload_config_locked(config_path)
+            try:
+                await self._reload_config_locked(config_path)
+            finally:
+                # Issue #6004: retire MCP clients that neither the committed
+                # config nor a restored previous one references (removed or
+                # re-specced servers, or ones opened for a rejected candidate).
+                self._prune_mcp_pool((self._loaded_config or {}).get("mcp_servers"))
 
     def _record_reload_status(
         self,
@@ -10600,6 +10687,7 @@ class WebSocketGateway:
                 default_model=default_model,
                 guardrails_cfg=guardrails_cfg,
                 durable_runs=durable_runs,
+                mcp_servers_cfg=new_cfg.get("mcp_servers"),
             )
             self._register_rooms_from_config(new_cfg.get("rooms"))
             candidate = {
@@ -10672,6 +10760,7 @@ class WebSocketGateway:
                     default_model=default_model,
                     guardrails_cfg=guardrails_cfg,
                     durable_runs=durable_runs,
+                    mcp_servers_cfg=prev_cfg.get("mcp_servers"),
                 )
                 self._register_rooms_from_config(prev_cfg.get("rooms"))
             prev_channels_cfg = prev_cfg.get("channels", {})
@@ -10701,6 +10790,12 @@ class WebSocketGateway:
             # rejected in health() instead of just a log line.
             self._record_reload_status("failed", error=str(e))
             return
+
+        # Issue #6004: opening downstream MCP servers waits for their startup
+        # handshake, so do it off the serving loop; the agent builders below
+        # then reuse the pooled clients without blocking.
+        if new_cfg.get("mcp_servers"):
+            await asyncio.to_thread(self._warm_mcp_pool, new_cfg.get("mcp_servers"))
 
         # Issue #3020: reconcile the cross-platform identity resolver from the
         # (possibly changed) top-level ``identity:`` block *before* any channel
@@ -10734,6 +10829,7 @@ class WebSocketGateway:
                         default_model=default_model,
                         guardrails_cfg=guardrails_cfg,
                         durable_runs=durable_runs,
+                        mcp_servers_cfg=new_cfg.get("mcp_servers"),
                     )
                     self._register_rooms_from_config(new_cfg.get("rooms"))
 
@@ -10853,6 +10949,7 @@ class WebSocketGateway:
                         default_model=default_model,
                         guardrails_cfg=guardrails_cfg,
                         durable_runs=durable_runs,
+                        mcp_servers_cfg=new_cfg.get("mcp_servers"),
                     )
                     self._register_rooms_from_config(new_cfg.get("rooms"))
                 logger.info("Agents reloaded")
@@ -11553,6 +11650,7 @@ class WebSocketGateway:
                 default_model=default_model,
                 guardrails_cfg=guardrails_cfg,
                 durable_runs=durable_runs,
+                mcp_servers_cfg=cfg.get("mcp_servers"),
             )
         self._register_rooms_from_config(cfg.get("rooms"))
 

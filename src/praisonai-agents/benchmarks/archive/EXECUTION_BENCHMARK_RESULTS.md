@@ -1,3 +1,5 @@
+> **Superseded.** Historical result from 2026-01-13, kept for reference only. Package versions and methodology differ from current runs; do not cite. Current results: [../BENCHMARK_RESULTS.md](../BENCHMARK_RESULTS.md).
+
 # PraisonAI Agents - Real Execution Benchmark
 
 **Generated:** 2026-01-13 06:07:28
