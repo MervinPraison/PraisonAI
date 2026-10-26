@@ -232,3 +232,46 @@ def test_member_driven_turn_reaches_owner_and_replay():
         assert ws.sent[-1]["content"] == "echo:hi"
     # Recorded once (via the owner's copy), not zero or twice.
     assert [e.type for e in session._events].count("response") == 1
+
+
+@pytest.mark.parametrize("frame", ["hello", "join"])
+def test_attached_viewer_cannot_rebind_via_handshake(frame):
+    async def _run():
+        gw = _gateway()
+        gw._agents["agent"] = object()
+        _client(gw, "owner")
+        viewer_ws = _client(gw, "bob", scopes=["read", "write"])
+        session = _owned(gw, visibility="read_only")
+        gw.attach(session.session_id, "bob", role="viewer")
+        await gw._handle_client_message(
+            "bob",
+            {"type": frame, "agent_id": "agent", "session_id": session.session_id},
+        )
+        return gw, session, viewer_ws
+
+    gw, session, viewer_ws = asyncio.run(_run())
+    assert session.client_id == "owner"
+    assert "bob" not in gw._client_sessions
+    assert gw.observers(session.session_id)[1] == ("bob", SessionSharingRole.VIEWER)
+    assert viewer_ws.sent and "observer" in str(viewer_ws.sent[-1]).lower()
+
+
+def test_observer_copy_not_recorded_in_its_own_session_replay():
+    async def _run():
+        gw = _gateway()
+        _client(gw, "owner")
+        _client(gw, "bob", scopes=["read"])
+        session_a = _owned(gw, visibility="shared")
+        gw.attach(session_a.session_id, "bob", role="viewer")
+        # The viewer also owns an unrelated session B.
+        session_b = gw.create_session("agent", client_id="bob")
+        gw._client_sessions["bob"] = session_b.session_id
+
+        session_a.mark_executing(True)
+        await session_a.queue_message("hi")
+        await gw._run_session_queue(session_a, _EmitterAgent(), "owner")
+        return session_a, session_b
+
+    session_a, session_b = asyncio.run(_run())
+    assert [e.type for e in session_a._events].count("response") == 1
+    assert list(session_b._events) == []

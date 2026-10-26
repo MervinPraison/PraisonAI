@@ -4001,6 +4001,19 @@ class WebSocketGateway:
             # Resume or create session
             session_id = data.get("session_id")
             since_cursor = data.get("since")
+            if isinstance(session_id, str) and client_id in self._session_observers.get(
+                session_id, {}
+            ):
+                # Issue #5997: an attached observer keeps its sharing role; it
+                # must not rebind as the session's owner.
+                error = HelloError(
+                    code=ConnectErrorCode.AUTH_UNAUTHORIZED,
+                    message="Attached observers cannot take over the session",
+                    next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+                    next_action="start_new_session",
+                )
+                await self._send_to_client(client_id, error.to_dict())
+                return
             session, replay_events = self.resume_or_create_session(
                 session_id=session_id,
                 agent_id=agent_id,
@@ -4182,7 +4195,19 @@ class WebSocketGateway:
                             "message": "Invalid 'since' cursor. Must be an integer.",
                         })
                         return
-                
+
+                if isinstance(session_id, str) and client_id in self._session_observers.get(
+                    session_id, {}
+                ):
+                    # Issue #5997: an attached observer keeps its sharing
+                    # role; it must not rebind as the session's owner.
+                    await self._send_to_client(client_id, {
+                        "type": "error",
+                        "code": "unauthorized",
+                        "message": "Attached observers cannot take over the session",
+                    })
+                    return
+
                 # Resume or create session
                 session, replay_events = self.resume_or_create_session(
                     session_id=session_id,
@@ -5539,10 +5564,17 @@ class WebSocketGateway:
                     "tool_result_stream",
                 ]:
                     session_id = self._client_sessions.get(client_id)
-                    # An attached member's fan-out copy is not recorded again
-                    # in the session's replay buffer (issue #5997).
-                    if session_id and client_id not in self._session_observers.get(
-                        session_id, {}
+                    # Issue #5997: record only frames of the recipient's own
+                    # session, and never an attached observer's fan-out copy
+                    # (the owner's copy is the one recorded).
+                    inner = data.get("data")
+                    frame_sid = data.get("session_id") or (
+                        inner.get("session_id") if isinstance(inner, dict) else None
+                    )
+                    if (
+                        session_id
+                        and frame_sid in (None, session_id)
+                        and client_id not in self._session_observers.get(session_id, {})
                     ):
                         session = self._sessions.get(session_id)
                         if session:
