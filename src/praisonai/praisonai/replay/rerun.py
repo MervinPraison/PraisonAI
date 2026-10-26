@@ -24,6 +24,7 @@ node or an output that was only recorded as a truncated preview fail with
 from __future__ import annotations
 
 import contextlib
+import os
 import threading
 from collections import OrderedDict
 from typing import Any, Callable, Dict, Iterator, List, Optional, Union
@@ -111,7 +112,7 @@ def _recover_output(span: Dict[str, Any], events: List[Dict[str, Any]]) -> Any:
 
 def plan_rerun(events: Union[str, List[Any]], node_id: str) -> RerunPlan:
     """Work out which recorded outputs to reuse for a re-run from ``node_id``."""
-    evs = load_events(events) if isinstance(events, str) else as_dicts(events)
+    evs = load_events(events) if isinstance(events, (str, os.PathLike)) else as_dicts(events)
     if not evs:
         raise RerunError("The trace is empty.")
     if not any(ev.get("node_id") for ev in evs):

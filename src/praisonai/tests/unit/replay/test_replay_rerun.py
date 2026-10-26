@@ -314,3 +314,22 @@ def test_cli_rerun_legacy_trace_fails_clearly(traces_dir, fx):
     result = _invoke("rerun", "run-legacy1", "--from", "task:write")
     assert result.exit_code == 1
     assert "schema 1.0" in result.output
+
+
+def test_plan_rerun_accepts_a_path_object(tmp_path):
+    """record() hands back a pathlib.Path; rerun must take it as-is."""
+    import json
+    from pathlib import Path
+
+    from praisonai.replay.rerun import plan_rerun
+
+    events = [
+        {"event_type": "session_start", "session_id": "s", "sequence_num": 0, "timestamp": 1.0, "data": {}, "run_id": "r"},
+        {"event_type": "workflow_start", "session_id": "s", "sequence_num": 1, "timestamp": 1.1, "data": {"kind": "flow"}, "run_id": "r"},
+        {"event_type": "step_start", "session_id": "s", "sequence_num": 2, "timestamp": 1.2, "data": {"name": "a"}, "node_id": "step:a", "run_id": "r"},
+        {"event_type": "step_end", "session_id": "s", "sequence_num": 3, "timestamp": 1.3, "parent_seq": 2, "data": {"status": "completed", "output": "A"}, "node_id": "step:a", "run_id": "r"},
+        {"event_type": "step_start", "session_id": "s", "sequence_num": 4, "timestamp": 1.4, "data": {"name": "b"}, "node_id": "step:b", "run_id": "r"},
+    ]
+    path = tmp_path / "r.jsonl"
+    path.write_text("\n".join(json.dumps(e) for e in events) + "\n", encoding="utf-8")
+    assert plan_rerun(Path(path), "step:b") is not None
