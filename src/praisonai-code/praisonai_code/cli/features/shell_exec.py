@@ -234,6 +234,47 @@ def _kill_process_tree(proc: "subprocess.Popen") -> None:
         pass
 
 
+class _Cancelled(Exception):
+    """The agent's cooperative cancellation signal fired mid-command."""
+
+
+def _cancel_event():
+    """The running agent's ``cancel_event``, or ``None`` outside an agent."""
+    try:
+        from praisonaiagents.tools.injected import get_current_state
+        state = get_current_state()
+    except Exception:
+        return None
+    return getattr(state, "cancel_event", None) if state is not None else None
+
+
+def _communicate(proc: "subprocess.Popen", timeout: int):
+    """``proc.communicate`` that also stops when the user interrupts the agent.
+
+    Mirrors the core runner: without this a stopped agent's command keeps
+    changing workspace files until it finishes or times out.
+    """
+    import time
+
+    cancel = _cancel_event()
+    if cancel is None:
+        return proc.communicate(timeout=timeout)
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while True:
+        if cancel.is_set():
+            raise _Cancelled()
+        slice_ = 0.1
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(proc.args, timeout)
+            slice_ = min(slice_, remaining)
+        try:
+            return proc.communicate(timeout=slice_)
+        except subprocess.TimeoutExpired:
+            continue
+
+
 def _run_real_shell(
     command: str,
     cwd: Optional[str],
@@ -284,7 +325,19 @@ def _run_real_shell(
             **popen_kwargs,
         )
         try:
-            out, err = proc.communicate(timeout=timeout)
+            out, err = _communicate(proc, timeout)
+        except _Cancelled:
+            _kill_process_tree(proc)
+            out, err = proc.communicate()
+            return {
+                "command": command,
+                "stdout": out or "",
+                "stderr": "Command interrupted by user",
+                "exit_code": 130,
+                "success": False,
+                "error": "Command interrupted by user",
+                "sandbox": backend,
+            }
         except subprocess.TimeoutExpired:
             _kill_process_tree(proc)
             out, err = proc.communicate()
@@ -457,6 +510,14 @@ def run_shell_command(
     # Containment is a property of the mode, not of the command's syntax:
     # ``rm -rf build`` has no operator but must still run inside the jail.
     if effective == MODE_SANDBOXED:
+        if kwargs.get("run_in_background"):
+            # The contained runner has no process registry; refuse rather than
+            # block until the timeout kills a server the caller expected back.
+            return _refusal(
+                command, "",
+                f"run_in_background is not supported under {MODE_ENV_VAR}="
+                f"sandboxed. Run the command in the foreground.",
+            )
         return _run_sandboxed(
             command, operator, cwd, timeout, env, max_output_size,
             writable_paths=writable_paths, network=network,

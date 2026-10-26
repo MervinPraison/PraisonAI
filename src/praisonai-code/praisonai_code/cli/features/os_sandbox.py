@@ -154,6 +154,10 @@ def _build_bubblewrap(writable: Sequence[str], network: bool) -> Optional[Sandbo
         "--die-with-parent",
         "--ro-bind", "/", "/",
         "--dev", "/dev",
+        # Own PID namespace so the fresh /proc shows only the jail: otherwise
+        # /proc/<host pid>/environ and /proc/<pid>/root/... would expose the
+        # secrets that the env scrub and the --tmpfs masks below withhold.
+        "--unshare-pid",
         "--proc", "/proc",
     ]
     for p in writable:

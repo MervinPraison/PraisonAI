@@ -118,6 +118,47 @@ def test_secret_env_is_not_passed_into_the_jail(monkeypatch, tmp_path):
     assert seen["env"]["ALLOWED_TOKEN"] == "ok"
 
 
+def test_bubblewrap_isolates_host_processes(monkeypatch):
+    # Without a PID namespace /proc/<host pid>/environ leaks the scrubbed env.
+    monkeypatch.setattr(os_sandbox.shutil, "which", lambda _: "/usr/bin/bwrap")
+    argv = os_sandbox._build_bubblewrap(["/tmp"], network=False).argv_prefix
+    assert "--unshare-pid" in argv
+    assert argv.index("--unshare-pid") < argv.index("--proc")
+
+
+def test_sandboxed_refuses_run_in_background(recorded, tmp_path):
+    result = shell_exec.execute_command("sleep 60", cwd=str(tmp_path), run_in_background=True)
+    assert result["success"] is False
+    assert "run_in_background" in result["error"]
+    assert recorded == []
+
+
+def test_contained_command_stops_on_cancel(monkeypatch, tmp_path):
+    import threading
+    import time
+
+    class _W:
+        backend = "bubblewrap"
+
+        def wrap(self, argv):
+            return list(argv)
+
+        def cleanup(self):
+            pass
+
+    cancel = threading.Event()
+    monkeypatch.setattr(os_sandbox, "build_wrapper", lambda **kw: _W())
+    monkeypatch.setattr(shell_exec, "_cancel_event", lambda: cancel)
+    threading.Timer(0.3, cancel.set).start()
+    start = time.monotonic()
+    result = shell_exec._run_real_shell(
+        "sleep 20", str(tmp_path), 30, None, 1000, contained=True
+    )
+    assert time.monotonic() - start < 5
+    assert result["success"] is False
+    assert "interrupted" in result["error"]
+
+
 def test_acp_honours_sandboxed_mode(recorded, tmp_path, monkeypatch):
     from praisonai_code.cli.features import action_orchestrator as ao
     from praisonai_code.cli.features.agent_tools import _sanitize_command
