@@ -760,7 +760,7 @@ def _replay_step_begin(flow, step, name=None, pattern=None):
             "started": time.perf_counter()}
 
 
-def _replay_step_end(span, status, output=None):
+def _replay_step_end(span, status, output=None, variables=None):
     """Emit ``step_end`` for a span from :func:`_replay_step_begin`."""
     if span is None:
         return
@@ -772,6 +772,7 @@ def _replay_step_end(span, status, output=None):
         route=span.get("route"),
         node_id=span["node_id"],
         agent=span["agent"],
+        variables=variables,
     )
 
 
@@ -1720,6 +1721,7 @@ class AgentFlow:
 
     def _notify_step_complete(
         self, span: Optional[dict], step_name: str, step_result: Any, status: str, output: Any = None,
+        variables: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Call ``on_step_complete`` then emit replay ``step_end``."""
         if self.on_step_complete:
@@ -1727,7 +1729,7 @@ class AgentFlow:
                 self.on_step_complete(step_name, step_result)
             except Exception as e:
                 logger.error(f"on_step_complete callback failed: {e}")
-        _replay_step_end(span, status, output)
+        _replay_step_end(span, status, output, variables)
 
     def _replay_graph(self) -> Dict[str, Any]:
         """Graph for ``workflow_start``; also maps step objects to node ids."""
@@ -2039,6 +2041,7 @@ class AgentFlow:
                             output=previous_output or "",
                             stop_workflow=bool(_cached.get("stop")),
                         ), "cached", previous_output,
+                        variables=_cached.get("variables"),
                     )
                     if _cached.get("stop"):
                         if verbose:
@@ -2059,6 +2062,8 @@ class AgentFlow:
             validation_feedback = None
             guardrail_failed = False
             cached_variable_updates = {} if _cache_key is not None else None
+            # Variables this step set (StepResult.variables), for replay's step_end.
+            step_variable_updates: Dict[str, Any] = {}
             
             while retry_count <= max_retries:
                 step_error = None
@@ -2081,6 +2086,7 @@ class AgentFlow:
                                 # accepted attempt that wrote {a} leaves both
                                 # keys in the live run, so both must be cached.
                                 all_variables.update(result.variables)
+                                step_variable_updates.update(result.variables)
                                 if cached_variable_updates is not None:
                                     cached_variable_updates.update(result.variables)
                         else:
@@ -2337,6 +2343,7 @@ class AgentFlow:
             self._notify_step_complete(
                 _replay, step.name, step_result,
                 "failed" if step_failed else "completed", output,
+                variables=step_variable_updates,
             )
             
             # Handle output_file - save output to file

@@ -1294,8 +1294,14 @@ class ContextTraceEmitter:
         route: Optional[str] = None,
         node_id: Optional[str] = None,
         agent: Optional[str] = None,
+        variables: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """A flow step ends: ``completed``, ``failed``, ``skipped`` or ``cached``."""
+        """A flow step ends: ``completed``, ``failed``, ``skipped`` or ``cached``.
+
+        ``variables`` are the workflow variables the step itself set (a handler's
+        ``StepResult.variables``); recorded redacted so a re-run that reuses the
+        step can restore them.
+        """
         if not self._enabled:
             return
         data: Dict[str, Any] = {
@@ -1306,6 +1312,8 @@ class ContextTraceEmitter:
         }
         if route is not None:
             data["route"] = route
+        if variables:
+            data["variables"] = self._redact_dict(dict(variables))
         self._emit(ContextEvent(
             event_type=ContextEventType.STEP_END,
             timestamp=time.time(),

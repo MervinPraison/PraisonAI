@@ -411,3 +411,92 @@ def test_flow_rerun_rejects_reordered_flow(traces_dir, fx):
     with pytest.raises(RerunError, match="different order"):
         rerun(AgentFlow(steps=[draft, research, polish]), str(src), "step:draft", input="topic")
     assert ran == []
+
+
+def test_flow_rerun_rejects_step_inserted_before_target(traces_dir, fx):
+    """research -> extra -> draft: 'extra' never ran, so draft would get its output, not research's."""
+    from praisonaiagents import AgentFlow
+    from praisonaiagents.workflows import StepResult
+
+    from praisonai.replay.rerun import RerunError, rerun
+
+    ran = []
+
+    def research(ctx):
+        ran.append("research")
+        return StepResult(output="r")
+
+    def extra(ctx):
+        ran.append("extra")
+        return StepResult(output="e")
+
+    def draft(ctx):
+        ran.append("draft")
+        return StepResult(output="d")
+
+    def polish(ctx):
+        ran.append("polish")
+        return StepResult(output="p")
+
+    src = fx.write_trace(traces_dir, "run-flow01", fx.flow_events())
+    with pytest.raises(RerunError, match="did not run in the recording"):
+        rerun(AgentFlow(steps=[research, extra, draft, polish]), str(src), "step:draft", input="topic")
+    assert ran == []
+
+
+def test_flow_rerun_allows_a_recorded_skipped_step_before_target(traces_dir, fx):
+    """A step that ran but was skipped is part of the recording, not an insertion."""
+    from praisonaiagents import AgentFlow
+    from praisonaiagents.workflows import StepResult
+
+    from praisonai.replay.rerun import rerun
+
+    evs = fx.flow_events()
+    for ev in evs:
+        if ev["event_type"] == "step_end" and ev.get("node_id") == "step:research":
+            ev["data"]["status"] = "skipped"
+    src = fx.write_trace(traces_dir, "run-flow01", evs)
+
+    def research(ctx):
+        return StepResult(output="r")
+
+    def draft(ctx):
+        return StepResult(output="d")
+
+    def polish(ctx):
+        return StepResult(output="p")
+
+    rec, _ = rerun(AgentFlow(steps=[research, draft, polish]), str(src), "step:draft", input="topic")
+    assert rec.path.exists()
+
+
+def test_recorded_handler_variables_survive_a_rerun(traces_dir):
+    """End to end: core records StepResult.variables on step_end; rerun restores them."""
+    import json
+
+    from praisonaiagents import AgentFlow
+    from praisonaiagents.workflows import StepResult
+
+    from praisonai.replay import record
+    from praisonai.replay.rerun import rerun
+
+    def make(customer_id, seen, calls):
+        def research(ctx):
+            calls.append("research")
+            return StepResult(output="notes", variables={"customer_id": customer_id})
+
+        def draft(ctx):
+            seen.append(ctx.variables.get("customer_id"))
+            return StepResult(output="draft")
+
+        return AgentFlow(steps=[research, draft])
+
+    with record(full_content=True) as rec:
+        make(42, [], []).start("topic")
+    ends = [json.loads(line) for line in open(rec.path) if '"step_end"' in line]
+    assert any((e["data"].get("variables") or {}).get("customer_id") == 42 for e in ends)
+
+    seen, calls = [], []
+    rerun(make(0, seen, calls), rec.path, "step:draft", input="topic")
+    assert calls == []          # research reused from the recording
+    assert seen == [42]         # with the variable it set, not the fresh run's 0

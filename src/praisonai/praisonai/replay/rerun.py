@@ -66,6 +66,7 @@ class RerunPlan:
         kind: str,
         outputs: "OrderedDict[str, Any]",
         variables: Optional[Dict[str, Dict[str, Any]]] = None,
+        started_before: Optional[List[str]] = None,
     ):
         self.source_run_id = source_run_id
         self.node_id = node_id
@@ -73,6 +74,9 @@ class RerunPlan:
         self.outputs = outputs
         # Variable updates a step's handler made, when its step_end recorded them.
         self.variables = variables or {}
+        # Every node of the target's kind that STARTED before it, whatever its
+        # status (skipped and failed steps too): what the recorded run executed.
+        self.started_before = list(started_before or [])
 
     @property
     def forked_from(self) -> Dict[str, str]:
@@ -150,6 +154,10 @@ def plan_rerun(events: Union[str, List[Any]], node_id: str) -> RerunPlan:
 
     outputs: "OrderedDict[str, Any]" = OrderedDict()
     variables: Dict[str, Dict[str, Any]] = {}
+    started_before = [
+        s["start"]["node_id"] for s in nodes
+        if s["type"] == target["type"] and s["seq"] < target["seq"]
+    ]
     for span in nodes:
         if span["type"] != target["type"] or span["end"] is None:
             continue
@@ -165,7 +173,7 @@ def plan_rerun(events: Union[str, List[Any]], node_id: str) -> RerunPlan:
         recorded_vars = (span["end"].get("data") or {}).get("variables")
         if isinstance(recorded_vars, dict):
             variables[span["start"]["node_id"]] = recorded_vars
-    return RerunPlan(run_id_of(evs), node_id, kind, outputs, variables)
+    return RerunPlan(run_id_of(evs), node_id, kind, outputs, variables, started_before)
 
 
 # ---------------------------------------------------------------------------
@@ -268,22 +276,39 @@ def _flow_step_names(steps: Any) -> set:
     return names
 
 
-def _check_flow_order(steps: List[Any], recorded: List[str]) -> None:
+def _check_flow_order(steps: List[Any], recorded: List[str], started_before: Optional[List[str]] = None) -> None:
     """Reject a sequential flow whose top-level steps are not in the recorded order.
 
     Only checked when the flow runs strictly in sequence: ``next_steps`` /
     ``branch_condition`` jumps or a repeated node (``#2``) can revisit steps.
+    Also rejects a step inserted before the target that never ran in the
+    recording: it would run fresh and replace the reused output the target
+    expects as its input.
     """
     if any(getattr(s, "next_steps", None) or getattr(s, "branch_condition", None) for s in steps):
         return
     if any("#" in node_id for node_id in recorded):
         return
     position: Dict[str, int] = {}
+    names_at: List[List[str]] = []
     for index, step in enumerate(steps):
+        names: List[str] = []
         for attr in ("name", "__name__", "_yaml_step_name"):
             value = getattr(step, attr, None)
             if isinstance(value, str):
                 position.setdefault(value, index)
+                names.append(value)
+        names_at.append(names)
+    if started_before is not None and recorded:
+        ran = {_step_name(node_id) for node_id in started_before}
+        target_index = position.get(_step_name(recorded[-1]))
+        if target_index is not None:
+            for names in names_at[:target_index]:
+                if names and not any(name in ran for name in names):
+                    raise RerunError(
+                        f"Step {names[0]!r} comes before {recorded[-1]!r} in this flow but did "
+                        "not run in the recording; re-run against the flow that recorded it."
+                    )
     last = -1
     for node_id in recorded:  # nested steps have no top-level position: skipped
         index = position.get(_step_name(node_id))
@@ -307,7 +332,7 @@ def seed_flow(flow: Any, plan: RerunPlan) -> TraceStepCache:
     for node_id in recorded:
         if _step_name(node_id) not in names:
             raise RerunError(f"Recorded node {node_id!r} does not match any step in this flow.")
-    _check_flow_order(getattr(flow, "steps", None) or [], recorded)
+    _check_flow_order(getattr(flow, "steps", None) or [], recorded, plan.started_before)
 
     cache = TraceStepCache(plan.outputs, plan.variables).bind(flow)
     flow.cache = cache

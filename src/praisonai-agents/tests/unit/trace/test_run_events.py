@@ -821,3 +821,23 @@ class TestTeamRunLabel:
 
         team = AgentTeam(agents=[Agent(name="Researcher", output="silent")], name="EV brief")
         assert team._replay_name() == "EV brief"
+
+
+class TestStepVariables:
+    """step_end records the variables a step set, so a re-run can restore them."""
+
+    def test_step_end_records_handler_variables_redacted(self, recorder):
+        from praisonaiagents.workflows import StepResult
+        from praisonaiagents.workflows.workflows import AgentFlow
+
+        def research(ctx):
+            return StepResult(output="notes", variables={"customer_id": 42, "api_key": "sk-abcdefghijklmnop1234"})
+
+        def draft(ctx):
+            return StepResult(output="draft")
+
+        AgentFlow(name="v", steps=[research, draft]).run("go")
+        ends = {e.node_id: e.data for e in _of(recorder, "step_end")}
+        assert ends["step:research"]["variables"]["customer_id"] == 42
+        assert "sk-abcdefghijklmnop1234" not in str(ends["step:research"]["variables"])
+        assert "variables" not in ends["step:draft"]
