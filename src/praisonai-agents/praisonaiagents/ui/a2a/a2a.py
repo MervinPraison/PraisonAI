@@ -312,6 +312,9 @@ class A2A:
         
         # Update to working
         self.task_store.update_status(task.id, TaskState.WORKING)
+        # Keep the task while we wait on the agent: a cancel can make it
+        # terminal (and evictable) before we build the response.
+        self.task_store._pinned.add(task.id)
         
         try:
             # Extract user input text
@@ -340,6 +343,8 @@ class A2A:
         except Exception as e:
             logger.error(f"Agent error in message/send: {e}")
             updated_task = self.task_store.update_status(task.id, TaskState.FAILED)
+        finally:
+            self.task_store._pinned.discard(task.id)
         
         # Return JSON-RPC response
         return JSONResponse(content={

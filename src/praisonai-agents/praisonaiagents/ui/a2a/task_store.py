@@ -6,7 +6,7 @@ In-memory storage for A2A Task lifecycle management.
 
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from praisonaiagents.ui.a2a.types import (
     Task,
@@ -34,6 +34,8 @@ class TaskStore:
     def __init__(self):
         """Initialize empty task store."""
         self._tasks: Dict[str, Task] = {}
+        # Ids of tasks a request is still waiting on; never evicted.
+        self._pinned: Set[str] = set()
     
     def create_task(self, message: Message, context_id: Optional[str] = None) -> Task:
         """
@@ -75,7 +77,8 @@ class TaskStore:
             return
         old = [
             t.id for t in self._tasks.values()
-            if t.status.state in TERMINAL_STATES and t.id != keep
+            if t.status.state in TERMINAL_STATES
+            and t.id != keep and t.id not in self._pinned
         ]
         for tid in old[:excess]:
             del self._tasks[tid]
