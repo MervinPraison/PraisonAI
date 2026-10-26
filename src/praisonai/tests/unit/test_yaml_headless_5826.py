@@ -103,7 +103,10 @@ def test_yaml_cli_config_forwards_metrics_flags():
     assert "metrics" not in config and "metrics_json" not in config
 
 
-def test_output_file_and_metrics_json(mock_endpoint, tmp_path, capsys):
+def test_output_file_and_metrics_json(mock_endpoint, tmp_path, capsys, monkeypatch):
+    # Task output_file writes are contained in the project root (#5770); the
+    # files here live under tmp_path, so make that the root.
+    monkeypatch.setenv("PRAISONAI_PROJECT_ROOT", str(tmp_path))
     result = _run(_config(tmp_path), {"metrics_json": True, "trust": True})
 
     assert "FINAL TEXT" in result
