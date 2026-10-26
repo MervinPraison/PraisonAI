@@ -401,10 +401,12 @@ class AutonomyResult:
         return self.output or ""
 
 
-def _timeout_result(timeout_seconds, iterations, stage, actions, start_time, started_at):
-    """Return a ``timeout`` AutonomyResult once a run is past ``timeout_seconds``, else None."""
+def _timeout_result(timeout_seconds, iterations, stage, actions, start_time, started_at,
+                    turn_timed_out=False):
+    """Return a ``timeout`` AutonomyResult once a run is past ``timeout_seconds``
+    or the last turn was cut by ``max_execution_time`` (``turn_timed_out``), else None."""
     import time
-    if not timeout_seconds or (time.time() - start_time) <= timeout_seconds:
+    if not turn_timed_out and (not timeout_seconds or (time.time() - start_time) <= timeout_seconds):
         return None
     return AutonomyResult(
         success=False,

@@ -4837,9 +4837,13 @@ Summary:"""
                         response = self.chat(turn_prompt)
                 except Exception as e:
                     # The run deadline cancels an overrunning turn; report it as a timeout.
+                    # A budget stop keeps its typed budget_exhausted result when a cap applies.
                     return _timeout_result(
                         timeout_seconds, iterations, stage, actions_taken, start_time, started_at
-                    ) or AutonomyResult(
+                    ) or (isinstance(e, BudgetExceededError) and self._autonomy_budget_result(
+                        iterations, stage, actions_taken, start_time, started_at,
+                        "", spend_baseline
+                    )) or AutonomyResult(
                         success=False,
                         output=str(e),
                         completion_reason="error",
@@ -4851,9 +4855,11 @@ Summary:"""
                         started_at=started_at,
                     )
                 
-                # A turn that overran the run deadline must not count as progress.
+                # A turn that overran the run deadline or max_execution_time
+                # must not count as progress.
                 _timed_out = _timeout_result(
-                    timeout_seconds, iterations, stage, actions_taken, start_time, started_at)
+                    timeout_seconds, iterations, stage, actions_taken, start_time, started_at,
+                    turn_timed_out=getattr(self, "_last_stop_reason", None) == "timeout")
                 if _timed_out is not None:
                     return _timed_out
                 
@@ -5324,9 +5330,13 @@ Summary:"""
                         response = await self.achat(turn_prompt)
                 except Exception as e:
                     # The run deadline cancels an overrunning turn; report it as a timeout.
+                    # A budget stop keeps its typed budget_exhausted result when a cap applies.
                     return _timeout_result(
                         timeout_seconds, iterations, stage, actions_taken, start_time, started_at
-                    ) or AutonomyResult(
+                    ) or (isinstance(e, BudgetExceededError) and self._autonomy_budget_result(
+                        iterations, stage, actions_taken, start_time, started_at,
+                        "", spend_baseline
+                    )) or AutonomyResult(
                         success=False,
                         output=str(e),
                         completion_reason="error",
@@ -5338,9 +5348,11 @@ Summary:"""
                         started_at=started_at,
                     )
                 
-                # A turn that overran the run deadline must not count as progress.
+                # A turn that overran the run deadline or max_execution_time
+                # must not count as progress.
                 _timed_out = _timeout_result(
-                    timeout_seconds, iterations, stage, actions_taken, start_time, started_at)
+                    timeout_seconds, iterations, stage, actions_taken, start_time, started_at,
+                    turn_timed_out=getattr(self, "_last_stop_reason", None) == "timeout")
                 if _timed_out is not None:
                     return _timed_out
                 

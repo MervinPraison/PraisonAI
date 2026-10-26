@@ -2263,7 +2263,22 @@ Your Goal: {self.goal}"""
 
     @contextlib.contextmanager
     def _llm_usage_sink(self):
-        """Route every call the custom LLM makes in this block into ``_record_llm_usage``."""
+        """Route every call the custom LLM makes in this block into ``_record_llm_usage``.
+
+        Refuses to start when ``max_budget`` is already spent (``"stop"`` mode),
+        so retrying after ``BudgetExceededError`` sends no further paid request.
+        """
+        if self._max_budget and self._on_budget_exceeded == "stop":
+            with self._cost_lock:
+                current_cost = self._total_cost
+            if current_cost >= self._max_budget:
+                raise BudgetExceededError(
+                    f"Agent '{self.name}' exceeded budget: ${current_cost:.4f} >= ${self._max_budget:.4f}",
+                    budget_type="cost",
+                    limit=self._max_budget,
+                    used=current_cost,
+                    agent_id=self.name
+                )
         from ..llm.llm import _usage_sink
         token = _usage_sink.set((
             self.llm_instance,

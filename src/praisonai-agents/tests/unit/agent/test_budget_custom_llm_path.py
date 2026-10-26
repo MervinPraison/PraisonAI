@@ -130,3 +130,26 @@ def test_sink_ignores_other_llm_instances(calls):
     with agent._llm_usage_sink():
         other._track_token_usage(_text(MODEL), MODEL)
     assert agent.cost_summary["llm_calls"] == 0
+
+
+def test_retry_after_exhaustion_sends_no_request(calls):
+    agent = _agent(execution=ExecutionConfig(max_budget=0.001))
+    with pytest.raises(BudgetExceededError):
+        agent.chat("first")
+    sent = calls["n"]
+    with pytest.raises(BudgetExceededError):
+        agent.chat("retry")
+    with pytest.raises(BudgetExceededError):
+        asyncio.run(agent.achat("retry async"))
+    assert calls["n"] == sent
+
+
+def test_autonomy_budget_error_keeps_budget_exhausted(calls):
+    """A max_budget stop inside the turn still reports the autonomy cap result."""
+    agent = _agent(execution=ExecutionConfig(max_budget=0.001),
+                   autonomy={"max_budget_usd": 0.001})
+    result = agent.run_autonomous("go", max_iterations=3)
+    assert result.completion_reason == "budget_exhausted"
+    result = asyncio.run(_agent(execution=ExecutionConfig(max_budget=0.001),
+                                autonomy={"max_budget_usd": 0.001}).run_autonomous_async("go", max_iterations=3))
+    assert result.completion_reason == "budget_exhausted"

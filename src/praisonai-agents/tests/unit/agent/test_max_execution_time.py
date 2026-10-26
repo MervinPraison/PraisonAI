@@ -105,3 +105,14 @@ def test_run_autonomous_async_timeout_bounds_the_running_turn(calls):
     result = asyncio.run(agent.run_autonomous_async("go", max_iterations=1, timeout_seconds=1))
     assert time.time() - t0 < 3
     assert result.completion_reason == "timeout"
+
+
+def test_run_autonomous_reports_turn_max_execution_time(calls):
+    """A turn cut by max_execution_time is a failed timeout, not a goal."""
+    agent = _agent(autonomy=True, execution=ExecutionConfig(max_execution_time=1, max_iter=50))
+    result = agent.run_autonomous("go", max_iterations=3)
+    assert result.completion_reason == "timeout"
+    assert not result.success
+    result = asyncio.run(agent.run_autonomous_async("go", max_iterations=3))
+    assert result.completion_reason == "timeout"
+    assert not result.success
