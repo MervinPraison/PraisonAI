@@ -176,7 +176,7 @@ def explain_default_model(explicit: Optional[str] = None) -> Tuple[str, str]:
             if local:
                 return local.model, "local"
     except Exception:
-        return _fallback_model(), "fallback"
+        model = _fallback_model()
 
     provider = _provider_for_model(model)
     if provider and os.environ.get(provider):
