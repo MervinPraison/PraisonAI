@@ -114,6 +114,8 @@ class _Graph:
         # time to stamp node_id on step events.
         self.ids: Dict[int, str] = {}
         self._seen: Dict[str, int] = {}
+        # edge id -> distinct route labels, joined only for display.
+        self._labels: Dict[str, List[str]] = {}
 
     def unique(self, base: str) -> str:
         """``base`` the first time, then ``base#2``, ``base#3`` ..."""
@@ -159,12 +161,13 @@ class _Graph:
                 "kind": kind,
                 "label": label,
             }
+            self._labels[edge_id] = [label] if label else []
         elif label:
             # Two conditions to the same target share one edge; keep both labels.
-            existing = self.edges[edge_id]
-            labels = (existing["label"] or "").split(" / ") if existing["label"] else []
+            labels = self._labels[edge_id]
             if label not in labels:
-                existing["label"] = " / ".join(labels + [label])
+                labels.append(label)
+                self.edges[edge_id]["label"] = " / ".join(labels)
         if draw:
             self.ops.append(("edge", source, target, label))
 

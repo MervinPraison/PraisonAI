@@ -125,6 +125,21 @@ def test_team_graph_keeps_when_routes_and_shared_target_labels():
     assert edges["task:revise->task:publish:routes"]["label"] == "approved / forced"
 
 
+def test_shared_target_keeps_a_label_that_looks_like_a_merged_one():
+    from praisonaiagents import Agent, Task
+    from praisonaiagents.agents.agents import AgentTeam
+
+    a = Agent(name="A", instructions="a")
+    tasks = [
+        Task(name="revise", description="r", agent=a, is_start=True,
+             condition={"approved / forced": ["publish"], "approved": ["publish"]}),
+        Task(name="publish", description="p", agent=a),
+    ]
+    graph = to_graph(AgentTeam(agents=[a], tasks=tasks, process="workflow"))
+    edges = {e["id"]: e for e in graph["edges"]}
+    assert edges["task:revise->task:publish:routes"]["label"] == "approved / forced / approved"
+
+
 def test_repeat_with_a_step_list_draws_each_member():
     from praisonaiagents.workflows.workflows import AgentFlow, Repeat
 
