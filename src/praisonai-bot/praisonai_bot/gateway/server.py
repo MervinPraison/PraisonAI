@@ -1203,6 +1203,9 @@ class WebSocketGateway:
         self._reaped_connections = 0
         
         self._agents: Dict[str, "Agent"] = {}
+        # Issue #6004: downstream MCP servers from YAML ``mcp_servers:``, one
+        # shared ``MCP`` client per (name, spec) reused across agents/reloads.
+        self._mcp_pool: Dict[str, Any] = {}
         self._sessions: Dict[str, GatewaySession] = {}
         self._clients: Dict[str, Any] = {}  # WebSocket connections
         self._client_conns: Dict[str, _ClientConn] = {}  # client_id -> bounded outbound conn
@@ -3842,6 +3845,14 @@ class WebSocketGateway:
                 self._lifecycle_ledger.mark_exited()
             except Exception:
                 logger.debug("Failed to mark clean exit in lifecycle ledger")
+
+        # Issue #6004: close pooled downstream MCP clients.
+        for mcp_client in self._mcp_pool.values():
+            try:
+                mcp_client.shutdown()
+            except Exception:
+                logger.debug("Failed to shut down pooled MCP client")
+        self._mcp_pool.clear()
 
         # Release PID lock
         if hasattr(self, '_pid_lock') and self._pid_lock:
@@ -8242,6 +8253,41 @@ class WebSocketGateway:
             self._agents[route_id] = room
             logger.info(f"Room registered: {route_id} roster={room.config.roster}")
 
+    def _get_pooled_mcp(self, name: str, spec: Any) -> Any:
+        """Return the shared ``MCP`` client for a ``mcp_servers`` entry.
+
+        One client per (name, spec) is opened and reused by every agent that
+        lists it — and across hot reloads while the spec is unchanged — so N
+        agents do not open N connections. The core ``MCP`` client already
+        restarts a dead stdio server on the next call. Returns ``None`` (with a
+        warning) when the server cannot be started (Issue #6004).
+        """
+        import json
+
+        if isinstance(spec, str):
+            spec = {"command": spec}
+        if not isinstance(spec, dict):
+            logger.warning("mcp_servers.%s must be a mapping or string; skipping", name)
+            return None
+        key = f"{name}:{json.dumps(spec, sort_keys=True, default=str)}"
+        client = self._mcp_pool.get(key)
+        if client is not None:
+            return client
+        opts = dict(spec)
+        target = opts.pop("url", None) or opts.pop("command", None)
+        if not target:
+            logger.warning("mcp_servers.%s needs a 'command' or 'url'; skipping", name)
+            return None
+        try:
+            from praisonaiagents import MCP
+
+            client = MCP(target, **opts)
+        except Exception as exc:
+            logger.warning("Failed to start MCP server '%s': %s", name, exc)
+            return None
+        self._mcp_pool[key] = client
+        return client
+
     def _create_agents_from_config(
         self,
         agents_cfg: Dict[str, Dict[str, Any]],
@@ -8249,6 +8295,7 @@ class WebSocketGateway:
         default_model: Optional[str] = None,
         guardrails_cfg: Optional[Dict[str, Any]] = None,
         durable_runs: bool = False,
+        mcp_servers_cfg: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Create and register Agent instances from the agents section of config.
 
@@ -8280,6 +8327,9 @@ class WebSocketGateway:
                           store) the execution hot path is unchanged (zero-overhead).
                           Per-agent ``durable`` in YAML overrides this gateway-wide
                           default.
+            mcp_servers_cfg: Optional top-level ``mcp_servers`` dict. An agent
+                          ``tools:`` entry naming a server gets that server's
+                          shared, pooled ``MCP`` client (Issue #6004).
         """
         from praisonaiagents import Agent
 
@@ -8333,12 +8383,17 @@ class WebSocketGateway:
             
             agent_tools = []
             yaml_tool_names = agent_def.get("tools", [])
-            if yaml_tool_names and tool_resolver:
+            if yaml_tool_names and (tool_resolver or mcp_servers_cfg):
                 for tool_name in yaml_tool_names:
                     if not tool_name or not isinstance(tool_name, str):
                         continue
                     tool_name = tool_name.strip()
-                    resolved = tool_resolver.resolve(tool_name)
+                    if mcp_servers_cfg and tool_name in mcp_servers_cfg:
+                        mcp_client = self._get_pooled_mcp(tool_name, mcp_servers_cfg[tool_name])
+                        if mcp_client is not None:
+                            agent_tools.append(mcp_client)
+                        continue
+                    resolved = tool_resolver.resolve(tool_name) if tool_resolver else None
                     if resolved:
                         agent_tools.append(resolved)
                         logger.debug(f"Resolved tool '{tool_name}' for agent '{agent_id}'")
@@ -10600,6 +10655,7 @@ class WebSocketGateway:
                 default_model=default_model,
                 guardrails_cfg=guardrails_cfg,
                 durable_runs=durable_runs,
+                mcp_servers_cfg=new_cfg.get("mcp_servers"),
             )
             self._register_rooms_from_config(new_cfg.get("rooms"))
             candidate = {
@@ -10672,6 +10728,7 @@ class WebSocketGateway:
                     default_model=default_model,
                     guardrails_cfg=guardrails_cfg,
                     durable_runs=durable_runs,
+                    mcp_servers_cfg=prev_cfg.get("mcp_servers"),
                 )
                 self._register_rooms_from_config(prev_cfg.get("rooms"))
             prev_channels_cfg = prev_cfg.get("channels", {})
@@ -10734,6 +10791,7 @@ class WebSocketGateway:
                         default_model=default_model,
                         guardrails_cfg=guardrails_cfg,
                         durable_runs=durable_runs,
+                        mcp_servers_cfg=new_cfg.get("mcp_servers"),
                     )
                     self._register_rooms_from_config(new_cfg.get("rooms"))
 
@@ -10853,6 +10911,7 @@ class WebSocketGateway:
                         default_model=default_model,
                         guardrails_cfg=guardrails_cfg,
                         durable_runs=durable_runs,
+                        mcp_servers_cfg=new_cfg.get("mcp_servers"),
                     )
                     self._register_rooms_from_config(new_cfg.get("rooms"))
                 logger.info("Agents reloaded")
@@ -11553,6 +11612,7 @@ class WebSocketGateway:
                 default_model=default_model,
                 guardrails_cfg=guardrails_cfg,
                 durable_runs=durable_runs,
+                mcp_servers_cfg=cfg.get("mcp_servers"),
             )
         self._register_rooms_from_config(cfg.get("rooms"))
 
