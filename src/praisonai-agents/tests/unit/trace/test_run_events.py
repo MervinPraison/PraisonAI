@@ -889,3 +889,23 @@ class TestStepVariables:
         ends = {e.node_id: e.data for e in _of(recorder, "step_end")}
         variables = next(d.get("variables") for n, d in ends.items() if n.endswith("add"))
         assert variables == {"items": ["a", "b"]}
+
+    def test_uncopyable_variable_does_not_hide_an_in_place_change(self, recorder):
+        """One variable that cannot be deep-copied must not stop the others being compared by value."""
+        import threading
+        from praisonaiagents.workflows import StepResult
+        from praisonaiagents.workflows.workflows import AgentFlow, If
+
+        def seed(ctx):
+            return StepResult(output="s", variables={"items": ["a"]})
+
+        def add(ctx):
+            ctx.variables["items"].append("b")
+            return StepResult(output="m")
+
+        flow = AgentFlow(name="v", steps=[seed, If(condition="1 > 0", then_steps=[add])],
+                         variables={"lock": threading.Lock()})
+        flow.run("go")
+        ends = {e.node_id: e.data for e in _of(recorder, "step_end")}
+        variables = next(d.get("variables") for n, d in ends.items() if n.endswith("add"))
+        assert variables == {"items": ["a", "b"]}

@@ -3134,12 +3134,10 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 step, previous_output, input, all_variables, model, verbose, index,
                 stream=stream, depth=depth,
             )
-        # A deep copy (recording only), so a list or dict the step changed in
-        # place still counts as set by it; fall back to identity if uncopyable.
-        try:
-            before, by_value = copy.deepcopy(all_variables), True
-        except Exception:
-            before, by_value = dict(all_variables), False
+        # A per-value deep copy (recording only), so a list or dict the step
+        # changed in place still counts as set by it; only an uncopyable value
+        # is shared by reference.
+        before = _isolate_scope(all_variables)
         try:
             result = self._execute_leaf_step(
                 step, previous_output, input, all_variables, model, verbose, index,
@@ -3158,7 +3156,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         if is_dict:
             step_vars = {
                 k: v for k, v in (result.get("variables") or {}).items()
-                if k not in before or (_differs(before[k], v) if by_value else before[k] is not v)
+                if k not in before or _differs(before[k], v)
             }
             step_vars.pop(getattr(step, "output_variable", None) or f"{result.get('step')}_output", None)
         _replay_step_end(span, status, result.get("output") if is_dict else None, step_vars)
