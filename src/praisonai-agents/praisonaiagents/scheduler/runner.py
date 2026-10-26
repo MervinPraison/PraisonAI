@@ -119,10 +119,15 @@ class ScheduleRunner:
                 job_name=job.name,
             )
 
-        if job.should_retire(job.last_run_at):
-            self._store.remove(job.id)
-        else:
-            self._store.update(job)
+        # The run already happened (its claim was persisted), so a failed write
+        # here is reported, not raised: one bad write must not stop the loop.
+        try:
+            if job.should_retire(job.last_run_at):
+                self._store.remove(job.id)
+            else:
+                self._store.update(job)
+        except OSError as e:
+            logger.error("Failed to persist run state for job %r: %s", job.id, e)
 
     # ── job-to-job context chaining ───────────────────────────────────
 
