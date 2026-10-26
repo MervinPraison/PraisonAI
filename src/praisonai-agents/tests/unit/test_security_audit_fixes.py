@@ -33,6 +33,54 @@ def test_web_crawl_rejects_redirect_to_loopback():
     assert _is_safe_crawl_url("http://example.com/") is True
 
 
+def test_web_crawl_urllib_fallback_does_not_follow_redirect_to_internal(monkeypatch):
+    import http.server
+    import sys
+    import threading
+
+    from praisonaiagents.tools import web_crawl_tools as w
+
+    monkeypatch.setitem(sys.modules, "httpx", None)  # force the urllib fallback
+    hits = []
+
+    class Internal(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            hits.append(self.path)
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"<html>internal-metadata</html>")
+
+        def log_message(self, *a):
+            pass
+
+    internal = http.server.HTTPServer(("127.0.0.1", 0), Internal)
+
+    class Redir(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{internal.server_port}/meta")
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    redir = http.server.HTTPServer(("127.0.0.1", 0), Redir)
+    for server in (internal, redir):
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+    start = f"http://127.0.0.1:{redir.server_port}/"
+    real = w._is_safe_crawl_url
+    monkeypatch.setattr(w, "_is_safe_crawl_url", lambda u: u == start or real(u))
+    try:
+        result = w._crawl_with_httpx([start])
+    finally:
+        internal.shutdown()
+        redir.shutdown()
+
+    assert hits == []
+    assert "internal-metadata" not in result[0]["content"]
+    assert "SSRF" in result[0]["error"]
+
+
 def test_searxng_may_use_loopback_but_the_crawler_may_not():
     """One predicate, two callers, opposite requirements. Pin both."""
     from praisonaiagents.tools.url_safety import validate_searxng_url
