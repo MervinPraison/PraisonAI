@@ -122,10 +122,9 @@ def calculate_llm_cost(
                     # Fallback to building dict from tokens
                     cost = completion_cost(
                         completion_response={
-                            'usage': {
-                                'prompt_tokens': prompt_tokens,
-                                'completion_tokens': completion_tokens,
-                            },
+                            'usage': _litellm_usage(
+                                prompt_tokens, completion_tokens, cached_tokens, cache_write_tokens
+                            ),
                             'model': model or 'gpt-4o-mini',
                         },
                         model=model,
@@ -134,10 +133,9 @@ def calculate_llm_cost(
                 # Build dict from tokens
                 cost = completion_cost(
                     completion_response={
-                        'usage': {
-                            'prompt_tokens': prompt_tokens,
-                            'completion_tokens': completion_tokens,
-                        },
+                        'usage': _litellm_usage(
+                            prompt_tokens, completion_tokens, cached_tokens, cache_write_tokens
+                        ),
                         'model': model or 'gpt-4o-mini',
                     },
                     model=model,
@@ -152,6 +150,22 @@ def calculate_llm_cost(
     return _calculate_fallback_cost(
         prompt_tokens, completion_tokens, model, cached_tokens, cache_write_tokens
     )
+
+
+def _litellm_usage(
+    prompt_tokens: int,
+    completion_tokens: int,
+    cached_tokens: Optional[int],
+    cache_write_tokens: Optional[int],
+) -> Dict[str, Any]:
+    """Build a usage dict for litellm, carrying prompt-cache counts."""
+    return {
+        'prompt_tokens': prompt_tokens,
+        'completion_tokens': completion_tokens,
+        'prompt_tokens_details': {'cached_tokens': _usage_int(cached_tokens)},
+        'cache_read_input_tokens': _usage_int(cached_tokens),
+        'cache_creation_input_tokens': _usage_int(cache_write_tokens),
+    }
 
 
 def _get(obj: Any, name: str) -> Any:

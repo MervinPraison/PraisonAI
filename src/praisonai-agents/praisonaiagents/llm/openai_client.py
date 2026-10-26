@@ -193,6 +193,7 @@ class CompletionUsage:
     prompt_tokens_details: Optional[PromptTokensDetails] = None
     prompt_cache_hit_tokens: int = 0
     prompt_cache_miss_tokens: int = 0
+    cost: Optional[float] = None
 
 @dataclass
 class ChatCompletion:
@@ -250,6 +251,8 @@ def process_stream_chunks(chunks):
         # Track usage
         completion_tokens = 0
         prompt_tokens = 0
+        cached_tokens = 0
+        reported_cost = None
         
         content_list = []
         reasoning_list = []
@@ -266,6 +269,11 @@ def process_stream_chunks(chunks):
             if chunk_usage:
                 completion_tokens = getattr(chunk_usage, "completion_tokens", 0) or completion_tokens
                 prompt_tokens = getattr(chunk_usage, "prompt_tokens", 0) or prompt_tokens
+                details = getattr(chunk_usage, "prompt_tokens_details", None)
+                cached_tokens = getattr(details, "cached_tokens", 0) or cached_tokens
+                chunk_cost = getattr(chunk_usage, "cost", None)
+                if isinstance(chunk_cost, (int, float)):
+                    reported_cost = chunk_cost
 
             if not hasattr(chunk, "choices") or not chunk.choices:
                 continue
@@ -343,7 +351,8 @@ def process_stream_chunks(chunks):
             prompt_tokens=prompt_tokens,
             total_tokens=completion_tokens + prompt_tokens,
             completion_tokens_details=CompletionTokensDetails(),
-            prompt_tokens_details=PromptTokensDetails()
+            prompt_tokens_details=PromptTokensDetails(cached_tokens=cached_tokens),
+            cost=reported_cost,
         )
         
         return ChatCompletion(

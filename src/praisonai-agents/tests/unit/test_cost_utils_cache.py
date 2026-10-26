@@ -78,3 +78,36 @@ def test_agent_accounting_uses_cached_tokens():
     )
     response = SimpleNamespace(usage=usage)
     assert agent._calculate_llm_cost(1_000_000, 0, response=response) == pytest.approx(1.25)
+
+
+def test_litellm_usage_carries_cache_counts():
+    from praisonaiagents.utils.cost_utils import _litellm_usage
+
+    usage = _litellm_usage(1_000, 10, 800, 100)
+    assert usage["prompt_tokens_details"]["cached_tokens"] == 800
+    assert usage["cache_read_input_tokens"] == 800
+    assert usage["cache_creation_input_tokens"] == 100
+
+
+def test_streamed_response_keeps_cache_and_reported_cost():
+    from praisonaiagents.llm.openai_client import process_stream_chunks
+
+    delta = SimpleNamespace(content="hi", tool_calls=None)
+    content = SimpleNamespace(
+        id="c", created=0, model="gpt-4o", system_fingerprint=None, usage=None,
+        choices=[SimpleNamespace(delta=delta, finish_reason="stop")],
+    )
+    usage_chunk = SimpleNamespace(
+        id="c", created=0, model="gpt-4o", system_fingerprint=None, choices=[],
+        usage=SimpleNamespace(
+            prompt_tokens=1_000_000, completion_tokens=0,
+            prompt_tokens_details=SimpleNamespace(cached_tokens=1_000_000),
+        ),
+    )
+    combined = process_stream_chunks([content, usage_chunk])
+    assert combined.usage.prompt_tokens_details.cached_tokens == 1_000_000
+    assert calculate_llm_cost(1_000_000, 0, "gpt-4o", response=combined) == pytest.approx(1.25)
+
+    usage_chunk.usage.cost = 0.02
+    combined = process_stream_chunks([content, usage_chunk])
+    assert calculate_llm_cost(1_000_000, 0, "gpt-4o", response=combined) == pytest.approx(0.02)
