@@ -8,6 +8,7 @@ LAZY IMPORT: sqlite3 is only imported when this adapter is instantiated.
 """
 
 import os
+import re
 import sqlite3
 import json
 from praisonaiagents._logging import get_logger
@@ -21,6 +22,39 @@ from datetime import datetime
 from ..protocols import MemoryProtocol
 
 logger = get_logger(__name__)
+
+
+_SEARCH_STOP_WORDS = frozenset({
+    "a", "an", "and", "are", "as", "at", "be", "by", "can", "do", "does", "for",
+    "from", "has", "have", "how", "i", "in", "is", "it", "me", "my", "of", "on",
+    "or", "the", "to", "was", "were", "what", "when", "where", "which", "who",
+    "why", "with", "you", "your",
+})
+
+
+def _execute_search(conn, table, query, limit, user_id=None):
+    """Match the whole query or any significant word, best matches first.
+
+    A plain ``LIKE '%query%'`` misses natural-language queries such as
+    "Which mode does the user prefer?", so rows are also matched per word and
+    ranked by exact-phrase hit, then number of matched words, then recency.
+    """
+    terms = list(dict.fromkeys(
+        w for w in re.findall(r"\w+", (query or "").lower())
+        if w not in _SEARCH_STOP_WORDS
+    ))[:32]  # keep well under SQLite's bound-parameter limit
+    patterns = [f"%{query}%"] + [f"%{t}%" for t in terms]
+    match = " OR ".join(["content LIKE ?"] * len(patterns))
+    # An empty score would leave ``ORDER BY 0``, which SQLite reads as a column index
+    score = " + ".join(["(content LIKE ?)"] * len(terms)) + " DESC, " if terms else ""
+    user_filter = " AND memory_user_id(metadata) = ?" if user_id is not None else ""
+    params = patterns + ([str(user_id)] if user_id is not None else []) + patterns + [limit]
+    return conn.execute(
+        f"SELECT id, content, metadata, timestamp FROM {table} "
+        f"WHERE ({match}){user_filter} "
+        f"ORDER BY (content LIKE ?) DESC, {score}timestamp DESC LIMIT ?",
+        params,
+    )
 
 
 def _metadata_user_id(raw):
@@ -206,14 +240,7 @@ class SqliteMemoryAdapter:
         """Search short-term memory."""
         with self._write_lock if self.short_db == ":memory:" else nullcontext():
             conn = self._get_stm_conn()
-            user_id = kwargs.get("user_id")
-            user_filter = " AND memory_user_id(metadata) = ?" if user_id is not None else ""
-            params = (f"%{query}%", str(user_id), limit) if user_id is not None else (f"%{query}%", limit)
-            cursor = conn.execute(
-                "SELECT id, content, metadata, timestamp FROM short_term_memory "
-                "WHERE content LIKE ?" + user_filter + " ORDER BY timestamp DESC LIMIT ?",
-                params
-            )
+            cursor = _execute_search(conn, "short_term_memory", query, limit, kwargs.get("user_id"))
         
             results = []
             for row in cursor.fetchall():
@@ -250,14 +277,7 @@ class SqliteMemoryAdapter:
         """Search long-term memory."""
         with self._write_lock if self.long_db == ":memory:" else nullcontext():
             conn = self._get_ltm_conn()
-            user_id = kwargs.get("user_id")
-            user_filter = " AND memory_user_id(metadata) = ?" if user_id is not None else ""
-            params = (f"%{query}%", str(user_id), limit) if user_id is not None else (f"%{query}%", limit)
-            cursor = conn.execute(
-                "SELECT id, content, metadata, timestamp FROM long_term_memory "
-                "WHERE content LIKE ?" + user_filter + " ORDER BY timestamp DESC LIMIT ?",
-                params
-            )
+            cursor = _execute_search(conn, "long_term_memory", query, limit, kwargs.get("user_id"))
         
             results = []
             for row in cursor.fetchall():

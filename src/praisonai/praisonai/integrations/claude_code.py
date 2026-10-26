@@ -29,11 +29,13 @@ Usage:
 
 import inspect
 import json
+import logging
 import os
 from typing import AsyncIterator, Dict, Any, Optional, List
 
 from .base import BaseCLIIntegration
 
+logger = logging.getLogger(__name__)
 
 # Check if Claude Code SDK is available
 CLAUDE_SDK_AVAILABLE = False
@@ -96,6 +98,11 @@ class ClaudeCodeIntegration(BaseCLIIntegration):
         self.system_prompt = system_prompt
         self.allowed_tools = allowed_tools
         self.disallowed_tools = disallowed_tools
+        if use_sdk and not CLAUDE_SDK_AVAILABLE:
+            logger.warning(
+                "use_sdk=True but claude-agent-sdk is not installed; falling back to "
+                "the 'claude' CLI subprocess. Install with: pip install claude-agent-sdk"
+            )
         self.use_sdk = use_sdk and CLAUDE_SDK_AVAILABLE
         self.model = model
         

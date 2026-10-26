@@ -864,8 +864,10 @@ class DeliveryRouter:
                 # to return a truthy message object on success, ``None``/void on
                 # success for lightweight adapters, and to *raise* on failure —
                 # so ``None`` must NOT be treated as a failure or those succeed
-                # paths would regress.
-                if result is False:
+                # paths would regress. A ``SendResult`` whose ``status`` is
+                # ``"failed"`` (e.g. retries exhausted in ``deliver()``) is the
+                # structured form of the same signal.
+                if result is False or getattr(result, "status", None) == "failed":
                     raise DeliveryNotAccepted(
                         f"{platform} adapter reported no delivery "
                         f"(send_message returned {result!r})"

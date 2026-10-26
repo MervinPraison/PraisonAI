@@ -803,6 +803,9 @@ class Knowledge:
         same path as local files. Failures are surfaced to the caller so a
         single bad URL in a batch is visible, matching local-file behaviour.
         """
+        from ..tools.url_safety import is_safe_http_url
+        if not is_safe_http_url(url):
+            raise ValueError(f"Refusing to fetch unsafe URL: {url}")
         result = self.markdown.convert(url)
         content = getattr(result, 'text_content', None)
         if not content:

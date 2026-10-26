@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 _WEBHOOK_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "0.0.0.0", "::1"})
 
 
-def _resolve_and_screen_webhook_host(url: str) -> List[str]:
+def _resolve_and_screen_webhook_host(url: str, label: str = "Webhook URL") -> List[str]:
     """Resolve a webhook URL's hostname and reject unsafe addresses.
 
     Returns the list of validated (public) IP strings the hostname maps to so
@@ -28,14 +28,14 @@ def _resolve_and_screen_webhook_host(url: str) -> List[str]:
     """
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
-        raise ValueError("Webhook URL must use http or https scheme")
+        raise ValueError(f"{label} must use http or https scheme")
 
     hostname = parsed.hostname
     if not hostname:
-        raise ValueError("Invalid webhook URL")
+        raise ValueError(f"Invalid {label}")
 
     if hostname.lower() in _WEBHOOK_LOCAL_HOSTS:
-        raise ValueError("Webhook URL cannot be a localhost address")
+        raise ValueError(f"{label} cannot be a localhost address")
 
     try:
         infos = socket.getaddrinfo(
@@ -44,7 +44,7 @@ def _resolve_and_screen_webhook_host(url: str) -> List[str]:
             proto=socket.IPPROTO_TCP,
         )
     except socket.gaierror as exc:
-        raise ValueError("Webhook URL hostname could not be resolved") from exc
+        raise ValueError(f"{label} hostname could not be resolved") from exc
 
     resolved: List[str] = []
     for _family, _type, _proto, _canon, sockaddr in infos:
@@ -59,12 +59,12 @@ def _resolve_and_screen_webhook_host(url: str) -> List[str]:
             or ip_obj.is_unspecified
         ):
             raise ValueError(
-                "Webhook URL resolves to a private or restricted network address"
+                f"{label} resolves to a private or restricted network address"
             )
         resolved.append(ip_str)
 
     if not resolved:
-        raise ValueError("Webhook URL hostname could not be resolved")
+        raise ValueError(f"{label} hostname could not be resolved")
 
     return resolved
 

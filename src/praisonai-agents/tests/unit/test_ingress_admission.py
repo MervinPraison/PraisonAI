@@ -302,3 +302,11 @@ def test_expand_access_groups_cycle_rejected():
 
     with pytest.raises(ValueError, match="cycle"):
         expand_access_groups(["group:a"], {"a": ["group:b"], "b": ["group:a"]})
+
+
+def test_unknown_group_policy_fails_closed_to_mention_only():
+    """Issue #5962: an unrecognised policy is mention-gated, not respond_all."""
+    from praisonaiagents.bots.admission import resolve_ingress_admission
+
+    d = resolve_ingress_admission(chat_type="group", sender_id="u", group_policy="bogus")
+    assert d.admit is False and d.reason_code == "group_mention_only"

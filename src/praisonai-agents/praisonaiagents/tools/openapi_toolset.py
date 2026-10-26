@@ -331,8 +331,15 @@ class OpenAPIOperation:
             # Returned, not raised, for the same reason as the transport errors
             # below: a raising tool ends the turn.
             return f"{self.name} failed: {exc}"
+        from .url_safety import is_safe_http_url
+        if not is_safe_http_url(request["url"]):
+            # The host comes from an untrusted spec's `servers:` entry; keep it
+            # off loopback/private/metadata addresses (ALLOW_LOCAL_CRAWL=true
+            # opts out for local development).
+            return (f"{self.name} failed: refusing unsafe URL "
+                    f"{request['url']!r}")
         try:
-            with httpx.Client(timeout=self.timeout) as client:
+            with httpx.Client(timeout=self.timeout, follow_redirects=False) as client:
                 response = client.request(**request)
                 response.raise_for_status()
                 try:
@@ -391,7 +398,11 @@ class OpenAPIToolset:
             text = spec_str
         else:
             import httpx
-            with httpx.Client(timeout=30) as client:
+            from .url_safety import is_safe_http_url
+            if not is_safe_http_url(spec_url):
+                raise ValueError(
+                    f"OpenAPIToolset refuses unsafe spec_url {spec_url!r}")
+            with httpx.Client(timeout=30, follow_redirects=False) as client:
                 response = client.get(spec_url)
                 response.raise_for_status()
                 text = response.text

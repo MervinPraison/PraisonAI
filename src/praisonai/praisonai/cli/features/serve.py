@@ -645,11 +645,17 @@ Launch PraisonAI servers with unified discovery support.
             "host": {"default": self.DEFAULT_HOST},
             "port": {"default": 8082, "type": "int"},
             "file": {"default": "agents.yaml"},
+            "api_key": {"default": None},
         }
         parsed = self._parse_args(args, spec)
-        
+
+        if not os.path.exists(parsed["file"]):
+            self._print_error(f"Agents file not found: {parsed['file']}")
+            return self.EXIT_VALIDATION_ERROR
+
         try:
             self._print_success(f"Starting A2A server on {parsed['host']}:{parsed['port']}")
+            print(f"  Agents file: {parsed['file']}")
             print("  Agent Card: /.well-known/agent.json")
             print("  Discovery: /__praisonai__/discovery")
             
@@ -664,18 +670,100 @@ Launch PraisonAI servers with unified discovery support.
             return self.EXIT_GENERAL_ERROR
         
         return self.EXIT_SUCCESS
-    
+
+    @staticmethod
+    def _yaml_query_runner(agents_file: str) -> Any:
+        """Return ``async run(query) -> str`` executing the agents YAML workflow."""
+        import yaml
+        with open(agents_file) as f:
+            yaml_framework = (yaml.safe_load(f) or {}).get("framework")
+
+        async def run(query: str) -> str:
+            import praisonai
+            result = await praisonai.arun(
+                agent_file=agents_file,
+                framework=yaml_framework,
+                cli_config={"topic": query} if query else None,
+            )
+            return str(result)
+
+        return run
+
+    @staticmethod
+    def _add_a2a_route(app: Any, run_query: Any) -> None:
+        """Mount ``POST /a2a`` (JSON-RPC ``message/send``) backed by ``run_query``."""
+        @app.post("/a2a")
+        async def a2a_endpoint(request_data: dict):
+            """Handle A2A JSON-RPC requests."""
+            method = request_data.get("method")
+            params = request_data.get("params", {})
+            request_id = request_data.get("id")
+
+            if method != "message/send":
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {"code": -32601, "message": f"Method not found: {method}"},
+                }
+
+            message = params.get("message") if isinstance(params, dict) else None
+            parts = message.get("parts") if isinstance(message, dict) else None
+            text = "".join(
+                p["text"] for p in (parts if isinstance(parts, list) else [])
+                if isinstance(p, dict) and p.get("type") == "text" and isinstance(p.get("text"), str)
+            )
+            if not text:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {"code": -32602, "message": "message/send requires a text part"},
+                }
+            try:
+                reply = await run_query(text)
+            except Exception as e:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {"code": -32603, "message": f"Agent execution failed: {e}"},
+                }
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "message": {
+                        "role": "assistant",
+                        "parts": [{"type": "text", "text": reply}],
+                    },
+                },
+            }
+
+    @staticmethod
+    def _resolve_api_key(config: Dict[str, Any], command: str) -> Optional[str]:
+        """Require an API key for non-localhost binds of agent-driving servers."""
+        api_key = config.get("api_key") or os.environ.get("PRAISONAI_SERVE_API_KEY")
+        if config.get("host", ServeHandler.DEFAULT_HOST) not in _LOCALHOST_HOSTS and not api_key:
+            raise SystemExit(
+                f"praisonai serve {command}: --api-key (or PRAISONAI_SERVE_API_KEY) is "
+                "required when binding to a non-localhost host; it exposes "
+                "tool-driving routes."
+            )
+        return api_key
+
     def _create_a2a_app(self, config: Dict[str, Any]) -> Any:
         """Create FastAPI app for A2A server."""
         from fastapi import FastAPI
-        
+
         from praisonai.endpoints.discovery import (
             create_discovery_document,
             EndpointInfo,
             ProviderInfo,
         )
         from praisonai.endpoints.server import add_discovery_routes
-        
+
+        # POST /a2a runs the YAML workflow (and its tools); gate non-localhost.
+        api_key = self._resolve_api_key(config, "a2a")
+        run_query = self._yaml_query_runner(config["file"])
+
         discovery = create_discovery_document(server_name="praisonai-a2a")
         discovery.add_provider(ProviderInfo(
             type="a2a",
@@ -711,41 +799,9 @@ Launch PraisonAI servers with unified discovery support.
         async def status():
             """Return server status."""
             return {"status": "ok", "name": "PraisonAI A2A", "version": "1.0.0"}
-        
-        @app.post("/a2a")
-        async def a2a_endpoint(request_data: dict):
-            """Handle A2A JSON-RPC requests."""
-            method = request_data.get("method")
-            params = request_data.get("params", {})
-            request_id = request_data.get("id")
-            
-            if method == "message/send":
-                # Handle message
-                message = params.get("message", {})
-                parts = message.get("parts", [])
-                text = ""
-                for part in parts:
-                    if part.get("type") == "text":
-                        text += part.get("text", "")
-                
-                # TODO: Process with agent
-                return {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": {
-                        "message": {
-                            "role": "assistant",
-                            "parts": [{"type": "text", "text": f"Received: {text}"}],
-                        },
-                    },
-                }
-            
-            return {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "error": {"code": -32601, "message": f"Method not found: {method}"},
-            }
-        
+
+        self._add_a2a_route(app, run_query)
+
         discovery.add_endpoint(EndpointInfo(
             name="a2a",
             description="A2A protocol endpoint",
@@ -760,7 +816,11 @@ Launch PraisonAI servers with unified discovery support.
                 "agent_card": "/.well-known/agent.json",
                 "discovery": "/__praisonai__/discovery",
             }
-        
+
+        _install_api_key_middleware(
+            app, api_key, {"/", "/status", "/.well-known/agent.json"}
+        )
+
         return app
     
     def cmd_a2u(self, args: List[str]) -> int:
@@ -892,19 +952,11 @@ Launch PraisonAI servers with unified discovery support.
 
         # Security: the unified server mounts tool-driving routes; refuse to bind
         # a non-localhost host without an API key, mirroring cmd_agents.
-        host = parsed.get("host", self.DEFAULT_HOST)
-        api_key = parsed.get("api_key") or os.environ.get("PRAISONAI_SERVE_API_KEY")
-        if host not in _LOCALHOST_HOSTS and not api_key:
-            raise SystemExit(
-                "praisonai serve unified: --api-key (or PRAISONAI_SERVE_API_KEY) is "
-                "required when binding to a non-localhost host; the unified server "
-                "exposes tool-driving routes."
-            )
-        parsed["api_key"] = api_key
+        parsed["api_key"] = self._resolve_api_key(parsed, "unified")
 
         try:
             self._print_success(f"Starting unified server on {parsed['host']}:{parsed['port']}")
-            print("  Providers: agents-api, recipe, mcp, a2a, a2u")
+            print(f"  Providers: {', '.join(self._unified_providers(parsed))}")
             print("  Discovery: /__praisonai__/discovery")
             
             # Lazy builder: built once (here when not reloading, or in the reload
@@ -927,11 +979,22 @@ Launch PraisonAI servers with unified discovery support.
             return self.EXIT_GENERAL_ERROR
         
         return self.EXIT_SUCCESS
-    
+
+    @staticmethod
+    def _unified_providers(config: Dict[str, Any]) -> List[str]:
+        """Providers the unified app actually mounts.
+
+        agents-api and a2a need the agents YAML (--file); recipe and MCP run as
+        their own servers (``serve recipe`` / ``praisonai mcp serve``).
+        """
+        if os.path.exists(config.get("file") or ""):
+            return ["agents-api", "a2a", "a2u"]
+        return ["a2u"]
+
     def _create_unified_app(self, config: Dict[str, Any]) -> Any:
-        """Create unified FastAPI app with all providers."""
-        from fastapi import FastAPI
-        
+        """Create unified FastAPI app with every provider it can mount."""
+        from fastapi import FastAPI, HTTPException, Request
+
         from praisonai.endpoints.discovery import (
             create_discovery_document,
             EndpointInfo,
@@ -939,49 +1002,60 @@ Launch PraisonAI servers with unified discovery support.
         )
         from praisonai.endpoints.server import add_discovery_routes
         from praisonai.endpoints.a2u_server import create_a2u_routes
-        
+
+        providers = self._unified_providers(config)
         discovery = create_discovery_document(server_name="praisonai-unified")
-        
-        # Add all providers
-        discovery.add_provider(ProviderInfo(
-            type="agents-api",
-            name="Agents API",
-            capabilities=["invoke", "health"],
-        ))
-        discovery.add_provider(ProviderInfo(
-            type="recipe",
-            name="Recipe Runner",
-            capabilities=["list", "describe", "invoke", "stream"],
-        ))
-        discovery.add_provider(ProviderInfo(
-            type="mcp",
-            name="MCP Server",
-            capabilities=["list-tools", "call-tool"],
-        ))
-        discovery.add_provider(ProviderInfo(
-            type="a2a",
-            name="A2A Protocol",
-            capabilities=["agent-card", "message-send"],
-        ))
-        discovery.add_provider(ProviderInfo(
-            type="a2u",
-            name="A2U Event Stream",
-            capabilities=["subscribe", "stream"],
-        ))
-        
         app = FastAPI(
             title="PraisonAI Unified Server",
             description="Unified server with all PraisonAI providers",
         )
-        
         add_discovery_routes(app, discovery)
+
+        if "agents-api" in providers:
+            run_query = self._yaml_query_runner(config["file"])
+
+            @app.post("/agents")
+            async def invoke_agents(request: Request):
+                """Invoke the agents YAML workflow with a query."""
+                try:
+                    body = await request.json()
+                except Exception:
+                    raise HTTPException(status_code=400, detail="Invalid request")
+                if not isinstance(body, dict):
+                    raise HTTPException(status_code=400, detail="Request body must be a JSON object")
+                query = body.get("query", "") or body.get("message", "")
+                try:
+                    return {"response": await run_query(query)}
+                except Exception as e:
+                    raise HTTPException(status_code=500, detail=f"Agent execution failed: {e}")
+
+            self._add_a2a_route(app, run_query)
+            discovery.add_provider(ProviderInfo(
+                type="agents-api",
+                name="Agents API",
+                capabilities=["invoke"],
+            ))
+            discovery.add_provider(ProviderInfo(
+                type="a2a",
+                name="A2A Protocol",
+                capabilities=["agent-card", "message-send"],
+            ))
+            discovery.add_endpoint(EndpointInfo(
+                name="agents",
+                description="Agents workflow endpoint",
+                provider_type="agents-api",
+            ))
+            discovery.add_endpoint(EndpointInfo(
+                name="a2a",
+                description="A2A protocol endpoint",
+                provider_type="a2a",
+            ))
+
         create_a2u_routes(app)
-        
-        # Add sample endpoints
-        discovery.add_endpoint(EndpointInfo(
-            name="agents",
-            description="Agents workflow endpoint",
-            provider_type="agents-api",
+        discovery.add_provider(ProviderInfo(
+            type="a2u",
+            name="A2U Event Stream",
+            capabilities=["subscribe", "stream"],
         ))
         discovery.add_endpoint(EndpointInfo(
             name="events",
@@ -994,17 +1068,23 @@ Launch PraisonAI servers with unified discovery support.
         async def root():
             return {
                 "message": "PraisonAI Unified Server",
-                "providers": ["agents-api", "recipe", "mcp", "a2a", "a2u"],
+                "providers": providers,
                 "discovery": "/__praisonai__/discovery",
             }
-        
+
         @app.get("/.well-known/agent.json")
         async def agent_card():
-            return {
+            card = {
                 "name": "PraisonAI Unified",
                 "description": "PraisonAI Unified Server",
                 "version": "1.0.0",
             }
+            if "a2a" in providers:
+                card["url"] = (
+                    f"http://{config.get('host', 'localhost')}:"
+                    f"{config.get('port', self.DEFAULT_PORT)}/a2a"
+                )
+            return card
 
         _install_api_key_middleware(app, config.get("api_key"))
         
