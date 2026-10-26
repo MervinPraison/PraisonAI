@@ -1106,6 +1106,11 @@ class GatewayConfigSchema(BaseModel):
     # core ``RoomConfig.from_dict`` and bound like an agent via ``room:<name>``.
     rooms: Optional[Dict[str, Dict[str, Any]]] = None
 
+    # Downstream MCP tool servers (Issue #6004). Each ``mcp_servers.<name>``
+    # (``command``/``args``/``env`` or ``url``/``headers``) is opened once as a
+    # shared ``MCP`` client and handed to agents that list ``<name>`` in tools.
+    mcp_servers: Optional[Dict[str, Union[Dict[str, Any], str]]] = None
+
     # Gateway server settings (host/port, drain_timeout, admission control,
     # etc.) and inbound trigger hooks. Kept as dicts/lists on this model so
     # downstream consumers (``gateway/server.py`` reads them via ``.get(...)``)

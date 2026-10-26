@@ -44,6 +44,7 @@ import logging
 from praisonaiagents._logging import get_logger
 import subprocess
 from pathlib import Path
+from ..utils.safe_path import safe_child
 from typing import Any, Dict, List, Optional, Literal, Callable
 from dataclasses import dataclass, field
 
@@ -515,9 +516,13 @@ class RulesManager:
                     dir_prefix = rules_dir_name.split("/")[0].strip(".")
                     self._rules[f"gitroot_{dir_prefix}:{rule.name}"] = rule
         
-        # 6. Load subdirectory rules (walk up from cwd to workspace/git root)
-        stop_at = git_root if git_root else self.workspace_path
-        current = Path.cwd()
+        # 6. Load subdirectory rules (walk up from cwd to workspace/git root).
+        # Skipped when cwd is outside that tree, so ancestors such as the
+        # user's home directory are never scanned.
+        stop_at = (git_root if git_root else self.workspace_path).resolve()
+        current = Path.cwd().resolve()
+        if not current.is_relative_to(stop_at):
+            current = stop_at
         while current != stop_at and current != current.parent:
             # Check .praisonai/rules/
             subdir_rules_dir = current / self.RULES_DIR_NAME.replace("/", os.sep)
@@ -808,7 +813,7 @@ class RulesManager:
             rules_dir = self.workspace_path / self.RULES_DIR_NAME.replace("/", os.sep)
         
         rules_dir.mkdir(parents=True, exist_ok=True)
-        file_path = rules_dir / f"{name}.md"
+        file_path = safe_child(rules_dir, name, ".md")
         
         # Build frontmatter
         import yaml

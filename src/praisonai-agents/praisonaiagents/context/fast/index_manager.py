@@ -157,8 +157,8 @@ class FileIndex:
                 "entries": {k: v.to_dict() for k, v in self.entries.items()}
             }
             
-            with open(self.index_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2)
+            from praisonaiagents.utils.atomic_io import atomic_write_json
+            atomic_write_json(self.index_path, data, indent=2)
             
             return True
         except Exception as e:

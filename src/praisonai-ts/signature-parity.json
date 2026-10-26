@@ -3994,12 +3994,12 @@
         "camelCase": 16,
         "exact": 8,
         "flattened": 0,
-        "mismatches": 0,
+        "mismatches": 1,
         "missing": 0,
         "params": 25,
         "ts_only": 1,
         "ts_total": 26,
-        "waived": 0
+        "waived": 1
       },
       "params": [
         {
@@ -4030,9 +4030,12 @@
         },
         {
           "canonical": "timeout",
-          "default": null,
-          "default_kind": "literal",
-          "gap": null,
+          "default": "_TIMEOUT_UNSET",
+          "default_kind": "expr",
+          "gap": {
+            "detail": "default differs: python=`_TIMEOUT_UNSET` typescript=undefined (TS `timeout`)",
+            "kind": "default"
+          },
           "kind": "positional",
           "match": "exact",
           "name": "timeout",
@@ -4051,7 +4054,7 @@
           "ts_name": "timeout",
           "type_class": "number",
           "type_text": "Optional[int]",
-          "waived": null,
+          "waived": "LLM.__init__.timeout",
           "warnings": []
         },
         {
@@ -4656,7 +4659,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:493",
+        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:501",
         "resolved_class": "LLM"
       },
       "ts_only": [
@@ -7401,13 +7404,13 @@
     "camelCase": 92,
     "exact": 123,
     "flattened": 3,
-    "mismatches": 28,
+    "mismatches": 29,
     "missing": 0,
     "params": 226,
     "surfaces": 17,
     "ts_only": 85,
     "ts_total": 317,
-    "waived": 28
+    "waived": 29
   },
   "waivers": [
     {
@@ -7521,6 +7524,13 @@
       "key": "Handoff.__init__.tool_name_override",
       "owner": "praisonai-ts",
       "reason": "Same derived string, built at a different moment. `defaultHandoffToolName` now produces Python's `transfer_to_<lowercased, spaces-to-underscores name>` exactly (it previously said `handoff_to_<raw name>`, which could contain a space and be rejected by the provider). Only the moment of derivation differs."
+    },
+    {
+      "expires": null,
+      "issue": "#5968",
+      "key": "LLM.__init__.timeout",
+      "owner": "praisonai-ts",
+      "reason": "Same effective bound, applied by a different layer. Python's sentinel resolves an unset timeout to 600s in the body (litellm would otherwise wait 6000s); TS leaves `timeout` undefined and the OpenAI Node SDK applies its own 600s (10 minute) default. An explicit value is forwarded on both sides."
     },
     {
       "expires": null,

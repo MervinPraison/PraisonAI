@@ -776,6 +776,21 @@ class TestCapabilityImports:
         from praisonai.capabilities import container_file_read
         assert callable(container_file_read)
 
+    def test_unimplemented_container_stubs_not_advertised(self):
+        """Backend-less container stubs stay importable but are not in __all__."""
+        import praisonai.capabilities as caps
+        stubs = [
+            'container_create', 'acontainer_create',
+            'container_file_read', 'acontainer_file_read',
+            'container_file_write', 'acontainer_file_write',
+            'container_file_list', 'acontainer_file_list',
+        ]
+        for name in stubs:
+            assert name not in caps.__all__
+            assert callable(getattr(caps, name))
+        with pytest.raises(NotImplementedError):
+            caps.container_create(image="python:3.11")
+
 
 class TestEmbeddingAliases:
     """Tests for embedding/embed alias consolidation."""

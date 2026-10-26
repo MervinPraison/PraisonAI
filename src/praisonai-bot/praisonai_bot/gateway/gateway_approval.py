@@ -103,8 +103,9 @@ class GatewayApprovalBackend:
         )
 
         # Fire optional notification (fire-and-forget)
+        pending_notify = None
         if self._notify_url:
-            asyncio.create_task(self._notify(request_id, request))
+            pending_notify = asyncio.create_task(self._notify(request_id, request))
 
         # Wait for resolution (fail-closed on timeout)
         try:
@@ -118,6 +119,12 @@ class GatewayApprovalBackend:
                 "Approval timeout for request %s (tool=%s) — DENIED",
                 request_id, request.tool_name,
             )
+            # Settle the notified channel so a stale "pending" card is not
+            # left looking actionable: tell it the action did NOT run.
+            if pending_notify is not None:
+                asyncio.create_task(
+                    self._notify_timed_out(pending_notify, request_id, request),
+                )
             return ApprovalDecision(
                 approved=False,
                 reason=f"Approval timed out after {self._timeout}s",
@@ -130,13 +137,28 @@ class GatewayApprovalBackend:
             approver="gateway:human",
         )
 
-    async def _notify(self, request_id: str, request: ApprovalRequest) -> None:
-        """POST a notification to the configured webhook (fire-and-forget)."""
+    async def _notify_timed_out(
+        self, pending: asyncio.Task, request_id: str, request: ApprovalRequest,
+    ) -> None:
+        """Send ``timed_out`` only after ``pending`` lands, so the receiver
+        never sees the settle before the card it settles."""
+        await asyncio.gather(pending, return_exceptions=True)
+        await self._notify(request_id, request, status="timed_out")
+
+    async def _notify(
+        self, request_id: str, request: ApprovalRequest, status: str = "pending",
+    ) -> None:
+        """POST a notification to the configured webhook (fire-and-forget).
+
+        ``status`` is ``"pending"`` when the request is created and
+        ``"timed_out"`` when it expires unanswered (the tool was not run).
+        """
         try:
             import aiohttp
 
             payload = {
                 "request_id": request_id,
+                "status": status,
                 "tool_name": request.tool_name,
                 "arguments": request.arguments,
                 "agent_name": request.agent_name,

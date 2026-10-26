@@ -259,15 +259,31 @@ class TestContextManager:
         manager = ContextManager(model="gpt-4o-mini")
         
         text = "Hello world"
-        
-        # First call
-        tokens1, _ = manager.estimate_tokens(text)
-        
-        # Second call should use cache
-        tokens2, _ = manager.estimate_tokens(text)
-        
+
+        with patch(
+            "praisonaiagents.context.tokens.estimate_tokens_accurate", return_value=3
+        ) as accurate:
+            # First validated call computes and caches
+            tokens1, _ = manager.estimate_tokens(text, validate=True)
+
+            # Second call should use cache
+            tokens2, _ = manager.estimate_tokens(text, validate=True)
+
         assert tokens1 == tokens2
-    
+        assert accurate.call_count == 1
+
+    def test_estimate_tokens_heuristic_skips_hashing(self):
+        """Heuristic path must not hash or cache the text."""
+        manager = ContextManager(model="gpt-4o-mini")
+
+        with patch("praisonaiagents.context.manager.hashlib.sha256") as sha:
+            tokens, metrics = manager.estimate_tokens("Hello world")
+
+        assert tokens > 0
+        assert metrics is None
+        sha.assert_not_called()
+        assert manager._estimation_cache == {}
+
     def test_reset(self):
         """Test manager reset."""
         manager = ContextManager(model="gpt-4o-mini")

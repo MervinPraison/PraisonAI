@@ -43,6 +43,14 @@ _TOOL_ARGUMENTS_PARSE_FAILED = object()
 # Bounded shrink-and-retry steps after a provider context-overflow rejection.
 _CONTEXT_OVERFLOW_SHRINK_STEPS = 3
 
+# Default per-request timeout (seconds) when ``timeout`` is not passed. Without
+# it litellm falls back to its 6000s ceiling, so a provider that accepts the
+# connection but never answers blocks the turn for ~100 minutes per attempt.
+# 600s matches the OpenAI SDK default used by the bare-model-name path and is
+# a read-gap bound for streams. Pass ``timeout=None`` (or 0) to opt out.
+_DEFAULT_LLM_TIMEOUT_S = 600
+_TIMEOUT_UNSET = object()
+
 
 # ``litellm.success_callback``/``_async_success_callback``/``callbacks`` are
 # process-global lists shared by every LLM instance. Guard the read-modify-write
@@ -493,7 +501,7 @@ Respond with ONLY a valid JSON tool call in this format:
     def __init__(
         self,
         model: str,
-        timeout: Optional[int] = None,
+        timeout: Optional[int] = _TIMEOUT_UNSET,
         temperature: Optional[float] = None,
         top_p: Optional[float] = None,
         n: Optional[int] = None,
@@ -535,7 +543,7 @@ Respond with ONLY a valid JSON tool call in this format:
                 )
 
         self.model = model
-        self.timeout = timeout
+        self.timeout = _DEFAULT_LLM_TIMEOUT_S if timeout is _TIMEOUT_UNSET else timeout
         self.temperature = temperature
         self.top_p = top_p
         self.n = n

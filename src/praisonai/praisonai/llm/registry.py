@@ -333,6 +333,9 @@ def _get_builtin_provider_loaders() -> Dict[str, Callable[[], ProviderType]]:
         ("openai",      ("oai",)),
         ("anthropic",   ("claude",)),
         ("google",      ("gemini", "google_genai")),
+        # Hosted prefixes PraisonAIModel (inc/models.py) already accepts.
+        ("groq",        ()),
+        ("cohere",      ()),
         # Local runtimes. "ollama_chat" is litellm's recommended prefix for
         # Ollama tool calling; "hosted_vllm" is its name for an OpenAI-compatible
         # vLLM server.

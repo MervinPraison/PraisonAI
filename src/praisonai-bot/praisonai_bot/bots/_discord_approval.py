@@ -371,6 +371,11 @@ class DiscordApproval(DurableApprovalMixin):
             status_emoji = "✅"
             status_text = "Approved"
             color = 0x00FF00
+        elif (decision.metadata or {}).get("timeout"):
+            # Unanswered: make it explicit nothing ran, not a human denial.
+            status_emoji = "⌛"
+            status_text = "Timed out — not run"
+            color = 0x808080
         else:
             status_emoji = "❌"
             status_text = "Denied"
