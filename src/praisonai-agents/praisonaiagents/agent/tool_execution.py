@@ -2174,22 +2174,25 @@ class ToolExecutionMixin:
         Returns:
             Estimated minimum cost in USD for the call.
         """
-        prompt_chars = 0
+        texts = []
         if messages:
             for _msg in messages:
                 _content = _msg.get("content") if isinstance(_msg, dict) else None
                 if isinstance(_content, str):
-                    prompt_chars += len(_content)
+                    texts.append(_content)
                 elif isinstance(_content, list):
                     for _part in _content:
                         if isinstance(_part, dict):
                             _text = _part.get("text")
                             if isinstance(_text, str):
-                                prompt_chars += len(_text)
+                                texts.append(_text)
                 elif _content is not None:
-                    prompt_chars += len(str(_content))
+                    texts.append(str(_content))
 
-        prompt_tokens = prompt_chars // 4
+        from ..context.tokens import estimate_tokens_heuristic
+        prompt_text = "".join(texts)
+        prompt_chars = len(prompt_text)
+        prompt_tokens = estimate_tokens_heuristic(prompt_text)
         if max_tokens:
             completion_tokens = int(max_tokens)
         elif prompt_chars > 0:

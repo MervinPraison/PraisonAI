@@ -100,5 +100,5 @@ class TestEstimateTokens:
         from praisonaiagents.rag.compressor import estimate_tokens
         
         assert estimate_tokens("") == 0
-        assert estimate_tokens("hello") == 2  # 5/4 + 1 = 2
-        assert estimate_tokens("a" * 100) == 26  # 100/4 + 1 = 26
+        assert estimate_tokens("hello") == 1  # canonical: 5 * 0.25, min 1
+        assert estimate_tokens("a" * 100) == 25
