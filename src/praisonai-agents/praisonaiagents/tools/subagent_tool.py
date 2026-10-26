@@ -66,6 +66,35 @@ def _emit_subagent_stop(
         logger.debug("SUBAGENT_STOP hook failed", exc_info=True)
 
 
+def _messenger_delivery(messenger: Any, deliver: str) -> Callable[[Any], None]:
+    """Build an ``on_complete`` callback that sends a finished job's result
+    through the turn's outbound messenger (the gateway's DeliveryRouter).
+
+    Raises when the send is not accepted so the job manager leaves the job
+    un-``delivered`` instead of recording a delivery that never happened.
+    """
+
+    def _deliver(info: Any) -> None:
+        from .messaging_tools import _run_async
+
+        result = info.result
+        if info.error:
+            text = f"Background task failed: {info.error}"
+        elif isinstance(result, dict):
+            text = result.get("output") if result.get("success") else (
+                f"Background task failed: {result.get('error')}"
+            )
+        else:
+            text = result
+        if not text:
+            return
+        outcome = _run_async(messenger.send(deliver, str(text)))
+        if not getattr(outcome, "ok", False):
+            raise RuntimeError(getattr(outcome, "summary", "") or "delivery failed")
+
+    return _deliver
+
+
 def create_subagent_tool(
     agent_factory: Optional[Callable[..., Any]] = None,
     allowed_agents: Optional[List[str]] = None,
@@ -114,9 +143,10 @@ def create_subagent_tool(
             ``deliver`` target finishes. This is the observable completion
             signal a gateway (e.g. ``BotOS``) subscribes to in order to
             route the result back to the originating chat without an active
-            turn. When ``None`` (the default) background jobs remain strictly
-            pull-only via ``subagent_result`` — byte-for-byte the prior
-            behaviour.
+            turn. When ``None`` (the default) and the spawning turn has an
+            outbound messenger registered (a running gateway), the result is
+            sent through that messenger; otherwise background jobs remain
+            pull-only via ``subagent_result``.
         
     Returns:
         Tool definition dictionary
@@ -356,16 +386,30 @@ def create_subagent_tool(
             origin: Dict[str, Any] = {}
             job_on_complete = None
             if deliver:
+                # Fill the origin from the current turn (still in scope here)
+                # rather than from the model; explicit arguments still win.
+                from praisonaiagents.session.context import (
+                    get_outbound_messenger,
+                    get_session_context,
+                )
+
+                ctx = get_session_context()
+                use_ctx = not chat_id
                 origin = {
                     "deliver": deliver,
-                    "platform": platform,
-                    "chat_id": chat_id,
-                    "thread_id": thread_id,
+                    "platform": platform or (ctx.platform if use_ctx else ""),
+                    "chat_id": chat_id or ctx.chat_id,
+                    "thread_id": thread_id or (ctx.thread_id if use_ctx else ""),
                     "session_id": session_id,
+                    "user_id": ctx.user_id,
                     "task": task,
                 }
                 if on_job_complete is not None:
                     job_on_complete = on_job_complete
+                else:
+                    messenger = get_outbound_messenger()
+                    if messenger is not None:
+                        job_on_complete = _messenger_delivery(messenger, deliver)
 
             job_id = job_manager.start_job(
                 _job,
