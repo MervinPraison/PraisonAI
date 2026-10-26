@@ -889,12 +889,10 @@ Write the complete compiled report:"""
                 except InterruptedError:
                     if cancel is None or cancel.reason != "timeout":
                         raise
-                    response = None
+                    return self._caller_mode_timeout_result(start_time, started_at)
                 finally:
                     if timer is not None:
                         timer.cancel()
-                if cancel is not None and cancel.reason == "timeout":
-                    return self._caller_mode_timeout_result(start_time, started_at)
                 response_str = str(response) if response else ""
                 
                 # Auto-save session after chat
