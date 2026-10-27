@@ -551,27 +551,9 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                                         pass
                                     return
                                 final_content = send_result["content"]
-                                # A streamed answer longer than Discord's hard
-                                # cap cannot be delivered by editing the single
-                                # placeholder (both the edit and the send
-                                # fallback 400 on >2000 chars), which would drop
-                                # the whole reply. Fall back to the chunked
-                                # reply path so long answers are split and keep
-                                # the reply reference (Greptile #3 / #5).
-                                _cap = min(self.config.max_message_length, 2000)
-                                if len(final_content) > _cap:
-                                    try:
-                                        await self.delete_message(
-                                            channel_id, placeholder_message_id
-                                        )
-                                    except Exception:
-                                        pass
-                                    await self._send_long_message(
-                                        message.channel, final_content,
-                                        reference=message,
-                                    )
-                                else:
-                                    await streamer.finalize(final_content)
+                                # Over-cap answers are chunked by the shared
+                                # streamer (Issue #6078).
+                                await streamer.finalize(final_content)
                                 self.fire_message_sent(channel_id, final_content)
                             except Exception:
                                 try:

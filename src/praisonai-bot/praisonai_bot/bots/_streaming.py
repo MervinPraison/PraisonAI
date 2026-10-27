@@ -15,6 +15,8 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Dict, Optional, Protocol, TYPE_CHECKING
 
+from ._chunk import _calculate_length, _hard_split, chunk_message, enforce_hard_cap
+
 if TYPE_CHECKING:
     from praisonaiagents.streaming.events import StreamEvent
 
@@ -375,7 +377,10 @@ class DraftStreamer:
         self._can_edit = caps.get('live_edit', True)  # Assume true for backward compat
         self._text_limit = caps.get('text_limit', 0) or 0  # 0 = unlimited
         self._edit_rate_limit = caps.get('edit_rate_limit', 0) or 0
-        
+        # Telegram measures its cap in UTF-16 units; default to codepoints.
+        unit = getattr(getattr(adapter, 'platform_capabilities', None), 'length_unit', None)
+        self._length_unit = unit if unit in ("codepoints", "utf16") else "codepoints"
+
         # Per-stream runtime interval. Adaptive backoff mutates this, NOT the
         # shared config, so a flood in one stream never leaks into others.
         self._current_min_interval = self._config.min_interval
@@ -621,8 +626,9 @@ class DraftStreamer:
         content = redact_outbound_text(content, self._adapter)
         
         # Apply text limit if configured
-        if self._text_limit > 0 and len(content) > self._text_limit:
-            content = content[:self._text_limit - 3] + "..."
+        if self._text_limit > 0 and _calculate_length(content, self._length_unit) > self._text_limit:
+            head = _hard_split(content, max(1, self._text_limit - 3), self._length_unit)[0]
+            content = head + "..."
         
         return content
     
@@ -715,10 +721,20 @@ class DraftStreamer:
         # still gets the safe-by-default guarantee. The adapter carries any
         # injected redactor / opt-out so one policy governs every outbound seam.
         final_content = redact_outbound_text(final_content, self._adapter)
-        
+
+        # Over-cap answers cannot be delivered as one edit/send (both fail with
+        # "message too long" and the reply is lost). Edit the placeholder with
+        # the first chunk and send the rest as follow-ons (Issue #6078).
+        chunks = [final_content]
+        if self._text_limit > 0 and _calculate_length(final_content, self._length_unit) > self._text_limit:
+            chunks = enforce_hard_cap(
+                chunk_message(final_content, self._text_limit, length_unit=self._length_unit),
+                self._text_limit, length_unit=self._length_unit,
+            )
+
         if self._rate_limiter:
             await self._rate_limiter.acquire(self._channel_id)
-        
+
         # Primary delivery: when progressive edits are still healthy, edit the
         # existing placeholder in place. When they were disabled by flooding, a
         # fresh edit is likely to fail too, so try the placeholder edit first
@@ -726,23 +742,40 @@ class DraftStreamer:
         # new send below.
         delivered = False
         try:
-            await self._adapter.edit_message(self._channel_id, self._message_id, final_content)
+            await self._adapter.edit_message(self._channel_id, self._message_id, chunks[0])
             delivered = True
         except Exception as e:  # noqa: BLE001 - adapter boundary; preserve final delivery
             logger.warning("DraftStreamer final edit failed: %s", e)
-        
+
         # Fallback: if the edit failed (or progressive editing was disabled by
         # flooding), deliver the full answer as a fresh send so the user ALWAYS
         # receives the completed answer regardless of the progressive path taken.
         if not delivered:
             try:
-                await self._adapter.send_message(self._channel_id, final_content)
+                await self._adapter.send_message(self._channel_id, chunks[0])
                 delivered = True
             except Exception as send_exc:  # noqa: BLE001 - last-resort delivery fallback
                 logger.warning(
                     "DraftStreamer final send fallback also failed: %s", send_exc
                 )
-        
+
+        # Follow-on chunks go through the bounded retry wrapper so a transient
+        # flood on one chunk never drops the rest of the reply.
+        if len(chunks) > 1:
+            from praisonai_bot.bots._resilience import deliver_with_retry
+
+            for chunk in chunks[1:]:
+                if self._rate_limiter:
+                    await self._rate_limiter.acquire(self._channel_id)
+                try:
+                    await deliver_with_retry(
+                        lambda c=chunk: self._adapter.send_message(self._channel_id, c),
+                        platform=self._platform,
+                    )
+                except Exception as chunk_exc:  # noqa: BLE001 - keep delivering remaining chunks
+                    delivered = False
+                    logger.warning("DraftStreamer follow-on chunk send failed: %s", chunk_exc)
+
         logger.debug(
             "DraftStreamer finalized message %s, final_length=%d, progressive=%s, delivered=%s",
             self._message_id, len(final_content), self._progressive, delivered
