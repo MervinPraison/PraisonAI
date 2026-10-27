@@ -469,12 +469,17 @@ class PermissionAllowlist:
         (empty signature) covers any arguments.
         """
         sig = arg_signature or ""
+        cutoff = time.time() - self._ttl_seconds if self._ttl_seconds > 0 else None
         with self._lock:
-            self._evict_expired_locked()
+            # Only the candidate keys are checked (O(1)); expired ones are
+            # evicted lazily. Full sweeps happen in list()/list_scoped().
             for a in (agent_id, ANY_AGENT):
-                if (a, tool_name, "") in self._allowed:
-                    return True
-                if sig and (a, tool_name, sig) in self._allowed:
+                for key in ((a, tool_name, ""), (a, tool_name, sig) if sig else None):
+                    if key is None or key not in self._allowed:
+                        continue
+                    if cutoff is not None and self._allowed[key] <= cutoff:
+                        del self._allowed[key]
+                        continue
                     return True
         return False
 
