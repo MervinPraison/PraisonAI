@@ -15,7 +15,7 @@ import time
 from typing import Dict, Iterator, List, Optional
 
 from .models import ScheduleJob, RunRecord
-from .due import is_due as _is_due, is_misfire as _is_misfire, lease_state as _lease_state, resolve_schedule_timezone
+from .due import is_due as _is_due, is_misfire as _is_misfire, lease_state as _lease_state, past_until as _past_until, resolve_schedule_timezone
 from .hook_emit import emit_schedule_add, emit_schedule_remove
 
 logger = get_logger(__name__)
@@ -239,8 +239,9 @@ class ConfigYamlScheduleStore:
                     job._lease_until = 0.0
                     job._lease_owner = None
                     changed = True
-                    if getattr(job, "_retiring", 0) == 1:
-                        # First attempt of a spent job crashed: retry once.
+                    if getattr(job, "_retiring", 0) == 1 and not _past_until(job, now, self._default_timezone):
+                        # First attempt of a spent job crashed: retry once
+                        # (unless its ``until`` deadline has passed meanwhile).
                         job._retiring = 2
                         take(job)
                         continue

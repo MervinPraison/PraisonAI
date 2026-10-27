@@ -163,3 +163,21 @@ def test_resumed_failed_one_shot_runs_again(make_store):
     ScheduleRunner(resumed).mark_run(retry[0])
     resumed.complete(job.id, "B")
     assert make_store().get(job.id) is None
+
+
+def test_crashed_spent_job_not_retried_past_until(make_store):
+    store = make_store()
+    t0 = time.time()
+    until = datetime.fromtimestamp(t0 + 3, timezone.utc).isoformat()
+    job = ScheduleJob(
+        name="bounded", message="ping",
+        schedule=Schedule(kind="every", every_seconds=3600),
+        max_runs=1, until=until,
+    )
+    store.add(job)
+    assert store.claim_due(t0, owner_id="A", lease_seconds=1)
+    # Crash, then restart after the deadline: logged and retired, not re-run.
+    restarted = make_store()
+    assert restarted.claim_due(t0 + 5, owner_id="B") == []
+    assert restarted.get(job.id) is None
+    assert _statuses(make_store(), job.id) == ["abandoned"]
