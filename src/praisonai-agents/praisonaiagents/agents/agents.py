@@ -1761,6 +1761,9 @@ class AgentTeam(SpawnAnnounceProtocol):
             logger.debug(f"Attempt {retries+1} for task {task_id}")
             if task.status in ["not started", "in progress"]:
                 task_output = await self.aexecute_task(task_id)
+                # Result processing marks guardrail rejection terminally failed.
+                if task.status == "failed":
+                    return
                 if task_output and self.completion_checker(task, task_output.raw):
                     # Apply guardrail validation using shared helper (offloaded to
                     # a thread so a blocking LLM guardrail does not stall the loop)
@@ -2339,6 +2342,9 @@ class AgentTeam(SpawnAnnounceProtocol):
             logger.debug(f"Attempt {retries+1} for task {task_id}")
             if task.status in ["not started", "in progress"]:
                 task_output = self.execute_task(task_id)
+                # Result processing marks guardrail rejection terminally failed.
+                if task.status == "failed":
+                    return
                 if task_output and self.completion_checker(task, task_output.raw):
                     # Apply guardrail validation using shared helper
                     task_output, should_retry = self._apply_task_guardrail(task, task_id, task_output)

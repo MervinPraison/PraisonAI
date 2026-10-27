@@ -200,7 +200,7 @@ class ExecutionMixin:
                 from ..guardrails.guardrail_result import _GuardrailBlockedResponse
                 response = await self.achat(prompt, **kwargs)
                 blocked = isinstance(response, _GuardrailBlockedResponse)
-                response_str = str(response) if response else ""
+                response_str = response if blocked else (str(response) if response else "")
                 
                 # Auto-save session after chat. Offloaded to a worker thread so
                 # the synchronous FileLock/JSON read-modify-write never stalls
@@ -302,6 +302,8 @@ class ExecutionMixin:
 
         if isinstance(result, _GuardrailBlockedResponse):
             return RunOutcome(reason="failed", output=str(result), error=str(result))
+        if isinstance(result, AutonomyResult) and isinstance(result.output, _GuardrailBlockedResponse):
+            return RunOutcome(reason="failed", output=str(result.output), error=result.error)
         output = str(result) if result is not None else None
         # Read the recorded classification without letting a lookup problem mask a
         # provider block as a successful ``completed``. Only an expected
@@ -314,8 +316,6 @@ class ExecutionMixin:
             reason = None
         if reason in PROVIDER_BLOCK_REASONS:
             return RunOutcome(reason=reason, output=output)
-        if isinstance(result, AutonomyResult) and not result.success:
-            return RunOutcome(reason="failed", output=result.output, error=result.error)
         return RunOutcome.completed(output=output)
 
     def run(self, prompt: str, **kwargs: Any) -> Optional[str]:
@@ -914,7 +914,7 @@ Write the complete compiled report:"""
                 from ..guardrails.guardrail_result import _GuardrailBlockedResponse
                 response = self.chat(prompt, **kwargs)
                 blocked = isinstance(response, _GuardrailBlockedResponse)
-                response_str = str(response) if response else ""
+                response_str = response if blocked else (str(response) if response else "")
                 
                 # Auto-save session after chat
                 self._auto_save_session()
