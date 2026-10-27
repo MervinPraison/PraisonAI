@@ -215,7 +215,8 @@ class MCPToolRunner(threading.Thread):
         except asyncio.TimeoutError:
             response_queue.put((False, f"MCP {kind} call timed out after {self.timeout} seconds (server side)"))
         except asyncio.CancelledError:
-            response_queue.put((False, f"MCP {kind} call cancelled: runner shut down"))
+            # Report the real cause when a sibling call saw the transport die.
+            response_queue.put((False, self._dead or f"MCP {kind} call cancelled: runner shut down"))
             raise
         except Exception as e:
             if _is_transport_closed(e):
@@ -418,8 +419,8 @@ class MCPToolRunner(threading.Thread):
         Queues the shutdown sentinel and joins the thread so the request loop
         exits and its stdio subprocess is terminated instead of leaking a
         background thread (and its child) across the process lifetime. The
-        request loop polls the queue between async operations, so once any
-        in-flight call unwinds the sentinel is consumed promptly.
+        request loop reads the sentinel promptly and cancels any in-flight
+        calls, which are answered with an error instead of left waiting.
 
         Args:
             timeout: Seconds to wait for the thread to exit. Defaults to the
