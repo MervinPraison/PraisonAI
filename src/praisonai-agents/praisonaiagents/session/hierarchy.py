@@ -306,6 +306,8 @@ class HierarchicalSessionStore(DefaultSessionStore):
                 raw = f.read()
             data = json.loads(raw.decode("utf-8"))
             session = ExtendedSessionData.from_dict(data)
+            if not self._owns_file(session_id, filepath, session):
+                return ExtendedSessionData(session_id=session_id)
             # Bind the fingerprint to this parsed object and these exact bytes.
             # A later writer must not certify an older payload via its stats.
             with self._lock:
