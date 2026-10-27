@@ -2458,7 +2458,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 self.tools = tools
         # Otherwise, fall back to OpenAI environment/name (cached for performance)
         else:
-            model_name = llm or Agent._get_default_model()
+            model_name = Agent._get_default_model() if llm is None else llm
             # Pointing at a non-OpenAI endpoint without naming a model leaves the
             # OpenAI default in place, so the endpoint is asked for a model it
             # has never heard of -- Ollama answers 404 "model 'gpt-4o-mini' not
