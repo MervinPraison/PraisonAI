@@ -2220,7 +2220,7 @@ class ToolExecutionMixin:
 
         return response
 
-    def _calculate_llm_cost(self, prompt_tokens: int, completion_tokens: int, response: any = None) -> float:
+    def _calculate_llm_cost(self, prompt_tokens: int, completion_tokens: int, response: any = None, model: Optional[str] = None) -> float:
         """Calculate estimated cost for LLM call.
         
         Uses litellm for accurate pricing (1000+ models) when available,
@@ -2230,6 +2230,7 @@ class ToolExecutionMixin:
             prompt_tokens: Number of tokens in the prompt
             completion_tokens: Number of tokens in the completion
             response: Optional LLM response object for more accurate cost calculation
+            model: Model that answered (e.g. a fallback model); defaults to ``self.llm``
             
         Returns:
             Estimated cost in USD
@@ -2238,7 +2239,7 @@ class ToolExecutionMixin:
         return calculate_llm_cost(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-            model=self.llm,
+            model=model or self.llm,
             response=response,
         )
 
