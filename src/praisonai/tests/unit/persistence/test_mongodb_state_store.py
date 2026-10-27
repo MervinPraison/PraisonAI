@@ -73,3 +73,13 @@ def test_expired_key_is_hidden(store):
     assert store.exists("k") is False
     assert store.ttl("k") is None
     assert store.get("k") is None
+
+
+def test_uri_options_override_adapter_defaults(store):
+    from praisonai.persistence.state.mongodb import MongoDBStateStore
+
+    MongoDBStateStore(url="mongodb://example:27017/?RetryWrites=false&maxPoolSize=7")
+    kwargs = store._mongo_client_cls.call_args.kwargs
+    assert "retryWrites" not in kwargs
+    assert "maxPoolSize" not in kwargs
+    assert kwargs["retryReads"] is True
