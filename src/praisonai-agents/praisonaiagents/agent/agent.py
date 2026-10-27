@@ -1917,6 +1917,17 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 "Use Agent(policy=PolicyEngine(...)) for tool policy enforcement, "
                 "or pass a validator via GuardrailConfig(validator=...)."
             )
+        # GuardrailConfig.on_fail has a single implemented policy (retry, then
+        # return the blocked message); refuse "skip"/"raise" rather than
+        # silently behaving as "retry".
+        if isinstance(_guardrails_config, GuardrailConfig) and (
+            getattr(_guardrails_config.on_fail, "value", _guardrails_config.on_fail) != "retry"
+        ):
+            raise ValueError(
+                f"GuardrailConfig.on_fail={_guardrails_config.on_fail!r} is not supported; "
+                "only 'retry' is implemented. Remove on_fail, or handle a blocked "
+                "response via Agent.last_guardrail_error."
+            )
 
         # Fail loud when the value could not be turned into an enforceable
         # guardrail, instead of storing something that never runs. Silently
@@ -6684,10 +6695,19 @@ Summary:"""
                     if hasattr(self, 'llm_instance') and self.llm_instance:
                         llm = self.llm_instance
                     
+                    # rerank=True without rerank_model has no backend reranker,
+                    # so use the zero-dependency keyword reranker; with
+                    # rerank_model the vector store already reranks.
+                    reranker = None
+                    if rag_config_obj.rerank and not getattr(self._retrieval_config, "rerank_model", None):
+                        from praisonaiagents.rag.retriever import SimpleReranker
+                        reranker = SimpleReranker()
+
                     self._rag_instance = RAG(
                         knowledge=self.knowledge,
                         config=rag_config_obj,
                         llm=llm,
+                        reranker=reranker,
                     )
                 except ImportError:
                     logging.warning("RAG module not available. Install with: pip install 'praisonaiagents[rag]'")

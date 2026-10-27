@@ -60,9 +60,11 @@ def _project_root(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def mock_endpoint(monkeypatch):
+def mock_endpoint(monkeypatch, tmp_path):
     server = HTTPServer(("127.0.0.1", 0), _MockOpenAI)
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    # output_file writes are contained to the project root (#5770).
+    monkeypatch.setenv("PRAISONAI_PROJECT_ROOT", str(tmp_path))
     monkeypatch.setenv("OPENAI_API_KEY", "placeholder")
     monkeypatch.setenv("OPENAI_BASE_URL", f"http://127.0.0.1:{server.server_port}/v1")
     monkeypatch.setenv("PRAISONAI_TELEMETRY_DISABLED", "true")

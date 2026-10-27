@@ -1744,8 +1744,28 @@ class ToolExecutionMixin:
                     # `if artifact_ref:` guards remain valid on short-result paths.
                     artifact_ref = None
 
+                    # ToolConfig.output_max_lines caps lines first, then the
+                    # char limit below applies; output_direction picks the end(s) kept.
+                    _tool_cfg = getattr(self, '_tool_config', None)
+                    direction = getattr(_tool_cfg, 'output_direction', 'both')
+                    max_lines = getattr(_tool_cfg, 'output_max_lines', None)
+                    capped_str = result_str
+                    if max_lines:
+                        lines = result_str.split("\n")
+                        if len(lines) > max_lines:
+                            if direction == "head":
+                                kept_head, kept_tail = lines[:max_lines], []
+                            elif direction == "tail":
+                                kept_head, kept_tail = [], lines[-max_lines:]
+                            else:
+                                n_tail = max_lines // 2
+                                kept_head = lines[:max_lines - n_tail]
+                                kept_tail = lines[-n_tail:] if n_tail else []
+                            marker = f"...[{len(lines):,} lines total, showing {max_lines:,}]..."
+                            capped_str = "\n".join(kept_head + [marker] + kept_tail)
+
                     # Check if we need to spill to artifact store
-                    if len(result_str) > limit:
+                    if len(capped_str) > limit or capped_str is not result_str:
                         # Try to use artifact store if available
                         if hasattr(self, '_artifact_store') and self._artifact_store is not None:
                             try:
@@ -1770,22 +1790,25 @@ class ToolExecutionMixin:
                             except Exception as e:
                                 logging.debug(f"Failed to store artifact: {e}")
                         
-                        # Generate truncated preview
-                        tail_size = min(limit // 5, 2000)
-                        head = result_str[:limit - tail_size]
-                        tail = result_str[-tail_size:] if tail_size > 0 else ""
-                        
+                        if len(capped_str) <= limit:
+                            # Only the line cap applied
+                            truncated = capped_str
+                        else:
+                            # Generate truncated preview
+                            if direction == "head":
+                                head, tail = capped_str[:limit], ""
+                            elif direction == "tail":
+                                head, tail = "", capped_str[-limit:]
+                            else:
+                                tail_size = min(limit // 5, 2000)
+                                head = capped_str[:limit - tail_size]
+                                tail = capped_str[-tail_size:] if tail_size > 0 else ""
+                            total = "chars total" if artifact_ref else "chars"
+                            truncated = f"{head}\n...[{len(result_str):,} {total}, showing first/last portions]...\n{tail}"
+
                         # If we stored an artifact, include reference in the output
                         if artifact_ref:
-                            truncated = (
-                                f"{head}\n"
-                                f"...[{len(result_str):,} chars total, showing first/last portions]...\n"
-                                f"{tail}\n\n"
-                                f"{artifact_ref.to_inline()}"
-                            )
-                        else:
-                            # Fallback to simple truncation
-                            truncated = f"{head}\n...[{len(result_str):,} chars, showing first/last portions]...\n{tail}"
+                            truncated = f"{truncated}\n\n{artifact_ref.to_inline()}"
                     else:
                         truncated = result_str
                     
@@ -1803,10 +1826,15 @@ class ToolExecutionMixin:
                         else:
                             truncated = self._truncate_tool_output(function_name, truncated, tool_call_id)
                     
-                    if len(truncated) < len(result_str):
+                    # A triggered line cap applies even when its marker makes the
+                    # preview no shorter than the original (many short lines).
+                    line_capped = capped_str is not result_str
+                    if line_capped or len(truncated) < len(result_str):
                         logging.debug(f"Truncated {function_name} output from {len(result_str)} to {len(truncated)} chars")
-                        # For dicts, truncate large string fields (e.g., raw_content from search)
-                        if isinstance(result, dict):
+                        # For dicts, truncate large string fields (e.g., raw_content from search).
+                        # Field truncation keeps both ends, so a line cap or a head/tail
+                        # direction uses the string preview instead.
+                        if isinstance(result, dict) and direction == "both" and not line_capped:
                             max_field_chars = getattr(self, 'tool_output_limit', DEFAULT_TOOL_OUTPUT_LIMIT) if not self.context_manager else None
                             result = self._truncate_dict_fields(result, function_name, max_field_chars, tool_call_id)
                             # Per-field truncation only shortens individual fields
