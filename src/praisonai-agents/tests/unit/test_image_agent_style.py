@@ -23,6 +23,9 @@ def test_style_forwarding(llm, kwargs, expected):
     agent._litellm = fake_image_generation
     try:
         agent.generate("A small green square icon", **kwargs)
-        assert received.get("style") == expected
+        if expected is None:
+            assert "style" not in received
+        else:
+            assert received["style"] == expected
     finally:
         agent.close()
