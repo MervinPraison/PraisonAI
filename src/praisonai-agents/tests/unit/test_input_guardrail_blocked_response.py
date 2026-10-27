@@ -168,6 +168,20 @@ def test_planning_outcome_preserves_guardrail_failure(monkeypatch):
     agent._get_planning_agent.assert_not_called()
 
 
+@pytest.mark.parametrize("reason", ["refused", "content_filtered", "length_truncated"])
+def test_provider_reason_precedes_generic_autonomy_failure(reason):
+    """Iterative autonomy must not hide a recorded provider reason."""
+    from praisonaiagents.agent.autonomy import AutonomyResult
+
+    agent = Agent(name="T", instructions="test", llm="gpt-4o-mini")
+    agent._last_stop_reason = reason
+    result = AutonomyResult(success=False, output="provider output", error="max iterations")
+    outcome = agent._outcome_for_result(result)
+    assert outcome.reason == reason
+    blocked = agent._guardrail_blocked_message()
+    assert agent._outcome_for_result(blocked).reason == "failed"
+
+
 def test_plain_text_is_not_classified_by_its_message(monkeypatch):
     """Identical ordinary text remains a successful task, without string matching."""
     agent = Agent(name="T", instructions="test", llm="gpt-4o-mini")
