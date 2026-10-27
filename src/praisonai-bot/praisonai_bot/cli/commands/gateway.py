@@ -1687,12 +1687,22 @@ def _parse_channel_settings(pairs: Optional[List[str]]) -> dict:
     return settings
 
 
-def _edit_channel(config: str, name: str, settings=None, *, remove=False, must_exist=True) -> None:
+def _edit_channel(
+    ctx: typer.Context, config: Optional[str], name: str, settings=None, *, remove=False, must_exist=True
+) -> None:
     """Run one validated channel edit, mapping failures to CLI exits (#6079)."""
-    from praisonai_bot.gateway.admin import edit_gateway_channel
+    import os
+    import yaml
 
-    config = _resolve_doctor_config(config)
-    exists = name in _load_channels(config)
+    from praisonai_bot.gateway.admin import _editable_channels, edit_gateway_channel
+
+    # ``gateway channels --config X <cmd>`` applies to the subcommand too.
+    config = _resolve_doctor_config(config or ctx.parent.params.get("config") or "gateway.yaml")
+    if not os.path.exists(config):
+        print(f"Error: Config file not found: {config}")
+        raise typer.Exit(1)
+    with open(config) as fh:
+        exists = name in _editable_channels(yaml.safe_load(fh) or {})
     if must_exist and not exists:
         print(f"Error: channel {name!r} is not configured in {config}")
         raise typer.Exit(1)
@@ -1708,6 +1718,7 @@ def _edit_channel(config: str, name: str, settings=None, *, remove=False, must_e
 
 @channels_app.command("add")
 def gateway_channels_add(
+    ctx: typer.Context,
     name: str = typer.Argument(..., help="Channel name, e.g. 'telegram'"),
     platform: Optional[str] = typer.Option(None, "--platform", help="Platform (default: the channel name)"),
     token: Optional[str] = typer.Option(
@@ -1715,7 +1726,7 @@ def gateway_channels_add(
         help="Channel token (default: ${VAR} reference to the platform's credential env var)",
     ),
     set_: Optional[List[str]] = typer.Option(None, "--set", help="Extra setting key=value (repeatable)"),
-    config: str = typer.Option("gateway.yaml", "--config", "-c", help="Path to gateway.yaml"),
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to gateway.yaml"),
 ):
     """Add one channel to gateway.yaml without touching the others.
 
@@ -1729,16 +1740,17 @@ def gateway_channels_add(
     settings = {"platform": platform}
     settings["token"] = token if token is not None else GatewayConfigSchema._credential_env_ref(platform)
     settings.update(_parse_channel_settings(set_))
-    _edit_channel(config, name, settings, must_exist=False)
+    _edit_channel(ctx, config, name, settings, must_exist=False)
     print(f"Added channel {name!r}.")
 
 
 @channels_app.command("update")
 def gateway_channels_update(
+    ctx: typer.Context,
     name: str = typer.Argument(..., help="Channel name to update"),
     token: Optional[str] = typer.Option(None, "--token", help="New channel token"),
     set_: Optional[List[str]] = typer.Option(None, "--set", help="Setting key=value (repeatable)"),
-    config: str = typer.Option("gateway.yaml", "--config", "-c", help="Path to gateway.yaml"),
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to gateway.yaml"),
 ):
     """Update settings of one configured channel.
 
@@ -1751,30 +1763,32 @@ def gateway_channels_update(
     if not settings:
         print("Error: nothing to update; pass --token and/or --set key=value")
         raise typer.Exit(1)
-    _edit_channel(config, name, settings)
+    _edit_channel(ctx, config, name, settings)
     print(f"Updated channel {name!r}.")
 
 
 @channels_app.command("disable")
 def gateway_channels_disable(
+    ctx: typer.Context,
     name: str = typer.Argument(..., help="Channel name to disable"),
-    config: str = typer.Option("gateway.yaml", "--config", "-c", help="Path to gateway.yaml"),
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to gateway.yaml"),
 ):
     """Stop serving a channel but keep its config (sets ``enabled: false``).
 
     Re-enable with ``praisonai gateway channels update <name> --set enabled=true``.
     """
-    _edit_channel(config, name, {"enabled": False})
+    _edit_channel(ctx, config, name, {"enabled": False})
     print(f"Disabled channel {name!r}.")
 
 
 @channels_app.command("remove")
 def gateway_channels_remove(
+    ctx: typer.Context,
     name: str = typer.Argument(..., help="Channel name to remove"),
-    config: str = typer.Option("gateway.yaml", "--config", "-c", help="Path to gateway.yaml"),
+    config: Optional[str] = typer.Option(None, "--config", "-c", help="Path to gateway.yaml"),
 ):
     """Delete a channel block from gateway.yaml."""
-    _edit_channel(config, name, remove=True)
+    _edit_channel(ctx, config, name, remove=True)
     print(f"Removed channel {name!r}.")
 
 

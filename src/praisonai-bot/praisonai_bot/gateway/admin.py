@@ -269,7 +269,7 @@ def edit_gateway_channel(
     with open(config_path) as fh:
         cfg = yaml.safe_load(fh) or {}
 
-    channels = cfg.get("channels") or {}
+    channels = _editable_channels(cfg)
     if remove:
         if name not in channels:
             raise KeyError(f"channel {name!r} is not configured in {config_path}")
@@ -282,11 +282,50 @@ def edit_gateway_channel(
         channels[name] = block
     cfg["channels"] = channels
 
-    # Structural validation only: ``${VAR}`` refs stay unresolved so a
-    # credential absent from this shell does not block the edit.
-    validate_gateway_config(cfg, apply_env_substitution=False)
+    # Check the document itself: the validator may otherwise satisfy its
+    # "at least one channel" rule from env credentials, which are not saved.
+    if not any(
+        not isinstance(b, dict) or b.get("enabled", True) is not False
+        for b in channels.values()
+    ):
+        raise ValueError("at least one enabled channel must remain configured")
+    # Validate an env-resolved copy (as the runtime does; unset ``${VAR}``
+    # refs are left as-is) while the saved file keeps the references.
+    validate_gateway_config(cfg)
     _atomic_write_yaml(config_path, cfg)
     return block
+
+
+def _editable_channels(cfg: dict) -> dict:
+    """Return ``cfg``'s ``channels`` map, moving legacy declarations into it.
+
+    Single-bot (top-level ``platform``) and BotOS (``platforms``) files are
+    only honoured by the loader while ``channels`` is empty, so they are
+    converted in place before an edit adds a ``channels:`` block. ``${VAR}``
+    references are copied verbatim.
+    """
+    channels = cfg.get("channels") or {}
+    if channels:
+        return channels
+    platform = cfg.get("platform")
+    if platform:
+        # Mirrors the loader's single-bot migration, which wins over BotOS.
+        from praisonai_bot.bots._config_schema import GatewayConfigSchema
+
+        platform = str(cfg.pop("platform")).lower().strip()
+        block = {"platform": platform}
+        token = cfg.pop("token", None)
+        block["token"] = token or GatewayConfigSchema._credential_env_ref(platform)
+        if platform == "slack" and cfg.get("app_token") is not None:
+            block["app_token"] = cfg.pop("app_token")
+        for key in ("unknown_user_policy", "owner_user_id"):
+            if cfg.get(key) is not None:
+                block[key] = cfg[key]
+        channels[platform] = block
+    elif cfg.get("platforms"):
+        for pname, pcfg in cfg.pop("platforms").items():
+            channels[pname] = {"platform": pname, **(pcfg or {})}
+    return channels
 
 
 def _repair_gateway_secret(dry_run: bool = False, config_path: str = ""):
