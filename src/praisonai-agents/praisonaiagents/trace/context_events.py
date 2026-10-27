@@ -85,6 +85,16 @@ def get_context_emitter() -> "ContextTraceEmitter":
         return _default_disabled_emitter
 
 
+def _agent_key(name: Optional[str]) -> str:
+    """The id an agent has in traces and graphs: its name, or "Agent" when unnamed.
+
+    ``Agent(instructions=...)`` has ``name=None``; without this its events had no
+    node id and its tools were recorded as ``tool:None/<tool>``, so nothing
+    matched the ``agent:Agent`` node in its graph.
+    """
+    return name or "Agent"
+
+
 def set_context_emitter(emitter: "ContextTraceEmitter") -> contextvars.Token:
     """
     Set the context trace emitter for the current async context.
@@ -786,7 +796,7 @@ class ContextTraceEmitter:
             session_id=self._session_id,
             agent_name=agent_name,
             data=metadata or {},
-            node_id=f"agent:{agent_name}" if agent_name else None,
+            node_id=f"agent:{_agent_key(agent_name)}",
         ))
     
     def agent_end(
@@ -803,7 +813,7 @@ class ContextTraceEmitter:
             session_id=self._session_id,
             agent_name=agent_name,
             data=metadata or {},
-            node_id=f"agent:{agent_name}" if agent_name else None,
+            node_id=f"agent:{_agent_key(agent_name)}",
         ))
     
     def message_added(
@@ -853,7 +863,7 @@ class ContextTraceEmitter:
                 "tool_name": tool_name,
                 "tool_args": self._redact_dict(tool_args) if tool_args else {},
             },
-            node_id=f"tool:{agent_name}/{tool_name}",
+            node_id=f"tool:{_agent_key(agent_name)}/{tool_name}",
         ))
     
     def tool_call_end(
@@ -901,7 +911,7 @@ class ContextTraceEmitter:
                 "duration_ms": duration_ms,
                 "error": error,
             },
-            node_id=f"tool:{agent_name}/{tool_name}",
+            node_id=f"tool:{_agent_key(agent_name)}/{tool_name}",
         ))
     
     def _smart_truncate_result(self, result: str, tool_name: str) -> str:
@@ -1030,7 +1040,7 @@ class ContextTraceEmitter:
             tokens_used=tokens_used,
             tokens_budget=tokens_budget,
             data=data,
-            node_id=f"agent:{agent_name}" if agent_name else None,
+            node_id=f"agent:{_agent_key(agent_name)}",
         )
     
     def llm_response(
@@ -1114,7 +1124,7 @@ class ContextTraceEmitter:
             completion_tokens=actual_completion_tokens,
             cost_usd=cost_usd,
             data=data,
-            node_id=f"agent:{agent_name}" if agent_name else None,
+            node_id=f"agent:{_agent_key(agent_name)}",
         )
     
     def context_snapshot(

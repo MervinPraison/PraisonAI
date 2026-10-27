@@ -31,6 +31,11 @@ _turns_lock = threading.Lock()
 _turn_loop_guard = contextvars.ContextVar("praisonai_turn_loop_guard", default=None)
 
 
+def _agent_end_status(db_status: str) -> str:
+    """``agent_end`` status for replay: completed, failed or cancelled."""
+    return "failed" if db_status == "error" else db_status
+
+
 def _enter_turn(agent, cancel):
     """Mark a ``chat``/``achat`` turn in flight and bind its cancel token to this context."""
     with _turns_lock:
@@ -3618,7 +3623,7 @@ Your Goal: {self.goal}"""
                 end_durable_run(durable_token)
                 durable_context.close()
             try:
-                _trace_emitter.agent_end(self.name)
+                _trace_emitter.agent_end(self.name, {"status": _agent_end_status(db_status)})
             finally:
                 if getattr(self, "_active_turn_token", None) is _cancel:
                     self._active_turn_token = None
@@ -4467,7 +4472,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         await durable_context.aclose()
                 finally:
                     try:
-                        _trace_emitter.agent_end(self.name)
+                        _trace_emitter.agent_end(self.name, {"status": _agent_end_status(db_status)})
                     finally:
                         if getattr(self, "_active_turn_token", None) is _cancel:
                             self._active_turn_token = None
@@ -6775,6 +6780,57 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         raise RuntimeError("Retry loop completed without returning or raising an exception")
 
     async def _achat_completion_with_retry(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
+        """Async model call with retry, recorded as ``llm_request``/``llm_response`` like the sync path.
+
+        ``Agent.astart``/``achat`` recorded no model calls before this, so a replay
+        of an async run showed the agent but never what it asked the model.
+        """
+        from ..trace.context_events import get_context_emitter
+
+        _trace_emitter = get_context_emitter()
+        call = self._achat_completion_with_retry_dispatch(
+            messages, temperature, tools, stream, reasoning_steps, task_name,
+            task_description, task_id, response_format,
+            stream_callback=stream_callback, emit_events=emit_events,
+        )
+        if not _trace_emitter._enabled:  # zero overhead when tracing is off
+            return await call
+        _trace_emitter.llm_request(
+            self.name,
+            messages_count=len(messages),
+            tokens_used=0,
+            model=self.llm if isinstance(self.llm, str) else None,
+            messages=messages,
+        )
+        started = time.time()
+        try:
+            response = await call
+        except Exception as e:
+            _trace_emitter.llm_response(
+                self.name,
+                duration_ms=(time.time() - started) * 1000,
+                finish_reason="error",
+                response_content=str(e),
+            )
+            raise
+        prompt_tokens = completion_tokens = 0
+        cost_usd = 0.0
+        usage = getattr(response, "usage", None)
+        if usage:
+            prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+            completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+            cost_usd = self._calculate_llm_cost(prompt_tokens, completion_tokens, response=response)
+        _trace_emitter.llm_response(
+            self.name,
+            duration_ms=(time.time() - started) * 1000,
+            response_content=self._extract_llm_response_content(response),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost_usd=cost_usd,
+        )
+        return response
+
+    async def _achat_completion_with_retry_dispatch(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
         """
         Async wrapper for _execute_unified_achat_completion that adds jittered exponential backoff retry logic.
         
