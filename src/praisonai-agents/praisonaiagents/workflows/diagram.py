@@ -87,7 +87,8 @@ def _tool_name(tool: Any) -> str:
 
 
 def _is_agent(obj: Any) -> bool:
-    return hasattr(obj, "chat") and isinstance(getattr(obj, "name", None), str)
+    # An unnamed Agent (``Agent(instructions=...)``) has ``name=None``; it is still an agent.
+    return hasattr(obj, "chat") and hasattr(obj, "name")
 
 
 # ---------------------------------------------------------------------------
@@ -204,8 +205,11 @@ class _Graph:
 
 def _add_agent(g: _Graph, agent: Any, parent: Optional[str] = None, _seen: Optional[set] = None) -> str:
     """Add an agent node with its tools and hand-off targets; return its id."""
-    name = getattr(agent, "name", None) or type(agent).__name__
-    agent_id = f"agent:{name}"
+    from ..trace.context_events import _agent_key
+
+    name = getattr(agent, "name", None) or type(agent).__name__  # label
+    key = _agent_key(getattr(agent, "name", None))  # the id the trace uses
+    agent_id = f"agent:{key}"
     seen = _seen if _seen is not None else set()
     if agent_id in seen:
         return agent_id
@@ -227,7 +231,7 @@ def _add_agent(g: _Graph, agent: Any, parent: Optional[str] = None, _seen: Optio
         tool_name = _tool_name(tool)
         if tool_name in handoff_tools:
             continue  # drawn as the hand-off edge, not as a tool
-        tool_id = f"tool:{name}/{tool_name}"
+        tool_id = f"tool:{key}/{tool_name}"
         g.node(tool_id, "tool", tool_name, parent=parent)
         g.edge(agent_id, tool_id, "uses")
     for target in targets:
