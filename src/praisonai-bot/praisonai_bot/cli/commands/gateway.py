@@ -1761,7 +1761,7 @@ def gateway_channels_update(
     if token is not None:
         settings["token"] = token
     if not settings:
-        print("Error: nothing to update; pass --token and/or --set key=value")
+        print("Error: nothing to update; pass --set key=value, --token, or both")
         raise typer.Exit(1)
     _edit_channel(ctx, config, name, settings)
     print(f"Updated channel {name!r}.")
