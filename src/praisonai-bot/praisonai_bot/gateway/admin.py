@@ -201,7 +201,6 @@ def _repair_config_version(config_path: str):
     an interruption, full disk, or I/O error during ``doctor --fix`` can never
     leave the config truncated or half-written.
     """
-    import tempfile
     import yaml
 
     with open(config_path) as fh:
@@ -210,6 +209,14 @@ def _repair_config_version(config_path: str):
     from praisonaiagents.gateway.config import migrate_config_with_doctor
 
     migrated, reasons = migrate_config_with_doctor(cfg)
+    _atomic_write_yaml(config_path, migrated)
+    return reasons
+
+
+def _atomic_write_yaml(config_path: str, data: dict) -> None:
+    """Serialise ``data`` to a temp file and ``os.replace`` it over the config."""
+    import tempfile
+    import yaml
 
     directory = os.path.dirname(os.path.abspath(config_path))
     fd, tmp_path = tempfile.mkstemp(
@@ -217,9 +224,7 @@ def _repair_config_version(config_path: str):
     )
     try:
         with os.fdopen(fd, "w") as fh:
-            yaml.safe_dump(
-                migrated, fh, default_flow_style=False, sort_keys=False
-            )
+            yaml.safe_dump(data, fh, default_flow_style=False, sort_keys=False)
             fh.flush()
             os.fsync(fh.fileno())
         os.replace(tmp_path, config_path)
@@ -230,7 +235,58 @@ def _repair_config_version(config_path: str):
             pass
         raise
 
-    return reasons
+
+def edit_gateway_channel(
+    config_path: PathLike,
+    name: str,
+    settings: Optional[Dict] = None,
+    *,
+    remove: bool = False,
+) -> dict:
+    """Add, update or remove one ``channels:`` entry in place (Issue #6079).
+
+    A surgical read-modify-write: ``settings`` is merged into
+    ``channels[name]`` (created if absent, ``platform`` defaulting to ``name``)
+    or, with ``remove=True``, the block is deleted. Other channels and
+    top-level keys are untouched. The edited document is validated against
+    ``GatewayConfigSchema`` before the atomic write, so an invalid mutation is
+    rejected rather than persisted. Disable a channel with
+    ``settings={"enabled": False}``.
+
+    Returns:
+        The resulting channel block (``{}`` when removed).
+
+    Raises:
+        FileNotFoundError: If ``config_path`` does not exist.
+        KeyError: If ``remove=True`` and the channel is not configured.
+        ValueError: If the edited config fails validation.
+    """
+    import yaml
+
+    from praisonai_bot.bots._config_schema import validate_gateway_config
+
+    config_path = os.fspath(config_path)
+    with open(config_path) as fh:
+        cfg = yaml.safe_load(fh) or {}
+
+    channels = cfg.get("channels") or {}
+    if remove:
+        if name not in channels:
+            raise KeyError(f"channel {name!r} is not configured in {config_path}")
+        channels.pop(name)
+        block: dict = {}
+    else:
+        block = dict(channels.get(name) or {})
+        block.setdefault("platform", name)
+        block.update(settings or {})
+        channels[name] = block
+    cfg["channels"] = channels
+
+    # Structural validation only: ``${VAR}`` refs stay unresolved so a
+    # credential absent from this shell does not block the edit.
+    validate_gateway_config(cfg, apply_env_substitution=False)
+    _atomic_write_yaml(config_path, cfg)
+    return block
 
 
 def _repair_gateway_secret(dry_run: bool = False, config_path: str = ""):

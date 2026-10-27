@@ -14,6 +14,7 @@ _LAZY_EXPORTS = {
         "praisonai_bot.gateway.admin",
         "provision_gateway_config",
     ),
+    "edit_gateway_channel": ("praisonai_bot.gateway.admin", "edit_gateway_channel"),
 }
 
 
@@ -34,5 +35,6 @@ __all__ = [
     "GatewayRepairResult",
     "repair_gateway_config",
     "provision_gateway_config",
+    "edit_gateway_channel",
     "__version__",
 ]
