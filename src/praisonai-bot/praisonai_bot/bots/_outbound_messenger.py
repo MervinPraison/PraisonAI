@@ -102,6 +102,27 @@ class BotOutboundMessenger:
 
         resolved = f"{platform}:{channel_id}"
 
+        # Destination authorization (#6084): the target is model-controlled, so
+        # an explicit "<platform>:<chat_id>" must name a chat this gateway
+        # already knows (the turn's origin, or a home/alias/observed channel)
+        # before anything — text or media — is delivered. Symbolic tokens
+        # ("origin", a platform home, an alias) resolve to known chats by
+        # construction. Operators widen the set via the alias overlay.
+        if not self._is_attested(platform, channel_id):
+            logger.warning(
+                "BotOutboundMessenger: refusing send to unattested destination %s",
+                resolved,
+            )
+            return DeliveryResult(
+                ok=False,
+                target=resolved,
+                summary=f"Refused: {resolved} is not a known destination for this gateway.",
+                detail=(
+                    "destination not attested (not the origin chat, a home "
+                    "channel, an alias, or an observed channel)"
+                ),
+            )
+
         # Idempotency covers the *whole* text+media envelope (issue #2578). A
         # duplicate proactive send must skip both the text and any media upload,
         # otherwise a re-fired job with attachments would double-upload media
@@ -182,6 +203,21 @@ class BotOutboundMessenger:
             summary=summary,
             detail=detail,
         )
+
+    def _is_attested(self, platform: str, channel_id: str) -> bool:
+        """Whether ``platform:channel_id`` is a chat this gateway knows."""
+        origin = self._origin
+        if (
+            origin is not None
+            and (origin.platform or "").lower() == platform.lower()
+            and str(origin.channel_id) == str(channel_id)
+        ):
+            return True
+        try:
+            return bool(self._router.directory.has_channel(platform, str(channel_id)))
+        except Exception as e:  # pragma: no cover — defensive, fail closed
+            logger.warning("BotOutboundMessenger: attestation check failed: %s", e)
+            return False
 
     async def _deliver_media(
         self,

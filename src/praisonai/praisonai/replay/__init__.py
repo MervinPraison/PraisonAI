@@ -20,9 +20,29 @@ Usage:
     # Interactive replay
     player = ReplayPlayer(reader)
     player.run()
+
+    # Record a run (PraisonAI Replay) and export it
+    from praisonai.replay import record
+    from praisonai.replay.events import load_events
+    from praisonai.replay import export
+
+    with record(live=True) as rec:
+        agent.start("Say hello")
+    html = export.to_html(load_events(rec.path))
+
+    # Watch it live: a page with a Run button (or mount it in your own app)
+    from praisonai.replay import watch, replay_app
+    watch(flow)                                  # opens the browser
+    app.mount("/replay", replay_app(flow))       # FastAPI / Starlette
 """
 
 __all__ = [
+    "record",
+    "Recording",
+    "watch",
+    "replay_app",
+    "TraceStepCache",
+    "load_events",
     "ContextTraceWriter",
     "ContextTraceReader",
     "ReplayPlayer",
@@ -40,6 +60,22 @@ __all__ = [
 
 def __getattr__(name: str):
     """Lazy load module components."""
+    if name in ("record", "Recording"):
+        from . import recorder
+        return getattr(recorder, name)
+
+    if name in ("watch", "replay_app"):
+        from . import live
+        return getattr(live, name)
+
+    if name == "TraceStepCache":
+        from .rerun import TraceStepCache
+        return TraceStepCache
+
+    if name == "load_events":
+        from .events import load_events
+        return load_events
+
     if name == "ContextTraceWriter":
         from .writer import ContextTraceWriter
         return ContextTraceWriter

@@ -6,6 +6,8 @@ and response processing. Extracted from agent.py for maintainability.
 """
 
 import asyncio
+import contextlib
+import contextvars
 import os
 import re
 import time
@@ -24,12 +26,25 @@ logger = logging.getLogger(__name__)
 
 _turns_lock = threading.Lock()
 
+# Per-turn loop guard: ``[agent, LoopGuard | None]`` bound by ``_enter_turn``. Copied
+# into tool worker threads with the context, so each turn has its own counters and
+# overlapping turns on a shared agent never exhaust each other's limits.
+_turn_loop_guard = contextvars.ContextVar("praisonai_turn_loop_guard", default=None)
+# Agent whose streamed turn already records agent_start/agent_end, set while its
+# non-streaming chat() fallback runs so that turn is not recorded twice.
+_stream_traced_agent = contextvars.ContextVar("praisonai_stream_traced_agent", default=None)
+
+
+def _agent_end_status(db_status: str) -> str:
+    """``agent_end`` status for replay: completed, failed or cancelled."""
+    return "failed" if db_status == "error" else db_status
+
 
 def _enter_turn(agent, cancel):
     """Mark a ``chat``/``achat`` turn in flight and bind its cancel token to this context."""
     with _turns_lock:
         agent._turns_in_flight = getattr(agent, "_turns_in_flight", 0) + 1
-    return _active_turn_cancel.set((agent, cancel))
+    return _active_turn_cancel.set((agent, cancel)), _turn_loop_guard.set([agent, None])
 
 
 def _exit_turn(agent, ctx_token):
@@ -38,18 +53,36 @@ def _exit_turn(agent, ctx_token):
         return
     with _turns_lock:
         agent._turns_in_flight = max(getattr(agent, "_turns_in_flight", 1) - 1, 0)
-    try:
-        _active_turn_cancel.reset(ctx_token)
-    except (ValueError, LookupError):
-        _active_turn_cancel.set(None)
+    cancel_token, guard_token = ctx_token
+    for var, token in ((_active_turn_cancel, cancel_token), (_turn_loop_guard, guard_token)):
+        try:
+            var.reset(token)
+        except (ValueError, LookupError):
+            var.set(None)
+
+
+def _current_turn_loop_guard(agent):
+    """Return this turn's loop guard for ``agent`` (lazily created, sharing the agent
+    guard's config), or ``None`` when not inside one of ``agent``'s chat turns."""
+    slot = _turn_loop_guard.get()
+    if slot is None or slot[0] is not agent:
+        return None
+    with _turns_lock:
+        if slot[1] is None:
+            from ..escalation.loop_guard import LoopGuard
+            slot[1] = LoopGuard(agent._loop_guard.config)
+        return slot[1]
 
 
 def _reset_loop_guard_for_turn(agent):
-    """Reset per-turn loop-guard limits unless another turn on this agent is still
-    running (the guard is shared; resetting it would restart that turn's limits).
-    Never force-creates the guard."""
+    """Start fresh per-turn loop-guard limits. Inside a chat turn this drops the turn's
+    own guard; outside one it resets the agent-level guard. Never force-creates a guard."""
+    slot = _turn_loop_guard.get()
+    if slot is not None and slot[0] is agent:
+        slot[1] = None
+        return
     guard = getattr(agent, "_loop_guard", None)
-    if guard is not None and getattr(agent, "_turns_in_flight", 0) <= 1:
+    if guard is not None:
         guard.reset_turn()
 
 
@@ -73,20 +106,50 @@ def _sleep_unless_cancelled(seconds: float, cancel_token: Any = None, step: floa
         time.sleep(min(step, remaining))
 
 
+# ``time.monotonic()`` deadline for turns started in this context, set by
+# ``run_autonomous(timeout_seconds=...)`` so a single long turn cannot overrun it.
+_run_deadline = contextvars.ContextVar("praisonai_run_deadline", default=None)
+
+
+@contextlib.contextmanager
+def _deadline_scope(seconds):
+    """Bound every turn started in this block to ``seconds`` from now (no-op when falsy)."""
+    if not seconds:
+        yield
+        return
+    deadline = time.monotonic() + seconds
+    outer = _run_deadline.get()
+    token = _run_deadline.set(deadline if outer is None else min(deadline, outer))
+    try:
+        yield
+    finally:
+        _run_deadline.reset(token)
+
+
 class _TurnCancelToken:
-    """Track cancellation observed by one call without shared backend state."""
+    """Track cancellation observed by one call without shared backend state.
+
+    An optional ``deadline`` (``time.monotonic()``) makes the token report set
+    once it passes, so the existing cancel checks also stop an overrunning turn.
+    """
 
     def __init__(
         self,
         source: Any,
         *,
         turn_id: Optional[int] = None,
+        deadline: Optional[float] = None,
     ):
         self._source = source
         self._observed = False
         self._turn_id = turn_id
+        self._deadline = deadline
+        self.timed_out = False
 
     def is_set(self) -> bool:
+        if self._deadline is not None and time.monotonic() >= self._deadline:
+            self.timed_out = self._observed = True
+            return True
         turn_checker = getattr(self._source, "_turn_is_cancelled", None)
         if self._turn_id is not None and callable(turn_checker):
             is_set = bool(turn_checker(self._turn_id))
@@ -97,6 +160,8 @@ class _TurnCancelToken:
 
     @property
     def reason(self):
+        if self.timed_out:
+            return "timeout"
         return getattr(self._source, "reason", None)
 
     def check(self) -> None:
@@ -133,13 +198,22 @@ class ChatMixin:
         return get_durable_run()
 
     def _turn_cancel_token(self, source: Any, *, explicit: bool):
-        """Create per-turn cancellation state while consuming default requests once."""
+        """Create per-turn cancellation state while consuming default requests once.
+
+        ``ExecutionConfig.max_execution_time`` and any enclosing
+        ``run_autonomous`` timeout become the token's deadline.
+        """
+        limit = getattr(self, "max_execution_time", None)
+        deadline = time.monotonic() + limit if limit else None
+        outer = _run_deadline.get()
+        if outer is not None:
+            deadline = outer if deadline is None else min(deadline, outer)
         if source is None:
-            return None
+            return None if deadline is None else _TurnCancelToken(None, deadline=deadline)
         begin_turn = getattr(source, "_begin_turn", None)
         if explicit or not callable(begin_turn):
-            return _TurnCancelToken(source)
-        return _TurnCancelToken(source, turn_id=begin_turn())
+            return _TurnCancelToken(source, deadline=deadline)
+        return _TurnCancelToken(source, turn_id=begin_turn(), deadline=deadline)
 
     @staticmethod
     def _notify_tool_call(tool_name, tool_input, tool_result, elapsed_time=None, success=True):
@@ -1888,6 +1962,107 @@ Your Goal: {self.goal}"""
             self._openai_client = get_openai_client(api_key=getattr(self, 'api_key', None))
         return create_llm_dispatcher(openai_client=self._openai_client, model=model)
 
+    def _fallback_llm_for(self, model):
+        """Build a throwaway LLM bound to fallback ``model`` for the custom-LLM path.
+
+        Never assigned to ``self.llm_instance``, so concurrent turns keep the
+        primary model. A fallback entry that is already a model object is used
+        as-is. Option params (metrics, max_iter, retries, ...) are inherited;
+        connection settings (base_url, api_key, auth) only when the fallback
+        targets the same provider prefix as the primary.
+        """
+        if not isinstance(model, str):
+            return model
+        from ..llm.llm import LLM
+        params = dict(getattr(self, '_llm_init_params', None) or {})
+        primary = str(params.get('model') or self.llm or '')
+        # Bare names (no "provider/" prefix) share the configured server.
+        prefix = lambda name: name.split('/', 1)[0] if '/' in name else ''
+        if prefix(primary) != prefix(model):
+            for key in ('base_url', 'api_key', 'auth'):
+                params.pop(key, None)
+        params['model'] = model
+        return LLM(**params)
+
+    def _classify_custom_llm_fallback(self, error, failed_model, fallback_index):
+        """Return ``(next_model, category)`` if ``error`` warrants a model fallback."""
+        next_model = self._get_next_fallback_model(fallback_index)
+        if next_model is None:
+            return None, None
+        from ..llm.error_classifier import classify_llm_error
+        model_name = str(failed_model)
+        provider = model_name.split('/', 1)[0] if '/' in model_name else "openai"
+        classification = classify_llm_error(error, provider=provider, model=model_name)
+        if not classification.should_fallback_model:
+            return None, None
+        logging.info(f"[{self.name}] {model_name} unavailable — falling back to {next_model}")
+        return next_model, classification.error_category
+
+    @staticmethod
+    def _track_tool_runs(llm_kwargs):
+        """Return ``(llm_kwargs, ran)``; ``ran`` becomes non-empty once a tool executes.
+
+        A fallback replays the whole turn from the original messages, so it is
+        only safe while no tool has run (otherwise side effects would repeat).
+        """
+        import functools
+        import inspect
+        ran = []
+        fn = llm_kwargs.get('execute_tool_fn')
+        if fn is None:
+            return llm_kwargs, ran
+        if inspect.iscoroutinefunction(fn):
+            @functools.wraps(fn)
+            async def tracked(*args, **kwargs):
+                ran.append(True)
+                return await fn(*args, **kwargs)
+        else:
+            @functools.wraps(fn)
+            def tracked(*args, **kwargs):
+                ran.append(True)
+                return fn(*args, **kwargs)
+        return {**llm_kwargs, 'execute_tool_fn': tracked}, ran
+
+    def _custom_llm_get_response(self, llm_kwargs):
+        """Call ``llm_instance.get_response`` walking ``fallback_models`` on outage."""
+        llm, index, current = self.llm_instance, 0, self.llm
+        stream_cb = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
+        llm_kwargs, tools_ran = self._track_tool_runs(llm_kwargs)
+        while True:
+            try:
+                with self._llm_usage_sink(llm):
+                    return llm.get_response(**llm_kwargs)
+            except (ToolExecutionError, BudgetExceededError, InterruptedError):
+                raise
+            except Exception as e:
+                if tools_ran:
+                    raise
+                next_model, category = self._classify_custom_llm_fallback(e, current, index)
+                if next_model is None:
+                    raise
+                self._emit_model_fallback(current, next_model, category, index, stream_cb)
+                llm, index, current = self._fallback_llm_for(next_model), index + 1, next_model
+
+    async def _custom_llm_get_response_async(self, llm_kwargs):
+        """Async twin of :meth:`_custom_llm_get_response`."""
+        llm, index, current = self.llm_instance, 0, self.llm
+        stream_cb = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
+        llm_kwargs, tools_ran = self._track_tool_runs(llm_kwargs)
+        while True:
+            try:
+                with self._llm_usage_sink(llm):
+                    return await llm.get_response_async(**llm_kwargs)
+            except (ToolExecutionError, BudgetExceededError, InterruptedError):
+                raise
+            except Exception as e:
+                if tools_ran:
+                    raise
+                next_model, category = self._classify_custom_llm_fallback(e, current, index)
+                if next_model is None:
+                    raise
+                await self._aemit_model_fallback(current, next_model, category, index, stream_cb)
+                llm, index, current = self._fallback_llm_for(next_model), index + 1, next_model
+
     def _get_model_fallback_lock(self):
         """Lazily create the per-instance lock guarding model-fallback swaps.
 
@@ -2050,6 +2225,82 @@ Your Goal: {self.goal}"""
         if isinstance(max_retries, int) and max_retries >= 0:
             return max_retries
         return 2
+
+    def _extract_llm_usage(self, response, model=None):
+        """Return ``(prompt_tokens, completion_tokens, cost_usd)`` for one LLM response priced as ``model``."""
+        usage = getattr(response, 'usage', None) if response else None
+        if not usage:
+            return 0, 0, 0.0
+        # Chat Completions names, then the Responses API names.
+        prompt_tokens = getattr(usage, 'prompt_tokens', 0) or getattr(usage, 'input_tokens', 0) or 0
+        completion_tokens = getattr(usage, 'completion_tokens', 0) or getattr(usage, 'output_tokens', 0) or 0
+        # Calculate cost using litellm (if available) or fallback pricing
+        cost_usd = self._calculate_llm_cost(prompt_tokens, completion_tokens, response=response, model=model)
+        return prompt_tokens, completion_tokens, cost_usd
+
+    def _record_llm_usage(self, prompt_tokens, completion_tokens, cost_usd):
+        """Add one LLM call to the agent's cost/token totals and enforce ``max_budget``.
+
+        The single accounting point for every path: the OpenAI-native
+        completions call it directly and the custom-LLM (``provider/model``)
+        tool loop reaches it through the LLM usage sink, once per call.
+        """
+        # Thread-safe cost tracking (Gap 1a fix)
+        with self._cost_lock:
+            self._total_cost += cost_usd
+            self._total_tokens_in += prompt_tokens
+            self._total_tokens_out += completion_tokens
+            self._llm_call_count += 1
+            budget_exceeded = self._max_budget and self._total_cost >= self._max_budget
+            current_cost = self._total_cost
+
+        if budget_exceeded:
+            if self._on_budget_exceeded == "stop":
+                raise BudgetExceededError(
+                    f"Agent '{self.name}' exceeded budget: ${current_cost:.4f} >= ${self._max_budget:.4f}",
+                    budget_type="cost",
+                    limit=self._max_budget,
+                    used=current_cost,
+                    agent_id=self.name
+                )
+            elif self._on_budget_exceeded == "warn":
+                logging.warning(
+                    f"[budget] {self.name}: ${current_cost:.4f} exceeded "
+                    f"${self._max_budget:.4f} budget"
+                )
+            elif callable(self._on_budget_exceeded):
+                self._on_budget_exceeded(current_cost, self._max_budget)
+
+    @contextlib.contextmanager
+    def _llm_usage_sink(self, llm=None):
+        """Route every call ``llm`` (default: the custom LLM) makes in this block into ``_record_llm_usage``.
+
+        Refuses to start when ``max_budget`` is already spent (``"stop"`` mode),
+        so retrying after ``BudgetExceededError`` sends no further paid request.
+        """
+        if self._max_budget and self._on_budget_exceeded == "stop":
+            with self._cost_lock:
+                current_cost = self._total_cost
+            if current_cost >= self._max_budget:
+                raise BudgetExceededError(
+                    f"Agent '{self.name}' exceeded budget: ${current_cost:.4f} >= ${self._max_budget:.4f}",
+                    budget_type="cost",
+                    limit=self._max_budget,
+                    used=current_cost,
+                    agent_id=self.name
+                )
+        from ..llm.llm import _usage_sink
+        llm = llm if llm is not None else self.llm_instance
+        # A fallback model is priced as itself, not as the primary ``self.llm``.
+        model = None if llm is self.llm_instance else getattr(llm, 'model', None)
+        token = _usage_sink.set((
+            llm,
+            lambda response: self._record_llm_usage(*self._extract_llm_usage(response, model)),
+        ))
+        try:
+            yield
+        finally:
+            _usage_sink.reset(token)
 
     def _chat_completion(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0, _fallback_index=0, cancel_token=None):
         start_time = time.time()
@@ -2250,19 +2501,8 @@ Your Goal: {self.goal}"""
 
             # Emit LLM response trace event with token usage
             _duration_ms = (time.time() - start_time) * 1000
-            _prompt_tokens = 0
-            _completion_tokens = 0
-            _cost_usd = 0.0
-            
-            # Extract token usage from response if available
-            if final_response:
-                _usage = getattr(final_response, 'usage', None)
-                if _usage:
-                    _prompt_tokens = getattr(_usage, 'prompt_tokens', 0) or 0
-                    _completion_tokens = getattr(_usage, 'completion_tokens', 0) or 0
-                    # Calculate cost using litellm (if available) or fallback pricing
-                    _cost_usd = self._calculate_llm_cost(_prompt_tokens, _completion_tokens, response=final_response)
-            
+            _prompt_tokens, _completion_tokens, _cost_usd = self._extract_llm_usage(final_response)
+
             _trace_emitter.llm_response(
                 self.name,
                 duration_ms=_duration_ms,
@@ -2272,33 +2512,8 @@ Your Goal: {self.goal}"""
                 cost_usd=_cost_usd,
             )
 
-            # Budget tracking & enforcement (zero overhead when _max_budget is None)
-            # Thread-safe cost tracking (Gap 1a fix)
-            with self._cost_lock:
-                self._total_cost += _cost_usd
-                self._total_tokens_in += _prompt_tokens
-                self._total_tokens_out += _completion_tokens
-                self._llm_call_count += 1
-                budget_exceeded = self._max_budget and self._total_cost >= self._max_budget
-                current_cost = self._total_cost
-            
-            if budget_exceeded:
-                if self._on_budget_exceeded == "stop":
-                    raise BudgetExceededError(
-                        f"Agent '{self.name}' exceeded budget: ${current_cost:.4f} >= ${self._max_budget:.4f}",
-                        budget_type="cost",
-                        limit=self._max_budget,
-                        used=current_cost,
-                        agent_id=self.name
-                    )
-                elif self._on_budget_exceeded == "warn":
-                    logging.warning(
-                        f"[budget] {self.name}: ${current_cost:.4f} exceeded "
-                        f"${self._max_budget:.4f} budget"
-                    )
-                elif callable(self._on_budget_exceeded):
-                    self._on_budget_exceeded(current_cost, self._max_budget)
-            
+            self._record_llm_usage(_prompt_tokens, _completion_tokens, _cost_usd)
+
             # Trigger AFTER_LLM hook
             # Only build the input if an AFTER_LLM hook is actually registered
             from ..hooks import HookEvent, AfterLLMInput
@@ -2312,6 +2527,7 @@ Your Goal: {self.goal}"""
                     messages=messages,
                     response=str(final_response),
                     model=self.llm if isinstance(self.llm, str) else str(self.llm),
+                    tokens_used=_prompt_tokens + _completion_tokens,
                     latency_ms=(time.time() - start_time) * 1000
                 )
                 self._hook_runner.execute_sync(HookEvent.AFTER_LLM, after_llm_input)
@@ -2966,40 +3182,8 @@ Your Goal: {self.goal}"""
             )
 
             # Post-call budget accounting (parity with sync _chat_completion).
-            _prompt_tokens = 0
-            _completion_tokens = 0
-            _cost_usd = 0.0
-            if final_response:
-                _usage = getattr(final_response, 'usage', None)
-                if _usage:
-                    _prompt_tokens = getattr(_usage, 'prompt_tokens', 0) or 0
-                    _completion_tokens = getattr(_usage, 'completion_tokens', 0) or 0
-                    _cost_usd = self._calculate_llm_cost(
-                        _prompt_tokens, _completion_tokens, response=final_response
-                    )
-            with self._cost_lock:
-                self._total_cost += _cost_usd
-                self._total_tokens_in += _prompt_tokens
-                self._total_tokens_out += _completion_tokens
-                self._llm_call_count += 1
-                budget_exceeded = self._max_budget and self._total_cost >= self._max_budget
-                current_cost = self._total_cost
-            if budget_exceeded:
-                if self._on_budget_exceeded == "stop":
-                    raise BudgetExceededError(
-                        f"Agent '{self.name}' exceeded budget: ${current_cost:.4f} >= ${self._max_budget:.4f}",
-                        budget_type="cost",
-                        limit=self._max_budget,
-                        used=current_cost,
-                        agent_id=self.name
-                    )
-                elif self._on_budget_exceeded == "warn":
-                    logging.warning(
-                        f"[budget] {self.name}: ${current_cost:.4f} exceeded "
-                        f"${self._max_budget:.4f} budget"
-                    )
-                elif callable(self._on_budget_exceeded):
-                    self._on_budget_exceeded(current_cost, self._max_budget)
+            _prompt_tokens, _completion_tokens, _cost_usd = self._extract_llm_usage(final_response)
+            self._record_llm_usage(_prompt_tokens, _completion_tokens, _cost_usd)
 
             # Trigger AFTER_LLM hook (parity with sync _chat_completion).
             from ..hooks import AfterLLMInput
@@ -3013,6 +3197,7 @@ Your Goal: {self.goal}"""
                     messages=messages,
                     response=str(final_response),
                     model=self.llm if isinstance(self.llm, str) else str(self.llm),
+                    tokens_used=_prompt_tokens + _completion_tokens,
                     latency_ms=(time.time() - _achat_start_time) * 1000
                 )
                 await self._hook_runner.execute(HookEvent.AFTER_LLM, after_llm_input)
@@ -3424,7 +3609,9 @@ Your Goal: {self.goal}"""
         # Emit context trace event (zero overhead when not set)
         from ..trace.context_events import get_context_emitter
         _trace_emitter = get_context_emitter()
-        _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
+        _trace_turn = _stream_traced_agent.get() is not self
+        if _trace_turn:
+            _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         durable_context = None
         durable_token = None
         previous_run_state = self._get_db_run_state()
@@ -3493,12 +3680,15 @@ Your Goal: {self.goal}"""
                 end_durable_run(durable_token)
                 durable_context.close()
             try:
-                _trace_emitter.agent_end(self.name)
+                if _trace_turn:
+                    _trace_emitter.agent_end(self.name, {"status": _agent_end_status(db_status)})
             finally:
                 if getattr(self, "_active_turn_token", None) is _cancel:
                     self._active_turn_token = None
                 _exit_turn(self, _cancel_ctx)
                 if _cancel is not None:
+                    if getattr(_cancel, "timed_out", False):
+                        self._last_stop_reason = "timeout"
                     _cancel.close()
 
     def _chat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
@@ -3825,7 +4015,7 @@ Your Goal: {self.goal}"""
                     if hasattr(self, '_drain_steering_messages') and getattr(self, '_message_steering', None) is not None:
                         llm_kwargs['steering_drain'] = self._drain_steering_messages
 
-                    response_text = self.llm_instance.get_response(**llm_kwargs)
+                    response_text = self._custom_llm_get_response(llm_kwargs)
 
                     self._add_to_chat_history("assistant", response_text)
                     # Persist assistant message to DB
@@ -3856,7 +4046,7 @@ Your Goal: {self.goal}"""
                         # Rollback chat history on guardrail failure
                         self._rollback_chat_history_to(chat_history_length)
                         return self._guardrail_blocked_message(e)
-                except ToolExecutionError:
+                except (ToolExecutionError, BudgetExceededError):
                     raise
                 except Exception as e:
                     self._last_stop_reason = "error"
@@ -3864,7 +4054,7 @@ Your Goal: {self.goal}"""
                     self._rollback_chat_history_to(chat_history_length)
                     _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
                     return None
-            except ToolExecutionError:
+            except (ToolExecutionError, BudgetExceededError):
                 raise
             except Exception as e:
                 self._last_stop_reason = "error"
@@ -4216,11 +4406,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             except Exception as e:
                 logger.warning(f"Steering check failed, continuing without steering: {e}")
 
-        # Input-side guardrail validation (parity with sync chat()). No-op
-        # unless the guardrail exposes validate_input; runs before any
-        # backend/LLM dispatch so a rejected prompt never reaches the model.
+        # Input-side validators may perform blocking LLM calls. Keep them off
+        # the event loop, before any backend/LLM dispatch, just like tool guards.
         if hasattr(self, '_validate_input_with_guardrail'):
-            _in_ok, _in_prompt, _in_err = self._validate_input_with_guardrail(prompt)
+            _input_guard = self._guardrail_fn
+            if (_input_guard is None or not hasattr(_input_guard, "validate_input")
+                    or getattr(_input_guard, "_praison_output_only", False)):
+                _in_ok, _in_prompt, _in_err = self._validate_input_with_guardrail(prompt)
+            else:
+                _in_ok, _in_prompt, _in_err = await asyncio.to_thread(
+                    self._validate_input_with_guardrail, prompt
+                )
             if not _in_ok:
                 logging.warning(f"Agent {self.name}: input blocked by guardrail: {_in_err}")
                 return self._guardrail_blocked_message(_in_err)
@@ -4336,12 +4532,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         await durable_context.aclose()
                 finally:
                     try:
-                        _trace_emitter.agent_end(self.name)
+                        _trace_emitter.agent_end(self.name, {"status": _agent_end_status(db_status)})
                     finally:
                         if getattr(self, "_active_turn_token", None) is _cancel:
                             self._active_turn_token = None
                         _exit_turn(self, _cancel_ctx)
                         if _cancel is not None:
+                            if getattr(_cancel, "timed_out", False):
+                                self._last_stop_reason = "timeout"
                             _cancel.close()
 
     async def _achat_impl(self, prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice=None, seed=None, cancel_token=None):
@@ -4552,7 +4750,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if hasattr(self, '_drain_steering_messages') and getattr(self, '_message_steering', None) is not None:
                         llm_kwargs['steering_drain'] = self._drain_steering_messages
 
-                    response_text = await self.llm_instance.get_response_async(**llm_kwargs)
+                    response_text = await self._custom_llm_get_response_async(llm_kwargs)
 
                     # LLM call succeeded - now it's safe to commit any compacted history
                     if effective_history is not self.chat_history:
@@ -4580,7 +4778,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Rollback chat history on guardrail failure
                         self._rollback_chat_history_to(chat_history_length)
                         return self._guardrail_blocked_message(e)
-                except ToolExecutionError:
+                except (ToolExecutionError, BudgetExceededError):
                     raise
                 except Exception as e:
                     self._last_stop_reason = "error"
@@ -5094,6 +5292,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except ToolExecutionError:
             raise
         except Exception as e:
+            # The custom-LLM path raises on an exhausted budget (sync parity).
+            if isinstance(e, BudgetExceededError) and self._using_custom_llm:
+                raise
             self._last_stop_reason = "error"
             _get_display_functions()['display_error'](f"Error in achat: {e}")
             if get_logger().getEffectiveLevel() == logging.DEBUG:
@@ -5291,6 +5492,36 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def _start_stream(self, prompt: str, **kwargs) -> Generator[str, None, None]:
         """Own the durable context for the complete streaming generator."""
+        # A stream is a turn too: give it its own loop guard (as chat/achat get
+        # via _enter_turn) so overlapping streams on a shared agent neither
+        # exhaust nor inherit each other's per-turn limits.
+        guard_token = _turn_loop_guard.set([self, None])
+        # Record the streamed turn like chat()/achat() do, so a live replay can
+        # show the agent running while its words stream (no-op when tracing is off).
+        from ..trace.context_events import get_context_emitter
+        _trace_emitter = get_context_emitter()
+        status = "completed"
+        if _trace_emitter._enabled:
+            _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
+        try:
+            # _start_stream_turn returns "failed" when a guardrail or hook blocks
+            # the turn, matching chat(), which records a blocked turn as failed.
+            status = (yield from self._start_stream_turn(prompt, **kwargs)) or status
+        except (GeneratorExit, InterruptedError):
+            status = "cancelled"
+            raise
+        except BaseException:
+            status = "failed"
+            raise
+        finally:
+            if _trace_emitter._enabled:
+                _trace_emitter.agent_end(self.name, {"status": status})
+            try:
+                _turn_loop_guard.reset(guard_token)
+            except (ValueError, LookupError):
+                _turn_loop_guard.set(None)
+
+    def _start_stream_turn(self, prompt: str, **kwargs) -> Generator[str, None, None]:
         # Tools go to their sandbox before the first model call, once per
         # agent. Placed on chat/achat/_start_stream rather than run/start
         # because AgentTeam and AgentFlow call these three directly -- an
@@ -5309,7 +5540,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if not _in_ok:
                 logging.warning(f"Agent {getattr(self, 'name', '')}: input blocked by guardrail: {_in_err}")
                 yield self._guardrail_blocked_message(_in_err)
-                return
+                return "failed"
             prompt = _in_prompt
 
         # Same pre-turn checks as chat()/achat(): a streamed turn must not
@@ -5330,7 +5561,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             ))
             if self._hook_runner.is_blocked(hook_results):
                 logging.warning(f"Agent {self.name} execution blocked by BEFORE_AGENT hook")
-                return
+                return "failed"
             for res in hook_results:
                 if res.output and res.output.modified_input and "prompt" in res.output.modified_input:
                     prompt = res.output.modified_input["prompt"]
@@ -6150,6 +6381,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         else:
             fallback_kwargs.pop('stream', None)
 
+        # The streamed turn already records agent_start/agent_end; keep chat()
+        # from recording the same turn a second time.
+        _traced = _stream_traced_agent.set(self)
         try:
             return self.chat(prompt, **fallback_kwargs)
         except Exception as fallback_error:
@@ -6162,6 +6396,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             except Exception:
                 pass
             raise fallback_error from streaming_error
+        finally:
+            _stream_traced_agent.reset(_traced)
 
     def _create_llm_summarize_function(self):
         """
@@ -6631,6 +6867,57 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         raise RuntimeError("Retry loop completed without returning or raising an exception")
 
     async def _achat_completion_with_retry(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
+        """Async model call with retry, recorded as ``llm_request``/``llm_response`` like the sync path.
+
+        ``Agent.astart``/``achat`` recorded no model calls before this, so a replay
+        of an async run showed the agent but never what it asked the model.
+        """
+        from ..trace.context_events import get_context_emitter
+
+        _trace_emitter = get_context_emitter()
+        call = self._achat_completion_with_retry_dispatch(
+            messages, temperature, tools, stream, reasoning_steps, task_name,
+            task_description, task_id, response_format,
+            stream_callback=stream_callback, emit_events=emit_events,
+        )
+        if not _trace_emitter._enabled:  # zero overhead when tracing is off
+            return await call
+        _trace_emitter.llm_request(
+            self.name,
+            messages_count=len(messages),
+            tokens_used=0,
+            model=self.llm if isinstance(self.llm, str) else None,
+            messages=messages,
+        )
+        started = time.time()
+        try:
+            response = await call
+        except Exception as e:
+            _trace_emitter.llm_response(
+                self.name,
+                duration_ms=(time.time() - started) * 1000,
+                finish_reason="error",
+                response_content=str(e),
+            )
+            raise
+        prompt_tokens = completion_tokens = 0
+        cost_usd = 0.0
+        usage = getattr(response, "usage", None)
+        if usage:
+            prompt_tokens = getattr(usage, "prompt_tokens", 0) or 0
+            completion_tokens = getattr(usage, "completion_tokens", 0) or 0
+            cost_usd = self._calculate_llm_cost(prompt_tokens, completion_tokens, response=response)
+        _trace_emitter.llm_response(
+            self.name,
+            duration_ms=(time.time() - started) * 1000,
+            response_content=self._extract_llm_response_content(response),
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            cost_usd=cost_usd,
+        )
+        return response
+
+    async def _achat_completion_with_retry_dispatch(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
         """
         Async wrapper for _execute_unified_achat_completion that adds jittered exponential backoff retry logic.
         

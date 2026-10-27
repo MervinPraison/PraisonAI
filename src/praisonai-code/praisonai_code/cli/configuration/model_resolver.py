@@ -19,7 +19,7 @@ helper that maps present credentials to a default.
 import json
 import os
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 
 from .paths import get_state_dir
 
@@ -134,50 +134,29 @@ def _provider_for_model(model: str) -> Optional[str]:
     return None
 
 
-def resolve_default_model(
-    explicit: Optional[str] = None,
-    *,
-    persist: bool = True,
-    notify: bool = True,
-) -> str:
-    """Resolve the default model for a zero-config run.
+def explain_default_model(explicit: Optional[str] = None) -> Tuple[str, str]:
+    """Return ``(model, source)`` for the model a run will actually dispatch.
 
-    Precedence: ``explicit`` > recent (persisted) > ``MODEL_NAME`` /
-    ``OPENAI_MODEL_NAME`` > provider-aware best > the terminal fallback
-    (:data:`praisonai_code.llm.env.DEFAULT_FALLBACK_MODEL`).
-
-    Only *user-chosen* models (``explicit`` and the env overrides) are
-    persisted as the recent model. Provider-*inferred* defaults and the
-    terminal fallback are intentionally **not** persisted: persisting them
-    would let a stale inferred default short-circuit credential-based
-    inference on a later run after the user's available providers have changed.
-
-    Args:
-        explicit: An explicitly configured model (``--model``/config/YAML).
-            When given it wins and is persisted as the recent model.
-        persist: Whether to remember user-chosen models for next time.
-        notify: Whether to emit a one-line transparency notice the first time a
-            provider-aware default is inferred (no explicit, no recent model).
-
-    Returns:
-        The resolved model id.
+    Side-effect free (no persistence, no notice) so it can back introspection
+    such as ``praisonai config provenance``. ``source`` is one of
+    ``"explicit"``, ``"state:<path>"``, ``"env:MODEL_NAME"`` /
+    ``"env:OPENAI_MODEL_NAME"``, ``"local"``, ``"provider:<ENV_VAR>"`` or
+    ``"fallback"``. :func:`resolve_default_model` is built on top of this so the
+    reported source can never drift from the resolution itself.
     """
     if explicit:
-        if persist:
-            set_recent_model(explicit)
-        return explicit
+        return explicit, "explicit"
 
     recent = get_recent_model()
     if recent:
-        return recent
+        return recent, f"state:{_model_state_path()}"
 
     # Honour OPENAI_MODEL_NAME / MODEL_NAME for backward compatibility before
     # falling back to credential-based inference.
-    env_model = os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL_NAME")
-    if env_model:
-        if persist:
-            set_recent_model(env_model)
-        return env_model
+    for var in ("MODEL_NAME", "OPENAI_MODEL_NAME"):
+        env_model = os.environ.get(var)
+        if env_model:
+            return env_model, f"env:{var}"
 
     try:
         from praisonai_code.llm.env import (
@@ -195,30 +174,62 @@ def resolve_default_model(
             except Exception:
                 local = None
             if local:
-                if notify:
-                    try:
-                        import typer
-                        typer.echo(
-                            f"No cloud key found; using local model "
-                            f"{local.model}. Run `praisonai setup` to add a "
-                            f"hosted provider."
-                        )
-                    except Exception:
-                        pass
-                return local.model
+                return local.model, "local"
     except Exception:
         model = _fallback_model()
 
-    if notify:
-        provider = _provider_for_model(model)
-        if provider and os.environ.get(provider):
-            try:
-                import typer
-                typer.echo(
-                    f"No model set; using {model} because {provider} is present."
-                )
-            except Exception:
-                pass
+    provider = _provider_for_model(model)
+    if provider and os.environ.get(provider):
+        return model, f"provider:{provider}"
+    return model, "fallback"
+
+
+def resolve_default_model(
+    explicit: Optional[str] = None,
+    *,
+    persist: bool = True,
+    notify: bool = True,
+) -> str:
+    """Resolve the default model for a zero-config run.
+
+    Precedence: ``explicit`` > recent (persisted) > ``MODEL_NAME`` /
+    ``OPENAI_MODEL_NAME`` > provider-aware best > the terminal fallback
+    (:data:`praisonai_code.llm.env.DEFAULT_FALLBACK_MODEL`). See
+    :func:`explain_default_model` for the source of the chosen model.
+
+    Only *user-chosen* models (``explicit`` and the env overrides) are
+    persisted as the recent model. Provider-*inferred* defaults and the
+    terminal fallback are intentionally **not** persisted: persisting them
+    would let a stale inferred default short-circuit credential-based
+    inference on a later run after the user's available providers have changed.
+
+    Args:
+        explicit: An explicitly configured model (``--model``/config/YAML).
+            When given it wins and is persisted as the recent model.
+        persist: Whether to remember user-chosen models for next time.
+        notify: Whether to emit a one-line transparency notice the first time a
+            provider-aware default is inferred (no explicit, no recent model).
+
+    Returns:
+        The resolved model id.
+    """
+    model, source = explain_default_model(explicit)
+
+    if source == "explicit" or source.startswith("env:"):
+        if persist:
+            set_recent_model(model)
+        return model
+
+    if notify and source == "local":
+        _echo(
+            f"No cloud key found; using local model {model}. Run "
+            f"`praisonai setup` to add a hosted provider."
+        )
+    elif notify and source.startswith("provider:"):
+        _echo(
+            f"No model set; using {model} because "
+            f"{source.split(':', 1)[1]} is present."
+        )
 
     # NOTE: provider-inferred defaults and the terminal fallback are
     # deliberately NOT persisted. Persisting them would let a stale inferred
@@ -226,3 +237,11 @@ def resolve_default_model(
     # user's available providers have changed, re-introducing the very
     # zero-config failure this resolver exists to prevent.
     return model
+
+
+def _echo(message: str) -> None:
+    try:
+        import typer
+        typer.echo(message)
+    except Exception:
+        pass

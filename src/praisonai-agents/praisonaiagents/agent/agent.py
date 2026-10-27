@@ -12,7 +12,7 @@ from collections import OrderedDict
 import inspect
 
 # Decomposed agent functionality - real implementations in mixin files
-from .chat_mixin import ChatMixin
+from .chat_mixin import ChatMixin, _deadline_scope
 from .execution_mixin import ExecutionMixin
 from .memory_mixin import MemoryMixin
 from .async_memory_mixin import AsyncMemoryMixin
@@ -457,11 +457,20 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             self._wire_deferred_history_callback()
 
     def _ensure_loop_guard(self):
-        """Lazy-create loop guard on first tool execution."""
+        """Lazy-create loop guard on first tool execution.
+
+        Inside a chat turn, returns that turn's own guard (same config) so
+        concurrent turns on a shared agent do not share per-turn counters."""
         if self._loop_guard is None:
             from ..escalation.loop_guard import LoopGuard, LoopGuardConfig
-            self._loop_guard = LoopGuard(LoopGuardConfig(enabled=True))
-        return self._loop_guard
+            config = LoopGuardConfig(enabled=True)
+            limit = getattr(self, "max_execution_time", None)
+            if limit is not None:
+                config.max_time_per_turn = float(limit) if limit > 0 else float("inf")
+            self._loop_guard = LoopGuard(config)
+        from .chat_mixin import _current_turn_loop_guard
+        turn_guard = _current_turn_loop_guard(self)
+        return turn_guard if turn_guard is not None else self._loop_guard
 
     def _ensure_loop_detector(self):
         """Lazy-create the result-aware tool-loop detector on first tool call.
@@ -1908,6 +1917,17 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 "Use Agent(policy=PolicyEngine(...)) for tool policy enforcement, "
                 "or pass a validator via GuardrailConfig(validator=...)."
             )
+        # GuardrailConfig.on_fail has a single implemented policy (retry, then
+        # return the blocked message); refuse "skip"/"raise" rather than
+        # silently behaving as "retry".
+        if isinstance(_guardrails_config, GuardrailConfig) and (
+            getattr(_guardrails_config.on_fail, "value", _guardrails_config.on_fail) != "retry"
+        ):
+            raise ValueError(
+                f"GuardrailConfig.on_fail={_guardrails_config.on_fail!r} is not supported; "
+                "only 'retry' is implemented. Remove on_fail, or handle a blocked "
+                "response via Agent.last_guardrail_error."
+            )
 
         # Fail loud when the value could not be turned into an enforceable
         # guardrail, instead of storing something that never runs. Silently
@@ -3278,6 +3298,12 @@ Your Goal: {self.goal}
             if k in ("_db_run_context", "_db_session_init_lock"):
                 # A clone starts outside the source agent's active DB turn.
                 continue
+            elif k == "_tool_executor":
+                # Thread pools can't be copied; the clone lazily builds its own.
+                continue
+            elif k == "_Agent__hook_runner":
+                # Holds locks; rebuilt lazily on first use.
+                object.__setattr__(result, k, None)
             elif k in ("_Agent__cache_lock",):
                 object.__setattr__(result, k, threading.RLock())
             elif k in ("_cost_lock", "_auto_save_lock"):
@@ -4104,7 +4130,9 @@ Summary:"""
         step budget from ``ExecutionConfig.max_steps`` was reached and the run was
         truncated), a provider block/refusal/truncation
         (``"content_filtered" | "refused" | "length_truncated"``) derived from the
-        LLM ``finish_reason``/refusal signal, or ``"error"``. Lets CLI/CI callers
+        LLM ``finish_reason``/refusal signal, ``"timeout"`` (the turn passed
+        ``ExecutionConfig.max_execution_time`` or the ``run_autonomous``
+        deadline), or ``"error"``. Lets CLI/CI callers
         branch on the terminal reason instead of parsing a magic string. Reads
         from whichever backend (OpenAI-native or LiteLLM) executed the last turn.
         """
@@ -4722,7 +4750,7 @@ Summary:"""
             if result.success:
                 print(result.output)
         """
-        from .autonomy import AutonomyResult
+        from .autonomy import AutonomyResult, _timeout_result
         import time as time_module
         from datetime import datetime, timezone
         
@@ -4761,6 +4789,11 @@ Summary:"""
         effective_promise = completion_promise
         if effective_promise is None:
             effective_promise = self.autonomy_config.get("completion_promise")
+        # The promise is the only success signal, so tell the model about it
+        # unless the caller already did (e.g. the `loop` CLI instructions).
+        _promise_tag = f"<promise>{effective_promise}</promise>"
+        if effective_promise and _promise_tag not in prompt and _promise_tag not in (self.instructions or ""):
+            prompt = f"{prompt}\n\nWhen the task is fully complete, include {_promise_tag} in your response."
         
         # Get clear_context from config if not explicitly set
         effective_clear_context = clear_context
@@ -4791,17 +4824,10 @@ Summary:"""
                 )
                 
                 # Check timeout
-                if timeout_seconds and (time_module.time() - start_time) > timeout_seconds:
-                    return AutonomyResult(
-                        success=False,
-                        output="Task timed out",
-                        completion_reason="timeout",
-                        iterations=iterations,
-                        stage=stage,
-                        actions=actions_taken,
-                        duration_seconds=time_module.time() - start_time,
-                        started_at=started_at,
-                    )
+                _timed_out = _timeout_result(
+                    timeout_seconds, iterations, stage, actions_taken, start_time, started_at)
+                if _timed_out is not None:
+                    return _timed_out
                 
                 # G2: Check for interrupt request (cooperative cancellation) - sync version
                 if self.interrupt_controller and self.interrupt_controller.is_set():
@@ -4824,9 +4850,17 @@ Summary:"""
                 # Reset the per-turn warning latch and inject any queued nudge.
                 turn_prompt = self._consume_self_correction(prompt)
                 try:
-                    response = self.chat(turn_prompt)
+                    with _deadline_scope(timeout_seconds and timeout_seconds - (time_module.time() - start_time)):
+                        response = self.chat(turn_prompt)
                 except Exception as e:
-                    return AutonomyResult(
+                    # The run deadline cancels an overrunning turn; report it as a timeout.
+                    # A budget stop keeps its typed budget_exhausted result when a cap applies.
+                    return _timeout_result(
+                        timeout_seconds, iterations, stage, actions_taken, start_time, started_at
+                    ) or (isinstance(e, BudgetExceededError) and self._autonomy_budget_result(
+                        iterations, stage, actions_taken, start_time, started_at,
+                        "", spend_baseline
+                    )) or AutonomyResult(
                         success=False,
                         output=str(e),
                         completion_reason="error",
@@ -4837,6 +4871,14 @@ Summary:"""
                         error=str(e),
                         started_at=started_at,
                     )
+                
+                # A turn that overran the run deadline or max_execution_time
+                # must not count as progress.
+                _timed_out = _timeout_result(
+                    timeout_seconds, iterations, stage, actions_taken, start_time, started_at,
+                    turn_timed_out=getattr(self, "_last_stop_reason", None) == "timeout")
+                if _timed_out is not None:
+                    return _timed_out
                 
                 response_str = str(response)
                 
@@ -5003,7 +5045,7 @@ Summary:"""
                 # the task naturally (model stopped calling tools = done).
                 # This is the same signal the CLI/wrapper path trusts.
                 # ─────────────────────────────────────────────────────────────
-                if self._autonomy_turn_tool_count > 0 and len(response_str) > 100:
+                if not effective_promise and self._autonomy_turn_tool_count > 0 and len(response_str) > 100:
                     # P3/G2: Emit completion callback
                     execute_sync_callback('autonomy_complete',
                         completion_reason="tool_completion",
@@ -5040,7 +5082,8 @@ Summary:"""
                         if obs is not None:
                             obs.emit(_EvtType.STAGE_ESCALATE, {"from": prev_stage, "to": stage})
                 
-                # Check for completion promise FIRST (structured signal)
+                # Completion promise: when configured, it is the only success signal
+                # (heuristic exits above/below are skipped in promise mode)
                 if effective_promise:
                     promise_tag = f"<promise>{effective_promise}</promise>"
                     if promise_tag in response_str:
@@ -5062,7 +5105,7 @@ Summary:"""
                         )
                 
                 # Check for keyword-based completion signals (word-boundary, G-COMPLETION-1 fix)
-                if self._is_completion_signal(response_str):
+                if not effective_promise and self._is_completion_signal(response_str):
                     # P3/G2: Emit completion callback
                     execute_sync_callback('autonomy_complete',
                         completion_reason="goal",
@@ -5081,7 +5124,7 @@ Summary:"""
                     )
                 
                 # For DIRECT stage, complete after first response
-                if stage == "direct":
+                if not effective_promise and stage == "direct":
                     # P3/G2: Emit completion callback
                     execute_sync_callback('autonomy_complete',
                         completion_reason="goal",
@@ -5109,7 +5152,7 @@ Summary:"""
                 # Suppressed when doom recovery is active — once a doom loop
                 # is detected, no_tool_calls (a success exit) should not fire;
                 # the doom loop system manages termination instead.
-                if (self._autonomy_turn_tool_count == 0 and iterations > 1
+                if (not effective_promise and self._autonomy_turn_tool_count == 0 and iterations > 1
                         and not self._doom_recovery_active):
                     self._consecutive_no_tool_turns += 1
                     if self._consecutive_no_tool_turns >= 2:
@@ -5221,7 +5264,7 @@ Summary:"""
             
             asyncio.run(main())
         """
-        from .autonomy import AutonomyResult
+        from .autonomy import AutonomyResult, _timeout_result
         import time as time_module
         from datetime import datetime, timezone
         import asyncio
@@ -5248,6 +5291,11 @@ Summary:"""
         effective_promise = completion_promise
         if effective_promise is None:
             effective_promise = self.autonomy_config.get("completion_promise")
+        # The promise is the only success signal, so tell the model about it
+        # unless the caller already did (e.g. the `loop` CLI instructions).
+        _promise_tag = f"<promise>{effective_promise}</promise>"
+        if effective_promise and _promise_tag not in prompt and _promise_tag not in (self.instructions or ""):
+            prompt = f"{prompt}\n\nWhen the task is fully complete, include {_promise_tag} in your response."
         
         # Get clear_context from config if not explicitly set
         effective_clear_context = clear_context
@@ -5268,17 +5316,10 @@ Summary:"""
                 iterations += 1
                 
                 # Check timeout
-                if timeout_seconds and (time_module.time() - start_time) > timeout_seconds:
-                    return AutonomyResult(
-                        success=False,
-                        output="Task timed out",
-                        completion_reason="timeout",
-                        iterations=iterations,
-                        stage=stage,
-                        actions=actions_taken,
-                        duration_seconds=time_module.time() - start_time,
-                        started_at=started_at,
-                    )
+                _timed_out = _timeout_result(
+                    timeout_seconds, iterations, stage, actions_taken, start_time, started_at)
+                if _timed_out is not None:
+                    return _timed_out
                 
                 # G2: Check for interrupt request (cooperative cancellation)
                 if self.interrupt_controller and self.interrupt_controller.is_set():
@@ -5302,9 +5343,17 @@ Summary:"""
                 # Reset the per-turn warning latch and inject any queued nudge.
                 turn_prompt = self._consume_self_correction(prompt)
                 try:
-                    response = await self.achat(turn_prompt)
+                    with _deadline_scope(timeout_seconds and timeout_seconds - (time_module.time() - start_time)):
+                        response = await self.achat(turn_prompt)
                 except Exception as e:
-                    return AutonomyResult(
+                    # The run deadline cancels an overrunning turn; report it as a timeout.
+                    # A budget stop keeps its typed budget_exhausted result when a cap applies.
+                    return _timeout_result(
+                        timeout_seconds, iterations, stage, actions_taken, start_time, started_at
+                    ) or (isinstance(e, BudgetExceededError) and self._autonomy_budget_result(
+                        iterations, stage, actions_taken, start_time, started_at,
+                        "", spend_baseline
+                    )) or AutonomyResult(
                         success=False,
                         output=str(e),
                         completion_reason="error",
@@ -5315,6 +5364,14 @@ Summary:"""
                         error=str(e),
                         started_at=started_at,
                     )
+                
+                # A turn that overran the run deadline or max_execution_time
+                # must not count as progress.
+                _timed_out = _timeout_result(
+                    timeout_seconds, iterations, stage, actions_taken, start_time, started_at,
+                    turn_timed_out=getattr(self, "_last_stop_reason", None) == "timeout")
+                if _timed_out is not None:
+                    return _timed_out
                 
                 response_str = str(response)
                 
@@ -5470,7 +5527,7 @@ Summary:"""
                 # produced a substantive response, the inner loop completed
                 # the task naturally (model stopped calling tools = done).
                 # ─────────────────────────────────────────────────────────────
-                if self._autonomy_turn_tool_count > 0 and len(response_str) > 100:
+                if not effective_promise and self._autonomy_turn_tool_count > 0 and len(response_str) > 100:
                     return AutonomyResult(
                         success=True,
                         output=response_str,
@@ -5493,7 +5550,8 @@ Summary:"""
                         if obs is not None:
                             obs.emit(_EvtType.STAGE_ESCALATE, {"from": stage_order[idx], "to": stage})
                 
-                # Check for completion promise FIRST (structured signal)
+                # Completion promise: when configured, it is the only success signal
+                # (heuristic exits above/below are skipped in promise mode)
                 if effective_promise:
                     promise_tag = f"<promise>{effective_promise}</promise>"
                     if promise_tag in response_str:
@@ -5509,7 +5567,7 @@ Summary:"""
                         )
                 
                 # Check for keyword-based completion signals (word-boundary, G-COMPLETION-1 fix)
-                if self._is_completion_signal(response_str):
+                if not effective_promise and self._is_completion_signal(response_str):
                     return AutonomyResult(
                         success=True,
                         output=response_str,
@@ -5522,7 +5580,7 @@ Summary:"""
                     )
                 
                 # For DIRECT stage, complete after first response
-                if stage == "direct":
+                if not effective_promise and stage == "direct":
                     return AutonomyResult(
                         success=True,
                         output=response_str,
@@ -5543,7 +5601,7 @@ Summary:"""
                 # Suppressed when doom recovery is active — once a doom loop
                 # is detected, no_tool_calls (a success exit) should not fire;
                 # the doom loop system manages termination instead.
-                if (self._autonomy_turn_tool_count == 0 and iterations > 1
+                if (not effective_promise and self._autonomy_turn_tool_count == 0 and iterations > 1
                         and not self._doom_recovery_active):
                     self._consecutive_no_tool_turns += 1
                     if self._consecutive_no_tool_turns >= 2:
@@ -6524,7 +6582,8 @@ Summary:"""
                     # In async context - prefer async hook if available
                     if hasattr(self._memory_instance, 'aon_memory_write'):
                         # Schedule async hook without blocking (fire and forget)
-                        asyncio.create_task(self._memory_instance.aon_memory_write(action, memory_type, content, metadata))
+                        from ..utils.async_bridge import spawn_background
+                        spawn_background(self._memory_instance.aon_memory_write(action, memory_type, content, metadata), "aon_memory_write")
                     elif hasattr(self._memory_instance, 'on_memory_write'):
                         self._memory_instance.on_memory_write(action, memory_type, content, metadata)
                 except RuntimeError:
@@ -6656,10 +6715,19 @@ Summary:"""
                     if hasattr(self, 'llm_instance') and self.llm_instance:
                         llm = self.llm_instance
                     
+                    # rerank=True without rerank_model has no backend reranker,
+                    # so use the zero-dependency keyword reranker; with
+                    # rerank_model the vector store already reranks.
+                    reranker = None
+                    if rag_config_obj.rerank and not getattr(self._retrieval_config, "rerank_model", None):
+                        from praisonaiagents.rag.retriever import SimpleReranker
+                        reranker = SimpleReranker()
+
                     self._rag_instance = RAG(
                         knowledge=self.knowledge,
                         config=rag_config_obj,
                         llm=llm,
+                        reranker=reranker,
                     )
                 except ImportError:
                     logging.warning("RAG module not available. Install with: pip install 'praisonaiagents[rag]'")
@@ -7085,6 +7153,9 @@ Answer:"""
 
     def _process_handoffs(self):
         """Process handoffs and convert them to tools that can be used by the agent."""
+        if not self.handoffs and not (isinstance(self.tools, list) and self.tools):
+            return
+
         # Import here to avoid circular imports
         from .handoff import Handoff
 

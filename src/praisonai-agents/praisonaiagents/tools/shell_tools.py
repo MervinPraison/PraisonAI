@@ -7,6 +7,7 @@ This module provides a safe interface for executing shell commands with:
 - Resource limits
 """
 
+import re
 import subprocess
 import shlex
 import logging
@@ -87,6 +88,48 @@ def _find_shell_syntax(command: str):
                     return token
         i += 1
     return None
+
+
+# Credential-looking variable names are withheld from model-driven commands:
+# a gateway serving untrusted chat would otherwise hand `env` / `echo $X` every
+# LLM key, channel token and its own GATEWAY_AUTH_TOKEN. Operators who need one
+# inside a command name it in PRAISONAI_SHELL_ENV_ALLOWLIST (comma-separated).
+_SECRET_NAME_PARTS = frozenset({"TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "CREDENTIALS", "APIKEY"})
+_ENV_REF = re.compile(r"\$(\w+|\{[^}]*\})")
+_ENV_REF_NT = re.compile(r"\$(\w+|\{[^}]*\})|%(\w+)%")
+
+
+def _is_secret_name(name: str) -> bool:
+    upper = name.upper()
+    return upper.endswith("_KEY") or any(part in _SECRET_NAME_PARTS for part in upper.split("_"))
+
+
+def _build_subprocess_env(extra_env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """Parent environment minus secret-looking names, plus explicit *extra_env*."""
+    allow = {n.strip() for n in os.environ.get("PRAISONAI_SHELL_ENV_ALLOWLIST", "").split(",") if n.strip()}
+    process_env = {k: v for k, v in os.environ.items() if k in allow or not _is_secret_name(k)}
+    if extra_env:
+        process_env.update(extra_env)
+    return process_env
+
+
+def _expandvars(value: str, env: Dict[str, str]) -> str:
+    """``os.path.expandvars`` against *env* rather than ``os.environ``.
+
+    On Windows ``%VAR%`` is expanded too and names are case-insensitive,
+    matching ``ntpath.expandvars``.
+    """
+    windows = platform.system() == 'Windows'
+    if windows:
+        env = {k.upper(): v for k, v in env.items()}
+
+    def _sub(match):
+        name = (match.group(1) or match.group(2)).strip("{}")
+        return env.get(name.upper() if windows else name, match.group(0))
+
+    if windows:
+        return _ENV_REF_NT.sub(_sub, value) if ("$" in value or "%" in value) else value
+    return _ENV_REF.sub(_sub, value) if "$" in value else value
 
 
 class ShellTools:
@@ -187,24 +230,23 @@ class ShellTools:
             if not command:
                 return {"error": "Empty command", "stdout": "", "stderr": "", "exit_code": 1}
             
+            # Set up process environment (secrets stripped, explicit env kept)
+            process_env = _build_subprocess_env(env)
+
             # Expand tilde and environment variables in command arguments
-            # (shell=False means the shell won't do this for us)
-            command = [os.path.expanduser(os.path.expandvars(arg)) for arg in command]
-            
+            # (shell=False means the shell won't do this for us). Expansion
+            # uses the scrubbed env so `echo $OPENAI_API_KEY` cannot leak it.
+            command = [os.path.expanduser(_expandvars(arg, process_env)) for arg in command]
+
             # Expand tilde in cwd (subprocess doesn't do this)
             if cwd:
                 cwd = os.path.expanduser(cwd)
-                cwd = os.path.expandvars(cwd)  # Also expand $HOME, $USER, etc.
+                cwd = _expandvars(cwd, process_env)  # Also expand $HOME, $USER, etc.
                 if not os.path.isdir(cwd):
                     # Fallback: try home directory, then current working directory
                     fallback = os.path.expanduser("~") if os.path.isdir(os.path.expanduser("~")) else os.getcwd()
                     logging.warning(f"Working directory '{cwd}' does not exist, using '{fallback}'")
                     cwd = fallback
-            
-            # Set up process environment
-            process_env = os.environ.copy()
-            if env:
-                process_env.update(env)
 
             if run_in_background:
                 return self._start_background(command, cwd, process_env)
@@ -256,43 +298,38 @@ class ShellTools:
                     result['stderr_artifact'] = stderr_path
                 return result
             
-            except _CommandCancelled:
+            except _CommandCancelled as e:
                 # A cooperative interrupt (/stop, Ctrl-C) fired while the child
                 # was still running. Kill the whole process group so descendants
                 # do not keep mutating state, then report an interrupted outcome.
                 self._kill_process_tree(process)
-                return {
-                    'stdout': '',
-                    'stderr': 'Command interrupted by user',
-                    'exit_code': -1,
-                    'success': False,
-                    'interrupted': True,
-                    'execution_time': time.time() - start_time
-                }
+                result = self._partial_result(
+                    e, 'Command interrupted by user', max_output_size, spill, spill_dir
+                )
+                result.update(interrupted=True, execution_time=time.time() - start_time)
+                return result
 
-            except _StreamDrainTimeout:
+            except _StreamDrainTimeout as e:
                 # The direct child already exited; only an inherited pipe kept a
                 # reader blocked. Report a timeout but do NOT kill — the direct
                 # child's PID is gone (and may have been recycled), so killing it
                 # would be unsafe and misleading.
-                return {
-                    'stdout': '',
-                    'stderr': f'Command output streaming timed out after {timeout} seconds',
-                    'exit_code': -1,
-                    'success': False,
-                    'execution_time': timeout
-                }
+                result = self._partial_result(
+                    e, f'Command output streaming timed out after {timeout} seconds',
+                    max_output_size, spill, spill_dir,
+                )
+                result.update(timed_out=True, execution_time=timeout)
+                return result
 
-            except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired as e:
                 # Kill process on timeout
                 self._kill_process_tree(process)
-                return {
-                    'stdout': '',
-                    'stderr': f'Command timed out after {timeout} seconds',
-                    'exit_code': -1,
-                    'success': False,
-                    'execution_time': timeout
-                }
+                result = self._partial_result(
+                    e, f'Command timed out after {timeout} seconds',
+                    max_output_size, spill, spill_dir,
+                )
+                result.update(timed_out=True, execution_time=timeout)
+                return result
                 
         except Exception as e:
             # Name the exception type and log the traceback. Some exceptions
@@ -314,6 +351,28 @@ class ShellTools:
                 'execution_time': 0
             }
     
+    def _partial_result(self, exc, reason, max_output_size, spill, spill_dir):
+        """Build a failed result that keeps output captured before ``exc``."""
+        collect = getattr(exc, 'collect_output', None)
+        stdout, stderr = collect() if collect else ('', '')
+        stdout, stdout_path = self._handle_overflow(
+            stdout, "stdout", max_output_size, spill, spill_dir
+        )
+        stderr, stderr_path = self._handle_overflow(
+            stderr, "stderr", max_output_size, spill, spill_dir
+        )
+        result: Dict[str, Union[str, int, bool]] = {
+            'stdout': stdout,
+            'stderr': f"{stderr.rstrip()}\n{reason}" if stderr.strip() else reason,
+            'exit_code': -1,
+            'success': False,
+        }
+        if stdout_path:
+            result['stdout_artifact'] = stdout_path
+        if stderr_path:
+            result['stderr_artifact'] = stderr_path
+        return result
+
     def _start_background(self, command, cwd, process_env):
         """Start *command* detached, writing stdout+stderr to a log file."""
         import tempfile
@@ -560,18 +619,31 @@ class ShellTools:
         t_out.start()
         t_err.start()
 
+        def _with_partial(exc, drain=True):
+            # Keep whatever the command already printed: on a timeout/interrupt
+            # the real error usually lives in the output produced so far. The
+            # caller collects only AFTER killing the child, so the pipes close
+            # and readline() returns trailing text written without a newline.
+            def _collect():
+                if drain:
+                    for reader in (t_out, t_err):
+                        reader.join(timeout=_DRAIN_GRACE_SECONDS)
+                return "".join(stdout_chunks), "".join(stderr_chunks)
+            exc.collect_output = _collect
+            return exc
+
         deadline = None if timeout is None else time.monotonic() + timeout
         if cancel_event is None:
             try:
                 process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
+            except subprocess.TimeoutExpired as exc:
                 # The direct child is still running. Disable any further emission
                 # and re-raise TimeoutExpired so the caller's timeout path KILLS
                 # the process before returning — a recorded read error must not
                 # short-circuit that cleanup (otherwise the still-running child
                 # leaks with its pipes open).
                 stop_emitting.set()
-                raise
+                raise _with_partial(exc)
         else:
             # Poll in short slices so a cooperative interrupt aborts the child
             # promptly (within the poll interval) rather than only on timeout.
@@ -579,12 +651,12 @@ class ShellTools:
             while True:
                 if cancel_event.is_set():
                     stop_emitting.set()
-                    raise _CommandCancelled()
+                    raise _with_partial(_CommandCancelled())
                 if deadline is not None:
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:
                         stop_emitting.set()
-                        raise subprocess.TimeoutExpired(process.args, timeout)
+                        raise _with_partial(subprocess.TimeoutExpired(process.args, timeout))
                     wait_slice = min(_POLL, remaining)
                 else:
                     wait_slice = _POLL
@@ -616,7 +688,7 @@ class ShellTools:
             # Stop emitting and signal a drain-timeout so the caller reports a
             # timeout WITHOUT trying to kill an already-exited process.
             stop_emitting.set()
-            raise _StreamDrainTimeout()
+            raise _with_partial(_StreamDrainTimeout(), drain=False)
 
         if read_errors:
             raise read_errors[0]

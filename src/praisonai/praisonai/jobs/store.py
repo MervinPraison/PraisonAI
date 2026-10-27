@@ -6,7 +6,9 @@ Provides storage backends for job state persistence.
 
 import asyncio
 import logging
+import os
 import threading
+import uuid
 from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
@@ -14,6 +16,71 @@ from datetime import datetime, timedelta
 from .models import Job, JobStatus
 
 logger = logging.getLogger(__name__)
+
+# Per-process identity stamped on persisted jobs ("<pid>:<start>:<token>"). The
+# token is regenerated after fork so each worker owns only the rows it wrote;
+# <start> is the process start time so a reused pid is not mistaken for the owner.
+_OWNER: Dict[str, Any] = {"pid": None, "id": None}
+
+
+def _proc_start(pid: int) -> str:
+    """Process start time (/proc on Linux, ``ps`` elsewhere), or "" when unknown."""
+    if os.path.isdir("/proc"):
+        try:
+            with open(f"/proc/{pid}/stat") as f:
+                return f.read().rsplit(")", 1)[1].split()[19]
+        except (OSError, IndexError):
+            return ""
+    if os.name != "posix":
+        return ""
+    import subprocess
+
+    try:
+        out = subprocess.run(
+            ["ps", "-o", "lstart=", "-p", str(pid)], capture_output=True,
+            text=True, timeout=5, env={**os.environ, "LC_ALL": "C"},
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return "".join(ch for ch in out if ch.isalnum())  # no ":" in the owner id
+
+
+def _owner_id() -> str:
+    pid = os.getpid()
+    if _OWNER["pid"] != pid:
+        _OWNER["pid"] = pid
+        _OWNER["id"] = f"{pid}:{_proc_start(pid)}:{uuid.uuid4().hex}"
+    return _OWNER["id"]
+
+
+def _owner_alive(owner: Optional[str]) -> bool:
+    """True when ``owner`` is a different, still-running process."""
+    if not owner or owner == _owner_id():
+        return False
+    parts = owner.split(":")
+    try:
+        pid = int(parts[0])
+    except ValueError:
+        return False
+    if len(parts) == 3 and parts[1]:
+        start = _proc_start(pid)
+        if start and start != parts[1]:
+            return False  # owner exited and its pid was reused
+        # Unreadable start time (hidepid, other user, pid namespace) is
+        # "unknown", not "dead": fall through to the kill(pid, 0) probe.
+    if pid == os.getpid() or os.name != "posix":
+        # Same pid with another token is our dead predecessor (e.g. container
+        # restart); no safe liveness probe off POSIX, so keep the old behaviour.
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
 
 
 class JobStore(ABC):
@@ -279,6 +346,18 @@ class SqliteJobStore(JobStore):
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_idempotency "
             "ON jobs(idempotency_key)"
         )
+        # Writer identity so a starting process only reconciles rows whose
+        # owner is gone, never a cohabiting worker's live jobs.
+        columns = {row[1] for row in self._conn.execute("PRAGMA table_info(jobs)")}
+        if "owner" not in columns:
+            try:
+                self._conn.execute("ALTER TABLE jobs ADD COLUMN owner TEXT")
+            except sqlite3.OperationalError:
+                # Fine if another worker added it concurrently; anything else
+                # (e.g. a lock timeout) would leave every write broken.
+                columns = {row[1] for row in self._conn.execute("PRAGMA table_info(jobs)")}
+                if "owner" not in columns:
+                    raise
         self._conn.commit()
         self._lock = threading.Lock()
         # Reconcile jobs that were still QUEUED/RUNNING when the previous
@@ -296,10 +375,14 @@ class SqliteJobStore(JobStore):
         now = datetime.utcnow().isoformat()
         try:
             with self._lock:
-                rows = self._conn.execute(
-                    f"SELECT data FROM jobs WHERE status IN ({placeholders})",
-                    nonterminal,
-                ).fetchall()
+                rows = [
+                    (data,)
+                    for data, owner in self._conn.execute(
+                        f"SELECT data, owner FROM jobs WHERE status IN ({placeholders})",
+                        nonterminal,
+                    ).fetchall()
+                    if not _owner_alive(owner)
+                ]
                 for (data,) in rows:
                     job = self._row_to_job(data)
                     job.status = JobStatus.FAILED
@@ -329,8 +412,8 @@ class SqliteJobStore(JobStore):
             with self._lock:
                 self._conn.execute(
                     "INSERT OR REPLACE INTO jobs "
-                    "(id, status, session_id, idempotency_key, created_at, completed_at, data) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "(id, status, session_id, idempotency_key, created_at, completed_at, data, owner) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         job.id,
                         job.status.value,
@@ -339,6 +422,7 @@ class SqliteJobStore(JobStore):
                         job.created_at.isoformat() if job.created_at else None,
                         job.completed_at.isoformat() if job.completed_at else None,
                         job.model_dump_json(),
+                        _owner_id(),
                     ),
                 )
                 self._conn.commit()
@@ -362,8 +446,8 @@ class SqliteJobStore(JobStore):
                 try:
                     self._conn.execute(
                         "INSERT INTO jobs "
-                        "(id, status, session_id, idempotency_key, created_at, completed_at, data) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        "(id, status, session_id, idempotency_key, created_at, completed_at, data, owner) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                         (
                             job.id,
                             job.status.value,
@@ -372,6 +456,7 @@ class SqliteJobStore(JobStore):
                             job.created_at.isoformat() if job.created_at else None,
                             job.completed_at.isoformat() if job.completed_at else None,
                             job.model_dump_json(),
+                            _owner_id(),
                         ),
                     )
                     self._conn.commit()

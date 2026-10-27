@@ -281,6 +281,8 @@ class SubQuestionEngine:
                 # Retrieve for each sub-question
                 try:
                     results = retriever.retrieve(sub_q, top_k=3)
+                    # SmartRetriever returns a RetrievalResult, not a list.
+                    results = getattr(results, "chunks", results)
                     for r in results:
                         if hasattr(r, 'text'):
                             all_contexts.append(r.text)

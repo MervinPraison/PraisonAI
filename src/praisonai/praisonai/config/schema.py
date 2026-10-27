@@ -402,7 +402,10 @@ class YAMLConfig(BaseModel):
     # Deployment / dependency declarations
     deploy: Optional[Dict[str, Any]] = Field(default=None, description="Deployment configuration")
     dependencies: Optional[Any] = Field(default=None, description="Task dependency declarations")
-    
+
+    # PraisonAI Replay: record every run of this file (same as --save)
+    save_replay: Optional[bool] = Field(default=None, description="Record a replay trace for each run (praisonai replay)")
+
     @model_validator(mode='after')
     def validate_config_structure(self):
         """Validate overall configuration structure."""

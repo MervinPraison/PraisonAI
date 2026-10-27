@@ -141,53 +141,100 @@ async def test_slack_stream_uploads_media(monkeypatch, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_discord_stream_chunks_long_reply(monkeypatch):
-    """A streamed answer over Discord's cap is delivered via the chunked path.
+async def test_discord_stream_chunks_long_reply():
+    """A streamed answer over Discord's cap is chunked by the shared streamer.
 
-    Guards Greptile #3/#5: editing the single placeholder with >2000 chars
-    would 400 and drop the whole reply, so the finalize path must fall back to
-    the reference-preserving ``_send_long_message`` chunker.
+    Editing the single placeholder with >2000 chars would 400 and drop the
+    whole reply, so ``finalize`` edits the placeholder with the first chunk and
+    sends the remainder as follow-ons (Issue #6078).
     """
-    from unittest.mock import AsyncMock, MagicMock
-
-    bot = DiscordBot(token="t", config=BotConfig(token="t", streaming=True))
-
-    long_reply = "x" * 5000
-    bot._session.chat = AsyncMock(return_value=long_reply)
-    bot.send_message = AsyncMock(return_value={"message_id": "m1"})
-    bot.edit_message = AsyncMock(return_value=None)
-    bot.delete_message = AsyncMock(return_value=True)
-
-    sent_chunks = []
-
-    long_sender = AsyncMock(
-        side_effect=lambda channel, text, reference=None: sent_chunks.append(text)
-    )
-    monkeypatch.setattr(bot, "_send_long_message", long_sender)
+    from unittest.mock import AsyncMock
 
     from praisonai_bot.bots._streaming import DraftStreamer
 
+    bot = DiscordBot(token="t", config=BotConfig(token="t", streaming=True))
+    bot.send_message = AsyncMock(return_value={"message_id": "m1"})
+    bot.edit_message = AsyncMock(return_value=None)
+
     streamer = DraftStreamer(
-        adapter=bot,
-        channel_id="C1",
-        config=bot._streaming_config,
-        platform="discord",
+        adapter=bot, channel_id="C1", config=bot._streaming_config, platform="discord",
     )
     await streamer.start()
 
-    # Simulate the finalize decision the adapter makes for an over-cap reply.
-    send_result = bot.fire_message_sending("C1", long_reply)
-    final_content = send_result["content"]
-    cap = min(bot.config.max_message_length, 2000)
-    assert len(final_content) > cap
+    long_reply = "\n\n".join(f"Paragraph {i}. " + "x" * 900 for i in range(6))
+    await streamer.finalize(long_reply)
 
-    message = MagicMock()
-    message.channel = MagicMock()
-    if len(final_content) > cap:
-        await bot.delete_message("C1", "m1")
-        await bot._send_long_message(message.channel, final_content, reference=message)
-    else:  # pragma: no cover - defensive
-        await streamer.finalize(final_content)
+    edited = bot.edit_message.await_args.args[2]
+    follow_ons = [c.args[1] for c in bot.send_message.await_args_list[1:]]
+    assert edited.startswith("Paragraph 0.")
+    assert follow_ons, "remainder should be sent as follow-on messages"
+    assert all(len(c) <= 2000 for c in [edited, *follow_ons])
+    assert "".join([edited, *follow_ons]).replace("\n", "") == long_reply.replace("\n", "")
 
-    assert sent_chunks, "long reply should have been routed through the chunker"
-    bot.delete_message.assert_awaited()
+
+@pytest.mark.asyncio
+async def test_streamer_chunks_by_utf16_and_falls_back_per_chunk():
+    """Telegram-style UTF-16 cap: over-cap reply is chunked, never dropped.
+
+    When the placeholder edit fails, the first chunk falls back to a fresh
+    send, and every chunk stays within the UTF-16 limit (Issue #6078).
+    """
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from praisonai_bot.bots._chunk import _calculate_length
+    from praisonai_bot.bots._streaming import DraftStreamer, StreamingConfig
+
+    adapter = SimpleNamespace(
+        capabilities={"live_edit": True, "text_limit": 100},
+        platform_capabilities=SimpleNamespace(length_unit="utf16"),
+        send_message=AsyncMock(return_value={"message_id": "m1"}),
+        edit_message=AsyncMock(side_effect=RuntimeError("message is too long")),
+    )
+    streamer = DraftStreamer(
+        adapter=adapter, channel_id="C1",
+        config=StreamingConfig(mode=StreamingMode.DRAFT), platform="telegram",
+    )
+    await streamer.start()
+
+    reply = "\U0001F600" * 120  # 240 UTF-16 units, 120 codepoints
+    await streamer.finalize(reply)
+
+    sent = [c.args[1] for c in adapter.send_message.await_args_list[1:]]
+    assert len(sent) >= 3
+    assert all(_calculate_length(c, "utf16") <= 100 for c in sent)
+    assert "".join(sent) == reply
+
+
+@pytest.mark.asyncio
+async def test_streamer_follow_on_not_double_retried():
+    """Adapters already retry + park exhausted sends; the streamer must not
+    retry again, or a parked chunk would be re-sent and duplicated (#6078)."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from praisonai_bot.bots._streaming import DraftStreamer, StreamingConfig
+
+    send = AsyncMock(side_effect=[{"message_id": "m1"}, ConnectionError("parked"), None])
+    adapter = SimpleNamespace(
+        capabilities={"live_edit": True, "text_limit": 10},
+        send_message=send,
+        edit_message=AsyncMock(return_value=None),
+    )
+    streamer = DraftStreamer(
+        adapter=adapter, channel_id="C1",
+        config=StreamingConfig(mode=StreamingMode.DRAFT), platform="telegram",
+    )
+    await streamer.start()
+    await streamer.finalize("a" * 30)
+
+    # placeholder + exactly one attempt per follow-on chunk (2 chunks)
+    assert send.await_count == 3
+
+
+def test_fit_prefix_utf16_is_bounded():
+    from praisonai_bot.bots._streaming import _fit_prefix
+
+    assert _fit_prefix("\U0001F600" * 5, 5, "utf16") == "\U0001F600" * 2
+    assert _fit_prefix("abc", 10, "utf16") == "abc"
+    assert _fit_prefix("abcdef", 3, "codepoints") == "abc"

@@ -151,6 +151,9 @@ export class AISDKBackend implements LLMProvider {
     const callOptions: Record<string, unknown> = {
       model: this.model,
       messages: prompt,
+      // AI SDK >= 5 reads `maxOutputTokens` (it renamed `maxTokens`); `maxTokens`
+      // stays for the ai@4 peer range. Without it the cap never reached the model.
+      maxOutputTokens: options.maxTokens || this.config.maxOutputTokens,
       maxTokens: options.maxTokens || this.config.maxOutputTokens,
       temperature: options.temperature,
       topP: options.topP,
@@ -253,6 +256,9 @@ export class AISDKBackend implements LLMProvider {
     const callOptions: Record<string, unknown> = {
       model: this.model,
       messages: prompt,
+      // AI SDK >= 5 reads `maxOutputTokens` (it renamed `maxTokens`); `maxTokens`
+      // stays for the ai@4 peer range. Without it the cap never reached the model.
+      maxOutputTokens: options.maxTokens || this.config.maxOutputTokens,
       maxTokens: options.maxTokens || this.config.maxOutputTokens,
       temperature: options.temperature,
       topP: options.topP,
@@ -372,6 +378,9 @@ export class AISDKBackend implements LLMProvider {
       model: this.model,
       messages: prompt,
       schema: options.schema,
+      // AI SDK >= 5 reads `maxOutputTokens` (it renamed `maxTokens`); `maxTokens`
+      // stays for the ai@4 peer range. Without it the cap never reached the model.
+      maxOutputTokens: options.maxTokens || this.config.maxOutputTokens,
       maxTokens: options.maxTokens || this.config.maxOutputTokens,
       temperature: options.temperature,
       maxRetries: options.maxRetries || this.config.maxRetries,

@@ -44,6 +44,8 @@ from ._commands import (
     build_command_access_policy,
 )
 from ._failure import failure_reply_text
+from ._group_policy import decide_group_admission, record_passive_group_message
+from praisonaiagents.bots.admission import MentionFacts
 from ._session import BotSessionManager
 from ._streaming import (
     StreamingConfig,
@@ -318,6 +320,14 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 user_allowed = await UnknownUserHandler.handle(bot_message, self._bot_context)
                 if not user_allowed:
                     return
+
+            # Issue #5929: transcribe an inbound voice note so the turn reaches
+            # the agent (placeholder on disable/failure, never dropped). Runs
+            # after the access gates so rejected senders trigger no STT work.
+            if not (bot_message.content or "").strip():
+                transcript = await self._transcribe_audio(message)
+                if transcript:
+                    bot_message.content = transcript
             
             if bot_message.is_command:
                 command = bot_message.command
@@ -451,12 +461,21 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 # Slack reference adapter so a misspelled or not-yet-implemented
                 # command reaches the agent instead of vanishing (Issue #4318).
             
-            should_respond = False
-            if message.guild is None:
-                should_respond = True
-            elif self._client.user.mentioned_in(message) or not self.config.mention_required:
-                should_respond = True
-            
+            # Issue #5962: shared group_policy decision (same as Telegram),
+            # including reply-to-bot as an implicit mention and ``observe``.
+            admission = decide_group_admission(
+                self.config,
+                chat_type="dm" if message.guild is None else "group",
+                mention=MentionFacts(
+                    explicit=self._client.user.mentioned_in(message),
+                    reply_to_bot=self._is_reply_to_bot(message),
+                ),
+                is_command=bot_message.message_type == MessageType.COMMAND,
+            )
+            should_respond = admission.admit
+            if admission.observe:
+                record_passive_group_message(self, bot_message)
+
             if should_respond:
                 for handler in self._message_handlers:
                     try:
@@ -532,27 +551,9 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                                         pass
                                     return
                                 final_content = send_result["content"]
-                                # A streamed answer longer than Discord's hard
-                                # cap cannot be delivered by editing the single
-                                # placeholder (both the edit and the send
-                                # fallback 400 on >2000 chars), which would drop
-                                # the whole reply. Fall back to the chunked
-                                # reply path so long answers are split and keep
-                                # the reply reference (Greptile #3 / #5).
-                                _cap = min(self.config.max_message_length, 2000)
-                                if len(final_content) > _cap:
-                                    try:
-                                        await self.delete_message(
-                                            channel_id, placeholder_message_id
-                                        )
-                                    except Exception:
-                                        pass
-                                    await self._send_long_message(
-                                        message.channel, final_content,
-                                        reference=message,
-                                    )
-                                else:
-                                    await streamer.finalize(final_content)
+                                # Over-cap answers are chunked by the shared
+                                # streamer (Issue #6078).
+                                await streamer.finalize(final_content)
                                 self.fire_message_sent(channel_id, final_content)
                             except Exception:
                                 try:
@@ -805,6 +806,20 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 display = f"{guild_name}/{ch_name}" if guild_name else ch_name
                 out.append(ChannelRef(id=ch_id, name=display, type="channel"))
         return out
+
+    def _is_reply_to_bot(self, message) -> bool:
+        """Whether a Discord message replies to one of the bot's own messages.
+
+        Issue #5029/#5962: tapping "Reply" on the bot's answer is an implicit
+        mention. Best-effort: an unresolved reference means "not a reply".
+        """
+        try:
+            ref = getattr(message, "reference", None)
+            replied = getattr(ref, "resolved", None) or getattr(ref, "cached_message", None)
+            author = getattr(replied, "author", None)
+            return author is not None and author.id == self._client.user.id
+        except Exception:  # pragma: no cover — defensive
+            return False
 
     async def _send_long_message(self, channel, text: str, reference=None) -> None:
         """Send a long message, splitting with markdown-aware chunking."""
@@ -1070,6 +1085,39 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         extra = {cmd: "Custom command" for cmd in self._command_handlers}
         return format_help(self._agent, self.platform, extra)
     
+    async def _transcribe_audio(self, message) -> Optional[str]:
+        """Transcribe the first audio attachment of a Discord message.
+
+        Returns ``None`` when the message carries no audio; otherwise the
+        transcript or the shared voice placeholder (Issue #5929).
+        """
+        audio = next(
+            (
+                a for a in (getattr(message, "attachments", None) or [])
+                if (getattr(a, "content_type", None) or "").lower().startswith("audio/")
+            ),
+            None,
+        )
+        if audio is None:
+            return None
+
+        from ._media import resolve_max_inbound_media_bytes
+        from ._stt import DEFAULT_VOICE_PLACEHOLDER, resolve_stt_config, transcribe_audio_bytes
+
+        if not resolve_stt_config(self.config).enabled:
+            return DEFAULT_VOICE_PLACEHOLDER
+        max_bytes = resolve_max_inbound_media_bytes(self.config)
+        if not max_bytes or max_bytes <= 0 or (getattr(audio, "size", 0) or 0) > max_bytes:
+            return DEFAULT_VOICE_PLACEHOLDER
+        try:
+            data = await audio.read()
+        except Exception as e:
+            logger.warning("Discord audio download failed: %s", e)
+            return DEFAULT_VOICE_PLACEHOLDER
+        return await transcribe_audio_bytes(
+            data, self.config, filename=getattr(audio, "filename", None)
+        )
+
     def _convert_message(self, message) -> BotMessage:
         """Convert Discord Message to BotMessage."""
         sender = BotUser(

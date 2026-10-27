@@ -256,7 +256,7 @@ jobs:
         "
         /tmp/praisonai-browser-standalone/bin/praisonai-browser --help
         bash "$GITHUB_WORKSPACE/scripts/check_c11_browser_imports.sh"
-        python -m pytest src/praisonai-browser/tests/browser/test_protocol_compliance.py -q -m "not network"
+        python -m pytest src/praisonai-browser/tests/browser/test_protocol_compliance.py src/praisonai-browser/tests/browser/test_server.py -q -m "not network"
 
     - name: Standalone praisonai-mcp smoke (C12)
       run: |

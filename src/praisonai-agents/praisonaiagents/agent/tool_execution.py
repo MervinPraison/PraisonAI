@@ -38,10 +38,26 @@ _active_turn_cancel: "contextvars.ContextVar[Optional[tuple]]" = contextvars.Con
     "praisonai_active_turn_cancel", default=None
 )
 
+# Exceptions a tool body raises about its *input* (bad value, missing key or
+# path). They are terminal for the same arguments and say nothing about the
+# tool's health, so they are never retried and never count toward the per-tool
+# circuit breaker. Timeouts, connection errors and other OSErrors still do.
+_CALLER_ERROR_TYPES = (
+    ValueError, TypeError, AttributeError, LookupError,
+    FileNotFoundError, FileExistsError, IsADirectoryError, NotADirectoryError, PermissionError,
+)
+
 # Worker count for the per-agent tool ThreadPoolExecutor. Used both when the
 # pool is created and to decide (with the per-executor in-flight counter)
-# whether a fresh call would have to queue behind hung workers.
-_TOOL_POOL_MAX_WORKERS = 2
+# whether a fresh call would have to queue behind hung workers. Matches the
+# default ParallelToolCallExecutor width so a parallel batch never queues.
+_TOOL_POOL_MAX_WORKERS = 5
+
+# Upper bound on overflow ("spill") threads a single agent may run at once for
+# timed async tool calls that find every pool worker busy. A hung spill thread
+# cannot be reclaimed, so without this cap leaked threads would grow with
+# concurrency instead of staying bounded (#5356).
+_MAX_SPILL_TOOL_THREADS = 8
 
 # Sentinel returned as the "arguments" value when a tool call's argument string
 # cannot be parsed (e.g. truncated by max_tokens or a dropped connection).
@@ -1077,6 +1093,110 @@ class ToolExecutionMixin:
             from .async_safety import DualLock
             return self.__dict__.setdefault("_tool_executor_lock", DualLock())
 
+    def _submit_to_tool_pool(self, fn, *args, spill=False):
+        """Submit ``fn(*args)`` to the bounded per-agent tool pool.
+
+        Shared by the sync and async tool paths so a timed-out tool never
+        strands a thread in the process-wide default executor. Returns
+        ``(future, executor, orphaned)``; ``future`` is ``None`` when the pool
+        is exhausted by hung calls and the caller must refuse fast. With
+        ``spill=True`` and every worker busy (but not orphan-capped), the call
+        runs immediately on a counted daemon thread instead of waiting for a
+        worker, and ``(future, None, orphaned)`` is returned; once
+        ``_MAX_SPILL_TOOL_THREADS`` spill threads are still running the call is
+        refused like an exhausted pool.
+        """
+        with self._get_tool_executor_lock().sync():
+            if getattr(self, '_tool_executor', None) is None:
+                self._tool_executor = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=_TOOL_POOL_MAX_WORKERS,
+                    thread_name_prefix=f"tool-{self.name}"
+                )
+                # Per-executor in-flight counter so a retired pool's
+                # late-finishing future can never corrupt the *new* pool's count.
+                self._tool_executor._inflight = 0
+            executor = self._tool_executor
+            orphaned = getattr(self, '_tool_executor_orphaned', 0)
+            inflight = getattr(executor, '_inflight', 0)
+            # Once the orphan cap is hit we can no longer retire a stuck pool,
+            # so we would otherwise queue behind hung workers and time out a
+            # healthy tool that never got to start. Refuse fast and visibly
+            # instead when no worker is free, and let the pool self-heal (the
+            # orphan count drops as hung threads finish).
+            if inflight >= _TOOL_POOL_MAX_WORKERS:
+                if orphaned >= _MAX_ORPHANED_TOOL_EXECUTORS:
+                    return None, executor, orphaned
+                if spill:
+                    spilled = getattr(self, '_tool_spill_inflight', 0)
+                    if spilled >= _MAX_SPILL_TOOL_THREADS:
+                        return None, executor, orphaned + spilled
+                    self._tool_spill_inflight = spilled + 1
+                    return self._start_spill_thread(fn, *args), None, orphaned
+            executor._inflight = inflight + 1
+            future = executor.submit(fn, *args)
+
+        def _on_tool_done(_f, _agent=self, _executor=executor):  # noqa: ANN001
+            with _agent._get_tool_executor_lock().sync():
+                _executor._inflight = max(0, getattr(_executor, '_inflight', 1) - 1)
+                # Orphan accounting is per-POOL, not per-future: retiring a pool
+                # adds exactly one to the orphan count, so a pool may return
+                # exactly one slot. Recover it only when this retired pool's
+                # LAST in-flight worker exits (``_inflight`` == 0), and guard
+                # with a one-shot flag so a multi-worker pool can never
+                # decrement more than the single unit it contributed and steal
+                # another orphaned pool's slot.
+                if (
+                    getattr(_agent, '_tool_executor', None) is not _executor
+                    and _executor._inflight == 0
+                    and not getattr(_executor, '_orphan_recovered', False)
+                ):
+                    _executor._orphan_recovered = True
+                    _agent._tool_executor_orphaned = max(
+                        0, getattr(_agent, '_tool_executor_orphaned', 0) - 1
+                    )
+
+        future.add_done_callback(_on_tool_done)
+        return future, executor, orphaned
+
+    def _start_spill_thread(self, fn, *args):
+        """Run ``fn(*args)`` on a daemon thread; caller already counted it."""
+        future = concurrent.futures.Future()
+
+        def _target():
+            try:
+                if future.set_running_or_notify_cancel():
+                    try:
+                        future.set_result(fn(*args))
+                    except BaseException as e:  # noqa: BLE001 - re-raised by awaiter
+                        future.set_exception(e)
+            finally:
+                with self._get_tool_executor_lock().sync():
+                    self._tool_spill_inflight = max(0, getattr(self, '_tool_spill_inflight', 1) - 1)
+
+        try:
+            threading.Thread(target=_target, daemon=True, name=f"tool-{self.name}-spill").start()
+        except BaseException:
+            self._tool_spill_inflight = max(0, getattr(self, '_tool_spill_inflight', 1) - 1)
+            raise
+        return future
+
+    def _retire_tool_executor(self, executor):
+        """Retire a pool whose worker is stuck past its timeout.
+
+        The timed-out thread cannot be reclaimed. Retire this executor so the
+        next call gets a fresh worker instead of queuing behind a permanently
+        stuck one — but bound how many orphaned (still-blocked) pools we allow
+        to accumulate: once the cap is reached we stop recycling and keep
+        reusing the existing pool so repeated timeouts can't exhaust process
+        resources with an unbounded number of leaked threads.
+        """
+        with self._get_tool_executor_lock().sync():
+            orphaned = getattr(self, '_tool_executor_orphaned', 0)
+            if getattr(self, '_tool_executor', None) is executor and orphaned < _MAX_ORPHANED_TOOL_EXECUTORS:
+                executor.shutdown(wait=False)
+                self._tool_executor = None
+                self._tool_executor_orphaned = orphaned + 1
+
     def _get_turn_tools_lock(self):
         """Return the DualLock guarding the per-turn tool buffer.
 
@@ -1342,65 +1462,16 @@ class ToolExecutionMixin:
                             with tool_progress_channel(_attempt_sink):
                                 # Use copy_context to preserve injection context in executor thread
                                 ctx = contextvars.copy_context()
+                                started = threading.Event()
 
                                 def execute_with_context():
+                                    started.set()
                                     with with_injection_context(state):
                                         return self._execute_tool_with_circuit_breaker(function_name, arguments)
 
                                 # Use reusable executor to prevent resource leaks
-                                pool_exhausted = False
-                                with self._get_tool_executor_lock().sync():
-                                    if not hasattr(self, '_tool_executor') or self._tool_executor is None:
-                                        self._tool_executor = concurrent.futures.ThreadPoolExecutor(
-                                            max_workers=_TOOL_POOL_MAX_WORKERS,
-                                            thread_name_prefix=f"tool-{self.name}"
-                                        )
-                                        # Per-executor in-flight counter so a
-                                        # retired pool's late-finishing future can
-                                        # never corrupt the *new* pool's count.
-                                        self._tool_executor._inflight = 0
-                                    executor = self._tool_executor
-                                    orphaned = getattr(self, '_tool_executor_orphaned', 0)
-                                    inflight = getattr(executor, '_inflight', 0)
-                                    # Once the orphan cap is hit we can no longer
-                                    # retire a stuck pool, so we would otherwise
-                                    # queue behind hung workers and time out a
-                                    # healthy tool that never got to start. Refuse
-                                    # fast and visibly instead when no worker is
-                                    # free, and let the pool self-heal (the orphan
-                                    # count drops as hung threads finish).
-                                    if orphaned >= _MAX_ORPHANED_TOOL_EXECUTORS and inflight >= _TOOL_POOL_MAX_WORKERS:
-                                        pool_exhausted = True
-                                    else:
-                                        executor._inflight = inflight + 1
-                                        future = executor.submit(ctx.run, execute_with_context)
-
-                                        def _on_tool_done(_f, _agent=self, _executor=executor):  # noqa: ANN001
-                                            with _agent._get_tool_executor_lock().sync():
-                                                _executor._inflight = max(0, getattr(_executor, '_inflight', 1) - 1)
-                                                # Orphan accounting is per-POOL, not
-                                                # per-future: retiring a pool adds
-                                                # exactly one to the orphan count, so
-                                                # a pool may return exactly one slot.
-                                                # Recover it only when this retired
-                                                # pool's LAST in-flight worker exits
-                                                # (``_inflight`` == 0), and guard with
-                                                # a one-shot flag so a multi-worker
-                                                # pool can never decrement more than
-                                                # the single unit it contributed and
-                                                # steal another orphaned pool's slot.
-                                                if (
-                                                    getattr(_agent, '_tool_executor', None) is not _executor
-                                                    and _executor._inflight == 0
-                                                    and not getattr(_executor, '_orphan_recovered', False)
-                                                ):
-                                                    _executor._orphan_recovered = True
-                                                    _agent._tool_executor_orphaned = max(
-                                                        0, getattr(_agent, '_tool_executor_orphaned', 0) - 1
-                                                    )
-
-                                        future.add_done_callback(_on_tool_done)
-                                if pool_exhausted:
+                                future, executor, orphaned = self._submit_to_tool_pool(ctx.run, execute_with_context)
+                                if future is None:
                                     logging.warning(
                                         f"Tool worker pool exhausted; refusing to queue '{function_name}' "
                                         f"behind {orphaned} hung tool call(s)."
@@ -1415,6 +1486,13 @@ class ToolExecutionMixin:
                                     }
                                     break
                                 try:
+                                    # Charge tool_timeout from when the body starts,
+                                    # not from submit, so time spent queued for a
+                                    # worker never times out a healthy tool. The
+                                    # queue wait is itself bounded by tool_timeout
+                                    # so a pool stuck behind hung workers still fails.
+                                    if not started.wait(timeout=tool_timeout):
+                                        raise concurrent.futures.TimeoutError()
                                     result = future.result(timeout=tool_timeout)
                                 except concurrent.futures.TimeoutError:
                                     if _progress_active is not None:
@@ -1427,19 +1505,7 @@ class ToolExecutionMixin:
                                     # inner budget never saw it, so this one still
                                     # earns an outer retry pass under the single budget.
                                     result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True, "_outer_timeout": True}
-                                    # The timed-out thread cannot be reclaimed. Retire this
-                                    # executor so the next call gets a fresh worker instead of
-                                    # queuing behind a permanently stuck one — but bound how many
-                                    # orphaned (still-blocked) threads we allow to accumulate:
-                                    # once the cap is reached we stop recycling and keep reusing
-                                    # the existing pool so repeated timeouts can't exhaust process
-                                    # resources with an unbounded number of leaked threads.
-                                    with self._get_tool_executor_lock().sync():
-                                        orphaned = getattr(self, '_tool_executor_orphaned', 0)
-                                        if getattr(self, '_tool_executor', None) is executor and orphaned < _MAX_ORPHANED_TOOL_EXECUTORS:
-                                            executor.shutdown(wait=False)
-                                            self._tool_executor = None
-                                            self._tool_executor_orphaned = orphaned + 1
+                                    self._retire_tool_executor(executor)
                         else:
                             with tool_progress_channel(_progress_sink), with_injection_context(state):
                                 result = self._execute_tool_with_circuit_breaker(function_name, arguments)
@@ -1678,8 +1744,28 @@ class ToolExecutionMixin:
                     # `if artifact_ref:` guards remain valid on short-result paths.
                     artifact_ref = None
 
+                    # ToolConfig.output_max_lines caps lines first, then the
+                    # char limit below applies; output_direction picks the end(s) kept.
+                    _tool_cfg = getattr(self, '_tool_config', None)
+                    direction = getattr(_tool_cfg, 'output_direction', 'both')
+                    max_lines = getattr(_tool_cfg, 'output_max_lines', None)
+                    capped_str = result_str
+                    if max_lines:
+                        lines = result_str.split("\n")
+                        if len(lines) > max_lines:
+                            if direction == "head":
+                                kept_head, kept_tail = lines[:max_lines], []
+                            elif direction == "tail":
+                                kept_head, kept_tail = [], lines[-max_lines:]
+                            else:
+                                n_tail = max_lines // 2
+                                kept_head = lines[:max_lines - n_tail]
+                                kept_tail = lines[-n_tail:] if n_tail else []
+                            marker = f"...[{len(lines):,} lines total, showing {max_lines:,}]..."
+                            capped_str = "\n".join(kept_head + [marker] + kept_tail)
+
                     # Check if we need to spill to artifact store
-                    if len(result_str) > limit:
+                    if len(capped_str) > limit or capped_str is not result_str:
                         # Try to use artifact store if available
                         if hasattr(self, '_artifact_store') and self._artifact_store is not None:
                             try:
@@ -1704,22 +1790,25 @@ class ToolExecutionMixin:
                             except Exception as e:
                                 logging.debug(f"Failed to store artifact: {e}")
                         
-                        # Generate truncated preview
-                        tail_size = min(limit // 5, 2000)
-                        head = result_str[:limit - tail_size]
-                        tail = result_str[-tail_size:] if tail_size > 0 else ""
-                        
+                        if len(capped_str) <= limit:
+                            # Only the line cap applied
+                            truncated = capped_str
+                        else:
+                            # Generate truncated preview
+                            if direction == "head":
+                                head, tail = capped_str[:limit], ""
+                            elif direction == "tail":
+                                head, tail = "", capped_str[-limit:]
+                            else:
+                                tail_size = min(limit // 5, 2000)
+                                head = capped_str[:limit - tail_size]
+                                tail = capped_str[-tail_size:] if tail_size > 0 else ""
+                            total = "chars total" if artifact_ref else "chars"
+                            truncated = f"{head}\n...[{len(result_str):,} {total}, showing first/last portions]...\n{tail}"
+
                         # If we stored an artifact, include reference in the output
                         if artifact_ref:
-                            truncated = (
-                                f"{head}\n"
-                                f"...[{len(result_str):,} chars total, showing first/last portions]...\n"
-                                f"{tail}\n\n"
-                                f"{artifact_ref.to_inline()}"
-                            )
-                        else:
-                            # Fallback to simple truncation
-                            truncated = f"{head}\n...[{len(result_str):,} chars, showing first/last portions]...\n{tail}"
+                            truncated = f"{truncated}\n\n{artifact_ref.to_inline()}"
                     else:
                         truncated = result_str
                     
@@ -1737,10 +1826,15 @@ class ToolExecutionMixin:
                         else:
                             truncated = self._truncate_tool_output(function_name, truncated, tool_call_id)
                     
-                    if len(truncated) < len(result_str):
+                    # A triggered line cap applies even when its marker makes the
+                    # preview no shorter than the original (many short lines).
+                    line_capped = capped_str is not result_str
+                    if line_capped or len(truncated) < len(result_str):
                         logging.debug(f"Truncated {function_name} output from {len(result_str)} to {len(truncated)} chars")
-                        # For dicts, truncate large string fields (e.g., raw_content from search)
-                        if isinstance(result, dict):
+                        # For dicts, truncate large string fields (e.g., raw_content from search).
+                        # Field truncation keeps both ends, so a line cap or a head/tail
+                        # direction uses the string preview instead.
+                        if isinstance(result, dict) and direction == "both" and not line_capped:
                             max_field_chars = getattr(self, 'tool_output_limit', DEFAULT_TOOL_OUTPUT_LIMIT) if not self.context_manager else None
                             result = self._truncate_dict_fields(result, function_name, max_field_chars, tool_call_id)
                             # Per-field truncation only shortens individual fields
@@ -2126,7 +2220,7 @@ class ToolExecutionMixin:
 
         return response
 
-    def _calculate_llm_cost(self, prompt_tokens: int, completion_tokens: int, response: any = None) -> float:
+    def _calculate_llm_cost(self, prompt_tokens: int, completion_tokens: int, response: any = None, model: Optional[str] = None) -> float:
         """Calculate estimated cost for LLM call.
         
         Uses litellm for accurate pricing (1000+ models) when available,
@@ -2136,6 +2230,7 @@ class ToolExecutionMixin:
             prompt_tokens: Number of tokens in the prompt
             completion_tokens: Number of tokens in the completion
             response: Optional LLM response object for more accurate cost calculation
+            model: Model that answered (e.g. a fallback model); defaults to ``self.llm``
             
         Returns:
             Estimated cost in USD
@@ -2144,7 +2239,7 @@ class ToolExecutionMixin:
         return calculate_llm_cost(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
-            model=self.llm,
+            model=model or self.llm,
             response=response,
         )
 
@@ -2174,22 +2269,25 @@ class ToolExecutionMixin:
         Returns:
             Estimated minimum cost in USD for the call.
         """
-        prompt_chars = 0
+        texts = []
         if messages:
             for _msg in messages:
                 _content = _msg.get("content") if isinstance(_msg, dict) else None
                 if isinstance(_content, str):
-                    prompt_chars += len(_content)
+                    texts.append(_content)
                 elif isinstance(_content, list):
                     for _part in _content:
                         if isinstance(_part, dict):
                             _text = _part.get("text")
                             if isinstance(_text, str):
-                                prompt_chars += len(_text)
+                                texts.append(_text)
                 elif _content is not None:
-                    prompt_chars += len(str(_content))
+                    texts.append(str(_content))
 
-        prompt_tokens = prompt_chars // 4
+        from ..context.tokens import estimate_tokens_heuristic
+        prompt_text = "".join(texts)
+        prompt_chars = len(prompt_text)
+        prompt_tokens = estimate_tokens_heuristic(prompt_text)
         if max_tokens:
             completion_tokens = int(max_tokens)
         elif prompt_chars > 0:
@@ -3224,23 +3322,28 @@ class ToolExecutionMixin:
             return None
         breaker_name = f"tool_{id(self)}_{function_name}"
         config = CircuitBreakerConfig(
-            failure_threshold=5,
-            recovery_timeout=60.0,
-            timeout=30.0,
-            graceful_degradation=True,
+            failure_threshold=5,        # Open after 5 failures
+            recovery_timeout=60.0,      # Wait 60s before trying half-open
+            graceful_degradation=True,  # Return error instead of raising exception
         )
         breaker = get_circuit_breaker(breaker_name, config)
+        # Ensure the registry entry is removed the moment this Agent is
+        # actually garbage-collected, regardless of whether close()/aclose()
+        # was ever called. This closes the CPython id-reuse window where a
+        # new Agent at the same address could inherit a stale OPEN breaker.
         self._register_breaker_finalizer(breaker_name)
         return breaker
 
     def _circuit_breaker_open_result(self, function_name):
         """Return the standard ``circuit_open`` error dict for *function_name*."""
+        breaker = self._get_tool_circuit_breaker(function_name)
+        recovery = breaker.config.recovery_timeout if breaker is not None else 60.0
         return {
             "error": f"Tool '{function_name}' circuit breaker open - too many recent failures",
             "circuit_open": True,
             "agent_name": getattr(self, "name", None),
             "session_id": getattr(self, "_session_id", None),
-            "remediation": "Wait for recovery_timeout (60s) or investigate recent tool failures.",
+            "remediation": f"Wait for recovery_timeout ({recovery:g}s) or investigate recent tool failures.",
         }
 
     def _circuit_breaker_precheck(self, function_name):
@@ -3298,7 +3401,7 @@ class ToolExecutionMixin:
         """
         # Import circuit breaker components first (lazy import for performance)
         try:
-            from ..tools.circuit_breaker import get_circuit_breaker, CircuitBreakerConfig, CircuitBreakerException
+            from ..tools.circuit_breaker import CircuitBreakerException, _NeutralOutcome
         except ImportError:
             # Circuit breaker not available - fallback to direct execution
             logging.debug("Circuit breaker not available, falling back to direct tool execution")
@@ -3306,27 +3409,20 @@ class ToolExecutionMixin:
 
         try:
             
-            # Get or create circuit breaker for this tool.
-            # Scope the key to this Agent instance so one agent's failing tool
-            # cannot trip the breaker for another agent's same-named tool.
-            breaker_name = f"tool_{id(self)}_{function_name}"
-            config = CircuitBreakerConfig(
-                failure_threshold=5,        # Open after 5 failures
-                recovery_timeout=60.0,      # Wait 60s before trying half-open
-                timeout=30.0,               # Tool call timeout
-                graceful_degradation=True   # Return error instead of raising exception
-            )
-            breaker = get_circuit_breaker(breaker_name, config)
-
-            # Ensure the registry entry is removed the moment this Agent is
-            # actually garbage-collected, regardless of whether close()/aclose()
-            # was ever called. This closes the CPython id-reuse window where a
-            # new Agent at the same address could inherit a stale OPEN breaker.
-            self._register_breaker_finalizer(breaker_name)
+            # Get or create this agent's circuit breaker for this tool (shared
+            # with the async path so both use the same key and policy).
+            breaker = self._get_tool_circuit_breaker(function_name)
 
             # Execute tool through circuit breaker with failure detection wrapper
             def _tool_wrapper():
                 result = self._execute_tool_impl(function_name, arguments)
+                # Caller errors (bad input: _CALLER_ERROR_TYPES, tagged
+                # non-retryable) say nothing about the tool's health: record
+                # them as neither failure nor success, so they can neither open the
+                # breaker for other callers nor close a half-open one.
+                if isinstance(result, dict) and result.get("error") and \
+                   result.get("_praison_retryable") is False:
+                    raise _NeutralOutcome(result)
                 # Convert error dicts to exceptions so circuit breaker can detect failures
                 # Don't treat approval/permission denials as circuit breaker failures
                 if isinstance(result, dict) and result.get("error") and \
@@ -3345,6 +3441,8 @@ class ToolExecutionMixin:
             
             try:
                 return breaker.call(_tool_wrapper)
+            except _NeutralOutcome as n:
+                return n.value
             except Exception as e:
                 # Check if this is our sentinel exception
                 if hasattr(e, 'error_dict'):
@@ -3355,13 +3453,7 @@ class ToolExecutionMixin:
         except CircuitBreakerException as e:
             # Circuit breaker is open - return error dict instead of raising
             logging.warning(f"Tool '{function_name}' circuit breaker open: {e}")
-            return {
-                "error": f"Tool '{function_name}' circuit breaker open - too many recent failures",
-                "circuit_open": True,
-                "agent_name": getattr(self, "name", None),
-                "session_id": getattr(self, "_session_id", None),
-                "remediation": "Wait for recovery_timeout (60s) or investigate recent tool failures.",
-            }
+            return self._circuit_breaker_open_result(function_name)
 
     def _find_declared_tool(self, function_name, tools=None):
         """Return the tool OBJECT named ``function_name``, or ``None``.
@@ -3811,7 +3903,7 @@ class ToolExecutionMixin:
                 # model and cannot collide with a tool's own "retryable" field.
                 return {
                     "error": error_msg,
-                    "_praison_retryable": not isinstance(e, (ValueError, TypeError, AttributeError)),
+                    "_praison_retryable": not isinstance(e, _CALLER_ERROR_TYPES),
                 }
 
         # Unresolved: return a corrective, model-readable message so the model can

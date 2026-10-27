@@ -395,6 +395,24 @@ def _html_to_markdown(html: str, base_url: Optional[str] = None) -> tuple:
     return markdown, unescape(parser.title).strip()
 
 
+# Raw bytes read per page. Only 50,000 characters are returned, so a few MB is
+# ample and keeps memory (and HTML parsing) bounded for oversized responses.
+_MAX_CRAWL_BYTES = 5 * 1024 * 1024
+
+
+def _read_capped_httpx(response) -> str:
+    """Read at most ``_MAX_CRAWL_BYTES`` from a streamed httpx response."""
+    buf = bytearray()
+    for chunk in response.iter_bytes(chunk_size=64 * 1024):
+        buf += chunk
+        if len(buf) >= _MAX_CRAWL_BYTES:
+            break
+    try:
+        return bytes(buf[:_MAX_CRAWL_BYTES]).decode(response.charset_encoding or "utf-8", errors="ignore")
+    except LookupError:
+        return bytes(buf[:_MAX_CRAWL_BYTES]).decode("utf-8", errors="ignore")
+
+
 def _crawl_with_httpx(urls: List[str]) -> List[Dict[str, Any]]:
     """Crawl URLs using basic HTTP fetch with httpx or urllib."""
     import urllib.parse
@@ -409,31 +427,49 @@ def _crawl_with_httpx(urls: List[str]) -> List[Dict[str, Any]]:
             try:
                 import httpx
                 current = url
-                response = None
                 with httpx.Client(follow_redirects=False, timeout=30.0) as client:
                     for _ in range(max_redirects + 1):
                         if not _is_safe_crawl_url(current):
                             raise ValueError("Redirect target failed SSRF validation")
-                        response = client.get(current)
-                        if response.status_code not in redirect_statuses:
-                            break
-                        location = response.headers.get("Location")
-                        if not location:
-                            break
+                        # Stream so the body is never buffered past the byte cap.
+                        with client.stream("GET", current) as response:
+                            location = response.headers.get("Location")
+                            if response.status_code not in redirect_statuses or not location:
+                                response.raise_for_status()
+                                content = _read_capped_httpx(response)
+                                base_url = current
+                                break
                         current = urllib.parse.urljoin(current, location)
                     else:
                         raise ValueError("Too many redirects")
-                if response is not None:
-                    response.raise_for_status()
-                    content = response.text
-                    base_url = current
             except ImportError:
-                # Fallback to urllib
+                # Fallback to urllib, walking redirects by hand so every hop
+                # is SSRF-validated before it is requested (as above).
+                import urllib.error
                 import urllib.request
-                if not _is_safe_crawl_url(url):
-                    raise ValueError("URL blocked by SSRF policy")
-                with urllib.request.urlopen(url, timeout=30) as response:
-                    content = response.read().decode('utf-8', errors='ignore')
+
+                class _NoRedirect(urllib.request.HTTPRedirectHandler):
+                    def redirect_request(self, *args, **kwargs):
+                        return None  # surface 30x as HTTPError
+
+                opener = urllib.request.build_opener(_NoRedirect)
+                current = url
+                for _ in range(max_redirects + 1):
+                    if not _is_safe_crawl_url(current):
+                        raise ValueError("Redirect target failed SSRF validation")
+                    try:
+                        with opener.open(current, timeout=30) as response:
+                            content = response.read(_MAX_CRAWL_BYTES).decode('utf-8', errors='ignore')
+                        break
+                    except urllib.error.HTTPError as e:
+                        location = e.headers.get("Location")
+                        if e.code not in redirect_statuses or not location:
+                            raise
+                        e.close()  # release the redirect response's socket
+                        current = urllib.parse.urljoin(current, location)
+                else:
+                    raise ValueError("Too many redirects")
+                base_url = current
             
             # Convert HTML to structured Markdown using the standard library so
             # headings, lists, links, and code blocks survive on this path.

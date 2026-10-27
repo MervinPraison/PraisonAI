@@ -400,8 +400,8 @@ This report contains all agent interactions and outputs from a complete ContextA
             response_filename = f"{self.interaction_counter:03d}_{safe_agent_name}_{timestamp.replace(':', '_')}.json"
             response_path = os.path.join(self.output_dir, "agent_responses", response_filename)
             
-            with open(response_path, "w") as f:
-                json.dump(interaction_data, f, indent=2)
+            with open(response_path, "w", encoding="utf-8") as f:
+                json.dump(interaction_data, f, indent=2, ensure_ascii=False)
             
             # Save individual markdown files - debug only
             md_filename = f"{self.interaction_counter:03d}_{safe_agent_name}_{timestamp.replace(':', '_')}"
@@ -1201,20 +1201,20 @@ detailed, actionable implementation steps."""
     def _save_context_engineering_results(self):
         """Save all Context Engineering results following PRD methodology."""
         # Save comprehensive analysis
-        with open(os.path.join(self.output_dir, "comprehensive_analysis.json"), "w") as f:
-            json.dump(self.codebase_analysis, f, indent=2)
+        with open(os.path.join(self.output_dir, "comprehensive_analysis.json"), "w", encoding="utf-8") as f:
+            json.dump(self.codebase_analysis, f, indent=2, ensure_ascii=False)
         
         # Save pattern library
-        with open(os.path.join(self.output_dir, "pattern_library.json"), "w") as f:
-            json.dump(self.pattern_library, f, indent=2)
+        with open(os.path.join(self.output_dir, "pattern_library.json"), "w", encoding="utf-8") as f:
+            json.dump(self.pattern_library, f, indent=2, ensure_ascii=False)
             
         # Save validation framework
-        with open(os.path.join(self.output_dir, "validation_framework.json"), "w") as f:
-            json.dump(self.validation_framework, f, indent=2)
+        with open(os.path.join(self.output_dir, "validation_framework.json"), "w", encoding="utf-8") as f:
+            json.dump(self.validation_framework, f, indent=2, ensure_ascii=False)
             
         # Save all agent interactions summary
-        with open(os.path.join(self.output_dir, "all_agent_interactions.json"), "w") as f:
-            json.dump(self.agent_interactions, f, indent=2)
+        with open(os.path.join(self.output_dir, "all_agent_interactions.json"), "w", encoding="utf-8") as f:
+            json.dump(self.agent_interactions, f, indent=2, ensure_ascii=False)
         
         print(f"💾 Context Engineering results saved to: {self.output_dir}/")
         print(f"💾 Agent interactions ({len(self.agent_interactions)} total) saved to: agent_responses/")
@@ -1267,7 +1267,7 @@ Product Requirements Prompts following PRD template methodology.
 Every agent interaction has been saved for full audit trail and reproducibility.
 """
         
-        with open(os.path.join(self.output_dir, "analysis_summary.md"), "w") as f:
+        with open(os.path.join(self.output_dir, "analysis_summary.md"), "w", encoding="utf-8") as f:
             f.write(summary)
         
         print(f"📋 Analysis summary saved following PRD methodology")
@@ -1308,7 +1308,7 @@ Every agent interaction has been saved for full audit trail and reproducibility.
         safe_filename = feature_request.lower().replace(' ', '_').replace('-', '_')[:50]
         prp_path = os.path.join(self.output_dir, "PRPs", f"{safe_filename}.md")
         
-        with open(prp_path, "w") as f:
+        with open(prp_path, "w", encoding="utf-8") as f:
             f.write(prp)
         
         print(f"📄 Comprehensive PRP following PRD template saved to: {prp_path}")
@@ -1777,7 +1777,7 @@ Focus on creating clear, structured metadata that will help with intelligent fil
                     
                     request = urllib.request.Request(api_url, headers=headers)
                     
-                    with urllib.request.urlopen(request) as response:
+                    with urllib.request.urlopen(request, timeout=15) as response:
                         file_data = json.loads(response.read())
                         
                     if file_data.get('content') and file_data.get('encoding') == 'base64':
@@ -2350,7 +2350,7 @@ This PRP provides:
             import urllib.request
             import json
             
-            with urllib.request.urlopen(api_url) as response:
+            with urllib.request.urlopen(api_url, timeout=15) as response:
                 data = json.loads(response.read())
                 
             file_structure = []

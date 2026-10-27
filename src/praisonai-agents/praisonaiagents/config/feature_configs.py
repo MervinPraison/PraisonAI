@@ -590,8 +590,11 @@ class GuardrailConfig:
         # With validator function
         Agent(guardrails=my_validator_fn)
         
-        # With string preset
-        Agent(guardrails="strict")  # Uses strict preset
+        # With a string: an LLM-validation prompt (not a preset name)
+        Agent(guardrails="Ensure the response is polite")
+
+        # With a preset (sets max_retries only) plus a validator
+        Agent(guardrails=["strict", {"validator": my_validator_fn}])
 
         # For tool policy enforcement, use the dedicated `policy` param instead:
         Agent(policy=PolicyEngine(...))  # policy strings on guardrails are NOT enforced
@@ -600,7 +603,7 @@ class GuardrailConfig:
         Agent(guardrails=GuardrailConfig(
             validator=my_validator_fn,
             max_retries=3,
-            on_fail="retry",
+            on_fail="retry",  # only "retry" is implemented
         ))
         
         # With LLM-based validation
@@ -909,7 +912,8 @@ class ExecutionConfig:
     # ``rate_limiter`` explicitly for burst/TPM control (it takes precedence).
     max_rpm: Optional[int] = None
     
-    # Time limits
+    # Time limits: per-turn wall-clock seconds for the loop guard.
+    # None = loop-guard default (600s); 0 = no time limit.
     max_execution_time: Optional[int] = None
     
     # Retry settings

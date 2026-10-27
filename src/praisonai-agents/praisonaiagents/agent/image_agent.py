@@ -70,6 +70,9 @@ class ImageAgent(Agent):
             api_version=api_version
         )
         
+        # Only an explicit llm=/model= names an image model; the base Agent's chat default must not leak into image calls
+        self._image_llm_set = llm is not None or kwargs.get("model") is not None
+
         # Lazy load litellm
         self._litellm = None
         # Configure logging based on verbose level
@@ -124,15 +127,21 @@ class ImageAgent(Agent):
                     "Please install it with: pip install litellm"
                 )
         return self._litellm
+
+    def _image_model(self, default: str) -> str:
+        """Return the explicit ``llm=`` model name, else an image-capable ``default``."""
+        if not self._image_llm_set:
+            return default
+        model_info = self.llm_model
+        return model_info.model if hasattr(model_info, 'model') else str(model_info)
+
     def generate_image(self, prompt: str, **kwargs) -> Dict[str, Any]:
         """Generate an image based on the provided prompt."""
         # Merge default config with any provided kwargs
         config = self.image_config.dict(exclude_none=True)
         config.update(kwargs)
         
-        # Get the model name robustly from the parent Agent's property
-        model_info = self.llm_model
-        model_name = model_info.model if hasattr(model_info, 'model') else str(model_info)
+        model_name = self._image_model("dall-e-3")
         
         # Use the model name in config
         config['model'] = model_name
@@ -154,6 +163,14 @@ class ImageAgent(Agent):
             # Gemini provider doesn't support response_format parameter
             # Apply this filter if provider is explicitly 'gemini' or as fallback for gemini models
             config.pop('response_format', None)
+        elif custom_llm_provider == "openai":
+            if config.get('response_format') == "url":
+                # "url" is OpenAI's default for DALL-E and is rejected by models that
+                # don't accept response_format (e.g. gpt-image), so don't send it
+                config.pop('response_format', None)
+            if 'dall-e-3' not in model_name.lower():
+                # Only dall-e-3 accepts 'style'; other OpenAI image models reject it
+                config.pop('style', None)
         from rich.progress import Progress, SpinnerColumn, TextColumn
         with Progress(
             SpinnerColumn(),
@@ -260,7 +277,7 @@ class ImageAgent(Agent):
             import litellm
             litellm.telemetry = False
             
-            model_name = self.llm or self.model or "dall-e-2"
+            model_name = self._image_model("dall-e-2")
             
             config = {
                 "model": model_name,
@@ -335,7 +352,7 @@ class ImageAgent(Agent):
             import litellm
             litellm.telemetry = False
             
-            model_name = self.llm or self.model or "dall-e-2"
+            model_name = self._image_model("dall-e-2")
             
             config = {
                 "model": model_name,

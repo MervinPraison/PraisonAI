@@ -30,7 +30,7 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 | `Agent.chat` | 17 | 7 | 9 | 1 | 0 | 0 | 0 | 0 | 2 / 19 |
 | `AgentTeam.start` | 3 | 2 | 1 | 0 | 0 | 0 | 0 | 0 | 1 / 4 |
 | `Handoff.__init__` | 7 | 2 | 2 | 3 | 0 | 0 | 2 | 2 | 13 / 21 |
-| `LLM.__init__` | 25 | 8 | 16 | 1 | 0 | 0 | 0 | 0 | 1 / 26 |
+| `LLM.__init__` | 25 | 8 | 16 | 1 | 0 | 0 | 1 | 1 | 1 / 26 |
 | `Session.__init__` | 7 | 1 | 6 | 0 | 0 | 0 | 1 | 1 | 5 / 12 |
 | `tool()` | 13 | 5 | 7 | 1 | 0 | 0 | 3 | 3 | 3 / 16 |
 | `GoalEngineer.__init__` | 6 | 4 | 2 | 0 | 0 | 0 | 5 | 5 | 2 / 8 |
@@ -40,13 +40,13 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 | `PraisonAIError.__init__` | 6 | 2 | 4 | 0 | 0 | 0 | 1 | 1 | 1 / 7 |
 | `FileTracker.__init__` | 1 | 0 | 1 | 0 | 0 | 0 | 0 | 0 | 0 / 1 |
 | `Knowledge.__init__` | 2 | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 / 2 |
-| **Total (17 surfaces)** | 226 | 123 | 92 | 8 | 3 | 0 | 28 | 28 | 85 / 317 |
+| **Total (17 surfaces)** | 226 | 123 | 92 | 8 | 3 | 0 | 29 | 29 | 85 / 317 |
 
 ## Surfaces
 
 ### `Agent.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:619`
+- Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:628`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:197` (ctor `src/praisonai-ts/src/agent/simple.ts:1019`)
 - Counts: 42 python params: 29 exact, 8 camelCase, 2 alias, 3 flattened, 0 missing; 8 mismatches; 8 waived; 14 TS-only of 60
 
@@ -99,7 +99,7 @@ TS-only members: `config`, `pretty`?, `fetch`?, `outputSchema`?, `outputSchemaNa
 
 ### `AgentTeam.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:804`
+- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:837`
 - TypeScript: `src/praisonai-ts/src/agent/team.ts:93` (ctor `src/praisonai-ts/src/agent/team.ts:381`)
 - Python aliases: PraisonAIAgents, Agents
 - Counts: 23 python params: 20 exact, 3 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 3 TS-only of 26
@@ -207,7 +207,7 @@ TS-only members: `dependencies`?
 
 ### `Agent.start`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:799`
+- Python: `src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:753`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:2497`
 - Counts: 1 python params: 1 exact, 0 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 20 TS-only of 21
 
@@ -219,7 +219,7 @@ TS-only members: `previousResult`?, `onToken`?, `signal`?, `onEvent`?, `options`
 
 ### `Agent.chat`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3345`
+- Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3530`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:3592`
 - Counts: 17 python params: 7 exact, 9 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 2 TS-only of 19
 
@@ -247,7 +247,7 @@ TS-only members: `previousResult`?, `options`?
 
 ### `AgentTeam.start`
 
-- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2484`
+- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2591`
 - TypeScript: `src/praisonai-ts/src/agent/team.ts:1125`
 - Counts: 3 python params: 2 exact, 1 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 4
 
@@ -279,14 +279,14 @@ TS-only members: `condition`?, `contextPolicy`?, `maxContextTokens`?, `maxContex
 
 ### `LLM.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:493`
+- Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:678`
 - TypeScript: `src/praisonai-ts/src/llm/index.ts:236` (ctor `src/praisonai-ts/src/llm/index.ts:416`)
-- Counts: 25 python params: 8 exact, 16 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 26
+- Counts: 25 python params: 8 exact, 16 camelCase, 1 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 1 TS-only of 26
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
 |---|---|---|---|---|---|---|---|---|
 | `model` | positional | *required* | `str` | exact | `model` | *required* | `string` | ok |
-| `timeout` | positional | null | `Optional[int]` | exact | `timeout` | undefined | `number` | ok |
+| `timeout` | positional | `_TIMEOUT_UNSET` | `Optional[int]` | exact | `timeout` | undefined | `number` | default mismatch (waived) |
 | `temperature` | positional | null | `Optional[float]` | exact | `temperature` | undefined | `number` | ok |
 | `top_p` | positional | null | `Optional[float]` | camelCase | `topP` | undefined | `number` | ok |
 | `n` | positional | null | `Optional[int]` | exact | `n` | undefined | `number` | ok |
@@ -478,6 +478,7 @@ TS-only members: none
 | `GoalEngineer.__init__.verbose` | The constructor only overrides `verbose` when it is supplied; the default lives on GoalConfig, exactly as Python's None does. The extractor reports no default rather than inventing one, which is the correct reading. | praisonai-ts |  |  |
 | `Handoff.__init__.tool_description_override` | Same derived string, built at a different moment. `defaultHandoffToolDescription` now produces Python's `Transfer task to <name> (<role>) - <goal>` exactly (it previously said "Transfer conversation to <name>", which the model saw). Only the moment of derivation differs. | praisonai-ts |  |  |
 | `Handoff.__init__.tool_name_override` | Same derived string, built at a different moment. `defaultHandoffToolName` now produces Python's `transfer_to_<lowercased, spaces-to-underscores name>` exactly (it previously said `handoff_to_<raw name>`, which could contain a space and be rejected by the provider). Only the moment of derivation differs. | praisonai-ts |  |  |
+| `LLM.__init__.timeout` | Same effective bound, applied by a different layer. Python's sentinel resolves an unset timeout to 600s in the body (litellm would otherwise wait 6000s); TS leaves `timeout` undefined and the OpenAI Node SDK applies its own 600s (10 minute) default. An explicit value is forwarded on both sides. | praisonai-ts | #5968 |  |
 | `PraisonAIError.__init__.run_id` | Both sides mint a UUID at construction -- Python's `self.run_id = run_id or str(uuid.uuid4())` (errors.py) is NOT lazy. Only the declared default differs. Edge case: `runId: ''` survives TS's `??` but is replaced by Python's `or`. | praisonai-ts |  |  |
 | `Session.__init__.user_id` | Both sides assign eagerly with the same truthiness rule -- Python's `self.user_id = user_id or "default_user"` (session/api.py), TS's `config.userId \|\| 'default_user'`. Only the declared default differs. | praisonai-ts |  |  |
 | `Task.__init__.action` | TS action mirrors description; Python's `self.action = action if action is not None else description` resolves the same in the body. | praisonai-ts |  |  |

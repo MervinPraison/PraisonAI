@@ -154,6 +154,7 @@ class RAG:
         user_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         run_id: Optional[str] = None,
+        top_k: Optional[int] = None,
         **kwargs,
     ) -> List[Dict[str, Any]]:
         """
@@ -193,15 +194,27 @@ class RAG:
                     filtered.append(r)
             results = filtered
         
-        # Limit to top_k
-        results = results[:self.config.top_k]
+        # Limit to top_k (per-call value, never written back to shared config)
+        results = results[:self.config.top_k if top_k is None else top_k]
         
         return results
     
+    def _reranked(self, rerank: bool) -> bool:
+        """Whether a reranker actually ran: the local one, or a backend
+        reranker configured on the knowledge (e.g. mem0 with rerank_model)."""
+        if not rerank:
+            return False
+        if self.reranker:
+            return True
+        cfg = getattr(self.knowledge, "config", None)
+        backend = cfg.get("reranker") if isinstance(cfg, dict) else None
+        return bool(isinstance(backend, dict) and backend.get("default_rerank") and backend.get("provider"))
+
     def _rerank(
         self,
         query: str,
         results: List[Dict[str, Any]],
+        rerank: Optional[bool] = None,
     ) -> List[Dict[str, Any]]:
         """
         Rerank results if reranker is configured.
@@ -213,7 +226,9 @@ class RAG:
         Returns:
             Reranked results
         """
-        if not self.config.rerank or not self.reranker:
+        if rerank is None:
+            rerank = self.config.rerank
+        if not rerank or not self.reranker:
             return results
         
         try:
@@ -354,54 +369,47 @@ class RAG:
         """
         start_time = time.time()
         
-        # Apply overrides
-        original_top_k = self.config.top_k
-        original_rerank = self.config.rerank
+        # Resolve per-call overrides without mutating the shared config:
+        # aretrieve() runs this in an executor, so concurrent calls on one RAG
+        # would otherwise see (and permanently "restore") each other's values.
+        eff_top_k = self.config.top_k if top_k is None else top_k
+        eff_rerank = self.config.rerank if rerank is None else rerank
         
-        if top_k is not None:
-            self.config.top_k = top_k
-        if rerank is not None:
-            self.config.rerank = rerank
+        # 1. Retrieve
+        results = self._retrieve(
+            query=query,
+            user_id=user_id,
+            agent_id=agent_id,
+            run_id=run_id,
+            filters=filters,
+            top_k=eff_top_k,
+            **kwargs,
+        )
         
-        try:
-            # 1. Retrieve
-            results = self._retrieve(
-                query=query,
-                user_id=user_id,
-                agent_id=agent_id,
-                run_id=run_id,
-                filters=filters,
-                **kwargs,
-            )
-            
-            # 2. Rerank (optional)
-            results = self._rerank(query, results)
-            
-            # 3. Build context
-            context, used_results = self._build_context(results)
-            
-            # 4. Format citations
-            citations = self._format_citations(used_results)
-            
-            elapsed = time.time() - start_time
-            
-            return ContextPack(
-                context=context,
-                citations=citations,
-                query=query,
-                metadata={
-                    "elapsed_seconds": elapsed,
-                    "num_results": len(results),
-                    "num_citations": len(citations),
-                    "retrieval_strategy": self.config.retrieval_strategy.value,
-                    "reranked": self.config.rerank,
-                    "top_k": self.config.top_k,
-                },
-            )
-        finally:
-            # Restore original config
-            self.config.top_k = original_top_k
-            self.config.rerank = original_rerank
+        # 2. Rerank (optional)
+        results = self._rerank(query, results, rerank=eff_rerank)
+        
+        # 3. Build context
+        context, used_results = self._build_context(results)
+        
+        # 4. Format citations
+        citations = self._format_citations(used_results)
+        
+        elapsed = time.time() - start_time
+        
+        return ContextPack(
+            context=context,
+            citations=citations,
+            query=query,
+            metadata={
+                "elapsed_seconds": elapsed,
+                "num_results": len(results),
+                "num_citations": len(citations),
+                "retrieval_strategy": self.config.retrieval_strategy.value,
+                "reranked": self._reranked(eff_rerank),
+                "top_k": eff_top_k,
+            },
+        )
     
     async def aretrieve(
         self,
@@ -498,7 +506,7 @@ class RAG:
                 "num_results": len(results),
                 "num_citations": len(citations),
                 "retrieval_strategy": self.config.retrieval_strategy.value,
-                "reranked": self.config.rerank,
+                "reranked": self._reranked(self.config.rerank),
             },
         )
     

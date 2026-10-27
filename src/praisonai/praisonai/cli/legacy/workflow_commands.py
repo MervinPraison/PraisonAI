@@ -329,11 +329,16 @@ def _run_yaml_workflow(self, yaml_file: str, action_args: list, variables: dict 
         variables: Workflow variables
         args: Parsed command line arguments
     """
-    # Initialize trace variables for cleanup
-    trace_writer = None
-    trace_emitter = None
-    trace_emitter_token = None
-    
+    # Replay trace (--save): praisonai.replay.record() owns writer + emitter setup.
+    import contextlib
+    replay_stack = contextlib.ExitStack()
+    recording = None
+
+    def _finish_replay(failed: bool) -> None:
+        if recording is not None and failed:
+            recording.status = "failed"
+        replay_stack.close()
+
     try:
         from praisonaiagents.workflows import WorkflowManager
         from rich import print
@@ -362,22 +367,22 @@ def _run_yaml_workflow(self, yaml_file: str, action_args: list, variables: dict 
         
         # Get save flag for replay trace
         save_replay = '--save' in action_args or '-s' in action_args or (getattr(args, 'save', False) if args else False)
+        if not save_replay:
+            # ``save_replay: true`` in the YAML records every run, like --save.
+            from praisonai.replay.yaml_run import yaml_wants_replay
+            save_replay = yaml_wants_replay(yaml_file)
         
         # Initialize replay trace writer if --save flag is set
         run_id = f"run-{uuid.uuid4().hex[:12]}"
         if save_replay:
             try:
-                from praisonai_code._wrapper_bridge import import_wrapper_module
-                _mod = import_wrapper_module('praisonai.replay')
-                ContextTraceWriter = getattr(_mod, 'ContextTraceWriter')
-                from praisonaiagents.trace.context_events import ContextTraceEmitter, set_context_emitter
-                from pathlib import Path
-                
-                trace_writer = ContextTraceWriter(session_id=run_id)
-                trace_emitter = ContextTraceEmitter(sink=trace_writer, session_id=run_id)
-                # Set as global emitter so agents can access it
-                trace_emitter_token = set_context_emitter(trace_emitter)
-                trace_emitter.session_start({"workflow": yaml_file, "run_id": run_id})
+                import os as _os
+                from praisonai.replay.recorder import record
+
+                meta = {"workflow": yaml_file, "run_id": run_id}
+                if _os.path.isfile(yaml_file):
+                    meta["yaml_path"] = _os.path.abspath(yaml_file)
+                recording = replay_stack.enter_context(record(run_id, meta=meta))
                 print(f"[cyan]📝 Replay trace enabled: {run_id}[/cyan]")
             except ImportError as e:
                 import logging
@@ -512,39 +517,19 @@ def _run_yaml_workflow(self, yaml_file: str, action_args: list, variables: dict 
             print(f"\n[red]❌ Workflow failed: {result.get('error', 'Unknown error')}[/red]")
             exit_code = 1
         
-        # Close trace writer on completion
-        if trace_emitter:
-            trace_emitter.session_end()
+        # Close the replay trace on completion
+        _finish_replay(failed=exit_code != 0)
+        if recording is not None:
             print(f"[cyan]📝 Replay trace saved: {run_id}[/cyan]")
-        if trace_writer:
-            trace_writer.close()
-        # Reset global emitter
-        if trace_emitter_token:
-            from praisonaiagents.trace.context_events import reset_context_emitter
-            reset_context_emitter(trace_emitter_token)
 
         return exit_code
 
     except FileNotFoundError:
-        # Cleanup trace on error
-        if trace_emitter:
-            trace_emitter.session_end()
-        if trace_writer:
-            trace_writer.close()
-        if trace_emitter_token:
-            from praisonaiagents.trace.context_events import reset_context_emitter
-            reset_context_emitter(trace_emitter_token)
+        _finish_replay(failed=True)
         print(f"[red]ERROR: YAML file not found: {yaml_file}[/red]")
         return 1
     except Exception as e:
-        # Cleanup trace on error
-        if trace_emitter:
-            trace_emitter.session_end()
-        if trace_writer:
-            trace_writer.close()
-        if trace_emitter_token:
-            from praisonaiagents.trace.context_events import reset_context_emitter
-            reset_context_emitter(trace_emitter_token)
+        _finish_replay(failed=True)
         print(f"[red]ERROR: YAML workflow failed: {e}[/red]")
         import traceback
         traceback.print_exc()

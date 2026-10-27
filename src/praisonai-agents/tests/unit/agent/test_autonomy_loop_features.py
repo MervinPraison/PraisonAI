@@ -154,9 +154,14 @@ class TestPromptReinjection:
                 completion_promise="DONE"
             )
         
-        # All prompts should be the original, not "Continue with the task"
+        # All prompts should be the original (plus the promise instruction),
+        # not "Continue with the task"
+        expected = (
+            "Build a REST API\n\nWhen the task is fully complete, include "
+            "<promise>DONE</promise> in your response."
+        )
         for prompt in prompts_received:
-            assert prompt == "Build a REST API", f"Expected original prompt, got: {prompt}"
+            assert prompt == expected, f"Expected original prompt, got: {prompt}"
     
     def test_prompt_not_continue_with_task(self):
         """Prompt should NOT be 'Continue with the task' after first iteration."""

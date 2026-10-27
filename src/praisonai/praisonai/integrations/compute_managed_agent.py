@@ -63,7 +63,7 @@ _KEY_VARS = (
 _RUNNER = r'''
 import json, sys
 
-payload = json.load(open("/tmp/praison_agent.json"))
+payload = json.load(open(sys.argv[1]))
 try:
     from praisonaiagents import Agent
 
@@ -129,14 +129,32 @@ class ComputeManagedAgent:
         try:
             await self._ensure()
 
+            # Per-call paths: a warm instance (keep_alive=True) is shared by
+            # every call, so fixed filenames let concurrent calls overwrite
+            # each other's payload and return the other prompt's answer.
+            # Uppercase hex for the same reason as _write's delimiter.
+            base = f"/tmp/praison_{uuid.uuid4().hex.upper()}"
+            payload_path, runner_path = f"{base}_agent.json", f"{base}_runner.py"
             payload = json.dumps({"agent": self._config, "prompt": prompt})
-            await self._write("/tmp/praison_agent.json", payload)
-            await self._write("/tmp/praison_runner.py", _RUNNER)
+            try:
+                await self._write(payload_path, payload)
+                await self._write(runner_path, _RUNNER)
 
-            result = await self._provider.execute(
-                self._instance, "python /tmp/praison_runner.py",
-                kwargs.get("timeout", 900),
-            )
+                result = await self._provider.execute(
+                    self._instance,
+                    f"python {shlex.quote(runner_path)} {shlex.quote(payload_path)}",
+                    kwargs.get("timeout", 900),
+                )
+            finally:
+                if self._keep_alive and self._instance:
+                    try:
+                        await self._provider.execute(
+                            self._instance,
+                            f"rm -f {shlex.quote(runner_path)} {shlex.quote(payload_path)}",
+                            30,
+                        )
+                    except Exception as exc:  # pragma: no cover - best effort
+                        logger.debug("[compute_managed] cleanup failed: %s", exc)
             answer = _parse(result.get("stdout", ""))
             if answer is None:
                 detail = (result.get("stderr") or result.get("stdout") or "").strip()[-600:]

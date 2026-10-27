@@ -356,6 +356,39 @@ def _record_skipped_task(agents_instance, task):
     task.status = "completed"
 
 
+def _trace_task_begin(agents_instance, task):
+    """Emit ``task_start``; returns a span for ``_trace_task_end`` (None when off)."""
+    from ..trace.context_events import get_context_emitter
+    emitter = get_context_emitter()
+    if not emitter._enabled:
+        return None
+    from ..workflows.diagram import task_node_id
+    node_id = task_node_id(agents_instance.tasks, task)
+    agent = getattr(getattr(task, "agent", None), "name", None)
+    emitter.task_start(
+        getattr(task, "name", None), getattr(task, "description", None),
+        agent=agent, node_id=node_id,
+    )
+    return emitter, node_id, agent, time.perf_counter()
+
+
+def _trace_task_end(span, task, status):
+    """Emit ``task_end`` (completed / failed / skipped) for a ``_trace_task_begin`` span."""
+    if span is None:
+        return
+    emitter, node_id, agent, started = span
+    result = getattr(task, "result", None)
+    emitter.task_end(
+        getattr(task, "name", None),
+        status,
+        retries=getattr(task, "retry_count", 0) or 0,
+        duration_ms=(time.perf_counter() - started) * 1000,
+        output=getattr(result, "raw", None) if result is not None else None,
+        agent=agent,
+        node_id=node_id,
+    )
+
+
 def _task_should_skip(agents_instance, task):
     """Return True when a task's should_run gate evaluates falsy.
 
@@ -1545,7 +1578,19 @@ class AgentTeam(SpawnAnnounceProtocol):
             agent_name=getattr(getattr(task, "agent", None), "name", None),
             context={"kind": "task_output_review", "prompt": prompt},
         )
-        decision = backend.request_approval_sync(request)
+        from ..trace.context_events import _approval_begin, _approval_end, get_context_emitter
+        _approval = None
+        if get_context_emitter()._enabled:
+            from ..workflows.diagram import task_node_id
+            _approval = _approval_begin(
+                request, kind="task_output_review", node_id=task_node_id(self.tasks, task),
+            )
+        try:
+            decision = backend.request_approval_sync(request)
+        except BaseException as exc:
+            _approval_end(_approval, error=exc)
+            raise
+        _approval_end(_approval, decision)
 
         if getattr(decision, "approved", False):
             return task_output, False
@@ -1690,10 +1735,21 @@ class AgentTeam(SpawnAnnounceProtocol):
             except Exception as e:
                 logger.error(f"Error in on_task_start callback: {e}")
 
-        # Apply global variables to task if not already set. Use a shallow copy so a
-        # task mutating its variables doesn't leak back into the shared AgentTeam state.
+        self._propagate_variables(task, task_id)
+
+    def _propagate_variables(self, task, task_id):
+        """Apply global variables to a task that has none of its own.
+
+        Uses a shallow copy so a task mutating its variables doesn't leak back
+        into the shared AgentTeam state. The copy is remembered so a later fresh
+        ``start()`` can drop it (and re-propagate current values) without
+        touching caller-defined ``Task.variables``.
+        """
         if self.variables and not getattr(task, 'variables', None):
             task.variables = self.variables.copy()
+            if not hasattr(self, "_propagated_variables"):
+                self._propagated_variables = {}
+            self._propagated_variables[task_id] = task.variables
 
     def _run_task_complete_hook(self, task, task_output):
         """Run the on_task_complete hook. Shared by run_task and arun_task."""
@@ -1720,8 +1776,7 @@ class AgentTeam(SpawnAnnounceProtocol):
             except Exception as e:
                 logger.error(f"Error in on_task_start callback: {e}")
 
-        if self.variables and not getattr(task, 'variables', None):
-            task.variables = self.variables.copy()
+        self._propagate_variables(task, task_id)
 
     async def _arun_task_complete_hook(self, task, task_output):
         """Async-aware on_task_complete hook for arun_task (see _arun_task_start_hook)."""
@@ -1746,6 +1801,18 @@ class AgentTeam(SpawnAnnounceProtocol):
             logger.info(f"Task with ID {task_id} is already completed")
             return
 
+        _span = _trace_task_begin(self, task)
+        _status = "failed"
+        try:
+            if await self._arun_task_body(task_id, task) == "skipped":
+                _status = "skipped"
+            elif task.status == "completed":
+                _status = "completed"
+        finally:
+            _trace_task_end(_span, task, _status)
+
+    async def _arun_task_body(self, task_id, task):
+        """Body of :meth:`arun_task`; returns ``"skipped"`` for a gated-out task."""
         # Call on_task_start callback and propagate variables (async-aware, mirrors run_task)
         await self._arun_task_start_hook(task, task_id)
 
@@ -1753,7 +1820,7 @@ class AgentTeam(SpawnAnnounceProtocol):
         if await _atask_should_skip(self, task):
             logger.info(f"Task {task_id} skipped by should_run gate")
             _record_skipped_task(self, task)
-            return
+            return "skipped"
 
         # Use per-task max_retries if available
         task_max = getattr(task, "max_retries", self.max_retries)
@@ -1937,18 +2004,20 @@ class AgentTeam(SpawnAnnounceProtocol):
                     if self._depends_on_pending(task, tasks_to_run):
                         await self._gather_with_isolation([c for _, c in tasks_to_run])
                         tasks_to_run = []
-                        # A just-flushed prerequisite may now be failed; don't
-                        # queue a dependent that would run with missing context
-                        # unless it opted into graceful degradation.
-                        if self._deps_failed(task_id) and not self._should_continue_on_dep_failure(task_id):
-                            self.tasks[task_id].status = "failed"
-                            continue
+                    # The predecessor may have run synchronously (no batch),
+                    # or may just have finished in the batch flushed above.
+                    if self._deps_failed(task_id) and not self._should_continue_on_dep_failure(task_id):
+                        task.status = "failed"
+                        continue
                     tasks_to_run.append((task_id, self.arun_task(task_id)))
                 else:
                     # If we encounter a sync task, we must wait for the previous async tasks to finish.
                     if tasks_to_run:
                         await self._gather_with_isolation([c for _, c in tasks_to_run])
                         tasks_to_run = []
+                    if self._deps_failed(task_id) and not self._should_continue_on_dep_failure(task_id):
+                        task.status = "failed"
+                        continue
                     
                     # Run sync task in an executor to avoid blocking the event loop
                     # Use copy_context_to_callable to propagate contextvars (needed for trace emission)
@@ -2211,7 +2280,16 @@ class AgentTeam(SpawnAnnounceProtocol):
         # Re-entrant on the owning thread so batch runs (astart_for_each) can hold
         # the guard across the whole batch while still calling astart() per item.
         with self._guard_execution():
-            return await self._astart_impl(content=content, return_dict=return_dict, **kwargs)
+            self._reset_if_previous_run_finished()
+            try:
+                from ..trace.context_events import _workflow_scope
+                with _workflow_scope("team", self._replay_name(), self.process,
+                                     graph_fn=self.to_graph, run_id=self.run_id) as _run:
+                    result = await self._astart_impl(content=content, return_dict=return_dict, **kwargs)
+                    self._mark_run_status(_run)
+                    return result
+            finally:
+                self._previous_run_finished = True
 
     async def _astart_impl(self, content=None, return_dict=False, **kwargs):
         # Track execution via telemetry
@@ -2225,6 +2303,7 @@ class AgentTeam(SpawnAnnounceProtocol):
                     if not task.context:
                         task.context = []
                     task.context.append(content)
+                    self._injected_content.append((task, content))
 
         if self.planning:
             await self._arun_with_planning()
@@ -2263,13 +2342,11 @@ class AgentTeam(SpawnAnnounceProtocol):
     def save_output_to_file(self, task, task_output):
         if task.output_file:
             try:
-                if task.create_directory:
-                    dir_name = os.path.dirname(task.output_file)
-                    if dir_name:
-                        os.makedirs(dir_name, exist_ok=True)
-                with open(task.output_file, "w") as f:
-                    f.write(str(task_output))
-                if self.verbose >= 1:
+                from ..utils.output_file import write_output_file
+                saved = write_output_file(
+                    task.output_file, str(task_output), create_dirs=task.create_directory
+                )
+                if saved and self.verbose >= 1:
                     logger.info(f"Task output saved to {task.output_file}")
             except Exception as e:
                 display_error(f"Error saving task output to file: {e}")
@@ -2328,6 +2405,18 @@ class AgentTeam(SpawnAnnounceProtocol):
             logger.info(f"Task with ID {task_id} is already completed")
             return
 
+        _span = _trace_task_begin(self, task)
+        _status = "failed"
+        try:
+            if self._run_task_body(task_id, task) == "skipped":
+                _status = "skipped"
+            elif task.status == "completed":
+                _status = "completed"
+        finally:
+            _trace_task_end(_span, task, _status)
+
+    def _run_task_body(self, task_id, task):
+        """Body of :meth:`run_task`; returns ``"skipped"`` for a gated-out task."""
         # Call on_task_start callback and propagate variables (shared with arun_task)
         self._run_task_start_hook(task, task_id)
 
@@ -2335,7 +2424,7 @@ class AgentTeam(SpawnAnnounceProtocol):
         if _task_should_skip(self, task):
             logger.info(f"Task {task_id} skipped by should_run gate")
             _record_skipped_task(self, task)
-            return
+            return "skipped"
 
         # Use per-task max_retries if available
         task_max = getattr(task, "max_retries", self.max_retries)
@@ -2431,6 +2520,9 @@ class AgentTeam(SpawnAnnounceProtocol):
         
         if self.process == "workflow":
             for task_id in process.workflow():
+                if self._deps_failed(task_id) and not self._should_continue_on_dep_failure(task_id):
+                    self.tasks[task_id].status = "failed"
+                    continue
                 self.run_task(task_id)
         elif self.process == "sequential":
             for task_id in process.sequential():
@@ -2454,6 +2546,21 @@ class AgentTeam(SpawnAnnounceProtocol):
                     task_id = gen.send(task_id)
             except StopIteration:
                 pass
+
+    def to_graph(self) -> Dict[str, Any]:
+        """This team's definition as graph data (``praisonai.graph/1``).
+
+        Covers agents, tasks (context/depends_on, next_tasks, conditions),
+        tools, hand-offs, human review and the hierarchical manager. Node ids
+        are stable across processes and match replay events' ``node_id``.
+        """
+        from ..workflows.diagram import to_graph
+        return to_graph(self)
+
+    def to_mermaid(self) -> str:
+        """Render this team's definition as a mermaid diagram."""
+        from ..workflows.diagram import graph_to_mermaid, to_graph
+        return graph_to_mermaid(to_graph(self))
 
     def get_task_status(self, task_id):
         if task_id in self.tasks:
@@ -2533,8 +2640,31 @@ class AgentTeam(SpawnAnnounceProtocol):
         # Re-entrant on the owning thread so batch runs (start_for_each) can hold
         # the guard across the whole batch while still calling start() per item.
         with self._guard_execution():
-            return self._start_impl(content=content, return_dict=return_dict,
-                                    output=output, **kwargs)
+            self._reset_if_previous_run_finished()
+            try:
+                from ..trace.context_events import _workflow_scope
+                with _workflow_scope("team", self._replay_name(), self.process,
+                                     graph_fn=self.to_graph, run_id=self.run_id) as _run:
+                    result = self._start_impl(content=content, return_dict=return_dict,
+                                              output=output, **kwargs)
+                    self._mark_run_status(_run)
+                    return result
+            finally:
+                self._previous_run_finished = True
+
+    def _replay_name(self) -> str:
+        """Run label for Replay: the team's name, else its agents joined ("A + B")."""
+        if self.name:
+            return self.name
+        names = [getattr(a, "name", None) or "Agent" for a in (self.agents or [])]
+        return " + ".join(names) if names else "Agent team"
+
+    def _mark_run_status(self, run_state):
+        """Record a failed replay run when any task ended failed (tracing on only)."""
+        if run_state is not None and any(
+            getattr(t, "status", None) == "failed" for t in self.tasks.values()
+        ):
+            run_state["status"] = "failed"
 
     def _start_impl(self, content=None, return_dict=False, output=None, **kwargs):
         # Track execution via telemetry
@@ -2565,6 +2695,7 @@ class AgentTeam(SpawnAnnounceProtocol):
                     if not task.context:
                         task.context = []
                     task.context.append(content)
+                    self._injected_content.append((task, content))
         
         # ─────────────────────────────────────────────────────────────
         # Verbose Mode: Show Rich panels for multi-agent workflow
@@ -2760,14 +2891,19 @@ class AgentTeam(SpawnAnnounceProtocol):
         Captures the fields that ``run_task``/``arun_task`` mutate during a run
         (``status``, ``result``, ``retry_count``) plus caller-defined
         ``variables``, keeping the public Task API backward-compatible.
+        ``propagated`` records whether those variables were copied from the
+        team's ``variables`` so a restore keeps that ownership tracking.
         """
         snapshot = {}
+        propagated = getattr(self, "_propagated_variables", {})
         for task_id, task in getattr(self, "tasks", {}).items():
+            variables = getattr(task, "variables", None)
             snapshot[task_id] = {
                 "status": getattr(task, "status", None),
                 "result": getattr(task, "result", None),
                 "retry_count": getattr(task, "retry_count", None),
-                "variables": getattr(task, "variables", None),
+                "variables": variables,
+                "propagated": variables is not None and propagated.get(task_id) is variables,
             }
         return snapshot
 
@@ -2786,8 +2922,41 @@ class AgentTeam(SpawnAnnounceProtocol):
                 task.retry_count = 0
             task.variables = {}
 
+    def _reset_if_previous_run_finished(self):
+        """Make a repeated ``start()``/``astart()`` a fresh run.
+
+        ``run_task``/``arun_task`` skip tasks whose status is "completed", so
+        without this a second ``start()`` on the same team executed nothing and
+        returned the previous run's output. Resetting only once a previous run
+        has finished keeps ``restore_session_state()`` + ``start()`` resuming,
+        and also drops the ``content`` earlier runs appended to task context.
+        Caller-defined ``Task.variables`` are kept; only copies propagated from
+        the team's ``variables`` are cleared so current values re-propagate.
+        """
+        injected = getattr(self, "_injected_content", [])
+        if getattr(self, "_previous_run_finished", False):
+            propagated = getattr(self, "_propagated_variables", {})
+            for task_id, task in self.tasks.items():
+                task.status = "not started"
+                task.result = None
+                if hasattr(task, "retry_count"):
+                    task.retry_count = 0
+                if task_id in propagated and getattr(task, "variables", None) is propagated[task_id]:
+                    task.variables = {}
+            propagated.clear()
+            for task, item in injected:
+                try:
+                    task.context.remove(item)
+                except (AttributeError, ValueError):
+                    pass
+            injected = []
+        # A resumed run keeps the tracked entries so the next fresh run removes them.
+        self._previous_run_finished = False
+        self._injected_content = injected
+
     def _restore_task_state(self, snapshot):
         """Restore per-task run state captured by ``_snapshot_task_state``."""
+        propagated = {}
         for task_id, state in snapshot.items():
             task = self.tasks.get(task_id)
             if task is None:
@@ -2797,6 +2966,9 @@ class AgentTeam(SpawnAnnounceProtocol):
             if state["retry_count"] is not None:
                 task.retry_count = state["retry_count"]
             task.variables = state["variables"]
+            if state.get("propagated"):
+                propagated[task_id] = task.variables
+        self._propagated_variables = propagated
 
     def _build_batch_result(self, batch_id, items):
         """Aggregate per-item results into a batch summary dict.
@@ -3145,6 +3317,9 @@ class AgentTeam(SpawnAnnounceProtocol):
             if state.get("variables"):
                 task.variables = state["variables"]
             restored += 1
+        if restored:
+            # A restored checkpoint is meant to be resumed, not reset.
+            self._previous_run_finished = False
         return restored
 
     @staticmethod
@@ -4475,7 +4650,10 @@ class AgentTeam(SpawnAnnounceProtocol):
         # Read target agents inside lock to avoid race condition
         with self._spawn_lock:
             target_agents = agent_ids or list(self._spawned_agents.keys())
-        
+            if not target_agents:
+                # Return retained history only for the default target selection.
+                return list(self._completion_events) if agent_ids is None else []
+
         completed_agents = set()
         
         while True:
