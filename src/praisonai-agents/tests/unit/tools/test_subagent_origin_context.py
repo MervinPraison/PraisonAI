@@ -148,3 +148,31 @@ def test_without_gateway_stays_pull_only():
     info = jm.get_job_info(handle["job_id"])
     assert info.delivered is False
     assert info.origin["chat_id"] == ""
+
+
+def test_restating_own_chat_keeps_turn_thread_and_platform():
+    messenger = _FakeMessenger()
+    handle = _spawn_in_turn(messenger, chat_id="100")
+    info = _wait_info(handle["job_id"])
+    assert info.origin["platform"] == "telegram"
+    assert info.origin["thread_id"] == "7"
+    assert len(messenger.sent) == 1
+
+
+def test_empty_output_still_notifies_before_marking_delivered():
+    class _Silent:
+        def chat(self, prompt):
+            return ""
+
+    tool = create_subagent_tool(agent_factory=lambda **kw: _Silent())
+    messenger = _FakeMessenger()
+    ctx = set_session_context(platform="telegram", chat_id="100", user_id="alice")
+    msg = register_outbound_messenger(messenger)
+    try:
+        handle = tool["function"](task="t", background=True, deliver="origin")
+    finally:
+        clear_outbound_messenger(msg)
+        clear_session_context(ctx)
+    info = _wait_info(handle["job_id"])
+    assert info.delivered is True
+    assert len(messenger.sent) == 1

@@ -87,7 +87,7 @@ def _messenger_delivery(messenger: Any) -> Callable[[Any], None]:
         else:
             text = result
         if not text:
-            return
+            text = "Background task finished with no output."
         outcome = _run_async(messenger.send("origin", str(text)))
         if not getattr(outcome, "ok", False):
             raise RuntimeError(getattr(outcome, "summary", "") or "delivery failed")
@@ -395,7 +395,7 @@ def create_subagent_tool(
                 )
 
                 ctx = get_session_context()
-                use_ctx = not chat_id
+                use_ctx = not chat_id or chat_id == ctx.chat_id
                 origin = {
                     "deliver": deliver,
                     "platform": platform or (ctx.platform if use_ctx else ""),
