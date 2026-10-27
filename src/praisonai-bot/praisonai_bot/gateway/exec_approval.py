@@ -382,12 +382,16 @@ class PermissionAllowlist:
         path: Optional[Union[str, Path]] = None,
     ) -> None:
         self._lock = threading.Lock()
-        # In-memory mirror of grant keys (agent_id, tool_name, arg_signature)
-        self._allowed: Set[tuple] = set()
+        # In-memory mirror: (agent_id, tool_name, arg_signature) -> created_at.
+        # Stamped so the grant TTL holds on the hot path for the whole process
+        # lifetime, not only when the durable store is re-read on restart.
+        self._allowed: Dict[tuple, float] = {}
         self._store: Optional[ScopedAllowlistStore] = None
+        self._ttl_seconds = _DEFAULT_GRANT_TTL_SECONDS
         if durable:
             try:
                 self._store = store or ScopedAllowlistStore(path=path)
+                self._ttl_seconds = self._store.ttl_seconds
                 self._rehydrate()
             except Exception:
                 # Fail-closed on the persistence path: if the store cannot be
@@ -409,12 +413,20 @@ class PermissionAllowlist:
                 grant["tool_name"],
                 grant.get("arg_signature") or "",
             )
-            self._allowed.add(key)
+            self._allowed[key] = float(grant.get("created_at") or time.time())
         if self._allowed:
             logger.info(
                 "Rehydrated %d durable allow-list grant(s) from %s",
                 len(self._allowed), self._store.path,
             )
+
+    def _evict_expired_locked(self) -> None:
+        """Drop grants older than the TTL from the in-memory mirror."""
+        if self._ttl_seconds <= 0:
+            return
+        cutoff = time.time() - self._ttl_seconds
+        for key in [k for k, ts in self._allowed.items() if ts <= cutoff]:
+            del self._allowed[key]
 
     # ── Scoped API ───────────────────────────────────────────────────
     def add_scoped(
@@ -428,7 +440,7 @@ class PermissionAllowlist:
         """Add a scoped grant, persisting it when durable."""
         key = (agent_id, tool_name, arg_signature or "")
         with self._lock:
-            self._allowed.add(key)
+            self._allowed[key] = time.time()
         if self._store is not None:
             try:
                 self._store.add(
@@ -457,11 +469,17 @@ class PermissionAllowlist:
         (empty signature) covers any arguments.
         """
         sig = arg_signature or ""
+        cutoff = time.time() - self._ttl_seconds if self._ttl_seconds > 0 else None
         with self._lock:
+            # Only the candidate keys are checked (O(1)); expired ones are
+            # evicted lazily. Full sweeps happen in list()/list_scoped().
             for a in (agent_id, ANY_AGENT):
-                if (a, tool_name, "") in self._allowed:
-                    return True
-                if sig and (a, tool_name, sig) in self._allowed:
+                for key in ((a, tool_name, ""), (a, tool_name, sig) if sig else None):
+                    if key is None or key not in self._allowed:
+                        continue
+                    if cutoff is not None and self._allowed[key] <= cutoff:
+                        del self._allowed[key]
+                        continue
                     return True
         return False
 
@@ -478,12 +496,11 @@ class PermissionAllowlist:
             if arg_signature is None:
                 for key in list(self._allowed):
                     if key[0] == agent_id and key[1] == tool_name:
-                        self._allowed.discard(key)
+                        del self._allowed[key]
                         removed = True
             else:
                 key = (agent_id, tool_name, arg_signature)
-                if key in self._allowed:
-                    self._allowed.discard(key)
+                if self._allowed.pop(key, None) is not None:
                     removed = True
         if self._store is not None:
             try:
@@ -508,6 +525,7 @@ class PermissionAllowlist:
             except Exception:
                 logger.exception("Failed to list persisted grants; using memory")
         with self._lock:
+            self._evict_expired_locked()
             items = [
                 {
                     "agent_id": a,
@@ -530,7 +548,7 @@ class PermissionAllowlist:
         with self._lock:
             for key in list(self._allowed):
                 if key[1] == tool_name:
-                    self._allowed.discard(key)
+                    del self._allowed[key]
                     removed = True
         if self._store is not None:
             try:
@@ -551,6 +569,7 @@ class PermissionAllowlist:
         grants are exposed via :meth:`list_scoped` / the ``grants`` view.
         """
         with self._lock:
+            self._evict_expired_locked()
             return sorted(
                 {key[1] for key in self._allowed if key[0] == ANY_AGENT}
             )
