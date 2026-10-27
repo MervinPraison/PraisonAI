@@ -38,6 +38,15 @@ _active_turn_cancel: "contextvars.ContextVar[Optional[tuple]]" = contextvars.Con
     "praisonai_active_turn_cancel", default=None
 )
 
+# Exceptions a tool body raises about its *input* (bad value, missing key or
+# path). They are terminal for the same arguments and say nothing about the
+# tool's health, so they are never retried and never count toward the per-tool
+# circuit breaker. Timeouts, connection errors and other OSErrors still do.
+_CALLER_ERROR_TYPES = (
+    ValueError, TypeError, AttributeError, LookupError,
+    FileNotFoundError, FileExistsError, IsADirectoryError, NotADirectoryError, PermissionError,
+)
+
 # Worker count for the per-agent tool ThreadPoolExecutor. Used both when the
 # pool is created and to decide (with the per-executor in-flight counter)
 # whether a fresh call would have to queue behind hung workers.
@@ -1077,6 +1086,76 @@ class ToolExecutionMixin:
             from .async_safety import DualLock
             return self.__dict__.setdefault("_tool_executor_lock", DualLock())
 
+    def _submit_to_tool_pool(self, fn, *args):
+        """Submit ``fn(*args)`` to the bounded per-agent tool pool.
+
+        Shared by the sync and async tool paths so a timed-out tool never
+        strands a thread in the process-wide default executor. Returns
+        ``(future, executor, orphaned)``; ``future`` is ``None`` when the pool
+        is exhausted by hung calls and the caller must refuse fast.
+        """
+        with self._get_tool_executor_lock().sync():
+            if getattr(self, '_tool_executor', None) is None:
+                self._tool_executor = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=_TOOL_POOL_MAX_WORKERS,
+                    thread_name_prefix=f"tool-{self.name}"
+                )
+                # Per-executor in-flight counter so a retired pool's
+                # late-finishing future can never corrupt the *new* pool's count.
+                self._tool_executor._inflight = 0
+            executor = self._tool_executor
+            orphaned = getattr(self, '_tool_executor_orphaned', 0)
+            inflight = getattr(executor, '_inflight', 0)
+            # Once the orphan cap is hit we can no longer retire a stuck pool,
+            # so we would otherwise queue behind hung workers and time out a
+            # healthy tool that never got to start. Refuse fast and visibly
+            # instead when no worker is free, and let the pool self-heal (the
+            # orphan count drops as hung threads finish).
+            if orphaned >= _MAX_ORPHANED_TOOL_EXECUTORS and inflight >= _TOOL_POOL_MAX_WORKERS:
+                return None, executor, orphaned
+            executor._inflight = inflight + 1
+            future = executor.submit(fn, *args)
+
+        def _on_tool_done(_f, _agent=self, _executor=executor):  # noqa: ANN001
+            with _agent._get_tool_executor_lock().sync():
+                _executor._inflight = max(0, getattr(_executor, '_inflight', 1) - 1)
+                # Orphan accounting is per-POOL, not per-future: retiring a pool
+                # adds exactly one to the orphan count, so a pool may return
+                # exactly one slot. Recover it only when this retired pool's
+                # LAST in-flight worker exits (``_inflight`` == 0), and guard
+                # with a one-shot flag so a multi-worker pool can never
+                # decrement more than the single unit it contributed and steal
+                # another orphaned pool's slot.
+                if (
+                    getattr(_agent, '_tool_executor', None) is not _executor
+                    and _executor._inflight == 0
+                    and not getattr(_executor, '_orphan_recovered', False)
+                ):
+                    _executor._orphan_recovered = True
+                    _agent._tool_executor_orphaned = max(
+                        0, getattr(_agent, '_tool_executor_orphaned', 0) - 1
+                    )
+
+        future.add_done_callback(_on_tool_done)
+        return future, executor, orphaned
+
+    def _retire_tool_executor(self, executor):
+        """Retire a pool whose worker is stuck past its timeout.
+
+        The timed-out thread cannot be reclaimed. Retire this executor so the
+        next call gets a fresh worker instead of queuing behind a permanently
+        stuck one — but bound how many orphaned (still-blocked) pools we allow
+        to accumulate: once the cap is reached we stop recycling and keep
+        reusing the existing pool so repeated timeouts can't exhaust process
+        resources with an unbounded number of leaked threads.
+        """
+        with self._get_tool_executor_lock().sync():
+            orphaned = getattr(self, '_tool_executor_orphaned', 0)
+            if getattr(self, '_tool_executor', None) is executor and orphaned < _MAX_ORPHANED_TOOL_EXECUTORS:
+                executor.shutdown(wait=False)
+                self._tool_executor = None
+                self._tool_executor_orphaned = orphaned + 1
+
     def _get_turn_tools_lock(self):
         """Return the DualLock guarding the per-turn tool buffer.
 
@@ -1348,59 +1427,8 @@ class ToolExecutionMixin:
                                         return self._execute_tool_with_circuit_breaker(function_name, arguments)
 
                                 # Use reusable executor to prevent resource leaks
-                                pool_exhausted = False
-                                with self._get_tool_executor_lock().sync():
-                                    if not hasattr(self, '_tool_executor') or self._tool_executor is None:
-                                        self._tool_executor = concurrent.futures.ThreadPoolExecutor(
-                                            max_workers=_TOOL_POOL_MAX_WORKERS,
-                                            thread_name_prefix=f"tool-{self.name}"
-                                        )
-                                        # Per-executor in-flight counter so a
-                                        # retired pool's late-finishing future can
-                                        # never corrupt the *new* pool's count.
-                                        self._tool_executor._inflight = 0
-                                    executor = self._tool_executor
-                                    orphaned = getattr(self, '_tool_executor_orphaned', 0)
-                                    inflight = getattr(executor, '_inflight', 0)
-                                    # Once the orphan cap is hit we can no longer
-                                    # retire a stuck pool, so we would otherwise
-                                    # queue behind hung workers and time out a
-                                    # healthy tool that never got to start. Refuse
-                                    # fast and visibly instead when no worker is
-                                    # free, and let the pool self-heal (the orphan
-                                    # count drops as hung threads finish).
-                                    if orphaned >= _MAX_ORPHANED_TOOL_EXECUTORS and inflight >= _TOOL_POOL_MAX_WORKERS:
-                                        pool_exhausted = True
-                                    else:
-                                        executor._inflight = inflight + 1
-                                        future = executor.submit(ctx.run, execute_with_context)
-
-                                        def _on_tool_done(_f, _agent=self, _executor=executor):  # noqa: ANN001
-                                            with _agent._get_tool_executor_lock().sync():
-                                                _executor._inflight = max(0, getattr(_executor, '_inflight', 1) - 1)
-                                                # Orphan accounting is per-POOL, not
-                                                # per-future: retiring a pool adds
-                                                # exactly one to the orphan count, so
-                                                # a pool may return exactly one slot.
-                                                # Recover it only when this retired
-                                                # pool's LAST in-flight worker exits
-                                                # (``_inflight`` == 0), and guard with
-                                                # a one-shot flag so a multi-worker
-                                                # pool can never decrement more than
-                                                # the single unit it contributed and
-                                                # steal another orphaned pool's slot.
-                                                if (
-                                                    getattr(_agent, '_tool_executor', None) is not _executor
-                                                    and _executor._inflight == 0
-                                                    and not getattr(_executor, '_orphan_recovered', False)
-                                                ):
-                                                    _executor._orphan_recovered = True
-                                                    _agent._tool_executor_orphaned = max(
-                                                        0, getattr(_agent, '_tool_executor_orphaned', 0) - 1
-                                                    )
-
-                                        future.add_done_callback(_on_tool_done)
-                                if pool_exhausted:
+                                future, executor, orphaned = self._submit_to_tool_pool(ctx.run, execute_with_context)
+                                if future is None:
                                     logging.warning(
                                         f"Tool worker pool exhausted; refusing to queue '{function_name}' "
                                         f"behind {orphaned} hung tool call(s)."
@@ -1427,19 +1455,7 @@ class ToolExecutionMixin:
                                     # inner budget never saw it, so this one still
                                     # earns an outer retry pass under the single budget.
                                     result = {"error": f"Tool timed out after {tool_timeout}s", "timeout": True, "_outer_timeout": True}
-                                    # The timed-out thread cannot be reclaimed. Retire this
-                                    # executor so the next call gets a fresh worker instead of
-                                    # queuing behind a permanently stuck one — but bound how many
-                                    # orphaned (still-blocked) threads we allow to accumulate:
-                                    # once the cap is reached we stop recycling and keep reusing
-                                    # the existing pool so repeated timeouts can't exhaust process
-                                    # resources with an unbounded number of leaked threads.
-                                    with self._get_tool_executor_lock().sync():
-                                        orphaned = getattr(self, '_tool_executor_orphaned', 0)
-                                        if getattr(self, '_tool_executor', None) is executor and orphaned < _MAX_ORPHANED_TOOL_EXECUTORS:
-                                            executor.shutdown(wait=False)
-                                            self._tool_executor = None
-                                            self._tool_executor_orphaned = orphaned + 1
+                                    self._retire_tool_executor(executor)
                         else:
                             with tool_progress_channel(_progress_sink), with_injection_context(state):
                                 result = self._execute_tool_with_circuit_breaker(function_name, arguments)
@@ -3227,23 +3243,28 @@ class ToolExecutionMixin:
             return None
         breaker_name = f"tool_{id(self)}_{function_name}"
         config = CircuitBreakerConfig(
-            failure_threshold=5,
-            recovery_timeout=60.0,
-            timeout=30.0,
-            graceful_degradation=True,
+            failure_threshold=5,        # Open after 5 failures
+            recovery_timeout=60.0,      # Wait 60s before trying half-open
+            graceful_degradation=True,  # Return error instead of raising exception
         )
         breaker = get_circuit_breaker(breaker_name, config)
+        # Ensure the registry entry is removed the moment this Agent is
+        # actually garbage-collected, regardless of whether close()/aclose()
+        # was ever called. This closes the CPython id-reuse window where a
+        # new Agent at the same address could inherit a stale OPEN breaker.
         self._register_breaker_finalizer(breaker_name)
         return breaker
 
     def _circuit_breaker_open_result(self, function_name):
         """Return the standard ``circuit_open`` error dict for *function_name*."""
+        breaker = self._get_tool_circuit_breaker(function_name)
+        recovery = breaker.config.recovery_timeout if breaker is not None else 60.0
         return {
             "error": f"Tool '{function_name}' circuit breaker open - too many recent failures",
             "circuit_open": True,
             "agent_name": getattr(self, "name", None),
             "session_id": getattr(self, "_session_id", None),
-            "remediation": "Wait for recovery_timeout (60s) or investigate recent tool failures.",
+            "remediation": f"Wait for recovery_timeout ({recovery:g}s) or investigate recent tool failures.",
         }
 
     def _circuit_breaker_precheck(self, function_name):
@@ -3301,7 +3322,7 @@ class ToolExecutionMixin:
         """
         # Import circuit breaker components first (lazy import for performance)
         try:
-            from ..tools.circuit_breaker import get_circuit_breaker, CircuitBreakerConfig, CircuitBreakerException, _NeutralOutcome
+            from ..tools.circuit_breaker import CircuitBreakerException, _NeutralOutcome
         except ImportError:
             # Circuit breaker not available - fallback to direct execution
             logging.debug("Circuit breaker not available, falling back to direct tool execution")
@@ -3309,29 +3330,15 @@ class ToolExecutionMixin:
 
         try:
             
-            # Get or create circuit breaker for this tool.
-            # Scope the key to this Agent instance so one agent's failing tool
-            # cannot trip the breaker for another agent's same-named tool.
-            breaker_name = f"tool_{id(self)}_{function_name}"
-            config = CircuitBreakerConfig(
-                failure_threshold=5,        # Open after 5 failures
-                recovery_timeout=60.0,      # Wait 60s before trying half-open
-                timeout=30.0,               # Tool call timeout
-                graceful_degradation=True   # Return error instead of raising exception
-            )
-            breaker = get_circuit_breaker(breaker_name, config)
-
-            # Ensure the registry entry is removed the moment this Agent is
-            # actually garbage-collected, regardless of whether close()/aclose()
-            # was ever called. This closes the CPython id-reuse window where a
-            # new Agent at the same address could inherit a stale OPEN breaker.
-            self._register_breaker_finalizer(breaker_name)
+            # Get or create this agent's circuit breaker for this tool (shared
+            # with the async path so both use the same key and policy).
+            breaker = self._get_tool_circuit_breaker(function_name)
 
             # Execute tool through circuit breaker with failure detection wrapper
             def _tool_wrapper():
                 result = self._execute_tool_impl(function_name, arguments)
-                # Caller errors (bad input: ValueError/TypeError/AttributeError,
-                # tagged non-retryable) say nothing about the tool's health: record
+                # Caller errors (bad input: _CALLER_ERROR_TYPES, tagged
+                # non-retryable) say nothing about the tool's health: record
                 # them as neither failure nor success, so they can neither open the
                 # breaker for other callers nor close a half-open one.
                 if isinstance(result, dict) and result.get("error") and \
@@ -3367,13 +3374,7 @@ class ToolExecutionMixin:
         except CircuitBreakerException as e:
             # Circuit breaker is open - return error dict instead of raising
             logging.warning(f"Tool '{function_name}' circuit breaker open: {e}")
-            return {
-                "error": f"Tool '{function_name}' circuit breaker open - too many recent failures",
-                "circuit_open": True,
-                "agent_name": getattr(self, "name", None),
-                "session_id": getattr(self, "_session_id", None),
-                "remediation": "Wait for recovery_timeout (60s) or investigate recent tool failures.",
-            }
+            return self._circuit_breaker_open_result(function_name)
 
     def _find_declared_tool(self, function_name, tools=None):
         """Return the tool OBJECT named ``function_name``, or ``None``.
@@ -3823,7 +3824,7 @@ class ToolExecutionMixin:
                 # model and cannot collide with a tool's own "retryable" field.
                 return {
                     "error": error_msg,
-                    "_praison_retryable": not isinstance(e, (ValueError, TypeError, AttributeError)),
+                    "_praison_retryable": not isinstance(e, _CALLER_ERROR_TYPES),
                 }
 
         # Unresolved: return a corrective, model-readable message so the model can
