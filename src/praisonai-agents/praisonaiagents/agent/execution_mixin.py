@@ -497,157 +497,111 @@ class ExecutionMixin:
             # The backend's stream method is async, so we need to handle that
             import asyncio
             
-            async def stream_wrapper():
-                async for chunk in self.backend.stream(prompt, **kwargs):
-                    yield chunk
-            
-            # Convert async generator to sync generator
+            import threading
+            import queue
+
+            def _to_text(item):
+                # Managed backends may yield event dicts; convert them to the
+                # string chunks expected by Agent and skip other event types
+                # (session.status_idle, etc.).
+                if isinstance(item, str):
+                    return item
+                if isinstance(item, dict) and item.get('type') == 'agent.message':
+                    content = item.get('content', [])
+                    if isinstance(content, str):
+                        return content
+                    if isinstance(content, list):
+                        text_parts = []
+                        for block in content:
+                            if isinstance(block, dict) and block.get('type') == 'text':
+                                text_parts.append(block.get('text', ''))
+                            elif isinstance(block, str):
+                                text_parts.append(block)
+                        if text_parts:
+                            return ''.join(text_parts)
+                return None
+
+            # Convert async generator to sync generator. The backend's async
+            # generator is always driven on a private loop in a background
+            # thread, whether or not the caller already has a running loop, so
+            # the caller receives chunks incrementally and a backend error
+            # (including RuntimeError) can never re-run the stream.
             def sync_stream():
-                try:
-                    loop = asyncio.get_running_loop()
-                    # Already in async context - need to handle differently
-                    import concurrent.futures
-                    import threading
-                    import queue
-                    
-                    result_queue = queue.Queue()
-                    exception_holder = [None]
-                    
-                    def run_in_thread():
-                        new_loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(new_loop)
+                # Bounded queue so an abandoned consumer applies back-pressure
+                # instead of letting the producer fill memory unbounded.
+                # ``cancel_event`` lets the producer stop early when the caller
+                # closes the generator.
+                bridge_queue = queue.Queue(maxsize=64)
+                cancel_event = threading.Event()
+
+                def run_in_thread():
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    try:
+                        async def pump():
+                            agen = self.backend.stream(prompt, **kwargs)
+                            try:
+                                async for item in agen:
+                                    if cancel_event.is_set():
+                                        break
+                                    # Block until space is available or the
+                                    # consumer signals cancellation, so we
+                                    # never spin nor grow the queue forever.
+                                    while not cancel_event.is_set():
+                                        try:
+                                            bridge_queue.put(('item', item), timeout=0.1)
+                                            break
+                                        except queue.Full:
+                                            continue
+                                if not cancel_event.is_set():
+                                    bridge_queue.put(('done', None))
+                            except Exception as e:
+                                if not cancel_event.is_set():
+                                    bridge_queue.put(('error', e))
+                            finally:
+                                # Run the backend's own cleanup (e.g. stopping
+                                # its producer) when the consumer closes early.
+                                aclose = getattr(agen, 'aclose', None)
+                                if aclose is not None:
+                                    try:
+                                        await aclose()
+                                    except Exception as e:
+                                        logger.debug(f"Backend stream cleanup failed: {e}")
+
+                        new_loop.run_until_complete(pump())
+                    finally:
                         try:
-                            async def collect():
-                                try:
-                                    async for item in self.backend.stream(prompt, **kwargs):
-                                        result_queue.put(('item', item))
-                                    result_queue.put(('done', None))
-                                except Exception as e:
-                                    exception_holder[0] = e
-                                    result_queue.put(('error', e))
-                            
-                            new_loop.run_until_complete(collect())
+                            new_loop.run_until_complete(new_loop.shutdown_asyncgens())
                         finally:
                             new_loop.close()
-                    
-                    thread = threading.Thread(target=run_in_thread)
-                    thread.start()
-                    
+
+                # Daemon thread so a stalled/abandoned producer can never
+                # block interpreter shutdown.
+                thread = threading.Thread(target=run_in_thread, daemon=True)
+                thread.start()
+
+                try:
                     while True:
-                        msg_type, data = result_queue.get()
+                        msg_type, data = bridge_queue.get()
                         if msg_type == 'item':
-                            # For managed backends, we might get event objects
-                            # Convert to string format expected by Agent
-                            if isinstance(data, dict):
-                                if data.get('type') == 'agent.message':
-                                    content = data.get('content', [])
-                                    if isinstance(content, list):
-                                        text_parts = []
-                                        for block in content:
-                                            if isinstance(block, dict) and block.get('type') == 'text':
-                                                text_parts.append(block.get('text', ''))
-                                            elif isinstance(block, str):
-                                                text_parts.append(block)
-                                        if text_parts:
-                                            yield ''.join(text_parts)
-                                    elif isinstance(content, str):
-                                        yield content
-                                # Skip other event types (session.status_idle, etc.)
-                            elif isinstance(data, str):
-                                yield data
+                            text = _to_text(data)
+                            if text is not None:
+                                yield text
                         elif msg_type == 'done':
                             break
                         elif msg_type == 'error':
                             raise data
-                    
-                    thread.join()
-                    
-                except RuntimeError:
-                    # No event loop (the common script/CLI case). Drive the
-                    # backend's async generator from a background thread and
-                    # push each chunk through a queue as it arrives, so the
-                    # caller receives chunks incrementally instead of only
-                    # after the whole response has been buffered. Mirrors the
-                    # running-loop branch above.
-                    import threading
-                    import queue
-                    # Bounded queue so an abandoned consumer applies
-                    # back-pressure instead of letting the producer fill memory
-                    # unbounded. ``cancel_event`` lets the producer stop early
-                    # when the caller closes the generator.
-                    bridge_queue = queue.Queue(maxsize=64)
-                    cancel_event = threading.Event()
-
-                    def run_in_thread_noloop():
-                        new_loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(new_loop)
-                        try:
-                            async def pump():
-                                try:
-                                    async for item in self.backend.stream(prompt, **kwargs):
-                                        if cancel_event.is_set():
-                                            break
-                                        # Block until space is available or the
-                                        # consumer signals cancellation, so we
-                                        # never spin nor grow the queue forever.
-                                        while not cancel_event.is_set():
-                                            try:
-                                                bridge_queue.put(('item', item), timeout=0.1)
-                                                break
-                                            except queue.Full:
-                                                continue
-                                    if not cancel_event.is_set():
-                                        bridge_queue.put(('done', None))
-                                except Exception as e:
-                                    if not cancel_event.is_set():
-                                        bridge_queue.put(('error', e))
-
-                            new_loop.run_until_complete(pump())
-                        finally:
-                            new_loop.close()
-
-                    # Daemon thread so a stalled/abandoned producer can never
-                    # block interpreter shutdown.
-                    thread = threading.Thread(target=run_in_thread_noloop, daemon=True)
-                    thread.start()
-
+                finally:
+                    # Runs on normal completion AND on early generator
+                    # close/GC: signal the producer to stop, drain one slot
+                    # so a blocked put() can observe the cancel, and join.
+                    cancel_event.set()
                     try:
-                        while True:
-                            msg_type, data = bridge_queue.get()
-                            if msg_type == 'item':
-                                item = data
-                                # Same conversion logic as the running-loop branch.
-                                if isinstance(item, dict):
-                                    if item.get('type') == 'agent.message':
-                                        content = item.get('content', [])
-                                        if isinstance(content, list):
-                                            text_parts = []
-                                            for block in content:
-                                                if isinstance(block, dict) and block.get('type') == 'text':
-                                                    text_parts.append(block.get('text', ''))
-                                                elif isinstance(block, str):
-                                                    text_parts.append(block)
-                                            if text_parts:
-                                                yield ''.join(text_parts)
-                                        elif isinstance(content, str):
-                                            yield content
-                                elif isinstance(item, str):
-                                    yield item
-                            elif msg_type == 'done':
-                                break
-                            elif msg_type == 'error':
-                                raise data
-                    finally:
-                        # Runs on normal completion AND on early generator
-                        # close/GC: signal the producer to stop, drain one slot
-                        # so a blocked put() can observe the cancel, and join.
-                        cancel_event.set()
-                        try:
-                            bridge_queue.get_nowait()
-                        except queue.Empty:
-                            pass
-                        thread.join(timeout=5)
-            
+                        bridge_queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                    thread.join(timeout=5)
+
             return sync_stream()
             
         except Exception as e:
@@ -1713,6 +1667,7 @@ Write the complete compiled report:"""
     async def _execute_tool_async_impl(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
         """Internal async tool execution implementation"""
         from ..errors import ToolExecutionError
+        from .tool_execution import _CALLER_ERROR_TYPES
         try:
             logging.info(f"Executing async tool: {function_name} with arguments: {arguments}")
             
@@ -1944,20 +1899,50 @@ Write the complete compiled report:"""
                         with tool_progress_channel(_progress_sink):
                             return await call_target(**call_arguments)
                     logging.debug(f"Executing sync function in executor: {function_name}")
-                    loop = asyncio.get_running_loop()
                     from ..trace.context_events import copy_context_to_callable
                     # copy_context_to_callable snapshots the CURRENT context (incl.
                     # the injection contextvar) into the executor thread, so setting
                     # it here propagates cancel_event to the sync tool body too.
                     if _inject_state is not None:
                         with with_injection_context(_inject_state), tool_progress_channel(_progress_sink):
-                            return await loop.run_in_executor(
-                                None, copy_context_to_callable(lambda: call_target(**call_arguments))
-                            )
+                            return await _run_sync(copy_context_to_callable(lambda: call_target(**call_arguments)))
                     with tool_progress_channel(_progress_sink):
-                        return await loop.run_in_executor(
-                            None, copy_context_to_callable(lambda: call_target(**call_arguments))
+                        return await _run_sync(copy_context_to_callable(lambda: call_target(**call_arguments)))
+
+                async def _run_sync(fn):
+                    # With a tool timeout, a timed-out sync tool keeps its thread
+                    # (wait_for cannot stop it). Run it on the bounded per-agent
+                    # pool (sync-path parity) instead of the shared default
+                    # executor, so hung tools cannot starve asyncio.to_thread
+                    # callers elsewhere in the process.
+                    if not (tool_timeout and tool_timeout > 0) or not hasattr(self, "_submit_to_tool_pool"):
+                        return await asyncio.get_running_loop().run_in_executor(None, fn)
+                    # spill=True: when every worker is busy the call runs at once
+                    # on a counted overflow thread (executor is None) instead of
+                    # queueing into its timeout; refused once that cap is hit.
+                    future, executor, orphaned = self._submit_to_tool_pool(fn, spill=True)
+                    if future is None:
+                        logging.warning(
+                            f"Tool worker pool exhausted; refusing to queue '{function_name}' "
+                            f"behind {orphaned} hung tool call(s)."
                         )
+                        return {
+                            "error": (
+                                f"Tool worker pool exhausted: {orphaned} earlier tool call(s) "
+                                f"are still running past their timeout. Refusing to queue "
+                                f"'{function_name}'."
+                            ),
+                            "tool_pool_exhausted": True,
+                            "_praison_retryable": False,
+                        }
+                    try:
+                        return await asyncio.wrap_future(future)
+                    except asyncio.CancelledError:
+                        # Timed out (or caller cancelled) while still running:
+                        # retire the stuck pool so the next call gets a fresh worker.
+                        if executor is not None and not future.done():
+                            self._retire_tool_executor(executor)
+                        raise
 
                 # Circuit-breaker parity with the sync path (tool_execution.py).
                 # The async tool path previously had no breaker, so a repeatedly
@@ -1977,23 +1962,12 @@ Write the complete compiled report:"""
                 _NeutralOutcome = _CircuitBreakerException
                 try:
                     from ..tools.circuit_breaker import (
-                        get_circuit_breaker,
-                        CircuitBreakerConfig,
                         CircuitBreakerException as _CircuitBreakerException,
                         _NeutralOutcome,
                     )
-                    breaker_name = f"tool_{id(self)}_{function_name}"
-                    breaker = get_circuit_breaker(
-                        breaker_name,
-                        CircuitBreakerConfig(
-                            failure_threshold=5,
-                            recovery_timeout=60.0,
-                            timeout=30.0,
-                            graceful_degradation=True,
-                        ),
-                    )
-                    if hasattr(self, "_register_breaker_finalizer"):
-                        self._register_breaker_finalizer(breaker_name)
+                    # Same per-agent breaker and policy as the sync path.
+                    if hasattr(self, "_get_tool_circuit_breaker"):
+                        breaker = self._get_tool_circuit_breaker(function_name)
                 except ImportError:
                     # Circuit breaker not available - fall back to direct invocation.
                     logging.debug("Circuit breaker not available on async path, executing directly")
@@ -2014,7 +1988,7 @@ Write the complete compiled report:"""
                     # half-open one. Unwrapped in _invoke_guarded.
                     try:
                         r = await _invoke()
-                    except (ValueError, TypeError, AttributeError) as e:
+                    except _CALLER_ERROR_TYPES as e:
                         raise _NeutralOutcome(e)
                     if isinstance(r, dict) and r.get("error") and \
                        r.get("_praison_retryable") is False:
@@ -2055,13 +2029,7 @@ Write the complete compiled report:"""
                     # _execute_tool_async_with_retry treats it as terminal.
                     if loop_guard is not None:
                         loop_guard.record(function_name, arguments, False, result=None)
-                    return {
-                        "error": f"Tool '{function_name}' circuit breaker open - too many recent failures",
-                        "circuit_open": True,
-                        "agent_name": getattr(self, "name", None),
-                        "session_id": getattr(self, "_session_id", None),
-                        "remediation": "Wait for recovery_timeout (60s) or investigate recent tool failures.",
-                    }
+                    return self._circuit_breaker_open_result(function_name)
 
                 # Apply the per-agent tool timeout (ToolConfig.timeout) so the async
                 # path matches the sync path in tool_execution.py. asyncio.wait_for
@@ -2221,7 +2189,7 @@ Write the complete compiled report:"""
                 if isinstance(e, ToolExecutionError):
                     retryable = e.is_retryable
                 else:
-                    retryable = not isinstance(e, (ValueError, TypeError, AttributeError))
+                    retryable = not isinstance(e, _CALLER_ERROR_TYPES)
                 # Private control-plane key: a tool's own result may legitimately
                 # contain "retryable" (common for HTTP-API wrappers) and must not
                 # collide with the framework's verdict nor leak to the model.
