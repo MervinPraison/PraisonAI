@@ -29,6 +29,9 @@ _turns_lock = threading.Lock()
 # into tool worker threads with the context, so each turn has its own counters and
 # overlapping turns on a shared agent never exhaust each other's limits.
 _turn_loop_guard = contextvars.ContextVar("praisonai_turn_loop_guard", default=None)
+# Agent whose streamed turn already records agent_start/agent_end, set while its
+# non-streaming chat() fallback runs so that turn is not recorded twice.
+_stream_traced_agent = contextvars.ContextVar("praisonai_stream_traced_agent", default=None)
 
 
 def _agent_end_status(db_status: str) -> str:
@@ -3554,7 +3557,9 @@ Your Goal: {self.goal}"""
         # Emit context trace event (zero overhead when not set)
         from ..trace.context_events import get_context_emitter
         _trace_emitter = get_context_emitter()
-        _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
+        _trace_turn = _stream_traced_agent.get() is not self
+        if _trace_turn:
+            _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         durable_context = None
         durable_token = None
         previous_run_state = self._get_db_run_state()
@@ -3623,7 +3628,8 @@ Your Goal: {self.goal}"""
                 end_durable_run(durable_token)
                 durable_context.close()
             try:
-                _trace_emitter.agent_end(self.name, {"status": _agent_end_status(db_status)})
+                if _trace_turn:
+                    _trace_emitter.agent_end(self.name, {"status": _agent_end_status(db_status)})
             finally:
                 if getattr(self, "_active_turn_token", None) is _cancel:
                     self._active_turn_token = None
@@ -5431,9 +5437,26 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # via _enter_turn) so overlapping streams on a shared agent neither
         # exhaust nor inherit each other's per-turn limits.
         guard_token = _turn_loop_guard.set([self, None])
+        # Record the streamed turn like chat()/achat() do, so a live replay can
+        # show the agent running while its words stream (no-op when tracing is off).
+        from ..trace.context_events import get_context_emitter
+        _trace_emitter = get_context_emitter()
+        status = "completed"
+        if _trace_emitter._enabled:
+            _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         try:
-            yield from self._start_stream_turn(prompt, **kwargs)
+            # _start_stream_turn returns "failed" when a guardrail or hook blocks
+            # the turn, matching chat(), which records a blocked turn as failed.
+            status = (yield from self._start_stream_turn(prompt, **kwargs)) or status
+        except (GeneratorExit, InterruptedError):
+            status = "cancelled"
+            raise
+        except BaseException:
+            status = "failed"
+            raise
         finally:
+            if _trace_emitter._enabled:
+                _trace_emitter.agent_end(self.name, {"status": status})
             try:
                 _turn_loop_guard.reset(guard_token)
             except (ValueError, LookupError):
@@ -5458,7 +5481,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if not _in_ok:
                 logging.warning(f"Agent {getattr(self, 'name', '')}: input blocked by guardrail: {_in_err}")
                 yield f"[Input blocked by guardrail: {_in_err}]"
-                return
+                return "failed"
             prompt = _in_prompt
 
         # Same pre-turn checks as chat()/achat(): a streamed turn must not
@@ -5479,7 +5502,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             ))
             if self._hook_runner.is_blocked(hook_results):
                 logging.warning(f"Agent {self.name} execution blocked by BEFORE_AGENT hook")
-                return
+                return "failed"
             for res in hook_results:
                 if res.output and res.output.modified_input and "prompt" in res.output.modified_input:
                     prompt = res.output.modified_input["prompt"]
@@ -6299,6 +6322,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         else:
             fallback_kwargs.pop('stream', None)
 
+        # The streamed turn already records agent_start/agent_end; keep chat()
+        # from recording the same turn a second time.
+        _traced = _stream_traced_agent.set(self)
         try:
             return self.chat(prompt, **fallback_kwargs)
         except Exception as fallback_error:
@@ -6311,6 +6337,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             except Exception:
                 pass
             raise fallback_error from streaming_error
+        finally:
+            _stream_traced_agent.reset(_traced)
 
     def _create_llm_summarize_function(self):
         """
