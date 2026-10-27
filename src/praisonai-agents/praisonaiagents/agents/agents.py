@@ -546,6 +546,7 @@ def _process_task_result(agents_instance, context, agent_output):
     llm = context.llm
 
     if isinstance(agent_output, _GuardrailBlockedResponse):
+        object.__setattr__(task, "_guardrail_rejection_terminal", True)
         task.status = "failed"
         return TaskResult(task_output=None, success=False, error="Agent input or output was blocked by a guardrail.")
     
@@ -1760,9 +1761,10 @@ class AgentTeam(SpawnAnnounceProtocol):
         while task.status != "completed" and retries < task_max:
             logger.debug(f"Attempt {retries+1} for task {task_id}")
             if task.status in ["not started", "in progress"]:
+                object.__setattr__(task, "_guardrail_rejection_terminal", False)
                 task_output = await self.aexecute_task(task_id)
-                # Result processing marks guardrail rejection terminally failed.
-                if task.status == "failed":
+                # Empty output can also mark failure, but remains retryable.
+                if getattr(task, "_guardrail_rejection_terminal", False):
                     return
                 if task_output and self.completion_checker(task, task_output.raw):
                     # Apply guardrail validation using shared helper (offloaded to
@@ -2341,9 +2343,10 @@ class AgentTeam(SpawnAnnounceProtocol):
         while task.status != "completed" and retries < task_max:
             logger.debug(f"Attempt {retries+1} for task {task_id}")
             if task.status in ["not started", "in progress"]:
+                object.__setattr__(task, "_guardrail_rejection_terminal", False)
                 task_output = self.execute_task(task_id)
-                # Result processing marks guardrail rejection terminally failed.
-                if task.status == "failed":
+                # Empty output can also mark failure, but remains retryable.
+                if getattr(task, "_guardrail_rejection_terminal", False):
                     return
                 if task_output and self.completion_checker(task, task_output.raw):
                     # Apply guardrail validation using shared helper

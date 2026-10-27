@@ -64,6 +64,27 @@ def test_team_does_not_complete_or_save_rejected_turn(tmp_path, monkeypatch, is_
     assert dispatch.call_count == 1
 
 
+@pytest.mark.parametrize("is_async", [False, True])
+@pytest.mark.parametrize("empty", [None, ""])
+def test_team_retries_ordinary_empty_output(monkeypatch, is_async, empty):
+    agent = Agent(name="T", instructions="test", llm="gpt-4o-mini")
+    dispatch = AsyncMock(side_effect=[empty, "success"]) if is_async else MagicMock(side_effect=[empty, "success"])
+    monkeypatch.setattr(agent, "achat" if is_async else "chat", dispatch)
+    monkeypatch.setattr("time.sleep", lambda _: None)
+    async def no_sleep(_):
+        pass
+    monkeypatch.setattr("asyncio.sleep", no_sleep)
+    task = Task(name="empty", description="synthetic", agent=agent, max_retries=3)
+    team = AgentTeam(agents=[agent], tasks=[task])
+    if is_async:
+        asyncio.run(team.arun_task(0))
+    else:
+        team.run_task(0)
+    assert dispatch.call_count == 2
+    assert task.status == "completed"
+    assert task.result.raw == "success"
+
+
 @pytest.mark.parametrize("stream", [False, True])
 def test_start_backend_rejection_never_dispatches(monkeypatch, stream):
     """Reject backend prompts before delegation in either streaming mode."""
