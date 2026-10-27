@@ -95,6 +95,15 @@ def test_sqlite_backfill_indexes_hashed_filenames(tmp_path):
     assert [h.session_id for h in store.search("narwhal")] == ["alice.smith@example.com"]
 
 
+def test_sqlite_backfill_indexes_legacy_collision_files(tmp_path):
+    from praisonaiagents.session.sqlite_store import SqliteSessionStore
+
+    legacy = DefaultSessionStore(session_dir=str(tmp_path))
+    _write_legacy(legacy, "alice_smith", "alice.smith", "walrus record")
+    store = SqliteSessionStore(session_dir=str(tmp_path), db_path=":memory:")
+    assert [h.session_id for h in store.search("walrus")] == ["alice.smith"]
+
+
 def test_spill_recovery_does_not_wait_on_own_lock(store, monkeypatch, tmp_path):
     import time
 

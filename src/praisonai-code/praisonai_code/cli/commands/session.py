@@ -552,23 +552,15 @@ def session_fork(
     # searched (project first, then global) so the fork source and the
     # existence check stay consistent.
     #
-    # The store persists each session under a sanitized filename (Issue #6024:
-    # injective, with the pre-#6024 lossy name still migrated on first read).
-    # Match both so a global-only id containing e.g. ``.`` or ``:`` still finds
-    # its real file instead of falling through to an empty project-scoped fork.
-    from praisonaiagents.session.store import (
-        _legacy_session_filename,
-        _safe_session_filename,
-    )
-
-    names = {f"{_safe_session_filename(session_id)}.json",
-             f"{_legacy_session_filename(session_id)}.json"}
+    # Ask each store directly: it resolves the injective filename and only
+    # migrates a pre-#6024 legacy file that really belongs to this id
+    # (Issue #6024), so a colliding id's file never selects the wrong store.
     store_dir = str(get_project_sessions_dir())
     for candidate in canonical_cli_stores():
         candidate_dir = getattr(candidate, "session_dir", None)
         if not candidate_dir:
             continue
-        if any((Path(candidate_dir) / name).exists() for name in names):
+        if candidate.session_exists(session_id):
             store_dir = str(candidate_dir)
             break
 

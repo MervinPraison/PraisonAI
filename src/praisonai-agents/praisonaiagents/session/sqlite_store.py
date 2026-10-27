@@ -35,7 +35,13 @@ from typing import Any, Dict, List, Optional
 
 from praisonaiagents._logging import get_logger
 
-from .store import DefaultSessionStore, FileLock, SessionData, _safe_session_filename
+from .store import (
+    DefaultSessionStore,
+    FileLock,
+    SessionData,
+    _legacy_session_filename,
+    _safe_session_filename,
+)
 
 logger = get_logger(__name__)
 
@@ -399,7 +405,10 @@ class SqliteSessionStore(DefaultSessionStore):
                 sid = json.load(f).get("session_id")
         except (OSError, ValueError, AttributeError):
             return None
-        if isinstance(sid, str) and f"{_safe_session_filename(sid)}.json" == filename:
+        if isinstance(sid, str) and filename in (
+            f"{_safe_session_filename(sid)}.json",
+            f"{_legacy_session_filename(sid)}.json",
+        ):
             return sid
         return None
 
@@ -446,8 +455,9 @@ class SqliteSessionStore(DefaultSessionStore):
             if not filename.endswith(".json"):
                 continue
             sid = filename[:-5]
-            if "~" in sid:
-                # Hashed name (Issue #6024): the real id lives in the file.
+            if "~" in sid or sid not in already:
+                # Hashed or pre-#6024 legacy name (Issue #6024): the real id
+                # lives in the file; loading it migrates a legacy file.
                 sid = self._stored_session_id(filename) or sid
             if sid in pending:
                 # Failed restore retries must not be bypassed by a synthetic
