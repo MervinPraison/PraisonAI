@@ -1917,28 +1917,10 @@ Write the complete compiled report:"""
                     # callers elsewhere in the process.
                     if not (tool_timeout and tool_timeout > 0) or not hasattr(self, "_submit_to_tool_pool"):
                         return await asyncio.get_running_loop().run_in_executor(None, fn)
+                    # spill=True: when every worker is busy the call runs at once
+                    # on a counted overflow thread (executor is None) instead of
+                    # queueing into its timeout; refused once that cap is hit.
                     future, executor, orphaned = self._submit_to_tool_pool(fn, spill=True)
-                    if executor is None:
-                        # Every pool worker is busy: run this call on its own
-                        # daemon thread now instead of queueing it (the timeout
-                        # would count the wait) or using the default executor
-                        # (a hang there starves asyncio.to_thread callers).
-                        import concurrent.futures
-                        import threading
-                        spill = concurrent.futures.Future()
-
-                        def _spill_target():
-                            if not spill.set_running_or_notify_cancel():
-                                return
-                            try:
-                                spill.set_result(fn())
-                            except BaseException as e:  # noqa: BLE001 - re-raised by awaiter
-                                spill.set_exception(e)
-
-                        threading.Thread(
-                            target=_spill_target, daemon=True, name=f"tool-{self.name}-spill"
-                        ).start()
-                        return await asyncio.wrap_future(spill)
                     if future is None:
                         logging.warning(
                             f"Tool worker pool exhausted; refusing to queue '{function_name}' "
@@ -1958,7 +1940,7 @@ Write the complete compiled report:"""
                     except asyncio.CancelledError:
                         # Timed out (or caller cancelled) while still running:
                         # retire the stuck pool so the next call gets a fresh worker.
-                        if not future.done():
+                        if executor is not None and not future.done():
                             self._retire_tool_executor(executor)
                         raise
 

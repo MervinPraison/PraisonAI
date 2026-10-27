@@ -52,6 +52,12 @@ _CALLER_ERROR_TYPES = (
 # whether a fresh call would have to queue behind hung workers.
 _TOOL_POOL_MAX_WORKERS = 2
 
+# Upper bound on overflow ("spill") threads a single agent may run at once for
+# timed async tool calls that find every pool worker busy. A hung spill thread
+# cannot be reclaimed, so without this cap leaked threads would grow with
+# concurrency instead of staying bounded (#5356).
+_MAX_SPILL_TOOL_THREADS = 8
+
 # Sentinel returned as the "arguments" value when a tool call's argument string
 # cannot be parsed (e.g. truncated by max_tokens or a dropped connection).
 # It is distinct from {} ("no arguments"): {} would silently execute the tool
@@ -1093,9 +1099,11 @@ class ToolExecutionMixin:
         strands a thread in the process-wide default executor. Returns
         ``(future, executor, orphaned)``; ``future`` is ``None`` when the pool
         is exhausted by hung calls and the caller must refuse fast. With
-        ``spill=True`` and every worker busy (but not orphan-capped), returns
-        ``(None, None, orphaned)`` so the caller can run the call elsewhere
-        instead of waiting for a worker.
+        ``spill=True`` and every worker busy (but not orphan-capped), the call
+        runs immediately on a counted daemon thread instead of waiting for a
+        worker, and ``(future, None, orphaned)`` is returned; once
+        ``_MAX_SPILL_TOOL_THREADS`` spill threads are still running the call is
+        refused like an exhausted pool.
         """
         with self._get_tool_executor_lock().sync():
             if getattr(self, '_tool_executor', None) is None:
@@ -1118,7 +1126,11 @@ class ToolExecutionMixin:
                 if orphaned >= _MAX_ORPHANED_TOOL_EXECUTORS:
                     return None, executor, orphaned
                 if spill:
-                    return None, None, orphaned
+                    spilled = getattr(self, '_tool_spill_inflight', 0)
+                    if spilled >= _MAX_SPILL_TOOL_THREADS:
+                        return None, executor, orphaned + spilled
+                    self._tool_spill_inflight = spilled + 1
+                    return self._start_spill_thread(fn, *args), None, orphaned
             executor._inflight = inflight + 1
             future = executor.submit(fn, *args)
 
@@ -1144,6 +1156,28 @@ class ToolExecutionMixin:
 
         future.add_done_callback(_on_tool_done)
         return future, executor, orphaned
+
+    def _start_spill_thread(self, fn, *args):
+        """Run ``fn(*args)`` on a daemon thread; caller already counted it."""
+        future = concurrent.futures.Future()
+
+        def _target():
+            try:
+                if future.set_running_or_notify_cancel():
+                    try:
+                        future.set_result(fn(*args))
+                    except BaseException as e:  # noqa: BLE001 - re-raised by awaiter
+                        future.set_exception(e)
+            finally:
+                with self._get_tool_executor_lock().sync():
+                    self._tool_spill_inflight = max(0, getattr(self, '_tool_spill_inflight', 1) - 1)
+
+        try:
+            threading.Thread(target=_target, daemon=True, name=f"tool-{self.name}-spill").start()
+        except BaseException:
+            self._tool_spill_inflight = max(0, getattr(self, '_tool_spill_inflight', 1) - 1)
+            raise
+        return future
 
     def _retire_tool_executor(self, executor):
         """Retire a pool whose worker is stuck past its timeout.

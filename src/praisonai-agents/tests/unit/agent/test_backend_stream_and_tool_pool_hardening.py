@@ -139,3 +139,31 @@ def test_parallel_healthy_timed_tools_do_not_queue_into_timeout():
 
     # Loop-guard may append advisory notes; what matters is no timeout.
     assert all(isinstance(r, str) and r.startswith("ok") for r in asyncio.run(main()))
+
+
+def test_hung_spill_threads_are_capped_across_bursts():
+    from praisonaiagents.agent import tool_execution as te
+
+    release = threading.Event()
+    a = _agent()
+    started = 0
+    try:
+        for _ in range(5):
+            # A burst of concurrent calls that all hang past their timeout;
+            # each timed-out burst retires the stuck pool as the async path does.
+            for _ in range(20):
+                future, executor, _ = a._submit_to_tool_pool(lambda: release.wait(10), spill=True)
+                started += future is not None
+            a._retire_tool_executor(a._tool_executor)
+            assert a._tool_spill_inflight <= te._MAX_SPILL_TOOL_THREADS
+        cap = (
+            te._MAX_SPILL_TOOL_THREADS
+            + (te._MAX_ORPHANED_TOOL_EXECUTORS + 1) * te._TOOL_POOL_MAX_WORKERS
+        )
+        assert started <= cap
+    finally:
+        release.set()
+    deadline = time.monotonic() + 5
+    while a._tool_spill_inflight and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert a._tool_spill_inflight == 0
