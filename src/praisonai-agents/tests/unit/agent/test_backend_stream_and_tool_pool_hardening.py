@@ -104,3 +104,38 @@ def test_open_breaker_remediation_uses_live_config():
     breaker = a._get_tool_circuit_breaker("x")
     breaker.config.recovery_timeout = 7
     assert "(7s)" in a._circuit_breaker_open_result("x")["remediation"]
+
+
+def test_stream_close_runs_backend_cleanup():
+    cleaned = threading.Event()
+
+    class _CleanupBackend:
+        async def stream(self, prompt, **kw):
+            try:
+                while True:
+                    yield "c"
+                    await asyncio.sleep(0)
+            finally:
+                cleaned.set()
+
+    a = _agent()
+    a.backend = _CleanupBackend()
+    g = a._delegate_streaming_to_backend("p")
+    next(g)
+    g.close()
+    assert cleaned.wait(2)
+
+
+def test_parallel_healthy_timed_tools_do_not_queue_into_timeout():
+    def work(i: int) -> str:
+        time.sleep(0.6)
+        return "ok"
+
+    a = _agent(tools=[work])
+    a._tool_timeout = 1
+
+    async def main():
+        return await asyncio.gather(*(a.execute_tool_async("work", {"i": i}) for i in range(5)))
+
+    # Loop-guard may append advisory notes; what matters is no timeout.
+    assert all(isinstance(r, str) and r.startswith("ok") for r in asyncio.run(main()))

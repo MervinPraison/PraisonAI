@@ -1086,13 +1086,16 @@ class ToolExecutionMixin:
             from .async_safety import DualLock
             return self.__dict__.setdefault("_tool_executor_lock", DualLock())
 
-    def _submit_to_tool_pool(self, fn, *args):
+    def _submit_to_tool_pool(self, fn, *args, spill=False):
         """Submit ``fn(*args)`` to the bounded per-agent tool pool.
 
         Shared by the sync and async tool paths so a timed-out tool never
         strands a thread in the process-wide default executor. Returns
         ``(future, executor, orphaned)``; ``future`` is ``None`` when the pool
-        is exhausted by hung calls and the caller must refuse fast.
+        is exhausted by hung calls and the caller must refuse fast. With
+        ``spill=True`` and every worker busy (but not orphan-capped), returns
+        ``(None, None, orphaned)`` so the caller can run the call elsewhere
+        instead of waiting for a worker.
         """
         with self._get_tool_executor_lock().sync():
             if getattr(self, '_tool_executor', None) is None:
@@ -1111,8 +1114,11 @@ class ToolExecutionMixin:
             # healthy tool that never got to start. Refuse fast and visibly
             # instead when no worker is free, and let the pool self-heal (the
             # orphan count drops as hung threads finish).
-            if orphaned >= _MAX_ORPHANED_TOOL_EXECUTORS and inflight >= _TOOL_POOL_MAX_WORKERS:
-                return None, executor, orphaned
+            if inflight >= _TOOL_POOL_MAX_WORKERS:
+                if orphaned >= _MAX_ORPHANED_TOOL_EXECUTORS:
+                    return None, executor, orphaned
+                if spill:
+                    return None, None, orphaned
             executor._inflight = inflight + 1
             future = executor.submit(fn, *args)
 

@@ -539,8 +539,9 @@ class ExecutionMixin:
                     asyncio.set_event_loop(new_loop)
                     try:
                         async def pump():
+                            agen = self.backend.stream(prompt, **kwargs)
                             try:
-                                async for item in self.backend.stream(prompt, **kwargs):
+                                async for item in agen:
                                     if cancel_event.is_set():
                                         break
                                     # Block until space is available or the
@@ -557,10 +558,22 @@ class ExecutionMixin:
                             except Exception as e:
                                 if not cancel_event.is_set():
                                     bridge_queue.put(('error', e))
+                            finally:
+                                # Run the backend's own cleanup (e.g. stopping
+                                # its producer) when the consumer closes early.
+                                aclose = getattr(agen, 'aclose', None)
+                                if aclose is not None:
+                                    try:
+                                        await aclose()
+                                    except Exception as e:
+                                        logger.debug(f"Backend stream cleanup failed: {e}")
 
                         new_loop.run_until_complete(pump())
                     finally:
-                        new_loop.close()
+                        try:
+                            new_loop.run_until_complete(new_loop.shutdown_asyncgens())
+                        finally:
+                            new_loop.close()
 
                 # Daemon thread so a stalled/abandoned producer can never
                 # block interpreter shutdown.
@@ -1904,7 +1917,28 @@ Write the complete compiled report:"""
                     # callers elsewhere in the process.
                     if not (tool_timeout and tool_timeout > 0) or not hasattr(self, "_submit_to_tool_pool"):
                         return await asyncio.get_running_loop().run_in_executor(None, fn)
-                    future, executor, orphaned = self._submit_to_tool_pool(fn)
+                    future, executor, orphaned = self._submit_to_tool_pool(fn, spill=True)
+                    if executor is None:
+                        # Every pool worker is busy: run this call on its own
+                        # daemon thread now instead of queueing it (the timeout
+                        # would count the wait) or using the default executor
+                        # (a hang there starves asyncio.to_thread callers).
+                        import concurrent.futures
+                        import threading
+                        spill = concurrent.futures.Future()
+
+                        def _spill_target():
+                            if not spill.set_running_or_notify_cancel():
+                                return
+                            try:
+                                spill.set_result(fn())
+                            except BaseException as e:  # noqa: BLE001 - re-raised by awaiter
+                                spill.set_exception(e)
+
+                        threading.Thread(
+                            target=_spill_target, daemon=True, name=f"tool-{self.name}-spill"
+                        ).start()
+                        return await asyncio.wrap_future(spill)
                     if future is None:
                         logging.warning(
                             f"Tool worker pool exhausted; refusing to queue '{function_name}' "
