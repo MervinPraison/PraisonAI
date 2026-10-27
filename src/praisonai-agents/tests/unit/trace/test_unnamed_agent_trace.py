@@ -230,3 +230,31 @@ def test_streamed_turn_records_nothing_when_tracing_is_off(monkeypatch):
         assert s.get_events() == []
     finally:
         reset_context_emitter(token)
+
+
+def test_streamed_turn_blocked_by_guardrail_is_failed(sink):
+    from praisonaiagents import Agent
+
+    agent = Agent(name="Writer", instructions="x")
+    with patch.object(agent, "_validate_input_with_guardrail", return_value=(False, None, "no")):
+        assert "blocked" in "".join(agent._start_stream("hi"))
+    assert _of(sink, "agent_end")[0].data == {"status": "failed"}
+
+
+def test_streamed_turn_fallback_records_the_turn_once(sink):
+    from praisonaiagents import Agent
+
+    def falls_back(self, prompt, **kwargs):
+        yield self._stream_fallback_chat(prompt, kwargs, RuntimeError("stream broke"))
+
+    agent = Agent(name="Writer", instructions="x")
+    with patch.object(type(agent), "_start_stream_impl", falls_back), \
+            patch.object(agent, "_chat_completion", return_value=_fake_completion()):
+        assert "".join(agent._start_stream("hi")) == "Solar sails ride sunlight."
+    kinds = [e.event_type.value for e in sink.get_events() if e.event_type.value.startswith("agent_")]
+    assert kinds == ["agent_start", "agent_end"]
+    assert _of(sink, "agent_end")[0].data == {"status": "completed"}
+    # chat() outside a stream still records its own turn.
+    with patch.object(agent, "_chat_completion", return_value=_fake_completion()):
+        agent.chat("again")
+    assert len(_of(sink, "agent_start")) == 2
