@@ -163,10 +163,14 @@ class ImageAgent(Agent):
             # Gemini provider doesn't support response_format parameter
             # Apply this filter if provider is explicitly 'gemini' or as fallback for gemini models
             config.pop('response_format', None)
-        elif custom_llm_provider == "openai" and config.get('response_format') == "url":
-            # "url" is OpenAI's default for DALL-E and is rejected by models that
-            # don't accept response_format (e.g. gpt-image), so don't send it
-            config.pop('response_format', None)
+        elif custom_llm_provider == "openai":
+            if config.get('response_format') == "url":
+                # "url" is OpenAI's default for DALL-E and is rejected by models that
+                # don't accept response_format (e.g. gpt-image), so don't send it
+                config.pop('response_format', None)
+            if 'dall-e-3' not in model_name.lower():
+                # Only dall-e-3 accepts 'style'; other OpenAI image models reject it
+                config.pop('style', None)
         from rich.progress import Progress, SpinnerColumn, TextColumn
         with Progress(
             SpinnerColumn(),
