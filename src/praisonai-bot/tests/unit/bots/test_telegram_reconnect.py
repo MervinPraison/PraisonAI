@@ -18,6 +18,12 @@ def polling(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    from praisonai_bot.bots import telegram as module
+    from praisonai_bot.gateway.pairing import PairingStore
+    # The module-level default directory was resolved before this fixture;
+    # changing HOME alone must not send a test through an operator's store.
+    monkeypatch.setattr(module, "PairingStore", lambda: PairingStore(
+        store_dir=str(tmp_path / "pairing"), secret="synthetic-test-secret"))
     state = SimpleNamespace(apps=[], errors=[], ready=asyncio.Event(), attempts=0)
 
     class App:
