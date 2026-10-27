@@ -204,3 +204,37 @@ async def test_streamer_chunks_by_utf16_and_falls_back_per_chunk():
     assert len(sent) >= 3
     assert all(_calculate_length(c, "utf16") <= 100 for c in sent)
     assert "".join(sent) == reply
+
+
+@pytest.mark.asyncio
+async def test_streamer_follow_on_not_double_retried():
+    """Adapters already retry + park exhausted sends; the streamer must not
+    retry again, or a parked chunk would be re-sent and duplicated (#6078)."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    from praisonai_bot.bots._streaming import DraftStreamer, StreamingConfig
+
+    send = AsyncMock(side_effect=[{"message_id": "m1"}, ConnectionError("parked"), None])
+    adapter = SimpleNamespace(
+        capabilities={"live_edit": True, "text_limit": 10},
+        send_message=send,
+        edit_message=AsyncMock(return_value=None),
+    )
+    streamer = DraftStreamer(
+        adapter=adapter, channel_id="C1",
+        config=StreamingConfig(mode=StreamingMode.DRAFT), platform="telegram",
+    )
+    await streamer.start()
+    await streamer.finalize("a" * 30)
+
+    # placeholder + exactly one attempt per follow-on chunk (2 chunks)
+    assert send.await_count == 3
+
+
+def test_fit_prefix_utf16_is_bounded():
+    from praisonai_bot.bots._streaming import _fit_prefix
+
+    assert _fit_prefix("\U0001F600" * 5, 5, "utf16") == "\U0001F600" * 2
+    assert _fit_prefix("abc", 10, "utf16") == "abc"
+    assert _fit_prefix("abcdef", 3, "codepoints") == "abc"

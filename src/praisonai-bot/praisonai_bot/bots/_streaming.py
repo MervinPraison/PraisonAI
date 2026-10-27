@@ -15,12 +15,24 @@ from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Any, Dict, Optional, Protocol, TYPE_CHECKING
 
-from ._chunk import _calculate_length, _hard_split, chunk_message, enforce_hard_cap
+from ._chunk import _calculate_length, chunk_message, enforce_hard_cap
 
 if TYPE_CHECKING:
     from praisonaiagents.streaming.events import StreamEvent
 
 logger = logging.getLogger(__name__)
+
+
+def _fit_prefix(text: str, limit: int, unit: str) -> str:
+    """Longest prefix of *text* within *limit* in *unit*; single O(limit) pass."""
+    if unit != "utf16":
+        return text[:limit]
+    used = 0
+    for i, ch in enumerate(text):
+        used += 2 if ord(ch) > 0xFFFF else 1
+        if used > limit:
+            return text[:i]
+    return text
 
 
 # Matches <think>...</think> and <reasoning>...</reasoning> spans (case-insensitive,
@@ -627,8 +639,7 @@ class DraftStreamer:
         
         # Apply text limit if configured
         if self._text_limit > 0 and _calculate_length(content, self._length_unit) > self._text_limit:
-            head = _hard_split(content, max(1, self._text_limit - 3), self._length_unit)[0]
-            content = head + "..."
+            content = _fit_prefix(content, max(1, self._text_limit - 3), self._length_unit) + "..."
         
         return content
     
@@ -759,22 +770,17 @@ class DraftStreamer:
                     "DraftStreamer final send fallback also failed: %s", send_exc
                 )
 
-        # Follow-on chunks go through the bounded retry wrapper so a transient
-        # flood on one chunk never drops the rest of the reply.
-        if len(chunks) > 1:
-            from praisonai_bot.bots._resilience import deliver_with_retry
-
-            for chunk in chunks[1:]:
-                if self._rate_limiter:
-                    await self._rate_limiter.acquire(self._channel_id)
-                try:
-                    await deliver_with_retry(
-                        lambda c=chunk: self._adapter.send_message(self._channel_id, c),
-                        platform=self._platform,
-                    )
-                except Exception as chunk_exc:  # noqa: BLE001 - keep delivering remaining chunks
-                    delivered = False
-                    logger.warning("DraftStreamer follow-on chunk send failed: %s", chunk_exc)
+        # Follow-on chunks: adapters' send_message already retries and parks
+        # exhausted sends in the DLQ, so do NOT wrap it again (a second retry
+        # layer would re-send a chunk that is already parked -> duplicates).
+        for chunk in chunks[1:]:
+            if self._rate_limiter:
+                await self._rate_limiter.acquire(self._channel_id)
+            try:
+                await self._adapter.send_message(self._channel_id, chunk)
+            except Exception as chunk_exc:  # noqa: BLE001 - keep delivering remaining chunks
+                delivered = False
+                logger.warning("DraftStreamer follow-on chunk send failed: %s", chunk_exc)
 
         logger.debug(
             "DraftStreamer finalized message %s, final_length=%d, progressive=%s, delivered=%s",
