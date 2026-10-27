@@ -313,7 +313,11 @@ runs:
         # Add allowed tools (include GitHub tools by default)
         TOOLS="mcp__github__get_issue,mcp__github__get_issue_comments,mcp__github__update_issue,mcp__github__search_issues,mcp__github__list_issues,mcp__github__add_issue_comment,mcp__github__get_pull_request,mcp__github__get_pull_request_files,mcp__github__get_pull_request_reviews,mcp__github__get_pull_request_status,Read,Write,Edit,Bash"
         if [[ -n "$INPUT_ALLOWED_TOOLS" ]]; then
-          TOOLS="$TOOLS,$INPUT_ALLOWED_TOOLS"
+          # Callers pass a YAML block (one tool per line). `read` below stops at
+          # the first newline, so join lines with commas or every tool after
+          # the first is silently dropped.
+          EXTRA_TOOLS=$(printf '%s' "$INPUT_ALLOWED_TOOLS" | tr '\n' ',' | sed 's/,,*/,/g; s/^,//; s/,$//')
+          TOOLS="$TOOLS,$EXTRA_TOOLS"
         fi
         
         # Remove any explicitly disallowed tools from the effective allow-list so
