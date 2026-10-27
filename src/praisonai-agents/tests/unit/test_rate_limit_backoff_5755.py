@@ -46,13 +46,18 @@ def test_actual_retry_loop_delay_selection(monkeypatch, is_async, delay, headers
         async def sleep(seconds):
             sleeps.append(seconds)
         monkeypatch.setattr("praisonaiagents.llm.llm.asyncio.sleep", sleep)
+        fail = AsyncMock(side_effect=error)
         with pytest.raises(RateLimited):
-            asyncio.run(llm._call_with_retry_async(AsyncMock(side_effect=error)))
+            asyncio.run(llm._call_with_retry_async(fail))
+        assert fail.await_count == llm._max_retries + 1
     else:
         monkeypatch.setattr("praisonaiagents.llm.llm.time.sleep", sleeps.append)
+        calls = []
         def fail():
+            calls.append(True)
             raise error
         with pytest.raises(RateLimited):
             llm._call_with_retry(fail)
+        assert len(calls) == llm._max_retries + 1
     # Zero-delay retries need not call sleep at all.
     assert [value for value in sleeps if value] == [value for value in expected if value]
