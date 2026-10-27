@@ -140,3 +140,28 @@ def test_removing_last_channel_is_rejected_even_with_env_token(config, monkeypat
     with pytest.raises(ValueError):
         edit_gateway_channel(config, "telegram", {"enabled": False})
     assert _load(config) == BASE
+
+
+def test_env_platform_reference_is_resolved_before_conversion(tmp_path, monkeypatch):
+    monkeypatch.setenv("BOT_PLATFORM", "telegram")
+    path = tmp_path / "bot.yaml"
+    path.write_text(yaml.safe_dump({"agent": {"instructions": "hi"}, "platform": "${BOT_PLATFORM}", "token": "${T}"}))
+    edit_gateway_channel(path, "discord", {"token": "${D}"})
+    cfg = _load(path)
+    assert cfg["channels"]["telegram"] == {"platform": "telegram", "token": "${T}"}
+    assert cfg["channels"]["discord"]["token"] == "${D}"
+
+
+def test_concurrent_edits_are_not_lost(config):
+    from concurrent.futures import ThreadPoolExecutor
+
+    names = [f"ch{i}" for i in range(8)]
+    with ThreadPoolExecutor(len(names)) as pool:
+        list(pool.map(lambda n: edit_gateway_channel(config, n, {"platform": "telegram", "token": "${X}"}), names))
+    assert set(_load(config)["channels"]) == {"telegram", *names}
+
+
+def test_missing_config_raises_without_lock_file(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        edit_gateway_channel(tmp_path / "nope.yaml", "discord", {})
+    assert not list(tmp_path.iterdir())

@@ -15,6 +15,7 @@ one canonical flow (DRY).
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 from dataclasses import dataclass, field
@@ -263,11 +264,19 @@ def edit_gateway_channel(
     """
     import yaml
 
-    from praisonai_bot.bots._config_schema import validate_gateway_config
-
     config_path = os.fspath(config_path)
-    with open(config_path) as fh:
-        cfg = yaml.safe_load(fh) or {}
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError(config_path)
+    # Hold a sidecar lock across read-modify-write so concurrent edits of
+    # different channels cannot overwrite each other.
+    with _config_edit_lock(config_path):
+        with open(config_path) as fh:
+            cfg = yaml.safe_load(fh) or {}
+        return _apply_channel_edit(config_path, cfg, name, settings, remove)
+
+
+def _apply_channel_edit(config_path, cfg, name, settings, remove) -> dict:
+    from praisonai_bot.bots._config_schema import validate_gateway_config
 
     channels = _editable_channels(cfg)
     if remove:
@@ -312,7 +321,9 @@ def _editable_channels(cfg: dict) -> dict:
         # Mirrors the loader's single-bot migration, which wins over BotOS.
         from praisonai_bot.bots._config_schema import GatewayConfigSchema
 
-        platform = str(cfg.pop("platform")).lower().strip()
+        # Resolve a ``${VAR}`` platform first, as the loader does.
+        raw = str(cfg.pop("platform"))
+        platform = str(_resolve_env_token(raw) or raw).lower().strip()
         block = {"platform": platform}
         token = cfg.pop("token", None)
         block["token"] = token or GatewayConfigSchema._credential_env_ref(platform)
@@ -326,6 +337,26 @@ def _editable_channels(cfg: dict) -> dict:
         for pname, pcfg in cfg.pop("platforms").items():
             channels[pname] = {"platform": pname, **(pcfg or {})}
     return channels
+
+
+@contextlib.contextmanager
+def _config_edit_lock(config_path: str):
+    """Exclusive OS advisory lock on ``<config>.lock`` (no-op if unsupported)."""
+    with open(config_path + ".lock", "a+") as fh:
+        try:
+            import fcntl
+        except ImportError:  # pragma: no cover - Windows
+            fcntl = None
+        if fcntl is not None:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        else:  # pragma: no cover - Windows
+            try:
+                import msvcrt
+
+                msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+            except Exception:
+                pass
+        yield  # released when ``fh`` closes
 
 
 def _repair_gateway_secret(dry_run: bool = False, config_path: str = ""):
