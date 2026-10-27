@@ -159,7 +159,7 @@ def check_gateway_security(config: DoctorConfig) -> CheckResult:
                     security_issues.append(
                         f"{channel_name}: No user restrictions - bot responds to EVERYONE!"
                     )
-                elif policy == "deny":
+                elif policy != "pair":  # deny (default), mirrors runtime fallback
                     warnings.append(
                         f"{channel_name}: No allowed_users and unknown_user_policy=deny "
                         "- DMs from unknown users are dropped"
