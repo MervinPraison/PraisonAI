@@ -172,3 +172,61 @@ def test_async_path_records_nothing_when_tracing_is_off(monkeypatch):
         assert d.called and s.get_events() == []
     finally:
         reset_context_emitter(token)
+
+
+# --- streamed turns (start(stream=True)) ---------------------------------------
+
+def _fake_stream(self, prompt, **kwargs):
+    yield "Solar "
+    yield "sails."
+
+
+def test_streamed_turn_records_agent_start_and_end(sink):
+    from praisonaiagents import Agent
+
+    agent = Agent(instructions="x")
+    with patch.object(type(agent), "_start_stream_turn", _fake_stream):
+        text = "".join(agent._start_stream("hi"))
+    assert text == "Solar sails."
+    kinds = [(e.event_type.value, e.node_id, e.data.get("status")) for e in sink.get_events()]
+    assert kinds == [("agent_start", "agent:Agent", None), ("agent_end", "agent:Agent", "completed")]
+
+
+def test_streamed_turn_stopped_early_is_cancelled(sink):
+    from praisonaiagents import Agent
+
+    agent = Agent(name="Writer", instructions="x")
+    with patch.object(type(agent), "_start_stream_turn", _fake_stream):
+        gen = agent._start_stream("hi")
+        next(gen)
+        gen.close()  # the page stopped reading
+    assert _of(sink, "agent_end")[0].data == {"status": "cancelled"}
+
+
+def test_streamed_turn_that_raises_is_failed(sink):
+    from praisonaiagents import Agent
+
+    def boom(self, prompt, **kwargs):
+        yield "x"
+        raise RuntimeError("provider down")
+
+    agent = Agent(name="Writer", instructions="x")
+    with patch.object(type(agent), "_start_stream_turn", boom):
+        with pytest.raises(RuntimeError):
+            list(agent._start_stream("hi"))
+    assert _of(sink, "agent_end")[0].data == {"status": "failed"}
+
+
+def test_streamed_turn_records_nothing_when_tracing_is_off(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-not-used")
+    from praisonaiagents import Agent
+
+    s = ContextListSink()
+    token = set_context_emitter(ContextTraceEmitter(sink=s, session_id="t", enabled=False))
+    try:
+        agent = Agent(name="Writer", instructions="x")
+        with patch.object(type(agent), "_start_stream_turn", _fake_stream):
+            assert "".join(agent._start_stream("hi")) == "Solar sails."
+        assert s.get_events() == []
+    finally:
+        reset_context_emitter(token)

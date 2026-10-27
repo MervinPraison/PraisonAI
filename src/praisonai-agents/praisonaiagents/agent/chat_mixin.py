@@ -5431,9 +5431,24 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # via _enter_turn) so overlapping streams on a shared agent neither
         # exhaust nor inherit each other's per-turn limits.
         guard_token = _turn_loop_guard.set([self, None])
+        # Record the streamed turn like chat()/achat() do, so a live replay can
+        # show the agent running while its words stream (no-op when tracing is off).
+        from ..trace.context_events import get_context_emitter
+        _trace_emitter = get_context_emitter()
+        status = "completed"
+        if _trace_emitter._enabled:
+            _trace_emitter.agent_start(self.name, {"role": self.role, "goal": self.goal})
         try:
             yield from self._start_stream_turn(prompt, **kwargs)
+        except (GeneratorExit, InterruptedError):
+            status = "cancelled"
+            raise
+        except BaseException:
+            status = "failed"
+            raise
         finally:
+            if _trace_emitter._enabled:
+                _trace_emitter.agent_end(self.name, {"status": status})
             try:
                 _turn_loop_guard.reset(guard_token)
             except (ValueError, LookupError):
