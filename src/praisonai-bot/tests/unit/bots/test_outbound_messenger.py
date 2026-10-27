@@ -88,6 +88,34 @@ def test_send_to_platform_home_channel():
     assert sent == [("999", "Nightly summary")]
 
 
+def test_send_to_unattested_explicit_chat_is_refused():
+    # #6084: a model-supplied "<platform>:<chat_id>" naming a chat the gateway
+    # has no relationship with must fail closed instead of delivering.
+    router, sent = _make_router(home="999")
+    origin = SessionSource(platform="telegram", channel_id="123")
+    messenger = BotOutboundMessenger(router, origin=origin)
+
+    result = asyncio.run(messenger.send("telegram:666", "leak"))
+
+    assert result.ok is False
+    assert "Refused" in result.summary
+    assert sent == []
+
+
+def test_send_to_known_explicit_chat_is_allowed():
+    router, sent = _make_router(home="999", aliases={"ops": "555"})
+    origin = SessionSource(platform="telegram", channel_id="123")
+    messenger = BotOutboundMessenger(router, origin=origin)
+
+    for target, chat in (
+        ("telegram:123", "123"),  # origin chat
+        ("telegram:999", "999"),  # home channel
+        ("telegram:555:42", "555"),  # aliased chat, thread under it
+    ):
+        assert asyncio.run(messenger.send(target, "hi")).ok is True, target
+    assert [c for c, _ in sent] == ["123", "999", "555"]
+
+
 def test_send_unresolvable_target_fails_cleanly():
     router, sent = _make_router()
     messenger = BotOutboundMessenger(router)  # no origin

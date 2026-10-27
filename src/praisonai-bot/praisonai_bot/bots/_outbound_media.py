@@ -468,10 +468,15 @@ async def deliver_media_to_adapter(
             )
             return False
 
-        target_id = thread_id or channel_id
-        channel = client.get_channel(int(target_id))
-        if channel is None and thread_id is not None:
-            channel = client.get_channel(int(channel_id))
+        # Resolve the thread *under* the parent channel (as ``send_message``
+        # does) rather than by global id, so a target's thread segment can
+        # never redirect the upload to an unrelated channel (#6084).
+        channel = client.get_channel(int(channel_id))
+        if channel is not None and thread_id is not None:
+            get_thread = getattr(channel, "get_thread", None)
+            thread = get_thread(int(thread_id)) if callable(get_thread) else None
+            if thread is not None:
+                channel = thread
         if channel is not None:
             await channel.send(
                 content=caption or None, file=discord.File(path)
