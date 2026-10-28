@@ -31,3 +31,17 @@ def test_style_forwarding(llm, kwargs, expected):
             assert received["style"] == expected
     finally:
         agent.close()
+
+
+@pytest.mark.parametrize("config,expected", [
+    ({}, None),
+    ({"style": "vivid"}, "vivid"),
+])
+def test_yaml_image_agent_style(config, expected):
+    from praisonaiagents.workflows.yaml_parser import YAMLWorkflowParser
+
+    agent = YAMLWorkflowParser()._create_image_agent("img", "openai/dall-e-3", config)
+    try:
+        assert agent.image_config.style == expected
+    finally:
+        agent.close()
