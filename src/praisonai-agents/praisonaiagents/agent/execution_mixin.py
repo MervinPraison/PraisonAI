@@ -29,6 +29,39 @@ from typing import List, Optional, Any, Dict, Union, Generator, TYPE_CHECKING
 from .server_registry import _server_registry
 
 
+class _TimeoutCancelToken:
+    """cancel_token for caller-mode ``start(timeout=...)``.
+
+    Set when the timeout elapses or when ``inner`` (the agent's own
+    per-turn interrupt token, if any) is set.
+    """
+
+    def __init__(self, timeout, inner=None):
+        self.timed_out = threading.Event()
+        self._inner = inner
+        self._timer = threading.Timer(timeout, self.timed_out.set)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def is_set(self) -> bool:
+        return self.timed_out.is_set() or (self._inner is not None and self._inner.is_set())
+
+    @property
+    def reason(self):
+        if self.timed_out.is_set():
+            return "timeout"
+        return getattr(self._inner, "reason", None)
+
+    def check(self) -> None:
+        if self.is_set():
+            raise InterruptedError(f"Operation cancelled: {self.reason or 'unknown'}")
+
+    def close(self) -> None:
+        self._timer.cancel()
+        if self._inner is not None:
+            self._inner.close()
+
+
 def cleanup_launch_registration(agent_id: str) -> None:
     """Remove launch() endpoints registered for ``agent_id`` from the shared
     HTTP state that ``Agent.launch()`` actually populates.
@@ -196,8 +229,26 @@ class ExecutionMixin:
                 from datetime import datetime, timezone
                 start_time = time_module.time()
                 started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-                
-                response = await self.achat(prompt, **kwargs)
+
+                # achat() has no timeout param: enforce it as a run budget here
+                timeout = kwargs.pop('timeout', None)
+                if timeout is not None and timeout > 0:
+                    task = asyncio.ensure_future(self.achat(prompt, **kwargs))
+                    try:
+                        done, _ = await asyncio.wait({task}, timeout=timeout)
+                    except asyncio.CancelledError:
+                        task.cancel()
+                        raise
+                    if task not in done:
+                        task.cancel()
+                        # Let achat()'s cleanup finish and collect its outcome
+                        for exc in await asyncio.gather(task, return_exceptions=True):
+                            if isinstance(exc, Exception):
+                                logger.debug("achat() cleanup after timeout failed: %s", exc)
+                        return self._caller_mode_timeout_result(start_time, started_at)
+                    response = task.result()
+                else:
+                    response = await self.achat(prompt, **kwargs)
                 response_str = str(response) if response else ""
                 
                 # Auto-save session after chat. Offloaded to a worker thread so
@@ -230,6 +281,21 @@ class ExecutionMixin:
         
         kwargs['stream'] = stream_requested
         return await self.achat(prompt, **kwargs)
+
+    @staticmethod
+    def _caller_mode_timeout_result(start_time, started_at):
+        """AutonomyResult for a caller-mode run that exceeded ``timeout``."""
+        from .autonomy import AutonomyResult
+        return AutonomyResult(
+            success=False,
+            output="Task timed out",
+            completion_reason="timeout",
+            iterations=1,
+            stage="direct",
+            actions=[],
+            duration_seconds=time.time() - start_time,
+            started_at=started_at,
+        )
 
     async def _astart_with_outcome(self, prompt, timeout=None, **kwargs):
         """Run astart() and normalise its result/exception into a RunOutcome.
@@ -843,9 +909,36 @@ Write the complete compiled report:"""
                 # Load history from past sessions
                 self._load_history_context()
                 
+                # chat() has no timeout param: enforce it via cooperative
+                # cancellation (cancel_token), unless the caller supplied one.
+                timeout = kwargs.pop('timeout', None)
+                cancel = None
+                if timeout is not None and timeout > 0 and kwargs.get('cancel_token') is None:
+                    # Still honour stop requests on the agent's own controller
+                    inner = self._turn_cancel_token(
+                        getattr(self, "interrupt_controller", None), explicit=False
+                    )
+                    cancel = kwargs['cancel_token'] = _TimeoutCancelToken(timeout, inner)
+
                 # Use chat() — all tools, approval, doom-loop per-tool work
-                response = self.chat(prompt, **kwargs)
+                try:
+                    response = self.chat(prompt, **kwargs)
+                except InterruptedError:
+                    if cancel is None or not cancel.timed_out.is_set():
+                        raise
+                    return self._caller_mode_timeout_result(start_time, started_at)
+                finally:
+                    if cancel is not None:
+                        cancel.close()
                 response_str = str(response) if response else ""
+                # The LLM tool loop returns this text instead of raising when
+                # the timeout stops it, so the run did not finish.
+                if (
+                    cancel is not None
+                    and cancel.timed_out.is_set()
+                    and response_str.startswith("Task interrupted: timeout")
+                ):
+                    return self._caller_mode_timeout_result(start_time, started_at)
                 
                 # Auto-save session after chat
                 self._auto_save_session()
@@ -920,7 +1013,6 @@ Write the complete compiled report:"""
                 # Show animated status during LLM call if verbose
                 if self.verbose and is_tty:
                     from ..main import PRAISON_COLORS, sync_display_callbacks, _callbacks_lock
-                    import threading
                     import time as time_module
                     
                     console = _get_console()()
