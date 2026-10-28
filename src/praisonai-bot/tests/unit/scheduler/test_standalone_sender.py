@@ -103,6 +103,25 @@ def test_plugin_descriptor_sender_used_when_no_live_handler(monkeypatch):
     assert sent == [("#room", "echo:hello")]
 
 
+def test_plugin_descriptor_sync_sender_supported(monkeypatch):
+    """A plugin may declare a plain (non-async) sender."""
+    from praisonai_bot.bots import _registry
+
+    sent: list = []
+
+    class _SyncDescriptor:
+        def standalone_sender(self, target, text):
+            sent.append(text)
+
+    monkeypatch.setattr(_registry, "get_platform_descriptor", lambda name: _SyncDescriptor())
+
+    ex = _agent_executor(delivery_handler=None)
+    result = _run(ex._execute_one(_job(deliver="matrix:#room")))
+
+    assert result.delivered is True
+    assert sent == ["echo:hello"]
+
+
 # ── executor fallback ────────────────────────────────────────────────
 
 

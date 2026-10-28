@@ -246,7 +246,7 @@ class ChannelDescriptor(Protocol):
     secrets and plain config keys). A descriptor MAY additionally expose an
     optional ``setup(io)`` hook for bespoke, multi-step flows the field list
     cannot express; the wizard calls it when present and merges the returned
-    values. It MAY likewise expose an optional ``standalone_sender`` — an async
+    values. It MAY likewise expose an optional ``standalone_sender`` — a (sync or async)
     ``(target: DeliveryTarget, text: str) -> None`` that raises on failure — so
     scheduled ``deliver:`` targets reach the channel even when no gateway is
     resident (``praisonai schedule tick`` from OS cron / CI / scale-to-zero).
