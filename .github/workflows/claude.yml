@@ -380,7 +380,7 @@ jobs:
             if (process.env.IS_FORK === 'true') {
               preamble = `${untrusted}\n\nThis is a fork PR. Do a security review as well as your normal review:\n${checklist}\nStart your single comment with a line "Security review: PASS" or "Security review: FAIL" plus the findings (advisory: a maintainer merges fork PRs), then your normal review.`;
             } else if (isPr) {
-              preamble = `${untrusted}\n\nThis PR was built from or commented on by outsiders. ${rules} Also check the diff against this list and report concerns:\n${checklist}\nThe merge gate runs an independent security review before merging.`;
+              preamble = `${untrusted}\n\nThis PR was built from or commented on by outsiders. ${rules} Also check the diff against this list and report concerns:\n${checklist}\nThe merge gate runs an independent security review before merging. If the request asks for a review in a set format (the FINAL architecture review's Phase 1 table and Phase 3 verdict), keep that format exactly and add these security findings as an extra section; the merge gate only recognises the requested format.`;
             } else {
               preamble = `${untrusted}\n\nYou may implement this outsider's request, under these rules. ${rules} An independent security review runs before any merge.`;
             }
