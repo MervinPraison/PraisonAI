@@ -19,8 +19,9 @@ Usage::
     agent = Agent(name="assistant", instructions="Be helpful")
     BotOS(agent=agent, platforms=["local"]).run()   # chat in your terminal
 
-Offline / CI (no token, no network) — pass any file-like streams to drive the
-real hook → command → session → send path and assert the reply::
+Tests / CI (no channel token) — pass any file-like streams to drive the real
+hook → command → session → send path and assert the reply. The agent still
+calls its own model, so use a mocked/local LLM for a fully offline run::
 
     import asyncio, io
     out = io.StringIO()
@@ -294,13 +295,13 @@ class LocalBot(ChatCommandMixin, MessageHookMixin):
 
     def _read_line(self) -> Optional[str]:
         """Blocking stdin read (run in an executor). Returns None on EOF."""
-        out = self._stdout or sys.stdout
+        out = self._stdout if self._stdout is not None else sys.stdout
         try:
             out.write(self._prompt)
             out.flush()
         except Exception:  # noqa: BLE001 — prompt is cosmetic
             pass
-        line = (self._stdin or sys.stdin).readline()
+        line = (self._stdin if self._stdin is not None else sys.stdin).readline()
         if line == "":
             return None
         return line
@@ -412,7 +413,7 @@ class LocalBot(ChatCommandMixin, MessageHookMixin):
         threads/replies have no meaning in a TTY and are ignored.
         """
         text = content if isinstance(content, str) else str(content)
-        out = self._stdout or sys.stdout
+        out = self._stdout if self._stdout is not None else sys.stdout
         try:
             out.write(text + "\n")
             out.flush()
@@ -450,7 +451,10 @@ class LocalBot(ChatCommandMixin, MessageHookMixin):
             platform="local",
             elapsed_ms=0.0,
             bot_username="local",
-            details={"tty": bool(getattr(self._stdin or sys.stdin, "isatty", lambda: False)())},
+            details={"tty": bool(getattr(
+                self._stdin if self._stdin is not None else sys.stdin,
+                "isatty", lambda: False,
+            )())},
         )
 
     async def health(self):

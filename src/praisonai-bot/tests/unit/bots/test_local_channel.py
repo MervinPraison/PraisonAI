@@ -202,3 +202,30 @@ def test_injected_streams_drive_a_turn_without_touching_sys():
     assert sent == [("local-operator", "hello", "local")]
     assert sys.stdout is real_out
     assert bot.is_running is False
+
+
+def test_falsy_injected_streams_are_still_used():
+    """An empty buffer (``len() == 0``) is falsy but must not fall back to
+    the process streams."""
+
+    class _FalsyOut(io.StringIO):
+        def __len__(self):
+            return 0
+
+    class _FalsyIn(_FakeStdin):
+        def __len__(self):
+            return 0
+
+    real_out = sys.stdout
+    out = _FalsyOut()
+    bot = LocalBot(stdin=_FalsyIn(["hi\n"]), stdout=out)
+    bot.set_agent(_Agent())
+
+    async def _fake_chat(agent, user_id, content, **kwargs):
+        return f"echo:{content}"
+
+    bot._session.chat = _fake_chat
+    asyncio.run(asyncio.wait_for(bot.start(), timeout=5))
+
+    assert "echo:hi" in out.getvalue()
+    assert sys.stdout is real_out
