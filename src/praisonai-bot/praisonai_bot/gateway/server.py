@@ -9698,6 +9698,7 @@ class WebSocketGateway:
         platform = str(ch_cfg.get("platform") or channel_name).lower()
         try:
             from praisonai_bot.bots._defaults import (
+                _sync_approval_registry,
                 apply_bot_smart_defaults,
                 enable_shell_tools,
             )
@@ -9711,6 +9712,16 @@ class WebSocketGateway:
                 channel_type=platform,
                 gateway_bind_host=self._resolve_gateway_bind_host(),
             )
+            # Reuse the durable approval backend the channel adapter already
+            # renders and resolves (#6032); a fresh per-clone one has no sender.
+            shared = getattr(
+                self._channel_bots.get(channel_name), "_approval_backend", None
+            )
+            if shared is not None and hasattr(
+                getattr(enabled, "_approval_backend", None), "handle_callback"
+            ):
+                enabled._approval_backend = shared
+                _sync_approval_registry(enabled)
             self._shell_routed_agents[cache_key] = enabled
             return enabled
         except Exception as exc:  # pragma: no cover - defensive
@@ -10083,6 +10094,7 @@ class WebSocketGateway:
             from telegram import Update
             from telegram.ext import (
                 Application,
+                CallbackQueryHandler,
                 CommandHandler,
                 MessageHandler,
                 filters,
@@ -10209,6 +10221,14 @@ class WebSocketGateway:
                         pass
                 ack_ctx = await bot._ack.ack(react_fn=_tg_react)
 
+            # Same identifiers the standalone adapter passes, so ingress dedup
+            # and ``session_scope: per_chat`` work in gateway mode (#6032).
+            _session_ids = {
+                "chat_id": chat_id or "",
+                "message_id": str(update.message.message_id),
+                "account": getattr(bot.config, "account", "default"),
+            }
+
             try:
                 message_text = await bot._debouncer.debounce(user_id, message_text)
                 
@@ -10222,12 +10242,14 @@ class WebSocketGateway:
                     response = await with_typing_renewal(
                         typing_func=_typing_action,
                         operation_coro=bot._session.chat(
-                            agent, user_id, message_text, tool_policy=tool_policy
+                            agent, user_id, message_text, tool_policy=tool_policy,
+                            **_session_ids,
                         )
                     )
                 else:
                     response = await bot._session.chat(
-                        agent, user_id, message_text, tool_policy=tool_policy
+                        agent, user_id, message_text, tool_policy=tool_policy,
+                        **_session_ids,
                     )
                 if hasattr(bot, '_send_response_with_media'):
                     # Issue #3623: this handler serves VOICE|AUDIO as well as
@@ -10289,6 +10311,10 @@ class WebSocketGateway:
         app.add_handler(CommandHandler("help", handle_help))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
         app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
+        # Inline buttons (pairing Approve/Deny, tool approvals) use the adapter's
+        # own dispatcher, so no second getUpdates poller is needed (#6032).
+        app.add_handler(CallbackQueryHandler(bot._handle_callback_query))
+        bot._autowire_agent_approval_backend()
 
         # Initialize and start using low-level API
         await app.initialize()
