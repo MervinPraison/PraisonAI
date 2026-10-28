@@ -400,8 +400,6 @@ class AsyncTUI:
         # wired to that session's store + prior turns for real conversational
         # continuity — not just display-only scrollback (Issue #4910).
         self._resume_session_id: Optional[str] = None
-        self._total_tokens = 0
-        self._total_cost = 0.0
         self._workspace_files: List[str] = []  # Files in workspace for @ completion
         self._runtime = None  # InteractiveRuntime for ACP/LSP
         self._runtime_started = False
@@ -1359,6 +1357,9 @@ Tips:
             self.messages.clear()
             self._conversation_history.clear()
             self._reset_agent_context()
+            from praisonai_code.cli.features.cost_tracker import reset_collected_usage
+
+            reset_collected_usage()
             self.messages.append(ChatMessage(role="system", content="Conversation cleared."))
             return True
         
@@ -1366,6 +1367,9 @@ Tips:
             self.messages.clear()
             self._conversation_history.clear()
             self._reset_agent_context()
+            from praisonai_code.cli.features.cost_tracker import reset_collected_usage
+
+            reset_collected_usage()
             self.messages.append(ChatMessage(role="system", content=f"New session: {self.session_id}"))
             return True
         
@@ -1412,10 +1416,13 @@ Tips:
             return True
         
         elif cmd in ("cost", "stats"):
+            from praisonai_code.cli.features.cost_tracker import collected_usage_line
+
+            tokens, cost_text = collected_usage_line(self.config.model)
             stats_info = (
                 f"Model:          {self.config.model}\n"
-                f"Total tokens:   {self._total_tokens}\n"
-                f"Estimated cost: ${self._total_cost:.4f}"
+                f"Total tokens:   {tokens}\n"
+                f"Estimated cost: {cost_text}"
             )
             self.messages.append(ChatMessage(role="system", content=stats_info))
             return True
