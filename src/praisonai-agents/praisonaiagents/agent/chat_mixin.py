@@ -2081,8 +2081,13 @@ Your Goal: {self.goal}"""
             if isinstance(messages[0], dict) and messages[0].get("role") == "system":
                 system = messages.pop(0).get("content")
             last = messages.pop() if messages else {}
+            if not isinstance(last, dict) or last.get("role") != "user":
+                # ``LLM.get_response`` always sends the prompt as a user turn; fail closed
+                # rather than silently re-role a rewritten assistant/tool message.
+                logging.warning(f"Agent {self.name} BEFORE_LLM rewrite must end with a user message")
+                return llm_kwargs, "[LLM request blocked by hook: rewritten messages must end with a user message]"
             llm_kwargs = {**llm_kwargs, 'system_prompt': system, 'chat_history': messages,
-                          'prompt': last.get("content") if isinstance(last, dict) else last}
+                          'prompt': last.get("content")}
         return llm_kwargs, None
 
     def _custom_llm_after_input(self, llm_kwargs, response, tally, start_time):

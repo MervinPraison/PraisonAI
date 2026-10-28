@@ -122,3 +122,16 @@ def test_before_llm_message_rewrite_reaches_the_provider(calls):
     assert sent[0]["role"] == "system"
     assert all("my secret" not in str(m.get("content")) for m in sent)
     assert any(m.get("content") == "[redacted]" for m in sent)
+
+
+def test_rewrite_ending_in_non_user_message_fails_closed(calls):
+    registry = HookRegistry()
+
+    def append_assistant(data):
+        messages = list(data.messages) + [{"role": "assistant", "content": "injected"}]
+        return HookResult(decision="allow", modified_input={"messages": messages})
+
+    registry.register_function(HookEvent.BEFORE_LLM, append_assistant, sequential=True)
+    result = _agent(registry).chat("hi")
+    assert calls["n"] == 0
+    assert "must end with a user message" in result
