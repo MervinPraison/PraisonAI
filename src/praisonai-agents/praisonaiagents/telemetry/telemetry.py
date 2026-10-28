@@ -550,9 +550,11 @@ class MinimalTelemetry:
                 flush_thread.start()
                 flush_thread.join(timeout=5.0)  # 5 second timeout
                 if flush_thread.is_alive():
+                    # Consumer flush/shutdown would block on the same wedged
+                    # transport, so skip the remaining cleanup.
                     self.logger.warning("PostHog flush timed out")
-                else:
-                    self.logger.debug("PostHog flush completed")
+                    return
+                self.logger.debug("PostHog flush completed")
                 
                 # Cleanup PostHog threads safely
                 self._shutdown_posthog_threads(posthog_client)

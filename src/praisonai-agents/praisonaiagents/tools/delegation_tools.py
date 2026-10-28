@@ -62,27 +62,22 @@ class DelegationTools:
             # blocking past the documented deadline. A non-positive timeout
             # means "no bound".
             if timeout and timeout > 0:
-                import concurrent.futures
+                # Daemon worker: a ThreadPoolExecutor worker is joined at
+                # interpreter exit, so a hung delegate would keep the process alive.
+                from .call_executor import ToolTimeoutError, _run_with_timeout
 
-                # Not a ``with`` block: its ``shutdown(wait=True)`` would join
-                # the worker we already gave up on, defeating the timeout.
-                pool = concurrent.futures.ThreadPoolExecutor(max_workers=1)
                 try:
-                    future = pool.submit(
-                        spawn, task=task_description, agent_name=agent_type
+                    result = _run_with_timeout(
+                        lambda: spawn(task=task_description, agent_name=agent_type),
+                        timeout,
                     )
-                    try:
-                        result = future.result(timeout=timeout)
-                    except concurrent.futures.TimeoutError:
-                        future.cancel()
-                        return json.dumps({
-                            "success": False,
-                            "task_description": task_description,
-                            "agent_type": agent_type,
-                            "error": f"Delegated task timed out after {timeout}s",
-                        }, indent=2)
-                finally:
-                    pool.shutdown(wait=False)
+                except ToolTimeoutError:
+                    return json.dumps({
+                        "success": False,
+                        "task_description": task_description,
+                        "agent_type": agent_type,
+                        "error": f"Delegated task timed out after {timeout}s",
+                    }, indent=2)
             else:
                 result = spawn(task=task_description, agent_name=agent_type)
 
