@@ -3766,7 +3766,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/handoff.py:358",
+        "location": "src/praisonai-agents/praisonaiagents/agent/handoff.py:391",
         "resolved_class": "Handoff"
       },
       "ts_only": [

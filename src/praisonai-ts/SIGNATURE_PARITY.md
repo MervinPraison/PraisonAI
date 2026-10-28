@@ -261,7 +261,7 @@ TS-only members: `options`?
 
 ### `Handoff.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/handoff.py:358`
+- Python: `src/praisonai-agents/praisonaiagents/agent/handoff.py:391`
 - TypeScript: `src/praisonai-ts/src/agent/handoff.ts:505` (ctor `src/praisonai-ts/src/agent/handoff.ts:759`)
 - Counts: 7 python params: 2 exact, 2 camelCase, 3 alias, 0 flattened, 0 missing; 2 mismatches; 2 waived; 13 TS-only of 21
 
