@@ -939,7 +939,9 @@ class PluginManager:
                         name=f"{name}:{event.value}",
                         # Delivery policies compose in order: apply a rewrite
                         # before the next policy, and stop the chain on denial.
-                        sequential=event == PluginHook.MESSAGE_SENDING,
+                        # AFTER_AGENT adapters mutate the shared response, so
+                        # stacked redactors must also run in order.
+                        sequential=event in (PluginHook.MESSAGE_SENDING, PluginHook.AFTER_AGENT),
                     )
                     hook_ids.append(hook_id)
                     count += 1

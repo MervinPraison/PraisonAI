@@ -115,3 +115,35 @@ class TestAgentAfterAgentEnforcement:
     def test_clean_response_passes_through(self):
         agent = _agent(RaiseBlockPlugin())
         assert agent._trigger_after_agent_hook("q", "hello", time.time()) == "hello"
+
+    def test_block_scrubs_stored_assistant_turn(self):
+        agent = _agent(RaiseBlockPlugin())
+        agent.chat_history.append({"role": "assistant", "content": f"SSN {SECRET}"})
+        out = agent._trigger_after_agent_hook("q", f"SSN {SECRET}", time.time())
+        assert agent.chat_history[-1]["content"] == out
+        assert all(SECRET not in str(m.get("content")) for m in agent.chat_history)
+
+
+class EmailRedactPlugin(Plugin):
+    @property
+    def info(self):
+        return PluginInfo(name="emailredact", hooks=[PluginHook.AFTER_AGENT])
+
+    def after_agent(self, response, context):
+        return response.replace("a@b.com", "[EMAIL]")
+
+
+def test_stacked_redactors_compose():
+    reg = HookRegistry()
+    mgr = PluginManager()
+    for p in (RedactPlugin(), EmailRedactPlugin()):
+        mgr.register(p)
+    mgr.set_plugin_options({
+        "redact": {"allow_conversation": True},
+        "emailredact": {"allow_conversation": True},
+    })
+    assert mgr.wire_into_hook_registry(reg) == 2
+    runner = HookRunner(registry=reg, cwd=os.getcwd())
+    data = _input(f"SSN {SECRET} mail a@b.com")
+    runner.execute_sync(HookEvent.AFTER_AGENT, data)
+    assert data.response == "SSN [REDACTED] mail [EMAIL]"

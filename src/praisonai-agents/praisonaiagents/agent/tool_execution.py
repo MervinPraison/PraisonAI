@@ -2074,15 +2074,26 @@ class ToolExecutionMixin:
         A blocking hook/plugin (``GuardrailBlocked`` / ``PluginDecision.deny``)
         withholds the response and returns a visible refusal marker, mirroring
         the BEFORE_LLM block. Otherwise a string rewrite (e.g. PII redaction)
-        is adopted so it actually reaches the caller.
+        is adopted so it actually reaches the caller. The stored assistant turn
+        is updated too, so later turns and auto-learning never see the
+        withheld or unredacted text.
         """
         if self._hook_runner.is_blocked(results):
             reason = self._hook_runner.get_blocking_reason(results) or "Blocked by hook"
             logging.warning(f"Agent {self.name} response blocked by AFTER_AGENT hook: {reason}")
-            return f"[Response blocked by hook: {reason}]"
-        if isinstance(response, str) and isinstance(after_agent_input.response, str):
-            return after_agent_input.response
-        return response
+            final = f"[Response blocked by hook: {reason}]"
+        elif isinstance(response, str) and isinstance(after_agent_input.response, str):
+            final = after_agent_input.response
+        else:
+            return response
+        if final != response and isinstance(response, str):
+            with self._history_lock:
+                for msg in reversed(self.chat_history):
+                    if isinstance(msg, dict) and msg.get("role") == "assistant":
+                        if msg.get("content") == response:
+                            msg["content"] = final
+                        break
+        return final
 
     def _after_agent_side_effects(self, prompt, response, *, process_auto_memory=True):
         """Run loop-agnostic after-agent side effects (no ``await`` inside).
