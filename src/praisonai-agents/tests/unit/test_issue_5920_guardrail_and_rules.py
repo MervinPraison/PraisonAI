@@ -52,6 +52,12 @@ def test_stream_input_block_does_not_leak_reason():
     _assert_blocked(a, "".join(chunks))
 
 
+def test_input_block_reason_exposed_via_last_guardrail_error():
+    a = _agent()
+    _assert_blocked(a, a.chat("hi"))
+    assert a.last_guardrail_error == SECRET_REASON
+
+
 def test_concurrent_learned_rules_are_not_lost(tmp_path):
     rules_file = str(tmp_path / "rules" / "default.rules")
     threads, per_thread = 8, 25
