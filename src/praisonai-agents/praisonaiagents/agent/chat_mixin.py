@@ -2039,14 +2039,110 @@ Your Goal: {self.goal}"""
                 return fn(*args, **kwargs)
         return {**llm_kwargs, 'execute_tool_fn': tracked}, ran
 
+    def _custom_llm_hook_messages(self, llm_kwargs):
+        """The custom-LLM request as the message list BEFORE_LLM / AFTER_LLM hooks see."""
+        messages = []
+        if llm_kwargs.get('system_prompt'):
+            messages.append({"role": "system", "content": llm_kwargs['system_prompt']})
+        messages.extend(llm_kwargs.get('chat_history') or [])
+        messages.append({"role": "user", "content": llm_kwargs.get('prompt')})
+        return messages
+
+    def _custom_llm_before_input(self, llm_kwargs):
+        """BEFORE_LLM input for the custom-LLM path, or ``None`` when no hook is registered."""
+        from ..hooks import HookEvent, BeforeLLMInput
+        if not self._hook_runner.registry.has_hooks(HookEvent.BEFORE_LLM):
+            return None
+        return BeforeLLMInput(
+            session_id=getattr(self, '_session_id', 'default'),
+            cwd=os.getcwd(),
+            event_name=HookEvent.BEFORE_LLM,
+            timestamp=str(time.time()),
+            agent_name=self.name,
+            messages=self._custom_llm_hook_messages(llm_kwargs),
+            model=self.llm if isinstance(self.llm, str) else str(self.llm),
+            temperature=llm_kwargs.get('temperature'),
+        )
+
+    def _adopt_custom_llm_before(self, llm_kwargs, before, results):
+        """Apply BEFORE_LLM ``results`` like ``_chat_completion``: return ``(llm_kwargs, block_message)``."""
+        if self._hook_runner.is_blocked(results):
+            reason = next(
+                (getattr(r.output, "reason", None) for r in results
+                 if r.output and getattr(r.output, "is_denied", lambda: False)()),
+                None,
+            ) or "Blocked by hook"
+            logging.warning(f"Agent {self.name} LLM request blocked by BEFORE_LLM hook: {reason}")
+            return llm_kwargs, f"[LLM request blocked by hook: {reason}]"
+        messages = list(before.messages or [])
+        if messages and messages != self._custom_llm_hook_messages(llm_kwargs):
+            # A hook rewrote the messages (e.g. PII redactor): map them back.
+            system = None
+            if isinstance(messages[0], dict) and messages[0].get("role") == "system":
+                system = messages.pop(0).get("content")
+            last = messages.pop() if messages else {}
+            llm_kwargs = {**llm_kwargs, 'system_prompt': system, 'chat_history': messages,
+                          'prompt': last.get("content") if isinstance(last, dict) else last}
+        return llm_kwargs, None
+
+    def _custom_llm_after_input(self, llm_kwargs, response, tally, start_time):
+        """AFTER_LLM input for the custom-LLM path, or ``None`` when no hook is registered."""
+        from ..hooks import HookEvent, AfterLLMInput
+        if not self._hook_runner.registry.has_hooks(HookEvent.AFTER_LLM):
+            return None
+        return AfterLLMInput(
+            session_id=getattr(self, '_session_id', 'default'),
+            cwd=os.getcwd(),
+            event_name=HookEvent.AFTER_LLM,
+            timestamp=str(time.time()),
+            agent_name=self.name,
+            messages=self._custom_llm_hook_messages(llm_kwargs),
+            response=str(response),
+            model=self.llm if isinstance(self.llm, str) else str(self.llm),
+            tokens_used=sum(tally),
+            latency_ms=(time.time() - start_time) * 1000,
+        )
+
     def _custom_llm_get_response(self, llm_kwargs):
+        """Call the custom LLM, firing BEFORE_LLM / AFTER_LLM like ``_chat_completion``."""
+        from ..hooks import HookEvent
+        before = self._custom_llm_before_input(llm_kwargs)
+        if before is not None:
+            results = self._hook_runner.execute_sync(HookEvent.BEFORE_LLM, before)
+            llm_kwargs, blocked = self._adopt_custom_llm_before(llm_kwargs, before, results)
+            if blocked:
+                return blocked
+        start_time, tally = time.time(), []
+        response = self._custom_llm_dispatch(llm_kwargs, tally)
+        after = self._custom_llm_after_input(llm_kwargs, response, tally, start_time)
+        if after is not None:
+            self._hook_runner.execute_sync(HookEvent.AFTER_LLM, after)
+        return response
+
+    async def _custom_llm_get_response_async(self, llm_kwargs):
+        """Async twin of :meth:`_custom_llm_get_response`."""
+        from ..hooks import HookEvent
+        before = self._custom_llm_before_input(llm_kwargs)
+        if before is not None:
+            results = await self._hook_runner.execute(HookEvent.BEFORE_LLM, before)
+            llm_kwargs, blocked = self._adopt_custom_llm_before(llm_kwargs, before, results)
+            if blocked:
+                return blocked
+        start_time, tally = time.time(), []
+        response = await self._custom_llm_dispatch_async(llm_kwargs, tally)
+        after = self._custom_llm_after_input(llm_kwargs, response, tally, start_time)
+        if after is not None:
+            await self._hook_runner.execute(HookEvent.AFTER_LLM, after)
+        return response
+
+    def _custom_llm_dispatch(self, llm_kwargs, tally=None):
         """Call ``llm_instance.get_response`` walking ``fallback_models`` on outage."""
         llm, index, current = self.llm_instance, 0, self.llm
         stream_cb = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
         llm_kwargs, tools_ran = self._track_tool_runs(llm_kwargs)
         while True:
             try:
-                with self._llm_usage_sink(llm):
+                with self._llm_usage_sink(llm, tally):
                     return llm.get_response(**llm_kwargs)
             except (ToolExecutionError, BudgetExceededError, InterruptedError):
                 raise
@@ -2059,14 +2155,14 @@ Your Goal: {self.goal}"""
                 self._emit_model_fallback(current, next_model, category, index, stream_cb)
                 llm, index, current = self._fallback_llm_for(next_model), index + 1, next_model
 
-    async def _custom_llm_get_response_async(self, llm_kwargs):
-        """Async twin of :meth:`_custom_llm_get_response`."""
+    async def _custom_llm_dispatch_async(self, llm_kwargs, tally=None):
+        """Async twin of :meth:`_custom_llm_dispatch`."""
         llm, index, current = self.llm_instance, 0, self.llm
         stream_cb = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
         llm_kwargs, tools_ran = self._track_tool_runs(llm_kwargs)
         while True:
             try:
-                with self._llm_usage_sink(llm):
+                with self._llm_usage_sink(llm, tally):
                     return await llm.get_response_async(**llm_kwargs)
             except (ToolExecutionError, BudgetExceededError, InterruptedError):
                 raise
@@ -2288,9 +2384,10 @@ Your Goal: {self.goal}"""
                 self._on_budget_exceeded(current_cost, self._max_budget)
 
     @contextlib.contextmanager
-    def _llm_usage_sink(self, llm=None):
+    def _llm_usage_sink(self, llm=None, tally=None):
         """Route every call ``llm`` (default: the custom LLM) makes in this block into ``_record_llm_usage``.
 
+        Each call's total tokens are also appended to ``tally`` when given.
         Refuses to start when ``max_budget`` is already spent (``"stop"`` mode),
         so retrying after ``BudgetExceededError`` sends no further paid request.
         """
@@ -2309,10 +2406,12 @@ Your Goal: {self.goal}"""
         llm = llm if llm is not None else self.llm_instance
         # A fallback model is priced as itself, not as the primary ``self.llm``.
         model = None if llm is self.llm_instance else getattr(llm, 'model', None)
-        token = _usage_sink.set((
-            llm,
-            lambda response: self._record_llm_usage(*self._extract_llm_usage(response, model)),
-        ))
+        def record(response):
+            usage = self._extract_llm_usage(response, model)
+            if tally is not None:
+                tally.append(usage[0] + usage[1])
+            self._record_llm_usage(*usage)
+        token = _usage_sink.set((llm, record))
         try:
             yield
         finally:
