@@ -9714,11 +9714,27 @@ class WebSocketGateway:
             )
             # Reuse the durable approval backend the channel adapter already
             # renders and resolves (#6032); a fresh per-clone one has no sender.
+            # Only when it gates the same chat with the same or a narrower
+            # approver set, so a routed shell agent is never gated more loosely.
+            from praisonai_bot.bots._presentation_approval_backend import (
+                PresentationApprovalBackend,
+            )
+
             shared = getattr(
                 self._channel_bots.get(channel_name), "_approval_backend", None
             )
-            if shared is not None and hasattr(
-                getattr(enabled, "_approval_backend", None), "handle_callback"
+            own = getattr(enabled, "_approval_backend", None)
+            if (
+                isinstance(shared, PresentationApprovalBackend)
+                and isinstance(own, PresentationApprovalBackend)
+                and shared._target == own._target
+                and (
+                    own._allowed_actors is None
+                    or (
+                        shared._allowed_actors is not None
+                        and shared._allowed_actors <= own._allowed_actors
+                    )
+                )
             ):
                 enabled._approval_backend = shared
                 _sync_approval_registry(enabled)
@@ -10123,8 +10139,17 @@ class WebSocketGateway:
         # Set up message handler with routing support
         channel_name = name
         gateway = self
+        # Turn handlers run with ``block=False`` so an approval tap can be
+        # dispatched while a turn waits on it (#6032). This lock keeps turns and
+        # /new strictly one at a time, as PTB's sequential dispatch did before,
+        # so staged profiles, debounce batches and resets never interleave.
+        turn_lock = asyncio.Lock()
 
         async def handle_message(update: Update, context: Any):
+            async with turn_lock:
+                await _handle_message(update, context)
+
+        async def _handle_message(update: Update, context: Any):
             # Import the shared security pipeline from telegram.py
             from praisonai_bot.bots.telegram import process_inbound_telegram_message
             
@@ -10287,6 +10312,10 @@ class WebSocketGateway:
             await update.message.reply_text(bot._format_status())
 
         async def handle_new(update: Update, context: Any):
+            async with turn_lock:
+                await _handle_new(update, context)
+
+        async def _handle_new(update: Update, context: Any):
             if not update.message:
                 return
             from praisonai_bot.bots.telegram import process_inbound_telegram_message
@@ -10312,11 +10341,11 @@ class WebSocketGateway:
 
         # Register handlers
         app.add_handler(CommandHandler("status", handle_status))
-        app.add_handler(CommandHandler("new", handle_new))
-        app.add_handler(CommandHandler("help", handle_help))
         # Non-blocking so an agent turn awaiting tool approval does not stall
         # PTB's sequential dispatch of the button tap that resolves it (#6032);
-        # per-session turn locks still serialise each conversation.
+        # ``turn_lock`` still runs turns and resets one at a time, in order.
+        app.add_handler(CommandHandler("new", handle_new, block=False))
+        app.add_handler(CommandHandler("help", handle_help))
         app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message, block=False))
         app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice, block=False))
         # Inline buttons (pairing Approve/Deny, tool approvals) use the adapter's

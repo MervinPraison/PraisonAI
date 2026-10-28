@@ -244,7 +244,7 @@ def test_gateway_new_resets_per_chat_session(fake_ptb, monkeypatch):
         try:
             handler = next(
                 h for h in fake_ptb.handlers
-                if isinstance(h, CommandHandler) and h.args[0] == "new"
+                if isinstance(h, CommandHandler) and h.args[0] == "new" and h.block is False
             )
             message = MagicMock(chat_id=-100555)
             message.reply_text = AsyncMock()
@@ -259,3 +259,131 @@ def test_gateway_new_resets_per_chat_session(fake_ptb, monkeypatch):
         account=getattr(bot.config, "account", "default"),
         chat_id="-100555",
     )
+
+
+def _routed_shell(monkeypatch, own, shared):
+    import praisonai_bot.bots._defaults as defaults
+
+    monkeypatch.setattr(defaults, "apply_bot_smart_defaults", lambda a, c: a)
+    monkeypatch.setattr(defaults, "_sync_approval_registry", lambda a: None)
+
+    def _enable(clone, *a, **k):
+        clone._approval_backend = own
+        return clone
+
+    monkeypatch.setattr(defaults, "enable_shell_tools", _enable)
+    gw = SimpleNamespace(
+        _channel_shell_cfg={"telegram": (object(), {"platform": "telegram"})},
+        _shell_routed_agents={},
+        _resolve_gateway_bind_host=lambda: "127.0.0.1",
+        _channel_bots={"telegram": SimpleNamespace(_approval_backend=shared)},
+    )
+    return WebSocketGateway._apply_channel_shell(gw, "telegram", SimpleNamespace())
+
+
+def test_routed_shell_reuses_channel_backend_when_approvers_match(monkeypatch):
+    own = PresentationApprovalBackend(allowed_actors={"999"}, target="42")
+    shared = PresentationApprovalBackend(allowed_actors={"999"}, target="42")
+    assert _routed_shell(monkeypatch, own, shared)._approval_backend is shared
+
+
+@pytest.mark.parametrize(
+    "shared",
+    [
+        # Broader approver set than the route asks for.
+        PresentationApprovalBackend(allowed_actors={"999", "111"}, target="42"),
+        # Any actor, while the route restricts approvers.
+        PresentationApprovalBackend(allowed_actors=None, target="42"),
+        # Different approval chat.
+        PresentationApprovalBackend(allowed_actors={"999"}, target="7"),
+        # Not a durable presentation backend.
+        SimpleNamespace(handle_callback=AsyncMock()),
+    ],
+)
+def test_routed_shell_keeps_own_backend_when_channel_backend_is_looser(
+    monkeypatch, shared
+):
+    own = PresentationApprovalBackend(allowed_actors={"999"}, target="42")
+    assert _routed_shell(monkeypatch, own, shared)._approval_backend is own
+
+
+def test_gateway_concurrent_turns_run_one_at_a_time_while_taps_dispatch(
+    fake_ptb, monkeypatch
+):
+    """block=False turns must not interleave (profile, debounce, reset)."""
+    import praisonai_bot.bots.telegram as tg_mod
+
+    inbound = SimpleNamespace(
+        sender=SimpleNamespace(user_id="777"), content="hi", thread_id=None
+    )
+    monkeypatch.setattr(
+        tg_mod, "process_inbound_telegram_message", AsyncMock(return_value=inbound)
+    )
+    events = []
+    approved = asyncio.Event()
+    profiles = {"1": "tenant-a", "2": "tenant-b"}
+
+    async def run():
+        bot = TelegramBot(
+            token="123:abc", config=BotConfig(token="123:abc", typing_indicator=False)
+        )
+        session = MagicMock()
+        staged = {}
+        session.set_profile_namespace = lambda ns, agent: staged.update(ns=ns)
+
+        async def chat(agent, user_id, text, **kw):
+            events.append(("start", kw["chat_id"], staged["ns"]))
+            if kw["chat_id"] == "1":
+                await approved.wait()  # turn waits on a tool approval
+            events.append(("end", kw["chat_id"], staged["ns"]))
+            return "ok"
+
+        session.chat = chat
+        session.reset = lambda *a, **k: events.append(("reset", k["chat_id"]))
+        bot._session = session
+        bot._ack = SimpleNamespace(enabled=False)
+        bot._debouncer = SimpleNamespace(debounce=AsyncMock(side_effect=lambda u, t: t))
+        bot._send_response_with_media = AsyncMock()
+        bot._agent = object()
+
+        async def tap(update, context):
+            events.append(("tap",))
+            approved.set()
+
+        bot._handle_callback_query = tap
+        gw = _gateway()
+        gw._resolve_profile_for_message = lambda ch, facts: profiles[facts["c"]]
+        gw._build_route_facts = lambda *a, channel_id=None, **k: {"c": channel_id}
+        task = await _start(bot, gw)
+        try:
+            by_name = {h.callback.__name__: h for h in fake_ptb.handlers}
+
+            def msg(chat):
+                m = MagicMock(voice=None, audio=None, chat_id=int(chat), message_id=1)
+                m.chat.type = "private"
+                m.chat.id = int(chat)
+                m.reply_text = AsyncMock()
+                return SimpleNamespace(message=m)
+
+            # PTB schedules block=False handlers as tasks in update order.
+            t1 = asyncio.create_task(by_name["handle_message"].callback(msg("1"), None))
+            await asyncio.sleep(0.01)
+            t2 = asyncio.create_task(by_name["handle_message"].callback(msg("2"), None))
+            t3 = asyncio.create_task(by_name["handle_new"].callback(msg("1"), None))
+            await asyncio.sleep(0.01)
+            assert events == [("start", "1", "tenant-a")]
+            # Blocking callback handler still runs while turn 1 waits.
+            await by_name["tap"].callback(SimpleNamespace(), None)
+            await asyncio.wait_for(asyncio.gather(t1, t2, t3), 2)
+        finally:
+            await _stop(task)
+
+    asyncio.run(run())
+    assert events == [
+        ("start", "1", "tenant-a"),
+        ("tap",),
+        ("end", "1", "tenant-a"),
+        ("start", "2", "tenant-b"),
+        ("end", "2", "tenant-b"),
+        ("reset", "1"),
+    ]
