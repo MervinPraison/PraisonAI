@@ -290,9 +290,14 @@ def _gateway_memory_user_id(agent_id: str) -> str:
     so a gateway that rebuilds agents on every boot, reload and channel clone
     would write to a fresh store each time. Derive the id from the configured
     agent id instead; characters FileMemory rejects in a directory name are
-    replaced.
+    replaced, plus a short hash of the original id when anything was replaced
+    so ids like ``support.bot`` and ``support_bot`` stay distinct.
     """
-    return "gateway-" + re.sub(r"[^A-Za-z0-9_-]", "_", str(agent_id))
+    raw = str(agent_id)
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", raw)
+    if safe != raw:
+        safe += "-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:8]
+    return "gateway-" + safe
 
 
 def _with_memory_user_id(memory: Any, user_id: str) -> Any:

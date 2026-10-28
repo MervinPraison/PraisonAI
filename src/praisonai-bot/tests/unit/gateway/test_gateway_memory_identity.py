@@ -6,7 +6,11 @@ from praisonaiagents import Agent
 from praisonaiagents.bots import BotConfig
 
 from praisonai_bot.bots._registry import register_platform
-from praisonai_bot.gateway.server import WebSocketGateway, _with_memory_user_id
+from praisonai_bot.gateway.server import (
+    WebSocketGateway,
+    _gateway_memory_user_id,
+    _with_memory_user_id,
+)
 
 
 class _FakeChannelBot:
@@ -63,6 +67,15 @@ def test_distinct_agents_get_distinct_ids():
     })
     assert _mem_id(gw.get_agent("support-bot")) == "gateway-support-bot"
     assert _mem_id(gw.get_agent("sales-bot")) == "gateway-sales-bot"
+
+
+def test_sanitised_ids_do_not_collide():
+    dotted = _gateway_memory_user_id("support.bot")
+    underscored = _gateway_memory_user_id("support_bot")
+    assert underscored == "gateway-support_bot"
+    assert dotted != underscored
+    assert dotted == _gateway_memory_user_id("support.bot")
+    assert "." not in dotted and "/" not in _gateway_memory_user_id("a/b")
 
 
 def test_explicit_user_id_wins():
