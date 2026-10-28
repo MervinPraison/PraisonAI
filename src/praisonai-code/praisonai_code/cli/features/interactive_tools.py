@@ -102,7 +102,7 @@ class ToolConfig:
     enable_basic: bool = True
     enable_clarify: bool = True
     enable_mcp: bool = True
-    approval_mode: str = "auto"  # auto (full privileges), manual, scoped
+    approval_mode: str = "auto"  # auto (full privileges), prompt, manual, scoped
     lsp_enabled: bool = True
     acp_enabled: bool = True
 
@@ -152,9 +152,18 @@ class ToolConfig:
             config.workspace = workspace
         
         # Check approval mode
-        approval = os.environ.get("PRAISON_APPROVAL_MODE", "")
-        if approval in ("auto", "manual", "scoped"):
+        # Fail closed: only an explicit "auto" grants full privileges. "prompt"
+        # is what `praisonai code --safe` (the default) writes; any other
+        # unrecognised value is treated the same way rather than silently
+        # keeping the permissive "auto" default.
+        approval = os.environ.get("PRAISON_APPROVAL_MODE", "").strip().lower()
+        if approval in ("auto", "prompt", "manual", "scoped"):
             config.approval_mode = approval
+        elif approval:
+            logger.warning(
+                f"Unknown PRAISON_APPROVAL_MODE={approval!r}; using 'prompt'"
+            )
+            config.approval_mode = "prompt"
         
         return config
 
@@ -641,8 +650,8 @@ def _load_edit_tools(config: ToolConfig) -> Dict[str, Callable]:
     # them through the approval registry. In the interactive "auto" approval
     # mode the agent runs with full privileges (matching the ACP tools), so
     # register these as context-approved to avoid a blocking console prompt.
-    # Manual/scoped modes leave the normal approval flow (with diff preview)
-    # in place.
+    # Prompt/manual/scoped modes leave the normal approval flow (with diff
+    # preview) in place.
     #
     # Merge into the existing YAML-approved set rather than replacing it:
     # ``set_yaml_approved_tools`` overwrites the whole context-local set, which
@@ -760,7 +769,10 @@ def _get_shared_runtime(config: ToolConfig):
         workspace=config.workspace,
         lsp_enabled=config.lsp_enabled,
         acp_enabled=config.acp_enabled,
-        approval_mode=config.approval_mode,
+        # In "prompt" mode the core @require_approval gate on each tool is the
+        # single approval point, so the in-wrapper orchestrator must not add a
+        # second, non-interactive refusal ("Plan is not approved").
+        approval_mode="auto" if config.approval_mode == "prompt" else config.approval_mode,
     )
     
     runtime = InteractiveRuntime(runtime_config)
@@ -904,7 +916,13 @@ def get_interactive_tools(
         all_tools.update(search_tools)
     
     # Load targeted/fuzzy edit tools (no runtime needed)
-    if config.enable_edit and not (disable and "edit" in disable):
+    # Only when the edit tools were actually requested: loading them also
+    # issues the auto-mode standing approval for edit_file/apply_patch.
+    if (
+        config.enable_edit
+        and not (disable and "edit" in disable)
+        and tool_names & set(TOOL_GROUPS["edit"])
+    ):
         edit_tools = _load_edit_tools(config)
         all_tools.update(edit_tools)
     

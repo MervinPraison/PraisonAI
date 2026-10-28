@@ -851,12 +851,14 @@ class AsyncTUI:
         logger.debug("Starting runtime...")
         try:
             from praisonai_code.cli.features.interactive_runtime import create_runtime
+            from praisonai_code.cli.features.interactive_tools import ToolConfig
             
             self._runtime = create_runtime(
                 workspace=self.config.workspace or ".",
                 lsp=self.config.enable_lsp,
                 acp=self.config.enable_acp,
-                approval="auto",  # Auto-approve for interactive mode
+                # Report the mode the tools actually run under (--safe => prompt)
+                approval=ToolConfig.from_env().approval_mode,
             )
             logger.debug("Runtime created")
             
