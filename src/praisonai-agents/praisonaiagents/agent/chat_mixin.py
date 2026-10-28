@@ -10,6 +10,7 @@ import contextlib
 import contextvars
 import os
 import re
+import sys
 import time
 import json
 import threading
@@ -417,13 +418,28 @@ class ChatMixin:
                 high = mid - 1
         return (rendered[:low].rstrip() + suffix) if low else ""
 
+    @staticmethod
+    def _memory_prefetch_enabled(config: Any, memory: Any) -> bool:
+        """Resolve ``MemoryConfig.prefetch`` (None = auto) for this backend."""
+        if not config or memory is None:
+            return False
+        prefetch = getattr(config, "prefetch", False)
+        if prefetch is not None:
+            return bool(prefetch)
+        # Auto: the full Memory class returns no system-prompt context without
+        # a query, so stored facts only reach the model via prefetch (#6040).
+        # If its module was never imported, the instance cannot be a Memory.
+        memory_module = sys.modules.get("praisonaiagents.memory.memory")
+        memory_cls = getattr(memory_module, "Memory", None)
+        return memory_cls is not None and isinstance(memory, memory_cls)
+
     def _prefetch_memory(self, prompt: Any) -> str:
-        """Best-effort synchronous turn-start retrieval (default-off)."""
+        """Best-effort synchronous turn-start retrieval."""
         if not self.use_system_prompt:
             return ""
         config = getattr(self, "_memory_config", None)
         memory = getattr(self, "_memory_instance", None)
-        if not config or not getattr(config, "prefetch", False) or memory is None:
+        if not self._memory_prefetch_enabled(config, memory):
             return ""
 
         try:
@@ -452,12 +468,12 @@ class ChatMixin:
             return ""
 
     async def _aprefetch_memory(self, prompt: Any) -> str:
-        """Best-effort asynchronous turn-start retrieval (default-off)."""
+        """Best-effort asynchronous turn-start retrieval."""
         if not self.use_system_prompt:
             return ""
         config = getattr(self, "_memory_config", None)
         memory = getattr(self, "_memory_instance", None)
-        if not config or not getattr(config, "prefetch", False) or memory is None:
+        if not self._memory_prefetch_enabled(config, memory):
             return ""
 
         try:

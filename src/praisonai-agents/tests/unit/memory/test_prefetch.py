@@ -26,7 +26,7 @@ def _agent(config: MemoryConfig) -> Agent:
 
 def test_memory_config_prefetch_defaults_and_round_trip():
     config = MemoryConfig()
-    assert config.prefetch is False
+    assert config.prefetch is None  # auto: decided per backend (#6040)
     assert config.prefetch_limit == 5
     assert config.prefetch_token_budget == 512
 

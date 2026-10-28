@@ -282,9 +282,11 @@ class MemoryConfig:
     history: bool = False
     history_limit: int = 10
 
-    # Turn-start long-term memory retrieval. Disabled by default so existing
-    # agents incur no backend query or prompt changes.
-    prefetch: bool = False
+    # Turn-start long-term memory retrieval. None = auto: on for query-based
+    # backends (sqlite/chroma/mem0), whose system-prompt context is empty
+    # without a query; off for FileMemory, which injects recent items itself.
+    # True/False force it on/off.
+    prefetch: Optional[bool] = None
     prefetch_limit: int = 5
     prefetch_token_budget: int = 512
     
