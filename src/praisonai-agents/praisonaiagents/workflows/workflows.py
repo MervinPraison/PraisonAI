@@ -738,13 +738,22 @@ _replay_step_span: "contextvars.ContextVar[Optional[dict]]" = contextvars.Contex
 )
 
 
-def _replay_step_begin(flow, step, name=None, pattern=None):
-    """Emit ``step_start`` for a definition object; returns a span or None."""
+def _replay_step_begin(flow, step, name=None, pattern=None, index=None):
+    """Emit ``step_start`` for a definition object; returns a span or None.
+
+    ``index`` is the step's position inside the enclosing pattern (or the
+    flow), so one object used at two positions maps to each position's node.
+    """
     from ..trace.context_events import get_context_emitter
     emitter = get_context_emitter()
     if not emitter._enabled:
         return None
     node_id = (getattr(flow, "_replay_node_ids", None) or {}).get(id(step))
+    position = None
+    if index is not None:
+        parent = _replay_step_span.get()
+        key = (parent["node_id"], parent.get("route"), index, id(step)) if parent else (None, None, index, id(step))
+        position = (getattr(flow, "_replay_positions", None) or {}).get(key)
     if name is None:
         if node_id is not None:
             name = node_id[len("step:"):] if node_id.startswith("step:") else node_id
@@ -753,6 +762,7 @@ def _replay_step_begin(flow, step, name=None, pattern=None):
             name = pattern or _label(step)
     if node_id is None:
         node_id = f"step:{name}"
+    node_id = position or node_id
     agent = getattr(step, "agent", None) if not hasattr(step, "chat") else step
     agent = getattr(agent, "name", None) if agent is not None else None
     emitter.step_start(name, pattern=pattern, node_id=node_id, agent=agent)
@@ -1726,9 +1736,9 @@ class AgentFlow:
         visit(self.steps)
         return found
 
-    def _notify_step_start(self, raw_step: Any, step: Any, context: Any) -> Optional[dict]:
+    def _notify_step_start(self, raw_step: Any, step: Any, context: Any, index: Optional[int] = None) -> Optional[dict]:
         """Emit replay ``step_start`` then call ``on_step_start``; returns the span."""
-        span = _replay_step_begin(self, raw_step, step.name)
+        span = _replay_step_begin(self, raw_step, step.name, index=index)
         if self.on_step_start:
             try:
                 self.on_step_start(step.name, context)
@@ -1753,6 +1763,7 @@ class AgentFlow:
         from .diagram import _flow_graph
         graph = _flow_graph(self)
         self._replay_node_ids = graph.ids
+        self._replay_positions = graph.positions
         return graph.to_dict()
 
     def _run_impl(
@@ -1994,7 +2005,7 @@ class AgentFlow:
 
             # Preserve the preparation hook before the gate: it may populate
             # context variables used by should_run, including on cached runs.
-            _replay = self._notify_step_start(raw_step, step, context)
+            _replay = self._notify_step_start(raw_step, step, context, i)
 
             # Check should_run condition
             if step.should_run:
@@ -3133,7 +3144,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 step, previous_output, input, all_variables, model, verbose, index,
                 stream=stream, depth=depth,
             )
-        span = _replay_step_begin(self, step)
+        span = _replay_step_begin(self, step, index=index)
         if span is None:
             return self._execute_leaf_step(
                 step, previous_output, input, all_variables, model, verbose, index,

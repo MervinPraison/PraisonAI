@@ -278,6 +278,39 @@ class TestFlowSteps:
         assert "step:page" in ends and "step:queue" not in ends
         assert "step:b" in ends and "step:a" not in ends
 
+    def test_one_step_object_at_two_positions_keeps_each_node_id(self, recorder):
+        from praisonaiagents.workflows.workflows import AgentFlow
+
+        review = _handler("review")
+        flow = AgentFlow(steps=[review, _handler("draft"), review])
+        flow.run("go")
+        expected = ["step:review", "step:draft", "step:review#2"]
+        assert [e.node_id for e in _of(recorder, "step_start")] == expected
+        assert [e.node_id for e in _of(recorder, "step_end")] == expected
+        nodes = {n["id"] for n in recorder.get_events()[0].data["graph"]["nodes"]}
+        assert set(expected) <= nodes
+
+    def test_one_step_object_at_two_positions_inside_a_loop(self, recorder):
+        from praisonaiagents.workflows.workflows import AgentFlow, Loop
+
+        review = _handler("review")
+        flow = AgentFlow(steps=[Loop(steps=[review, _handler("draft"), review], over="items")],
+                         variables={"items": ["a", "b"]})
+        flow.run("go")
+        leaf = ["step:review", "step:draft", "step:review#2"]
+        for kind in ("step_start", "step_end"):
+            ids = [e.node_id for e in _of(recorder, kind) if e.node_id != "step:loop"]
+            assert ids == leaf * 2  # stable across iterations
+
+    def test_one_step_object_in_both_if_branches(self, recorder):
+        from praisonaiagents.workflows.workflows import AgentFlow, If
+
+        review = _handler("review")
+        flow = AgentFlow(steps=[review, If(condition="{{missing}} == yes", then_steps=[review], else_steps=[review])])
+        flow.run("go")
+        ids = [e.node_id for e in _of(recorder, "step_end") if e.node_id != "step:if"]
+        assert ids == ["step:review", "step:review#3"]
+
     def test_skipped_failed_and_cached_steps(self, recorder):
         from praisonaiagents.task.task import Task
         from praisonaiagents.workflows.workflows import AgentFlow

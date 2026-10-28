@@ -114,6 +114,9 @@ class _Graph:
         # id(definition object) -> node id, first occurrence wins. Used at run
         # time to stamp node_id on step events.
         self.ids: Dict[int, str] = {}
+        # (parent node id, branch label, index, id(obj)) -> node id, so one
+        # object used at two positions still resolves to each position's node.
+        self.positions: Dict[tuple, str] = {}
         self._seen: Dict[str, int] = {}
         # edge id -> distinct route labels, joined only for display.
         self._labels: Dict[str, List[str]] = {}
@@ -175,8 +178,10 @@ class _Graph:
     def has_edge(self, source: str, target: str, kind: str) -> bool:
         return f"{source}->{target}:{kind}" in self.edges
 
-    def register(self, obj: Any, node_id: str) -> None:
+    def register(self, obj: Any, node_id: str, parent: Optional[str] = None, slot: Optional[tuple] = None) -> None:
         self.ids.setdefault(id(obj), node_id)
+        if slot is not None:
+            self.positions.setdefault((parent, *slot, id(obj)), node_id)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -245,7 +250,7 @@ def _add_agent(g: _Graph, agent: Any, parent: Optional[str] = None, _seen: Optio
 # ---------------------------------------------------------------------------
 
 
-def _flow_branch(steps: Any, g: _Graph, parent: Optional[str]) -> Optional[Tuple[str, str]]:
+def _flow_branch(steps: Any, g: _Graph, parent: Optional[str], route: Optional[str] = None) -> Optional[Tuple[str, str]]:
     """Render a sub-sequence of steps in isolation.
 
     Returns the ``(entry, exit)`` pair for the whole sub-sequence, or ``None``
@@ -255,8 +260,8 @@ def _flow_branch(steps: Any, g: _Graph, parent: Optional[str]) -> Optional[Tuple
     """
     entry: Optional[str] = None
     tail: Optional[str] = None
-    for inner in steps or []:
-        rendered = _flow_step(inner, g, tail, parent)
+    for index, inner in enumerate(steps or []):
+        rendered = _flow_step(inner, g, tail, parent, (route, index))
         if rendered is None:
             continue
         inner_entry, inner_exit = rendered
@@ -276,13 +281,16 @@ def _pattern_group(g: _Graph, step: Any, pattern: str, parent: Optional[str], la
     return group, group[len("step:"):]
 
 
-def _flow_step(step: Any, g: _Graph, prev: Optional[str], parent: Optional[str]) -> Optional[Tuple[str, str]]:
+def _flow_step(
+    step: Any, g: _Graph, prev: Optional[str], parent: Optional[str], slot: Optional[tuple] = None,
+) -> Optional[Tuple[str, str]]:
     """Render one step, returning its ``(entry, exit)`` nodes.
 
     ``entry`` is what an incoming edge should point at; ``exit`` is what the
     next step should follow. For a plain step the two are identical; for a
     composite they differ (e.g. an ``If`` enters at its decision and exits at
-    its join).
+    its join). ``slot`` is the ``(branch label, index)`` the executor runs
+    the step at inside ``parent``.
     """
     cls = type(step).__name__
 
@@ -295,7 +303,7 @@ def _flow_step(step: Any, g: _Graph, prev: Optional[str], parent: Optional[str])
             g.edge(prev, decision, "next", draw=True)
         ends = []
         for branch, edge_label in (("then_steps", "true"), ("else_steps", "false")):
-            rendered = _flow_branch(getattr(step, branch, None), g, group)
+            rendered = _flow_branch(getattr(step, branch, None), g, group, edge_label)
             if rendered:
                 branch_entry, branch_exit = rendered
                 g.edge(decision, branch_entry, "routes", edge_label, draw=True)
@@ -313,7 +321,7 @@ def _flow_step(step: Any, g: _Graph, prev: Optional[str], parent: Optional[str])
         ends = []
         routes = getattr(step, "routes", None) or {}
         for key, steps in routes.items():
-            rendered = _flow_branch(steps, g, group)
+            rendered = _flow_branch(steps, g, group, key)
             if rendered:
                 branch_entry, branch_exit = rendered
                 g.edge(router, branch_entry, "routes", key, draw=True)
@@ -321,7 +329,7 @@ def _flow_step(step: Any, g: _Graph, prev: Optional[str], parent: Optional[str])
         # ``Route.__init__`` mirrors ``routes["default"]`` into ``.default``;
         # only render ``.default`` when it was not already drawn as a key above.
         if "default" not in routes:
-            rendered = _flow_branch(getattr(step, "default", None), g, group)
+            rendered = _flow_branch(getattr(step, "default", None), g, group, "default")
             if rendered:
                 branch_entry, branch_exit = rendered
                 g.edge(router, branch_entry, "routes", "default", draw=True)
@@ -337,8 +345,8 @@ def _flow_step(step: Any, g: _Graph, prev: Optional[str], parent: Optional[str])
         if prev:
             g.edge(prev, fork, "next", draw=True)
         ends = []
-        for inner in getattr(step, "steps", None) or []:
-            rendered = _flow_step(inner, g, None, group)
+        for index, inner in enumerate(getattr(step, "steps", None) or []):
+            rendered = _flow_step(inner, g, None, group, (None, index))
             if rendered:
                 branch_entry, branch_exit = rendered
                 g.edge(fork, branch_entry, "parallel", draw=True)
@@ -366,8 +374,11 @@ def _flow_step(step: Any, g: _Graph, prev: Optional[str], parent: Optional[str])
         group, _ = _pattern_group(g, step, pattern, parent, pattern, meta)
         tail = prev
         first = None
-        for inner in inner_steps:
-            rendered = _flow_step(inner, g, tail, group)
+        for index, inner in enumerate(inner_steps):
+            # ``_execute_repeat`` passes the iteration, not the position, so
+            # Repeat members keep the by-object lookup.
+            slot = (None, index) if pattern == "loop" else None
+            rendered = _flow_step(inner, g, tail, group, slot)
             if rendered:
                 inner_entry, inner_exit = rendered
                 first = first or inner_entry
@@ -408,7 +419,7 @@ def _flow_step(step: Any, g: _Graph, prev: Optional[str], parent: Optional[str])
     if cls == "Discussion":
         meta["pattern"] = "discussion"
     g.node(node_id, "step", label, parent=parent, meta=meta, shape=f'["{_escape(label)}"]')
-    g.register(step, node_id)
+    g.register(step, node_id, parent, slot)
     if prev:
         g.edge(prev, node_id, "next", draw=True)
 
@@ -430,8 +441,8 @@ def _build_flow(steps: Any, name: Optional[str], kind: str = "flow", process: st
     start = g.node(START_ID, "start", "Brief",
                    shape='([" start "])' if not name else f'(["{_escape(name)}"])')
     prev: Optional[str] = start
-    for step in (steps or []):
-        rendered = _flow_step(step, g, prev, None)
+    for index, step in enumerate(steps or []):
+        rendered = _flow_step(step, g, prev, None, (None, index))
         if rendered:
             prev = rendered[1]
     end = g.node(END_ID, "end", "Delivered", shape='([" end "])')
