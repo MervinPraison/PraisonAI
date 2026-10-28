@@ -246,6 +246,11 @@ _TURN_ERROR_MESSAGES = {
 }
 _RETRYABLE_TURN_ERRORS = frozenset({"rate_limit", "overloaded", "transient", "idle_timeout"})
 
+# Upper bound on a ``/hooks/<path>`` request body. A signed hook reads the body
+# before any credential is proven, so it must be bounded (GitHub caps webhook
+# payloads at 25 MB).
+_HOOK_MAX_BODY_BYTES = 25 * 1024 * 1024
+
 
 def _turn_error_payload(exc: BaseException) -> Dict[str, Any]:
     """Project a failed turn's exception onto a stable wire error envelope.
@@ -2418,8 +2423,21 @@ class WebSocketGateway:
             import json
 
             # Read the raw body once so an HMAC signature can be verified over
-            # the exact bytes the provider signed, then parse it as JSON.
-            raw_body = await request.body()
+            # the exact bytes the provider signed, then parse it as JSON. The
+            # read is capped so an unauthenticated sender cannot exhaust memory.
+            too_large = JSONResponse({"error": "payload too large"}, status_code=413)
+            try:
+                if int(request.headers.get("content-length") or 0) > _HOOK_MAX_BODY_BYTES:
+                    return too_large
+            except ValueError:
+                return JSONResponse({"error": "invalid content-length"}, status_code=400)
+            chunks, size = [], 0
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > _HOOK_MAX_BODY_BYTES:
+                    return too_large
+                chunks.append(chunk)
+            raw_body = b"".join(chunks)
 
             # Provider signature verification (#3165). Fail-closed: when a
             # ``secret`` is configured, a missing/invalid signature is rejected

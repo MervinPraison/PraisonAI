@@ -113,3 +113,18 @@ def test_secret_and_auth_require_both(monkeypatch, tmp_path):
     ])
     assert codes == [401, 403, 401, 200]
     assert runs == 1
+
+
+def test_oversized_body_rejected_before_signature_check(monkeypatch, tmp_path):
+    # A signed hook reads the body before any credential is proven, so the
+    # read is bounded: an oversized delivery gets 413 and never runs the agent.
+    monkeypatch.setattr("praisonai_bot.gateway.server._HOOK_MAX_BODY_BYTES", 64)
+    big, big_headers = _delivery(10**80)
+    small, small_headers = _delivery(5)
+    assert len(big) > 64 >= len(small)
+    codes, runs = _run(monkeypatch, tmp_path, _hook(secret=SECRET), [
+        (big, big_headers),
+        (small, small_headers),
+    ])
+    assert codes == [413, 200]
+    assert runs == 1
