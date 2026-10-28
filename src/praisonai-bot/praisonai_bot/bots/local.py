@@ -19,6 +19,15 @@ Usage::
     agent = Agent(name="assistant", instructions="Be helpful")
     BotOS(agent=agent, platforms=["local"]).run()   # chat in your terminal
 
+Offline / CI (no token, no network) — pass any file-like streams to drive the
+real hook → command → session → send path and assert the reply::
+
+    import asyncio, io
+    out = io.StringIO()
+    bot = LocalBot(agent=agent, stdin=io.StringIO("What's 2+2?\n"), stdout=out)
+    asyncio.run(bot.start())       # returns at EOF
+    assert "4" in out.getvalue()
+
 Or alongside remote channels in one process::
 
     # gateway.yaml
@@ -109,6 +118,8 @@ class LocalBot(ChatCommandMixin, MessageHookMixin):
         agent: Optional["Agent"] = None,
         config: Optional[BotConfig] = None,
         prompt: str = "you> ",
+        stdin: Optional[Any] = None,
+        stdout: Optional[Any] = None,
         **kwargs: Any,
     ):
         # ``token`` is accepted for parity with the generic Bot adapter wiring
@@ -117,6 +128,10 @@ class LocalBot(ChatCommandMixin, MessageHookMixin):
         self._agent = agent
         self.config = config or BotConfig(token="", mode="polling")
         self._prompt = prompt or "you> "
+        # Optional file-like streams (default: the process stdin/stdout, looked
+        # up per call) so tests/CI can drive a full turn in-process.
+        self._stdin = stdin
+        self._stdout = stdout
 
         self._is_running = False
         self._started_at: Optional[float] = None
@@ -279,12 +294,13 @@ class LocalBot(ChatCommandMixin, MessageHookMixin):
 
     def _read_line(self) -> Optional[str]:
         """Blocking stdin read (run in an executor). Returns None on EOF."""
+        out = self._stdout or sys.stdout
         try:
-            sys.stdout.write(self._prompt)
-            sys.stdout.flush()
+            out.write(self._prompt)
+            out.flush()
         except Exception:  # noqa: BLE001 — prompt is cosmetic
             pass
-        line = sys.stdin.readline()
+        line = (self._stdin or sys.stdin).readline()
         if line == "":
             return None
         return line
@@ -396,9 +412,10 @@ class LocalBot(ChatCommandMixin, MessageHookMixin):
         threads/replies have no meaning in a TTY and are ignored.
         """
         text = content if isinstance(content, str) else str(content)
+        out = self._stdout or sys.stdout
         try:
-            sys.stdout.write(text + "\n")
-            sys.stdout.flush()
+            out.write(text + "\n")
+            out.flush()
         except Exception as e:  # noqa: BLE001
             # Propagate: a failed terminal write means the message was NOT
             # delivered. Swallowing it here would make the shared DeliveryRouter
@@ -433,7 +450,7 @@ class LocalBot(ChatCommandMixin, MessageHookMixin):
             platform="local",
             elapsed_ms=0.0,
             bot_username="local",
-            details={"tty": bool(getattr(sys.stdin, "isatty", lambda: False)())},
+            details={"tty": bool(getattr(self._stdin or sys.stdin, "isatty", lambda: False)())},
         )
 
     async def health(self):
