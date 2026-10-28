@@ -246,7 +246,11 @@ class ChannelDescriptor(Protocol):
     secrets and plain config keys). A descriptor MAY additionally expose an
     optional ``setup(io)`` hook for bespoke, multi-step flows the field list
     cannot express; the wizard calls it when present and merges the returned
-    values. Because it is optional, a minimal descriptor (like the example
+    values. It MAY likewise expose an optional ``standalone_sender`` — an async
+    ``(target: DeliveryTarget, text: str) -> None`` that raises on failure — so
+    scheduled ``deliver:`` targets reach the channel even when no gateway is
+    resident (``praisonai schedule tick`` from OS cron / CI / scale-to-zero).
+    Because these are optional, a minimal descriptor (like the example
     below) omits it — so this Protocol is intentionally *not* used as an
     ``isinstance`` type guard; consumers read attributes with ``getattr``
     fallbacks instead.

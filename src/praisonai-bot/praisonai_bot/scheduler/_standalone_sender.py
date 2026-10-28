@@ -377,10 +377,25 @@ _STANDALONE_SENDERS: dict = {
 def resolve_standalone_sender(channel: str) -> Optional[StandaloneSender]:
     """Return the standalone sender for ``channel``, or ``None`` if none exists.
 
+    Bundled platforms are checked first; otherwise a ``standalone_sender``
+    declared on the channel's registered ``ChannelDescriptor`` is used.
+
     ``None`` means the executor has no out-of-process delivery path for that
     platform and falls back to logging a warning (its prior behaviour when no
     live adapter is wired), so an unsupported platform never raises here.
     """
     if not channel:
         return None
-    return _STANDALONE_SENDERS.get(channel.lower())
+    sender = _STANDALONE_SENDERS.get(channel.lower())
+    if sender is not None:
+        return sender
+    # A ``praisonai.channels`` plugin may declare its own stateless sender on
+    # its ``ChannelDescriptor`` so gateway-less delivery works for it too.
+    try:
+        from praisonai_bot.bots._registry import get_platform_descriptor
+
+        declared = getattr(get_platform_descriptor(channel), "standalone_sender", None)
+    except Exception as e:  # a broken plugin must not crash the tick
+        logger.debug("descriptor lookup failed for channel %r: %s", channel, e)
+        return None
+    return declared if callable(declared) else None

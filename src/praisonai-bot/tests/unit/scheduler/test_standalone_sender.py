@@ -76,6 +76,33 @@ def test_resolver_known_and_unknown():
     assert ss.resolve_standalone_sender(None) is None  # type: ignore[arg-type]
 
 
+def test_plugin_descriptor_sender_used_when_no_live_handler(monkeypatch):
+    """A ``praisonai.channels`` plugin's declared sender works gateway-less (#6099)."""
+    from praisonai_bot.bots import _registry
+
+    sent: list = []
+
+    class _MatrixDescriptor:
+        config_fields: list = []
+        system_prompt_hint = ""
+
+        async def standalone_sender(self, target, text):
+            sent.append((target.channel_id, text))
+
+    monkeypatch.setattr(
+        _registry, "get_platform_descriptor",
+        lambda name: _MatrixDescriptor() if name == "matrix" else None,
+    )
+    assert ss.resolve_standalone_sender("irc") is None
+
+    ex = _agent_executor(delivery_handler=None)
+    result = _run(ex._execute_one(_job(deliver="matrix:#room")))
+
+    assert result.delivered is True
+    assert result.delivery_error is None
+    assert sent == [("#room", "echo:hello")]
+
+
 # ── executor fallback ────────────────────────────────────────────────
 
 
