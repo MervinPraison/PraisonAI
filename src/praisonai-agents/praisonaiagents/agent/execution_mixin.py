@@ -1654,11 +1654,28 @@ Write the complete compiled report:"""
         retry_policy = self._get_tool_retry_policy(function_name)
         
         last_exception = None
-        
+
+        def _finish(result, raised):
+            # Strip the private control-plane tag before it reaches the model. A
+            # tool that *raised* ends the turn with ToolExecutionError so the run
+            # is finalized failed — the same contract as the sync path
+            # (tool_execution.py, test_tool_failure_not_relabelled). A plain
+            # tool-returned {"error": ...} stays a recoverable model input.
+            retryable = result.pop("_praison_retryable", None) is True
+            if raised:
+                raise ToolExecutionError(
+                    result.get("error", f"Tool '{function_name}' failed"),
+                    tool_name=function_name,
+                    agent_id=self.name,
+                    is_retryable=retryable,
+                )
+            return result
+
         # Retry loop with exponential backoff
         for attempt in range(retry_policy.max_attempts):
             try:
                 result = await self._execute_tool_async_impl(function_name, arguments, tool_call_id, tools_override)
+                raised = isinstance(result, dict) and bool(result.pop("_praison_raised", False))
                 
                 # Check if result is an error that should be retried
                 if isinstance(result, dict) and result.get("error"):
@@ -1673,8 +1690,7 @@ Write the complete compiled report:"""
                         result.get("circuit_open") or
                         result.get("loop_blocked") or
                         result.get("_praison_retryable") is False):
-                        result.pop("_praison_retryable", None)
-                        return result
+                        return _finish(result, raised)
 
                     # The body already ran and may have completed its side effect
                     # before failing. Honour an explicit restart_safe=False /
@@ -1684,8 +1700,7 @@ Write the complete compiled report:"""
                     # up to max_attempts times -- charging a card three times for
                     # a tool the author marked "must never be silently re-executed".
                     if self._tool_declares_not_idempotent(function_name, tools_override):
-                        result.pop("_praison_retryable", None)
-                        return result
+                        return _finish(result, raised)
 
                     # Determine error type for retry policy
                     error_type = self._classify_error_type(result, last_exception)
@@ -1703,13 +1718,11 @@ Write the complete compiled report:"""
                     # never steer our retry loop.
                     if (not retry_policy.should_retry(error_type, attempt)
                             and result.get("_praison_retryable") is not True):
-                        result.pop("_praison_retryable", None)
-                        return result
+                        return _finish(result, raised)
                     
                     # Don't retry on last attempt
                     if attempt == retry_policy.max_attempts - 1:
-                        result.pop("_praison_retryable", None)
-                        return result
+                        return _finish(result, raised)
                     
                     # Emit retry hook event  
                     delay_ms = retry_policy.get_delay_ms(attempt)
@@ -1734,7 +1747,9 @@ Write the complete compiled report:"""
                 
                 # Check if retryable and not last attempt
                 if not is_retryable or attempt == retry_policy.max_attempts - 1:
-                    # Return error dict instead of raising for consistency with sync version
+                    # A framework-internal failure escaping the impl (not a tool
+                    # body raise — those are flattened and handled above) is
+                    # returned as an error dict.
                     return {"error": f"Error in execute_tool_async: {str(e)}"}
                 
                 # Determine error type  
@@ -2285,9 +2300,14 @@ Write the complete compiled report:"""
                 # Private control-plane key: a tool's own result may legitimately
                 # contain "retryable" (common for HTTP-API wrappers) and must not
                 # collide with the framework's verdict nor leak to the model.
+                # ``_praison_raised`` marks the dict as a flattened *raised*
+                # exception (timeouts/pool exhaustion also carry
+                # ``_praison_retryable`` but did not raise), so the retry loop can
+                # surface it as ToolExecutionError exactly like the sync path.
                 return {
                     "error": f"Error executing {function_name}: {str(e)}",
                     "_praison_retryable": retryable,
+                    "_praison_raised": True,
                 }
 
         except ToolExecutionError:

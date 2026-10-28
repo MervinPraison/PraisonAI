@@ -3222,6 +3222,10 @@ Your Goal: {self.goal}"""
 
         except BudgetExceededError:
             raise
+        except ToolExecutionError:
+            # Sync parity: a tool failure is not an LLM error — do not relabel
+            # it or re-drive the model without the tool result.
+            raise
         except Exception as e:
             from ..errors import LLMError
             # Apply the same structured error classification for async path
