@@ -2068,6 +2068,22 @@ class ToolExecutionMixin:
             execution_time_ms=(time.time() - start_time) * 1000
         )
 
+    def _apply_after_agent_results(self, response, after_agent_input, results):
+        """Honour AFTER_AGENT hook outcomes on the final response.
+
+        A blocking hook/plugin (``GuardrailBlocked`` / ``PluginDecision.deny``)
+        withholds the response and returns a visible refusal marker, mirroring
+        the BEFORE_LLM block. Otherwise a string rewrite (e.g. PII redaction)
+        is adopted so it actually reaches the caller.
+        """
+        if self._hook_runner.is_blocked(results):
+            reason = self._hook_runner.get_blocking_reason(results) or "Blocked by hook"
+            logging.warning(f"Agent {self.name} response blocked by AFTER_AGENT hook: {reason}")
+            return f"[Response blocked by hook: {reason}]"
+        if isinstance(response, str) and isinstance(after_agent_input.response, str):
+            return after_agent_input.response
+        return response
+
     def _after_agent_side_effects(self, prompt, response, *, process_auto_memory=True):
         """Run loop-agnostic after-agent side effects (no ``await`` inside).
 
@@ -2125,7 +2141,8 @@ class ToolExecutionMixin:
         from ..hooks import HookEvent
         if self._hook_runner.registry.has_hooks(HookEvent.AFTER_AGENT):
             after_agent_input = self._build_after_agent_input(prompt, response, start_time, tools_used)
-            self._hook_runner.execute_sync(HookEvent.AFTER_AGENT, after_agent_input)
+            results = self._hook_runner.execute_sync(HookEvent.AFTER_AGENT, after_agent_input)
+            response = self._apply_after_agent_results(response, after_agent_input, results)
 
         self._after_agent_side_effects(prompt, response)
 
@@ -2183,7 +2200,8 @@ class ToolExecutionMixin:
         from ..hooks import HookEvent
         if self._hook_runner.registry.has_hooks(HookEvent.AFTER_AGENT):
             after_agent_input = self._build_after_agent_input(prompt, response, start_time, tools_used)
-            await self._hook_runner.execute(HookEvent.AFTER_AGENT, after_agent_input)
+            results = await self._hook_runner.execute(HookEvent.AFTER_AGENT, after_agent_input)
+            response = self._apply_after_agent_results(response, after_agent_input, results)
 
         if response and getattr(self, '_memory_instance', None):
             prompt_str = _memory_prompt_text(prompt)

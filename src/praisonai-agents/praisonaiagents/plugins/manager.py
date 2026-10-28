@@ -1171,8 +1171,14 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
 
     if _overrides("after_agent"):
         def after_agent_hook(data, _p=resolving_plugin):
-            new_resp = _p.after_agent(getattr(data, "response", ""),
-                                      {"agent_name": getattr(data, "agent_name", None)})
+            try:
+                new_resp = _p.after_agent(getattr(data, "response", ""),
+                                          {"agent_name": getattr(data, "agent_name", None)})
+            except GuardrailBlocked as e:
+                return HookResult.block(e.reason)
+            decision = _as_decision(new_resp)
+            if decision is not None:
+                return decision
             if isinstance(new_resp, str) and hasattr(data, "response"):
                 data.response = new_resp
             return HookResult.allow()

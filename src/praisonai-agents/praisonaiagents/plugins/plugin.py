@@ -232,8 +232,16 @@ class Plugin(ABC):
         """
         return prompt
     
-    def after_agent(self, response: str, context: Dict[str, Any]) -> str:
-        """Called after agent execution. Can modify response."""
+    def after_agent(
+        self, response: str, context: Dict[str, Any]
+    ) -> Union[str, "PluginDecision", "HookResult", None]:
+        """Called after agent execution.
+
+        Return a modified ``response`` (rewrite), or a deny/block decision
+        (``PluginDecision.deny(reason)`` / a ``HookResult`` / raise
+        :class:`GuardrailBlocked`) to withhold the final response, or ``None``
+        for no-op.
+        """
         return response
     
     def before_tool(
