@@ -9,7 +9,9 @@ from praisonaiagents import ImageAgent
     ("openai/dall-e-2", {}, None),
     ("openai/gpt-image-1", {}, None),
     ("openai/gpt-image-1", {"style": "vivid"}, None),
-    ("openai/dall-e-3", {}, "natural"),
+    (None, {}, None),
+    ("openai/dall-e-3", {}, None),
+    ("openai/dall-e-3", {"style": "natural"}, "natural"),
     ("openai/dall-e-3", {"style": "vivid"}, "vivid"),
 ])
 def test_style_forwarding(llm, kwargs, expected):
