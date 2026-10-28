@@ -1654,7 +1654,9 @@ class ScheduledAgentExecutor:
                 "no live adapter and no standalone sender for channel "
                 f"{getattr(delivery, 'channel', '')!r}"
             )
-        result = await sender(delivery, text)
+        result = sender(delivery, text)
+        if inspect.isawaitable(result):  # plugin senders may be sync (#6099)
+            result = await result
         return result is not False
 
     def _incident_tracker(self) -> Optional[Any]:
