@@ -190,6 +190,39 @@ def _get_handoff_depth() -> int:
     """Get current handoff depth."""
     return len(_get_handoff_chain())
 
+def _tool_pair_safe_tail(messages: List[Any], n: int) -> List[Any]:
+    """Return the last ``n`` messages without splitting tool_calls/tool pairs.
+
+    A count-based slice can cut between an assistant ``tool_calls`` message and
+    its ``tool`` responses; providers reject the resulting orphans. Drop tool
+    results whose call was cut off, and assistant tool_calls whose responses
+    are incomplete (together with their partial responses).
+    """
+    if n <= 0:
+        return []
+    tail = list(messages[-n:])
+
+    def _call_ids(msg: Any) -> set:
+        calls = msg.get('tool_calls') if isinstance(msg, dict) else None
+        return {c.get('id') if isinstance(c, dict) else getattr(c, 'id', None) for c in calls or ()}
+
+    def _is_tool(msg: Any) -> bool:
+        return isinstance(msg, dict) and msg.get('role') == 'tool'
+
+    response_ids = {m.get('tool_call_id') for m in tail if _is_tool(m)}
+    dropped: set = set()
+    kept = []
+    for msg in tail:
+        ids = _call_ids(msg)
+        if ids and not ids <= response_ids:
+            dropped |= ids
+            continue
+        kept.append(msg)
+    call_ids = set().union(*(_call_ids(m) for m in kept))
+    return [m for m in kept
+            if not (_is_tool(m) and (m.get('tool_call_id') in dropped
+                                     or m.get('tool_call_id') not in call_ids))]
+
 def _push_handoff(agent_name: str) -> None:
     """Push agent to handoff chain.
 
@@ -702,22 +735,22 @@ class Handoff:
         # Apply context policy
         if self.config.context_policy == ContextPolicy.NONE:
             filtered_messages = []
-        elif self.config.context_policy == ContextPolicy.LAST_N:
-            n = self.config.max_context_messages
+        elif self.config.context_policy in (ContextPolicy.LAST_N, ContextPolicy.SUMMARY):
             if self.config.preserve_system:
                 system_msgs = [m for m in messages if isinstance(m, dict) and m.get('role') == 'system']
-                other_msgs = [m for m in messages if not (isinstance(m, dict) and m.get('role') == 'system')]
-                filtered_messages = system_msgs + other_msgs[-n:]
+                base = [m for m in messages if not (isinstance(m, dict) and m.get('role') == 'system')]
             else:
-                filtered_messages = messages[-n:]
-        elif self.config.context_policy == ContextPolicy.SUMMARY:
-            # For summary, keep system + last few messages
-            if self.config.preserve_system:
-                system_msgs = [m for m in messages if isinstance(m, dict) and m.get('role') == 'system']
-                other_msgs = [m for m in messages if not (isinstance(m, dict) and m.get('role') == 'system')]
-                filtered_messages = system_msgs + other_msgs[-3:]  # Last 3 non-system
+                system_msgs, base = [], list(messages)
+            if self.config.context_policy == ContextPolicy.LAST_N:
+                tail = _tool_pair_safe_tail(base, self.config.max_context_messages)
             else:
-                filtered_messages = messages[-3:]
+                # SUMMARY: the first user message (the task goal) + last few
+                # messages. An LLM summary stays opt-in via ``input_filter``.
+                tail = _tool_pair_safe_tail(base, 3)
+                goal = next((m for m in base if isinstance(m, dict) and m.get('role') == 'user'), None)
+                if goal is not None and not any(m is goal for m in tail):
+                    tail = [goal] + tail
+            filtered_messages = system_msgs + tail
         else:  # FULL
             filtered_messages = messages[:]
         

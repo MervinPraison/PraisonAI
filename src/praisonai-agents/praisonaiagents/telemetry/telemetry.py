@@ -540,21 +540,19 @@ class MinimalTelemetry:
                 
                 # Use a timeout-based flush to prevent hanging
                 import threading
-                import time
-                import concurrent.futures
-                
-                # Use ThreadPoolExecutor for better control
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                    flush_future = executor.submit(self._safe_flush_posthog, posthog_client)
-                    
-                    try:
-                        flush_future.result(timeout=5.0)  # 5 second timeout
-                        self.logger.debug("PostHog flush completed successfully")
-                    except concurrent.futures.TimeoutError:
-                        self.logger.warning("PostHog flush timed out")
-                        flush_future.cancel()
-                    except Exception as e:
-                        self.logger.error(f"PostHog flush failed: {e}")
+
+                # Daemon thread + bounded join: a ThreadPoolExecutor would join
+                # a wedged flush on exit/shutdown, so the timeout never applied.
+                flush_thread = threading.Thread(
+                    target=self._safe_flush_posthog, args=(posthog_client,),
+                    name="praisonai-posthog-flush", daemon=True,
+                )
+                flush_thread.start()
+                flush_thread.join(timeout=5.0)  # 5 second timeout
+                if flush_thread.is_alive():
+                    self.logger.warning("PostHog flush timed out")
+                else:
+                    self.logger.debug("PostHog flush completed")
                 
                 # Cleanup PostHog threads safely
                 self._shutdown_posthog_threads(posthog_client)
