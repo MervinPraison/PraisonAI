@@ -814,12 +814,13 @@ def _replay_pattern(pattern):
     """Wrap a pattern executor (``_execute_route`` ...) in step_start/step_end.
 
     Top-level and nested patterns both reach the executor, so wrapping it here
-    covers every nesting level once.
+    covers every nesting level once. Callers pass ``_replay_index`` (the
+    pattern's position) so a reused pattern object maps to each position's node.
     """
     def decorate(execute):
-        def wrapper(self, step, *args, **kwargs):
+        def wrapper(self, step, *args, _replay_index=None, **kwargs):
             name = getattr(step, "name", None) if pattern == "discussion" else None
-            span = _replay_step_begin(self, step, name, pattern)
+            span = _replay_step_begin(self, step, name, pattern, _replay_index)
             if span is None:
                 return execute(self, step, *args, **kwargs)
             token = _replay_step_span.set(span)
@@ -1876,7 +1877,7 @@ class AgentFlow:
             if isinstance(step, Route):
                 # Decision-based routing
                 route_result = self._execute_route(
-                    step, previous_output, input, all_variables, model, verbose, stream
+                    step, previous_output, input, all_variables, model, verbose, stream, _replay_index=i
                 )
                 results.extend(route_result["steps"])
                 previous_output = route_result["output"]
@@ -1892,7 +1893,7 @@ class AgentFlow:
             elif isinstance(step, Parallel):
                 # Parallel execution
                 parallel_result = self._execute_parallel(
-                    step, previous_output, input, all_variables, model, verbose, stream
+                    step, previous_output, input, all_variables, model, verbose, stream, _replay_index=i
                 )
                 results.extend(parallel_result["steps"])
                 previous_output = parallel_result["output"]
@@ -1910,7 +1911,7 @@ class AgentFlow:
             elif isinstance(step, Loop):
                 # Loop over items
                 loop_result = self._execute_loop(
-                    step, previous_output, input, all_variables, model, verbose, stream
+                    step, previous_output, input, all_variables, model, verbose, stream, _replay_index=i
                 )
                 results.extend(loop_result["steps"])
                 previous_output = loop_result["output"]
@@ -1927,7 +1928,7 @@ class AgentFlow:
                 
             elif isinstance(step, Discussion):
                 discussion_result = self._execute_discussion(
-                    step, previous_output, input, all_variables, model, verbose, stream
+                    step, previous_output, input, all_variables, model, verbose, stream, _replay_index=i
                 )
                 results.extend(discussion_result["steps"])
                 previous_output = discussion_result["output"]
@@ -1945,7 +1946,7 @@ class AgentFlow:
             elif isinstance(step, Repeat):
                 # Repeat until condition
                 repeat_result = self._execute_repeat(
-                    step, previous_output, input, all_variables, model, verbose, stream
+                    step, previous_output, input, all_variables, model, verbose, stream, _replay_index=i
                 )
                 results.extend(repeat_result["steps"])
                 previous_output = repeat_result["output"]
@@ -1961,7 +1962,7 @@ class AgentFlow:
             elif isinstance(step, Include):
                 # Include another recipe
                 include_result = self._execute_include(
-                    step, previous_output, input, all_variables, model, verbose, stream
+                    step, previous_output, input, all_variables, model, verbose, stream, _replay_index=i
                 )
                 results.extend(include_result["steps"])
                 previous_output = include_result["output"]
@@ -1972,7 +1973,7 @@ class AgentFlow:
             elif isinstance(step, If):
                 # Conditional branching
                 if_result = self._execute_if(
-                    step, previous_output, input, all_variables, model, verbose, stream
+                    step, previous_output, input, all_variables, model, verbose, stream, _replay_index=i
                 )
                 results.extend(if_result["steps"])
                 previous_output = if_result["output"]
@@ -3298,7 +3299,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         # Handle nested patterns (Loop, Parallel, Route, Repeat, If)
         if isinstance(step, Loop):
             loop_result = self._execute_loop(
-                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1
+                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1, _replay_index=index
             )
             return {
                 "step": f"loop_{index}",
@@ -3311,7 +3312,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         
         if isinstance(step, Parallel):
             parallel_result = self._execute_parallel(
-                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1
+                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1, _replay_index=index
             )
             return {
                 "step": f"parallel_{index}",
@@ -3324,7 +3325,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         
         if isinstance(step, Route):
             route_result = self._execute_route(
-                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1
+                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1, _replay_index=index
             )
             return {
                 "step": f"route_{index}",
@@ -3335,7 +3336,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         
         if isinstance(step, Repeat):
             repeat_result = self._execute_repeat(
-                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1
+                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1, _replay_index=index
             )
             return {
                 "step": f"repeat_{index}",
@@ -3346,7 +3347,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         
         if isinstance(step, Discussion):
             discussion_result = self._execute_discussion(
-                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1
+                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1, _replay_index=index
             )
             return {
                 "step": f"discussion_{index}",
@@ -3361,7 +3362,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         
         if isinstance(step, If):
             if_result = self._execute_if(
-                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1
+                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1, _replay_index=index
             )
             return {
                 "step": f"if_{index}",
@@ -3373,7 +3374,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         # Handle Include steps (for include inside loop)
         if isinstance(step, Include):
             include_result = self._execute_include(
-                step, previous_output, input, all_variables, model, verbose, stream
+                step, previous_output, input, all_variables, model, verbose, stream, _replay_index=index
             )
             # Return in the expected format for single step
             combined_output = include_result.get("output", "")

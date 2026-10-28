@@ -311,6 +311,20 @@ class TestFlowSteps:
         ids = [e.node_id for e in _of(recorder, "step_end") if e.node_id != "step:if"]
         assert ids == ["step:review", "step:review#3"]
 
+    def test_one_pattern_object_at_two_positions_keeps_each_node_id(self, recorder):
+        from praisonaiagents.workflows.workflows import AgentFlow, If, Loop
+
+        branch = If(condition="{{missing}} == yes", then_steps=[_handler("skip")], else_steps=[_handler("review")])
+        loop = Loop(steps=[branch, branch], over="items")
+        flow = AgentFlow(steps=[branch, branch, loop], variables={"items": ["a"]})
+        flow.run("go")
+        ends = [e.node_id for e in _of(recorder, "step_end")]
+        nodes = {n["id"] for n in recorder.get_events()[0].data["graph"]["nodes"]}
+        assert set(ends) <= nodes
+        assert [i for i in ends if i.startswith("step:if")] == ["step:if", "step:if#2", "step:if#3", "step:if#4"]
+        assert [i for i in ends if i.startswith("step:review")] == [
+            "step:review", "step:review#2", "step:review#3", "step:review#4"]
+
     def test_skipped_failed_and_cached_steps(self, recorder):
         from praisonaiagents.task.task import Task
         from praisonaiagents.workflows.workflows import AgentFlow

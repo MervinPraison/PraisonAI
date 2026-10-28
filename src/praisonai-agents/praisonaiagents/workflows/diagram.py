@@ -273,11 +273,14 @@ def _flow_branch(steps: Any, g: _Graph, parent: Optional[str], route: Optional[s
     return entry, tail
 
 
-def _pattern_group(g: _Graph, step: Any, pattern: str, parent: Optional[str], label: str, meta: Dict[str, Any]) -> Tuple[str, str]:
+def _pattern_group(
+    g: _Graph, step: Any, pattern: str, parent: Optional[str], label: str, meta: Dict[str, Any],
+    slot: Optional[tuple] = None,
+) -> Tuple[str, str]:
     """The ``step:<name>`` node that groups a pattern's parts; returns (id, suffix)."""
     group = g.unique(f"step:{label}")
     g.node(group, "step", label, parent=parent, meta={"pattern": pattern, **meta})
-    g.register(step, group)
+    g.register(step, group, parent, slot)
     return group, group[len("step:"):]
 
 
@@ -296,7 +299,7 @@ def _flow_step(
 
     if cls == "If":
         condition = getattr(step, "condition", "") or "if"
-        group, suffix = _pattern_group(g, step, "if", parent, "if", {"condition": str(condition)})
+        group, suffix = _pattern_group(g, step, "if", parent, "if", {"condition": str(condition)}, slot)
         decision = g.node(f"decision:{suffix}", "decision", str(condition), parent=group,
                           shape=f'{{"{_escape(condition)}"}}')
         if prev:
@@ -314,7 +317,7 @@ def _flow_step(
         return decision, join
 
     if cls == "Route":
-        group, suffix = _pattern_group(g, step, "route", parent, "route", {})
+        group, suffix = _pattern_group(g, step, "route", parent, "route", {}, slot)
         router = g.node(f"decision:{suffix}", "decision", "route", parent=group, shape='{"route"}')
         if prev:
             g.edge(prev, router, "next", draw=True)
@@ -340,7 +343,7 @@ def _flow_step(
         return router, join
 
     if cls == "Parallel":
-        group, suffix = _pattern_group(g, step, "parallel", parent, "parallel", {})
+        group, suffix = _pattern_group(g, step, "parallel", parent, "parallel", {}, slot)
         fork = g.node(f"fork:{suffix}", "fork", "fork", parent=group, shape='(("fork"))')
         if prev:
             g.edge(prev, fork, "next", draw=True)
@@ -371,7 +374,7 @@ def _flow_step(
             meta["over"] = str(over)
         if iterations:
             meta["max_iterations"] = iterations
-        group, _ = _pattern_group(g, step, pattern, parent, pattern, meta)
+        group, _ = _pattern_group(g, step, pattern, parent, pattern, meta, slot)
         tail = prev
         first = None
         for index, inner in enumerate(inner_steps):
@@ -399,7 +402,7 @@ def _flow_step(
         meta = {"recipe": recipe} if recipe else {}
         if workflow is not None and getattr(workflow, "name", None):
             meta["workflow"] = workflow.name
-        group, _ = _pattern_group(g, step, "include", parent, "include", meta)
+        group, _ = _pattern_group(g, step, "include", parent, "include", meta, slot)
         if workflow is not None:
             rendered = _flow_branch(getattr(workflow, "steps", None), g, group)
             if rendered:
