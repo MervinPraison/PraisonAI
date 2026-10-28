@@ -365,8 +365,11 @@ class HookConfig:
         action: ``"agent"`` runs a turn, ``"wake"`` nudges a session.
         auth: Optional bearer token / shared secret required on the request.
             When omitted the gateway's own ``auth_token`` is used, unless
-            ``secret`` is set: a valid signature then authenticates on its own
-            (so a GitHub webhook needs no token in its URL).
+            ``secret`` is set with a timestamped scheme (``hmac_timestamped``
+            or ``structured``) and ``signature_tolerance_seconds > 0``: that
+            replay-bounded signature then authenticates on its own. A
+            body-only HMAC (``hmac_hex``/``hmac_base64``) still needs the
+            gateway token, since a captured delivery could be replayed.
         session_key: Template for the session id, so related events share
             context, e.g. ``"hook:gmail:{message_id}"``.
         idempotency_key: Template for the dedup key, e.g. ``"{message_id}"``.

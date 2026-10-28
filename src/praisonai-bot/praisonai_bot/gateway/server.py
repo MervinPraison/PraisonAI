@@ -2408,14 +2408,20 @@ class WebSocketGateway:
             if hook is None or not getattr(hook, "enabled", True):
                 return JSONResponse({"error": "hook not found"}, status_code=404)
 
-            # A valid provider signature *is* the authentication (#6034):
-            # signed providers such as GitHub cannot send a bearer token, so a
-            # hook with ``secret`` skips the gateway-token fallback. An explicit
-            # hook ``auth`` is still required on top. Token auth runs before the
-            # body is read so unauthenticated requests are rejected early.
+            # A replay-bounded provider signature *is* the authentication
+            # (#6034): a hook with ``secret`` whose scheme signs a timestamp
+            # checked against a tolerance skips the gateway-token fallback. A
+            # body-only HMAC (e.g. GitHub's ``hmac_hex``) can be replayed from a
+            # captured delivery, so it still needs the gateway token. An
+            # explicit hook ``auth`` is always required on top. Token auth runs
+            # before the body is read so unauthenticated requests fail early.
             verify = getattr(hook, "verify_signature", None)
             signed = callable(verify) and bool(getattr(hook, "secret", None))
-            if not signed or getattr(hook, "auth", None):
+            replay_bounded = (
+                getattr(hook, "signature_scheme", None) in ("hmac_timestamped", "structured")
+                and (getattr(hook, "signature_tolerance_seconds", 0) or 0) > 0
+            )
+            if not (signed and replay_bounded) or getattr(hook, "auth", None):
                 auth_err = _check_hook_auth(request, hook)
                 if auth_err:
                     return auth_err
