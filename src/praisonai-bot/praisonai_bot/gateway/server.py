@@ -10294,7 +10294,12 @@ class WebSocketGateway:
             if not message:
                 return
             user_id = message.sender.user_id if message.sender else "unknown"
-            bot._session.reset(user_id)
+            # Same route chat() receives, so ``per_chat`` group sessions reset.
+            bot._session.reset(
+                user_id,
+                account=getattr(bot.config, "account", "default"),
+                chat_id=str(update.message.chat_id) if update.message.chat_id else "",
+            )
             await update.message.reply_text("Session reset. Starting fresh conversation.")
 
         async def handle_help(update: Update, context: Any):
@@ -10309,8 +10314,11 @@ class WebSocketGateway:
         app.add_handler(CommandHandler("status", handle_status))
         app.add_handler(CommandHandler("new", handle_new))
         app.add_handler(CommandHandler("help", handle_help))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
+        # Non-blocking so an agent turn awaiting tool approval does not stall
+        # PTB's sequential dispatch of the button tap that resolves it (#6032);
+        # per-session turn locks still serialise each conversation.
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message, block=False))
+        app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice, block=False))
         # Inline buttons (pairing Approve/Deny, tool approvals) use the adapter's
         # own dispatcher, so no second getUpdates poller is needed (#6032).
         app.add_handler(CallbackQueryHandler(bot._handle_callback_query))

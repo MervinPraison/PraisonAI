@@ -36,9 +36,10 @@ class _Filter:
 
 
 class _Handler:
-    def __init__(self, *args):
+    def __init__(self, *args, block=True):
         self.args = args
         self.callback = args[-1]
+        self.block = block
 
 
 class CommandHandler(_Handler):
@@ -209,3 +210,52 @@ def test_gateway_session_chat_receives_chat_and_message_ids(fake_ptb, monkeypatc
     assert kwargs["chat_id"] == "4242"
     assert kwargs["message_id"] == "7"
     assert kwargs["account"] == getattr(bot.config, "account", "default")
+
+
+def test_gateway_message_handlers_do_not_block_approval_taps(fake_ptb):
+    """A turn awaiting tool approval must not stall dispatch of the tap."""
+    async def run():
+        bot = TelegramBot(token="123:abc", config=BotConfig(token="123:abc"))
+        task = await _start(bot)
+        await _stop(task)
+
+    asyncio.run(run())
+    turn_handlers = [
+        h for h in fake_ptb.handlers
+        if isinstance(h, MessageHandler)
+        and h.callback.__name__ in ("handle_message", "handle_voice")
+    ]
+    assert len(turn_handlers) == 2
+    assert all(h.block is False for h in turn_handlers)
+
+
+def test_gateway_new_resets_per_chat_session(fake_ptb, monkeypatch):
+    import praisonai_bot.bots.telegram as tg_mod
+
+    inbound = SimpleNamespace(sender=SimpleNamespace(user_id="777"))
+    monkeypatch.setattr(
+        tg_mod, "process_inbound_telegram_message", AsyncMock(return_value=inbound)
+    )
+
+    async def run():
+        bot = TelegramBot(token="123:abc", config=BotConfig(token="123:abc"))
+        bot._session = MagicMock()
+        task = await _start(bot)
+        try:
+            handler = next(
+                h for h in fake_ptb.handlers
+                if isinstance(h, CommandHandler) and h.args[0] == "new"
+            )
+            message = MagicMock(chat_id=-100555)
+            message.reply_text = AsyncMock()
+            await handler.callback(SimpleNamespace(message=message), None)
+        finally:
+            await _stop(task)
+        return bot
+
+    bot = asyncio.run(run())
+    bot._session.reset.assert_called_once_with(
+        "777",
+        account=getattr(bot.config, "account", "default"),
+        chat_id="-100555",
+    )
