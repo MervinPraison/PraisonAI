@@ -812,11 +812,11 @@ def handle_direct_prompt(self, prompt):
                 telemetry = TelemetryHandler(verbose=getattr(self.args, 'verbose', False))
                 telemetry.enable()
             
-            # Sandbox - Secure command execution (display only, actual sandboxing is in tool approval)
+            # Sandbox - not enforced on this path; say so rather than imply protection
             sandbox_mode = getattr(self.args, 'sandbox', None)
             if sandbox_mode and sandbox_mode != 'off':
-                print(f"[bold green]🔒 Sandbox Mode: {sandbox_mode.upper()}[/bold green]")
-                print("[dim]Commands will be validated before execution[/dim]")
+                print("[bold yellow]⚠ --sandbox is not enforced here; commands run uncontained. "
+                      "Use `praisonai code` with PRAISON_SHELL=sandboxed for OS-level containment.[/bold yellow]")
             
             # Auto Memory - Automatic memory extraction (handled post-processing, not as Agent param)
             if getattr(self.args, 'auto_memory', False):

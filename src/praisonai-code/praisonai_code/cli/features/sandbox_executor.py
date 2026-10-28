@@ -2,14 +2,16 @@
 Sandboxed Execution System for PraisonAI CLI.
 
 Inspired by Codex CLI's sandbox modes for secure command execution.
-Provides isolated execution environment when enabled via --sandbox flag.
+Policy/validation helpers for an isolated execution environment.
 
 Architecture:
 - SandboxExecutor: Base class for sandboxed execution
 - SubprocessSandbox: Subprocess-based isolation with resource limits
 - SandboxPolicy: Configurable security policies
 
-Note: Sandbox is ONLY activated when explicitly requested via CLI flag.
+Note: nothing in the CLI routes agent commands through this module, and no
+--sandbox flag enables it. OS-level containment of agent shell commands is
+provided by ``PRAISON_SHELL=sandboxed`` (see ``shell_exec`` / ``os_sandbox``).
 """
 
 from dataclasses import dataclass, field
