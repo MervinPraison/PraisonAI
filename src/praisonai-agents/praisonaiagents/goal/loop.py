@@ -64,6 +64,14 @@ class GoalLoopMixin:
 
     def _load_goal_state(self) -> Optional["GoalState"]:
         """Load a persisted GoalState from the session store, if any."""
+        # The store is created lazily on the first chat(); a fresh Agent in a
+        # new process would otherwise see no store and restart the goal.
+        init_store = getattr(self, "_init_session_store", None)
+        if init_store is not None:
+            try:
+                init_store()
+            except Exception as exc:  # pragma: no cover - best-effort
+                logger.debug("Initialising session store failed: %s", exc)
         store = getattr(self, "_session_store", None) or getattr(
             self, "session_store", None
         )
@@ -237,14 +245,18 @@ class GoalLoopMixin:
         max_turns: int,
         resume: bool,
     ) -> "GoalState":
-        """Resume a persisted paused state for the same goal, else start fresh."""
+        """Resume a persisted paused/active state for the same goal, else start fresh.
+
+        A saved ``active`` state means the previous process died mid-run, so
+        it is resumed like a ``paused`` one.
+        """
         from .models import GoalState
 
         if resume:
             saved = self._load_goal_state()
             if (
                 saved is not None
-                and saved.status == "paused"
+                and saved.status in ("paused", "active")
                 and saved.goal == goal
             ):
                 # Resume the paused run in place (keep turns_used/verdict).
@@ -283,7 +295,7 @@ class GoalLoopMixin:
             max_turns: Judged iterations before a recoverable pause.
             judge_model: Independent judge model (defaults to gpt-4o-mini).
             resume: When ``True`` (default), a previously persisted ``paused``
-                run for the same goal is resumed (turns are not reset) instead
+                (or crashed, still ``active``) run for the same goal is resumed (turns are not reset) instead
                 of restarting at ``turns_used=0``.
 
         Returns:
