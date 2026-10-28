@@ -113,8 +113,33 @@ def test_provider_returned_error_dict_reaches_model_on_both(monkeypatch):
         return {"error": "mailbox full"}
 
     sync = _outcome(lambda: _provider_agent(send_email).chat("email a@b.c"))
+    assert sync == ("returned", "the email could not be sent")
+    assert seen and all("mailbox full" in m for m in seen)
+
+    seen.clear()
     async_ = _outcome(
         lambda: asyncio.run(_provider_agent(send_email).achat("email a@b.c"))
     )
-    assert sync[0] == async_[0] == "returned"
-    assert seen and all("mailbox full" in s for s in seen)
+    assert async_ == ("returned", "the email could not be sent")
+    assert seen and all("mailbox full" in m for m in seen)
+
+
+def test_provider_not_restart_safe_raise_is_not_retryable(monkeypatch):
+    # A restart_safe=False tool must not run again, so the error must not
+    # advertise a retry (durable runs would otherwise stay open).
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
+    seen = []
+    _stub_litellm(monkeypatch, seen)
+    runs = []
+
+    def send_email(to: str) -> str:
+        """Send an email."""
+        runs.append(to)
+        raise RuntimeError("SMTP server unreachable")
+    send_email.restart_safe = False
+
+    with pytest.raises(ToolExecutionError) as exc:
+        asyncio.run(_provider_agent(send_email).achat("email a@b.c"))
+    assert exc.value.is_retryable is False
+    assert runs == ["a@b.c"]
+    assert seen == []

@@ -1655,13 +1655,13 @@ Write the complete compiled report:"""
         
         last_exception = None
 
-        def _finish(result, raised):
+        def _finish(result, raised, retryable_ok=True):
             # Strip the private control-plane tag before it reaches the model. A
             # tool that *raised* ends the turn with ToolExecutionError so the run
             # is finalized failed — the same contract as the sync path
             # (tool_execution.py, test_tool_failure_not_relabelled). A plain
             # tool-returned {"error": ...} stays a recoverable model input.
-            retryable = result.pop("_praison_retryable", None) is True
+            retryable = result.pop("_praison_retryable", None) is True and retryable_ok
             if raised:
                 raise ToolExecutionError(
                     result.get("error", f"Tool '{function_name}' failed"),
@@ -1700,7 +1700,9 @@ Write the complete compiled report:"""
                     # up to max_attempts times -- charging a card three times for
                     # a tool the author marked "must never be silently re-executed".
                     if self._tool_declares_not_idempotent(function_name, tools_override):
-                        return _finish(result, raised)
+                        # Must not run again: report non-retryable so durable
+                        # runs are finalized failed (sync parity).
+                        return _finish(result, raised, retryable_ok=False)
 
                     # Determine error type for retry policy
                     error_type = self._classify_error_type(result, last_exception)
