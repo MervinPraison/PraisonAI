@@ -128,3 +128,17 @@ def test_oversized_body_rejected_before_signature_check(monkeypatch, tmp_path):
     ])
     assert codes == [413, 200]
     assert runs == 1
+
+
+def test_unsigned_request_rejected_before_body_read(monkeypatch, tmp_path):
+    # With no signature header a signed-only hook cannot authenticate, so the
+    # request is refused (401) before the body is buffered: never 413.
+    monkeypatch.setattr("praisonai_bot.gateway.server._HOOK_MAX_BODY_BYTES", 64)
+    big, _ = _delivery(10**80)
+    assert len(big) > 64
+    codes, runs = _run(monkeypatch, tmp_path, _hook(secret=SECRET), [
+        (big, {"X-GitHub-Event": "issues"}),
+        (big, {"X-GitHub-Event": "issues", **_bearer(GATEWAY_TOKEN)}),
+    ])
+    assert codes == [401, 401]
+    assert runs == 0

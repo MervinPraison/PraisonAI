@@ -2419,6 +2419,10 @@ class WebSocketGateway:
                 auth_err = _check_hook_auth(request, hook)
                 if auth_err:
                     return auth_err
+            elif not request.headers.get(getattr(hook, "signature_header", None) or ""):
+                # Signature is the only credential: with no signature header the
+                # request cannot authenticate, so reject it before buffering.
+                return JSONResponse({"error": "invalid signature"}, status_code=401)
 
             import json
 
