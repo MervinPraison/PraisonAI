@@ -4376,9 +4376,11 @@ Respond with ONLY a valid JSON tool call in this format:
                                 arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, tools)
 
                             logging.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
-                            # Capture tool failures and report them back to the model
-                            # instead of aborting the whole run (safe-by-default,
-                            # matching the async path in execution_mixin.py).
+                            # A ToolExecutionError (a tool that raised, or a terminal
+                            # framework decision such as a loop-guard HALT) ends the
+                            # turn, same as the async path in execution_mixin.py.
+                            # Any other unexpected failure here is reported back to
+                            # the model instead of aborting the whole run.
                             try:
                                 tool_result = execute_tool_fn(
                                     function_name,
