@@ -249,6 +249,40 @@ class MessageHookMixin:
     is guarded by ``getattr`` checks.
     """
 
+    # Platform-native mention markup (e.g. ``"<@{}>"``); ``None`` means the
+    # platform cannot ping by user id and ``mention_user`` falls back to text.
+    _mention_template: Optional[str] = None
+
+    def mention_user(self, unified_user_id: str) -> str:
+        """Render a native mention for a canonical identity (Issue #6119).
+
+        Maps ``unified_user_id`` to this platform's user id via the bot's
+        identity resolver (``links_for``), or accepts the unlinked
+        ``"{platform}:{user_id}"`` form directly. Returns the plain id as
+        text when the human is not linked here or the platform cannot ping.
+        """
+        template = self._mention_template
+        if not template or not unified_user_id:
+            return unified_user_id
+        platform = getattr(self, "platform", "")
+        native = None
+        prefix = f"{platform}:"
+        if unified_user_id.startswith(prefix):
+            native = unified_user_id[len(prefix):]
+        else:
+            resolver = getattr(self, "_identity_resolver", None)
+            if resolver is not None:
+                try:
+                    links = resolver.links_for(unified_user_id)
+                except Exception as e:  # pragma: no cover — defensive
+                    logger.warning("mention_user: identity lookup failed: %s", e)
+                    links = []
+                native = next(
+                    (l.platform_user_id for l in links if l.platform == platform),
+                    None,
+                )
+        return template.format(native) if native else unified_user_id
+
     def _get_hook_runner(self) -> Any:
         """Resolve the HookRunner from the agent, if available."""
         agent = getattr(self, '_agent', None)
