@@ -227,3 +227,26 @@ async def test_session_reregisters_agent_for_pending_runs():
     assert prompts_seen == ["first", "pending follow-up"]
     assert steer_decisions == [RunDecision.STEERED]
     agent.steer.assert_called_once_with("steer the pending run", priority=30)
+
+
+@pytest.mark.asyncio
+async def test_interrupt_mode_queues_while_turn_is_protected():
+    """#6122: interrupt busy-mode must not supersede a turn mid-subagent/compaction."""
+    from praisonai_bot.bots._run_control import SessionRunControl, RunDecision
+
+    rc = SessionRunControl(busy_mode="interrupt")
+    assert await rc.submit("u1", "first") == RunDecision.RUN_NOW
+    ctrl = rc.get_interrupt_controller("u1")
+    generation = rc.get_run_status("u1")["run_generation"]
+
+    with ctrl.protect():
+        decision = await rc.submit("u1", "also check Y")
+        assert decision == RunDecision.QUEUED
+        assert not ctrl.is_set()
+        assert rc.get_run_status("u1")["run_generation"] == generation
+        assert "queued" in await rc.get_busy_ack_message("u1", decision)
+
+    assert rc.next_pending("u1") == "also check Y"
+    # Once the protected window closes, interrupting works as before.
+    assert await rc.submit("u1", "new") == RunDecision.INTERRUPTED
+    assert ctrl.is_set()
