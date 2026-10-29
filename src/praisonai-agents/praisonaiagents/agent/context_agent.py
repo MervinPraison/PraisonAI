@@ -48,41 +48,6 @@ def _get_asyncio():
         _asyncio = asyncio
     return _asyncio
 
-async def _async_subprocess_run(cmd: list, timeout: int = 60) -> tuple:
-    """
-    Run subprocess asynchronously (non-blocking).
-    
-    Args:
-        cmd: Command list to execute
-        timeout: Timeout in seconds
-        
-    Returns:
-        Tuple of (stdout, stderr, returncode)
-    """
-    asyncio = _get_asyncio()
-    try:
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        stdout, stderr = await asyncio.wait_for(
-            process.communicate(),
-            timeout=timeout
-        )
-        return (
-            stdout.decode() if stdout else "",
-            stderr.decode() if stderr else "",
-            process.returncode
-        )
-    except asyncio.TimeoutError:
-        if process:
-            process.kill()
-            await process.wait()
-        raise
-    except FileNotFoundError:
-        raise
-
 from ..agent.agent import Agent
 from ..task import Task
 
