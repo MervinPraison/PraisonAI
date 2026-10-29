@@ -435,7 +435,7 @@ TS-only members: `options`?
 
 ### `FileTracker.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/knowledge/indexing.py:326`
+- Python: `src/praisonai-agents/praisonaiagents/knowledge/indexing.py:328`
 - TypeScript: `src/praisonai-ts/src/knowledge/indexing.ts:552`
 - Counts: 1 python params: 0 exact, 1 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 0 TS-only of 1
 

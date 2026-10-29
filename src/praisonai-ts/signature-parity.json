@@ -3329,7 +3329,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/knowledge/indexing.py:326",
+        "location": "src/praisonai-agents/praisonaiagents/knowledge/indexing.py:328",
         "resolved_class": "FileTracker"
       },
       "ts_only": [],
