@@ -682,7 +682,9 @@ class Process:
             if task.next_tasks:
                 for next_task_name in task.next_tasks:
                     next_task = self._task_by_name(next_task_name)
-                    if next_task:
+                    # Skip AgentTeam's inferred navigation-only link between
+                    # independent async tasks so they stay parallel.
+                    if next_task and getattr(next_task, "_navigation_only_prev", None) != task.name:
                         next_task.previous_tasks.append(task.name)
                         logging.debug(f"Added {task.name} as previous task for {next_task_name}")
 
@@ -1353,7 +1355,9 @@ Provide a JSON with the structure:
             if task.next_tasks:
                 for next_task_name in task.next_tasks:
                     next_task = self._task_by_name(next_task_name)
-                    if next_task:
+                    # Skip AgentTeam's inferred navigation-only link between
+                    # independent async tasks so they stay parallel.
+                    if next_task and getattr(next_task, "_navigation_only_prev", None) != task.name:
                         next_task.previous_tasks.append(task.name)
 
         # Find start task

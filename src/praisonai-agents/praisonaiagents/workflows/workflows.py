@@ -26,6 +26,7 @@ import copy
 import time
 import logging
 import collections
+import inspect
 from praisonaiagents._logging import get_logger
 from praisonaiagents.utils.safe_path import safe_child
 from pathlib import Path
@@ -216,6 +217,22 @@ class WorkflowStepError(Exception):
         super().__init__(message)
         self.cause = cause
         self.errors = errors or []
+
+def _call_handler(handler: Callable, context: Any) -> Any:
+    """Call a step handler from a sync path, awaiting it if it is ``async def``.
+
+    Without this an async handler's coroutine was stringified as the step's
+    output and the step was reported as completed.
+    """
+    result = handler(context)
+    if inspect.isawaitable(result):
+        from ..utils.async_bridge import run_coroutine_from_any_context
+
+        async def _await(awaitable):
+            return await awaitable
+
+        result = run_coroutine_from_any_context(_await(result), timeout=None)
+    return result
 
 def _parse_json_output(output: Any, step_name: str = "step") -> Any:
     """
@@ -1085,6 +1102,13 @@ class AgentFlow:
     # consumed in run()'s finally to restore the caller's generation (nested runs).
     _run_generation_token: Any = field(default=None, repr=False, compare=False)
 
+    def _reset_approval_token(self) -> None:
+        """Reset this run's YAML-approved tools exactly once."""
+        token, self._approval_token = getattr(self, "_approval_token", None), None
+        if token is not None:
+            from ..approval import reset_yaml_approved_tools
+            reset_yaml_approved_tools(token)
+
     def _begin_run_generation(self) -> Any:
         """Stamp a fresh generation for the run starting now and publish it to the
         current context so branches submitted by this run capture it.
@@ -1610,6 +1634,9 @@ class AgentFlow:
             # leave a stale generation on the outer run's thread.
             token, self._run_generation_token = self._run_generation_token, None
             self._end_run_generation(token)
+            # A raising step skips _run_impl's reset; never let YAML tool
+            # approvals outlive the run.
+            self._reset_approval_token()
             self._execution_lock.release()
 
     def to_mermaid(self) -> str:
@@ -1840,6 +1867,8 @@ class AgentFlow:
         if approve_tools and allow_dangerous:
             from ..approval import set_yaml_approved_tools
             _approval_token = set_yaml_approved_tools(approve_tools)
+        # Kept on the instance so run()'s finally can reset it if a step raises.
+        self._approval_token = _approval_token
         
         # Call on_workflow_start callback
         if self.on_workflow_start:
@@ -2107,7 +2136,7 @@ class AgentFlow:
                 try:
                     if step.handler:
                         # Custom handler function
-                        result = step.handler(context)
+                        result = _call_handler(step.handler, context)
                         if isinstance(result, StepResult):
                             output = result.output
                             stop = result.stop_workflow
@@ -2477,12 +2506,12 @@ class AgentFlow:
             self.status = "completed"
         
         # Reset YAML-approved tools context if it was set
-        if _approval_token is not None:
-            from ..approval import reset_yaml_approved_tools
-            reset_yaml_approved_tools(_approval_token)
+        self._reset_approval_token()
         
         final_result = {
-            "output": previous_output,
+            # A failed run must not expose an earlier step's value as its
+            # output; partial results stay available under "steps".
+            "output": None if self.status == "failed" else previous_output,
             "steps": results,
             "variables": all_variables,
             "status": self.status
@@ -2816,12 +2845,11 @@ Respond with JSON: {{"approved": true/false, "reason": "Brief explanation"}}
         if failure_reason is None:
             self.status = "completed"
         
-        if _approval_token is not None:
-            from ..approval import reset_yaml_approved_tools
-            reset_yaml_approved_tools(_approval_token)
+        self._reset_approval_token()
         
         final_result = {
-            "output": previous_output,
+            # Same contract as the sequential path: no stale output on failure.
+            "output": None if self.status == "failed" else previous_output,
             "steps": results,
             "variables": all_variables,
             "status": self.status
@@ -3401,7 +3429,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 context.variables["validation_feedback"] = validation_feedback
 
             if normalized.handler:
-                result = normalized.handler(context)
+                result = _call_handler(normalized.handler, context)
                 if isinstance(result, StepResult):
                     if result.variables:
                         all_variables.update(result.variables)
@@ -4137,7 +4165,7 @@ CONCISE SUMMARY:"""
                 errors.append({"step": idx, "error": info["error"]})
                 # partial_ok: record the failure but keep going; fold neither the
                 # exception text into outputs nor skip the index alignment.
-                results.append({"step": f"parallel_{idx}", "output": None, "error": str(info["error"])})
+                results.append({"step": f"parallel_{idx}", "output": None, "status": "failed", "error": str(info["error"])})
                 if info["delta"] is not None:
                     branch_deltas.append((idx, info["delta"]))
                 outputs.append(None)
@@ -4195,7 +4223,13 @@ CONCISE SUMMARY:"""
         
         # Get items from variable, CSV, or file
         if loop_step.over:
-            items = all_variables.get(loop_step.over, [])
+            if loop_step.over not in all_variables:
+                # A typo in over= used to run zero iterations and report success.
+                raise WorkflowStepError(
+                    f"loop(over={loop_step.over!r}): no such workflow variable; "
+                    f"known: {sorted(all_variables)}"
+                )
+            items = all_variables[loop_step.over]
             if isinstance(items, str):
                 # Try to parse as JSON list first (handles agent output like '["a", "b", "c"]')
                 items = self._parse_list_from_string(items)
@@ -6274,7 +6308,7 @@ class WorkflowManager:
         # If step has a custom handler function
         if step.handler:
             try:
-                result = step.handler(context)
+                result = _call_handler(step.handler, context)
                 # Handle StepResult
                 if isinstance(result, StepResult):
                     # Update variables from result
