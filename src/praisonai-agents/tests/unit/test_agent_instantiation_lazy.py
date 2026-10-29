@@ -73,3 +73,25 @@ class TestLazyInstantiation:
         compaction = [w for w in caught if "context_compaction" in str(w.message)]
         assert not compaction
         assert ExecutionConfig._context_compaction_internal is True  # noqa: SLF001
+
+
+def test_init_does_not_reimport_feature_configs(monkeypatch):
+    """A function-local ``from ..config.feature_configs import X`` probes the
+    module's lazy ``__getattr__`` for ``__path__`` on every construction (#5835)."""
+    import praisonaiagents.config.feature_configs as fc
+
+    def tool(city: str) -> str:
+        """Tool."""
+        return city
+
+    Agent(name="T", model="gpt-4o-mini", tools=[tool], output="silent")
+    probes = []
+    original = fc.__getattr__
+
+    def spy(name):
+        probes.append(name)
+        return original(name)
+
+    monkeypatch.setattr(fc, "__getattr__", spy)
+    Agent(name="T", model="gpt-4o-mini", tools=[tool], output="silent")
+    assert "__path__" not in probes
