@@ -120,3 +120,50 @@ def test_team_workflow_keeps_navigation_with_declared_context(agent):
     AgentTeam(agents=[agent], tasks=[a, b], process="workflow")
     assert a.next_tasks == ["B"]
     assert b.context == [a]
+
+
+def test_team_workflow_async_tasks_stay_independent(agent):
+    from praisonaiagents.process.process import Process
+
+    r1 = _task("r1", agent, async_execution=True)
+    r2 = _task("r2", agent, async_execution=True)
+    team = AgentTeam(agents=[agent], tasks=[r1, r2], process="workflow")
+    assert r1.next_tasks == ["r2"]  # navigation kept
+
+    gen = Process(tasks=team.tasks, agents=[agent]).aworkflow()
+    asyncio.run(gen.__anext__())  # builds previous_tasks, yields r1
+    assert r2.previous_tasks == []
+    assert not team._depends_on_pending(r2, [(r1.id, None)])
+
+
+def test_team_workflow_user_declared_async_link_still_depends(agent):
+    from praisonaiagents.process.process import Process
+
+    r1 = _task("r1", agent, async_execution=True, next_tasks=["r2"])
+    r2 = _task("r2", agent, async_execution=True)
+    team = AgentTeam(agents=[agent], tasks=[r1, r2], process="workflow")
+    gen = Process(tasks=team.tasks, agents=[agent]).aworkflow()
+    asyncio.run(gen.__anext__())
+    assert r2.previous_tasks == ["r1"]
+
+
+def test_hierarchical_run_does_not_leak_tool_approvals(monkeypatch):
+    from praisonaiagents.approval import get_approval_registry
+
+    def body(ctx):
+        return StepResult(output="b")
+
+    wf = Workflow(steps=[body], process="hierarchical")
+    wf.approve_tools = ["write_file"]
+    wf.allow_dangerous_tools = True
+    seen = {}
+
+    def fake_hierarchical(**kwargs):
+        seen["active"] = get_approval_registry().is_yaml_approved("write_file")
+        raise RuntimeError("manager failed")
+
+    monkeypatch.setattr(wf, "_run_hierarchical", fake_hierarchical)
+    with pytest.raises(RuntimeError):
+        wf.start("x")
+    assert seen["active"] is True
+    assert not get_approval_registry().is_yaml_approved("write_file")

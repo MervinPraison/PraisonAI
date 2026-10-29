@@ -1261,13 +1261,20 @@ class AgentTeam(SpawnAnnounceProtocol):
             for prev, nxt in zip(tasks, tasks[1:]):
                 # Navigation: process="workflow" follows next_tasks, so link
                 # every task that declared none; keep user routing as-is.
-                if not prev.next_tasks:
+                inferred = not prev.next_tasks
+                if inferred:
                     prev.next_tasks = [nxt.name]
                 elif nxt.name not in prev.next_tasks:
                     continue
                 # Context: keep a user-set context, and leave adjacent
                 # async_execution tasks independent so they run in parallel.
-                if not nxt.context and not (prev.async_execution and nxt.async_execution):
+                if prev.async_execution and nxt.async_execution:
+                    if inferred and not nxt.context:
+                        # Navigation only: the workflow process must not turn
+                        # this inferred link into a previous_tasks dependency.
+                        nxt._navigation_only_prev = prev.name
+                    continue
+                if not nxt.context:
                     nxt.context = [prev]
             logger.info("Set up sequential flow with automatic context passing")
         
