@@ -46,3 +46,14 @@ def test_slack_and_discord_declare_mention_template():
 
     assert DiscordBot._mention_template == "<@{}>"
     assert SlackBot._mention_template == "<@{}>"
+
+
+def test_resolver_stamped_on_session_is_used():
+    """Bot/BotOS/gateway stamp the resolver on ``adapter._session``."""
+    from praisonai_bot.bots.discord import DiscordBot
+
+    resolver = InMemoryIdentityResolver()
+    resolver.link("discord", "222", "alice")
+    bot = DiscordBot(token="test-token")
+    bot._session._identity_resolver = resolver
+    assert bot.mention_user("alice") == "<@222>"

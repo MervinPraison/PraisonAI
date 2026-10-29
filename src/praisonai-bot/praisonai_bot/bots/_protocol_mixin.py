@@ -270,7 +270,14 @@ class MessageHookMixin:
         if unified_user_id.startswith(prefix):
             native = unified_user_id[len(prefix):]
         else:
-            resolver = getattr(self, "_identity_resolver", None)
+            # Bot/BotOS/gateway stamp the resolver on the adapter's session
+            # manager; direct injection on the adapter still wins.
+            session = getattr(self, "_session", None) or getattr(
+                self, "_session_mgr", None
+            )
+            resolver = getattr(self, "_identity_resolver", None) or getattr(
+                session, "_identity_resolver", None
+            )
             if resolver is not None:
                 try:
                     links = resolver.links_for(unified_user_id)
