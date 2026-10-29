@@ -1185,7 +1185,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/agent.py:628",
+        "location": "src/praisonai-agents/praisonaiagents/agent/agent.py:631",
         "resolved_class": "Agent"
       },
       "ts_only": [
