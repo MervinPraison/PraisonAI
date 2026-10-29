@@ -2088,12 +2088,17 @@ class ToolExecutionMixin:
         else:
             return response
         if final != response and isinstance(response, str):
-            # Match by content, not position: a concurrent turn may have
-            # appended a newer assistant message after this one.
+            # Prefer this turn's own messages (by identity) so a concurrent
+            # turn with identical text is never touched; fall back to a
+            # content match over shared history for untracked callers.
+            from .memory_mixin import _active_turn_owned
+            owned = _active_turn_owned.get() or []
             with self._history_lock:
-                for msg in reversed(self.chat_history):
-                    if (isinstance(msg, dict) and msg.get("role") == "assistant"
-                            and msg.get("content") == response):
+                for candidates in (owned, self.chat_history):
+                    msg = next((m for m in reversed(candidates)
+                                if isinstance(m, dict) and m.get("role") == "assistant"
+                                and m.get("content") == response), None)
+                    if msg is not None:
                         msg["content"] = final
                         break
         return final

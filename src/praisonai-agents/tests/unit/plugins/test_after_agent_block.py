@@ -132,6 +132,21 @@ class TestAgentAfterAgentEnforcement:
         assert all(SECRET not in str(m.get("content")) for m in agent.chat_history)
         assert agent.chat_history[-1]["content"] == "concurrent reply"
 
+    def test_block_scrubs_own_turn_not_identical_concurrent_turn(self):
+        agent = _agent(RaiseBlockPlugin())
+        own = {"role": "assistant", "content": f"SSN {SECRET}"}
+        # A concurrent (untracked here) turn appends an identical answer later.
+        other = {"role": "assistant", "content": f"SSN {SECRET}"}
+        token = agent._begin_turn_tracking()
+        try:
+            agent._append_to_chat_history(own)
+            agent.chat_history.append(other)
+            out = agent._trigger_after_agent_hook("q", f"SSN {SECRET}", time.time())
+        finally:
+            agent._end_turn_tracking(token)
+        assert own["content"] == out
+        assert other["content"] == f"SSN {SECRET}"
+
 
 class EmailRedactPlugin(Plugin):
     @property
