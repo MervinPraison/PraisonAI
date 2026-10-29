@@ -2072,11 +2072,12 @@ class ToolExecutionMixin:
         """Honour AFTER_AGENT hook outcomes on the final response.
 
         A blocking hook/plugin (``GuardrailBlocked`` / ``PluginDecision.deny``)
-        withholds the response and returns a visible refusal marker, mirroring
+        replaces the returned value with a visible refusal marker, mirroring
         the BEFORE_LLM block. Otherwise a string rewrite (e.g. PII redaction)
-        is adopted so it actually reaches the caller. The stored assistant turn
-        is updated too, so later turns and auto-learning never see the
-        withheld or unredacted text.
+        is adopted so it actually reaches the caller. The matching in-memory
+        assistant turn is updated too, so later turns and auto-memory never
+        see the withheld or unredacted text. Interaction callbacks, verbose
+        display and session/DB persistence run earlier and are not gated here.
         """
         if self._hook_runner.is_blocked(results):
             reason = self._hook_runner.get_blocking_reason(results) or "Blocked by hook"
@@ -2087,11 +2088,13 @@ class ToolExecutionMixin:
         else:
             return response
         if final != response and isinstance(response, str):
+            # Match by content, not position: a concurrent turn may have
+            # appended a newer assistant message after this one.
             with self._history_lock:
                 for msg in reversed(self.chat_history):
-                    if isinstance(msg, dict) and msg.get("role") == "assistant":
-                        if msg.get("content") == response:
-                            msg["content"] = final
+                    if (isinstance(msg, dict) and msg.get("role") == "assistant"
+                            and msg.get("content") == response):
+                        msg["content"] = final
                         break
         return final
 

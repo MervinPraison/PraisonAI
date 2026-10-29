@@ -123,6 +123,15 @@ class TestAgentAfterAgentEnforcement:
         assert agent.chat_history[-1]["content"] == out
         assert all(SECRET not in str(m.get("content")) for m in agent.chat_history)
 
+    def test_block_scrubs_turn_when_newer_turn_interleaved(self):
+        agent = _agent(RaiseBlockPlugin())
+        agent.chat_history.append({"role": "assistant", "content": f"SSN {SECRET}"})
+        agent.chat_history.append({"role": "user", "content": "other"})
+        agent.chat_history.append({"role": "assistant", "content": "concurrent reply"})
+        agent._trigger_after_agent_hook("q", f"SSN {SECRET}", time.time())
+        assert all(SECRET not in str(m.get("content")) for m in agent.chat_history)
+        assert agent.chat_history[-1]["content"] == "concurrent reply"
+
 
 class EmailRedactPlugin(Plugin):
     @property
