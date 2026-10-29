@@ -2068,6 +2068,41 @@ class ToolExecutionMixin:
             execution_time_ms=(time.time() - start_time) * 1000
         )
 
+    def _apply_after_agent_results(self, response, after_agent_input, results):
+        """Honour AFTER_AGENT hook outcomes on the final response.
+
+        A blocking hook/plugin (``GuardrailBlocked`` / ``PluginDecision.deny``)
+        replaces the returned value with a visible refusal marker, mirroring
+        the BEFORE_LLM block. Otherwise a string rewrite (e.g. PII redaction)
+        is adopted so it actually reaches the caller. The matching in-memory
+        assistant turn is updated too, so later turns and auto-memory never
+        see the withheld or unredacted text. Interaction callbacks, verbose
+        display and session/DB persistence run earlier and are not gated here.
+        """
+        if self._hook_runner.is_blocked(results):
+            reason = self._hook_runner.get_blocking_reason(results) or "Blocked by hook"
+            logging.warning(f"Agent {self.name} response blocked by AFTER_AGENT hook: {reason}")
+            final = f"[Response blocked by hook: {reason}]"
+        elif isinstance(response, str) and isinstance(after_agent_input.response, str):
+            final = after_agent_input.response
+        else:
+            return response
+        if final != response and isinstance(response, str):
+            # Prefer this turn's own messages (by identity) so a concurrent
+            # turn with identical text is never touched; fall back to a
+            # content match over shared history for untracked callers.
+            from .memory_mixin import _active_turn_owned
+            owned = _active_turn_owned.get() or []
+            with self._history_lock:
+                for candidates in (owned, self.chat_history):
+                    msg = next((m for m in reversed(candidates)
+                                if isinstance(m, dict) and m.get("role") == "assistant"
+                                and m.get("content") == response), None)
+                    if msg is not None:
+                        msg["content"] = final
+                        break
+        return final
+
     def _after_agent_side_effects(self, prompt, response, *, process_auto_memory=True):
         """Run loop-agnostic after-agent side effects (no ``await`` inside).
 
@@ -2125,7 +2160,8 @@ class ToolExecutionMixin:
         from ..hooks import HookEvent
         if self._hook_runner.registry.has_hooks(HookEvent.AFTER_AGENT):
             after_agent_input = self._build_after_agent_input(prompt, response, start_time, tools_used)
-            self._hook_runner.execute_sync(HookEvent.AFTER_AGENT, after_agent_input)
+            results = self._hook_runner.execute_sync(HookEvent.AFTER_AGENT, after_agent_input)
+            response = self._apply_after_agent_results(response, after_agent_input, results)
 
         self._after_agent_side_effects(prompt, response)
 
@@ -2183,7 +2219,8 @@ class ToolExecutionMixin:
         from ..hooks import HookEvent
         if self._hook_runner.registry.has_hooks(HookEvent.AFTER_AGENT):
             after_agent_input = self._build_after_agent_input(prompt, response, start_time, tools_used)
-            await self._hook_runner.execute(HookEvent.AFTER_AGENT, after_agent_input)
+            results = await self._hook_runner.execute(HookEvent.AFTER_AGENT, after_agent_input)
+            response = self._apply_after_agent_results(response, after_agent_input, results)
 
         if response and getattr(self, '_memory_instance', None):
             prompt_str = _memory_prompt_text(prompt)
