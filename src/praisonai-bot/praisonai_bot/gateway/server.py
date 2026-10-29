@@ -1240,6 +1240,9 @@ class WebSocketGateway:
         # serving loop only when a ``gateway.watchdog`` block (or the CLI
         # ``--watchdog`` flag) enables it; ``None`` means zero cost.
         self._watchdog = None
+        # Issue #6123: systemd READY=1/WATCHDOG=1 notifier; only started when
+        # running under a ``Type=notify`` unit (``$NOTIFY_SOCKET`` set).
+        self._sd_notify_task: Optional[asyncio.Task] = None
         # Issue #2798/#3911: application-level connection-liveness heartbeat +
         # half-open reaper. The background task emits ``PING`` at the configured
         # interval and closes any session whose ``last_activity`` exceeds the
@@ -2672,6 +2675,14 @@ class WebSocketGateway:
         if self._session_store:
             await self._start_session_cleanup()
 
+        # Issue #6123: tell systemd when we are actually serving and keep its
+        # watchdog fed from this loop (a wedged loop stops the pings). Started
+        # before the boot-time recovery below so a long resume stays covered.
+        if os.environ.get("NOTIFY_SOCKET") and self._sd_notify_task is None:
+            self._sd_notify_task = asyncio.create_task(
+                self._sd_notify_loop(), name="gateway-sd-notify"
+            )
+
         # Issue #4603: record this boot in the durable lifecycle ledger before
         # anything else. This reads the prior sentinel, classifies whether the
         # previous process exited cleanly (an unclean/OOM death runs no signal
@@ -2748,6 +2759,7 @@ class WebSocketGateway:
         finally:
             self._disarm_watchdog()
             await self._cancel_liveness_task()
+            await self._cancel_sd_notify_task()
             # Issue #4603: ``serve()`` returns through here on every graceful
             # termination — the SIGINT/SIGTERM handler only flips
             # ``should_exit`` and uvicorn unwinds, so ``stop()`` is not
@@ -2777,6 +2789,51 @@ class WebSocketGateway:
                 pass
             except Exception:
                 logger.debug("Liveness task exited with error on cancel")
+
+    async def _sd_notify_loop(self) -> None:
+        """Send systemd READY=1 once serving, then WATCHDOG=1 pings (#6123).
+
+        Until READY=1, also sends EXTEND_TIMEOUT_USEC so a long boot-time
+        recovery is not killed by ``TimeoutStartSec`` while the loop is alive.
+        """
+        from ..daemon.sd_notify import sd_notify, watchdog_interval
+
+        interval = watchdog_interval()
+        period = interval or 10.0
+        tick = min(period, 0.5)
+        ready = False
+        last_ping = 0.0
+        while True:
+            if not ready and self._server is not None and getattr(
+                self._server, "started", False
+            ):
+                sd_notify("READY=1")
+                ready = True
+                if interval is None:
+                    return
+            now = time.monotonic()
+            if now - last_ping >= period:
+                if interval:
+                    sd_notify("WATCHDOG=1")
+                if not ready:
+                    sd_notify(f"EXTEND_TIMEOUT_USEC={int(period * 3_000_000)}")
+                last_ping = now
+            await asyncio.sleep(tick)
+
+    async def _cancel_sd_notify_task(self) -> None:
+        """Stop the systemd notifier and report STOPPING=1 (idempotent)."""
+        task = self._sd_notify_task
+        self._sd_notify_task = None
+        if task is None:
+            return
+        from ..daemon.sd_notify import sd_notify
+
+        sd_notify("STOPPING=1")
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
 
     async def _cancel_ledger_heartbeat(self) -> None:
         """Stop the lifecycle-ledger memory-sample heartbeat (idempotent)."""
@@ -3846,7 +3903,13 @@ class WebSocketGateway:
         # routing new traffic while in-flight sessions finish. Keep _is_running
         # True so liveness (/live) still reports the process as alive during drain.
         self._draining = True
-        
+        # Issue #6123: tell systemd this is a clean drain, not a hang/crash.
+        # The notifier keeps feeding WATCHDOG=1 until serve() unwinds.
+        if self._sd_notify_task is not None:
+            from ..daemon.sd_notify import sd_notify
+
+            sd_notify("STOPPING=1")
+
         # Gracefully drain active sessions before closing
         await self._drain_active_sessions(reason="shutdown", timeout=drain_timeout)
 
