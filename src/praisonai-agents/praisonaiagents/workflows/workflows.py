@@ -1102,6 +1102,13 @@ class AgentFlow:
     # consumed in run()'s finally to restore the caller's generation (nested runs).
     _run_generation_token: Any = field(default=None, repr=False, compare=False)
 
+    def _reset_approval_token(self) -> None:
+        """Reset this run's YAML-approved tools exactly once."""
+        token, self._approval_token = getattr(self, "_approval_token", None), None
+        if token is not None:
+            from ..approval import reset_yaml_approved_tools
+            reset_yaml_approved_tools(token)
+
     def _begin_run_generation(self) -> Any:
         """Stamp a fresh generation for the run starting now and publish it to the
         current context so branches submitted by this run capture it.
@@ -1627,6 +1634,9 @@ class AgentFlow:
             # leave a stale generation on the outer run's thread.
             token, self._run_generation_token = self._run_generation_token, None
             self._end_run_generation(token)
+            # A raising step skips _run_impl's reset; never let YAML tool
+            # approvals outlive the run.
+            self._reset_approval_token()
             self._execution_lock.release()
 
     def to_mermaid(self) -> str:
@@ -1857,6 +1867,8 @@ class AgentFlow:
         if approve_tools and allow_dangerous:
             from ..approval import set_yaml_approved_tools
             _approval_token = set_yaml_approved_tools(approve_tools)
+        # Kept on the instance so run()'s finally can reset it if a step raises.
+        self._approval_token = _approval_token
         
         # Call on_workflow_start callback
         if self.on_workflow_start:
@@ -2494,9 +2506,7 @@ class AgentFlow:
             self.status = "completed"
         
         # Reset YAML-approved tools context if it was set
-        if _approval_token is not None:
-            from ..approval import reset_yaml_approved_tools
-            reset_yaml_approved_tools(_approval_token)
+        self._reset_approval_token()
         
         final_result = {
             # A failed run must not expose an earlier step's value as its
@@ -2835,9 +2845,7 @@ Respond with JSON: {{"approved": true/false, "reason": "Brief explanation"}}
         if failure_reason is None:
             self.status = "completed"
         
-        if _approval_token is not None:
-            from ..approval import reset_yaml_approved_tools
-            reset_yaml_approved_tools(_approval_token)
+        self._reset_approval_token()
         
         final_result = {
             "output": previous_output,

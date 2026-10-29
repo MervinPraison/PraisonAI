@@ -1256,19 +1256,19 @@ class AgentTeam(SpawnAnnounceProtocol):
             
         # Set up sequential flow if needed
         if len(tasks) > 1 and (process == "sequential" or all(task.next_tasks == [] for task in tasks)):
-            # Only infer edges the user did not declare: keep a user-set
-            # next_tasks/context, leave adjacent async_execution tasks
-            # independent so they can run in parallel, and stay idempotent
+            # Only infer edges the user did not declare and stay idempotent
             # when the same Task objects are passed to another team.
             for prev, nxt in zip(tasks, tasks[1:]):
-                if nxt.context or (prev.async_execution and nxt.async_execution):
-                    continue
-                if prev.next_tasks:
-                    if nxt.name not in prev.next_tasks:
-                        continue
-                else:
+                # Navigation: process="workflow" follows next_tasks, so link
+                # every task that declared none; keep user routing as-is.
+                if not prev.next_tasks:
                     prev.next_tasks = [nxt.name]
-                nxt.context = [prev]
+                elif nxt.name not in prev.next_tasks:
+                    continue
+                # Context: keep a user-set context, and leave adjacent
+                # async_execution tasks independent so they run in parallel.
+                if not nxt.context and not (prev.async_execution and nxt.async_execution):
+                    nxt.context = [prev]
             logger.info("Set up sequential flow with automatic context passing")
         
         self._state = {}

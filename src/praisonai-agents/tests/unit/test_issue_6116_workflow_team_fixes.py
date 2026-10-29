@@ -98,3 +98,25 @@ def test_team_chain_is_idempotent(agent):
         AgentTeam(agents=[agent], tasks=[t1, t2])
     assert t1.next_tasks == ["t2"]
     assert [t.name for t in t2.context] == ["t1"]
+
+
+def test_failed_loop_does_not_leak_tool_approvals():
+    from praisonaiagents.approval import get_approval_registry
+
+    def body(ctx):
+        return StepResult(output="b")
+
+    wf = Workflow(steps=[loop(body, over="itmes")])
+    wf.approve_tools = ["write_file"]
+    wf.allow_dangerous_tools = True
+    with pytest.raises(WorkflowStepError):
+        wf.start("x")
+    assert not get_approval_registry().is_yaml_approved("write_file")
+
+
+def test_team_workflow_keeps_navigation_with_declared_context(agent):
+    a = _task("A", agent)
+    b = _task("B", agent, context=[a])
+    AgentTeam(agents=[agent], tasks=[a, b], process="workflow")
+    assert a.next_tasks == ["B"]
+    assert b.context == [a]
