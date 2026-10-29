@@ -51,3 +51,57 @@ def test_foreground_subagent_protects_parent_turn():
     assert result["success"]
     assert seen == [True]
     assert not ctrl.is_protected()
+
+
+class _Compactor:
+    """Records whether the turn was protected while compacting."""
+
+    def __init__(self, ctrl, fail=False):
+        self.ctrl, self.fail, self.seen = ctrl, fail, []
+
+    def _run(self, messages):
+        self.seen.append(self.ctrl.is_protected())
+        if self.fail:
+            raise RuntimeError("compaction failed")
+        return messages, SimpleNamespace(original_tokens=2, compacted_tokens=1, messages_removed=0)
+
+    compact = _run
+
+    def needs_compaction(self, _messages):
+        return False
+
+
+def _agent_with(ctrl):
+    from praisonaiagents import Agent
+    agent = Agent(name="t", instructions="t")
+    agent.interrupt_controller = ctrl
+    agent._persist_compaction_checkpoint = lambda _r: None
+    return agent
+
+
+def _policy():
+    from praisonaiagents.context.policy import CompactionStrategy
+    return SimpleNamespace(strategy=CompactionStrategy.TRUNCATE)
+
+
+def test_proactive_compaction_protects_turn():
+    import pytest
+    ctrl = InterruptController()
+    agent = _agent_with(ctrl)
+    ok = _Compactor(ctrl)
+    agent._apply_compaction([{"role": "user", "content": "x"}], ok, _policy())
+    assert ok.seen == [True] and not ctrl.is_protected()
+
+    bad = _Compactor(ctrl, fail=True)
+    with pytest.raises(RuntimeError):
+        agent._apply_compaction([{"role": "user", "content": "x"}], bad, _policy())
+    assert bad.seen == [True] and not ctrl.is_protected()
+
+
+def test_proactive_compaction_async_protects_turn():
+    import asyncio
+    ctrl = InterruptController()
+    agent = _agent_with(ctrl)
+    ok = _Compactor(ctrl)
+    asyncio.run(agent._apply_compaction_async([{"role": "user", "content": "x"}], ok, _policy()))
+    assert ok.seen == [True] and not ctrl.is_protected()

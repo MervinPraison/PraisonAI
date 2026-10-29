@@ -246,7 +246,10 @@ async def test_interrupt_mode_queues_while_turn_is_protected():
         assert rc.get_run_status("u1")["run_generation"] == generation
         assert "queued" in await rc.get_busy_ack_message("u1", decision)
 
-    assert rc.next_pending("u1") == "also check Y"
+    # A message after the window closes must not drop the queued follow-up.
+    assert await rc.submit("u1", "and Z") == RunDecision.MERGED
+    assert not ctrl.is_set()
+    assert rc.next_pending("u1") == "also check Y\nand Z"
     # Once the protected window closes, interrupting works as before.
     assert await rc.submit("u1", "new") == RunDecision.INTERRUPTED
     assert ctrl.is_set()

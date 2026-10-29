@@ -213,10 +213,12 @@ class SessionRunControl:
             # There's an active run, handle based on busy mode
             ctrl = session.interrupt_controller
             # Don't supersede a turn mid-subagent or mid-compaction: queue the
-            # message instead so the in-flight work is not discarded.
-            session.interrupt_deferred = (
-                self._busy_mode == BusyMode.INTERRUPT
-                and bool(getattr(ctrl, "is_protected", lambda: False)())
+            # message instead so the in-flight work is not discarded. Once a
+            # message is queued, keep merging until it runs so the queued
+            # follow-up is never dropped by a later interrupt.
+            session.interrupt_deferred = self._busy_mode == BusyMode.INTERRUPT and (
+                session.pending_message is not None
+                or bool(getattr(ctrl, "is_protected", lambda: False)())
             )
             if self._busy_mode == BusyMode.INTERRUPT and not session.interrupt_deferred:
                 # Cancel current run and start new one
