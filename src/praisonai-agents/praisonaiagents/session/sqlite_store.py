@@ -926,7 +926,7 @@ class SqliteSessionStore(DefaultSessionStore):
                 if not isinstance(msg, dict):
                     continue
                 content = str(msg.get("content", ""))
-                if not content:
+                if not content or self._is_compaction_summary(msg):
                     continue
                 lowered = content.lower()
                 score = 0.0

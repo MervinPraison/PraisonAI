@@ -2402,6 +2402,17 @@ class DefaultSessionStore:
         return snippet
 
     @staticmethod
+    def _is_compaction_summary(msg: Dict[str, Any]) -> bool:
+        """True for the synthetic ``retention="compact"`` rollup message.
+
+        The summary paraphrases archived turns that are scanned verbatim, so
+        it is kept for context/replay but excluded from scoring — otherwise a
+        session's rank would depend on how often it was compacted (Issue #5051).
+        """
+        metadata = msg.get("metadata")
+        return isinstance(metadata, dict) and bool(metadata.get("compaction"))
+
+    @staticmethod
     def _searchable_messages(data: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Project a persisted session into the list of messages to scan.
 
@@ -2477,7 +2488,7 @@ class DefaultSessionStore:
                 if not isinstance(msg, dict):
                     continue
                 content = str(msg.get("content", ""))
-                if not content:
+                if not content or self._is_compaction_summary(msg):
                     continue
                 lowered = content.lower()
                 score = 0.0
