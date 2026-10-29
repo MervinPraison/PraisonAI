@@ -6,7 +6,8 @@ operations. Follows protocol-driven design with zero overhead when not used.
 """
 
 import threading
-from typing import Optional, Protocol, Set, runtime_checkable
+from contextlib import contextmanager, nullcontext
+from typing import Any, ContextManager, Iterator, Optional, Protocol, Set, runtime_checkable
 from dataclasses import dataclass, field
 
 __all__ = [
@@ -14,6 +15,16 @@ __all__ = [
     "CancellableInterruptControllerProtocol",
     "InterruptController",
 ]
+
+
+def protect_turn(controller: Any) -> ContextManager[None]:
+    """Open a ``protect()`` window on ``controller`` if it supports one.
+
+    Controllers are optional and may be third-party implementations without
+    ``protect``; those (and ``None``) get a no-op context.
+    """
+    protect = getattr(controller, "protect", None)
+    return protect() if protect is not None else nullcontext()
 
 
 class InterruptControllerProtocol(Protocol):
@@ -88,7 +99,30 @@ class InterruptController:
     _cancelled_turns: Set[int] = field(default_factory=set, init=False, repr=False)
     _next_turn_id: int = field(default=0, init=False, repr=False)
     _pending_turn_cancel: bool = field(default=False, init=False, repr=False)
+    _protect_depth: int = field(default=0, init=False, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False, repr=False)
+
+    @contextmanager
+    def protect(self) -> Iterator[None]:
+        """Mark a window of work that should not be superseded mid-flight.
+
+        Used around foreground subagent runs and context compaction. It does
+        not block :meth:`request` (``/stop`` still cancels); it only lets a
+        caller such as the gateway's ``interrupt`` busy-mode check
+        :meth:`is_protected` and queue a new message instead.
+        """
+        with self._lock:
+            self._protect_depth += 1
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._protect_depth -= 1
+
+    def is_protected(self) -> bool:
+        """Return True while any :meth:`protect` window is open."""
+        with self._lock:
+            return self._protect_depth > 0
 
     def request(self, reason: str = "user") -> None:
         """Request cancellation with a reason.
