@@ -2848,7 +2848,8 @@ Respond with JSON: {{"approved": true/false, "reason": "Brief explanation"}}
         self._reset_approval_token()
         
         final_result = {
-            "output": previous_output,
+            # Same contract as the sequential path: no stale output on failure.
+            "output": None if self.status == "failed" else previous_output,
             "steps": results,
             "variables": all_variables,
             "status": self.status

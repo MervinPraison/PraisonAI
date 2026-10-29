@@ -167,3 +167,17 @@ def test_hierarchical_run_does_not_leak_tool_approvals(monkeypatch):
         wf.start("x")
     assert seen["active"] is True
     assert not get_approval_registry().is_yaml_approved("write_file")
+
+
+def test_failed_hierarchical_run_does_not_expose_input_as_output(monkeypatch):
+    def body(ctx):
+        return StepResult(output="b")
+
+    def raising_step(*args, **kwargs):
+        raise RuntimeError("step broke")
+
+    wf = Workflow(steps=[body], process="hierarchical")
+    monkeypatch.setattr(wf, "_execute_single_step_internal", raising_step)
+    r = wf.start("user input")
+    assert r["status"] == "failed"
+    assert r["output"] is None
