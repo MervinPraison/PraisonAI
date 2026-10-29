@@ -57,7 +57,8 @@ class SqliteSessionStore(DefaultSessionStore):
     # Bumped whenever ``_flatten`` changes what content lands in the index, so
     # a store built by an older release rebuilds its FTS rows once on upgrade.
     # v2: archived_messages included (Issue #5031).
-    INDEX_CONTENT_VERSION = 2
+    # v3: compaction summaries excluded (Issue #5051).
+    INDEX_CONTENT_VERSION = 3
 
     def __init__(
         self,
@@ -235,11 +236,16 @@ class SqliteSessionStore(DefaultSessionStore):
         Includes ``archived_messages`` (turns rolled out of the active window
         by ``retention="compact"``) ahead of the active ``messages`` so a
         compaction re-index preserves — rather than deletes — the raw turns,
-        keeping the whole conversation searchable (Issue #5031).
+        keeping the whole conversation searchable (Issue #5031). Compaction
+        summaries are skipped: search never scores them, so indexing them
+        would only spend the candidate allowance on misses (Issue #5051).
         """
         parts = []
         for msg in (*session.archived_messages, *session.messages):
             content = getattr(msg, "content", "")
+            metadata = getattr(msg, "metadata", None)
+            if isinstance(metadata, dict) and metadata.get("compaction"):
+                continue
             if content:
                 parts.append(str(content))
         return "\n".join(parts)

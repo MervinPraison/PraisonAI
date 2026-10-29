@@ -358,6 +358,27 @@ class TestArchivedRecall:
         anchor = next(m for m in hit.messages if m["index"] == hit.anchor_index)
         assert anchor["archived"]
 
+    def test_summary_only_matches_do_not_exhaust_candidates(self, tmp_dir):
+        # Unscored summaries must not be indexed, or they spend the bounded
+        # candidate allowance and hide a real match (Issue #5051, Greptile P1).
+        from praisonaiagents.session.store import SessionData, SessionMessage
+
+        store = SqliteSessionStore(session_dir=tmp_dir)
+        for i in range(6):
+            data = SessionData(session_id=f"compacted-{i}")
+            data.archived_messages.append(SessionMessage(role="user", content="hello"))
+            data.messages.append(
+                SessionMessage(
+                    role="system",
+                    content="[Session Summary]\n" + "pelican " * 20,
+                    metadata={"compaction": True},
+                )
+            )
+            store._save_session(data)
+        self._seed_with_archive(store, "real", archived=[], active=[("user", "a pelican flew by")])
+
+        assert [h.session_id for h in store.search("pelican", limit=1)] == ["real"]
+
 
 class TestIndexedSessionRoute:
     """Indexed gateway/agent routing lookups (Issue #2956)."""
