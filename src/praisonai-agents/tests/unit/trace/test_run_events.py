@@ -444,9 +444,7 @@ class TestTeamTasks:
                 return ApprovalDecision(approved=True, reason="looks good", approver="ana")
 
         registry = get_approval_registry()
-        # Save the raw slot: get_backend() falls back to a fresh ConsoleBackend,
-        # and restoring that would leave a global backend set for later files.
-        previous = registry._global_backend
+        previous = registry.get_backend()
         registry.set_backend(Reviewer())
         try:
             writer = Agent(name="Writer", instructions="write")
@@ -455,7 +453,7 @@ class TestTeamTasks:
             out = TaskOutput(description="Draft", raw="api_key=sk-secret123456 text", agent="Writer")
             team._apply_human_review(task, 0, out)
         finally:
-            registry._global_backend = previous
+            registry.set_backend(previous)
         requested, decided = _of(recorder, "approval_requested"), _of(recorder, "approval_decided")
         assert len(requested) == len(decided) == 1
         assert requested[0].data["kind"] == "task_output_review"
