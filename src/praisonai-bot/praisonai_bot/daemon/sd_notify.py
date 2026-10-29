@@ -17,8 +17,8 @@ from typing import Optional
 def sd_notify(state: str) -> bool:
     """Send ``state`` to ``$NOTIFY_SOCKET``; return True if it was delivered.
 
-    Fail-open: any socket error is swallowed so notification can never take
-    the gateway down.
+    Fail-open and non-blocking: a full receive queue or any socket error is
+    reported as False so notification can never stall or crash the gateway.
     """
     addr = os.environ.get("NOTIFY_SOCKET")
     if not addr or not hasattr(socket, "AF_UNIX"):
@@ -27,8 +27,9 @@ def sd_notify(state: str) -> bool:
         addr = "\0" + addr[1:]
     try:
         with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+            sock.setblocking(False)
             sock.connect(addr)
-            sock.sendall(state.encode())
+            sock.send(state.encode())
         return True
     except OSError:
         return False

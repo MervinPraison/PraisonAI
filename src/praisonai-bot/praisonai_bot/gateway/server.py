@@ -2791,11 +2791,16 @@ class WebSocketGateway:
                 logger.debug("Liveness task exited with error on cancel")
 
     async def _sd_notify_loop(self) -> None:
-        """Send systemd READY=1 once serving, then WATCHDOG=1 pings (#6123)."""
+        """Send systemd READY=1 once serving, then WATCHDOG=1 pings (#6123).
+
+        Until READY=1, also sends EXTEND_TIMEOUT_USEC so a long boot-time
+        recovery is not killed by ``TimeoutStartSec`` while the loop is alive.
+        """
         from ..daemon.sd_notify import sd_notify, watchdog_interval
 
         interval = watchdog_interval()
-        tick = min(interval, 0.5) if interval else 0.5
+        period = interval or 10.0
+        tick = min(period, 0.5)
         ready = False
         last_ping = 0.0
         while True:
@@ -2807,8 +2812,11 @@ class WebSocketGateway:
                 if interval is None:
                     return
             now = time.monotonic()
-            if interval and now - last_ping >= interval:
-                sd_notify("WATCHDOG=1")
+            if now - last_ping >= period:
+                if interval:
+                    sd_notify("WATCHDOG=1")
+                if not ready:
+                    sd_notify(f"EXTEND_TIMEOUT_USEC={int(period * 3_000_000)}")
                 last_ping = now
             await asyncio.sleep(tick)
 

@@ -51,6 +51,13 @@ def test_unreachable_socket_fails_open(tmp_path, monkeypatch):
     assert sd_notify("READY=1") is False
 
 
+def test_full_queue_does_not_block(notify_socket):
+    # Nobody reads the socket: once its queue fills, sends must fail fast.
+    results = [sd_notify("WATCHDOG=1") for _ in range(5000)]
+    assert results[0] is True
+    assert results[-1] is False
+
+
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="abstract ns")
 def test_abstract_namespace(monkeypatch):
     name = f"praisonai-test-{os.getpid()}"
@@ -113,6 +120,8 @@ def test_gateway_notifier_ready_watchdog_stopping(notify_socket, monkeypatch):
 
     before_ready, after = asyncio.run(scenario())
     assert "WATCHDOG=1" in before_ready  # startup is covered by the watchdog
+    assert any(m.startswith("EXTEND_TIMEOUT_USEC=") for m in before_ready)
+    assert not any(m.startswith("EXTEND_TIMEOUT_USEC=") for m in after[1:])
     assert after.count("READY=1") == 1
     assert "WATCHDOG=1" in after
     assert after[-1] == "STOPPING=1"
