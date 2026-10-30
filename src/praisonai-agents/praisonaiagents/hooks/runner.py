@@ -348,6 +348,11 @@ class HookRunner:
                     process.communicate(input=input_json),
                     timeout=timeout
                 )
+            except asyncio.CancelledError:
+                # Caller cancelled (e.g. a shutdown deadline): don't orphan the child.
+                if process.returncode is None:
+                    process.kill()
+                raise
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
