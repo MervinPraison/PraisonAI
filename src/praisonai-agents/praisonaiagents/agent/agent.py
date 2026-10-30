@@ -7223,7 +7223,7 @@ Answer:"""
         return getattr(self, "_last_guardrail_error", None)
 
     def _guardrail_blocked_message(self, error=None):
-        """Fixed, user-facing string returned when an output guardrail blocks a run.
+        """Fixed, user-facing string returned when an input or output guardrail blocks a run.
 
         A blocked response must never surface the rejected (potentially unsafe)
         model text, but it must also never be ``None`` - callers expect a
