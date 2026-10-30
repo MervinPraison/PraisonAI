@@ -681,37 +681,6 @@ def list_tools() -> List[str]:
     return get_registry().list_tools()
 
 
-def get_tool_definitions(
-    permission_resolver: Optional[Callable[[str], bool]] = None,
-) -> List[Dict[str, Any]]:
-    """Get OpenAI-compatible tool definitions with dynamic schema overrides applied.
-    
-    This is the main entry point for getting tool schemas that respects
-    dynamic overrides. Called every time tools need to be passed to the LLM.
-    
-    Args:
-        permission_resolver: Optional ``(tool_name) -> bool`` filter; denied
-            tools are dropped from the advertised schema (deny = hide).
-    
-    Returns:
-        List of OpenAI-compatible tool definition dictionaries
-    """
-    return get_registry().get_tool_definitions(permission_resolver=permission_resolver)
-
-
-def discover_plugins() -> int:
-    """Discover and load tools from single-file plugins.
-    
-    Scans default plugin directories for WordPress-style plugins:
-    - ./.praisonai/plugins/ (project-level)
-    - ~/.praisonai/plugins/ (user-level)
-    
-    Returns:
-        Number of plugins loaded
-    """
-    return get_registry().discover_single_file_plugins()
-
-
 def list_available_tools(
     context: Optional[Dict[str, Any]] = None, 
     ttl_seconds: Optional[float] = None
