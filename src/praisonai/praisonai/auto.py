@@ -684,8 +684,9 @@ class BaseAutoGenerator:
         Consults ``praisonai.llm.registry`` so a provider registered via
         ``register_llm_provider(...)`` becomes reachable from AutoGenerator (and
         every generator inheriting from it). Only providers that are (a) NOT a
-        built-in litellm/gateway prefix and (b) opt in by exposing an async
-        ``generate_structured(response_model, messages, **kwargs)`` are used;
+        built-in litellm/gateway prefix and (b) opt in by exposing a sync or async
+        ``generate_structured(response_model, messages, **kwargs)`` are used
+        (sync ones are offloaded to a worker thread);
         everything else returns ``None`` so the existing LiteLLM/OpenAI ladder
         runs unchanged. Never raises for registry issues — returns ``None``.
         """
@@ -734,8 +735,14 @@ class BaseAutoGenerator:
         generate_structured = getattr(provider, "generate_structured", None)
         if not callable(generate_structured):
             return None
+        if _inspect.iscoroutinefunction(generate_structured):
+            return await generate_structured(response_model, messages, **kwargs)
+        # Sync provider: offload so a blocking call never parks the loop this
+        # coroutine runs on (the caller's loop or the shared bridge loop).
         return await _maybe_await(
-            generate_structured(response_model, messages, **kwargs)
+            await asyncio.to_thread(
+                generate_structured, response_model, messages, **kwargs
+            )
         )
 
     async def _completion_impl(
