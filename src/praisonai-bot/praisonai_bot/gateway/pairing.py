@@ -371,8 +371,13 @@ class PairingStore:
         channel_type: str,
         label: str = "",
     ) -> bool:
-        """Validate identity and platform before atomically consuming a code."""
+        """Consume a valid code only after matching platform and requester.
+
+        Invalid or mismatched requests count towards lockout but do not consume
+        a pending request; successful pairing clears the failure count.
+        """
         if self._locked_out(channel_type):
+            logger.warning("Pairing verification locked out for channel type %s", channel_type)
             return False
 
         with self._transaction():

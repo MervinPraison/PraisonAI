@@ -62,7 +62,7 @@ def test_deny_consumes_without_creating_pair(tmp_path, monkeypatch):
     result = asyncio.run(handler.handle_approval_callback("signed", "owner", SimpleNamespace()))
     assert result.success
     assert pairing.list_paired() == []
-    assert not pairing.verify_and_pair(code, None, "telegram")
+    assert not pairing.verify_and_pair(code, "requester", "telegram")
 
 
 def test_existing_instances_see_approvals_and_revocations(tmp_path):
