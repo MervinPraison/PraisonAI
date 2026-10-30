@@ -65,6 +65,8 @@ export class FileMemory {
     try {
       const fs = await import('fs/promises');
       const content = await fs.readFile(this.filePath, 'utf-8').catch(() => '');
+      // A previous instance may have left a record without its final newline.
+      this.appendNeedsSeparator = content.length > 0 && !content.endsWith('\n');
 
       if (content) {
         const lines = content.trim().split('\n').filter(Boolean);

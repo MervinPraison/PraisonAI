@@ -87,4 +87,21 @@ describe('FileMemory write recovery', () => {
     const reopened = new FileMemory({ filePath });
     expect(await reopened.getAll()).toEqual([initial, recovered, later]);
   });
+
+  test.each([
+    ['incomplete JSON', false],
+    ['complete JSON', true],
+  ] as const)('preserves new records after loading an unterminated %s line', async (_, complete) => {
+    const filePath = path.join(tempDir, 'memory.jsonl');
+    const original = new FileMemory({ filePath });
+    const initial = await original.add('Before restart', 'user');
+    const last = { id: 'last-record', content: 'Last record', role: 'user', timestamp: initial.timestamp };
+    const tail = complete ? JSON.stringify(last) : '{"id":"interrupted","content":';
+    await fs.appendFile(filePath, tail);
+
+    const restarted = new FileMemory({ filePath });
+    const recovered = await restarted.add('After restart', 'assistant');
+    const reopened = new FileMemory({ filePath });
+    expect(await reopened.getAll()).toEqual(complete ? [initial, last, recovered] : [initial, recovered]);
+  });
 });
