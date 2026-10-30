@@ -200,8 +200,16 @@ class _ChannelBotOS:
     so the scheduled/hook delivery path can reuse the router unchanged.
     """
 
-    def __init__(self, channel_bots: Dict[str, Any]) -> None:
+    def __init__(
+        self, channel_bots: Dict[str, Any], hook_runner: Optional[Any] = None,
+    ) -> None:
         self._channel_bots = channel_bots
+        # #6140: zero-arg factory so the router can fire MESSAGE_UNDELIVERED
+        # on the gateway's outbound hooks (None → no hook runner, as before).
+        self._hook_runner = hook_runner
+
+    def _get_hook_runner(self) -> Optional[Any]:
+        return self._hook_runner() if self._hook_runner is not None else None
 
     def list_bots(self) -> List[str]:
         return list(self._channel_bots.keys())
@@ -3927,6 +3935,8 @@ class WebSocketGateway:
 
         if self._hook_coalescer is not None:
             await self._hook_coalescer.aclose()
+
+        await self._stop_outbound_hooks()
         
         self._is_running = False
         
@@ -6169,6 +6179,41 @@ class WebSocketGateway:
                     event, command, name=f"outbound:{event.value}", timeout=timeout,
                 ))
 
+    def _outbound_hook_runner(self) -> Optional[Any]:
+        """HookRunner over the default registry when outbound hooks exist (#6140)."""
+        if not getattr(self, "_outbound_hook_ids", None):
+            return None
+        from praisonaiagents.hooks import HookRunner, get_default_registry
+
+        return HookRunner(registry=get_default_registry())
+
+    async def _stop_outbound_hooks(self) -> None:
+        """Fire ``gateway_stop`` on outbound hooks, then unregister them (#6140)."""
+        runner = self._outbound_hook_runner()
+        if runner is None:
+            return
+        try:
+            import time
+
+            from praisonaiagents.hooks.events import GatewayStopInput
+            from praisonaiagents.hooks.types import HookEvent
+
+            platforms = list(getattr(self, "_channel_bots", {}) or {})
+            await runner.execute(HookEvent.GATEWAY_STOP, GatewayStopInput(
+                session_id="", cwd=os.getcwd(), event_name=HookEvent.GATEWAY_STOP,
+                timestamp=str(time.time()), agent_name="gateway",
+                platforms=platforms, bot_count=len(platforms), reason="stop",
+            ))
+        except Exception:
+            logger.debug("GATEWAY_STOP outbound hook failed", exc_info=True)
+        finally:
+            from praisonaiagents.hooks import get_default_registry
+
+            registry = get_default_registry()
+            for hook_id in self._outbound_hook_ids:
+                registry.unregister(hook_id)
+            self._outbound_hook_ids = []
+
     def _get_hook_idem_store(self) -> Any:
         """Build (once) and return the inbound idempotency store (#4208).
 
@@ -6447,7 +6492,7 @@ class WebSocketGateway:
         except Exception as e:  # pragma: no cover - defensive
             logger.debug("DeadTargetRegistry unavailable: %s", e)
             self._dead_targets = None
-        botos = _ChannelBotOS(self._channel_bots)
+        botos = _ChannelBotOS(self._channel_bots, self._outbound_hook_runner)
         # Close-the-loop on permanent delivery failure (issue #3297): opt-in via
         # ``gateway.notify_on_undelivered``. Default OFF so behaviour is
         # unchanged; when enabled, a permanent failure fires MESSAGE_UNDELIVERED

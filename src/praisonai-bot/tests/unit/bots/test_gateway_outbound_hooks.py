@@ -82,3 +82,28 @@ def test_schema_rejects_unknown_event():
     GatewayServerSchema(hooks_outbound=[{"command": "x", "events": ["session_end"]}])
     with pytest.raises(ValueError, match="Unknown hook event"):
         GatewayServerSchema(hooks_outbound=[{"command": "x", "events": ["sesion_end"]}])
+
+
+def test_stop_fires_gateway_stop_then_unregisters(srv, tmp_path):
+    out = tmp_path / "stop.json"
+    cmd = f'{sys.executable} -c "import sys; open(r\'{out}\', \'w\').write(sys.stdin.read())"'
+    srv._channel_bots = {"telegram": object()}
+    srv._apply_hooks_from_config(_cfg({"command": cmd, "events": ["gateway_stop"]}))
+    asyncio.run(srv._stop_outbound_hooks())
+    payload = json.loads(out.read_text())
+    assert payload["platforms"] == ["telegram"] and payload["reason"] == "stop"
+    assert srv._outbound_hook_ids == []
+    assert not any(
+        (h.name or "").startswith("outbound:")
+        for h in get_default_registry().get_hooks(HookEvent.GATEWAY_STOP)
+    )
+
+
+def test_channel_botos_exposes_outbound_runner_for_undelivered(srv):
+    from praisonai_bot.gateway.server import _ChannelBotOS
+
+    botos = _ChannelBotOS({}, srv._outbound_hook_runner)
+    assert botos._get_hook_runner() is None  # no outbound hooks → no runner
+    srv._apply_hooks_from_config(_cfg({"command": "true", "events": ["message_undelivered"]}))
+    assert isinstance(botos._get_hook_runner(), HookRunner)
+    assert _ChannelBotOS({})._get_hook_runner() is None
