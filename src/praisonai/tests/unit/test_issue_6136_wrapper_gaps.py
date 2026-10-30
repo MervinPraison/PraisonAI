@@ -16,16 +16,27 @@ def test_tools_lazy_attr_is_stable_and_uses_lazy_cache():
         tools.does_not_exist
 
 
-def test_replay_runner_uses_async_bridge_for_awaitables():
+def test_replay_runner_records_async_target_through_real_bridge(tmp_path, monkeypatch):
+    import json
+
     from praisonai.replay import live
+    from praisonaiagents.trace.context_events import get_context_emitter
+
+    monkeypatch.setenv("PRAISONAI_TRACES_DIR", str(tmp_path))
+    caller = threading.get_ident()
+    seen = {}
 
     async def target(text):
-        return text
+        seen["thread"] = threading.get_ident()
+        get_context_emitter().agent_start("bridge-agent", {"input": text})
 
-    calls = []
-    with patch("praisonai._async_bridge.run_cli_coro", side_effect=lambda c: calls.append(asyncio.run(c))):
-        live._runner(target)("hi", "run-6136")
-    assert calls == ["hi"]
+    live._runner(target)("hi", "run-6136")
+
+    assert seen["thread"] != caller  # ran on the bridge loop, not a fresh asyncio.run
+    events = [json.loads(line) for line in (tmp_path / "run-6136.jsonl").read_text().splitlines() if line.strip()]
+    agent_events = [e for e in events if e.get("agent_name") == "bridge-agent"]
+    assert agent_events, events  # contextvars-bound emitter reached the bridge thread
+    assert all(e.get("session_id") == "run-6136" for e in agent_events)
 
 
 def test_sync_registered_provider_is_offloaded_off_the_loop():
