@@ -239,6 +239,13 @@ def is_recoverable_error(err: BaseException, platform: str = "") -> bool:
     
     # Platform-specific checks
     if platform == "telegram":
+        try:
+            from telegram.error import NetworkError
+        except ImportError:
+            pass  # Telegram remains an optional dependency for other adapters.
+        else:
+            if isinstance(err, NetworkError):
+                return True
         for pattern in _TELEGRAM_RECOVERABLE:
             if pattern in msg:
                 return True
