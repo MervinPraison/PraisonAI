@@ -101,15 +101,19 @@ def test_delegate_task_timeout_exceeded(monkeypatch):
 
     def factory(*, agent_factory=None, **kwargs):
         def spawn(task, agent_name=None, **kw):
-            time.sleep(2)
+            time.sleep(4)
             return {"success": True, "output": "too late", "agent_name": agent_name}
         return {"function": spawn}
 
     monkeypatch.setattr(delegation_tools, "create_subagent_tool", factory)
+    start = time.monotonic()
     raw = DelegationTools().delegate_task("Slow task", agent_type="research", timeout=1)
+    elapsed = time.monotonic() - start
     data = json.loads(raw)
     assert data["success"] is False
     assert "timed out" in data["error"]
+    # The caller must not wait for the abandoned worker to finish.
+    assert elapsed < 3
 
 
 def test_delegate_task_requires_approval_registered():

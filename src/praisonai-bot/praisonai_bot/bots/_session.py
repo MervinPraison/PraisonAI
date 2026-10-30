@@ -1325,7 +1325,13 @@ class BotSessionManager:
                 from praisonaiagents.session.context import (
                     register_outbound_messenger as _register_messenger,
                     clear_outbound_messenger as _clear_messenger,
+                    register_gateway_loop,
                 )
+
+                # Background workers (e.g. a ``deliver``-backed subagent)
+                # send after the turn ends; record the loop the router's
+                # adapters live on so they schedule onto it.
+                register_gateway_loop(asyncio.get_running_loop())
 
                 origin_source = None
                 if self._platform and chat_id:

@@ -26,7 +26,7 @@ from pydantic import BaseModel
 import time
 import json
 import xml.etree.ElementTree as ET
-from ..errors import AgentErrorKind, FailoverDecision, IdleTimeoutBreaker, ToolExecutionError
+from ..errors import AgentErrorKind, BudgetExceededError, FailoverDecision, IdleTimeoutBreaker, ToolExecutionError
 from ..model_harness.guard import check_model_request
 # Gap 2: Tool call execution imports
 from ..tools.call_executor import ToolCall, create_tool_call_executor
@@ -343,6 +343,11 @@ except ImportError:
 # (Agent.chat → _chat_completion) are separate code paths, not duplicate
 # API calls per request. This is a DRY/maintenance concern, not a billing issue.
 from ..tools.hosted import is_hosted_tool  # noqa: E402
+
+# ``(llm, callback)`` bound by the owning Agent for one custom-LLM turn. Every
+# tracked call made by that ``llm`` reports its response to ``callback`` so the
+# Agent's cost/token counters and ``max_budget`` cover the whole tool loop.
+_usage_sink = contextvars.ContextVar("praisonai_llm_usage_sink", default=None)
 
 
 class LLMResponseError(Exception):
@@ -817,7 +822,9 @@ Respond with ONLY a valid JSON tool call in this format:
         # Rate limiting and retry settings
         self._rate_limiter = extra_settings.get('rate_limiter', None)
         self._max_retries = extra_settings.get('max_retries', 3)
-        self._retry_delay = extra_settings.get('retry_delay', 60)  # Default 60 seconds
+        # Fixed delay applies only when explicitly configured; otherwise use jitter.
+        self._retry_delay = extra_settings.get('retry_delay', 60)
+        self._retry_delay_explicit = 'retry_delay' in extra_settings
         
         # Subscription auth
         self._auth_provider_id = auth
@@ -1066,7 +1073,7 @@ Respond with ONLY a valid JSON tool call in this format:
         else:
             return False
 
-    def _parse_retry_delay(self, error_message: Union[Exception, str]) -> float:
+    def _parse_retry_delay(self, error_message: Union[Exception, str]) -> Optional[float]:
         """Parse retry delay from a rate limit error.
 
         Args:
@@ -1074,7 +1081,7 @@ Respond with ONLY a valid JSON tool call in this format:
                 ``Retry-After`` response header is honoured) or its message
 
         Returns:
-            Retry delay in seconds, or default if not found
+            Provider delay in seconds, explicit fixed delay, or None if unspecified
         """
         # Max delay cap to prevent unbounded sleep (5 minutes default)
         max_delay = 300
@@ -1085,7 +1092,9 @@ Respond with ONLY a valid JSON tool call in this format:
 
         error = error_message if isinstance(error_message, BaseException) else Exception(error_message)
         delay = extract_retry_after(error, cap_seconds=max_delay)
-        return self._retry_delay if delay is None else delay
+        if delay is None and self._retry_delay_explicit:
+            return self._retry_delay
+        return delay
 
     def _is_rate_limit_error(self, error: Exception) -> bool:
         """Check if an exception is a rate limit error.
@@ -1303,9 +1312,10 @@ Respond with ONLY a valid JSON tool call in this format:
 
         # Rate limiting - extract retry delay
         if error_kind == "rate_limit":
-            backoff = self._parse_retry_delay(error)  # Returns seconds
-            if backoff == 0:  # No specific delay found, use exponential backoff
-                backoff = min(2 ** (attempt - 1), 60)  # 1s, 2s, 4s, ... cap at 60s
+            backoff = self._parse_retry_delay(error)
+            if backoff is None:
+                from .error_classifier import ErrorCategory, get_retry_delay
+                backoff = get_retry_delay(ErrorCategory.RATE_LIMIT, attempt)
             return FailoverDecision(
                 action="retry",
                 reason=error_kind, 
@@ -3988,7 +3998,9 @@ Respond with ONLY a valid JSON tool call in this format:
                                         # Mark that fallback completed successfully
                                         fallback_completed = True
                                         streaming_success = False
-                                        
+
+                                    except BudgetExceededError:
+                                        raise
                                     except Exception as fallback_error:
                                         # If non-streaming also fails, create a graceful fallback with partial streaming data
                                         logging.warning(f"Non-streaming fallback also failed: {fallback_error}")
@@ -4364,9 +4376,11 @@ Respond with ONLY a valid JSON tool call in this format:
                                 arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, tools)
 
                             logging.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
-                            # Capture tool failures and report them back to the model
-                            # instead of aborting the whole run (safe-by-default,
-                            # matching the async path in execution_mixin.py).
+                            # A ToolExecutionError (a tool that raised, or a terminal
+                            # framework decision such as a loop-guard HALT) ends the
+                            # turn, same as the async path in execution_mixin.py.
+                            # Any other unexpected failure here is reported back to
+                            # the model instead of aborting the whole run.
                             try:
                                 tool_result = execute_tool_fn(
                                     function_name,
@@ -4514,7 +4528,7 @@ Respond with ONLY a valid JSON tool call in this format:
                         final_response_text = response_text.strip() if response_text else ""
                         break
                         
-                except (LLMResponseError, ToolExecutionError):
+                except (LLMResponseError, ToolExecutionError, BudgetExceededError):
                     raise
                 except Exception as e:
                     logging.error(f"Error in LLM iteration {iteration_count}: {e}")
@@ -4861,6 +4875,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             interaction_displayed = True
                         return _prepare_return_value(response_text)
                     continue
+                except BudgetExceededError:
+                    raise
                 except Exception as e:
                     _get_display_functions()['display_error'](f"Error in LLM response: {str(e)}")
                     return None
@@ -6856,6 +6872,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def _track_token_usage(self, response: Any, model: str) -> Optional[TokenMetrics]:
         """Extract and track token usage from LLM response."""
+        try:
+            return self._collect_token_metrics(response, model)
+        finally:
+            # Outside the collector's error swallowing so the Agent's budget
+            # check can raise BudgetExceededError and stop the tool loop.
+            sink = _usage_sink.get()
+            if sink is not None and sink[0] is self:
+                sink[1](response)
+
+    def _collect_token_metrics(self, response: Any, model: str) -> Optional[TokenMetrics]:
         if not TokenMetrics or not get_token_collector:
             return None
 

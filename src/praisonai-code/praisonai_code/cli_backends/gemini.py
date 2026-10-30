@@ -4,11 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import logging
 import os
 import subprocess
 from typing import AsyncIterator, List, Optional
 
 from ._errors import called_process_error_message
+
+logger = logging.getLogger(__name__)
 
 try:
     from praisonaiagents import (
@@ -29,7 +32,7 @@ except ImportError:
 
 DEFAULT_CONFIG = CliBackendConfig(
     command="gemini",
-    args=["--yolo", "--skip-trust", "--output-format", "text"],
+    args=["--output-format", "text"],  # Safe by default - no auto-approve
     output="text",
     input="single",
     timeout_ms=300_000,
@@ -39,8 +42,22 @@ DEFAULT_CONFIG = CliBackendConfig(
 class GeminiBackend:
     """Gemini CLI backend — delegates agent turns to ``gemini -p``."""
 
-    def __init__(self, config: Optional[CliBackendConfig] = None):
+    def __init__(self, config: Optional[CliBackendConfig] = None, unsafe: bool = False):
+        """Initialize with custom or default configuration.
+
+        Args:
+            config: Custom configuration or None for defaults
+            unsafe: If True and env PRAISONAI_GEMINI_BYPASS_PERMISSIONS=1,
+                auto-approve every tool call and skip folder trust
+        """
         self.config = copy.deepcopy(config if config is not None else DEFAULT_CONFIG)
+
+        # Bypass requires both the explicit flag and the env opt-in
+        if unsafe and os.getenv("PRAISONAI_GEMINI_BYPASS_PERMISSIONS") == "1":
+            logger.warning("SECURITY WARNING: Gemini backend running with --yolo - all tool approvals disabled!")
+            for flag in ("--yolo", "--skip-trust"):
+                if flag not in self.config.args:
+                    self.config.args.insert(0, flag)
 
     async def execute(
         self,

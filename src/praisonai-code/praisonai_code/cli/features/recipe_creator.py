@@ -265,7 +265,7 @@ Keywords: "audio", "speech", "voice", "tts", "stt", "transcribe", "speak", "narr
 
 ### VideoAgent - Video Generation
 Keywords: "video", "generate video", "create video", "animation", "sora"
-- Models: openai/sora-2, gemini/veo-3.0-generate-preview, runway/gen-3
+- Models: openai/sora-2, gemini/veo-3.1-generate-preview
 - Use `agent: VideoAgent` in the agent definition
 - Action: "Generate a video based on the prompt"
 

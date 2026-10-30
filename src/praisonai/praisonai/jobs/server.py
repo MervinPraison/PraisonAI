@@ -154,7 +154,8 @@ def create_app(
         app.add_middleware(
             CORSMiddleware,
             allow_origins=origins,
-            allow_credentials=True,
+            # Never pair credentials with "*" (Starlette reflects the Origin).
+            allow_credentials="*" not in origins,
             allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
             allow_headers=["Authorization", "Content-Type", "Origin", "Accept", "Idempotency-Key"],
         )

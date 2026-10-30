@@ -135,20 +135,29 @@ def _get_display_tool_call():
         _display_tool_call = display_tool_call
     return _display_tool_call
 
+# Sampling params reasoning models reject (same set as ``llm.py``).
+_REASONING_UNSUPPORTED_PARAMS = (
+    "temperature", "top_p", "presence_penalty", "frequency_penalty", "logit_bias",
+)
+
 def _normalize_chat_params(params: Dict[str, Any]) -> Dict[str, Any]:
     """Make Chat Completions params acceptable to reasoning models (#5909).
 
     An unset ``temperature``/``max_tokens`` is omitted rather than sent as
     JSON ``null``, which reasoning models reject; an explicit ``max_tokens``
-    becomes ``max_completion_tokens`` for them (mirrors ``llm.py``).
+    becomes ``max_completion_tokens`` for them and unsupported sampling
+    params are dropped (mirrors ``llm.py``, #6128).
     """
     for key in ("temperature", "max_tokens"):
         if key in params and params[key] is None:
             del params[key]
-    if "max_tokens" in params:
+    if any(key in params for key in ("max_tokens",) + _REASONING_UNSUPPORTED_PARAMS):
         from .model_capabilities import is_reasoning_model
         if is_reasoning_model(params.get("model") or ""):
-            params.setdefault("max_completion_tokens", params.pop("max_tokens"))
+            if "max_tokens" in params:
+                params.setdefault("max_completion_tokens", params.pop("max_tokens"))
+            for key in _REASONING_UNSUPPORTED_PARAMS:
+                params.pop(key, None)
     return params
 
 # Constants
@@ -193,6 +202,7 @@ class CompletionUsage:
     prompt_tokens_details: Optional[PromptTokensDetails] = None
     prompt_cache_hit_tokens: int = 0
     prompt_cache_miss_tokens: int = 0
+    cost: Optional[float] = None
 
 @dataclass
 class ChatCompletion:
@@ -250,6 +260,8 @@ def process_stream_chunks(chunks):
         # Track usage
         completion_tokens = 0
         prompt_tokens = 0
+        cached_tokens = 0
+        reported_cost = None
         
         content_list = []
         reasoning_list = []
@@ -266,6 +278,11 @@ def process_stream_chunks(chunks):
             if chunk_usage:
                 completion_tokens = getattr(chunk_usage, "completion_tokens", 0) or completion_tokens
                 prompt_tokens = getattr(chunk_usage, "prompt_tokens", 0) or prompt_tokens
+                details = getattr(chunk_usage, "prompt_tokens_details", None)
+                cached_tokens = getattr(details, "cached_tokens", 0) or cached_tokens
+                chunk_cost = getattr(chunk_usage, "cost", None)
+                if isinstance(chunk_cost, (int, float)):
+                    reported_cost = chunk_cost
 
             if not hasattr(chunk, "choices") or not chunk.choices:
                 continue
@@ -343,7 +360,8 @@ def process_stream_chunks(chunks):
             prompt_tokens=prompt_tokens,
             total_tokens=completion_tokens + prompt_tokens,
             completion_tokens_details=CompletionTokensDetails(),
-            prompt_tokens_details=PromptTokensDetails()
+            prompt_tokens_details=PromptTokensDetails(cached_tokens=cached_tokens),
+            cost=reported_cost,
         )
         
         return ChatCompletion(
@@ -915,7 +933,10 @@ class OpenAIClient:
 
         # ── Scalar params ────────────────────────────────────────────────
         if temperature is not None:
-            params["temperature"] = temperature
+            from .model_capabilities import is_reasoning_model
+            # Reasoning models reject sampling params (#6128).
+            if not is_reasoning_model(model):
+                params["temperature"] = temperature
 
         return params
 

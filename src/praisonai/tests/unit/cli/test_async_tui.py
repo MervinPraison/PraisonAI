@@ -368,13 +368,18 @@ class TestNewSlashCommands:
     def test_cost_command(self):
         """Test /cost command shows token usage."""
         from praisonai.cli.interactive.async_tui import AsyncTUI
-        
-        tui = AsyncTUI()
-        tui._total_tokens = 100
-        tui._total_cost = 0.001
-        result = tui._handle_command("/cost")
-        assert result is True
-        assert "100" in tui.messages[0].content
+        from praisonaiagents.telemetry.token_collector import TokenMetrics, get_token_collector
+
+        collector = get_token_collector()
+        collector.reset()
+        try:
+            collector.track_tokens("gpt-4o-mini", "a", TokenMetrics(input_tokens=60, output_tokens=40))
+            tui = AsyncTUI()
+            result = tui._handle_command("/cost")
+            assert result is True
+            assert "100" in tui.messages[0].content
+        finally:
+            collector.reset()
     
     def test_compact_display_command(self):
         """/compact-display toggles compact *output* mode.

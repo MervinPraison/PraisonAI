@@ -115,11 +115,14 @@ class AgentOS:
             openapi_url=self.config.openapi_url,
         )
         
-        # Add CORS middleware
+        # Add CORS middleware. Credentials are never combined with a "*"
+        # origin: Starlette would reflect any caller's Origin back, letting
+        # arbitrary sites make credentialed requests.
+        cors_origins = list(self.config.cors_origins or [])
         app.add_middleware(
             CORSMiddleware,
-            allow_origins=self.config.cors_origins,
-            allow_credentials=True,
+            allow_origins=cors_origins,
+            allow_credentials="*" not in cors_origins,
             allow_methods=["*"],
             allow_headers=["*"],
         )

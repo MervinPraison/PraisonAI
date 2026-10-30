@@ -122,6 +122,7 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
     """
     
     _outbound_platform = "slack"
+    _mention_template = "<@{}>"
     
     def __init__(
         self,

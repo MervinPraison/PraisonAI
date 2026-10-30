@@ -14,7 +14,7 @@ import warnings
 warnings.filterwarnings("ignore", "Valid config keys have changed in V2", UserWarning)
 class ImageGenerationConfig(BaseModel):
     """Configuration for image generation settings."""
-    style: str = Field(default="natural", description="Style of the generated image")
+    style: Optional[str] = Field(default=None, description="Style of the generated image (only sent when set)")
     response_format: str = Field(default="url", description="Format of the response (url or b64_json)")
     timeout: int = Field(default=600, description="Timeout in seconds for the API call")
     api_base: Optional[str] = Field(default=None, description="Optional API base URL")
@@ -36,7 +36,7 @@ class ImageAgent(Agent):
         backstory: Optional[str] = None,
         instructions: Optional[str] = None,
         llm: Optional[Union[str, Any]] = None,
-        style: str = "natural",
+        style: Optional[str] = None,
         response_format: str = "url",
         timeout: int = 600,
         api_base: Optional[str] = None,
@@ -163,10 +163,14 @@ class ImageAgent(Agent):
             # Gemini provider doesn't support response_format parameter
             # Apply this filter if provider is explicitly 'gemini' or as fallback for gemini models
             config.pop('response_format', None)
-        elif custom_llm_provider == "openai" and config.get('response_format') == "url":
-            # "url" is OpenAI's default for DALL-E and is rejected by models that
-            # don't accept response_format (e.g. gpt-image), so don't send it
-            config.pop('response_format', None)
+        elif custom_llm_provider == "openai":
+            if config.get('response_format') == "url":
+                # "url" is OpenAI's default for DALL-E and is rejected by models that
+                # don't accept response_format (e.g. gpt-image), so don't send it
+                config.pop('response_format', None)
+            if 'dall-e-3' not in model_name.lower():
+                # Only dall-e-3 accepts 'style'; other OpenAI image models reject it
+                config.pop('style', None)
         from rich.progress import Progress, SpinnerColumn, TextColumn
         with Progress(
             SpinnerColumn(),
