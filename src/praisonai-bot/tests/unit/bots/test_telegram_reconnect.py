@@ -5,6 +5,10 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+# python-telegram-bot is an optional platform SDK (same as discord in
+# test_outbound_media.py); skip when it is not installed.
+pytest.importorskip("telegram")
+
 from telegram.error import NetworkError, TimedOut
 from telegram.ext import Application, MessageHandler
 
