@@ -152,6 +152,7 @@ export class FileMemory {
    */
   async getRecent(count: number): Promise<MemoryEntry[]> {
     const all = await this.getAll();
+    if (count === 0) return [];
     return all.slice(-count);
   }
 
@@ -262,7 +263,7 @@ export class FileMemory {
    * Build context string from recent memory
    */
   async buildContext(count?: number): Promise<string> {
-    const entries = count ? await this.getRecent(count) : await this.getAll();
+    const entries = count !== undefined ? await this.getRecent(count) : await this.getAll();
     return entries
       .map(e => `${e.role}: ${e.content}`)
       .join('\n');
