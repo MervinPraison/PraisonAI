@@ -249,8 +249,18 @@ class _AgentServerRegistry:
             except KeyboardInterrupt:
                 print("\nServers stopped")
 
-        import atexit
-        atexit.register(_wait)
+        # Wait before Python shuts down thread pools: plain atexit runs after
+        # concurrent.futures' exit hook, so request handlers that use
+        # run_in_executor would fail. threading atexits run in reverse order,
+        # so registering after concurrent.futures.thread is imported runs first.
+        import concurrent.futures.thread  # noqa: F401
+        import threading
+        register = getattr(threading, "_register_atexit", None)
+        if register is not None:
+            register(_wait)
+        else:  # pragma: no cover - non-CPython fallback
+            import atexit
+            atexit.register(_wait)
 
 
 # Module level — single registry instance shared by every launch() call site.

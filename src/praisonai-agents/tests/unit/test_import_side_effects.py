@@ -69,3 +69,33 @@ def test_execute_tool_async_tool_inside_running_loop():
         return server.execute_tool("async_hi", {"x": "b"})
 
     assert asyncio.run(main()) == "hi b"
+
+
+def test_keep_alive_runs_before_executor_shutdown(tmp_path):
+    """Server handlers use run_in_executor; it must still work while the
+    script-end keep-alive is waiting (i.e. before thread pools shut down)."""
+    script = tmp_path / "s.py"
+    script.write_text(textwrap.dedent(
+        """
+        import os, signal, threading, time
+        from concurrent.futures import ThreadPoolExecutor
+        from praisonaiagents.agent.server_registry import _server_registry
+
+        _server_registry._started[0] = True
+        _server_registry.keep_alive_at_exit()
+
+        def handler():
+            while not threading._SHUTTING_DOWN:
+                time.sleep(0.05)
+            time.sleep(0.2)
+            print(ThreadPoolExecutor().submit(lambda: "served").result(), flush=True)
+            os.kill(os.getpid(), signal.SIGINT)
+
+        threading.Thread(target=handler, daemon=True).start()
+        """
+    ))
+    out = subprocess.run(
+        [sys.executable, str(script)], capture_output=True, text=True, timeout=30
+    )
+    assert "served" in out.stdout, out.stderr
+    assert "Servers stopped" in out.stdout
