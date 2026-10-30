@@ -31,12 +31,12 @@ def test_auth_rate_limiter():
 async def test_pairing_store():
     store = PairingStore()
     
-    # generate code
-    code = store.generate_code()
+    # generate code (codes are bound to the platform they were issued for)
+    code = store.generate_code(channel_type="test_channel")
     assert len(code) == 8
     
     # generate a few to fill store
-    code2 = store.generate_code()
+    code2 = store.generate_code(channel_type="test_channel")
     
     # simulate user verifying
     device_id = "dev_123"
