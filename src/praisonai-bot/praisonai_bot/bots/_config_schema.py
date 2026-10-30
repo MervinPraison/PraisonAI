@@ -946,6 +946,9 @@ class GatewayServerSchema(BaseModel):
     forensics: Optional[Dict[str, Any]] = None
     # Hooks may be nested under ``gateway:`` for grouping
     hooks: Optional[List["HookSchema"]] = None
+    # Outbound lifecycle sinks (#6140): shell commands run on core hook events
+    # (event JSON on stdin) — the config-only counterpart to inbound ``hooks``.
+    hooks_outbound: Optional[List["OutboundHookSchema"]] = None
 
     @field_validator("overflow_policy")
     @classmethod
@@ -1043,8 +1046,28 @@ class HookSchema(BaseModel):
         return v
 
 
-# Resolve the forward reference to ``HookSchema`` in
-# ``GatewayServerSchema.hooks`` now that ``HookSchema`` is defined.
+class OutboundHookSchema(BaseModel):
+    """``gateway.hooks_outbound[]`` — a core ``CommandHook`` on lifecycle events (#6140)."""
+    model_config = ConfigDict(extra="forbid", allow_inf_nan=False)
+
+    command: str = Field(min_length=1)
+    events: List[str] = Field(min_length=1)
+    timeout: float = Field(default=30.0, gt=0)
+
+    @field_validator("events")
+    @classmethod
+    def validate_events(cls, v: List[str]) -> List[str]:
+        from praisonaiagents.hooks.types import HookEvent
+
+        allowed = {e.value for e in HookEvent}
+        bad = [e for e in v if e not in allowed]
+        if bad:
+            raise ValueError(f"Unknown hook event(s): {', '.join(bad)}")
+        return v
+
+
+# Resolve the forward references to ``HookSchema``/``OutboundHookSchema`` in
+# ``GatewayServerSchema`` now that both are defined.
 GatewayServerSchema.model_rebuild()
 
 

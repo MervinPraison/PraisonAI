@@ -1427,6 +1427,37 @@
       "title": "HookSchema",
       "type": "object"
     },
+    "OutboundHookSchema": {
+      "additionalProperties": false,
+      "description": "``gateway.hooks_outbound[]`` \u2014 a core ``CommandHook`` on lifecycle events (#6140).",
+      "properties": {
+        "command": {
+          "minLength": 1,
+          "title": "Command",
+          "type": "string"
+        },
+        "events": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Events",
+          "type": "array"
+        },
+        "timeout": {
+          "default": 30.0,
+          "exclusiveMinimum": 0,
+          "title": "Timeout",
+          "type": "number"
+        }
+      },
+      "required": [
+        "command",
+        "events"
+      ],
+      "title": "OutboundHookSchema",
+      "type": "object"
+    },
     "GatewayServerSchema": {
       "additionalProperties": false,
       "description": "Typed schema for the ``gateway:`` server block (issue #3050).\n\nReplaces the previous opaque ``Dict[str, Any]`` so a misspelled or\nmistyped server knob (``drain_timout``, ``\"10s\"`` instead of ``10``) is\nrejected at load time with a friendly, field-named error instead of being\nsilently dropped and running with the default. Field names/types/ranges\nmirror core's ``praisonaiagents.gateway.config.GatewayConfig`` so there is\none definition of a gateway server setting.\n\n``extra=\"forbid\"`` surfaces unknown keys; ``hooks`` is validated as a\nnested list here too since the runtime accepts hooks nested under\n``gateway:``.",
@@ -1911,6 +1942,21 @@
           ],
           "default": null,
           "title": "Hooks"
+        },
+        "hooks_outbound": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/OutboundHookSchema"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hooks Outbound"
         }
       },
       "title": "GatewayServerSchema",
