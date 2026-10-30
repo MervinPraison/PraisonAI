@@ -1808,6 +1808,19 @@
           "default": null,
           "title": "Undelivered Template"
         },
+        "notifications": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notifications"
+        },
         "api": {
           "anyOf": [
             {

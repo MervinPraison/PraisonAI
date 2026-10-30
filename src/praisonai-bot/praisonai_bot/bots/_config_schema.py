@@ -928,6 +928,10 @@ class GatewayServerSchema(BaseModel):
     # best-effort sends a short plain-text notice on the same channel.
     notify_on_undelivered: Optional[bool] = None
     undelivered_template: Optional[str] = None
+    # Notification policy (#6138): ``{defaults: {...}, recipients: {"<platform>:
+    # <channel_id>": {categories, quiet_hours, timezone, detail}}}`` gating
+    # categorised proactive sends (scheduled results = ``agent_finished``).
+    notifications: Optional[Dict[str, Any]] = None
     # Additive protocol surfaces (#2715), liveness (#2798), health monitor
     api: Optional[Dict[str, Any]] = None
     liveness: Optional[Dict[str, Any]] = None
@@ -950,6 +954,19 @@ class GatewayServerSchema(BaseModel):
             raise ValueError(
                 "overflow_policy must be one of 'reject', 'queue', 'shed_oldest'"
             )
+        return v
+
+    @field_validator("notifications")
+    @classmethod
+    def validate_notifications(
+        cls, v: Optional[Dict[str, Any]]
+    ) -> Optional[Dict[str, Any]]:
+        # Fail at load on an unknown category/detail or malformed quiet_hours
+        # rather than silently at send time.
+        if v:
+            from ._notifications import NotificationGate
+
+            NotificationGate(v)
         return v
 
 

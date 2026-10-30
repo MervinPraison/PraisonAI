@@ -1053,6 +1053,10 @@ class WebSocketGateway:
         )
         if undelivered_template is not None:
             config.undelivered_template = undelivered_template
+        # Notification policy (#6138): stamped the same way; the router gates
+        # categorised proactive sends with it.
+        if gateway_config.get("notifications"):
+            config.notifications = gateway_config["notifications"]
 
         logger.info(f"Gateway config loaded from {config_path}")
         return cls(config=config)
@@ -6406,6 +6410,7 @@ class WebSocketGateway:
             dead_targets=self._dead_targets,
             notify_on_undelivered=notify_on_undelivered,
             undelivered_template=undelivered_template,
+            notifications=getattr(self.config, "notifications", None),
         )
         return self._delivery_router
 
@@ -7587,14 +7592,18 @@ class WebSocketGateway:
             # to the already-``sent`` row and is skipped on drain — no
             # double-post. The router remains the sender (throttle + dead-target
             # + LRU), so those guarantees are preserved on top of durability.
+            # A scheduled result is an ``agent_finished`` notification (#6138):
+            # the configured ``gateway.notifications`` policy decides whether and
+            # how much of it reaches this recipient.
+            notify = {"category": "agent_finished", "identity": session_id}
             outbox = self.scheduled_outbox
             if outbox is not None:
                 delivered = await self._deliver_via_outbox(
-                    outbox, router, route, text, idem,
+                    outbox, router, route, text, idem, **notify,
                 )
             else:
                 delivered = await router.deliver(
-                    route, text, idempotency_key=idem,
+                    route, text, idempotency_key=idem, **notify,
                 )
             if delivered:
                 logger.info(
@@ -7710,6 +7719,7 @@ class WebSocketGateway:
 
     async def _deliver_via_outbox(
         self, outbox: Any, router: Any, route: str, text: str, idem: str,
+        category: Optional[str] = None, identity: Optional[str] = None,
     ) -> bool:
         """Deliver a scheduled result durably via the shared ``OutboundQueue``.
 
@@ -7726,14 +7736,20 @@ class WebSocketGateway:
             await outbox.enqueue(
                 idempotency_key=idem,
                 target=route,
-                payload={"text": text, "idempotency_key": idem},
+                payload={
+                    "text": text, "idempotency_key": idem,
+                    "category": category, "identity": identity,
+                },
             )
         except Exception as e:  # pragma: no cover - defensive
             logger.debug(
                 "Outbox enqueue failed for %s, falling back to router: %s",
                 route, e,
             )
-            return await router.deliver(route, text, idempotency_key=idem)
+            return await router.deliver(
+                route, text, idempotency_key=idem,
+                category=category, identity=identity,
+            )
 
         # The ``scheduled_outbox`` is a single shared queue, so ``drain`` may
         # process rows other than the one we just enqueued. The sender must use
@@ -7747,6 +7763,8 @@ class WebSocketGateway:
                 target,
                 payload.get("text", ""),
                 idempotency_key=payload.get("idempotency_key") or target,
+                category=payload.get("category"),
+                identity=payload.get("identity"),
             )
 
         try:
@@ -11898,6 +11916,8 @@ class WebSocketGateway:
             self.config.undelivered_template = str(
                 gw_cfg["undelivered_template"]
             )
+        if gw_cfg.get("notifications"):
+            self.config.notifications = gw_cfg["notifications"]
         # Issue #2715: additive OpenAI-compatible / MCP protocol surfaces.
         # YAML ``gateway.api: { openai: true, mcp: true }`` enables them; a
         # CLI ``--openai-api`` / ``--mcp`` override (stamped on the instance)
