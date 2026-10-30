@@ -135,20 +135,30 @@ def _get_display_tool_call():
         _display_tool_call = display_tool_call
     return _display_tool_call
 
+# Sampling parameters OpenAI reasoning models reject (same list as llm.py).
+_REASONING_UNSUPPORTED_SAMPLING = (
+    "temperature", "top_p", "presence_penalty", "frequency_penalty", "logit_bias",
+)
+
+
 def _normalize_chat_params(params: Dict[str, Any]) -> Dict[str, Any]:
     """Make Chat Completions params acceptable to reasoning models (#5909).
 
     An unset ``temperature``/``max_tokens`` is omitted rather than sent as
     JSON ``null``, which reasoning models reject; an explicit ``max_tokens``
-    becomes ``max_completion_tokens`` for them (mirrors ``llm.py``).
+    becomes ``max_completion_tokens`` for them and the sampling parameters
+    they reject are dropped (mirrors ``llm.py``).
     """
     for key in ("temperature", "max_tokens"):
         if key in params and params[key] is None:
             del params[key]
-    if "max_tokens" in params:
+    if any(key in params for key in ("max_tokens",) + _REASONING_UNSUPPORTED_SAMPLING):
         from .model_capabilities import is_reasoning_model
         if is_reasoning_model(params.get("model") or ""):
-            params.setdefault("max_completion_tokens", params.pop("max_tokens"))
+            if "max_tokens" in params:
+                params.setdefault("max_completion_tokens", params.pop("max_tokens"))
+            for key in _REASONING_UNSUPPORTED_SAMPLING:
+                params.pop(key, None)
     return params
 
 # Constants
@@ -923,8 +933,11 @@ class OpenAIClient:
             params["tool_choice"] = kwargs.pop("tool_choice", "auto")
 
         # ── Scalar params ────────────────────────────────────────────────
+        # Reasoning models reject sampling parameters (mirrors llm.py).
         if temperature is not None:
-            params["temperature"] = temperature
+            from .model_capabilities import is_reasoning_model
+            if not is_reasoning_model(model):
+                params["temperature"] = temperature
 
         return params
 
