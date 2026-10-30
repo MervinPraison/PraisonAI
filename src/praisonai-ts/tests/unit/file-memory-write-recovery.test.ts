@@ -62,4 +62,29 @@ describe('FileMemory write recovery', () => {
     const reopened = new FileMemory({ filePath });
     expect(await reopened.getAll()).toEqual([initial, second.value, later]);
   });
+
+  test.each([1, 2])('preserves later records after %i partial append failures', async (failures) => {
+    const filePath = path.join(tempDir, 'memory.jsonl');
+    const memory = new FileMemory({ filePath });
+    const initial = await memory.add('Before interruption', 'user');
+    const appendFile = fs.appendFile;
+    const failure = Object.assign(new Error('Disk full after a partial write'), { code: 'ENOSPC' });
+    let attempts = 0;
+    jest.spyOn(fs, 'appendFile').mockImplementation(async (file, data, options) => {
+      if (attempts++ < failures) {
+        // Write an actual unterminated JSON prefix before reporting failure.
+        await appendFile(file, String(data).slice(0, 20), options);
+        throw failure;
+      }
+      await appendFile(file, data, options);
+    });
+
+    for (let attempt = 0; attempt < failures; attempt++) {
+      await expect(memory.add('Interrupted write', 'user')).rejects.toBe(failure);
+    }
+    const recovered = await memory.add('Recovered write', 'assistant');
+    const later = await memory.add('Later write', 'user');
+    const reopened = new FileMemory({ filePath });
+    expect(await reopened.getAll()).toEqual([initial, recovered, later]);
+  });
 });

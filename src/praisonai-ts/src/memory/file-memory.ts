@@ -28,6 +28,7 @@ export class FileMemory {
   private initialized: boolean = false;
   private initPromise?: Promise<void>;
   private writeQueue: Promise<void> = Promise.resolve();
+  private appendNeedsSeparator: boolean = false;
 
   constructor(config: FileMemoryConfig) {
     this.filePath = config.filePath;
@@ -272,7 +273,11 @@ export class FileMemory {
     // Queue writes to ensure order
     const write = this.writeQueue.then(async () => {
       const fs = await import('fs/promises');
-      await fs.appendFile(this.filePath, JSON.stringify(entry) + '\n');
+      // A failed append may have left an unfinished JSONL line.
+      const separator = this.appendNeedsSeparator ? '\n' : '';
+      this.appendNeedsSeparator = true;
+      await fs.appendFile(this.filePath, separator + JSON.stringify(entry) + '\n');
+      this.appendNeedsSeparator = false;
     });
     // Report this write's error to its caller without blocking later writes.
     this.writeQueue = write.catch(() => {});
