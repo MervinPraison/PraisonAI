@@ -33,13 +33,12 @@ class RealtimeConfig:
     
     def __post_init__(self):
         if self.temperature is not None:
-            # stacklevel=4: __post_init__ -> dataclass __init__ -> caller, plus one
-            # frame for the warnings.warn wrapper installed by _warning_patch.
+            # stacklevel=3: __post_init__ -> dataclass __init__ -> caller.
             warnings.warn(
                 "RealtimeConfig.temperature is ignored: the GA Realtime API "
                 "does not support a session temperature.",
                 DeprecationWarning,
-                stacklevel=4,
+                stacklevel=3,
             )
 
     def to_dict(self) -> Dict[str, Any]:

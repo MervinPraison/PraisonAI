@@ -125,13 +125,10 @@ class ToolsMCPServer:
         
         func = self._tool_map[tool_name]
         
-        # Handle async functions
+        # Handle async functions (works with or without a running event loop)
         if asyncio.iscoroutinefunction(func):
-            loop = asyncio.new_event_loop()
-            try:
-                return loop.run_until_complete(func(**arguments))
-            finally:
-                loop.close()
+            from ..utils.async_bridge import run_coroutine_from_any_context
+            return run_coroutine_from_any_context(func(**arguments), timeout=None)
         
         return func(**arguments)
     
