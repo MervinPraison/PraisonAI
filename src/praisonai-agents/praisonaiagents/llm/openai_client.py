@@ -135,6 +135,11 @@ def _get_display_tool_call():
         _display_tool_call = display_tool_call
     return _display_tool_call
 
+# Sampling params reasoning models reject (same set as ``llm.py``).
+_REASONING_UNSUPPORTED_PARAMS = (
+    "temperature", "top_p", "presence_penalty", "frequency_penalty", "logit_bias",
+)
+
 def _normalize_chat_params(params: Dict[str, Any]) -> Dict[str, Any]:
     """Make Chat Completions params acceptable to reasoning models (#5909).
 
@@ -154,11 +159,6 @@ def _normalize_chat_params(params: Dict[str, Any]) -> Dict[str, Any]:
             for key in _REASONING_UNSUPPORTED_PARAMS:
                 params.pop(key, None)
     return params
-
-# Sampling params reasoning models reject (same set as ``llm.py``).
-_REASONING_UNSUPPORTED_PARAMS = (
-    "temperature", "top_p", "presence_penalty", "frequency_penalty", "logit_bias",
-)
 
 # Constants
 LOCAL_SERVER_API_KEY_PLACEHOLDER = "not-needed"
