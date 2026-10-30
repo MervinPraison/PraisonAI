@@ -107,3 +107,15 @@ def test_channel_botos_exposes_outbound_runner_for_undelivered(srv):
     srv._apply_hooks_from_config(_cfg({"command": "true", "events": ["message_undelivered"]}))
     assert isinstance(botos._get_hook_runner(), HookRunner)
     assert _ChannelBotOS({})._get_hook_runner() is None
+
+
+def test_stop_hook_bounded_by_shutdown_deadline(srv):
+    import time
+
+    srv._apply_hooks_from_config(_cfg({"command": "sleep 20", "events": ["gateway_stop"]}))
+    srv._shutdown_deadline_at = time.monotonic() + 1.5  # ~0.5s budget for the hook
+    start = time.monotonic()
+    asyncio.run(srv._stop_outbound_hooks())
+    assert time.monotonic() - start < 5
+    assert srv._outbound_hook_ids == []
+

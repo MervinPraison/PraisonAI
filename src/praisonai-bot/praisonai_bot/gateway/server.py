@@ -2780,6 +2780,8 @@ class WebSocketGateway:
             self._disarm_watchdog()
             await self._cancel_liveness_task()
             await self._cancel_sd_notify_task()
+            # #6140: SIGINT/SIGTERM unwinds here without ``stop()``; idempotent.
+            await self._stop_outbound_hooks()
             # Issue #4603: ``serve()`` returns through here on every graceful
             # termination — the SIGINT/SIGTERM handler only flips
             # ``should_exit`` and uvicorn unwinds, so ``stop()`` is not
@@ -3912,6 +3914,11 @@ class WebSocketGateway:
         # healthy shutdown never self-exits. No-op unless a watchdog is set.
         shutdown_grace = self._resolve_shutdown_grace(grace)
         self._arm_shutdown_deadline(drain_timeout + shutdown_grace)
+        # #6140: outbound gateway_stop hooks must finish inside this budget.
+        self._shutdown_deadline_at = (
+            time.monotonic() + drain_timeout + shutdown_grace
+            if self._watchdog is not None else None
+        )
         try:
             await self._stop_inner(drain_timeout)
         finally:
@@ -6193,17 +6200,26 @@ class WebSocketGateway:
         if runner is None:
             return
         try:
-            import time
-
             from praisonaiagents.hooks.events import GatewayStopInput
             from praisonaiagents.hooks.types import HookEvent
 
             platforms = list(getattr(self, "_channel_bots", {}) or {})
-            await runner.execute(HookEvent.GATEWAY_STOP, GatewayStopInput(
+            fire = runner.execute(HookEvent.GATEWAY_STOP, GatewayStopInput(
                 session_id="", cwd=os.getcwd(), event_name=HookEvent.GATEWAY_STOP,
                 timestamp=str(time.time()), agent_name="gateway",
                 platforms=platforms, bot_count=len(platforms), reason="stop",
             ))
+            # Bound by the remaining shutdown deadline (leaving 1s for the rest
+            # of teardown) so a slow hook never trips the watchdog self-exit.
+            deadline_at = getattr(self, "_shutdown_deadline_at", None)
+            if deadline_at is None:
+                await fire
+            else:
+                await asyncio.wait_for(
+                    fire, max(0.0, deadline_at - time.monotonic() - 1.0),
+                )
+        except asyncio.TimeoutError:
+            logger.warning("GATEWAY_STOP outbound hook cut short by shutdown deadline")
         except Exception:
             logger.debug("GATEWAY_STOP outbound hook failed", exc_info=True)
         finally:
