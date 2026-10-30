@@ -926,6 +926,12 @@ class OpenAIClient:
         if temperature is not None:
             params["temperature"] = temperature
 
+        # Chat Completions takes ``reasoning_effort``; the Responses API takes
+        # the same level as ``reasoning: {"effort": ...}``.
+        reasoning_effort = kwargs.get("reasoning_effort")
+        if reasoning_effort:
+            params["reasoning"] = {"effort": reasoning_effort}
+
         return params
 
     @staticmethod

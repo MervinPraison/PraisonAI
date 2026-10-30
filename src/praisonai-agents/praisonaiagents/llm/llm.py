@@ -7825,10 +7825,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             'task_name', 'task_description', 'task_id',
             'execute_tool_fn', 'stream_callback', 'emit_events',
             'console', 'reasoning_steps',
+            'reasoning_effort', 'thinking_budget',  # translated below
         }
         for k, v in kwargs.items():
             if k not in _internal and v is not None:
                 params[k] = v
+
+        # ── Reasoning effort ────────────────────────────────────────────
+        # Translate the unified level (Issue #4452) like
+        # _build_completion_params does, but in the Responses API shape
+        # ``reasoning: {"effort": ...}``. A per-call value wins over the
+        # instance setting; an explicit ``reasoning`` object is kept as is.
+        effort = kwargs.get('reasoning_effort', self.reasoning_effort)
+        if effort is not None and 'reasoning' not in params:
+            from ..thinking.effort import resolve_reasoning_params
+            native = resolve_reasoning_params(effort, params['model'])
+            if 'reasoning_effort' in native:
+                params['reasoning'] = {'effort': native['reasoning_effort']}
 
         # Match Chat Completions after merging overrides: reasoning models
         # must not regain unsupported sampling parameters through either path.
