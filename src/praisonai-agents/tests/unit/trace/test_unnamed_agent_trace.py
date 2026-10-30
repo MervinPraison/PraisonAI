@@ -237,7 +237,7 @@ def test_streamed_turn_blocked_by_guardrail_is_failed(sink):
 
     agent = Agent(name="Writer", instructions="x")
     with patch.object(agent, "_validate_input_with_guardrail", return_value=(False, None, "no")):
-        assert "blocked" in "".join(agent._start_stream("hi"))
+        assert "".join(agent._start_stream("hi")) == agent._guardrail_blocked_message()
     assert _of(sink, "agent_end")[0].data == {"status": "failed"}
 
 

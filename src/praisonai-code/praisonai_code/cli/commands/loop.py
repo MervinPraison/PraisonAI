@@ -97,6 +97,9 @@ def _run_loop(
         "completion_promise": completion_promise,
         "clear_context": clear_context,
         "observe": observe,
+        # `loop` exists to iterate: without this, the default level (suggest)
+        # maps to a single-shot caller run and the loop flags do nothing.
+        "mode": "iterative",
     }
     if level:
         autonomy_config["level"] = level
@@ -140,7 +143,8 @@ def _run_loop(
     # Run autonomous loop using unified API
     # agent.start() automatically uses run_autonomous() when autonomy=True
     try:
-        result = agent.start(prompt, timeout=timeout)
+        start_kwargs = {"timeout": timeout} if timeout else {}
+        result = agent.start(prompt, **start_kwargs)
         
         # Display result
         if result.success:

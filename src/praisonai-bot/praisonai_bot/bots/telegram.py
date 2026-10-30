@@ -501,6 +501,54 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
 
         return f"Approval {approval_id} {'resolved' if handled else 'unresolved'}"
 
+    async def _handle_callback_query(self, update: Any, context: Any) -> None:
+        """Dispatch an inline-button tap (interactive registry, then ``pair:``).
+
+        Shared by standalone :meth:`start` and the gateway's polling path so
+        both modes resolve pairing and tool-approval taps (Issue #6032).
+        """
+        query = update.callback_query
+        if not query or not query.data:
+            return
+
+        # Answer the callback query to stop loading spinner
+        await query.answer()
+
+        # Create interactive context
+        from praisonaiagents.bots import InteractiveContext
+        ctx = InteractiveContext(
+            callback_data=query.data,
+            user_id=str(query.from_user.id),
+            message_id=str(query.message.message_id) if query.message else None,
+            chat_id=str(query.message.chat_id) if query.message else None,
+            bot_adapter=self,
+            platform_data={
+                "update": update,
+                "context": context,
+                "query": query
+            }
+        )
+
+        # Try to dispatch through the interactive registry
+        handled = await self._interactive_registry.dispatch(ctx)
+
+        if not handled:
+            # Fallback: handle legacy pairing callbacks
+            if query.data.startswith("pair:"):
+                result = await self._pairing_callback_handler.handle_approval_callback(
+                    callback_data=query.data,
+                    owner_user_id=str(query.from_user.id),
+                    bot_adapter=self
+                )
+
+                # Update the message with result
+                await query.edit_message_text(
+                    text=f"{query.message.text}\n\n{result.message}",
+                    parse_mode="Markdown"
+                )
+            else:
+                logger.debug(f"Unhandled callback: {query.data}")
+
     def register_approval_backend(self, backend, target: Optional[str] = None) -> None:
         """Wire a durable :class:`PresentationApprovalBackend` to this channel.
 
@@ -1411,50 +1459,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         )
         
         # Add callback query handler for all interactive buttons
-        async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            query = update.callback_query
-            if not query or not query.data:
-                return
-            
-            # Answer the callback query to stop loading spinner
-            await query.answer()
-            
-            # Create interactive context
-            from praisonaiagents.bots import InteractiveContext
-            ctx = InteractiveContext(
-                callback_data=query.data,
-                user_id=str(query.from_user.id),
-                message_id=str(query.message.message_id) if query.message else None,
-                chat_id=str(query.message.chat_id) if query.message else None,
-                bot_adapter=self,
-                platform_data={
-                    "update": update,
-                    "context": context,
-                    "query": query
-                }
-            )
-            
-            # Try to dispatch through the interactive registry
-            handled = await self._interactive_registry.dispatch(ctx)
-            
-            if not handled:
-                # Fallback: handle legacy pairing callbacks
-                if query.data.startswith("pair:"):
-                    result = await self._pairing_callback_handler.handle_approval_callback(
-                        callback_data=query.data,
-                        owner_user_id=str(query.from_user.id),
-                        bot_adapter=self
-                    )
-                    
-                    # Update the message with result
-                    await query.edit_message_text(
-                        text=f"{query.message.text}\n\n{result.message}",
-                        parse_mode="Markdown"
-                    )
-                else:
-                    logger.debug(f"Unhandled callback: {query.data}")
-        
-        self._application.add_handler(CallbackQueryHandler(handle_callback_query))
+        self._application.add_handler(CallbackQueryHandler(self._handle_callback_query))
         
         # Add voice/audio handlers
         self._application.add_handler(

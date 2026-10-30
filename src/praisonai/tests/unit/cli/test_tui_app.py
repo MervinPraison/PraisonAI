@@ -267,15 +267,19 @@ class TestPraisonTUI:
     def test_handle_command_cost(self):
         """Test handling cost command."""
         from praisonai.cli.interactive.tui_app import PraisonTUI
-        
-        tui = PraisonTUI()
-        tui._total_tokens = 100
-        tui._total_cost = 0.01
-        
-        result = tui._handle_command("/cost")
-        assert result is True
-        assert len(tui.messages) == 1
-        assert "100" in tui.messages[0].content
+        from praisonaiagents.telemetry.token_collector import TokenMetrics, get_token_collector
+
+        collector = get_token_collector()
+        collector.reset()
+        try:
+            collector.track_tokens("gpt-4o-mini", "a", TokenMetrics(input_tokens=60, output_tokens=40))
+            tui = PraisonTUI()
+            result = tui._handle_command("/cost")
+            assert result is True
+            assert len(tui.messages) == 1
+            assert "100" in tui.messages[0].content
+        finally:
+            collector.reset()
     
     def test_handle_command_compact(self):
         """Test handling compact command."""

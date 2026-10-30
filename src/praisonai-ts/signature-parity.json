@@ -1185,7 +1185,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/agent.py:628",
+        "location": "src/praisonai-agents/praisonaiagents/agent/agent.py:631",
         "resolved_class": "Agent"
       },
       "ts_only": [
@@ -1797,7 +1797,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3478",
+        "location": "src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3657",
         "resolved_class": "ChatMixin"
       },
       "ts_only": [
@@ -1876,7 +1876,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:753",
+        "location": "src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:819",
         "resolved_class": "ExecutionMixin"
       },
       "ts_only": [
@@ -2852,7 +2852,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2591",
+        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2606",
         "resolved_class": "AgentTeam"
       },
       "ts_only": [
@@ -3329,7 +3329,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/knowledge/indexing.py:326",
+        "location": "src/praisonai-agents/praisonaiagents/knowledge/indexing.py:328",
         "resolved_class": "FileTracker"
       },
       "ts_only": [],
@@ -3766,7 +3766,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/handoff.py:358",
+        "location": "src/praisonai-agents/praisonaiagents/agent/handoff.py:391",
         "resolved_class": "Handoff"
       },
       "ts_only": [
@@ -4659,7 +4659,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:673",
+        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:678",
         "resolved_class": "LLM"
       },
       "ts_only": [

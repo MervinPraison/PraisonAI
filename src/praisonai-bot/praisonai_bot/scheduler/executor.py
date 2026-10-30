@@ -1217,11 +1217,11 @@ class ScheduledAgentExecutor:
         prior state untouched); an empty dict likewise changes nothing. No-op
         when the store has no state support.
 
-        One-shot jobs (``delete_after_run``) are already removed from the store
-        by ``claim_due`` before the run reaches here, and their state is popped
-        with them. Persisting now would recreate an orphan ``job_state`` entry
-        that nothing ever cleans up (the schedule is gone, so ``remove`` is a
-        no-op) — and which would be injected if the same explicit id is reused.
+        One-shot jobs (``delete_after_run``) are retired from the store once
+        their run completes, and their state is popped with them. Persisting
+        would recreate an orphan ``job_state`` entry that nothing ever cleans
+        up (the schedule is gone, so ``remove`` is a no-op) — and which
+        would be injected if the same explicit id is reused.
         A single-run job has no "next run" to read a watermark, so skip it.
         """
         if getattr(job, "delete_after_run", False):
@@ -1654,7 +1654,9 @@ class ScheduledAgentExecutor:
                 "no live adapter and no standalone sender for channel "
                 f"{getattr(delivery, 'channel', '')!r}"
             )
-        result = await sender(delivery, text)
+        result = sender(delivery, text)
+        if inspect.isawaitable(result):  # plugin senders may be sync (#6099)
+            result = await result
         return result is not False
 
     def _incident_tracker(self) -> Optional[Any]:

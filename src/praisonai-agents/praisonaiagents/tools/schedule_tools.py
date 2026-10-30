@@ -148,8 +148,9 @@ def schedule_add(
             default ``PRAISONAI_SCHEDULE_TIMEZONE`` is used, then UTC.
         once: When True the job is a one-shot — it is removed automatically
             after its single successful fire (maps to ``delete_after_run``).
-            Useful for ``at:`` / ``in ...`` reminders so a spent job does not
-            linger in listings.
+            A failed fire leaves it listed but disabled; a run lost to a crash
+            is recorded as ``abandoned`` and retried once. Useful for ``at:`` /
+            ``in ...`` reminders so a spent job does not linger in listings.
         max_runs: Optional run-count bound for a recurring schedule — fire at
             most this many times, then auto-remove (e.g. "remind me 3 times").
             ``0`` (default) means unbounded. Generalises ``once`` (``max_runs=1``).

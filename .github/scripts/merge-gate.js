@@ -322,6 +322,7 @@ function isStaleFinalAfterPush(comments, headPushedAt) {
     new Date(a.created_at) > new Date(b.created_at) ? a : b
   );
   const finalTime = new Date(latestFinal.created_at).getTime();
+  if (finalAnsweredWithoutReview(comments, finalTime, headTime)) return true;
   if (headTime <= finalTime + 60000) return false;
 
   // The finished reply must follow BOTH the latest FINAL trigger and HEAD, so
@@ -340,6 +341,31 @@ function isStaleFinalAfterPush(comments, headPushedAt) {
     return new Date(c.created_at).getTime() >= headTime - 60000;
   });
   return !claudeSinceHead;
+}
+
+// FINAL re-requests allowed for one HEAD before a maintainer has to look.
+const FINAL_RETRIES_PER_HEAD = 3;
+
+/**
+ * Claude answered the latest FINAL, but not with the review the gate needs (no
+ * Phase 1 table / "Final architecture review" heading), e.g. a security-only
+ * comment on an outsider-origin PR. That FINAL never completes, and because it
+ * was requested after HEAD it is not "stale" either, so without this the PR
+ * waits forever. Treat it as stale so recovery asks again (capped per HEAD).
+ */
+function finalAnsweredWithoutReview(comments, finalTime, headTime) {
+  const after = comments.filter((c) => new Date(c.created_at).getTime() > finalTime);
+  if (after.some(isClaudeFinalReplyComment)) return false;
+  const retries = comments.filter(
+    (c) => isFinalClaudeTriggerComment(c) && new Date(c.created_at).getTime() >= headTime - 60000
+  ).length;
+  if (retries >= FINAL_RETRIES_PER_HEAD) return false;
+  return after.some((c) => {
+    if (!CLAUDE_AUTOMATION_LOGINS.has(c.user?.login || '') || AUTO_ACTORS.includes(c.user?.login)) return false;
+    const body = c.body || '';
+    if (isClaudeTriggerNoise(c) || /^\s*@claude\b/i.test(body) || /^\s*SECURITY_REVIEW:/m.test(body)) return false;
+    return true;
+  });
 }
 
 function needsStaleFinalRecovery(comments, headPushedAt) {

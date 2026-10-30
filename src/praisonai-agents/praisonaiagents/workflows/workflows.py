@@ -26,6 +26,7 @@ import copy
 import time
 import logging
 import collections
+import inspect
 from praisonaiagents._logging import get_logger
 from praisonaiagents.utils.safe_path import safe_child
 from pathlib import Path
@@ -216,6 +217,22 @@ class WorkflowStepError(Exception):
         super().__init__(message)
         self.cause = cause
         self.errors = errors or []
+
+def _call_handler(handler: Callable, context: Any) -> Any:
+    """Call a step handler from a sync path, awaiting it if it is ``async def``.
+
+    Without this an async handler's coroutine was stringified as the step's
+    output and the step was reported as completed.
+    """
+    result = handler(context)
+    if inspect.isawaitable(result):
+        from ..utils.async_bridge import run_coroutine_from_any_context
+
+        async def _await(awaitable):
+            return await awaitable
+
+        result = run_coroutine_from_any_context(_await(result), timeout=None)
+    return result
 
 def _parse_json_output(output: Any, step_name: str = "step") -> Any:
     """
@@ -738,13 +755,22 @@ _replay_step_span: "contextvars.ContextVar[Optional[dict]]" = contextvars.Contex
 )
 
 
-def _replay_step_begin(flow, step, name=None, pattern=None):
-    """Emit ``step_start`` for a definition object; returns a span or None."""
+def _replay_step_begin(flow, step, name=None, pattern=None, index=None):
+    """Emit ``step_start`` for a definition object; returns a span or None.
+
+    ``index`` is the step's position inside the enclosing pattern (or the
+    flow), so one object used at two positions maps to each position's node.
+    """
     from ..trace.context_events import get_context_emitter
     emitter = get_context_emitter()
     if not emitter._enabled:
         return None
     node_id = (getattr(flow, "_replay_node_ids", None) or {}).get(id(step))
+    position = None
+    if index is not None:
+        parent = _replay_step_span.get()
+        key = (parent["node_id"], parent.get("route"), index, id(step)) if parent else (None, None, index, id(step))
+        position = (getattr(flow, "_replay_positions", None) or {}).get(key)
     if name is None:
         if node_id is not None:
             name = node_id[len("step:"):] if node_id.startswith("step:") else node_id
@@ -753,6 +779,7 @@ def _replay_step_begin(flow, step, name=None, pattern=None):
             name = pattern or _label(step)
     if node_id is None:
         node_id = f"step:{name}"
+    node_id = position or node_id
     agent = getattr(step, "agent", None) if not hasattr(step, "chat") else step
     agent = getattr(agent, "name", None) if agent is not None else None
     emitter.step_start(name, pattern=pattern, node_id=node_id, agent=agent)
@@ -804,12 +831,13 @@ def _replay_pattern(pattern):
     """Wrap a pattern executor (``_execute_route`` ...) in step_start/step_end.
 
     Top-level and nested patterns both reach the executor, so wrapping it here
-    covers every nesting level once.
+    covers every nesting level once. Callers pass ``_replay_index`` (the
+    pattern's position) so a reused pattern object maps to each position's node.
     """
     def decorate(execute):
-        def wrapper(self, step, *args, **kwargs):
+        def wrapper(self, step, *args, _replay_index=None, **kwargs):
             name = getattr(step, "name", None) if pattern == "discussion" else None
-            span = _replay_step_begin(self, step, name, pattern)
+            span = _replay_step_begin(self, step, name, pattern, _replay_index)
             if span is None:
                 return execute(self, step, *args, **kwargs)
             token = _replay_step_span.set(span)
@@ -1073,6 +1101,13 @@ class AgentFlow:
     # Reset token for the _run_generation contextvar captured at run() start and
     # consumed in run()'s finally to restore the caller's generation (nested runs).
     _run_generation_token: Any = field(default=None, repr=False, compare=False)
+
+    def _reset_approval_token(self) -> None:
+        """Reset this run's YAML-approved tools exactly once."""
+        token, self._approval_token = getattr(self, "_approval_token", None), None
+        if token is not None:
+            from ..approval import reset_yaml_approved_tools
+            reset_yaml_approved_tools(token)
 
     def _begin_run_generation(self) -> Any:
         """Stamp a fresh generation for the run starting now and publish it to the
@@ -1599,6 +1634,9 @@ class AgentFlow:
             # leave a stale generation on the outer run's thread.
             token, self._run_generation_token = self._run_generation_token, None
             self._end_run_generation(token)
+            # A raising step skips _run_impl's reset; never let YAML tool
+            # approvals outlive the run.
+            self._reset_approval_token()
             self._execution_lock.release()
 
     def to_mermaid(self) -> str:
@@ -1726,9 +1764,9 @@ class AgentFlow:
         visit(self.steps)
         return found
 
-    def _notify_step_start(self, raw_step: Any, step: Any, context: Any) -> Optional[dict]:
+    def _notify_step_start(self, raw_step: Any, step: Any, context: Any, index: Optional[int] = None) -> Optional[dict]:
         """Emit replay ``step_start`` then call ``on_step_start``; returns the span."""
-        span = _replay_step_begin(self, raw_step, step.name)
+        span = _replay_step_begin(self, raw_step, step.name, index=index)
         if self.on_step_start:
             try:
                 self.on_step_start(step.name, context)
@@ -1753,6 +1791,7 @@ class AgentFlow:
         from .diagram import _flow_graph
         graph = _flow_graph(self)
         self._replay_node_ids = graph.ids
+        self._replay_positions = graph.positions
         return graph.to_dict()
 
     def _run_impl(
@@ -1828,6 +1867,8 @@ class AgentFlow:
         if approve_tools and allow_dangerous:
             from ..approval import set_yaml_approved_tools
             _approval_token = set_yaml_approved_tools(approve_tools)
+        # Kept on the instance so run()'s finally can reset it if a step raises.
+        self._approval_token = _approval_token
         
         # Call on_workflow_start callback
         if self.on_workflow_start:
@@ -1865,7 +1906,7 @@ class AgentFlow:
             if isinstance(step, Route):
                 # Decision-based routing
                 route_result = self._execute_route(
-                    step, previous_output, input, all_variables, model, verbose, stream
+                    step, previous_output, input, all_variables, model, verbose, stream, _replay_index=i
                 )
                 results.extend(route_result["steps"])
                 previous_output = route_result["output"]
@@ -1881,7 +1922,7 @@ class AgentFlow:
             elif isinstance(step, Parallel):
                 # Parallel execution
                 parallel_result = self._execute_parallel(
-                    step, previous_output, input, all_variables, model, verbose, stream
+                    step, previous_output, input, all_variables, model, verbose, stream, _replay_index=i
                 )
                 results.extend(parallel_result["steps"])
                 previous_output = parallel_result["output"]
@@ -1899,7 +1940,7 @@ class AgentFlow:
             elif isinstance(step, Loop):
                 # Loop over items
                 loop_result = self._execute_loop(
-                    step, previous_output, input, all_variables, model, verbose, stream
+                    step, previous_output, input, all_variables, model, verbose, stream, _replay_index=i
                 )
                 results.extend(loop_result["steps"])
                 previous_output = loop_result["output"]
@@ -1916,7 +1957,7 @@ class AgentFlow:
                 
             elif isinstance(step, Discussion):
                 discussion_result = self._execute_discussion(
-                    step, previous_output, input, all_variables, model, verbose, stream
+                    step, previous_output, input, all_variables, model, verbose, stream, _replay_index=i
                 )
                 results.extend(discussion_result["steps"])
                 previous_output = discussion_result["output"]
@@ -1934,7 +1975,7 @@ class AgentFlow:
             elif isinstance(step, Repeat):
                 # Repeat until condition
                 repeat_result = self._execute_repeat(
-                    step, previous_output, input, all_variables, model, verbose, stream
+                    step, previous_output, input, all_variables, model, verbose, stream, _replay_index=i
                 )
                 results.extend(repeat_result["steps"])
                 previous_output = repeat_result["output"]
@@ -1950,7 +1991,7 @@ class AgentFlow:
             elif isinstance(step, Include):
                 # Include another recipe
                 include_result = self._execute_include(
-                    step, previous_output, input, all_variables, model, verbose, stream
+                    step, previous_output, input, all_variables, model, verbose, stream, _replay_index=i
                 )
                 results.extend(include_result["steps"])
                 previous_output = include_result["output"]
@@ -1961,7 +2002,7 @@ class AgentFlow:
             elif isinstance(step, If):
                 # Conditional branching
                 if_result = self._execute_if(
-                    step, previous_output, input, all_variables, model, verbose, stream
+                    step, previous_output, input, all_variables, model, verbose, stream, _replay_index=i
                 )
                 results.extend(if_result["steps"])
                 previous_output = if_result["output"]
@@ -1994,7 +2035,7 @@ class AgentFlow:
 
             # Preserve the preparation hook before the gate: it may populate
             # context variables used by should_run, including on cached runs.
-            _replay = self._notify_step_start(raw_step, step, context)
+            _replay = self._notify_step_start(raw_step, step, context, i)
 
             # Check should_run condition
             if step.should_run:
@@ -2095,7 +2136,7 @@ class AgentFlow:
                 try:
                     if step.handler:
                         # Custom handler function
-                        result = step.handler(context)
+                        result = _call_handler(step.handler, context)
                         if isinstance(result, StepResult):
                             output = result.output
                             stop = result.stop_workflow
@@ -2465,12 +2506,12 @@ class AgentFlow:
             self.status = "completed"
         
         # Reset YAML-approved tools context if it was set
-        if _approval_token is not None:
-            from ..approval import reset_yaml_approved_tools
-            reset_yaml_approved_tools(_approval_token)
+        self._reset_approval_token()
         
         final_result = {
-            "output": previous_output,
+            # A failed run must not expose an earlier step's value as its
+            # output; partial results stay available under "steps".
+            "output": None if self.status == "failed" else previous_output,
             "steps": results,
             "variables": all_variables,
             "status": self.status
@@ -2804,12 +2845,11 @@ Respond with JSON: {{"approved": true/false, "reason": "Brief explanation"}}
         if failure_reason is None:
             self.status = "completed"
         
-        if _approval_token is not None:
-            from ..approval import reset_yaml_approved_tools
-            reset_yaml_approved_tools(_approval_token)
+        self._reset_approval_token()
         
         final_result = {
-            "output": previous_output,
+            # Same contract as the sequential path: no stale output on failure.
+            "output": None if self.status == "failed" else previous_output,
             "steps": results,
             "variables": all_variables,
             "status": self.status
@@ -3133,7 +3173,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 step, previous_output, input, all_variables, model, verbose, index,
                 stream=stream, depth=depth,
             )
-        span = _replay_step_begin(self, step)
+        span = _replay_step_begin(self, step, index=index)
         if span is None:
             return self._execute_leaf_step(
                 step, previous_output, input, all_variables, model, verbose, index,
@@ -3287,7 +3327,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         # Handle nested patterns (Loop, Parallel, Route, Repeat, If)
         if isinstance(step, Loop):
             loop_result = self._execute_loop(
-                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1
+                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1, _replay_index=index
             )
             return {
                 "step": f"loop_{index}",
@@ -3300,7 +3340,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         
         if isinstance(step, Parallel):
             parallel_result = self._execute_parallel(
-                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1
+                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1, _replay_index=index
             )
             return {
                 "step": f"parallel_{index}",
@@ -3313,7 +3353,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         
         if isinstance(step, Route):
             route_result = self._execute_route(
-                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1
+                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1, _replay_index=index
             )
             return {
                 "step": f"route_{index}",
@@ -3324,7 +3364,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         
         if isinstance(step, Repeat):
             repeat_result = self._execute_repeat(
-                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1
+                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1, _replay_index=index
             )
             return {
                 "step": f"repeat_{index}",
@@ -3335,7 +3375,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         
         if isinstance(step, Discussion):
             discussion_result = self._execute_discussion(
-                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1
+                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1, _replay_index=index
             )
             return {
                 "step": f"discussion_{index}",
@@ -3350,7 +3390,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         
         if isinstance(step, If):
             if_result = self._execute_if(
-                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1
+                step, previous_output, input, all_variables, model, verbose, stream, depth=depth+1, _replay_index=index
             )
             return {
                 "step": f"if_{index}",
@@ -3362,7 +3402,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         # Handle Include steps (for include inside loop)
         if isinstance(step, Include):
             include_result = self._execute_include(
-                step, previous_output, input, all_variables, model, verbose, stream
+                step, previous_output, input, all_variables, model, verbose, stream, _replay_index=index
             )
             # Return in the expected format for single step
             combined_output = include_result.get("output", "")
@@ -3389,7 +3429,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 context.variables["validation_feedback"] = validation_feedback
 
             if normalized.handler:
-                result = normalized.handler(context)
+                result = _call_handler(normalized.handler, context)
                 if isinstance(result, StepResult):
                     if result.variables:
                         all_variables.update(result.variables)
@@ -4125,7 +4165,7 @@ CONCISE SUMMARY:"""
                 errors.append({"step": idx, "error": info["error"]})
                 # partial_ok: record the failure but keep going; fold neither the
                 # exception text into outputs nor skip the index alignment.
-                results.append({"step": f"parallel_{idx}", "output": None, "error": str(info["error"])})
+                results.append({"step": f"parallel_{idx}", "output": None, "status": "failed", "error": str(info["error"])})
                 if info["delta"] is not None:
                     branch_deltas.append((idx, info["delta"]))
                 outputs.append(None)
@@ -4183,7 +4223,13 @@ CONCISE SUMMARY:"""
         
         # Get items from variable, CSV, or file
         if loop_step.over:
-            items = all_variables.get(loop_step.over, [])
+            if loop_step.over not in all_variables:
+                # A typo in over= used to run zero iterations and report success.
+                raise WorkflowStepError(
+                    f"loop(over={loop_step.over!r}): no such workflow variable; "
+                    f"known: {sorted(all_variables)}"
+                )
+            items = all_variables[loop_step.over]
             if isinstance(items, str):
                 # Try to parse as JSON list first (handles agent output like '["a", "b", "c"]')
                 items = self._parse_list_from_string(items)
@@ -6262,7 +6308,7 @@ class WorkflowManager:
         # If step has a custom handler function
         if step.handler:
             try:
-                result = step.handler(context)
+                result = _call_handler(step.handler, context)
                 # Handle StepResult
                 if isinstance(result, StepResult):
                     # Update variables from result

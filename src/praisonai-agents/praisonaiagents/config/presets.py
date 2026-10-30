@@ -275,9 +275,11 @@ REFLECTION_PRESETS: Dict[str, Dict[str, Any]] = {
 # =============================================================================
 
 GUARDRAIL_PRESETS: Dict[str, Dict[str, Any]] = {
-    "strict": {"max_retries": 5, "on_fail": "raise"},
-    "permissive": {"max_retries": 1, "on_fail": "skip"},
-    "safety": {"max_retries": 3, "on_fail": "retry"},
+    # Presets only set retry counts; supply a validator alongside them,
+    # e.g. guardrails=["strict", {"validator": fn}].
+    "strict": {"max_retries": 5},
+    "permissive": {"max_retries": 1},
+    "safety": {"max_retries": 3},
 }
 
 

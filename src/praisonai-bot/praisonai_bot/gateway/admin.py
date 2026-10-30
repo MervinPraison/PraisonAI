@@ -15,6 +15,7 @@ one canonical flow (DRY).
 
 from __future__ import annotations
 
+import contextlib
 import os
 import sys
 from dataclasses import dataclass, field
@@ -201,7 +202,6 @@ def _repair_config_version(config_path: str):
     an interruption, full disk, or I/O error during ``doctor --fix`` can never
     leave the config truncated or half-written.
     """
-    import tempfile
     import yaml
 
     with open(config_path) as fh:
@@ -210,6 +210,14 @@ def _repair_config_version(config_path: str):
     from praisonaiagents.gateway.config import migrate_config_with_doctor
 
     migrated, reasons = migrate_config_with_doctor(cfg)
+    _atomic_write_yaml(config_path, migrated)
+    return reasons
+
+
+def _atomic_write_yaml(config_path: str, data: dict) -> None:
+    """Serialise ``data`` to a temp file and ``os.replace`` it over the config."""
+    import tempfile
+    import yaml
 
     directory = os.path.dirname(os.path.abspath(config_path))
     fd, tmp_path = tempfile.mkstemp(
@@ -217,9 +225,7 @@ def _repair_config_version(config_path: str):
     )
     try:
         with os.fdopen(fd, "w") as fh:
-            yaml.safe_dump(
-                migrated, fh, default_flow_style=False, sort_keys=False
-            )
+            yaml.safe_dump(data, fh, default_flow_style=False, sort_keys=False)
             fh.flush()
             os.fsync(fh.fileno())
         os.replace(tmp_path, config_path)
@@ -230,7 +236,127 @@ def _repair_config_version(config_path: str):
             pass
         raise
 
-    return reasons
+
+def edit_gateway_channel(
+    config_path: PathLike,
+    name: str,
+    settings: Optional[Dict] = None,
+    *,
+    remove: bool = False,
+) -> dict:
+    """Add, update or remove one ``channels:`` entry in place (Issue #6079).
+
+    A surgical read-modify-write: ``settings`` is merged into
+    ``channels[name]`` (created if absent, ``platform`` defaulting to ``name``)
+    or, with ``remove=True``, the block is deleted. Other channels and
+    top-level keys are untouched. The edited document is validated against
+    ``GatewayConfigSchema`` before the atomic write, so an invalid mutation is
+    rejected rather than persisted. Disable a channel with
+    ``settings={"enabled": False}``.
+
+    Returns:
+        The resulting channel block (``{}`` when removed).
+
+    Raises:
+        FileNotFoundError: If ``config_path`` does not exist.
+        KeyError: If ``remove=True`` and the channel is not configured.
+        ValueError: If the edited config fails validation.
+    """
+    import yaml
+
+    config_path = os.fspath(config_path)
+    if not os.path.isfile(config_path):
+        raise FileNotFoundError(config_path)
+    # Hold a sidecar lock across read-modify-write so concurrent edits of
+    # different channels cannot overwrite each other.
+    with _config_edit_lock(config_path):
+        with open(config_path) as fh:
+            cfg = yaml.safe_load(fh) or {}
+        return _apply_channel_edit(config_path, cfg, name, settings, remove)
+
+
+def _apply_channel_edit(config_path, cfg, name, settings, remove) -> dict:
+    from praisonai_bot.bots._config_schema import validate_gateway_config
+
+    channels = _editable_channels(cfg)
+    if remove:
+        if name not in channels:
+            raise KeyError(f"channel {name!r} is not configured in {config_path}")
+        channels.pop(name)
+        block: dict = {}
+    else:
+        block = dict(channels.get(name) or {})
+        block.setdefault("platform", name)
+        block.update(settings or {})
+        channels[name] = block
+    cfg["channels"] = channels
+
+    # Check the document itself: the validator may otherwise satisfy its
+    # "at least one channel" rule from env credentials, which are not saved.
+    if not any(
+        not isinstance(b, dict) or b.get("enabled", True) is not False
+        for b in channels.values()
+    ):
+        raise ValueError("at least one enabled channel must remain configured")
+    # Validate an env-resolved copy (as the runtime does; unset ``${VAR}``
+    # refs are left as-is) while the saved file keeps the references.
+    validate_gateway_config(cfg)
+    _atomic_write_yaml(config_path, cfg)
+    return block
+
+
+def _editable_channels(cfg: dict) -> dict:
+    """Return ``cfg``'s ``channels`` map, moving legacy declarations into it.
+
+    Single-bot (top-level ``platform``) and BotOS (``platforms``) files are
+    only honoured by the loader while ``channels`` is empty, so they are
+    converted in place before an edit adds a ``channels:`` block. ``${VAR}``
+    references are copied verbatim.
+    """
+    channels = cfg.get("channels") or {}
+    if channels:
+        return channels
+    platform = cfg.get("platform")
+    if platform:
+        # Mirrors the loader's single-bot migration, which wins over BotOS.
+        from praisonai_bot.bots._config_schema import GatewayConfigSchema
+
+        # Resolve a ``${VAR}`` platform first, as the loader does.
+        raw = str(cfg.pop("platform"))
+        platform = str(_resolve_env_token(raw) or raw).lower().strip()
+        block = {"platform": platform}
+        token = cfg.pop("token", None)
+        block["token"] = token or GatewayConfigSchema._credential_env_ref(platform)
+        if platform == "slack" and cfg.get("app_token") is not None:
+            block["app_token"] = cfg.pop("app_token")
+        for key in ("unknown_user_policy", "owner_user_id"):
+            if cfg.get(key) is not None:
+                block[key] = cfg[key]
+        channels[platform] = block
+    elif cfg.get("platforms"):
+        for pname, pcfg in cfg.pop("platforms").items():
+            channels[pname] = {"platform": pname, **(pcfg or {})}
+    return channels
+
+
+@contextlib.contextmanager
+def _config_edit_lock(config_path: str):
+    """Exclusive OS advisory lock on ``<config>.lock`` (no-op if unsupported)."""
+    with open(config_path + ".lock", "a+") as fh:
+        try:
+            import fcntl
+        except ImportError:  # pragma: no cover - Windows
+            fcntl = None
+        if fcntl is not None:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        else:  # pragma: no cover - Windows
+            try:
+                import msvcrt
+
+                msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+            except Exception:
+                pass
+        yield  # released when ``fh`` closes
 
 
 def _repair_gateway_secret(dry_run: bool = False, config_path: str = ""):

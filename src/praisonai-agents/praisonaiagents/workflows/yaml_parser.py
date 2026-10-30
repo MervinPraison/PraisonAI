@@ -707,7 +707,7 @@ class YAMLWorkflowParser:
         from ..agent import ImageAgent
         
         # ImageAgent accepts: llm, style, and other image config
-        style = config.get('style', 'natural')
+        style = config.get('style')
         
         agent = ImageAgent(
             llm=llm,

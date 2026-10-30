@@ -112,6 +112,7 @@ class SessionRunState:
         self.start_time: Optional[float] = None
         self.last_activity: float = time.time()  # Always track activity for cleanup
         self.agent: Optional[Any] = None  # Live agent handle for STEER mode
+        self.interrupt_deferred = False  # Last busy message was queued, not interrupting
 
 
 class SessionRunControl:
@@ -210,7 +211,16 @@ class SessionRunControl:
                 return RunDecision.RUN_NOW
             
             # There's an active run, handle based on busy mode
-            if self._busy_mode == BusyMode.INTERRUPT:
+            ctrl = session.interrupt_controller
+            # Don't supersede a turn mid-subagent or mid-compaction: queue the
+            # message instead so the in-flight work is not discarded. Once a
+            # message is queued, keep merging until it runs so the queued
+            # follow-up is never dropped by a later interrupt.
+            session.interrupt_deferred = self._busy_mode == BusyMode.INTERRUPT and (
+                session.pending_message is not None
+                or bool(getattr(ctrl, "is_protected", lambda: False)())
+            )
+            if self._busy_mode == BusyMode.INTERRUPT and not session.interrupt_deferred:
                 # Cancel current run and start new one
                 if session.interrupt_controller:
                     session.interrupt_controller.request("user_new_message")
@@ -275,6 +285,8 @@ class SessionRunControl:
         """
         session = self._get_session(user_id)
         
+        if decision in (RunDecision.QUEUED, RunDecision.MERGED) and session.interrupt_deferred:
+            return "⏳ Finishing current work, your message is queued"
         if decision == RunDecision.QUEUED:
             action = "noted"
         elif decision == RunDecision.MERGED:

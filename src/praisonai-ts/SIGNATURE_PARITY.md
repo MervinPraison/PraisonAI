@@ -46,7 +46,7 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 
 ### `Agent.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:628`
+- Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:631`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:197` (ctor `src/praisonai-ts/src/agent/simple.ts:1019`)
 - Counts: 42 python params: 29 exact, 8 camelCase, 2 alias, 3 flattened, 0 missing; 8 mismatches; 8 waived; 14 TS-only of 60
 
@@ -207,7 +207,7 @@ TS-only members: `dependencies`?
 
 ### `Agent.start`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:753`
+- Python: `src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:819`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:2497`
 - Counts: 1 python params: 1 exact, 0 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 20 TS-only of 21
 
@@ -219,7 +219,7 @@ TS-only members: `previousResult`?, `onToken`?, `signal`?, `onEvent`?, `options`
 
 ### `Agent.chat`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3478`
+- Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3657`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:3592`
 - Counts: 17 python params: 7 exact, 9 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 2 TS-only of 19
 
@@ -247,7 +247,7 @@ TS-only members: `previousResult`?, `options`?
 
 ### `AgentTeam.start`
 
-- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2591`
+- Python: `src/praisonai-agents/praisonaiagents/agents/agents.py:2606`
 - TypeScript: `src/praisonai-ts/src/agent/team.ts:1125`
 - Counts: 3 python params: 2 exact, 1 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 1 TS-only of 4
 
@@ -261,7 +261,7 @@ TS-only members: `options`?
 
 ### `Handoff.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/handoff.py:358`
+- Python: `src/praisonai-agents/praisonaiagents/agent/handoff.py:391`
 - TypeScript: `src/praisonai-ts/src/agent/handoff.ts:505` (ctor `src/praisonai-ts/src/agent/handoff.ts:759`)
 - Counts: 7 python params: 2 exact, 2 camelCase, 3 alias, 0 flattened, 0 missing; 2 mismatches; 2 waived; 13 TS-only of 21
 
@@ -279,7 +279,7 @@ TS-only members: `condition`?, `contextPolicy`?, `maxContextTokens`?, `maxContex
 
 ### `LLM.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:673`
+- Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:678`
 - TypeScript: `src/praisonai-ts/src/llm/index.ts:236` (ctor `src/praisonai-ts/src/llm/index.ts:416`)
 - Counts: 25 python params: 8 exact, 16 camelCase, 1 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 1 TS-only of 26
 
@@ -435,7 +435,7 @@ TS-only members: `options`?
 
 ### `FileTracker.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/knowledge/indexing.py:326`
+- Python: `src/praisonai-agents/praisonaiagents/knowledge/indexing.py:328`
 - TypeScript: `src/praisonai-ts/src/knowledge/indexing.ts:552`
 - Counts: 1 python params: 0 exact, 1 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 0 TS-only of 1
 

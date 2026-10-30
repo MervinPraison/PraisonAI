@@ -87,7 +87,8 @@ class PolicyConfig:
     def save_learned_rule(self, resource: str, action: str = "allow") -> bool:
         """Persist a learned rule to the rules file.
         
-        Uses atomic write (tmp + rename) for safety.
+        Uses a locked, atomic read-modify-write so concurrent savers keep
+        each other's rules.
         
         Args:
             resource: Resource pattern (e.g., "tool:pip install *")
@@ -100,24 +101,21 @@ class PolicyConfig:
             return False
         
         try:
-            # Load existing rules
-            existing = self.load_learned_rules()
-            
-            # Check for duplicates
-            for rule in existing:
-                if rule.get("resource") == resource:
-                    return True  # Already exists
-            
-            # Add new rule
-            existing.append({"resource": resource, "action": action})
-            
             # Ensure directory exists
             rules_dir = os.path.dirname(self.rules_file)
-            os.makedirs(rules_dir, exist_ok=True)
-            
-            from ..utils.atomic_io import atomic_write_json
-            atomic_write_json(self.rules_file, {"rules": existing}, indent=2)
-            
+            if rules_dir:
+                os.makedirs(rules_dir, exist_ok=True)
+
+            # Read, dedupe and append under the per-path lock so concurrent
+            # writers never drop each other's rules (last-writer-wins).
+            def _add(data):
+                rules = data.setdefault("rules", [])
+                if not any(r.get("resource") == resource for r in rules):
+                    rules.append({"resource": resource, "action": action})
+
+            from ..utils.atomic_io import update_json
+            update_json(self.rules_file, _add, default=lambda: {"rules": []}, indent=2)
+
             logger.debug(f"Saved learned rule: {resource} -> {action}")
             return True
         except OSError as e:

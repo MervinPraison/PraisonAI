@@ -163,3 +163,23 @@ def test_cli_session_fork_resolves_sanitized_global_id(project):
     # Real history copied, proving the fork resolved the global store (not an
     # empty project-scoped fallback) despite the special characters in the id.
     assert len(forked.messages) == 2
+
+
+def test_cli_session_fork_ignores_colliding_project_file(project):
+    # Issue #6024: a project session ``sess_global`` shares the pre-#6024 lossy
+    # filename with global ``sess.global``; fork must still pick the global one.
+    from praisonai_code.cli.state.project_sessions import canonical_cli_stores
+
+    _create_project_session("sess_global")
+    global_store = canonical_cli_stores()[-1]
+    global_store.add_message("sess.global", "user", "g-first")
+    global_store.add_message("sess.global", "assistant", "g-reply")
+
+    session_fork("sess.global", at_message=None, title=None)
+
+    from praisonaiagents.session.hierarchy import HierarchicalSessionStore
+
+    store = HierarchicalSessionStore(global_store.session_dir)
+    new_id = _forked_id(store, "sess.global")
+    assert new_id is not None
+    assert len(store._load_extended_session(new_id, force_reload=True).messages) == 2

@@ -283,6 +283,46 @@ def _turn_error_payload(exc: BaseException) -> Dict[str, Any]:
     }
 
 
+def _gateway_memory_user_id(agent_id: str) -> str:
+    """Stable memory identity for a gateway agent (Issue #6033).
+
+    The core gives ``memory=`` without a ``user_id`` a random per-instance id,
+    so a gateway that rebuilds agents on every boot, reload and channel clone
+    would write to a fresh store each time. Derive the id from the configured
+    agent id instead; characters FileMemory rejects in a directory name are
+    replaced, plus a short hash of the original id when anything was replaced
+    so ids like ``support.bot`` and ``support_bot`` stay distinct.
+    """
+    raw = str(agent_id)
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", raw)
+    if safe != raw:
+        safe += "-" + hashlib.sha256(raw.encode("utf-8")).hexdigest()[:8]
+    return "gateway-" + safe
+
+
+def _with_memory_user_id(memory: Any, user_id: str) -> Any:
+    """Add ``user_id`` to a YAML ``memory:`` value that does not set one.
+
+    ``True``, a preset name (``"sqlite"``, ``"history"``, ...) and a dict
+    without ``user_id`` become the equivalent dict carrying ``user_id``. An
+    explicit ``user_id``, a disabled memory and any other value (e.g. a URL)
+    are returned unchanged.
+    """
+    if not memory:
+        return memory
+    if memory is True:
+        return {"user_id": user_id}
+    if isinstance(memory, dict):
+        return memory if memory.get("user_id") else {**memory, "user_id": user_id}
+    if isinstance(memory, str):
+        from praisonaiagents.config.presets import MEMORY_PRESETS
+
+        preset = MEMORY_PRESETS.get(memory.strip().lower())
+        if preset is not None:
+            return {**preset, "user_id": user_id}
+    return memory
+
+
 def _apply_bot_loop_config(config_kwargs: Dict[str, Any], ch_cfg: Mapping[str, Any]) -> None:
     """Fold a channel's ``allow_bots`` / ``bot_loop_protection`` into BotConfig.
 
@@ -1200,6 +1240,9 @@ class WebSocketGateway:
         # serving loop only when a ``gateway.watchdog`` block (or the CLI
         # ``--watchdog`` flag) enables it; ``None`` means zero cost.
         self._watchdog = None
+        # Issue #6123: systemd READY=1/WATCHDOG=1 notifier; only started when
+        # running under a ``Type=notify`` unit (``$NOTIFY_SOCKET`` set).
+        self._sd_notify_task: Optional[asyncio.Task] = None
         # Issue #2798/#3911: application-level connection-liveness heartbeat +
         # half-open reaper. The background task emits ``PING`` at the configured
         # interval and closes any session whose ``last_activity`` exceeds the
@@ -2632,6 +2675,14 @@ class WebSocketGateway:
         if self._session_store:
             await self._start_session_cleanup()
 
+        # Issue #6123: tell systemd when we are actually serving and keep its
+        # watchdog fed from this loop (a wedged loop stops the pings). Started
+        # before the boot-time recovery below so a long resume stays covered.
+        if os.environ.get("NOTIFY_SOCKET") and self._sd_notify_task is None:
+            self._sd_notify_task = asyncio.create_task(
+                self._sd_notify_loop(), name="gateway-sd-notify"
+            )
+
         # Issue #4603: record this boot in the durable lifecycle ledger before
         # anything else. This reads the prior sentinel, classifies whether the
         # previous process exited cleanly (an unclean/OOM death runs no signal
@@ -2708,6 +2759,7 @@ class WebSocketGateway:
         finally:
             self._disarm_watchdog()
             await self._cancel_liveness_task()
+            await self._cancel_sd_notify_task()
             # Issue #4603: ``serve()`` returns through here on every graceful
             # termination — the SIGINT/SIGTERM handler only flips
             # ``should_exit`` and uvicorn unwinds, so ``stop()`` is not
@@ -2737,6 +2789,51 @@ class WebSocketGateway:
                 pass
             except Exception:
                 logger.debug("Liveness task exited with error on cancel")
+
+    async def _sd_notify_loop(self) -> None:
+        """Send systemd READY=1 once serving, then WATCHDOG=1 pings (#6123).
+
+        Until READY=1, also sends EXTEND_TIMEOUT_USEC so a long boot-time
+        recovery is not killed by ``TimeoutStartSec`` while the loop is alive.
+        """
+        from ..daemon.sd_notify import sd_notify, watchdog_interval
+
+        interval = watchdog_interval()
+        period = interval or 10.0
+        tick = min(period, 0.5)
+        ready = False
+        last_ping = 0.0
+        while True:
+            if not ready and self._server is not None and getattr(
+                self._server, "started", False
+            ):
+                sd_notify("READY=1")
+                ready = True
+                if interval is None:
+                    return
+            now = time.monotonic()
+            if now - last_ping >= period:
+                if interval:
+                    sd_notify("WATCHDOG=1")
+                if not ready:
+                    sd_notify(f"EXTEND_TIMEOUT_USEC={int(period * 3_000_000)}")
+                last_ping = now
+            await asyncio.sleep(tick)
+
+    async def _cancel_sd_notify_task(self) -> None:
+        """Stop the systemd notifier and report STOPPING=1 (idempotent)."""
+        task = self._sd_notify_task
+        self._sd_notify_task = None
+        if task is None:
+            return
+        from ..daemon.sd_notify import sd_notify
+
+        sd_notify("STOPPING=1")
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
 
     async def _cancel_ledger_heartbeat(self) -> None:
         """Stop the lifecycle-ledger memory-sample heartbeat (idempotent)."""
@@ -3806,7 +3903,13 @@ class WebSocketGateway:
         # routing new traffic while in-flight sessions finish. Keep _is_running
         # True so liveness (/live) still reports the process as alive during drain.
         self._draining = True
-        
+        # Issue #6123: tell systemd this is a clean drain, not a hang/crash.
+        # The notifier keeps feeding WATCHDOG=1 until serve() unwinds.
+        if self._sd_notify_task is not None:
+            from ..daemon.sd_notify import sd_notify
+
+            sd_notify("STOPPING=1")
+
         # Gracefully drain active sessions before closing
         await self._drain_active_sessions(reason="shutdown", timeout=drain_timeout)
 
@@ -8582,9 +8685,12 @@ class WebSocketGateway:
                           session store is present — see
                           :meth:`_durable_runs_from_config`, Issue #4216),
                           construct each agent with ``ExecutionConfig(durable=True)`` so
-                          every gateway turn is journalled to the core ``RunJournal`` and
-                          can resume after a restart — no re-execution of side-effecting
-                          tools, no re-billing of LLM calls. When ``False`` (explicit
+                          every gateway turn is journalled to the core ``RunJournal``.
+                          The gateway does not auto-resume on boot: an interrupted turn
+                          can be resumed by run id via
+                          ``ExecutionConfig(durable=True, resume_run_id=...)`` (same
+                          ``journal_path``) with the same prompt,
+                          replaying recorded tool results. When ``False`` (explicit
                           ``durable_runs: false`` / ``reliability: "off"`` / no durable
                           store) the execution hot path is unchanged (zero-overhead).
                           Per-agent ``durable`` in YAML overrides this gateway-wide
@@ -8621,7 +8727,11 @@ class WebSocketGateway:
                     )
 
                     model = resolve_model_by_provider()
-            memory = agent_def.get("memory", False)
+            # Issue #6033: a stable memory id per configured agent, so memory
+            # survives restarts/reloads and is shared with channel clones. An
+            # explicit ``memory: {user_id: ...}`` still wins.
+            memory_user_id = _gateway_memory_user_id(agent_id)
+            memory = _with_memory_user_id(agent_def.get("memory", False), memory_user_id)
 
             # G2: Pass temperature through (optional, SDK uses its own default)
             temperature = agent_def.get("temperature", None)
@@ -8691,10 +8801,12 @@ class WebSocketGateway:
             # Durable runs (Issue #4028): when the operator opts in via
             # ``gateway.durable_runs`` (or per-agent ``durable: true``), build the
             # agent with ``ExecutionConfig(durable=True)`` so every turn is
-            # journalled to the core ``RunJournal``. This engages the already-shipped
-            # resume machinery — after a restart an interrupted run replays recorded
-            # tool results instead of re-executing side-effecting tools or re-billing
-            # LLM calls. Default-off/zero-overhead when neither flag is set; a lazy
+            # journalled to the core ``RunJournal``. A turn interrupted by a crash
+            # stays ``running`` in the journal; resuming it by run id
+            # (``ExecutionConfig(durable=True, resume_run_id=...)``, same journal)
+            # replays recorded tool results
+            # instead of re-executing them. Nothing here resumes runs on boot.
+            # Default-off/zero-overhead when neither flag is set; a lazy
             # import keeps the SDK cost off the hot path for non-durable gateways.
             agent_durable = self._config_bool(
                 agent_def.get("durable"), durable_runs
@@ -8727,6 +8839,12 @@ class WebSocketGateway:
                 guardrails=guardrail_prompt,
                 execution=execution_cfg,
             )
+
+            # No memory configured: bot defaults may inject memory keyed on
+            # agent.user_id, which otherwise falls back to the host-wide
+            # "praison" constant shared by every agent.
+            if not memory:
+                agent.user_id = memory_user_id
 
             # Store tool_choice for later use in chat()
             if tool_choice:
@@ -9693,11 +9811,15 @@ class WebSocketGateway:
         platform = str(ch_cfg.get("platform") or channel_name).lower()
         try:
             from praisonai_bot.bots._defaults import (
+                _sync_approval_registry,
                 apply_bot_smart_defaults,
                 enable_shell_tools,
             )
 
             clone = agent.clone_for_channel() if hasattr(agent, "clone_for_channel") else agent
+            # clone_for_channel() does not carry user_id (Issue #6033).
+            if getattr(agent, "user_id", None):
+                clone.user_id = agent.user_id
             clone = apply_bot_smart_defaults(clone, config)
             enabled = enable_shell_tools(
                 clone,
@@ -9706,6 +9828,32 @@ class WebSocketGateway:
                 channel_type=platform,
                 gateway_bind_host=self._resolve_gateway_bind_host(),
             )
+            # Reuse the durable approval backend the channel adapter already
+            # renders and resolves (#6032); a fresh per-clone one has no sender.
+            # Only when it gates the same chat with the same or a narrower
+            # approver set, so a routed shell agent is never gated more loosely.
+            from praisonai_bot.bots._presentation_approval_backend import (
+                PresentationApprovalBackend,
+            )
+
+            shared = getattr(
+                self._channel_bots.get(channel_name), "_approval_backend", None
+            )
+            own = getattr(enabled, "_approval_backend", None)
+            if (
+                isinstance(shared, PresentationApprovalBackend)
+                and isinstance(own, PresentationApprovalBackend)
+                and shared._target == own._target
+                and (
+                    own._allowed_actors is None
+                    or (
+                        shared._allowed_actors is not None
+                        and shared._allowed_actors <= own._allowed_actors
+                    )
+                )
+            ):
+                enabled._approval_backend = shared
+                _sync_approval_registry(enabled)
             self._shell_routed_agents[cache_key] = enabled
             return enabled
         except Exception as exc:  # pragma: no cover - defensive
@@ -9778,7 +9926,12 @@ class WebSocketGateway:
         """Create a bot instance for the given channel type."""
         # Clone agent to prevent channel-specific settings from leaking between channels
         # Use clone_for_channel() instead of copy.deepcopy() to avoid RLock issues (fixes #1746)
+        source_user_id = getattr(agent, "user_id", None)
         agent = agent.clone_for_channel()
+        # clone_for_channel() does not carry user_id; bot-injected memory keys
+        # on it, so keep the registered agent's stable id (Issue #6033).
+        if source_user_id:
+            agent.user_id = source_user_id
         
         # Apply smart defaults to agent (same logic as Bot() wrapper)
         from praisonai_bot.bots._defaults import apply_bot_smart_defaults, enable_shell_tools
@@ -10078,6 +10231,7 @@ class WebSocketGateway:
             from telegram import Update
             from telegram.ext import (
                 Application,
+                CallbackQueryHandler,
                 CommandHandler,
                 MessageHandler,
                 filters,
@@ -10106,8 +10260,17 @@ class WebSocketGateway:
         # Set up message handler with routing support
         channel_name = name
         gateway = self
+        # Turn handlers run with ``block=False`` so an approval tap can be
+        # dispatched while a turn waits on it (#6032). This lock keeps turns and
+        # /new strictly one at a time, as PTB's sequential dispatch did before,
+        # so staged profiles, debounce batches and resets never interleave.
+        turn_lock = asyncio.Lock()
 
         async def handle_message(update: Update, context: Any):
+            async with turn_lock:
+                await _handle_message(update, context)
+
+        async def _handle_message(update: Update, context: Any):
             # Import the shared security pipeline from telegram.py
             from praisonai_bot.bots.telegram import process_inbound_telegram_message
             
@@ -10204,6 +10367,14 @@ class WebSocketGateway:
                         pass
                 ack_ctx = await bot._ack.ack(react_fn=_tg_react)
 
+            # Same identifiers the standalone adapter passes, so ingress dedup
+            # and ``session_scope: per_chat`` work in gateway mode (#6032).
+            _session_ids = {
+                "chat_id": chat_id or "",
+                "message_id": str(update.message.message_id),
+                "account": getattr(bot.config, "account", "default"),
+            }
+
             try:
                 message_text = await bot._debouncer.debounce(user_id, message_text)
                 
@@ -10217,12 +10388,14 @@ class WebSocketGateway:
                     response = await with_typing_renewal(
                         typing_func=_typing_action,
                         operation_coro=bot._session.chat(
-                            agent, user_id, message_text, tool_policy=tool_policy
+                            agent, user_id, message_text, tool_policy=tool_policy,
+                            **_session_ids,
                         )
                     )
                 else:
                     response = await bot._session.chat(
-                        agent, user_id, message_text, tool_policy=tool_policy
+                        agent, user_id, message_text, tool_policy=tool_policy,
+                        **_session_ids,
                     )
                 if hasattr(bot, '_send_response_with_media'):
                     # Issue #3623: this handler serves VOICE|AUDIO as well as
@@ -10260,6 +10433,10 @@ class WebSocketGateway:
             await update.message.reply_text(bot._format_status())
 
         async def handle_new(update: Update, context: Any):
+            async with turn_lock:
+                await _handle_new(update, context)
+
+        async def _handle_new(update: Update, context: Any):
             if not update.message:
                 return
             from praisonai_bot.bots.telegram import process_inbound_telegram_message
@@ -10267,7 +10444,12 @@ class WebSocketGateway:
             if not message:
                 return
             user_id = message.sender.user_id if message.sender else "unknown"
-            bot._session.reset(user_id)
+            # Same route chat() receives, so ``per_chat`` group sessions reset.
+            bot._session.reset(
+                user_id,
+                account=getattr(bot.config, "account", "default"),
+                chat_id=str(update.message.chat_id) if update.message.chat_id else "",
+            )
             await update.message.reply_text("Session reset. Starting fresh conversation.")
 
         async def handle_help(update: Update, context: Any):
@@ -10280,10 +10462,17 @@ class WebSocketGateway:
 
         # Register handlers
         app.add_handler(CommandHandler("status", handle_status))
-        app.add_handler(CommandHandler("new", handle_new))
+        # Non-blocking so an agent turn awaiting tool approval does not stall
+        # PTB's sequential dispatch of the button tap that resolves it (#6032);
+        # ``turn_lock`` still runs turns and resets one at a time, in order.
+        app.add_handler(CommandHandler("new", handle_new, block=False))
         app.add_handler(CommandHandler("help", handle_help))
-        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-        app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message, block=False))
+        app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, handle_voice, block=False))
+        # Inline buttons (pairing Approve/Deny, tool approvals) use the adapter's
+        # own dispatcher, so no second getUpdates poller is needed (#6032).
+        app.add_handler(CallbackQueryHandler(bot._handle_callback_query))
+        bot._autowire_agent_approval_backend()
 
         # Initialize and start using low-level API
         await app.initialize()

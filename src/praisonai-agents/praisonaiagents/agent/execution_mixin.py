@@ -29,6 +29,39 @@ from typing import List, Optional, Any, Dict, Union, Generator, TYPE_CHECKING
 from .server_registry import _server_registry
 
 
+class _TimeoutCancelToken:
+    """cancel_token for caller-mode ``start(timeout=...)``.
+
+    Set when the timeout elapses or when ``inner`` (the agent's own
+    per-turn interrupt token, if any) is set.
+    """
+
+    def __init__(self, timeout, inner=None):
+        self.timed_out = threading.Event()
+        self._inner = inner
+        self._timer = threading.Timer(timeout, self.timed_out.set)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def is_set(self) -> bool:
+        return self.timed_out.is_set() or (self._inner is not None and self._inner.is_set())
+
+    @property
+    def reason(self):
+        if self.timed_out.is_set():
+            return "timeout"
+        return getattr(self._inner, "reason", None)
+
+    def check(self) -> None:
+        if self.is_set():
+            raise InterruptedError(f"Operation cancelled: {self.reason or 'unknown'}")
+
+    def close(self) -> None:
+        self._timer.cancel()
+        if self._inner is not None:
+            self._inner.close()
+
+
 def cleanup_launch_registration(agent_id: str) -> None:
     """Remove launch() endpoints registered for ``agent_id`` from the shared
     HTTP state that ``Agent.launch()`` actually populates.
@@ -196,8 +229,26 @@ class ExecutionMixin:
                 from datetime import datetime, timezone
                 start_time = time_module.time()
                 started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-                
-                response = await self.achat(prompt, **kwargs)
+
+                # achat() has no timeout param: enforce it as a run budget here
+                timeout = kwargs.pop('timeout', None)
+                if timeout is not None and timeout > 0:
+                    task = asyncio.ensure_future(self.achat(prompt, **kwargs))
+                    try:
+                        done, _ = await asyncio.wait({task}, timeout=timeout)
+                    except asyncio.CancelledError:
+                        task.cancel()
+                        raise
+                    if task not in done:
+                        task.cancel()
+                        # Let achat()'s cleanup finish and collect its outcome
+                        for exc in await asyncio.gather(task, return_exceptions=True):
+                            if isinstance(exc, Exception):
+                                logger.debug("achat() cleanup after timeout failed: %s", exc)
+                        return self._caller_mode_timeout_result(start_time, started_at)
+                    response = task.result()
+                else:
+                    response = await self.achat(prompt, **kwargs)
                 response_str = str(response) if response else ""
                 
                 # Auto-save session after chat. Offloaded to a worker thread so
@@ -230,6 +281,21 @@ class ExecutionMixin:
         
         kwargs['stream'] = stream_requested
         return await self.achat(prompt, **kwargs)
+
+    @staticmethod
+    def _caller_mode_timeout_result(start_time, started_at):
+        """AutonomyResult for a caller-mode run that exceeded ``timeout``."""
+        from .autonomy import AutonomyResult
+        return AutonomyResult(
+            success=False,
+            output="Task timed out",
+            completion_reason="timeout",
+            iterations=1,
+            stage="direct",
+            actions=[],
+            duration_seconds=time.time() - start_time,
+            started_at=started_at,
+        )
 
     async def _astart_with_outcome(self, prompt, timeout=None, **kwargs):
         """Run astart() and normalise its result/exception into a RunOutcome.
@@ -843,9 +909,36 @@ Write the complete compiled report:"""
                 # Load history from past sessions
                 self._load_history_context()
                 
+                # chat() has no timeout param: enforce it via cooperative
+                # cancellation (cancel_token), unless the caller supplied one.
+                timeout = kwargs.pop('timeout', None)
+                cancel = None
+                if timeout is not None and timeout > 0 and kwargs.get('cancel_token') is None:
+                    # Still honour stop requests on the agent's own controller
+                    inner = self._turn_cancel_token(
+                        getattr(self, "interrupt_controller", None), explicit=False
+                    )
+                    cancel = kwargs['cancel_token'] = _TimeoutCancelToken(timeout, inner)
+
                 # Use chat() — all tools, approval, doom-loop per-tool work
-                response = self.chat(prompt, **kwargs)
+                try:
+                    response = self.chat(prompt, **kwargs)
+                except InterruptedError:
+                    if cancel is None or not cancel.timed_out.is_set():
+                        raise
+                    return self._caller_mode_timeout_result(start_time, started_at)
+                finally:
+                    if cancel is not None:
+                        cancel.close()
                 response_str = str(response) if response else ""
+                # The LLM tool loop returns this text instead of raising when
+                # the timeout stops it, so the run did not finish.
+                if (
+                    cancel is not None
+                    and cancel.timed_out.is_set()
+                    and response_str.startswith("Task interrupted: timeout")
+                ):
+                    return self._caller_mode_timeout_result(start_time, started_at)
                 
                 # Auto-save session after chat
                 self._auto_save_session()
@@ -920,7 +1013,6 @@ Write the complete compiled report:"""
                 # Show animated status during LLM call if verbose
                 if self.verbose and is_tty:
                     from ..main import PRAISON_COLORS, sync_display_callbacks, _callbacks_lock
-                    import threading
                     import time as time_module
                     
                     console = _get_console()()
@@ -1562,11 +1654,28 @@ Write the complete compiled report:"""
         retry_policy = self._get_tool_retry_policy(function_name)
         
         last_exception = None
-        
+
+        def _finish(result, raised, retryable_ok=True):
+            # Strip the private control-plane tag before it reaches the model. A
+            # tool that *raised* ends the turn with ToolExecutionError so the run
+            # is finalized failed — the same contract as the sync path
+            # (tool_execution.py, test_tool_failure_not_relabelled). A plain
+            # tool-returned {"error": ...} stays a recoverable model input.
+            retryable = result.pop("_praison_retryable", None) is True and retryable_ok
+            if raised:
+                raise ToolExecutionError(
+                    result.get("error", f"Tool '{function_name}' failed"),
+                    tool_name=function_name,
+                    agent_id=self.name,
+                    is_retryable=retryable,
+                )
+            return result
+
         # Retry loop with exponential backoff
         for attempt in range(retry_policy.max_attempts):
             try:
                 result = await self._execute_tool_async_impl(function_name, arguments, tool_call_id, tools_override)
+                raised = isinstance(result, dict) and bool(result.pop("_praison_raised", False))
                 
                 # Check if result is an error that should be retried
                 if isinstance(result, dict) and result.get("error"):
@@ -1581,8 +1690,7 @@ Write the complete compiled report:"""
                         result.get("circuit_open") or
                         result.get("loop_blocked") or
                         result.get("_praison_retryable") is False):
-                        result.pop("_praison_retryable", None)
-                        return result
+                        return _finish(result, raised)
 
                     # The body already ran and may have completed its side effect
                     # before failing. Honour an explicit restart_safe=False /
@@ -1592,8 +1700,9 @@ Write the complete compiled report:"""
                     # up to max_attempts times -- charging a card three times for
                     # a tool the author marked "must never be silently re-executed".
                     if self._tool_declares_not_idempotent(function_name, tools_override):
-                        result.pop("_praison_retryable", None)
-                        return result
+                        # Must not run again: report non-retryable so durable
+                        # runs are finalized failed (sync parity).
+                        return _finish(result, raised, retryable_ok=False)
 
                     # Determine error type for retry policy
                     error_type = self._classify_error_type(result, last_exception)
@@ -1611,13 +1720,11 @@ Write the complete compiled report:"""
                     # never steer our retry loop.
                     if (not retry_policy.should_retry(error_type, attempt)
                             and result.get("_praison_retryable") is not True):
-                        result.pop("_praison_retryable", None)
-                        return result
+                        return _finish(result, raised)
                     
                     # Don't retry on last attempt
                     if attempt == retry_policy.max_attempts - 1:
-                        result.pop("_praison_retryable", None)
-                        return result
+                        return _finish(result, raised)
                     
                     # Emit retry hook event  
                     delay_ms = retry_policy.get_delay_ms(attempt)
@@ -1642,7 +1749,9 @@ Write the complete compiled report:"""
                 
                 # Check if retryable and not last attempt
                 if not is_retryable or attempt == retry_policy.max_attempts - 1:
-                    # Return error dict instead of raising for consistency with sync version
+                    # A framework-internal failure escaping the impl (not a tool
+                    # body raise — those are flattened and handled above) is
+                    # returned as an error dict.
                     return {"error": f"Error in execute_tool_async: {str(e)}"}
                 
                 # Determine error type  
@@ -2193,9 +2302,14 @@ Write the complete compiled report:"""
                 # Private control-plane key: a tool's own result may legitimately
                 # contain "retryable" (common for HTTP-API wrappers) and must not
                 # collide with the framework's verdict nor leak to the model.
+                # ``_praison_raised`` marks the dict as a flattened *raised*
+                # exception (timeouts/pool exhaustion also carry
+                # ``_praison_retryable`` but did not raise), so the retry loop can
+                # surface it as ToolExecutionError exactly like the sync path.
                 return {
                     "error": f"Error executing {function_name}: {str(e)}",
                     "_praison_retryable": retryable,
+                    "_praison_raised": True,
                 }
 
         except ToolExecutionError:

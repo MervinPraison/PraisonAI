@@ -21,6 +21,24 @@ const finals = [
 ];
 assert('stale when head after final', mg.isStaleFinalAfterPush(finals, '2026-06-12T09:00:00Z'));
 
+// PR #6056 shape: FINAL requested after HEAD; Claude answered with a security-only
+// comment (no Phase 1 table). That FINAL never completes, so recovery must re-ask.
+{
+  const head = '2026-10-27T20:40:21Z';
+  const trigger = { user: { login: 'MervinPraison' }, body: mg.FINAL_CLAUDE_REVIEW_BODY, created_at: '2026-10-27T20:42:06Z' };
+  const securityOnly = { user: { login: 'praisonai-triage-agent[bot]' }, body: '## Security and architecture review at `fec9380dd`. Origin: outsider\n\n**Verdict:** PASS', created_at: '2026-10-27T20:50:17Z' };
+  const realFinal = { user: { login: 'praisonai-triage-agent[bot]' }, body: '#### Phase 1 — AGENTS.md review\n| Check | Result |', created_at: '2026-10-27T20:55:00Z' };
+  const gateSecurity = { user: { login: 'praisonai-triage-agent[bot]' }, body: 'SECURITY_REVIEW: PASS\n| file | category |', created_at: '2026-10-27T20:50:17Z' };
+  assert('FINAL answered without the review is stale (re-ask)', mg.isStaleFinalAfterPush([trigger, securityOnly], head));
+  assert('FINAL answered without the review is not complete', !mg.finalClaudeCompletedOnSha([trigger, securityOnly], head));
+  assert('a real FINAL reply after a security-only one completes it', !mg.isStaleFinalAfterPush([trigger, securityOnly, realFinal], head)
+    && mg.finalClaudeCompletedOnSha([trigger, securityOnly, realFinal], head));
+  assert('the gate security review comment is not a FINAL answer', !mg.isStaleFinalAfterPush([trigger, gateSecurity], head));
+  assert('no reply yet: FINAL in progress, not stale', !mg.isStaleFinalAfterPush([trigger], head));
+  const retries = [0, 1, 2].map((i) => ({ ...trigger, created_at: `2026-10-27T2${i + 1}:00:00Z` }));
+  assert('re-asking stops after the per-HEAD cap', !mg.isStaleFinalAfterPush([...retries, { ...securityOnly, created_at: '2026-10-27T23:30:00Z' }], head));
+}
+
 const withRecovery = [
   ...finals,
   { user: { login: 'github-actions[bot]' }, body: '@claude FINAL architecture reviewer', created_at: '2026-06-12T09:30:00Z' },
