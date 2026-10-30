@@ -270,11 +270,13 @@ export class FileMemory {
 
   private async appendEntry(entry: FileMemoryEntry): Promise<void> {
     // Queue writes to ensure order
-    this.writeQueue = this.writeQueue.then(async () => {
+    const write = this.writeQueue.then(async () => {
       const fs = await import('fs/promises');
       await fs.appendFile(this.filePath, JSON.stringify(entry) + '\n');
     });
-    await this.writeQueue;
+    // Report this write's error to its caller without blocking later writes.
+    this.writeQueue = write.catch(() => {});
+    await write;
   }
 
   private textSearch(query: string, limit: number): SearchResult[] {
