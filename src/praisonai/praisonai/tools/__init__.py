@@ -17,6 +17,9 @@ __all__ = [
     "KANBAN_TOOLS",
 ]
 
+import sys as _sys
+import types as _types
+
 from .._lazy_cache import lazy_get
 
 _LAZY_ATTRS = {
@@ -36,8 +39,17 @@ def __getattr__(name: str):
     """Lazy load tools."""
     if name not in _LAZY_ATTRS:
         raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    value = lazy_get(f"tools:{name}", _LAZY_ATTRS[name])
-    # Bind on the package: importing ``.multiedit`` sets the submodule as the
-    # ``multiedit`` attribute, which would otherwise shadow the function.
-    globals()[name] = value
-    return value
+    return lazy_get(f"tools:{name}", _LAZY_ATTRS[name])
+
+
+class _ToolsModule(_types.ModuleType):
+    # Importing ``praisonai.tools.multiedit`` (from anywhere, in any order) makes
+    # the import system setattr the submodule onto the package, shadowing the
+    # ``multiedit`` function. Drop that binding so ``__getattr__`` stays in charge.
+    def __setattr__(self, name, value):
+        if name in _LAZY_ATTRS and isinstance(value, _types.ModuleType):
+            return
+        super().__setattr__(name, value)
+
+
+_sys.modules[__name__].__class__ = _ToolsModule

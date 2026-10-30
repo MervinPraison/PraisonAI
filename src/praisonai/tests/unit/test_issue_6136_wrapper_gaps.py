@@ -8,8 +8,11 @@ import pytest
 
 def test_tools_lazy_attr_is_stable_and_uses_lazy_cache():
     import praisonai.tools as tools
+    # Importing the submodule first (as other tests do) must not shadow the function.
+    from praisonai.tools.multiedit import multiedit as direct
 
     first = tools.multiedit
+    assert first is direct
     second = tools.multiedit
     assert callable(first) and first is second  # not shadowed by the submodule
     with pytest.raises(AttributeError):
