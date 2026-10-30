@@ -30,6 +30,7 @@ class _AgentServerRegistry:
         self._endpoints: Dict[int, Dict[str, str]] = {}
         self._apps: Dict[int, Any] = {}  # FastAPI apps
         self._ready_events: Dict[int, threading.Event] = {}
+        self._keep_alive_registered = False
 
     def get_or_create_app(self, port: int, title: str = "AgentTeam API") -> Tuple[Any, bool]:
         """Thread-safe app creation. Returns (app, is_new)."""
@@ -220,6 +221,46 @@ class _AgentServerRegistry:
         # server from a poisoned port.
         with self._lock:
             return self._started.get(port, False)
+
+    def keep_alive_at_exit(self) -> None:
+        """Keep daemon server threads alive until Ctrl+C once the script ends.
+
+        ``launch()`` returns immediately so several launches (and any code
+        after them) run; the wait happens once, at interpreter exit, only for
+        non-interactive scripts. Interactive sessions/notebooks never block.
+        """
+        import sys
+        main = sys.modules.get("__main__")
+        if sys.flags.interactive or not getattr(main, "__file__", None):
+            return
+        with self._lock:
+            if self._keep_alive_registered:
+                return
+            self._keep_alive_registered = True
+
+        def _wait():
+            with self._lock:
+                if not any(self._started.values()):
+                    return
+            print("\nAgent servers running. Press Ctrl+C to stop.")
+            try:
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                print("\nServers stopped")
+
+        # Wait before Python shuts down thread pools: plain atexit runs after
+        # concurrent.futures' exit hook, so request handlers that use
+        # run_in_executor would fail. threading atexits run in reverse order,
+        # so registering after concurrent.futures.thread is imported runs first.
+        import concurrent.futures.thread  # noqa: F401
+        import threading
+        register = getattr(threading, "_register_atexit", None)
+        if register is not None:
+            register(_wait)
+        else:  # pragma: no cover - non-CPython fallback
+            import atexit
+            atexit.register(_wait)
 
 
 # Module level — single registry instance shared by every launch() call site.
