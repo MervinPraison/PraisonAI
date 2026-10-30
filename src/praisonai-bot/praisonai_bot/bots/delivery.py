@@ -538,10 +538,16 @@ class DeliveryRouter:
         # gates *categorised* proactive sends by recipient category opt-in,
         # quiet hours and detail level. Unset ⇒ no gating, behaviour unchanged.
         self._notification_gate = None
+        self.set_notifications(notifications)
+
+    def set_notifications(self, notifications: Optional[Dict[str, Any]]) -> None:
+        """(Re)build the notification gate; falsy ⇒ no gating (issue #6138)."""
+        gate = None
         if notifications:
             from ._notifications import NotificationGate
 
-            self._notification_gate = NotificationGate(notifications)
+            gate = NotificationGate(notifications)
+        self._notification_gate = gate
 
     def _rate_limiter_for(self, platform: str) -> Optional[Any]:
         """Return a rate limiter for ``platform``, reusing the adapter's own.

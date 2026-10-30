@@ -1056,6 +1056,11 @@ class WebSocketGateway:
         # Notification policy (#6138): stamped the same way; the router gates
         # categorised proactive sends with it.
         if gateway_config.get("notifications"):
+            from ..bots._notifications import NotificationGate
+
+            # Validate here too: this entry point bypasses the schema, and a bad
+            # block should fail before serving, not on the first scheduled send.
+            NotificationGate(gateway_config["notifications"])
             config.notifications = gateway_config["notifications"]
 
         logger.info(f"Gateway config loaded from {config_path}")
@@ -11445,6 +11450,13 @@ class WebSocketGateway:
         # effect without a full process restart. No-op when the ``lifecycle``
         # block is absent and unchanged.
         self._reconcile_lifecycle(new_cfg)
+
+        # Issue #6138: apply changed (or removed) ``gateway.notifications`` to
+        # the cached delivery router, which otherwise keeps the boot policy.
+        notifications = (new_cfg.get("gateway") or {}).get("notifications") or None
+        self.config.notifications = notifications
+        if self._delivery_router is not None:
+            self._delivery_router.set_notifications(notifications)
 
         # Issue #2661: pick up a rotated shared gateway secret and force-close
         # every live session that authenticated under the previous secret, so a

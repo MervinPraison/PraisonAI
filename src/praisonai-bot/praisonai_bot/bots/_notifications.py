@@ -41,6 +41,19 @@ def _parse_time(value: str) -> time:
     return time(int(hour), int(minute or 0))
 
 
+def _parse_timezone(value: Any) -> str:
+    # The core policy silently falls back to UTC for an unknown zone, so a typo
+    # would shift quiet hours; reject it at config load instead.
+    from zoneinfo import ZoneInfo
+
+    name = str(value)
+    try:
+        ZoneInfo(name)
+    except Exception as exc:
+        raise ValueError(f"unknown notification timezone: {name!r}") from exc
+    return name
+
+
 def parse_preference(
     raw: Mapping[str, Any], base: NotificationPreference = DEFAULT_PREFERENCE
 ) -> NotificationPreference:
@@ -64,7 +77,9 @@ def parse_preference(
     return NotificationPreference(
         categories=set(categories),
         quiet_hours=quiet,
-        timezone=str(raw.get("timezone", base.timezone)),
+        timezone=(
+            _parse_timezone(raw["timezone"]) if "timezone" in raw else base.timezone
+        ),
         detail=DetailLevel(raw.get("detail", base.detail)),
         urgent_overrides_quiet=bool(
             raw.get("urgent_overrides_quiet", base.urgent_overrides_quiet)

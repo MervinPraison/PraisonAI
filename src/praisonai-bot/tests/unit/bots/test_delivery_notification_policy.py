@@ -75,20 +75,50 @@ def test_detail_level_redacts_content_per_recipient():
     assert sent == [("123", "Activity in cron_job1"), ("999", "transcript tail")]
 
 
-def test_quiet_hours_suppress_in_recipient_timezone():
-    hour = datetime.now(timezone.utc).hour
-    window = f"{hour:02d}:00-{(hour + 2) % 24:02d}:00"
+@pytest.mark.parametrize(
+    "utc_hour, expect_sent",
+    [
+        # 23:30 UTC = 08:30 Tokyo: outside Tokyo quiet hours (inside them in UTC).
+        (23, True),
+        # 13:30 UTC = 22:30 Tokyo: inside Tokyo quiet hours (outside them in UTC).
+        (13, False),
+    ],
+)
+def test_quiet_hours_use_recipient_timezone(monkeypatch, utc_hour, expect_sent):
+    from praisonai_bot.bots import _notifications
+
+    frozen = datetime(2026, 1, 15, utc_hour, 30, tzinfo=timezone.utc)
+
+    class FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return frozen.astimezone(tz) if tz else frozen.replace(tzinfo=None)
+
+    monkeypatch.setattr(_notifications, "datetime", FrozenDatetime)
     router, sent = _make_router({
         "recipients": {
             "telegram:123": {
                 "categories": ["agent_finished"],
-                "quiet_hours": window,
-                "timezone": "UTC",
+                "quiet_hours": "22:00-07:00",
+                "timezone": "Asia/Tokyo",
+                "detail": "detailed",
             },
         },
     })
-    _deliver(router, "late", category="agent_finished")
-    assert sent == []
+    _deliver(router, "result", category="agent_finished")
+    assert sent == ([("123", "result")] if expect_sent else [])
+
+
+def test_set_notifications_replaces_and_clears_policy():
+    router, sent = _make_router({"defaults": {"categories": []}})
+    _deliver(router, "a", category="agent_finished")
+    router.set_notifications(
+        {"defaults": {"categories": ["agent_finished"], "detail": "detailed"}}
+    )
+    _deliver(router, "b", category="agent_finished")
+    router.set_notifications(None)
+    _deliver(router, "c", category="agent_finished")
+    assert sent == [("123", "b"), ("123", "c")]
 
 
 def test_parse_preference_inherits_and_validates():
@@ -101,6 +131,8 @@ def test_parse_preference_inherits_and_validates():
         parse_preference({"categories": ["nope"]})
     with pytest.raises(ValueError):
         parse_preference({"detail": "loud"})
+    with pytest.raises(ValueError):
+        parse_preference({"timezone": "Europe/Londn"})
 
 
 def test_gate_falls_back_to_defaults_for_unknown_recipient():
