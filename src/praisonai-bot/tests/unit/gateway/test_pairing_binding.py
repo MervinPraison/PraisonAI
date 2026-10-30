@@ -65,6 +65,21 @@ def test_deny_consumes_without_creating_pair(tmp_path, monkeypatch):
     assert not pairing.verify_and_pair(code, "requester", "telegram")
 
 
+def test_reads_never_acquire_writer_lock(tmp_path, monkeypatch):
+    """Readers work when a lock file cannot be created, and use current JSON."""
+    from praisonaiagents.storage.base import FileLock
+    pairing = store(tmp_path)
+    code = pairing.generate_code("telegram", "requester")
+    assert pairing.approve("telegram", code)
+    def denied(_self):
+        raise PermissionError("read-only directory")
+    monkeypatch.setattr(FileLock, "__enter__", denied)
+    reader = store(tmp_path)
+    assert reader.is_paired("requester", "telegram")
+    assert len(reader.list_paired()) == 1
+    assert reader.list_pending() == []
+
+
 def test_existing_instances_see_approvals_and_revocations(tmp_path):
     """A bot neither misses another writer's approval nor restores a revoked pair."""
     bot, gateway = store(tmp_path), store(tmp_path)

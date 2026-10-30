@@ -308,8 +308,8 @@ class PairingStore:
             lockout_seconds=lockout_cooldown,
         )
 
-        with self._transaction():
-            pass
+        with self._lock:
+            self._load()
 
     @contextmanager
     def _transaction(self):
@@ -423,12 +423,14 @@ class PairingStore:
 
     def is_paired(self, channel_id: str, channel_type: str) -> bool:
         """Check if a channel is authorised."""
-        with self._transaction():
+        with self._lock:
+            self._load()  # The writer publishes complete snapshots by atomic replace.
             return (channel_id, channel_type) in self._paired
 
     def list_paired(self) -> List[PairedChannel]:
         """List all authorised channels."""
-        with self._transaction():
+        with self._lock:
+            self._load()
             return list(self._paired.values())
 
     def revoke(self, channel_id: str, channel_type: str) -> bool:
@@ -453,7 +455,8 @@ class PairingStore:
         Returns:
             List of pending requests with channel, code, user info, and age
         """
-        with self._transaction():
+        with self._lock:
+            self._load()
             self._prune_expired()
             
             pending_list = []
