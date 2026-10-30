@@ -1443,6 +1443,9 @@ class WebSocketGateway:
         # raw ``hooks`` dict — because ``GatewayConfig`` carries no idempotency
         # field. ``None`` until a config with a ``hooks:`` block is applied.
         self._hook_idempotency_backend: Optional[str] = None
+        # Ids of ``gateway.hooks_outbound`` command hooks on the default
+        # registry (#6140), so a config reload replaces rather than stacks them.
+        self._outbound_hook_ids: List[str] = []
 
         # Issue #3021: opt-in gateway lifecycle — idle/scale-to-zero, epoch-aware
         # external drain marker, and a crash-loop restart guard. These reuse the
@@ -6108,6 +6111,7 @@ class WebSocketGateway:
             self._hook_idem = None  # rebuild lazily under the new backend
 
         self._hooks.clear()
+        self._apply_outbound_hooks_from_config(cfg)
         if entries and os.environ.get(
             "PRAISONAI_NO_PLUGINS", ""
         ).strip().lower() in ("true", "1", "yes"):
@@ -6122,6 +6126,48 @@ class WebSocketGateway:
             return
         if entries:
             self._register_hooks_from_config(entries)
+
+    def _apply_outbound_hooks_from_config(self, cfg: Dict[str, Any]) -> None:
+        """(Re)register ``gateway.hooks_outbound`` lifecycle sinks (#6140).
+
+        Each entry ``{command, events, timeout}`` becomes a core ``CommandHook``
+        on the default hook registry — the one agents fire lifecycle events
+        (``session_end``, ``message_undelivered``, ``job_completed``,
+        ``gateway_stop``, ...) on — so the command receives the event JSON on
+        stdin with ``PRAISON_EVENT`` set. Invalid entries are skipped with a
+        warning; safe mode registers none.
+        """
+        from praisonaiagents.hooks import get_default_registry
+        from praisonaiagents.hooks.types import HookEvent
+
+        registry = get_default_registry()
+        for hook_id in getattr(self, "_outbound_hook_ids", []):
+            registry.unregister(hook_id)
+        self._outbound_hook_ids = []
+
+        entries = (cfg.get("gateway") or {}).get("hooks_outbound") or []
+        if entries and os.environ.get(
+            "PRAISONAI_NO_PLUGINS", ""
+        ).strip().lower() in ("true", "1", "yes"):
+            logger.warning(
+                "SAFE MODE: %d outbound hook(s) disabled (PRAISONAI_NO_PLUGINS)",
+                len(entries),
+            )
+            return
+        for entry in entries:
+            try:
+                command = str(entry["command"]).strip()
+                events = [HookEvent(e) for e in entry["events"]]
+                if not command or not events:
+                    raise ValueError("'command' and 'events' are required")
+                timeout = float(entry.get("timeout", 30.0))
+            except (KeyError, ValueError, TypeError) as e:
+                logger.warning("Skipping invalid outbound hook %s: %s", entry, e)
+                continue
+            for event in events:
+                self._outbound_hook_ids.append(registry.register_command(
+                    event, command, name=f"outbound:{event.value}", timeout=timeout,
+                ))
 
     def _get_hook_idem_store(self) -> Any:
         """Build (once) and return the inbound idempotency store (#4208).
