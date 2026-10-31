@@ -5,6 +5,7 @@ Implements progressive escalation from direct response to full autonomous mode.
 """
 
 from praisonaiagents._logging import get_logger
+import asyncio
 import time
 from typing import Any, Dict, List, Optional, Callable
 
@@ -284,6 +285,14 @@ class EscalationPipeline:
         else:
             return {"response": "", "success": False}
     
+    async def _run_chat(self, prompt: str, **kwargs) -> Any:
+        """Run the blocking ``agent.chat`` in a worker thread.
+
+        ``asyncio.to_thread`` copies contextvars, so request-scoped state
+        (user, trace, budget) survives, and the event loop stays responsive.
+        """
+        return await asyncio.to_thread(self.agent.chat, prompt, **kwargs)
+    
     async def _execute_direct(self, prompt: str) -> Dict[str, Any]:
         """
         Execute direct response (Stage 0).
@@ -298,7 +307,7 @@ class EscalationPipeline:
         
         try:
             # Direct chat without tools
-            response = self.agent.chat(prompt)
+            response = await self._run_chat(prompt)
             
             self._current_context.add_step(
                 action="direct_response",
@@ -335,16 +344,12 @@ class EscalationPipeline:
             # Limit tools for heuristic stage
             selected_tools = selected_tools[:self.config.heuristic_max_tools]
             
-            # Execute with selected tools
+            # Execute with selected tools passed per call, never mutating
+            # the shared, caller-owned agent (safe under concurrent execute()).
             if hasattr(self.agent, 'tools'):
-                original_tools = self.agent.tools
-                self.agent.tools = selected_tools
-            
-            try:
-                response = self.agent.chat(prompt)
-            finally:
-                if hasattr(self.agent, 'tools'):
-                    self.agent.tools = original_tools
+                response = await self._run_chat(prompt, tools=selected_tools)
+            else:
+                response = await self._run_chat(prompt)
             
             self._current_context.add_step(
                 action="heuristic_response",
@@ -381,7 +386,7 @@ class EscalationPipeline:
 
 Respond with numbered steps, then execute them."""
             
-            response = self.agent.chat(plan_prompt)
+            response = await self._run_chat(plan_prompt)
             
             self._current_context.add_step(
                 action="planned_response",
@@ -427,7 +432,7 @@ Respond with numbered steps, then execute them."""
 
 Use all available tools as needed. Verify your work before completing."""
             
-            response = self.agent.chat(autonomous_prompt)
+            response = await self._run_chat(autonomous_prompt)
             
             self._current_context.add_step(
                 action="autonomous_response",
