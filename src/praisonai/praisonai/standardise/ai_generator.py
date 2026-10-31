@@ -889,12 +889,12 @@ def calculator(expression: str) -> str:
     import operator
     
     # Safe operations mapping
-    ops = {
+    ops = {{
         ast.Add: operator.add, ast.Sub: operator.sub,
         ast.Mult: operator.mul, ast.Div: operator.truediv,
         ast.Pow: operator.pow, ast.Mod: operator.mod,
         ast.USub: operator.neg, ast.UAdd: operator.pos,
-    }
+    }}
     
     def _eval_node(node):
         if isinstance(node, ast.Constant):
@@ -907,14 +907,14 @@ def calculator(expression: str) -> str:
             operand = _eval_node(node.operand)
             return ops[type(node.op)](operand)
         else:
-            raise TypeError(f"Unsupported operation: {type(node)}")
+            raise TypeError(f"Unsupported operation: {{type(node)}}")
     
     try:
         tree = ast.parse(expression.strip(), mode='eval')
         result = _eval_node(tree.body)
         return str(result)
     except (ValueError, SyntaxError, TypeError, ZeroDivisionError, KeyError) as e:
-        return f"Error: {e}"
+        return f"Error: {{e}}"
 
 # Create agent with tool
 agent = Agent(
