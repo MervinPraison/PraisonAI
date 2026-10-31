@@ -38,6 +38,9 @@ export class Memory {
 
   constructor(config: MemoryConfig = {}) {
     this.maxEntries = config.maxEntries ?? 1000;
+    if (this.maxEntries < 0) {
+      throw new RangeError('maxEntries must be non-negative');
+    }
     this.maxTokens = config.maxTokens ?? 100000;
     this.embeddingProvider = config.embeddingProvider;
   }

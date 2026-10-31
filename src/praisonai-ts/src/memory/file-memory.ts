@@ -32,6 +32,9 @@ export class FileMemory {
   constructor(config: FileMemoryConfig) {
     this.filePath = config.filePath;
     this.maxEntries = config.maxEntries ?? 10000;
+    if (this.maxEntries < 0) {
+      throw new RangeError('maxEntries must be non-negative');
+    }
     this.embeddingProvider = config.embeddingProvider;
     this.compactionThreshold = config.compactionThreshold ?? 1000;
     this.autoCompact = config.autoCompact ?? true;
