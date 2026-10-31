@@ -430,20 +430,18 @@ class RAG:
         Currently wraps sync version. Can be extended for true async.
         """
         import asyncio
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.retrieve(
-                query=query,
-                top_k=top_k,
-                hybrid=hybrid,
-                rerank=rerank,
-                filters=filters,
-                user_id=user_id,
-                agent_id=agent_id,
-                run_id=run_id,
-                **kwargs,
-            ),
+        # asyncio.to_thread copies contextvars into the worker thread
+        return await asyncio.to_thread(
+            self.retrieve,
+            query=query,
+            top_k=top_k,
+            hybrid=hybrid,
+            rerank=rerank,
+            filters=filters,
+            user_id=user_id,
+            agent_id=agent_id,
+            run_id=run_id,
+            **kwargs,
         )
     
     def query(
@@ -523,19 +521,15 @@ class RAG:
         
         Currently wraps sync version. Can be extended for true async.
         """
-        # For now, wrap sync version
-        # TODO: Implement true async when Knowledge supports it
         import asyncio
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.query(
-                question=question,
-                user_id=user_id,
-                agent_id=agent_id,
-                run_id=run_id,
-                **kwargs,
-            ),
+        # asyncio.to_thread copies contextvars into the worker thread
+        return await asyncio.to_thread(
+            self.query,
+            question=question,
+            user_id=user_id,
+            agent_id=agent_id,
+            run_id=run_id,
+            **kwargs,
         )
     
     def stream(
@@ -580,6 +574,10 @@ class RAG:
         prompt = self._build_prompt(question, context)
         
         # 5. Stream generation
+        yield from self._stream_generate(prompt, **kwargs)
+    
+    def _stream_generate(self, prompt: str, **kwargs) -> Iterator[str]:
+        """Synchronously stream the LLM answer for an already-built prompt."""
         if self.llm is None:
             yield "LLM not available."
             return
@@ -615,10 +613,15 @@ class RAG:
         """
         Async streaming RAG response.
         
-        Yields tokens as they are generated.
+        Yields tokens as they are generated. Blocking retrieval, reranking
+        and sync LLM streaming run in worker threads so the event loop
+        stays responsive.
         """
-        # 1. Retrieve
-        results = self._retrieve(
+        import asyncio
+        
+        # 1. Retrieve (embedding + vector search are blocking)
+        results = await asyncio.to_thread(
+            self._retrieve,
             query=question,
             user_id=user_id,
             agent_id=agent_id,
@@ -627,7 +630,7 @@ class RAG:
         )
         
         # 2. Rerank
-        results = self._rerank(question, results)
+        results = await asyncio.to_thread(self._rerank, question, results)
         
         # 3. Build context
         context, used_results = self._build_context(results)
@@ -651,8 +654,14 @@ class RAG:
                 async for chunk in self.llm.astream(messages=messages, **kwargs):
                     yield chunk
             else:
-                # Fallback to sync streaming wrapped
-                for chunk in self.stream(question, user_id, agent_id, run_id, **kwargs):
+                # Fallback: pump the sync generator from a worker thread
+                # (reuses the context already retrieved above)
+                it = self._stream_generate(prompt, **kwargs)
+                sentinel = object()
+                while True:
+                    chunk = await asyncio.to_thread(next, it, sentinel)
+                    if chunk is sentinel:
+                        break
                     yield chunk
         except Exception as e:
             logger.error(f"Async streaming failed: {e}")
