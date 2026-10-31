@@ -897,3 +897,51 @@ class TestTurnLivenessBinding:
         ctrl.request("user_stop_command")
         assert asyncio.run(retained.send("origin", "late")).ok is False
         assert sent == [("123", "bg")]
+
+
+def test_stop_mid_send_halts_remaining_attachment_uploads(tmp_path):
+    # Issue #6160 (review): /stop only sets the controller flag; it does not
+    # cancel an in-flight send(). Remaining uploads must re-check liveness.
+    uploaded = []
+    state = {"live": True}
+
+    class FakeBot:
+        platform = "telegram"
+
+        async def send_message(self, channel_id, text):
+            pass
+
+        async def send_media(self, channel_id, path, caption=None):
+            uploaded.append(path)
+            state["live"] = False  # /stop arrives during the first upload
+
+    fake_bot = FakeBot()
+
+    class FakeBotOS:
+        def get_bot(self, platform):
+            return fake_bot if platform == "telegram" else None
+
+        def list_bots(self):
+            return ["telegram"]
+
+    router = DeliveryRouter(FakeBotOS())
+    router.directory._home_channels = {}
+    router.directory._aliases = {}
+    router.directory._observed = {}
+
+    files = []
+    for name in ("a.png", "b.png", "c.png"):
+        f = tmp_path / name
+        f.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 32)
+        files.append(str(f))
+
+    messenger = BotOutboundMessenger(
+        router,
+        origin=SessionSource(platform="telegram", channel_id="123"),
+        liveness=lambda: state["live"],
+    )
+    result = asyncio.run(messenger.send("origin", "charts", media=files))
+
+    assert uploaded == [files[0]]
+    assert "2 skipped" in result.summary
+    assert "no longer live" in (result.detail or "")

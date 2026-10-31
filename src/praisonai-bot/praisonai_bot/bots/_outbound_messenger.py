@@ -283,7 +283,18 @@ class BotOutboundMessenger:
         # Only the first attachment carries the caption to avoid repeating the
         # full text on every file.
         first = True
-        for path in media:
+        for index, path in enumerate(media):
+            # Re-check liveness before every upload (#6160): /stop only sets
+            # the controller flag, it does not cancel this coroutine, so a turn
+            # stopped mid-send must not keep uploading the remaining files.
+            if self._is_stale():
+                remaining = len(media) - index
+                skipped += remaining
+                notes.append(
+                    f"Stopped: {remaining} attachment(s) not sent, "
+                    f"{self._STALE_DETAIL}."
+                )
+                break
             try:
                 safe = validate_media_delivery_path(
                     path, policy=self._media_policy
