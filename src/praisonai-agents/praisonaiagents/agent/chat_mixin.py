@@ -3018,6 +3018,23 @@ Your Goal: {self.goal}"""
         # Raise the enriched error
         raise error
 
+    def _native_reasoning_kwargs(self, model=None):
+        """Provider-native reasoning effort for the direct OpenAI client path.
+
+        An LLM instance translates ``reasoning_effort`` itself; the plain
+        OpenAI client only sees what the dispatcher forwards, so resolve the
+        unified level (Issue #4452) here, as the streaming path does. Returns
+        {} when unset/off or when the model has no native effort control.
+        """
+        effort = getattr(self, 'reasoning_effort', None)
+        if effort is None or getattr(self, '_using_custom_llm', False):
+            return {}
+        from ..thinking.effort import resolve_reasoning_params
+        native = resolve_reasoning_params(effort, model or self.llm)
+        if 'reasoning_effort' not in native:
+            return {}
+        return {'reasoning_effort': native['reasoning_effort']}
+
     def _execute_unified_chat_completion(
         self, 
         messages, 
@@ -3072,6 +3089,7 @@ Your Goal: {self.goal}"""
                     temperature=temperature,
                     max_tokens=getattr(self, 'max_tokens', None),
                     stream=True,  # Try streaming first
+                    **self._native_reasoning_kwargs(self._unified_dispatcher.model),
                     response_format=response_format,
                     execute_tool_fn=self._durable_sync_tool_executor(
                         getattr(self, 'execute_tool', None)
@@ -3121,6 +3139,7 @@ Your Goal: {self.goal}"""
                 temperature=temperature,
                 max_tokens=getattr(self, 'max_tokens', None),
                 stream=stream,
+                **self._native_reasoning_kwargs(self._unified_dispatcher.model),
                 response_format=response_format,
                 execute_tool_fn=self._durable_sync_tool_executor(
                     getattr(self, 'execute_tool', None)
@@ -3272,6 +3291,7 @@ Your Goal: {self.goal}"""
                 temperature=temperature,
                 max_tokens=getattr(self, 'max_tokens', None),
                 stream=stream,
+                **self._native_reasoning_kwargs(getattr(dispatcher, 'model', None)),
                 response_format=response_format,
                 execute_tool_fn=self._durable_async_tool_executor(
                     getattr(self, 'execute_tool_async', None)
