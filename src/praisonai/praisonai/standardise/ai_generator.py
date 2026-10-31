@@ -904,11 +904,16 @@ def calculator(expression: str) -> str:
         elif isinstance(node, ast.BinOp):
             left = _eval_node(node.left)
             right = _eval_node(node.right)
+            # Reject powers whose result has at least 4096 + 1 bits before
+            # computing them; |left| >= 2 ** (bit_length - 1).
             if (isinstance(node.op, ast.Pow) and isinstance(left, int)
                     and isinstance(right, int)
-                    and abs(left).bit_length() * right > 4096):
+                    and (abs(left).bit_length() - 1) * right > 4096):
                 raise ValueError("Result is too large")
-            return ops[type(node.op)](left, right)
+            result = ops[type(node.op)](left, right)
+            if isinstance(result, int) and result.bit_length() > 4096:
+                raise ValueError("Result is too large")
+            return result
         elif isinstance(node, ast.UnaryOp):
             operand = _eval_node(node.operand)
             return ops[type(node.op)](operand)

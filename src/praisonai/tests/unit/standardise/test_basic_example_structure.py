@@ -39,7 +39,17 @@ def test_tools_structure_contains_runnable_calculator():
     tree = ast.parse(code)
     functions = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
     assert {"calculator", "_eval_node"} <= functions
-    assert "tools=[calculator]" in code
+    agent_calls = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and getattr(node.func, "id", None) == "Agent"
+    ]
+    assert any(
+        keyword.arg == "tools"
+        and isinstance(keyword.value, ast.List)
+        and [elt.id for elt in keyword.value.elts if isinstance(elt, ast.Name)] == ["calculator"]
+        for call in agent_calls
+        for keyword in call.keywords
+    )
 
 
 def test_tools_calculator_rejects_non_numeric_constants():
@@ -58,6 +68,10 @@ def test_tools_calculator_rejects_non_numeric_constants():
     assert calculator("True + 1").startswith("Error:")
     assert calculator("2 ** 10") == "1024"
     assert calculator("9 ** 100000000").startswith("Error:")
+    assert calculator("2 ** 3000") == str(2 ** 3000)
+    assert calculator("1 ** 5000") == "1"
+    assert calculator("3 ** 5000").startswith("Error:")
+    assert calculator("2 ** 4096").startswith("Error:")
     assert calculator("1e308 ** 2").startswith("Error:")
 
 
