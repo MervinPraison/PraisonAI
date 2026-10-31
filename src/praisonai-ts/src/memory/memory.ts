@@ -12,7 +12,7 @@ export interface MemoryEntry {
 }
 
 export interface MemoryConfig {
-  /** Maximum stored entries. Negative values are rejected; zero retains none. */
+  /** Entry limit enforced by add(). Negative values are rejected; zero drops added entries. */
   maxEntries?: number;
   maxTokens?: number;
   embeddingProvider?: EmbeddingProvider;
