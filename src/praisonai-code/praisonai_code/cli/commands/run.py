@@ -1515,6 +1515,15 @@ def run_main(
     output = get_output_controller()
     _ = get_current_context()  # Initialize context
 
+    # Per-tool usage tally for `praisonai usage --by tool` (Issue #6158).
+    try:
+        from ..state.project_sessions import install_tool_stats_hook, reset_tool_stats
+
+        reset_tool_stats()
+        install_tool_stats_hook()
+    except Exception:
+        pass
+
     # --pure / --no-plugins: suppression is scoped by the @scopes_no_plugins
     # decorator, which sets PRAISONAI_NO_PLUGINS (read by the core PluginManager)
     # for the duration of this call and always restores the prior value on
@@ -3101,6 +3110,11 @@ def _wire_subtree_context_hook(
             matcher=file_tool_matcher(),
             name="subtree_instruction_injection",
         )
+        # This per-agent registry replaces the global one, so register the
+        # per-tool usage tally here too (Issue #6158).
+        from ..state.project_sessions import install_tool_stats_hook
+
+        install_tool_stats_hook(registry)
         agent_config["hooks"] = registry
     except Exception:
         return
