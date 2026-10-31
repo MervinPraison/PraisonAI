@@ -2150,7 +2150,9 @@ class WebSocketGateway:
                 )
 
             return JSONResponse({
-                "pending": _approval_mgr.list_pending(),
+                "pending": _approval_mgr.list_pending(
+                    visible_to=_resolve_operator_identity(request),
+                ),
                 "allow_list": _approval_mgr.allowlist.list(),
             })
 

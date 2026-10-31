@@ -82,6 +82,26 @@ def test_denied_polling_does_not_exhaust_approval_budget(monkeypatch, tmp_path):
     asyncio.run(scenario())
 
 
+def test_pending_queue_hides_requests_bound_to_other_reviewers(monkeypatch, tmp_path):
+    async def scenario():
+        app, manager, _ = await build_app(monkeypatch, tmp_path, ["approvals"])
+        request_id, future = await manager.register(
+            tool_name="send_report", arguments={"report": "team-a secret"},
+            authorized_reviewers=["operator:alice"],
+        )
+        auth = {"Authorization": f"Bearer {TOKEN}"}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://gateway") as client:
+            bob = await client.get("/api/approval/pending", headers={**auth, "X-Operator-Id": "bob"})
+            alice = await client.get("/api/approval/pending", headers={**auth, "X-Operator-Id": "alice"})
+        assert bob.status_code == 200 and bob.json()["pending"] == []
+        assert "team-a secret" not in bob.text
+        assert alice.json()["pending"][0]["request_id"] == request_id
+        manager.resolve(request_id, Resolution(approved=False, reason="cleanup", resolver="operator:alice"))
+        await future
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.skipif(os.getenv("PRAISONAI_LIVE_TESTS") != "1", reason="Opt-in real LLM test")
 def test_generated_report_requires_approval_scope(monkeypatch, tmp_path):
     from praisonaiagents import Agent
