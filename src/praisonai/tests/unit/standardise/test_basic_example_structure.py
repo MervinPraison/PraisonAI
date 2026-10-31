@@ -30,6 +30,7 @@ def test_basic_structure_renders_for_every_feature(slug):
 def test_tools_structure_contains_runnable_calculator():
     structure = _generator()._get_feature_basic_structure("tools", "Tools")
     code = structure.split("```python\n", 1)[1].rsplit("```", 1)[0]
+    assert "{{" not in code and "}}" not in code
     assert "ops = {" in code
     assert 'f"Unsupported operation: {type(node)}"' in code
     assert 'f"Error: {e}"' in code
