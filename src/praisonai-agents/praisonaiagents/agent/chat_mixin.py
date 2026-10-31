@@ -5569,9 +5569,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 if rc:
                                     reasoning_content += rc
 
-                        if not full_response_text and not reasoning_content:
-                            # No answer text (only annotation or contentless
-                            # chunks): fall back to the tool results via the
+                        if not full_response_text.strip() and not reasoning_content.strip():
+                            # No answer text (only annotation, contentless or
+                            # whitespace-only chunks): fall back to the tool results via the
                             # except below.
                             raise ValueError("follow-up stream returned no answer text")
                         
