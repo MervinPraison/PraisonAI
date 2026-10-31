@@ -1,7 +1,8 @@
 """Live check that async chat with a tool returns a model-written final answer.
 
-Exercises the post-tool follow-up request in ``ChatMixin._achat_completion``.
-Skipped unless ``OPENAI_API_KEY`` is set.
+Exercises the post-tool follow-up request in ``ChatMixin._achat_completion``
+by turning off the default unified dispatch, so ``_achat_impl`` takes the
+legacy OpenAI-client branch. Skipped unless ``OPENAI_API_KEY`` is set.
 """
 import os
 
@@ -12,7 +13,7 @@ from praisonaiagents import Agent
 
 def get_secret_number() -> str:
     """Return the secret number."""
-    return "The secret number is 4217."
+    return "4217"
 
 
 @pytest.mark.asyncio
@@ -24,6 +25,8 @@ async def test_achat_with_tool_returns_final_answer_live():
         llm="gpt-4o-mini",
         tools=[get_secret_number],
     )
+    # The default unified path never calls _achat_completion.
+    agent._use_unified_llm_dispatch = False
     result = await agent.astart(
         "Use the get_secret_number tool, then reply with one sentence that "
         "contains the secret number."
@@ -31,3 +34,5 @@ async def test_achat_with_tool_returns_final_answer_live():
     print(f"Agent output: {result}")
     assert result
     assert "4217" in str(result)
+    # Without the fix the raw tool output ("4217") is returned unchanged.
+    assert str(result).strip() != "4217"

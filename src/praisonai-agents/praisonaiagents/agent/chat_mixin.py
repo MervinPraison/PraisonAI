@@ -5568,6 +5568,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 rc = chunk.choices[0].delta.reasoning_content
                                 if rc:
                                     reasoning_content += rc
+
+                        if not any(c.choices for c in chunks):
+                            # Nothing but annotation chunks: fall back to the
+                            # tool results via the except below.
+                            raise ValueError("follow-up stream returned no answer chunks")
                         
                         console = self.console  # None unless verbose
                         if console is not None:
