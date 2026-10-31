@@ -9,6 +9,7 @@ platform, no network egress, no configuration required.
     praisonai usage                 # last 30 days, grouped by day
     praisonai usage --by model      # grouped by model
     praisonai usage --by project    # grouped by project
+    praisonai usage --by tool       # per-tool calls, success rate, latency
     praisonai usage --days 7        # only the last week
     praisonai usage --json          # machine-readable output
 """
@@ -51,6 +52,7 @@ def _rows_from_sessions(
                 "project": project_label,
                 "total_tokens": int(s.get("total_tokens") or 0),
                 "cost": float(s.get("cost") or 0.0),
+                "tool_stats": s.get("tool_stats") or {},
             }
         )
     return rows
@@ -170,13 +172,82 @@ def _group(rows: List[Dict[str, Any]], by: str) -> List[Tuple[str, int, float]]:
     return grouped
 
 
+def _group_tools(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Roll per-session ``tool_stats`` up into one row per tool (Issue #6158).
+
+    Rows are walked newest-first so the first ``last_ms``/``last_error`` seen
+    for a tool is its most recent one.
+    """
+    rows = sorted(rows, key=lambda r: str(r.get("updated_at") or ""), reverse=True)
+    tools: Dict[str, Dict[str, Any]] = {}
+    for row in rows:
+        stats = row.get("tool_stats")
+        if not isinstance(stats, dict):
+            continue
+        for name, stat in stats.items():
+            if not isinstance(stat, dict) or not stat.get("calls"):
+                continue
+            cur = tools.get(name)
+            if cur is None:
+                cur = tools[name] = {
+                    "tool": name, "calls": 0, "errors": 0, "total_ms": 0.0,
+                    "last_ms": float(stat.get("last_ms") or 0.0),
+                    "last_error": None,
+                }
+            cur["calls"] += int(stat.get("calls") or 0)
+            cur["errors"] += int(stat.get("errors") or 0)
+            cur["total_ms"] += float(stat.get("total_ms") or 0.0)
+            if cur["last_error"] is None and stat.get("last_error"):
+                cur["last_error"] = stat["last_error"]
+    result = []
+    for cur in tools.values():
+        calls = cur["calls"]
+        result.append({
+            "tool": cur["tool"],
+            "calls": calls,
+            "successes": calls - cur["errors"],
+            "errors": cur["errors"],
+            "success_rate": round((calls - cur["errors"]) / calls, 4) if calls else 0.0,
+            "avg_ms": round(cur["total_ms"] / calls, 1) if calls else 0.0,
+            "last_ms": round(cur["last_ms"], 1),
+            "last_error": cur["last_error"],
+        })
+    result.sort(key=lambda r: (-r["calls"], r["tool"]))
+    return result
+
+
+def _print_tool_report(output, tools: List[Dict[str, Any]], errors: List[str], meta: Dict[str, Any], json_: bool) -> None:
+    if json_ or output.is_json_mode:
+        output.print_json({**meta, "rows": tools, "errors": errors})
+        return
+    for message in errors:
+        output.print_warning(f"Usage may be incomplete: {message}")
+    if not tools:
+        if not errors:
+            output.print_info("No tool usage recorded yet")
+        return
+    headers = ["Tool", "Calls", "Success", "Avg ms", "Last ms", "Last error"]
+    table_rows = [
+        [
+            t["tool"],
+            f"{t['calls']:,}",
+            f"{t['success_rate'] * 100:.1f}%",
+            f"{t['avg_ms']:.0f}",
+            f"{t['last_ms']:.0f}",
+            (t["last_error"] or "-")[:60],
+        ]
+        for t in tools
+    ]
+    output.print_table(headers, table_rows, title="Tool usage")
+
+
 @app.command()
 def usage(
     days: int = typer.Option(
         30, "--days", "-d", help="Only include sessions updated in the last N days (0 = all)"
     ),
     by: str = typer.Option(
-        "day", "--by", "-b", help="Group by: day, model, or project"
+        "day", "--by", "-b", help="Group by: day, model, project, or tool"
     ),
     project: Optional[str] = typer.Option(
         None, "--project", "-p", help="Restrict to a specific project ID"
@@ -189,12 +260,18 @@ def usage(
     output = get_output_controller()
 
     by = (by or "day").lower()
-    if by not in ("day", "model", "project"):
-        output.print_error("--by must be one of: day, model, project")
+    if by not in ("day", "model", "project", "tool"):
+        output.print_error("--by must be one of: day, model, project, tool")
         raise typer.Exit(1)
 
     errors: List[str] = []
     rows = _within_days(_collect_rows(project, on_error=errors.append), days)
+    if by == "tool":
+        _print_tool_report(
+            output, _group_tools(rows), errors,
+            {"by": by, "days": days, "project": project}, json_,
+        )
+        return
     grouped = _group(rows, by)
 
     total_tokens = sum(r[1] for r in grouped)

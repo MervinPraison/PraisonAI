@@ -5,6 +5,7 @@ Provides session continuity within project boundaries.
 """
 
 import os
+import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -506,6 +507,7 @@ def accumulate_session_usage(
     Best-effort: any failure leaves the session untouched and returns the
     current (possibly unchanged) totals.
     """
+    _flush_tool_stats(session_id, project_path)
     current = read_session_usage(session_id, project_path)
     try:
         from praisonaiagents.telemetry.token_collector import get_token_collector
@@ -573,6 +575,111 @@ def accumulate_session_usage(
         return current
 
     return updated
+
+
+# ── Per-tool outcome tally (Issue #6158) ───────────────────────────────────
+# Fed by the existing AFTER_TOOL hook payload (tool name, error, timing) and
+# merged into the session's ``tool_stats`` metadata alongside token/cost, so
+# ``praisonai usage --by tool`` has durable data to report. No core changes.
+_tool_tally: Dict[str, Dict[str, Any]] = {}
+_tool_tally_lock = threading.Lock()
+_default_tool_hook_id: Optional[str] = None
+
+
+def _empty_tool_stat() -> Dict[str, Any]:
+    return {"calls": 0, "errors": 0, "total_ms": 0.0, "last_ms": 0.0, "last_error": None}
+
+
+def _on_after_tool(data: Any) -> None:
+    """AFTER_TOOL hook: tally one tool outcome (never blocks or alters it)."""
+    try:
+        name = getattr(data, "tool_name", "") or "unknown"
+        error = getattr(data, "tool_error", None)
+        ms = float(getattr(data, "execution_time_ms", 0.0) or 0.0)
+        with _tool_tally_lock:
+            stat = _tool_tally.setdefault(name, _empty_tool_stat())
+            stat["calls"] += 1
+            stat["total_ms"] += ms
+            stat["last_ms"] = ms
+            if error:
+                stat["errors"] += 1
+                stat["last_error"] = str(error)[:500]
+    except Exception:
+        pass
+    return None
+
+
+def install_tool_stats_hook(registry: Any = None) -> None:
+    """Register the per-tool tally on ``registry`` (default: global registry).
+
+    Registration on the global registry is idempotent; a per-agent registry
+    (which replaces the global one for that agent) gets its own registration.
+    """
+    global _default_tool_hook_id
+    try:
+        from praisonaiagents.hooks import HookEvent
+
+        if registry is not None:
+            registry.register_function(
+                event=HookEvent.AFTER_TOOL, func=_on_after_tool, name="tool_stats"
+            )
+            return
+        if _default_tool_hook_id is None:
+            from praisonaiagents.hooks import add_hook
+
+            _default_tool_hook_id = add_hook(HookEvent.AFTER_TOOL, _on_after_tool)
+    except Exception:
+        pass
+
+
+def reset_tool_stats() -> None:
+    """Clear the in-process tally (call at the start of a run)."""
+    with _tool_tally_lock:
+        _tool_tally.clear()
+
+
+def merge_tool_stats(
+    base: Optional[Dict[str, Any]], delta: Dict[str, Any]
+) -> Dict[str, Dict[str, Any]]:
+    """Merge per-tool ``delta`` counters into ``base`` (returns a new dict)."""
+    merged: Dict[str, Dict[str, Any]] = {}
+    for name, stat in (base or {}).items():
+        if isinstance(stat, dict):
+            merged[name] = {**_empty_tool_stat(), **stat}
+    for name, stat in (delta or {}).items():
+        if not isinstance(stat, dict):
+            continue
+        cur = merged.setdefault(name, _empty_tool_stat())
+        cur["calls"] = int(cur.get("calls") or 0) + int(stat.get("calls") or 0)
+        cur["errors"] = int(cur.get("errors") or 0) + int(stat.get("errors") or 0)
+        cur["total_ms"] = round(
+            float(cur.get("total_ms") or 0.0) + float(stat.get("total_ms") or 0.0), 3
+        )
+        if stat.get("calls"):
+            cur["last_ms"] = round(float(stat.get("last_ms") or 0.0), 3)
+        if stat.get("last_error"):
+            cur["last_error"] = stat["last_error"]
+    return merged
+
+
+def _flush_tool_stats(session_id: str, project_path: Optional[str] = None) -> None:
+    """Merge (and drain) this run's tool tally into the session record."""
+    with _tool_tally_lock:
+        if not _tool_tally:
+            return
+        delta = {k: dict(v) for k, v in _tool_tally.items()}
+        _tool_tally.clear()
+    try:
+        store = _resolve_usage_store(session_id, project_path) or get_project_session_store(project_path)
+        try:
+            existing = (getattr(store.get_session(session_id), "metadata", {}) or {}).get("tool_stats")
+        except Exception:
+            existing = None
+        store.update_session_metadata(
+            session_id, tool_stats=merge_tool_stats(existing, delta)
+        )
+    except Exception:
+        pass
 
 
 def _first_exchange(history: List[Dict[str, Any]]) -> tuple:
