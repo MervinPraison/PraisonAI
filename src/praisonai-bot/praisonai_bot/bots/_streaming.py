@@ -467,7 +467,10 @@ class DraftStreamer:
             # No placeholder message: the status line is the only live surface.
             self._message_id = ""
             self._last_edit_time = time.monotonic()
-            await self._push_status_text(self._config.placeholder_text)
+            try:
+                await self._push_status_text(self._config.placeholder_text)
+            except Exception as e:  # noqa: BLE001 - status is advisory; never break the turn
+                self._handle_edit_failure(e)
             return self._message_id
 
         if self._rate_limiter:
@@ -493,15 +496,18 @@ class DraftStreamer:
         return self._message_id
     
     async def _push_status_text(self, text: str) -> None:
-        """Best-effort textual status update; skips unchanged lines (no API cost)."""
+        """Push a textual status line; skips unchanged lines (no API cost).
+
+        Rate-limited like edits. Raises on adapter failure so callers apply the
+        shared flood-control backoff (``_handle_edit_failure``).
+        """
         text = redact_outbound_text(text, self._adapter)
         if text == self._last_status_text:
             return
-        try:
-            await self._adapter.set_status_text(self._channel_id, text)
-            self._last_status_text = text
-        except Exception as e:  # noqa: BLE001 - status is advisory; never break the turn
-            logger.debug("DraftStreamer set_status_text failed: %s", e)
+        if self._rate_limiter:
+            await self._rate_limiter.acquire(self._channel_id)
+        await self._adapter.set_status_text(self._channel_id, text)
+        self._last_status_text = text
 
     @property
     def _active(self) -> bool:
@@ -702,18 +708,17 @@ class DraftStreamer:
         if content is None:
             return
 
-        if self._status_text_only:
-            self._last_edit_time = time.monotonic()
-            await self._push_status_text(content)
-            return
-        
         try:
-            # Apply rate limiting
-            if self._rate_limiter:
-                await self._rate_limiter.acquire(self._channel_id)
-            
-            # Perform edit
-            await self._adapter.edit_message(self._channel_id, self._message_id, content)
+            if self._status_text_only:
+                # Same rate limiting and flood backoff as edits.
+                await self._push_status_text(content)
+            else:
+                # Apply rate limiting
+                if self._rate_limiter:
+                    await self._rate_limiter.acquire(self._channel_id)
+
+                # Perform edit
+                await self._adapter.edit_message(self._channel_id, self._message_id, content)
             
             # Success - reset failure streak and update state
             self._fail_streak = 0
@@ -837,6 +842,15 @@ class DraftStreamer:
             except Exception as chunk_exc:  # noqa: BLE001 - keep delivering remaining chunks
                 delivered = False
                 logger.warning("DraftStreamer follow-on chunk send failed: %s", chunk_exc)
+
+        # Clear the status line so a finished turn no longer looks busy. Runs
+        # after delivery so it can never delay or block the answer.
+        if self._status_text_only and self._last_status_text:
+            try:
+                await self._adapter.set_status_text(self._channel_id, "")
+                self._last_status_text = ""
+            except Exception as e:  # noqa: BLE001 - status is advisory
+                logger.debug("DraftStreamer status clear failed: %s", e)
 
         logger.debug(
             "DraftStreamer finalized message %s, final_length=%d, progressive=%s, delivered=%s",

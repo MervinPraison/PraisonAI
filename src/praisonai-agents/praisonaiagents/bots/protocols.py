@@ -124,8 +124,8 @@ class PlatformCapabilities:
         supports_status_text: Whether the adapter can render a short,
             replaceable textual status line (e.g. "🔍 Searching the web...")
             without editing a message or adding reactions. When True the
-            adapter SHOULD implement ``async set_status_text(channel_id, text)``;
-            streaming ``auto``/``progress`` on a non-edit channel then routes the
+            adapter SHOULD implement ``async set_status_text(channel_id, text)``
+            (an empty ``text`` clears the line when the turn ends); streaming ``auto``/``progress`` on a non-edit channel then routes the
             curated activity line there instead of degrading to ``off``.
     """
     

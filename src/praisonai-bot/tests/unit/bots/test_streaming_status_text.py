@@ -91,7 +91,8 @@ def test_status_text_route_end_to_end(mode):
         await s.finalize("final answer")
 
     asyncio.run(run())
-    assert [t for _, t in adapter.status] == ["🤔 Thinking...", "Searching the web…"]
+    # Status line is cleared ("") once the answer is delivered.
+    assert [t for _, t in adapter.status] == ["🤔 Thinking...", "Searching the web…", ""]
     assert adapter.sent == ["final answer"]  # no placeholder message was sent
     assert adapter.edits == []
     assert not s.is_streaming
@@ -112,3 +113,43 @@ def test_status_text_failure_never_breaks_turn():
 
     asyncio.run(run())
     assert adapter.sent == ["done"]
+
+
+def test_status_text_uses_rate_limiter_and_stops_after_flood_failures():
+    adapter = _StatusAdapter()
+    calls = []
+
+    async def flood(channel_id, text):
+        calls.append(text)
+        raise RuntimeError("429 Too Many Requests")
+
+    adapter.set_status_text = flood
+
+    class _Limiter:
+        acquired = 0
+
+        async def acquire(self, channel_id):
+            _Limiter.acquired += 1
+
+    cfg = StreamingConfig(
+        mode=StreamingMode.AUTO, min_interval=0.01, disable_progressive_edits_after=2,
+    )
+    s = DraftStreamer(adapter, "c", cfg, rate_limiter=_Limiter())
+
+    async def run():
+        await s.start()  # failure 1
+        for name in ("a", "b", "c"):
+            await s.on_event(StreamEvent(
+                type=StreamEventType.TOOL_CALL_START, tool_call={"name": name},
+            ))
+            if s._update_task:
+                await s._update_task
+        await s.finalize("done")
+
+    asyncio.run(run())
+    # Bounded: status pushes stop once the flood streak disables progress.
+    assert len(calls) == 2
+    assert not s._progressive
+    assert s._current_min_interval > 0.01  # backoff widened the interval
+    assert _Limiter.acquired >= 2  # status pushes go through the shared limiter
+    assert adapter.sent == ["done"]  # final delivery unaffected
