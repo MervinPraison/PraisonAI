@@ -386,7 +386,7 @@ TS-only members: `maxIdenticalActions`?, `maxSimilarActions`?, `maxConsecutiveFa
 
 ### `EscalationPipeline.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/escalation/pipeline.py:44`
+- Python: `src/praisonai-agents/praisonaiagents/escalation/pipeline.py:45`
 - TypeScript: `src/praisonai-ts/src/escalation/pipeline.ts:51` (ctor `src/praisonai-ts/src/escalation/pipeline.ts:103`)
 - Counts: 5 python params: 3 exact, 2 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 4 TS-only of 9
 

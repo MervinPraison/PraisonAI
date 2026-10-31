@@ -3233,7 +3233,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/escalation/pipeline.py:44",
+        "location": "src/praisonai-agents/praisonaiagents/escalation/pipeline.py:45",
         "resolved_class": "EscalationPipeline"
       },
       "ts_only": [
