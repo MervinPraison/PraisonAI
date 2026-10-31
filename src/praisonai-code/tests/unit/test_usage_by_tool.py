@@ -55,6 +55,34 @@ def test_tally_persists_and_merges_across_runs(store):
     assert stats["last_error"] == "boom"
 
 
+
+def test_failed_save_keeps_tally_for_retry(store, monkeypatch):
+    store.add_message("s1", "user", "hi")
+    ps._on_after_tool(_Evt("read_file", 10))
+    monkeypatch.setattr(store, "_modify_session_locked", lambda *a, **k: False)
+    ps._flush_tool_stats("s1")
+    assert "tool_stats" not in store.get_session("s1").metadata
+    monkeypatch.undo()
+    monkeypatch.setattr(ps, "_resolve_usage_store", lambda *a, **k: store)
+    ps._on_after_tool(_Evt("read_file", 20))
+    ps._flush_tool_stats("s1")
+    stats = store.get_session("s1").metadata["tool_stats"]["read_file"]
+    assert stats["calls"] == 2 and stats["total_ms"] == 30
+
+
+def test_latest_values_follow_tool_time_not_session_time(store):
+    store.add_message("a", "user", "hi")
+    store.add_message("b", "user", "hi")
+    store.update_session_metadata("a", tool_stats={"search": {
+        "calls": 1, "errors": 1, "total_ms": 5, "last_ms": 5,
+        "last_error": "old", "last_at": 100.0, "last_error_at": 100.0}})
+    store.update_session_metadata("b", tool_stats={"search": {
+        "calls": 1, "errors": 1, "total_ms": 9, "last_ms": 9,
+        "last_error": "new", "last_at": 200.0, "last_error_at": 200.0}})
+    store.add_message("a", "user", "text-only turn")  # bumps a's updated_at
+    row = _usage_json()["rows"][0]
+    assert row["last_ms"] == 9.0 and row["last_error"] == "new"
+
 def test_usage_by_tool_json_shape(store):
     store.add_message("s1", "user", "hi")
     store.add_message("s2", "user", "hi")

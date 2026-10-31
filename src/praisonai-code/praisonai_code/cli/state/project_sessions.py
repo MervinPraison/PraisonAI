@@ -6,6 +6,7 @@ Provides session continuity within project boundaries.
 
 import os
 import threading
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -587,7 +588,10 @@ _default_tool_hook_id: Optional[str] = None
 
 
 def _empty_tool_stat() -> Dict[str, Any]:
-    return {"calls": 0, "errors": 0, "total_ms": 0.0, "last_ms": 0.0, "last_error": None}
+    return {
+        "calls": 0, "errors": 0, "total_ms": 0.0, "last_ms": 0.0,
+        "last_error": None, "last_at": 0.0, "last_error_at": 0.0,
+    }
 
 
 def _on_after_tool(data: Any) -> None:
@@ -596,14 +600,17 @@ def _on_after_tool(data: Any) -> None:
         name = getattr(data, "tool_name", "") or "unknown"
         error = getattr(data, "tool_error", None)
         ms = float(getattr(data, "execution_time_ms", 0.0) or 0.0)
+        now = time.time()
         with _tool_tally_lock:
             stat = _tool_tally.setdefault(name, _empty_tool_stat())
             stat["calls"] += 1
             stat["total_ms"] += ms
             stat["last_ms"] = ms
+            stat["last_at"] = now
             if error:
                 stat["errors"] += 1
                 stat["last_error"] = str(error)[:500]
+                stat["last_error_at"] = now
     except Exception:
         pass
     return None
@@ -655,31 +662,56 @@ def merge_tool_stats(
         cur["total_ms"] = round(
             float(cur.get("total_ms") or 0.0) + float(stat.get("total_ms") or 0.0), 3
         )
-        if stat.get("calls"):
+        # Keep whichever side ran most recently (timestamps, not merge order).
+        if stat.get("calls") and float(stat.get("last_at") or 0.0) >= float(cur.get("last_at") or 0.0):
             cur["last_ms"] = round(float(stat.get("last_ms") or 0.0), 3)
-        if stat.get("last_error"):
+            cur["last_at"] = float(stat.get("last_at") or 0.0)
+        if stat.get("last_error") and float(stat.get("last_error_at") or 0.0) >= float(
+            cur.get("last_error_at") or 0.0
+        ):
             cur["last_error"] = stat["last_error"]
+            cur["last_error_at"] = float(stat.get("last_error_at") or 0.0)
     return merged
 
 
 def _flush_tool_stats(session_id: str, project_path: Optional[str] = None) -> None:
-    """Merge (and drain) this run's tool tally into the session record."""
+    """Merge (and drain) this run's tool tally into the session record.
+
+    The merge runs inside the store's locked read-modify-write when available
+    so concurrent CLI processes don't overwrite each other's counts, and the
+    drained tally is restored if the write fails so a later flush retries it.
+    """
     with _tool_tally_lock:
         if not _tool_tally:
             return
         delta = {k: dict(v) for k, v in _tool_tally.items()}
         _tool_tally.clear()
+    ok = False
     try:
         store = _resolve_usage_store(session_id, project_path) or get_project_session_store(project_path)
-        try:
-            existing = (getattr(store.get_session(session_id), "metadata", {}) or {}).get("tool_stats")
-        except Exception:
-            existing = None
-        store.update_session_metadata(
-            session_id, tool_stats=merge_tool_stats(existing, delta)
-        )
+        modify = getattr(store, "_modify_session_locked", None)
+        if callable(modify):
+            def _apply(session: Any) -> None:
+                session.metadata["tool_stats"] = merge_tool_stats(
+                    session.metadata.get("tool_stats"), delta
+                )
+
+            ok = bool(modify(session_id, _apply, error_label="merge tool stats"))
+        else:
+            try:
+                existing = (getattr(store.get_session(session_id), "metadata", {}) or {}).get("tool_stats")
+            except Exception:
+                existing = None
+            ok = bool(store.update_session_metadata(
+                session_id, tool_stats=merge_tool_stats(existing, delta)
+            ))
     except Exception:
-        pass
+        ok = False
+    if not ok:
+        with _tool_tally_lock:
+            restored = merge_tool_stats(delta, _tool_tally)
+            _tool_tally.clear()
+            _tool_tally.update(restored)
 
 
 def _first_exchange(history: List[Dict[str, Any]]) -> tuple:

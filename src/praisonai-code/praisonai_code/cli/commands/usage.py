@@ -175,10 +175,9 @@ def _group(rows: List[Dict[str, Any]], by: str) -> List[Tuple[str, int, float]]:
 def _group_tools(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Roll per-session ``tool_stats`` up into one row per tool (Issue #6158).
 
-    Rows are walked newest-first so the first ``last_ms``/``last_error`` seen
-    for a tool is its most recent one.
+    ``last_ms``/``last_error`` are chosen by when the tool itself last ran
+    (``last_at``/``last_error_at``), not by session ``updated_at``.
     """
-    rows = sorted(rows, key=lambda r: str(r.get("updated_at") or ""), reverse=True)
     tools: Dict[str, Dict[str, Any]] = {}
     for row in rows:
         stats = row.get("tool_stats")
@@ -191,13 +190,19 @@ def _group_tools(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             if cur is None:
                 cur = tools[name] = {
                     "tool": name, "calls": 0, "errors": 0, "total_ms": 0.0,
-                    "last_ms": float(stat.get("last_ms") or 0.0),
-                    "last_error": None,
+                    "last_ms": 0.0, "last_at": -1.0,
+                    "last_error": None, "last_error_at": -1.0,
                 }
             cur["calls"] += int(stat.get("calls") or 0)
             cur["errors"] += int(stat.get("errors") or 0)
             cur["total_ms"] += float(stat.get("total_ms") or 0.0)
-            if cur["last_error"] is None and stat.get("last_error"):
+            last_at = float(stat.get("last_at") or 0.0)
+            if last_at > cur["last_at"]:
+                cur["last_at"] = last_at
+                cur["last_ms"] = float(stat.get("last_ms") or 0.0)
+            err_at = float(stat.get("last_error_at") or 0.0)
+            if stat.get("last_error") and err_at > cur["last_error_at"]:
+                cur["last_error_at"] = err_at
                 cur["last_error"] = stat["last_error"]
     result = []
     for cur in tools.values():
