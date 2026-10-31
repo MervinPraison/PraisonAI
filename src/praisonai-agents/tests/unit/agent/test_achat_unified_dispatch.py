@@ -169,3 +169,65 @@ async def test_execute_tool_async_resolves_aliased_function_name():
     )
 
     assert result == "aliased-ran"
+
+
+@pytest.mark.asyncio
+async def test_achat_completion_streams_final_response_after_tool_calls():
+    """After running tools, the legacy async path must ask the model for a
+    final answer instead of failing and returning the raw tool output.
+
+    ``_achat_completion`` used to reference an undefined ``stream`` name and
+    ``_get_llm_functions`` (only defined in ``agent.py``), so the follow-up
+    completion always raised ``NameError``, which was swallowed and the raw
+    tool results were returned.
+    """
+    agent = Agent(name="test", instructions="You are helpful", llm="gpt-4o-mini")
+
+    def lookup(query: str) -> str:
+        return "tool output"
+
+    tool_call = SimpleNamespace(
+        id="call-1",
+        function=SimpleNamespace(name="lookup", arguments='{"query": "x"}'),
+    )
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[tool_call]))]
+    )
+
+    def _chunk(content):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(delta=SimpleNamespace(content=content))]
+        )
+
+    async def _stream():
+        for part in ("final ", "answer"):
+            yield _chunk(part)
+
+    create = AsyncMock(return_value=_stream())
+    fake_client = SimpleNamespace(
+        async_client=SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+    )
+    final = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="final answer"))]
+    )
+    process_stream_chunks = MagicMock(return_value=final)
+
+    with patch.object(
+        type(agent), "_openai_client", new=fake_client
+    ), patch.object(
+        agent, "execute_tool_async", new_callable=AsyncMock, return_value="tool output"
+    ), patch(
+        "praisonaiagents.agent.agent._get_llm_functions",
+        return_value={"process_stream_chunks": process_stream_chunks},
+    ), patch(
+        "praisonaiagents.agent.chat_mixin._get_display_functions"
+    ) as display:
+        result = await agent._achat_completion(response, tools=[lookup])
+
+    display.return_value.__getitem__.return_value.assert_not_called()
+    create.assert_awaited_once()
+    assert create.await_args.kwargs["stream"] is True
+    process_stream_chunks.assert_called_once()
+    assert result == "final answer"

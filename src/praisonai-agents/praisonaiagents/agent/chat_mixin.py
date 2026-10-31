@@ -5541,7 +5541,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             model=self.llm,
                             messages=messages,
                             temperature=1.0,
-                            stream=stream
+                            stream=True
                         )
                         full_response_text = ""
                         reasoning_content = ""
@@ -5559,8 +5559,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 if rc:
                                     reasoning_content += rc
                         
-                        self.console.print()
+                        console = self.console  # None unless verbose
+                        if console is not None:
+                            console.print()
                         
+                        from .agent import _get_llm_functions
                         final_response = _get_llm_functions()['process_stream_chunks'](chunks)
                         # Return only reasoning content if reasoning_steps is True
                         if reasoning_steps and hasattr(final_response.choices[0].message, 'reasoning_content') and final_response.choices[0].message.reasoning_content:
