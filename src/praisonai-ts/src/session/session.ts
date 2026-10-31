@@ -123,7 +123,8 @@ export class Session {
   private readonly timeout: number;
   private readonly isRemote: boolean;
 
-  private state: Record<string, any> = {};
+  // State keys are user data, including names inherited by ordinary objects.
+  private state: Record<string, any> = Object.create(null);
   private messages: SessionMessage[] = [];
   private createdAt: number;
   private updatedAt: number;
@@ -264,7 +265,7 @@ export class Session {
    * Set entire state object.
    */
   setState(state: Record<string, any>): void {
-    this.state = { ...state };
+    this.state = Object.assign(Object.create(null), state);
     this.updatedAt = Date.now();
   }
 
@@ -272,7 +273,7 @@ export class Session {
    * Clear all state.
    */
   clearState(): void {
-    this.state = {};
+    this.state = Object.create(null);
     this.updatedAt = Date.now();
   }
 
@@ -364,7 +365,7 @@ export class Session {
     const messages = await this.db.getMessages(this.id, 1);
     if (messages.length > 0) {
       const sessionState: SessionState = JSON.parse(messages[0].content || '{}');
-      this.state = sessionState.data || {};
+      this.setState(sessionState.data || {});
       this.messages = sessionState.messages || [];
       this.createdAt = sessionState.createdAt || Date.now();
       this.updatedAt = sessionState.updatedAt || Date.now();
@@ -399,7 +400,7 @@ export class Session {
       userId: json.userId,
       ...config,
     });
-    session.state = json.data || {};
+    session.setState(json.data || {});
     session.messages = json.messages || [];
     session.createdAt = json.createdAt;
     session.updatedAt = json.updatedAt;
