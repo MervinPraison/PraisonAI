@@ -383,7 +383,7 @@ export class Session {
     return {
       id: this.id,
       userId: this.userId,
-      data: this.state,
+      data: this.getState(),
       messages: this.messages,
       createdAt: this.createdAt,
       updatedAt: this.updatedAt,

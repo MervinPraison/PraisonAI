@@ -67,3 +67,15 @@ it('preserves special keys across database save/load without inheriting unstored
   expect(restored.keys()).toEqual(['__proto__']);
   expect(restored.get('__proto__')).toEqual({ preference: 'aisle' });
 });
+
+it('exports state as an ordinary object while preserving special own keys', () => {
+  const session = new Session();
+  session.set('seat', 'window');
+  session.set('__proto__', { preference: 'quiet' });
+  const exported = session.toJSON().data;
+  expect(Object.getPrototypeOf(exported)).toBe(Object.prototype);
+  expect(exported.hasOwnProperty('seat')).toBe(true);
+  expect(exported.hasOwnProperty('__proto__')).toBe(true);
+  expect(JSON.parse(JSON.stringify(exported))['__proto__']).toEqual({ preference: 'quiet' });
+  expect(session.has('toString')).toBe(false);
+});
