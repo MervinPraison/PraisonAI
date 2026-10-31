@@ -13,6 +13,31 @@ import {
 import { promises as fs } from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { Memory } from '../../src/memory/memory';
+
+describe('Memory history limits', () => {
+  test('an explicit zero returns no recent entries', async () => {
+    const memory = new Memory();
+    const first = await memory.add('First message', 'user');
+    const second = await memory.add('Second message', 'assistant');
+
+    expect(memory.getRecent(0)).toEqual([]);
+    expect(memory.getRecent(1)).toEqual([second]);
+    expect(memory.getRecent(3)).toEqual([first, second]);
+    expect(memory.getAll()).toEqual([first, second]);
+  });
+
+  test('zero context entries differs from an omitted limit', async () => {
+    const memory = new Memory();
+    await memory.add('First message', 'user');
+    await memory.add('Second message', 'assistant');
+
+    expect(memory.buildContext(0)).toBe('');
+    expect(memory.buildContext(1)).toBe('assistant: Second message');
+    expect(memory.buildContext()).toBe('user: First message\nassistant: Second message');
+    expect(memory.size).toBe(2);
+  });
+});
 
 describe('FileMemory', () => {
   let tempDir: string;
@@ -74,6 +99,20 @@ describe('FileMemory', () => {
     expect(recent.length).toBe(2);
     expect(recent[0].content).toBe('Message 2');
     expect(recent[1].content).toBe('Message 3');
+  });
+
+  test('zero history limits survive a file-memory reload', async () => {
+    const memory = createFileMemory({ filePath: testFilePath });
+    const first = await memory.add('First message', 'user');
+    const second = await memory.add('Second message', 'assistant');
+    const reloaded = createFileMemory({ filePath: testFilePath });
+
+    expect(await reloaded.getRecent(0)).toEqual([]);
+    expect(await reloaded.buildContext(0)).toBe('');
+    expect(await reloaded.getRecent(1)).toEqual([second]);
+    expect(await reloaded.buildContext(1)).toBe('assistant: Second message');
+    expect(await reloaded.buildContext()).toBe('user: First message\nassistant: Second message');
+    expect(await reloaded.getAll()).toEqual([first, second]);
   });
 
   test('delete removes entry', async () => {
@@ -268,6 +307,18 @@ describe('FileMemory', () => {
 });
 
 describe('AutoMemory', () => {
+  test('zero recent entries does not return stored automatic memories', async () => {
+    const memory = createAutoMemory({
+      policies: [{ name: 'store-all', condition: () => true, action: 'store', priority: 1000 }]
+    });
+    const first = await memory.add('First message', 'user');
+    const second = await memory.add('Second message', 'assistant');
+
+    expect(memory.getRecent(0)).toEqual([]);
+    expect(memory.getRecent(1)).toEqual([second]);
+    expect(memory.getAll()).toEqual([first, second]);
+  });
+
   test('createAutoMemory creates instance', () => {
     const memory = createAutoMemory();
     expect(memory).toBeInstanceOf(AutoMemory);
