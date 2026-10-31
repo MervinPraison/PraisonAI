@@ -31,7 +31,7 @@ def test_tools_structure_contains_runnable_calculator():
     structure = _generator()._get_feature_basic_structure("tools", "Tools")
     code = structure.split("```python\n", 1)[1].rsplit("```", 1)[0]
     assert "{{" not in code and "}}" not in code
-    assert "ops = {" in code
+    assert "ast.Add: operator.add" in code
     assert 'f"Unsupported operation: {type(node)}"' in code
     assert 'f"Error: {e}"' in code
 
@@ -39,6 +39,21 @@ def test_tools_structure_contains_runnable_calculator():
     tree = ast.parse(code)
     functions = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
     assert {"calculator", "_eval_node"} <= functions
+
+
+def test_tools_calculator_rejects_non_numeric_constants():
+    structure = _generator()._get_feature_basic_structure("tools", "Tools")
+    code = structure.split("```python\n", 1)[1].rsplit("```", 1)[0]
+    calculator_def = next(
+        node for node in ast.parse(code).body
+        if isinstance(node, ast.FunctionDef) and node.name == "calculator"
+    )
+    namespace = {}
+    exec(compile(ast.Module(body=[calculator_def], type_ignores=[]), "<example>", "exec"), namespace)
+    calculator = namespace["calculator"]
+
+    assert calculator("2 + 3 * 4") == "14"
+    assert calculator("'x' * 3").startswith("Error:")
 
 
 def test_basic_example_prompt_includes_feature_structure(tmp_path):

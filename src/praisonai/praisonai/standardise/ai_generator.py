@@ -898,6 +898,8 @@ def calculator(expression: str) -> str:
     
     def _eval_node(node):
         if isinstance(node, ast.Constant):
+            if not isinstance(node.value, (int, float)):
+                raise TypeError("Only numeric constants are supported")
             return node.value
         elif isinstance(node, ast.BinOp):
             left = _eval_node(node.left)
