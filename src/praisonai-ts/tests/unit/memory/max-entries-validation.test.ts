@@ -25,6 +25,6 @@ describe('maxEntries validation (#6146)', () => {
     await m.add('a', 'user');
     await m.add('b', 'user');
     await m.add('c', 'user');
-    expect(m.getAll()).toHaveLength(2);
+    expect(m.getAll().map(e => e.content)).toEqual(['b', 'c']);
   });
 });
