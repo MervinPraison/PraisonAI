@@ -217,7 +217,7 @@ class StreamingMode(Enum):
     OFF = "off"           # Current behavior (single final message, chunked)
     DRAFT = "draft"       # Send placeholder, edit in place with growing content
     PROGRESS = "progress" # Show compact status, then replace with final answer
-    AUTO = "auto"         # Stream (DRAFT) where the channel can edit, else OFF
+    AUTO = "auto"         # DRAFT where the channel can edit, else status text, else OFF
 
 
 @dataclass
@@ -401,6 +401,24 @@ class DraftStreamer:
         if self._edit_rate_limit > 0:
             self._current_min_interval = max(self._current_min_interval, self._edit_rate_limit)
         
+        # Edit-less channels that declare ``supports_status_text`` (and back it
+        # with ``set_status_text``) get the curated activity line as a textual
+        # status instead of silence: degrade edit -> status-text -> off.
+        pcaps = getattr(adapter, 'platform_capabilities', None)
+        self._status_text_only = bool(
+            not self._can_edit
+            and self._config.mode in (StreamingMode.AUTO, StreamingMode.PROGRESS)
+            and getattr(pcaps, 'supports_status_text', False) is True
+            and callable(getattr(adapter, 'set_status_text', None))
+        )
+        self._last_status_text: Optional[str] = None
+        if self._status_text_only:
+            logger.info(
+                "Channel %s can't edit; routing streaming mode '%s' to status text",
+                channel_id, self._config.mode.value,
+            )
+            self._config = replace(self._config, mode=StreamingMode.PROGRESS)
+
         # Resolve AUTO to a concrete mode: stream where the channel can edit,
         # otherwise fall back to OFF. This makes "stream where supported" an
         # explicit, opt-in choice instead of every platform silently sitting on
@@ -419,7 +437,11 @@ class DraftStreamer:
 
         # Override config if channel doesn't support editing. Logged (not
         # silent) so operators can see why a channel isn't streaming.
-        if not self._can_edit and self._config.mode != StreamingMode.OFF:
+        if (
+            not self._can_edit
+            and not self._status_text_only
+            and self._config.mode != StreamingMode.OFF
+        ):
             logger.warning(
                 "Channel %s doesn't support live editing; degrading streaming "
                 "mode '%s' to 'off'",
@@ -441,6 +463,16 @@ class DraftStreamer:
         if self._config.mode == StreamingMode.OFF:
             raise ValueError("Cannot start streaming when mode is OFF")
         
+        if self._status_text_only:
+            # No placeholder message: the status line is the only live surface.
+            self._message_id = ""
+            self._last_edit_time = time.monotonic()
+            try:
+                await self._push_status_text(self._config.placeholder_text)
+            except Exception as e:  # noqa: BLE001 - status is advisory; never break the turn
+                self._handle_edit_failure(e)
+            return self._message_id
+
         if self._rate_limiter:
             await self._rate_limiter.acquire(self._channel_id)
         
@@ -463,11 +495,33 @@ class DraftStreamer:
         logger.debug("DraftStreamer started, placeholder sent with message_id=%s", self._message_id)
         return self._message_id
     
+    async def _push_status_text(self, text: str) -> None:
+        """Push a textual status line; skips unchanged lines (no API cost).
+
+        Rate-limited like edits. Raises on adapter failure so callers apply the
+        shared flood-control backoff (``_handle_edit_failure``).
+        """
+        text = redact_outbound_text(text, self._adapter)
+        if text == self._last_status_text:
+            return
+        if self._rate_limiter:
+            await self._rate_limiter.acquire(self._channel_id)
+        await self._adapter.set_status_text(self._channel_id, text)
+        self._last_status_text = text
+
+    @property
+    def _active(self) -> bool:
+        """Whether a live surface (placeholder or status line) is in use."""
+        return self._message_id is not None and (
+            bool(self._message_id) or self._status_text_only
+        )
+
     @property
     def _feed_style(self) -> bool:
         """Whether the multi-line rolling progress feed is enabled."""
         return (
-            self._config.mode == StreamingMode.PROGRESS
+            not self._status_text_only
+            and self._config.mode == StreamingMode.PROGRESS
             and self._config.progress_style == "feed"
         )
 
@@ -485,7 +539,7 @@ class DraftStreamer:
 
     async def on_event(self, event: "StreamEvent") -> None:
         """Stream event callback to handle progressive updates."""
-        if self._is_finalized or not self._message_id:
+        if self._is_finalized or not self._active:
             return
         
         # Import here to avoid circular imports
@@ -624,6 +678,8 @@ class DraftStreamer:
                     content = self._config.placeholder_text
             elif self._current_tool:
                 content = self._activity_line(self._current_tool)
+            elif self._status_text_only:
+                content = self._config.placeholder_text
             elif buffer:
                 content = buffer
             else:
@@ -645,20 +701,24 @@ class DraftStreamer:
     
     async def _perform_update(self) -> None:
         """Perform the actual message edit with flood-control handling."""
-        if not self._message_id or self._is_finalized or not self._progressive:
+        if not self._active or self._is_finalized or not self._progressive:
             return
         
         content = self._render_content()
         if content is None:
             return
-        
+
         try:
-            # Apply rate limiting
-            if self._rate_limiter:
-                await self._rate_limiter.acquire(self._channel_id)
-            
-            # Perform edit
-            await self._adapter.edit_message(self._channel_id, self._message_id, content)
+            if self._status_text_only:
+                # Same rate limiting and flood backoff as edits.
+                await self._push_status_text(content)
+            else:
+                # Apply rate limiting
+                if self._rate_limiter:
+                    await self._rate_limiter.acquire(self._channel_id)
+
+                # Perform edit
+                await self._adapter.edit_message(self._channel_id, self._message_id, content)
             
             # Success - reset failure streak and update state
             self._fail_streak = 0
@@ -709,7 +769,7 @@ class DraftStreamer:
     
     async def finalize(self, final_content: str) -> None:
         """Finalize with the complete response content."""
-        if self._is_finalized or not self._message_id:
+        if self._is_finalized or not self._active:
             return
         
         self._is_finalized = True
@@ -752,11 +812,12 @@ class DraftStreamer:
         # (to avoid leaving a stale "🤔 Thinking..." draft) and fall back to a
         # new send below.
         delivered = False
-        try:
-            await self._adapter.edit_message(self._channel_id, self._message_id, chunks[0])
-            delivered = True
-        except Exception as e:  # noqa: BLE001 - adapter boundary; preserve final delivery
-            logger.warning("DraftStreamer final edit failed: %s", e)
+        if not self._status_text_only:  # status-text mode has no placeholder to edit
+            try:
+                await self._adapter.edit_message(self._channel_id, self._message_id, chunks[0])
+                delivered = True
+            except Exception as e:  # noqa: BLE001 - adapter boundary; preserve final delivery
+                logger.warning("DraftStreamer final edit failed: %s", e)
 
         # Fallback: if the edit failed (or progressive editing was disabled by
         # flooding), deliver the full answer as a fresh send so the user ALWAYS
@@ -782,6 +843,15 @@ class DraftStreamer:
                 delivered = False
                 logger.warning("DraftStreamer follow-on chunk send failed: %s", chunk_exc)
 
+        # Clear the status line so a finished turn no longer looks busy. Runs
+        # after delivery so it can never delay or block the answer.
+        if self._status_text_only and self._last_status_text:
+            try:
+                await self._adapter.set_status_text(self._channel_id, "")
+                self._last_status_text = ""
+            except Exception as e:  # noqa: BLE001 - status is advisory
+                logger.debug("DraftStreamer status clear failed: %s", e)
+
         logger.debug(
             "DraftStreamer finalized message %s, final_length=%d, progressive=%s, delivered=%s",
             self._message_id, len(final_content), self._progressive, delivered
@@ -790,7 +860,7 @@ class DraftStreamer:
     @property
     def is_streaming(self) -> bool:
         """Check if streaming is active."""
-        return bool(self._message_id and not self._is_finalized)
+        return bool(self._active and not self._is_finalized)
     
     @property
     def has_content(self) -> bool:
