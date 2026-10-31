@@ -2,9 +2,19 @@
 import asyncio
 import time
 
+import pytest
+
 from praisonaiagents.ui.a2a.streaming import stream_agent_response
 from praisonaiagents.ui.a2a.task_store import TaskStore
 from praisonaiagents.ui.a2a.types import Message, Role, TaskState, TextPart
+
+
+@pytest.fixture(autouse=True)
+def _restore_event_loop():
+    # asyncio.run() leaves no current loop; later tests using
+    # get_event_loop() would break.
+    yield
+    asyncio.set_event_loop(asyncio.new_event_loop())
 
 
 def _new_task(store):
@@ -100,3 +110,46 @@ def test_stream_cancel_via_running_handle():
     assert any('"canceled"' in e or '"cancelled"' in e for e in events)
     assert store.get_task(task.id).status.state == TaskState.CANCELLED
     assert running == {}
+
+
+class _Counting:
+    calls = 0
+
+    def chat(self, x):
+        _Counting.calls += 1
+        return "ran"
+
+
+def test_cancel_before_call_registered_skips_agent():
+    store = TaskStore()
+    task = _new_task(store)
+    running = {}
+
+    async def main():
+        agen = stream_agent_response(
+            _Counting(), "x", task.id, task_store=store, running=running)
+        first = await agen.__anext__()
+        assert '"working"' in first
+        # tasks/cancel arrives before the call is registered
+        store.cancel_task(task.id)
+        return [first] + [e async for e in agen]
+
+    events = asyncio.run(main())
+    assert _Counting.calls == 0
+    assert not any('"completed"' in e for e in events)
+    assert store.get_task(task.id).status.state == TaskState.CANCELLED
+    assert running == {} and task.id not in store._pinned
+
+
+def test_early_close_leaves_terminal_state_and_unpins():
+    store = TaskStore()
+    task = _new_task(store)
+
+    async def main():
+        agen = stream_agent_response(_Team(), "x", task.id, task_store=store)
+        await agen.__anext__()
+        await agen.aclose()
+
+    asyncio.run(main())
+    assert store.get_task(task.id).status.state == TaskState.CANCELLED
+    assert task.id not in store._pinned

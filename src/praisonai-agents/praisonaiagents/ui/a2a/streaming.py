@@ -170,15 +170,22 @@ async def stream_agent_response(
         # terminal (and evictable) before we finish.
         task_store._pinned.add(task_id)
     
-    # Emit working status
-    yield encoder.encode_task_status(create_status_event(
-        task_id=task_id,
-        state=TaskState.WORKING,
-        context_id=context_id,
-    ))
-    
     fut = None
     try:
+        # Emit working status
+        yield encoder.encode_task_status(create_status_event(
+            task_id=task_id,
+            state=TaskState.WORKING,
+            context_id=context_id,
+        ))
+        
+        # tasks/cancel may have landed while we were suspended at the
+        # yield above, before the call was registered: don't start it.
+        if task_store is not None:
+            task = task_store.get_task(task_id)
+            if task is not None and task.status.state == TaskState.CANCELLED:
+                raise asyncio.CancelledError()
+        
         call = agent.chat if hasattr(agent, "chat") else agent.start
         fut = asyncio.ensure_future(asyncio.to_thread(call, user_input))
         if running is not None:
@@ -234,6 +241,13 @@ async def stream_agent_response(
             final=True,
             message=reason,
         ))
+    
+    except GeneratorExit:
+        # Stream closed early (client went away): leave a terminal state.
+        # No-op if the task already finished.
+        if task_store is not None:
+            task_store.update_status(task_id, TaskState.CANCELLED)
+        raise
     
     finally:
         if running is not None and running.get(task_id) is fut:
