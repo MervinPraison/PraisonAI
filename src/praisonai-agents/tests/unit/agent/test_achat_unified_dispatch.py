@@ -370,9 +370,22 @@ async def test_legacy_achat_impl_forwards_conversation_to_tool_follow_up():
 
 
 @pytest.mark.asyncio
-async def test_achat_completion_falls_back_when_follow_up_has_no_answer_chunks():
-    """A follow-up stream with only empty-``choices`` chunks must log an error
-    and return the tool results, not an empty string.
+@pytest.mark.parametrize(
+    "follow_up_chunk",
+    [
+        pytest.param(SimpleNamespace(choices=[]), id="empty-choices"),
+        pytest.param(
+            SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content=None))]
+            ),
+            id="choice-without-content",
+        ),
+    ],
+)
+async def test_achat_completion_falls_back_when_follow_up_has_no_answer_chunks(follow_up_chunk):
+    """A follow-up stream with no answer text (only empty-``choices`` chunks or
+    choices without ``delta.content``) must log an error and return the tool
+    results, not an empty string.
     """
     agent = Agent(name="test", instructions="You are helpful", llm="gpt-4o-mini")
 
@@ -388,7 +401,7 @@ async def test_achat_completion_falls_back_when_follow_up_has_no_answer_chunks()
     )
 
     async def _stream():
-        yield SimpleNamespace(choices=[])
+        yield follow_up_chunk
 
     create = AsyncMock(return_value=_stream())
     fake_client = SimpleNamespace(
