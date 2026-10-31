@@ -109,3 +109,33 @@ def test_subquestion_aquery_offloads():
     result, ticks = asyncio.run(_heartbeat_ticks(engine.aquery("q")))
     assert result == "done"
     assert ticks >= 5
+
+
+class _SyncStreamLLM:
+    """Sync-only LLM (no ``astream``) whose ``stream()`` blocks between chunks."""
+
+    def stream(self, messages, **kwargs):
+        for tok in ("a", "b", "c"):
+            time.sleep(BLOCK / 3)
+            yield tok
+
+
+def test_rag_astream_sync_fallback_offloads_and_retrieves_once():
+    rag = _BlockingRAG()
+    rag.llm = _SyncStreamLLM()
+    calls = []
+    orig_retrieve = rag._retrieve
+
+    def counting_retrieve(**kwargs):
+        calls.append(kwargs)
+        return orig_retrieve(**kwargs)
+
+    rag._retrieve = counting_retrieve
+
+    async def consume():
+        return [c async for c in rag.astream("q")]
+
+    chunks, ticks = asyncio.run(_heartbeat_ticks(consume()))
+    assert chunks == ["a", "b", "c"]
+    assert len(calls) == 1
+    assert ticks >= 10
