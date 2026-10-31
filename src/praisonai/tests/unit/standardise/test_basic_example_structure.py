@@ -46,7 +46,8 @@ def test_tools_structure_contains_runnable_calculator():
     assert any(
         keyword.arg == "tools"
         and isinstance(keyword.value, ast.List)
-        and [elt.id for elt in keyword.value.elts if isinstance(elt, ast.Name)] == ["calculator"]
+        and all(isinstance(elt, ast.Name) for elt in keyword.value.elts)
+        and [elt.id for elt in keyword.value.elts] == ["calculator"]
         for call in agent_calls
         for keyword in call.keywords
     )
@@ -73,6 +74,9 @@ def test_tools_calculator_rejects_non_numeric_constants():
     assert calculator("3 ** 5000").startswith("Error:")
     assert calculator("2 ** 4096").startswith("Error:")
     assert calculator("1e308 ** 2").startswith("Error:")
+    assert calculator(str(2 ** 4095)) == str(2 ** 4095)
+    assert calculator(str(2 ** 4096)).startswith("Error:")
+    assert calculator("-" + str(2 ** 4096)).startswith("Error:")
 
 
 def test_basic_example_prompt_includes_feature_structure(tmp_path):

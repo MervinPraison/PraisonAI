@@ -900,6 +900,8 @@ def calculator(expression: str) -> str:
         if isinstance(node, ast.Constant):
             if type(node.value) not in (int, float):
                 raise TypeError("Only numeric constants are supported")
+            if isinstance(node.value, int) and node.value.bit_length() > 4096:
+                raise ValueError("Result is too large")
             return node.value
         elif isinstance(node, ast.BinOp):
             left = _eval_node(node.left)
