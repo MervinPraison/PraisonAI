@@ -898,12 +898,16 @@ def calculator(expression: str) -> str:
     
     def _eval_node(node):
         if isinstance(node, ast.Constant):
-            if not isinstance(node.value, (int, float)):
+            if type(node.value) not in (int, float):
                 raise TypeError("Only numeric constants are supported")
             return node.value
         elif isinstance(node, ast.BinOp):
             left = _eval_node(node.left)
             right = _eval_node(node.right)
+            if (isinstance(node.op, ast.Pow) and isinstance(left, int)
+                    and isinstance(right, int)
+                    and abs(left).bit_length() * right > 4096):
+                raise ValueError("Result is too large")
             return ops[type(node.op)](left, right)
         elif isinstance(node, ast.UnaryOp):
             operand = _eval_node(node.operand)
@@ -915,7 +919,7 @@ def calculator(expression: str) -> str:
         tree = ast.parse(expression.strip(), mode='eval')
         result = _eval_node(tree.body)
         return str(result)
-    except (ValueError, SyntaxError, TypeError, ZeroDivisionError, KeyError) as e:
+    except (ValueError, SyntaxError, TypeError, ZeroDivisionError, KeyError, OverflowError) as e:
         return f"Error: {{e}}"
 
 # Create agent with tool

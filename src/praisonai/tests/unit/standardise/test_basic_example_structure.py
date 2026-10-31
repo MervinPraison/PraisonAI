@@ -39,6 +39,7 @@ def test_tools_structure_contains_runnable_calculator():
     tree = ast.parse(code)
     functions = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
     assert {"calculator", "_eval_node"} <= functions
+    assert "tools=[calculator]" in code
 
 
 def test_tools_calculator_rejects_non_numeric_constants():
@@ -54,6 +55,10 @@ def test_tools_calculator_rejects_non_numeric_constants():
 
     assert calculator("2 + 3 * 4") == "14"
     assert calculator("'x' * 3").startswith("Error:")
+    assert calculator("True + 1").startswith("Error:")
+    assert calculator("2 ** 10") == "1024"
+    assert calculator("9 ** 100000000").startswith("Error:")
+    assert calculator("1e308 ** 2").startswith("Error:")
 
 
 def test_basic_example_prompt_includes_feature_structure(tmp_path):
