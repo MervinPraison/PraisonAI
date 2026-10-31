@@ -7099,8 +7099,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     model_name=str(getattr(self, 'llm', '') or ''),
                 ),
             )
+            # Copy ContextVars into the worker so the re-scheduled model call
+            # keeps the caller's context (session identity, AG-UI run owner).
+            import contextvars
+            _ctx = contextvars.copy_context()
             response = await loop.run_in_executor(
-                None, lambda: manager.execute_model_call(request, _model_fn)
+                None, lambda: _ctx.run(manager.execute_model_call, request, _model_fn)
             )
             return self._unwrap_model_response(response)
 
