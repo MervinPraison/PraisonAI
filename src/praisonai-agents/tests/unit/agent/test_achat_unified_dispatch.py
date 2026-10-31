@@ -231,3 +231,67 @@ async def test_achat_completion_streams_final_response_after_tool_calls():
     assert create.await_args.kwargs["stream"] is True
     process_stream_chunks.assert_called_once()
     assert result == "final answer"
+
+
+@pytest.mark.asyncio
+async def test_achat_completion_follow_up_keeps_conversation_and_skips_empty_chunks():
+    """The post-tool follow-up request must keep the original conversation (so
+    the final answer still sees the user's question), and stream chunks with no
+    ``choices`` (e.g. Azure content-filter annotations) must be skipped rather
+    than raising ``IndexError`` and falling back to the raw tool output.
+    """
+    agent = Agent(name="test", instructions="You are helpful", llm="gpt-4o-mini")
+
+    def lookup(query: str) -> str:
+        return "tool output"
+
+    tool_call = SimpleNamespace(
+        id="call-1",
+        function=SimpleNamespace(name="lookup", arguments='{"query": "x"}'),
+    )
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[tool_call]))]
+    )
+    conversation = [
+        {"role": "system", "content": "You are helpful"},
+        {"role": "user", "content": "Look up x and answer in French"},
+    ]
+
+    async def _stream():
+        yield SimpleNamespace(choices=[])
+        yield SimpleNamespace(
+            choices=[SimpleNamespace(delta=SimpleNamespace(content="réponse"))]
+        )
+
+    create = AsyncMock(return_value=_stream())
+    fake_client = SimpleNamespace(
+        async_client=SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+    )
+    final = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="réponse"))]
+    )
+    process_stream_chunks = MagicMock(return_value=final)
+
+    with patch.object(
+        type(agent), "_openai_client", new=fake_client
+    ), patch.object(
+        agent, "execute_tool_async", new_callable=AsyncMock, return_value="tool output"
+    ), patch(
+        "praisonaiagents.agent.agent._get_llm_functions",
+        return_value={"process_stream_chunks": process_stream_chunks},
+    ), patch(
+        "praisonaiagents.agent.chat_mixin._get_display_functions"
+    ) as display:
+        result = await agent._achat_completion(
+            response, tools=[lookup], messages=conversation
+        )
+
+    display.return_value.__getitem__.return_value.assert_not_called()
+    sent = create.await_args.kwargs["messages"]
+    assert sent[: len(conversation)] == conversation
+    assert "tool output" in sent[-1]["content"]
+    # The caller's list is not mutated.
+    assert len(conversation) == 2
+    assert result == "réponse"
