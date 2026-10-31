@@ -107,3 +107,70 @@ def test_schedule_runner_starts_once_and_stops(monkeypatch):
 
     sr.stop_schedule_runner()  # idempotent
     assert len(stops) == 1
+
+
+# ── Gap 2b: download path (success / redirect refused / size cap) ───────
+
+
+@pytest.fixture
+def local_image_server(monkeypatch):
+    """Offline HTTP server; the public-host screen is bypassed so the real
+    download path (opener, redirect handler, size cap) is exercised."""
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+
+    class _Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == "/redirect":
+                self.send_response(302)
+                self.send_header("Location", "/img.png")
+                self.end_headers()
+                return
+            body = b"x" * 64
+            self.send_response(200)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    server = HTTPServer(("127.0.0.1", 0), _Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    monkeypatch.setattr(
+        "praisonai.jobs.models._resolve_and_screen_webhook_host",
+        lambda url, label="": ["127.0.0.1"],
+    )
+    try:
+        yield f"http://127.0.0.1:{server.server_address[1]}"
+    finally:
+        server.shutdown()
+        server.server_close()
+
+
+def test_image_save_downloads_public_url(tmp_path, local_image_server):
+    from praisonai.capabilities.images import ImageResult
+
+    out = tmp_path / "img.png"
+    ImageResult(url=f"{local_image_server}/img.png").save(str(out))
+    assert out.read_bytes() == b"x" * 64
+
+
+def test_image_save_refuses_redirect(tmp_path, local_image_server):
+    import urllib.error
+    from praisonai.capabilities.images import ImageResult
+
+    out = tmp_path / "img.png"
+    with pytest.raises(urllib.error.HTTPError):
+        ImageResult(url=f"{local_image_server}/redirect").save(str(out))
+    assert not out.exists()
+
+
+def test_image_save_enforces_size_cap(tmp_path, local_image_server, monkeypatch):
+    import praisonai.capabilities.images as images
+
+    monkeypatch.setattr(images, "_IMAGE_DOWNLOAD_MAX_BYTES", 16)
+    out = tmp_path / "img.png"
+    with pytest.raises(ValueError, match="maximum download size"):
+        images.ImageResult(url=f"{local_image_server}/img.png").save(str(out))
+    assert not out.exists()
