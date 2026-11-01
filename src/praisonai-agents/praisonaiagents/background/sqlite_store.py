@@ -141,21 +141,22 @@ class SqliteBackgroundJobStore:
         """Return jobs needing reconciliation after a restart.
 
         Jobs left ``PENDING``/``RUNNING`` (orphaned by a crash) and jobs
-        ``COMPLETED`` with an ``origin`` that were never ``delivered``. Returned
-        oldest-first for deterministic replay.
+        ``COMPLETED`` or ``LOST`` with an ``origin`` that were never
+        ``delivered``. Returned oldest-first for deterministic replay.
         """
         with self._lock:
             rows = self._conn.execute(
                 """
                 SELECT * FROM background_jobs
                 WHERE status IN (?, ?)
-                   OR (status = ? AND delivered = 0 AND origin IS NOT NULL)
+                   OR (status IN (?, ?) AND delivered = 0 AND origin IS NOT NULL)
                 ORDER BY created_at ASC
                 """,
                 (
                     JobStatus.PENDING.value,
                     JobStatus.RUNNING.value,
                     JobStatus.COMPLETED.value,
+                    JobStatus.LOST.value,
                 ),
             ).fetchall()
         return [self._row_to_job(r) for r in rows]

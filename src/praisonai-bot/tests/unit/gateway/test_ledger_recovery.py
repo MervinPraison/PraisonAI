@@ -279,3 +279,109 @@ def test_open_run_ledger_returns_none_when_db_missing(tmp_path, monkeypatch):
     gateway = _make_gateway()
     assert gateway._open_run_ledger() is None
     assert not (tmp_path / "ledger.db").exists()
+
+
+def test_reconcile_background_jobs_notifies_lost_job_once(tmp_path, monkeypatch):
+    """Issue #6038: a job RUNNING at restart gets one 'interrupted' notice."""
+    import praisonaiagents.background.job_manager as jm
+    from praisonaiagents.background.job_manager import JobInfo, JobStatus
+    from praisonaiagents.background.sqlite_store import SqliteBackgroundJobStore
+
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+    pre = SqliteBackgroundJobStore()
+    pre.upsert(JobInfo(
+        job_id="job-42", status=JobStatus.RUNNING, started_at=1.0,
+        origin={"deliver": "origin", "platform": "telegram",
+                "chat_id": "12345", "task": "audit all 40 repos"},
+    ))
+    pre.close()
+    monkeypatch.setattr(jm, "_global_job_manager", None)
+
+    gateway = _make_gateway()
+    sent = []
+
+    async def _notice(target, text, run_id):
+        sent.append((target, text, run_id))
+        return True
+
+    monkeypatch.setattr(gateway, "_deliver_lost_run_notice", _notice)
+    try:
+        assert asyncio.run(gateway._reconcile_background_jobs()) == 1
+        assert asyncio.run(gateway._reconcile_background_jobs()) == 0
+    finally:
+        mgr, jm._global_job_manager = jm._global_job_manager, None
+        if mgr is not None:
+            mgr.shutdown(wait=False)
+    assert len(sent) == 1
+    target, text, run_id = sent[0]
+    assert target == "telegram:12345"
+    assert "audit all 40 repos" in text and "interrupted" in text
+    assert run_id == "job:job-42:telegram:12345"
+
+
+def test_resolve_job_routes_keeps_thread_and_resolves_targets():
+    """Recovery uses the live delivery rules: thread kept, aliases resolved."""
+    gateway = _make_gateway()
+    origin = {"platform": "slack", "chat_id": "C1", "thread_id": "T9"}
+    assert gateway._resolve_job_routes({**origin, "deliver": "origin"}) == ["slack:C1:T9"]
+    assert gateway._resolve_job_routes({"deliver": ""}) == []
+    assert gateway._resolve_job_routes({"deliver": "origin"}) == []
+
+    class _Router:
+        def resolve(self, target):
+            if target == "ops":
+                return ("slack", "C2", None)
+            raise ValueError(target)
+
+    gateway._delivery_router = _Router()
+    try:
+        assert gateway._resolve_job_routes({**origin, "deliver": "ops"}) == ["slack:C2"]
+        # Not resolvable now: raise so the job is retried, not marked delivered.
+        with pytest.raises(ValueError):
+            gateway._resolve_job_routes({**origin, "deliver": "nowhere"})
+        with pytest.raises(RuntimeError):
+            gateway._resolve_job_routes({**origin, "deliver": "all"})
+    finally:
+        gateway._delivery_router = None
+
+
+def test_reconcile_background_jobs_retries_until_every_route_succeeds(tmp_path, monkeypatch):
+    """A partial fan-out failure leaves the job undelivered for the next boot."""
+    import praisonaiagents.background.job_manager as jm
+    from praisonaiagents.background.job_manager import JobInfo, JobStatus
+    from praisonaiagents.background.sqlite_store import SqliteBackgroundJobStore
+
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+    pre = SqliteBackgroundJobStore()
+    pre.upsert(JobInfo(
+        job_id="job-7", status=JobStatus.RUNNING, started_at=1.0,
+        origin={"deliver": "all", "task": "nightly report"},
+    ))
+    pre.close()
+    monkeypatch.setattr(jm, "_global_job_manager", None)
+
+    gateway = _make_gateway()
+    monkeypatch.setattr(
+        gateway, "_resolve_job_routes",
+        lambda origin: ["slack:C1", "telegram:42"],
+    )
+    down = {"telegram:42"}
+    sent = []
+
+    async def _notice(target, text, run_id):
+        if target in down:
+            return False
+        sent.append(target)
+        return True
+
+    monkeypatch.setattr(gateway, "_deliver_lost_run_notice", _notice)
+    try:
+        assert asyncio.run(gateway._reconcile_background_jobs()) == 0
+        assert not jm._global_job_manager.get_job_info("job-7").delivered
+        down.clear()
+        assert asyncio.run(gateway._reconcile_background_jobs()) == 1
+    finally:
+        mgr, jm._global_job_manager = jm._global_job_manager, None
+        if mgr is not None:
+            mgr.shutdown(wait=False)
+    assert "telegram:42" in sent

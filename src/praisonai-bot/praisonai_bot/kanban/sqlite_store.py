@@ -5,7 +5,7 @@ import json
 import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Tuple
 from pathlib import Path
 
 from .models import (
@@ -1069,6 +1069,10 @@ class SQLiteKanbanStore:
         recently heartbeating are left untouched (the worker may extend its
         own lease via heartbeat()).
 
+        Each reclaim closes the interrupted run as ``crashed``, counts it as a
+        failure (so a crash loop trips the circuit breaker) and adds an
+        ``interrupted`` comment, all in the reclaim's own transaction.
+
         Args:
             stale_timeout_seconds: Heartbeat staleness threshold.
 
@@ -1137,26 +1141,31 @@ class SQLiteKanbanStore:
                 if result.rowcount > 0:
                     reclaimed.append(row['id'])
                     reason = 'dead' if not worker_alive else 'stale_heartbeat'
-                    # Close the abandoned attempt in the same transaction, so a
-                    # dispatcher that claims the task next can never have its
-                    # own fresh run mistaken for this one.
-                    if row.get('current_run_id') is not None and conn.execute(
-                            "UPDATE task_runs SET outcome = ?, error = ?, ended_at = ? "
-                            "WHERE id = ? AND ended_at IS NULL",
-                            (RunOutcome.CRASHED.value,
-                             f'Worker {reason}; claim reclaimed',
-                             now.isoformat(), row['current_run_id']),
-                    ).rowcount:
-                        self._log_event(conn, row['id'], 'run_closed', {
-                            'run_id': row['current_run_id'],
-                            'outcome': RunOutcome.CRASHED.value,
-                        })
                     reclaim_details[row['id']] = {
                         'worker_id': row['claim_lock'],
                         'worker_pid': pid,
                         'reason': reason,
                     }
                     self._log_event(conn, row['id'], 'reclaimed', reclaim_details[row['id']])
+                    # Issue #6038: the interrupted attempt is a crash, not a
+                    # silent restart. Close its run, count it toward the
+                    # circuit breaker and leave a comment the next attempt sees
+                    # -- in this same transaction, so no other dispatcher can
+                    # claim the task before the old attempt is accounted for.
+                    error = (
+                        f"Worker {row['claim_lock']} was interrupted ({reason}); "
+                        "task reclaimed and will restart from scratch"
+                    )
+                    self._close_crashed_run(conn, row['id'], row.get('current_run_id'), error, now)
+                    reclaim_details[row['id']]['failure'] = (
+                        error, self._count_failure(conn, row['id'], error, now.isoformat())
+                    )
+                    conn.execute(
+                        "INSERT INTO task_comments (id, task_id, author, text, created_at) "
+                        "VALUES (?, ?, ?, ?, ?)",
+                        (f"comment_{uuid.uuid4().hex[:12]}", row['id'], 'system',
+                         f"interrupted: {error}", now.replace(tzinfo=None).isoformat()),
+                    )
 
         # Reclamation is a real running -> ready transition, so it announces
         # KANBAN_TASK_MOVED like any other move (tagged with why it happened).
@@ -1169,7 +1178,31 @@ class SQLiteKanbanStore:
                 reclaimed=True,
                 reason=detail.get('reason'),
             )
+            error, counted = detail['failure']
+            if counted is not None:
+                self._emit_failure(task_id, error, *counted)
         return reclaimed
+
+    def _close_crashed_run(
+        self, conn: sqlite3.Connection, task_id: str, run_id: Optional[int],
+        error: str, now: datetime,
+    ) -> None:
+        """Close an interrupted attempt as ``crashed`` inside ``conn``'s transaction."""
+        if run_id is None:
+            return
+        result = conn.execute(
+            "UPDATE task_runs SET outcome = ?, error = ?, ended_at = ? "
+            "WHERE id = ? AND (ended_at IS NULL OR ended_at = '')",
+            (RunOutcome.CRASHED.value, error, now.isoformat(), run_id),
+        )
+        conn.execute(
+            "UPDATE tasks SET current_run_id = NULL WHERE id = ? AND current_run_id = ?",
+            (task_id, run_id),
+        )
+        if result.rowcount > 0:
+            self._log_event(conn, task_id, 'run_closed', {
+                'run_id': run_id, 'outcome': RunOutcome.CRASHED.value,
+            })
 
     # ------------------------------------------------------------------
     # Task runs (attempt history) + per-task retry / circuit-breaker
@@ -1307,55 +1340,74 @@ class SQLiteKanbanStore:
         from datetime import timezone
         now = datetime.now(timezone.utc).isoformat()
         with self._get_connection() as conn:
-            cursor = conn.execute(
-                "SELECT consecutive_failures, max_retries, status FROM tasks WHERE id = ?",
-                (task_id,)
-            )
-            row = cursor.fetchone()
-            if not row:
-                raise ValueError(f"Task {task_id} not found")
-            # A terminal task (already completed/archived by another caller,
-            # e.g. kanban_complete) must not be re-failed: a stale process-exit
-            # handler could otherwise increment the counter and re-block a task
-            # that already finished. Treat as a no-op (not circuit-broken).
-            if (row['status'] or '') in ('done', 'archived'):
+            counted = self._count_failure(conn, task_id, error, now)
+            if counted is None:
                 return False
-            failures = (row['consecutive_failures'] or 0) + 1
-            # Normalize the persisted limit too: a task created before create-path
-            # validation (or via migration) may carry max_retries=0/negative,
-            # which would otherwise auto-block on the first failure. Fall back to
-            # the board default for any non-positive / non-integer stored value.
-            stored_limit = row['max_retries']
-            try:
-                stored_limit = int(stored_limit) if stored_limit is not None else None
-            except (TypeError, ValueError):
-                stored_limit = None
-            limit = stored_limit if (stored_limit is not None and stored_limit >= 1) else DEFAULT_MAX_RETRIES
-            blocked = failures >= limit
-            if blocked:
-                conn.execute("""
-                    UPDATE tasks
-                    SET consecutive_failures = ?, status = 'blocked',
-                        claim_lock = NULL, updated_at = ?, version = version + 1
-                    WHERE id = ?
-                """, (failures, now, task_id))
-                self._log_event(conn, task_id, 'circuit_broken', {
-                    'consecutive_failures': failures,
-                    'max_retries': limit,
-                    'error': (error or '')[:500],
-                })
-            else:
-                conn.execute(
-                    "UPDATE tasks SET consecutive_failures = ?, updated_at = ? WHERE id = ?",
-                    (failures, now, task_id)
-                )
-                self._log_event(conn, task_id, 'failure_recorded', {
-                    'consecutive_failures': failures,
-                    'max_retries': limit,
-                })
-            old_status = row['status'] or ''
+        self._emit_failure(task_id, error, *counted)
+        return counted[3]
 
-        # Committed. Every recorded attempt failure announces KANBAN_TASK_FAILED;
+    def _count_failure(
+        self, conn: sqlite3.Connection, task_id: str, error: Optional[str], now: str,
+    ) -> Optional[Tuple[str, int, int, bool]]:
+        """Count one failed attempt inside ``conn``'s transaction.
+
+        Returns ``(old_status, failures, limit, blocked)`` for
+        :meth:`_emit_failure`, or ``None`` when the task is already terminal.
+        """
+        cursor = conn.execute(
+            "SELECT consecutive_failures, max_retries, status FROM tasks WHERE id = ?",
+            (task_id,)
+        )
+        row = cursor.fetchone()
+        if not row:
+            raise ValueError(f"Task {task_id} not found")
+        # A terminal task (already completed/archived by another caller,
+        # e.g. kanban_complete) must not be re-failed: a stale process-exit
+        # handler could otherwise increment the counter and re-block a task
+        # that already finished. Treat as a no-op (not circuit-broken).
+        if (row['status'] or '') in ('done', 'archived'):
+            return None
+        failures = (row['consecutive_failures'] or 0) + 1
+        # Normalize the persisted limit too: a task created before create-path
+        # validation (or via migration) may carry max_retries=0/negative,
+        # which would otherwise auto-block on the first failure. Fall back to
+        # the board default for any non-positive / non-integer stored value.
+        stored_limit = row['max_retries']
+        try:
+            stored_limit = int(stored_limit) if stored_limit is not None else None
+        except (TypeError, ValueError):
+            stored_limit = None
+        limit = stored_limit if (stored_limit is not None and stored_limit >= 1) else DEFAULT_MAX_RETRIES
+        blocked = failures >= limit
+        if blocked:
+            conn.execute("""
+                UPDATE tasks
+                SET consecutive_failures = ?, status = 'blocked',
+                    claim_lock = NULL, updated_at = ?, version = version + 1
+                WHERE id = ?
+            """, (failures, now, task_id))
+            self._log_event(conn, task_id, 'circuit_broken', {
+                'consecutive_failures': failures,
+                'max_retries': limit,
+                'error': (error or '')[:500],
+            })
+        else:
+            conn.execute(
+                "UPDATE tasks SET consecutive_failures = ?, updated_at = ? WHERE id = ?",
+                (failures, now, task_id)
+            )
+            self._log_event(conn, task_id, 'failure_recorded', {
+                'consecutive_failures': failures,
+                'max_retries': limit,
+            })
+        return (row['status'] or '', failures, limit, blocked)
+
+    def _emit_failure(
+        self, task_id: str, error: Optional[str],
+        old_status: str, failures: int, limit: int, blocked: bool,
+    ) -> None:
+        """Announce a committed failure counted by :meth:`_count_failure`."""
+        # Every recorded attempt failure announces KANBAN_TASK_FAILED;
         # tripping the circuit breaker additionally moves the task to 'blocked'
         # in-place (it does not route through move_task), so announce that too.
         self._emit_hook(
@@ -1377,7 +1429,6 @@ class SQLiteKanbanStore:
                 circuit_broken=True,
                 error=(error or '')[:500],
             )
-        return blocked
 
     def get_retry_context(self, task_id: str) -> List[Dict[str, Any]]:
         """Prior attempts' outcomes/summaries/errors for a retrying worker.
