@@ -72,7 +72,7 @@ export class MemoryCache extends BaseCache {
     if (this.maxSize && this.cache.size >= this.maxSize && !this.cache.has(key)) {
       // Remove oldest entry
       const firstKey = this.cache.keys().next().value;
-      if (firstKey) this.cache.delete(firstKey);
+      if (firstKey !== undefined) this.cache.delete(firstKey);
     }
 
     const effectiveTtl = ttl ?? this.ttl;
