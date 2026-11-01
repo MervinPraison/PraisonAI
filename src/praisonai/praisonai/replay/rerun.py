@@ -34,6 +34,7 @@ from praisonaiagents.trace.redact import REDACTED_VALUE
 from praisonaiagents.workflows.step_cache import StepCacheProtocol
 
 from .events import as_dicts, etype, load_events, pair_spans, run_id_of
+from praisonai._errors import _WrapperError
 
 __all__ = [
     "RerunError",
@@ -53,7 +54,7 @@ _REUSABLE = {"completed", "cached"}
 _SHORTENED = re.compile(r"\n\.\.\.\[[\d,]+ chars, showing first/last portions\]\.\.\.\n")
 
 
-class RerunError(RuntimeError):
+class RerunError(_WrapperError, RuntimeError):
     """The recording cannot support a re-run from the requested node."""
 
 

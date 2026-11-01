@@ -10,12 +10,13 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from praisonai._errors import _WrapperError
 
 if TYPE_CHECKING:
     from .loader import TemplateConfig
 
 
-class StrictModeError(Exception):
+class StrictModeError(_WrapperError):
     """Raised when strict mode detects missing dependencies."""
     
     def __init__(self, message: str, missing_items: Dict[str, List[str]]):

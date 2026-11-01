@@ -20,9 +20,10 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
+from praisonai._errors import _WrapperError
 
 
-class SecurityError(Exception):
+class SecurityError(_WrapperError):
     """Base exception for security operations."""
     pass
 

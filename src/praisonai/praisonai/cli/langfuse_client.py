@@ -33,9 +33,10 @@ from typing import Any, Dict, List, Optional
 
 import requests
 from requests.auth import HTTPBasicAuth
+from praisonai._errors import _WrapperError
 
 
-class LangfuseAPIError(Exception):
+class LangfuseAPIError(_WrapperError):
     """Raised when Langfuse API returns an error."""
     
     def __init__(self, message: str, status_code: Optional[int] = None):

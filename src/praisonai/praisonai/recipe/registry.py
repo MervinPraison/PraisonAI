@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, Protocol
 from urllib.parse import urlparse
+from praisonai._errors import _WrapperError
 
 
 # Default registry paths
@@ -29,7 +30,7 @@ DEFAULT_RUNS_PATH = Path.home() / ".praison" / "runs"
 DEFAULT_REGISTRY_PORT = 7777
 
 
-class RegistryError(Exception):
+class RegistryError(_WrapperError):
     """Base exception for registry operations."""
     pass
 

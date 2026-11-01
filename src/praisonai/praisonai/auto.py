@@ -18,12 +18,13 @@ import asyncio
 import threading
 import warnings
 from praisonai._logging import get_logger
+from praisonai._errors import _WrapperError
 
 # Type variable for Pydantic models - will be bound at runtime
 T = TypeVar('T')
 
 
-class MergeConflictError(Exception):
+class MergeConflictError(_WrapperError):
     """Raised when ``--merge`` targets an existing but un-parseable YAML file.
 
     Merging cannot proceed without a readable target, so instead of silently
