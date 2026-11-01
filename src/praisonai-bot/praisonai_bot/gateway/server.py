@@ -254,6 +254,11 @@ _TURN_ERROR_MESSAGES = {
 }
 _RETRYABLE_TURN_ERRORS = frozenset({"rate_limit", "overloaded", "transient", "idle_timeout"})
 
+# Upper bound on a ``/hooks/<path>`` request body. A signed hook reads the body
+# before any credential is proven, so it must be bounded (GitHub caps webhook
+# payloads at 25 MB).
+_HOOK_MAX_BODY_BYTES = 25 * 1024 * 1024
+
 
 def _turn_error_payload(exc: BaseException) -> Dict[str, Any]:
     """Project a failed turn's exception onto a stable wire error envelope.
@@ -2466,26 +2471,54 @@ class WebSocketGateway:
             if hook is None or not getattr(hook, "enabled", True):
                 return JSONResponse({"error": "hook not found"}, status_code=404)
 
-            auth_err = _check_hook_auth(request, hook)
-            if auth_err:
-                return auth_err
+            # A replay-bounded provider signature *is* the authentication
+            # (#6034): a hook with ``secret`` whose scheme signs a timestamp
+            # checked against a tolerance skips the gateway-token fallback. A
+            # body-only HMAC (e.g. GitHub's ``hmac_hex``) can be replayed from a
+            # captured delivery, so it still needs the gateway token. An
+            # explicit hook ``auth`` is always required on top. Token auth runs
+            # before the body is read so unauthenticated requests fail early.
+            verify = getattr(hook, "verify_signature", None)
+            signed = callable(verify) and bool(getattr(hook, "secret", None))
+            replay_bounded = (
+                getattr(hook, "signature_scheme", None) in ("hmac_timestamped", "structured")
+                and (getattr(hook, "signature_tolerance_seconds", 0) or 0) > 0
+            )
+            if not (signed and replay_bounded) or getattr(hook, "auth", None):
+                auth_err = _check_hook_auth(request, hook)
+                if auth_err:
+                    return auth_err
+            elif not request.headers.get(getattr(hook, "signature_header", None) or ""):
+                # Signature is the only credential: with no signature header the
+                # request cannot authenticate, so reject it before buffering.
+                return JSONResponse({"error": "invalid signature"}, status_code=401)
 
             import json
 
             # Read the raw body once so an HMAC signature can be verified over
-            # the exact bytes the provider signed, then parse it as JSON.
-            raw_body = await request.body()
+            # the exact bytes the provider signed, then parse it as JSON. The
+            # read is capped so an unauthenticated sender cannot exhaust memory.
+            too_large = JSONResponse({"error": "payload too large"}, status_code=413)
+            try:
+                if int(request.headers.get("content-length") or 0) > _HOOK_MAX_BODY_BYTES:
+                    return too_large
+            except ValueError:
+                return JSONResponse({"error": "invalid content-length"}, status_code=400)
+            chunks, size = [], 0
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > _HOOK_MAX_BODY_BYTES:
+                    return too_large
+                chunks.append(chunk)
+            raw_body = b"".join(chunks)
 
             # Provider signature verification (#3165). Fail-closed: when a
             # ``secret`` is configured, a missing/invalid signature is rejected
-            # with 401 before any agent runs. A hook without ``secret`` is
-            # unaffected (backward compatible).
-            verify = getattr(hook, "verify_signature", None)
-            if callable(verify) and getattr(hook, "secret", None):
-                if not verify(raw_body, dict(request.headers)):
-                    return JSONResponse(
-                        {"error": "invalid signature"}, status_code=401,
-                    )
+            # with 401 before any agent runs.
+            if signed and not verify(raw_body, dict(request.headers)):
+                return JSONResponse(
+                    {"error": "invalid signature"}, status_code=401,
+                )
 
             try:
                 payload = json.loads(raw_body) if raw_body else {}
