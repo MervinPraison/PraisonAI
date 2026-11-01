@@ -156,6 +156,8 @@ jobs:
               tests/unit/bus/ tests/unit/skills/ tests/unit/agents/
               tests/unit/rag/ tests/unit/streaming/
               tests/unit/test_adapter_registry.py tests/unit/test_token_budget.py
+              tests/unit/test_streaming_events.py tests/unit/test_tool_decorator_approval.py
+              tests/unit/test_task_execution_config.py
             # Both tests previously deselected here now pass in combination.
             # test_lazy_litellm_import was looking the loader module up by
             # name and could get a different object than the one get_litellm()
