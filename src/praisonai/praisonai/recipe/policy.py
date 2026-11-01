@@ -14,9 +14,10 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Union
 
 import yaml
+from praisonai._errors import _WrapperError
 
 
-class PolicyError(Exception):
+class PolicyError(_WrapperError):
     """Base exception for policy operations."""
     pass
 

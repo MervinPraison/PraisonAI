@@ -156,6 +156,7 @@ def _get_default_adapter_registry():
 
 # Framework availability detection (lazy via __getattr__)
 from ._framework_availability import is_available
+from praisonai._errors import _WrapperError
 
 # Lazy constants mapping for backward compatibility
 _AVAIL = {
@@ -192,7 +193,7 @@ def __dir__():
 _DEFAULT_TOOL_TIMEOUT_WORKERS = 32
 
 
-class ToolTimeoutError(TimeoutError):
+class ToolTimeoutError(_WrapperError, TimeoutError):
     """Raised when a wrapped tool exceeds its per-call timeout.
 
     Preserves the tool's declared return-type contract: instead of silently
