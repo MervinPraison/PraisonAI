@@ -108,17 +108,44 @@ def _parse_redirect(url: str) -> Tuple[str, str]:
     return (params.get("state") or [""])[0], (params.get("code") or [""])[0]
 
 
-def _read_pasted_redirect(callback: OAuthCallbackHandler, state: str) -> None:
-    """Headless fallback: accept the redirect URL pasted from another device."""
-    try:
-        line = input("Or paste the full redirect URL here: ")
-    except (EOFError, OSError):
-        return
-    got_state, code = _parse_redirect(line)
-    if got_state == state and code:
-        callback.receive_callback(state, code)
-    else:
-        print("Pasted URL has no matching state/code; ignored.", file=sys.stderr)
+# Headless fallback: a single terminal reader shared by all flows waiting on a
+# pasted redirect. Per-flow readers would race for stdin and drop each other's
+# pastes; one reader routes each paste to the shared state-keyed handler.
+_paste_states: set = set()
+_paste_reader: Optional[Thread] = None
+
+
+def _paste_loop() -> None:
+    global _paste_reader
+    while True:
+        try:
+            line: Optional[str] = input("Or paste the full redirect URL here: ")
+        except (EOFError, OSError):
+            line = None
+        handler = None
+        got_state, code = _parse_redirect(line or "")
+        with _callback_lock:
+            if line is not None and code and got_state in _paste_states:
+                _paste_states.discard(got_state)
+                handler = _callback_handler
+            stop = line is None or not _paste_states
+            if stop:
+                _paste_reader = None  # nothing left waiting; next flow restarts us
+        if handler is not None:
+            handler.receive_callback(got_state, code)
+        elif line is not None:
+            print("Pasted URL has no matching state/code; ignored.", file=sys.stderr)
+        if stop:
+            return
+
+
+def _await_paste(state: str) -> None:
+    global _paste_reader
+    with _callback_lock:
+        _paste_states.add(state)
+        if _paste_reader is None:
+            _paste_reader = Thread(target=_paste_loop, daemon=True)
+            _paste_reader.start()
 
 
 class MCPOAuthProvider:
@@ -292,13 +319,11 @@ class MCPOAuthProvider:
                     file=sys.stderr,
                 )
                 if sys.stdin is not None and sys.stdin.isatty():
-                    Thread(
-                        target=_read_pasted_redirect,
-                        args=(callback, state),
-                        daemon=True,
-                    ).start()
+                    _await_paste(state)
             code = callback.wait_for_callback(state, timeout=300.0)
         finally:
+            with _callback_lock:
+                _paste_states.discard(state)
             callback.clear_state(state)
             _release_callback()
 
