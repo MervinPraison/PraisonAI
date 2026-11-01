@@ -3,6 +3,9 @@
  */
 
 import { MemoryCache, FileCache, createMemoryCache, createFileCache } from '../../../src/cache';
+import { mkdtemp, rm } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 
 describe('MemoryCache', () => {
   let cache: MemoryCache;
@@ -156,5 +159,59 @@ describe('Factory functions', () => {
   it('should create FileCache', () => {
     const cache = createFileCache({ cacheDir: '/tmp/test' });
     expect(cache).toBeInstanceOf(FileCache);
+  });
+});
+
+describe('FileCache default TTL', () => {
+  let cacheDir: string;
+  let now: number;
+
+  beforeEach(async () => {
+    cacheDir = await mkdtemp(join(tmpdir(), 'praisonai-file-cache-ttl-'));
+    now = 1000;
+    jest.spyOn(Date, 'now').mockImplementation(() => now);
+  });
+
+  afterEach(async () => {
+    jest.restoreAllMocks();
+    await rm(cacheDir, { recursive: true, force: true });
+  });
+
+  it.each(['get', 'has'] as const)('honors the configured TTL through %s after reopening', async (method) => {
+    const cache = createFileCache({ cacheDir, ttl: 50 });
+    await cache.set('answer', 'old answer');
+    expect(await cache.get('answer')).toBe('old answer');
+
+    const reopened = new FileCache({ cacheDir });
+    now += 51;
+    if (method === 'get') {
+      expect(await reopened.get('answer')).toBeUndefined();
+    } else {
+      expect(await reopened.has('answer')).toBe(false);
+    }
+    expect(await reopened.keys()).not.toContain('answer');
+  });
+
+  it('allows a per-entry TTL to override the configured TTL', async () => {
+    const cache = new FileCache({ cacheDir, ttl: 50 });
+    await cache.set('answer', 'value', 100);
+    now += 51;
+    expect(await cache.get('answer')).toBe('value');
+    now += 50;
+    expect(await cache.get('answer')).toBeUndefined();
+  });
+
+  it('allows an explicit zero TTL to disable the configured expiry', async () => {
+    const cache = new FileCache({ cacheDir, ttl: 50 });
+    await cache.set('answer', 'value', 0);
+    now += 1000;
+    expect(await cache.get('answer')).toBe('value');
+  });
+
+  it('keeps entries without a default or explicit TTL', async () => {
+    const cache = new FileCache({ cacheDir });
+    await cache.set('answer', 'value');
+    now += 1000;
+    expect(await cache.get('answer')).toBe('value');
   });
 });
