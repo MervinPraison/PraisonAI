@@ -106,6 +106,31 @@ class TestNoMatchSelfCorrection:
         result = tools.edit_file(str(p), "x = compute(a)", "compute(a)")
         assert "Error" in result and "No change needed" not in result
 
+    def test_unrelated_new_string_elsewhere_is_not_noop(self, tools, tmp_path):
+        # new_string exists in another function, not where old_string was expected.
+        p = tmp_path / "a.py"
+        _write(p, "def f(x):\n    return x * 2\n\ndef g():\n    return 0\n")
+        result = tools.edit_file(str(p), "return x * 3", "return 0")
+        assert "No change needed" not in result
+        assert "String not found" in result
+        assert "    2|" in result
+
+    def test_hint_truncates_long_lines(self, tools, tmp_path):
+        p = tmp_path / "a.json"
+        _write(p, '{"key": "' + "a" * 1000 + '"}\n')
+        result = tools.edit_file(str(p), '{"key": "' + "a" * 900 + 'b"}', "x")
+        assert "Closest match" in result and "[truncated]" in result
+        assert len(result) < 1000
+
+    def test_hint_search_is_bounded_on_long_repetitive_lines(self, tools, tmp_path):
+        import time
+        p = tmp_path / "a.json"
+        _write(p, "\n".join('{"k": "' + "ab" * 600 + '"}' for _ in range(500)) + "\n")
+        start = time.monotonic()
+        result = tools.edit_file(str(p), '{"k": "' + "ab" * 550 + 'c"}', "x")
+        assert "String not found" in result
+        assert time.monotonic() - start < 5
+
     def test_closest_region_hint_with_line_numbers(self, tools, tmp_path):
         p = tmp_path / "a.py"
         _write(p, "import os\n\ndef compute(x):\n    total = x * 2\n    return total\n")

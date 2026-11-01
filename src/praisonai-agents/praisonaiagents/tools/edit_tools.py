@@ -20,6 +20,11 @@ logger = logging.getLogger(__name__)
 _BLOCK_ANCHOR_THRESHOLD = 0.7
 # Minimum similarity for a "closest match" hint on the no-match error path.
 _CLOSEST_HINT_THRESHOLD = 0.6
+# Bounds for the hint search/output: skip long targets, cap total comparison
+# work (sum of len(window) * len(target)), and truncate long displayed lines.
+_CLOSEST_HINT_MAX_CHARS = 2000
+_CLOSEST_HINT_BUDGET = 2_000_000
+_CLOSEST_HINT_LINE_CHARS = 200
 
 # Maximum characters of diagnostics output appended to a tool result.
 _DIAGNOSTICS_MAX_CHARS = 2000
@@ -803,43 +808,59 @@ class EditTools:
         return []
 
     @staticmethod
-    def _closest_region(content: str, old: str, max_lines: int = 20000) -> str:
-        """Return the most similar block of ``content`` with line numbers.
+    def _closest_region(content: str, old: str, max_lines: int = 20000):
+        """Find the block of ``content`` most similar to ``old``.
 
-        Used only on the no-match path so the agent can correct ``old`` without
-        re-reading the whole file.  Returns "" when nothing is similar enough.
+        Used only on the no-match path.  Returns ``(start_index, n_lines)`` or
+        ``None`` when nothing is similar enough or the search would be too
+        expensive (bounded by input size and a total comparison budget).
         """
+        if len(old) > _CLOSEST_HINT_MAX_CHARS:
+            return None
         old_lines = [line.strip() for line in old.splitlines()]
         lines = content.splitlines()
         n = len(old_lines)
         if not n or not lines or len(lines) > max_lines:
-            return ""
+            return None
         n = min(n, len(lines))
         stripped = [line.strip() for line in lines]
+        target = '\n'.join(old_lines)
         matcher = difflib.SequenceMatcher(autojunk=False)
-        matcher.set_seq2('\n'.join(old_lines))
+        matcher.set_seq2(target)
+        budget = _CLOSEST_HINT_BUDGET
         best_ratio, best_i = _CLOSEST_HINT_THRESHOLD, None
         for i in range(len(lines) - n + 1):
-            matcher.set_seq1('\n'.join(stripped[i:i + n]))
+            window = '\n'.join(stripped[i:i + n])
+            matcher.set_seq1(window)
             if matcher.real_quick_ratio() <= best_ratio or matcher.quick_ratio() <= best_ratio:
                 continue
+            budget -= len(window) * len(target)
+            if budget < 0:
+                break  # optional hint: keep the best found so far
             ratio = matcher.ratio()
             if ratio > best_ratio:
                 best_ratio, best_i = ratio, i
-        if best_i is None:
-            return ""
-        shown = lines[best_i:best_i + min(n, 10)]
-        body = '\n'.join(f"{best_i + k + 1:>5}| {line}" for k, line in enumerate(shown))
+        return None if best_i is None else (best_i, n)
+
+    @staticmethod
+    def _format_region(lines, start: int, n: int) -> str:
+        """Render up to 10 lines from ``start`` with line numbers, each truncated."""
+        shown = lines[start:start + min(n, 10)]
+        width = _CLOSEST_HINT_LINE_CHARS
+        body = '\n'.join(
+            f"{start + k + 1:>5}| "
+            + (line if len(line) <= width else line[:width] + "... [truncated]")
+            for k, line in enumerate(shown))
         if n > len(shown):
             body += "\n  ..."
-        return f"lines {best_i + 1}-{best_i + n}:\n{body}"
+        return f"lines {start + 1}-{start + n}:\n{body}"
 
-    def _not_found_error(self, prefix: str, content: str, old: str) -> str:
-        """Build the no-match error, adding the closest region when one exists."""
+    def _not_found_error(self, prefix: str, content: str, old: str, region) -> str:
+        """Build the no-match error, adding ``region`` (from _closest_region) if any."""
         preview = old[:50] + ("..." if len(old) > 50 else "")
-        hint = self._closest_region(content, old)
-        if not hint:
+        if not region:
             return f"{prefix}: '{preview}'"
+        hint = self._format_region(content.splitlines(), *region)
         return (f"{prefix}: '{preview}'. Closest match in the file, {hint}\n"
                 f"Adjust old_string to match these lines exactly, "
                 f"or re-read the file if it changed.")
@@ -930,16 +951,23 @@ class EditTools:
                 
                 if not spans:
                     # Idempotency: the edit already landed (e.g. a retried
-                    # call).  Require a unique occurrence, and skip when
-                    # new_string is inside old_string, so incidental matches
-                    # of short/common text are not mistaken for a prior edit.
-                    if (new_string.strip() and new_string not in old_string
+                    # call).  Only claim this when new_string occurs exactly
+                    # once (and not inside old_string) AND sits where
+                    # old_string was expected, i.e. inside the region most
+                    # similar to old_string; an unrelated occurrence elsewhere
+                    # is not evidence of a prior edit.
+                    region = self._closest_region(content, old_string)
+                    if (region and new_string.strip() and new_string not in old_string
                             and self._count_occurrences(content, new_string) == 1):
-                        return (f"No change needed: {filepath} already contains "
-                                f"new_string and old_string is absent "
-                                f"(edit previously applied).")
+                        start, n = region
+                        new_line = content.count('\n', 0, content.find(new_string))
+                        new_end = new_line + new_string.count('\n')
+                        if new_line < start + n and new_end >= start:
+                            return (f"No change needed: {filepath} already contains "
+                                    f"new_string where old_string was expected "
+                                    f"(edit previously applied).")
                     return self._not_found_error(
-                        "Error: String not found in file", content, old_string)
+                        "Error: String not found in file", content, old_string, region)
                 
                 occurrences = len(spans)
                 
@@ -1234,7 +1262,8 @@ class EditTools:
                         spans = self._find_spans(updated, old_block)
                         if not spans:
                             return self._not_found_error(
-                                f"Error: Hunk not found in '{op['src']}'", updated, old_block)
+                                f"Error: Hunk not found in '{op['src']}'", updated, old_block,
+                                self._closest_region(updated, old_block))
                         if len(spans) > 1:
                             preview = old_block[:30] + ("..." if len(old_block) > 30 else "")
                             return (f"Error: Ambiguous hunk in '{op['src']}': '{preview}' "
@@ -1318,7 +1347,8 @@ class EditTools:
                         spans = self._find_spans(updated, old_block)
                         if not spans:
                             return self._not_found_error(
-                                f"Error: Hunk not found in '{op['path']}'", updated, old_block)
+                                f"Error: Hunk not found in '{op['path']}'", updated, old_block,
+                                self._closest_region(updated, old_block))
                         if len(spans) > 1:
                             preview = old_block[:30] + ("..." if len(old_block) > 30 else "")
                             return (f"Error: Ambiguous hunk in '{op['path']}': '{preview}' "
