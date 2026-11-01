@@ -5264,7 +5264,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             response = await self._openai_client.async_client.chat.completions.create(
                                 **tool_call_kwargs
                             )
-                            result = await self._achat_completion(response, tools)
+                            result = await self._achat_completion(response, tools, messages=messages)
                             if get_logger().getEffectiveLevel() == logging.DEBUG:
                                 total_time = time.time() - start_time
                                 logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
@@ -5444,8 +5444,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # the except blocks above already read ownership before this runs.
             self._clear_turn_tracking()
 
-    async def _achat_completion(self, response, tools, reasoning_steps=False):
-        """Async version of _chat_completion method"""
+    async def _achat_completion(self, response, tools, reasoning_steps=False, messages=None):
+        """Async version of _chat_completion method.
+
+        ``messages`` is the conversation that produced ``response``; it is kept in
+        the follow-up request so the final answer still sees the user's question.
+        """
         try:
             message = response.choices[0].message
             if not hasattr(message, 'tool_calls') or not message.tool_calls:
@@ -5531,17 +5535,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if results:
                 formatted_results = "\n".join([str(r) for r in results if r is not None])
                 if formatted_results:
-                    messages = [
-                        {"role": "system", "content": self.system_prompt},
+                    if messages:
+                        follow_up_messages = list(messages)
+                    else:
+                        follow_up_messages = [{"role": "system", "content": self.system_prompt}]
+                    follow_up_messages.extend([
                         {"role": "assistant", "content": "Here are the tool results:"},
                         {"role": "user", "content": formatted_results + "\nPlease process these results and provide a final response."}
-                    ]
+                    ])
                     try:
                         final_response = await self._openai_client.async_client.chat.completions.create(
                             model=self.llm,
-                            messages=messages,
+                            messages=follow_up_messages,
                             temperature=1.0,
-                            stream=stream
+                            stream=True
                         )
                         full_response_text = ""
                         reasoning_content = ""
@@ -5551,6 +5558,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Process stream without display_generating since streaming is active
                         async for chunk in final_response:
                             chunks.append(chunk)
+                            if not chunk.choices:
+                                # e.g. Azure content-filter annotation chunks
+                                continue
                             if chunk.choices[0].delta.content:
                                 full_response_text += chunk.choices[0].delta.content
                             
@@ -5558,9 +5568,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 rc = chunk.choices[0].delta.reasoning_content
                                 if rc:
                                     reasoning_content += rc
+
+                        if not full_response_text.strip() and not reasoning_content.strip():
+                            # No answer text (only annotation, contentless or
+                            # whitespace-only chunks): fall back to the tool results via the
+                            # except below.
+                            raise ValueError("follow-up stream returned no answer text")
                         
-                        self.console.print()
+                        console = self.console  # None unless verbose
+                        if console is not None:
+                            console.print()
                         
+                        from .agent import _get_llm_functions
                         final_response = _get_llm_functions()['process_stream_chunks'](chunks)
                         # Return only reasoning content if reasoning_steps is True
                         if reasoning_steps and hasattr(final_response.choices[0].message, 'reasoning_content') and final_response.choices[0].message.reasoning_content:

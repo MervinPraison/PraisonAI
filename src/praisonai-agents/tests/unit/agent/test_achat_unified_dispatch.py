@@ -169,3 +169,264 @@ async def test_execute_tool_async_resolves_aliased_function_name():
     )
 
     assert result == "aliased-ran"
+
+
+@pytest.mark.asyncio
+async def test_achat_completion_streams_final_response_after_tool_calls():
+    """After running tools, the legacy async path must ask the model for a
+    final answer instead of failing and returning the raw tool output.
+
+    ``_achat_completion`` used to reference an undefined ``stream`` name and
+    ``_get_llm_functions`` (only defined in ``agent.py``), so the follow-up
+    completion always raised ``NameError``, which was swallowed and the raw
+    tool results were returned.
+    """
+    agent = Agent(name="test", instructions="You are helpful", llm="gpt-4o-mini")
+
+    def lookup(query: str) -> str:
+        return "tool output"
+
+    tool_call = SimpleNamespace(
+        id="call-1",
+        function=SimpleNamespace(name="lookup", arguments='{"query": "x"}'),
+    )
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[tool_call]))]
+    )
+
+    def _chunk(content):
+        return SimpleNamespace(
+            choices=[SimpleNamespace(delta=SimpleNamespace(content=content))]
+        )
+
+    async def _stream():
+        for part in ("final ", "answer"):
+            yield _chunk(part)
+
+    create = AsyncMock(return_value=_stream())
+    fake_client = SimpleNamespace(
+        async_client=SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+    )
+    final = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="final answer"))]
+    )
+    process_stream_chunks = MagicMock(return_value=final)
+
+    with patch.object(
+        type(agent), "_openai_client", new=fake_client
+    ), patch.object(
+        agent, "execute_tool_async", new_callable=AsyncMock, return_value="tool output"
+    ), patch(
+        "praisonaiagents.agent.agent._get_llm_functions",
+        return_value={"process_stream_chunks": process_stream_chunks},
+    ), patch(
+        "praisonaiagents.agent.chat_mixin._get_display_functions"
+    ) as display:
+        result = await agent._achat_completion(response, tools=[lookup])
+
+    display.return_value.__getitem__.return_value.assert_not_called()
+    create.assert_awaited_once()
+    assert create.await_args.kwargs["stream"] is True
+    process_stream_chunks.assert_called_once()
+    assert result == "final answer"
+
+
+@pytest.mark.asyncio
+async def test_achat_completion_follow_up_keeps_conversation_and_skips_empty_chunks():
+    """The post-tool follow-up request must keep the original conversation (so
+    the final answer still sees the user's question), and stream chunks with no
+    ``choices`` (e.g. Azure content-filter annotations) must be skipped rather
+    than raising ``IndexError`` and falling back to the raw tool output.
+    """
+    agent = Agent(name="test", instructions="You are helpful", llm="gpt-4o-mini")
+
+    def lookup(query: str) -> str:
+        return "tool output"
+
+    tool_call = SimpleNamespace(
+        id="call-1",
+        function=SimpleNamespace(name="lookup", arguments='{"query": "x"}'),
+    )
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[tool_call]))]
+    )
+    conversation = [
+        {"role": "system", "content": "You are helpful"},
+        {"role": "user", "content": "Look up x and answer in French"},
+    ]
+
+    async def _stream():
+        yield SimpleNamespace(choices=[])
+        yield SimpleNamespace(
+            choices=[SimpleNamespace(delta=SimpleNamespace(content="réponse"))]
+        )
+
+    create = AsyncMock(return_value=_stream())
+    fake_client = SimpleNamespace(
+        async_client=SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+    )
+    final = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="réponse"))]
+    )
+    process_stream_chunks = MagicMock(return_value=final)
+
+    with patch.object(
+        type(agent), "_openai_client", new=fake_client
+    ), patch.object(
+        agent, "execute_tool_async", new_callable=AsyncMock, return_value="tool output"
+    ), patch(
+        "praisonaiagents.agent.agent._get_llm_functions",
+        return_value={"process_stream_chunks": process_stream_chunks},
+    ), patch(
+        "praisonaiagents.agent.chat_mixin._get_display_functions"
+    ) as display:
+        result = await agent._achat_completion(
+            response, tools=[lookup], messages=conversation
+        )
+
+    display.return_value.__getitem__.return_value.assert_not_called()
+    sent = create.await_args.kwargs["messages"]
+    assert sent[: len(conversation)] == conversation
+    assert "tool output" in sent[-1]["content"]
+    # The caller's list is not mutated.
+    assert len(conversation) == 2
+    assert result == "réponse"
+
+
+@pytest.mark.asyncio
+async def test_legacy_achat_impl_forwards_conversation_to_tool_follow_up():
+    """The legacy ``_achat_impl`` tool branch must pass the conversation to
+    ``_achat_completion`` so the follow-up request still has the user's prompt.
+    """
+    agent = Agent(name="test", instructions="You are helpful", llm="gpt-4o-mini")
+    agent._using_custom_llm = False
+    agent._use_unified_llm_dispatch = False
+
+    def lookup(query: str) -> str:
+        return "tool output"
+
+    tool_call = SimpleNamespace(
+        id="call-1",
+        function=SimpleNamespace(name="lookup", arguments='{"query": "x"}'),
+    )
+    tool_response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[tool_call]))]
+    )
+
+    async def _stream():
+        yield SimpleNamespace(
+            choices=[SimpleNamespace(delta=SimpleNamespace(content="final answer"))]
+        )
+
+    create = AsyncMock(side_effect=[tool_response, _stream()])
+    fake_client = SimpleNamespace(
+        async_client=SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+    )
+    final = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content="final answer"))]
+    )
+    prompt_messages = [{"role": "user", "content": "Look up x for me"}]
+
+    with patch.object(type(agent), "_openai_client", new=fake_client), patch.object(
+        agent, "execute_tool_async", new_callable=AsyncMock, return_value="tool output"
+    ), patch(
+        "praisonaiagents.agent.agent._get_llm_functions",
+        return_value={"process_stream_chunks": MagicMock(return_value=final)},
+    ), patch.object(
+        agent, "_atrigger_after_agent_hook", new_callable=AsyncMock, side_effect=lambda p, r, t: r
+    ), patch.object(agent, "_execute_callback_and_display"), patch.object(
+        agent, "_build_messages", return_value=(list(prompt_messages), "Look up x for me")
+    ), patch.object(agent, "_persist_message"), patch.object(
+        agent, "_format_tools_for_completion", return_value=[{"type": "function"}]
+    ):
+        result = await agent._achat_impl(
+            prompt="Look up x for me",
+            temperature=1.0,
+            tools=[lookup],
+            output_json=None,
+            output_pydantic=None,
+            reasoning_steps=False,
+            stream=False,
+            task_name=None,
+            task_description=None,
+            task_id=None,
+            config=None,
+            force_retrieval=False,
+            skip_retrieval=True,
+            attachments=None,
+            _trace_emitter=MagicMock(),
+        )
+
+    assert create.await_count == 2
+    follow_up = create.await_args_list[1].kwargs["messages"]
+    assert {"role": "user", "content": "Look up x for me"} in follow_up
+    assert result == "final answer"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "follow_up_chunk",
+    [
+        pytest.param(SimpleNamespace(choices=[]), id="empty-choices"),
+        pytest.param(
+            SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content=None))]
+            ),
+            id="choice-without-content",
+        ),
+        pytest.param(
+            SimpleNamespace(
+                choices=[SimpleNamespace(delta=SimpleNamespace(content="\n  "))]
+            ),
+            id="whitespace-only-content",
+        ),
+    ],
+)
+async def test_achat_completion_falls_back_when_follow_up_has_no_answer_chunks(follow_up_chunk):
+    """A follow-up stream with no answer text (only empty-``choices`` chunks,
+    choices without ``delta.content`` or whitespace-only content) must log an error and return the tool
+    results, not an empty string.
+    """
+    agent = Agent(name="test", instructions="You are helpful", llm="gpt-4o-mini")
+
+    def lookup(query: str) -> str:
+        return "tool output"
+
+    tool_call = SimpleNamespace(
+        id="call-1",
+        function=SimpleNamespace(name="lookup", arguments='{"query": "x"}'),
+    )
+    response = SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(tool_calls=[tool_call]))]
+    )
+
+    async def _stream():
+        yield follow_up_chunk
+
+    create = AsyncMock(return_value=_stream())
+    fake_client = SimpleNamespace(
+        async_client=SimpleNamespace(
+            chat=SimpleNamespace(completions=SimpleNamespace(create=create))
+        )
+    )
+    process_stream_chunks = MagicMock()
+
+    with patch.object(type(agent), "_openai_client", new=fake_client), patch.object(
+        agent, "execute_tool_async", new_callable=AsyncMock, return_value="tool output"
+    ), patch(
+        "praisonaiagents.agent.agent._get_llm_functions",
+        return_value={"process_stream_chunks": process_stream_chunks},
+    ), patch(
+        "praisonaiagents.agent.chat_mixin._get_display_functions"
+    ) as display:
+        result = await agent._achat_completion(response, tools=[lookup])
+
+    display.return_value.__getitem__.return_value.assert_called()
+    process_stream_chunks.assert_not_called()
+    assert result == "tool output"
