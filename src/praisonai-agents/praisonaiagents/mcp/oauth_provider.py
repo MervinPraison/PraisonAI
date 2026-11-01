@@ -14,11 +14,12 @@ and only runs when a server actually challenges for OAuth, so servers without
 auth — or with pre-supplied client info/tokens — behave exactly as before.
 """
 
+import sys
 import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from threading import Thread
-from typing import Any, Dict, Optional
+from threading import Lock, Thread
+from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlencode, urlparse, parse_qs
 
 from praisonaiagents._logging import get_logger
@@ -67,6 +68,57 @@ def _make_callback_server(handler: OAuthCallbackHandler, port: int) -> HTTPServe
             pass
 
     return HTTPServer(("127.0.0.1", port), _Handler)
+
+
+# One loopback callback server per process, shared by every in-flight flow.
+# The redirect URI is fixed (it is what dynamic registration whitelisted), so
+# concurrent flows must not each try to bind the port; the state-keyed
+# ``OAuthCallbackHandler`` already routes each code to the right flow.
+_callback_lock = Lock()
+_callback_server: Optional[HTTPServer] = None
+_callback_handler: Optional[OAuthCallbackHandler] = None
+_callback_refs = 0
+
+
+def _acquire_callback() -> OAuthCallbackHandler:
+    global _callback_server, _callback_handler, _callback_refs
+    with _callback_lock:
+        if _callback_server is None:
+            handler = OAuthCallbackHandler()
+            server = _make_callback_server(handler, OAUTH_CALLBACK_PORT)
+            Thread(target=server.serve_forever, daemon=True).start()
+            _callback_server, _callback_handler = server, handler
+        _callback_refs += 1
+        return _callback_handler
+
+
+def _release_callback() -> None:
+    global _callback_server, _callback_handler, _callback_refs
+    with _callback_lock:
+        _callback_refs -= 1
+        if _callback_refs <= 0 and _callback_server is not None:
+            _callback_server.shutdown()
+            _callback_server.server_close()
+            _callback_server, _callback_handler, _callback_refs = None, None, 0
+
+
+def _parse_redirect(url: str) -> Tuple[str, str]:
+    """Extract ``(state, code)`` from a pasted redirect URL."""
+    params = parse_qs(urlparse(url.strip()).query)
+    return (params.get("state") or [""])[0], (params.get("code") or [""])[0]
+
+
+def _read_pasted_redirect(callback: OAuthCallbackHandler, state: str) -> None:
+    """Headless fallback: accept the redirect URL pasted from another device."""
+    try:
+        line = input("Or paste the full redirect URL here: ")
+    except (EOFError, OSError):
+        return
+    got_state, code = _parse_redirect(line)
+    if got_state == state and code:
+        callback.receive_callback(state, code)
+    else:
+        print("Pasted URL has no matching state/code; ignored.", file=sys.stderr)
 
 
 class MCPOAuthProvider:
@@ -198,11 +250,11 @@ class MCPOAuthProvider:
         if not self.open_browser:
             raise InteractiveAuthRequired(
                 f"Interactive OAuth is required to authenticate with "
-                f"{self.server_url}. Run this from an interactive session, or "
+                f"{self.server_url}. Run `praisonai mcp auth {self.mcp_name}` "
+                f"from a terminal on this host (works headless/over SSH), or "
                 f"pre-supply tokens, to complete authentication."
             )
 
-        callback = OAuthCallbackHandler()
         state = generate_state()
         code_verifier = generate_code_verifier()
         code_challenge = generate_code_challenge(code_verifier)
@@ -222,15 +274,33 @@ class MCPOAuthProvider:
 
         auth_url = f"{metadata['authorization_endpoint']}?{urlencode(params)}"
 
-        server = _make_callback_server(callback, OAUTH_CALLBACK_PORT)
-        thread = Thread(target=server.serve_forever, daemon=True)
-        thread.start()
+        callback = _acquire_callback()
         try:
             logger.debug(f"Opening browser for OAuth authorization: {auth_url}")
-            webbrowser.open(auth_url)
+            try:
+                opened = webbrowser.open(auth_url)
+            except Exception:  # noqa: BLE001 - no usable browser
+                opened = False
+            if not opened:
+                # Headless/remote host: let the operator consent on any device.
+                print(
+                    f"Open this URL on any device to authorise "
+                    f"{self.mcp_name}:\n  {auth_url}\n"
+                    f"After consenting, the browser is redirected to "
+                    f"{get_redirect_url()} (it may fail to load on another "
+                    f"device; that is expected).",
+                    file=sys.stderr,
+                )
+                if sys.stdin is not None and sys.stdin.isatty():
+                    Thread(
+                        target=_read_pasted_redirect,
+                        args=(callback, state),
+                        daemon=True,
+                    ).start()
             code = callback.wait_for_callback(state, timeout=300.0)
         finally:
-            server.shutdown()
+            callback.clear_state(state)
+            _release_callback()
 
         tokens = self._exchange_code(
             metadata, client_info, code, code_verifier, timeout=timeout
