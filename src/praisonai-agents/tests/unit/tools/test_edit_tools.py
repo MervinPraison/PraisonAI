@@ -144,6 +144,21 @@ class TestNoMatchSelfCorrection:
         assert "String not found" in result
         assert time.monotonic() - start < 5
 
+    def test_hint_prefilter_is_budgeted(self):
+        # Every window passes real_quick_ratio but fails quick_ratio (a
+        # pure-Python pass); that prefilter work must count against the budget
+        # (unbudgeted this took ~4s on a 20k-line file).
+        import random
+        import string
+        import time
+        rnd = random.Random(0)
+        line = lambda alpha: "".join(rnd.choice(alpha) for _ in range(20))
+        content = "\n".join(line(string.ascii_lowercase) for _ in range(19999))
+        old = "\n".join(line("abcdefghijkl") for _ in range(95))
+        start = time.monotonic()
+        EditTools._closest_region(content, old)
+        assert time.monotonic() - start < 2
+
     def test_closest_region_hint_with_line_numbers(self, tools, tmp_path):
         p = tmp_path / "a.py"
         _write(p, "import os\n\ndef compute(x):\n    total = x * 2\n    return total\n")

@@ -832,7 +832,12 @@ class EditTools:
         for i in range(len(lines) - n + 1):
             window = '\n'.join(stripped[i:i + n])
             matcher.set_seq1(window)
-            if matcher.real_quick_ratio() <= best_ratio or matcher.quick_ratio() <= best_ratio:
+            if matcher.real_quick_ratio() <= best_ratio:
+                continue
+            budget -= len(window)  # quick_ratio() is a pure-Python pass over window
+            if budget < 0:
+                break
+            if matcher.quick_ratio() <= best_ratio:
                 continue
             budget -= len(window) * len(target)
             if budget < 0:
