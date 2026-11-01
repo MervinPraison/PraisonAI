@@ -126,11 +126,31 @@ def _matches_glob(fname: str, rel: str, glob: Optional[str]) -> bool:
     if not glob:
         return True
     posix = rel.replace(os.sep, "/")
-    return (
+    if (
         fnmatch.fnmatch(fname, glob)
         or fnmatch.fnmatch(rel, glob)
         or fnmatch.fnmatch(posix, glob)
-    )
+    ):
+        return True
+
+    # fnmatch treats "**/" as requiring a slash. Recursive glob segments
+    # also match zero directories, as they do on the ripgrep path.
+    segments = glob.split("/")
+    if "**" not in segments:
+        return False
+    parts = posix.split("/")
+    positions = {0}
+    for segment in segments:
+        if not positions:
+            return False
+        if segment == "**":
+            positions = set(range(min(positions), len(parts) + 1))
+        else:
+            positions = {
+                i + 1 for i in positions
+                if i < len(parts) and fnmatch.fnmatch(parts[i], segment)
+            }
+    return len(parts) in positions
 
 
 def _iter_files(root: str, glob: Optional[str], ignore_matcher):
