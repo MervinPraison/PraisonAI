@@ -82,15 +82,28 @@ class TestExactMatchBackwardCompat:
 
 
 class TestNoMatchSelfCorrection:
-    def test_already_applied_is_noop(self, tools, tmp_path):
+    def test_retried_edit_shows_applied_line_in_hint(self, tools, tmp_path):
+        # A retried edit is never reported as success; the hint shows the
+        # already-edited line so the agent can see the change landed.
         p = tmp_path / "a.py"
         _write(p, "def foo():\n    return 1\n")
         assert "Success" in tools.edit_file(str(p), "return 1", "return 2")
         before = _read(p)
         result = tools.edit_file(str(p), "return 1", "return 2")
-        assert result.startswith("No change needed")
-        assert "Error" not in result
+        assert "String not found" in result and "No change needed" not in result
+        assert "    2|     return 2" in result
         assert _read(p) == before
+
+    def test_tied_candidate_elsewhere_is_not_reported_applied(self, tools, tmp_path):
+        # Merge-gate case: g() already has `return 2` and ties with f()'s
+        # `return 3`; the edit meant for f() must not report success.
+        p = tmp_path / "a.py"
+        src = "def g():\n    return 2\n\ndef f():\n    return 3\n"
+        _write(p, src)
+        result = tools.edit_file(str(p), "return 1", "return 2")
+        assert "No change needed" not in result
+        assert "String not found" in result
+        assert _read(p) == src
 
     def test_short_common_new_string_is_not_noop(self, tools, tmp_path):
         # new_string occurring more than once is not evidence of a prior edit.

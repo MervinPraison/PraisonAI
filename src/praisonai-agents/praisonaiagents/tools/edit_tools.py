@@ -950,24 +950,13 @@ class EditTools:
                 spans = self._find_spans(content, old_string)
                 
                 if not spans:
-                    # Idempotency: the edit already landed (e.g. a retried
-                    # call).  Only claim this when new_string occurs exactly
-                    # once (and not inside old_string) AND sits where
-                    # old_string was expected, i.e. inside the region most
-                    # similar to old_string; an unrelated occurrence elsewhere
-                    # is not evidence of a prior edit.
-                    region = self._closest_region(content, old_string)
-                    if (region and new_string.strip() and new_string not in old_string
-                            and self._count_occurrences(content, new_string) == 1):
-                        start, n = region
-                        new_line = content.count('\n', 0, content.find(new_string))
-                        new_end = new_line + new_string.count('\n')
-                        if new_line < start + n and new_end >= start:
-                            return (f"No change needed: {filepath} already contains "
-                                    f"new_string where old_string was expected "
-                                    f"(edit previously applied).")
+                    # No "already applied" shortcut: similarity cannot prove
+                    # *where* a prior edit landed (ties pick the wrong site),
+                    # and a false success silently drops an edit.  The hint
+                    # shows the closest lines, so a retried edit is visible.
                     return self._not_found_error(
-                        "Error: String not found in file", content, old_string, region)
+                        "Error: String not found in file", content, old_string,
+                        self._closest_region(content, old_string))
                 
                 occurrences = len(spans)
                 
