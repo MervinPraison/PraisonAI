@@ -32,6 +32,8 @@ from ..model_harness.guard import check_model_request
 from ..tools.call_executor import ToolCall, create_tool_call_executor
 from ..tools.schema import build_tool_definition
 
+logger = get_logger(__name__)
+
 
 # Sentinel returned as the "arguments" value when a tool call's argument string
 # cannot be parsed (e.g. truncated by max_tokens or a dropped connection).
