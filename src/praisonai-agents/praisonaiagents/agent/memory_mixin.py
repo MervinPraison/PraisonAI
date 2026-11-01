@@ -1228,34 +1228,18 @@ class MemoryMixin:
             return False
         
         try:
-            import os
-            from praisonaiagents.tools.path_safety import resolve_within_root
+            from ..utils.output_file import write_output_file
 
-            project_root = os.environ.get("PRAISONAI_PROJECT_ROOT") or os.getcwd()
-            file_path = resolve_within_root(self._output_file, project_root)
+            # Shared hardened writer (root containment, O_NOFOLLOW, hardlink-safe).
+            file_path = write_output_file(self._output_file, str(content))
             if file_path is None:
-                logging.warning(
-                    "Output file %r is outside project root %r; skipping save",
-                    self._output_file,
-                    project_root,
-                )
                 print(f"⚠️ Output path outside project root: {self._output_file}")
                 return False
-            
-            # Create parent directories if they don't exist
-            parent_dir = os.path.dirname(file_path)
-            if parent_dir and not os.path.exists(parent_dir):
-                os.makedirs(parent_dir, exist_ok=True)
-            
-            # Write content to file
-            with open(file_path, 'w', encoding='utf-8') as f:
-                f.write(str(content))
-            
-            # Print success message to terminal
+
             print(f"✅ Output saved to {file_path}")
             logging.debug(f"Output saved to file: {file_path}")
             return True
-            
+
         except Exception as e:
             logging.warning(f"Failed to save output to file '{self._output_file}': {e}")
             print(f"⚠️ Failed to save output to {self._output_file}: {e}")
