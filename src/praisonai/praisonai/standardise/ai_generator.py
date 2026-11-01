@@ -889,32 +889,45 @@ def calculator(expression: str) -> str:
     import operator
     
     # Safe operations mapping
-    ops = {
+    ops = {{
         ast.Add: operator.add, ast.Sub: operator.sub,
         ast.Mult: operator.mul, ast.Div: operator.truediv,
         ast.Pow: operator.pow, ast.Mod: operator.mod,
         ast.USub: operator.neg, ast.UAdd: operator.pos,
-    }
+    }}
     
     def _eval_node(node):
         if isinstance(node, ast.Constant):
+            if type(node.value) not in (int, float):
+                raise TypeError("Only numeric constants are supported")
+            if isinstance(node.value, int) and node.value.bit_length() > 4096:
+                raise ValueError("Result is too large")
             return node.value
         elif isinstance(node, ast.BinOp):
             left = _eval_node(node.left)
             right = _eval_node(node.right)
-            return ops[type(node.op)](left, right)
+            # Reject powers whose result has at least 4096 + 1 bits before
+            # computing them; |left| >= 2 ** (bit_length - 1).
+            if (isinstance(node.op, ast.Pow) and isinstance(left, int)
+                    and isinstance(right, int)
+                    and (abs(left).bit_length() - 1) * right > 4096):
+                raise ValueError("Result is too large")
+            result = ops[type(node.op)](left, right)
+            if isinstance(result, int) and result.bit_length() > 4096:
+                raise ValueError("Result is too large")
+            return result
         elif isinstance(node, ast.UnaryOp):
             operand = _eval_node(node.operand)
             return ops[type(node.op)](operand)
         else:
-            raise TypeError(f"Unsupported operation: {type(node)}")
+            raise TypeError(f"Unsupported operation: {{type(node)}}")
     
     try:
         tree = ast.parse(expression.strip(), mode='eval')
         result = _eval_node(tree.body)
         return str(result)
-    except (ValueError, SyntaxError, TypeError, ZeroDivisionError, KeyError) as e:
-        return f"Error: {e}"
+    except (ValueError, SyntaxError, TypeError, ZeroDivisionError, KeyError, OverflowError) as e:
+        return f"Error: {{e}}"
 
 # Create agent with tool
 agent = Agent(
