@@ -41,4 +41,4 @@ jobs:
 
     - name: Run tests
       run: |
-        cd src/praisonai && python -m pytest tests/unit/ -v --tb=short --disable-warnings --timeout=60 || echo "Some tests failed"
+        cd src/praisonai && python -m pytest tests/unit/ -v --tb=short --disable-warnings --timeout=60
