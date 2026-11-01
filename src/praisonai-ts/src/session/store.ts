@@ -112,6 +112,7 @@ export class FileSessionStore implements ISessionStore {
     private saveTimer?: NodeJS.Timeout;
     private dirty: boolean = false;
     private saveQueue: Promise<void> = Promise.resolve();
+    private pendingSaves: number = 0;
 
     constructor(filePath: string, config?: { defaultTTL?: number; autoSaveInterval?: number }) {
         this.filePath = filePath;
@@ -121,7 +122,7 @@ export class FileSessionStore implements ISessionStore {
 
         if (this.autoSaveInterval) {
             this.saveTimer = setInterval(() => {
-                if (this.dirty) this.save();
+                if (this.dirty && this.pendingSaves === 0) this.save();
             }, this.autoSaveInterval);
         }
     }
@@ -147,6 +148,7 @@ export class FileSessionStore implements ISessionStore {
     }
 
     async save(): Promise<void> {
+        this.pendingSaves++;
         const saving = this.saveQueue.then(async () => {
             const fs = await import('fs').then(m => m.promises);
             const data = JSON.stringify(Array.from(this.sessions.values()), null, 2);
@@ -161,7 +163,11 @@ export class FileSessionStore implements ISessionStore {
         });
         // Keep the queue usable after a failure, while this caller still sees it.
         this.saveQueue = saving.catch(() => {});
-        await saving;
+        try {
+            await saving;
+        } finally {
+            this.pendingSaves--;
+        }
     }
 
     async get(id: string): Promise<StoredSession | null> {

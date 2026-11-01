@@ -21,6 +21,7 @@ describe('FileSessionStore save ordering', () => {
 
     afterEach(async () => {
         jest.restoreAllMocks();
+        jest.useRealTimers();
         await fs.rm(directory, { recursive: true, force: true });
     });
 
@@ -95,6 +96,32 @@ describe('FileSessionStore save ordering', () => {
         await Promise.all([saving, closing]);
         expect(writesBeforeRelease).toBe(1);
         expect(closedBeforeRelease).toBe(false);
+    });
+
+    it('does not queue repeated autosaves behind a blocked write', async () => {
+        jest.useFakeTimers();
+        const store = new FileSessionStore(filePath, { autoSaveInterval: 10 });
+        const save = jest.spyOn(store, 'save');
+        const first = createStoredSession({ turn: 1 });
+        const second = createStoredSession({ turn: 2 });
+        await store.set(first);
+        const paused = pauseFirstWrite();
+        const saving = store.save();
+        await paused.entered;
+        await store.set(second);
+        jest.advanceTimersByTime(100);
+        const saveCallsBeforeRelease = save.mock.calls.length;
+        paused.release();
+        await saving;
+        jest.advanceTimersByTime(10);
+        const saveCallsAfterRelease = save.mock.calls.length;
+        await store.close();
+
+        const reloaded = new FileSessionStore(filePath);
+        await reloaded.load();
+        expect(saveCallsBeforeRelease).toBe(1);
+        expect(saveCallsAfterRelease).toBe(2);
+        expect((await reloaded.list()).map(session => session.id)).toEqual([first.id, second.id]);
     });
 
     it('retries a failed save on close without poisoning later saves', async () => {
