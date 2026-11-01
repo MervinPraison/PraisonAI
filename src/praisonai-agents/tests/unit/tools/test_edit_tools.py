@@ -81,6 +81,58 @@ class TestExactMatchBackwardCompat:
         assert _read(p) == "x = 2\nx = 2\n"
 
 
+class TestNoMatchSelfCorrection:
+    def test_already_applied_is_noop(self, tools, tmp_path):
+        p = tmp_path / "a.py"
+        _write(p, "def foo():\n    return 1\n")
+        assert "Success" in tools.edit_file(str(p), "return 1", "return 2")
+        before = _read(p)
+        result = tools.edit_file(str(p), "return 1", "return 2")
+        assert result.startswith("No change needed")
+        assert "Error" not in result
+        assert _read(p) == before
+
+    def test_short_common_new_string_is_not_noop(self, tools, tmp_path):
+        # new_string occurring more than once is not evidence of a prior edit.
+        p = tmp_path / "a.py"
+        _write(p, "x = 1\ny = x\n")
+        result = tools.edit_file(str(p), "z = 1", "x")
+        assert "No change needed" not in result
+
+    def test_new_inside_old_is_not_noop(self, tools, tmp_path):
+        # new_string is a substring of old_string, so its presence proves nothing.
+        p = tmp_path / "a.py"
+        _write(p, "y = compute(a)\n")
+        result = tools.edit_file(str(p), "x = compute(a)", "compute(a)")
+        assert "Error" in result and "No change needed" not in result
+
+    def test_closest_region_hint_with_line_numbers(self, tools, tmp_path):
+        p = tmp_path / "a.py"
+        _write(p, "import os\n\ndef compute(x):\n    total = x * 2\n    return total\n")
+        result = tools.edit_file(str(p), "def compute(y):\n    total = y * 3", "x")
+        assert "String not found" in result
+        assert "Closest match" in result
+        assert "lines 3-4" in result
+        assert "    3| def compute(x):" in result
+
+    def test_no_hint_when_nothing_similar(self, tools, tmp_path):
+        p = tmp_path / "a.py"
+        _write(p, "hello world\n")
+        result = tools.edit_file(str(p), "zzzzqqqq", "x")
+        assert "String not found" in result
+        assert "Closest match" not in result
+
+    def test_apply_patch_hunk_hint(self, tools, tmp_path):
+        p = tmp_path / "a.py"
+        _write(p, "def compute(x):\n    return x * 2\n")
+        patch = (f"*** Update File: {p}\n@@\n"
+                 "def compute(y):\n    return y * 2\n===\n"
+                 "def compute(y):\n    return y * 3\n")
+        result = tools.apply_patch(patch)
+        assert "Hunk not found" in result
+        assert "    1| def compute(x):" in result
+
+
 class TestFuzzyMatching:
     def test_line_trimmed_indentation(self, tools, tmp_path):
         p = tmp_path / "a.py"

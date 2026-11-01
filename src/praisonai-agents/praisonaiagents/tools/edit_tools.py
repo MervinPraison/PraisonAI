@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 # Minimum similarity ratio for an accepted block-anchor (fuzzy) match.
 _BLOCK_ANCHOR_THRESHOLD = 0.7
+# Minimum similarity for a "closest match" hint on the no-match error path.
+_CLOSEST_HINT_THRESHOLD = 0.6
 
 # Maximum characters of diagnostics output appended to a tool result.
 _DIAGNOSTICS_MAX_CHARS = 2000
@@ -800,6 +802,48 @@ class EditTools:
                 return spans
         return []
 
+    @staticmethod
+    def _closest_region(content: str, old: str, max_lines: int = 20000) -> str:
+        """Return the most similar block of ``content`` with line numbers.
+
+        Used only on the no-match path so the agent can correct ``old`` without
+        re-reading the whole file.  Returns "" when nothing is similar enough.
+        """
+        old_lines = [line.strip() for line in old.splitlines()]
+        lines = content.splitlines()
+        n = len(old_lines)
+        if not n or not lines or len(lines) > max_lines:
+            return ""
+        n = min(n, len(lines))
+        stripped = [line.strip() for line in lines]
+        matcher = difflib.SequenceMatcher(autojunk=False)
+        matcher.set_seq2('\n'.join(old_lines))
+        best_ratio, best_i = _CLOSEST_HINT_THRESHOLD, None
+        for i in range(len(lines) - n + 1):
+            matcher.set_seq1('\n'.join(stripped[i:i + n]))
+            if matcher.real_quick_ratio() <= best_ratio or matcher.quick_ratio() <= best_ratio:
+                continue
+            ratio = matcher.ratio()
+            if ratio > best_ratio:
+                best_ratio, best_i = ratio, i
+        if best_i is None:
+            return ""
+        shown = lines[best_i:best_i + min(n, 10)]
+        body = '\n'.join(f"{best_i + k + 1:>5}| {line}" for k, line in enumerate(shown))
+        if n > len(shown):
+            body += "\n  ..."
+        return f"lines {best_i + 1}-{best_i + n}:\n{body}"
+
+    def _not_found_error(self, prefix: str, content: str, old: str) -> str:
+        """Build the no-match error, adding the closest region when one exists."""
+        preview = old[:50] + ("..." if len(old) > 50 else "")
+        hint = self._closest_region(content, old)
+        if not hint:
+            return f"{prefix}: '{preview}'"
+        return (f"{prefix}: '{preview}'. Closest match in the file, {hint}\n"
+                f"Adjust old_string to match these lines exactly, "
+                f"or re-read the file if it changed.")
+
     @require_approval(risk_level="high")
     def edit_file(self, filepath: str, old_string: str, new_string: str, 
                   replace_all: bool = False, expected_hash: Optional[str] = None,
@@ -885,8 +929,17 @@ class EditTools:
                 spans = self._find_spans(content, old_string)
                 
                 if not spans:
-                    preview = old_string[:50] + ("..." if len(old_string) > 50 else "")
-                    return f"Error: String not found in file: '{preview}'"
+                    # Idempotency: the edit already landed (e.g. a retried
+                    # call).  Require a unique occurrence, and skip when
+                    # new_string is inside old_string, so incidental matches
+                    # of short/common text are not mistaken for a prior edit.
+                    if (new_string.strip() and new_string not in old_string
+                            and self._count_occurrences(content, new_string) == 1):
+                        return (f"No change needed: {filepath} already contains "
+                                f"new_string and old_string is absent "
+                                f"(edit previously applied).")
+                    return self._not_found_error(
+                        "Error: String not found in file", content, old_string)
                 
                 occurrences = len(spans)
                 
@@ -1180,8 +1233,8 @@ class EditTools:
                             return f"Error: Empty hunk in move for '{op['src']}'"
                         spans = self._find_spans(updated, old_block)
                         if not spans:
-                            preview = old_block[:50] + ("..." if len(old_block) > 50 else "")
-                            return (f"Error: Hunk not found in '{op['src']}': '{preview}'")
+                            return self._not_found_error(
+                                f"Error: Hunk not found in '{op['src']}'", updated, old_block)
                         if len(spans) > 1:
                             preview = old_block[:30] + ("..." if len(old_block) > 30 else "")
                             return (f"Error: Ambiguous hunk in '{op['src']}': '{preview}' "
@@ -1264,8 +1317,8 @@ class EditTools:
                             return f"Error: Empty hunk in update for '{op['path']}'"
                         spans = self._find_spans(updated, old_block)
                         if not spans:
-                            preview = old_block[:50] + ("..." if len(old_block) > 50 else "")
-                            return (f"Error: Hunk not found in '{op['path']}': '{preview}'")
+                            return self._not_found_error(
+                                f"Error: Hunk not found in '{op['path']}'", updated, old_block)
                         if len(spans) > 1:
                             preview = old_block[:30] + ("..." if len(old_block) > 30 else "")
                             return (f"Error: Ambiguous hunk in '{op['path']}': '{preview}' "
