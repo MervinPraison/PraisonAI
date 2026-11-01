@@ -269,6 +269,27 @@ def test_unbound_request_resolvable_by_anyone(tmp_path):
     assert asyncio.run(go()).approved is True
 
 
+def test_list_pending_scoped_to_authorized_reviewers():
+    """A custody-bound request is only listed for its reviewers (no leak)."""
+    mgr = ExecApprovalManager(ttl=300, durable=False)
+
+    async def go():
+        bound, _ = await mgr.register(
+            tool_name="deploy",
+            arguments={"secret": "x"},
+            authorized_reviewers=["operator:alice"],
+        )
+        open_, _ = await mgr.register(tool_name="read_file", arguments={})
+        return bound, open_
+
+    bound, open_ = asyncio.run(go())
+    ids = lambda who: {p["request_id"] for p in mgr.list_pending(visible_to=who)}
+    assert ids("operator:alice") == {bound, open_}
+    assert ids("operator:bob") == {open_}
+    # Unscoped listing keeps legacy behaviour.
+    assert {p["request_id"] for p in mgr.list_pending()} == {bound, open_}
+
+
 def test_authorized_reviewers_survive_restart(tmp_path):
     """Per-request custody binding is durable across a rehydrate."""
     store = ApprovalStore(path=tmp_path / "approvals.sqlite")
