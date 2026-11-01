@@ -19,7 +19,7 @@ import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from threading import Lock, Thread
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 from urllib.parse import urlencode, urlparse, parse_qs
 
 from praisonaiagents._logging import get_logger
@@ -100,52 +100,6 @@ def _release_callback() -> None:
             _callback_server.shutdown()
             _callback_server.server_close()
             _callback_server, _callback_handler, _callback_refs = None, None, 0
-
-
-def _parse_redirect(url: str) -> Tuple[str, str]:
-    """Extract ``(state, code)`` from a pasted redirect URL."""
-    params = parse_qs(urlparse(url.strip()).query)
-    return (params.get("state") or [""])[0], (params.get("code") or [""])[0]
-
-
-# Headless fallback: a single terminal reader shared by all flows waiting on a
-# pasted redirect. Per-flow readers would race for stdin and drop each other's
-# pastes; one reader routes each paste to the shared state-keyed handler.
-_paste_states: set = set()
-_paste_reader: Optional[Thread] = None
-
-
-def _paste_loop() -> None:
-    global _paste_reader
-    while True:
-        try:
-            line: Optional[str] = input("Or paste the full redirect URL here: ")
-        except (EOFError, OSError):
-            line = None
-        handler = None
-        got_state, code = _parse_redirect(line or "")
-        with _callback_lock:
-            if line is not None and code and got_state in _paste_states:
-                _paste_states.discard(got_state)
-                handler = _callback_handler
-            stop = line is None or not _paste_states
-            if stop:
-                _paste_reader = None  # nothing left waiting; next flow restarts us
-        if handler is not None:
-            handler.receive_callback(got_state, code)
-        elif line is not None:
-            print("Pasted URL has no matching state/code; ignored.", file=sys.stderr)
-        if stop:
-            return
-
-
-def _await_paste(state: str) -> None:
-    global _paste_reader
-    with _callback_lock:
-        _paste_states.add(state)
-        if _paste_reader is None:
-            _paste_reader = Thread(target=_paste_loop, daemon=True)
-            _paste_reader.start()
 
 
 class MCPOAuthProvider:
@@ -310,20 +264,19 @@ class MCPOAuthProvider:
                 opened = False
             if not opened:
                 # Headless/remote host: let the operator consent on any device.
+                # No stdin reading: a library must not consume the host's input.
                 print(
                     f"Open this URL on any device to authorise "
                     f"{self.mcp_name}:\n  {auth_url}\n"
                     f"After consenting, the browser is redirected to "
-                    f"{get_redirect_url()} (it may fail to load on another "
-                    f"device; that is expected).",
+                    f"{get_redirect_url()}. On another device either forward "
+                    f"that port (ssh -L {OAUTH_CALLBACK_PORT}:127.0.0.1:"
+                    f"{OAUTH_CALLBACK_PORT} <host>) or copy the redirect URL "
+                    f"and run `curl '<redirect URL>'` on this host.",
                     file=sys.stderr,
                 )
-                if sys.stdin is not None and sys.stdin.isatty():
-                    _await_paste(state)
             code = callback.wait_for_callback(state, timeout=300.0)
         finally:
-            with _callback_lock:
-                _paste_states.discard(state)
             callback.clear_state(state)
             _release_callback()
 
