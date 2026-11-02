@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from '@jest/globals';
+import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { mkdtemp, mkdir, rm } from 'fs/promises';
 import { tmpdir } from 'os';
 import { join } from 'path';
@@ -37,6 +37,28 @@ describe('FileCache concurrent list appends', () => {
     await rm(blockedFile, { recursive: true });
     await cache.listPush('events', 'retry');
     expect(await cache.listRange('events', 0)).toEqual(['retry']);
+  });
+
+  it('continues an already queued append after a transient write failure', async () => {
+    const cache = createFileCache({ cacheDir: directory });
+    let releaseFailure!: () => void;
+    let signalWrite!: () => void;
+    const blocked = new Promise<void>(resolve => { releaseFailure = resolve; });
+    const writing = new Promise<void>(resolve => { signalWrite = resolve; });
+    // Inject one failed public write; the queued retry uses the real filesystem.
+    jest.spyOn(cache, 'set').mockImplementationOnce(async () => {
+      signalWrite();
+      await blocked;
+      throw new Error('transient write failure');
+    });
+    const failed = expect(cache.listPush('events', 'failed')).rejects.toThrow('transient write failure');
+    const retry = cache.listPush('events', 'retry');
+    await writing;
+    releaseFailure();
+    await failed;
+    await retry;
+    const reopened = createFileCache({ cacheDir: directory });
+    expect(await reopened.listRange('events', 0)).toEqual(['retry']);
   });
 
   it('preserves sequential appends and list slicing', async () => {
