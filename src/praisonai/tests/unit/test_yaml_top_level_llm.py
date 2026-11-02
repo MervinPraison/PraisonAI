@@ -47,3 +47,12 @@ def test_per_agent_llm_still_wins():
     default = adapter._pick_model(_gen(CATALOGUE)._run_config_list({"llm": "gpt-4o-mini"}))
     assert adapter._resolve_agent_model({}, default) == "gpt-4o-mini"
     assert adapter._resolve_agent_model({"llm": "gpt-4o"}, default) == "gpt-4o"
+
+
+def test_yaml_llm_dict_form_passes_validation():
+    from praisonai.config.validator import ConfigValidator
+
+    base = {"roles": {"r": {"role": "R", "goal": "G", "backstory": "B"}}}
+    for llm in ("gpt-4o-mini", {"model": "gpt-4o-mini"}):
+        result = ConfigValidator().validate_config({**base, "llm": llm})
+        assert result.valid, result.errors
