@@ -181,8 +181,12 @@ export class MCPClient {
 
             // Initialize session
             if (this.transport.type === 'stdio') {
+                const stdioClient = this.transport.client;
                 // The SDK negotiates and sends notifications/initialized itself.
                 await this.refreshTools();
+                if (!stdioClient.transport) {
+                    throw new Error('MCP stdio connection closed during initialization');
+                }
             } else {
                 await this.initialize();
             }

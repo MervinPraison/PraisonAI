@@ -1,11 +1,16 @@
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const { MCPClient } = require('../../../src/mcp');
-const client = new MCPClient({ transport: 'stdio', command: process.execPath, args: [path.join(__dirname, 'stdio-server.cjs')], env: { PRAISON_MCP_FIXTURE_VALUE: 'retained' }, timeout: 5000 });
+const client = new MCPClient({ transport: 'stdio', command: process.execPath, args: [path.join(__dirname, 'stdio-server.cjs')], env: { PRAISON_MCP_FIXTURE_VALUE: 'retained', PRAISON_MCP_FIXTURE_EXIT_ON_LIST: process.argv[2] === 'startup-close' ? '1' : '0' }, timeout: 5000 });
 const deadline = setTimeout(() => { client.disconnect().finally(() => process.exit(2)); }, 10000);
 process.on('uncaughtException', error => { console.error(error); client.disconnect().finally(() => process.exit(1)); });
 (async () => {
   try {
+    if (process.argv[2] === 'startup-close') {
+      await assert.rejects(client.connect(), /closed/i);
+      assert.equal(client.isConnected(), false);
+      return;
+    }
     await client.connect();
     switch (process.argv[2]) {
       case 'handshake':
