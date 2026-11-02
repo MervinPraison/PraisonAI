@@ -1,7 +1,7 @@
-import { describe, expect, it } from '@jest/globals';
+import { describe, expect, it, jest } from '@jest/globals';
 import { ToolsRegistry } from '../../../src/tools/registry/registry';
 import { composeMiddleware, createRetryMiddleware } from '../../../src/tools/registry/middleware';
-import type { ToolMetadata, ToolMiddleware } from '../../../src/tools/registry/types';
+import type { ToolMetadata, ToolMiddleware, ToolExecutionContext } from '../../../src/tools/registry/types';
 
 const metadata: ToolMetadata = {
   id: 'retry-test', displayName: 'Retry test', description: 'Local retry test',
@@ -9,15 +9,15 @@ const metadata: ToolMetadata = {
   install: { npm: '', pnpm: '', yarn: '', bun: '' }, capabilities: {}, packageName: 'node:path',
 };
 
-function runPipeline(mode: 'composed' | 'registry', middleware: ToolMiddleware[], execute: () => Promise<unknown>) {
-  if (mode === 'composed') return composeMiddleware(...middleware)({}, {}, execute);
+function runPipeline(mode: 'composed' | 'registry', middleware: ToolMiddleware[], execute: () => Promise<unknown>, context: ToolExecutionContext = {}) {
+  if (mode === 'composed') return composeMiddleware(...middleware)({}, context, execute);
   const registry = new ToolsRegistry();
   registry.register(metadata, () => ({
     name: 'retry-test', description: 'Local retry test',
     parameters: { type: 'object', properties: {} }, execute,
   }));
   for (const layer of middleware) registry.use(layer);
-  return registry.create('retry-test').execute({});
+  return registry.create('retry-test').execute({}, context);
 }
 
 describe.each(['composed', 'registry'] as const)('%s middleware retry chain', mode => {
@@ -64,6 +64,27 @@ describe.each(['composed', 'registry'] as const)('%s middleware retry chain', mo
     })).rejects.toThrow('failure-3');
     expect(attempts).toBe(3);
     expect(handled).toBe(3);
+  });
+
+  it('does not re-enter downstream middleware after cancellation during backoff', async () => {
+    jest.useFakeTimers();
+    try {
+      const controller = new AbortController();
+      let entries = 0;
+      let calls = 0;
+      const layer: ToolMiddleware = async (_input, _context, next) => { entries++; return next(); };
+      const done = runPipeline(mode, [createRetryMiddleware(1, 1000), layer], async () => {
+        if (++calls === 1) throw new Error('temporary');
+        return 'retried';
+      }, { signal: controller.signal }).then(value => ({ value, error: undefined }), error => ({ value: undefined, error }));
+      await jest.advanceTimersByTimeAsync(0);
+      expect(entries).toBe(1);
+      controller.abort();
+      await jest.advanceTimersByTimeAsync(1000);
+      expect(entries).toBe(1);
+      expect(calls).toBe(1);
+      expect((await done).error).toBe(controller.signal.reason);
+    } finally { jest.clearAllTimers(); jest.useRealTimers(); }
   });
 
   it('preserves middleware order for a successful first attempt', async () => {

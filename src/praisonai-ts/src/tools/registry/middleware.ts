@@ -147,6 +147,9 @@ export function createRetryMiddleware(
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (context.signal?.aborted) {
+        throw context.signal.reason ?? new Error('The operation was aborted');
+      }
       try {
         return await next();
       } catch (error) {
