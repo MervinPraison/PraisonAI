@@ -10,6 +10,7 @@ describe('small chunk defaults through public callers', () => {
     const chunks = await adapter.chunk('First sentence. Second sentence.');
     expect(chunks.length).toBeGreaterThan(0);
     expect(chunks.length).toBeLessThanOrEqual(2);
+    if (strategy === 'size') expect(chunks[1].startOffset).toBe(18);
     expect(chunks[chunks.length - 1].endOffset).toBe(32);
   });
 
@@ -18,6 +19,7 @@ describe('small chunk defaults through public callers', () => {
     const chunks = knowledge.chunker.chunk('First sentence. Second sentence.');
     expect(chunks.length).toBeGreaterThan(0);
     expect(chunks.length).toBeLessThanOrEqual(2);
+    if (type === 'recursive') expect(chunks[1].startOffset).toBe(18);
     expect(chunks[chunks.length - 1].endOffset).toBe(32);
   });
 });
