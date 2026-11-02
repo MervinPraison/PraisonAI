@@ -5,7 +5,9 @@
 export type ChunkStrategy = 'size' | 'sentence' | 'paragraph' | 'semantic';
 
 export interface ChunkingConfig {
+  /** Positive integer character count. */
   chunkSize?: number;
+  /** Non-negative integer smaller than chunkSize; defaults to at most 50. */
   overlap?: number;
   strategy?: ChunkStrategy;
   separator?: string;
@@ -30,7 +32,13 @@ export class Chunking {
 
   constructor(config: ChunkingConfig = {}) {
     this.chunkSize = config.chunkSize ?? 500;
-    this.overlap = config.overlap ?? 50;
+    this.overlap = config.overlap ?? Math.min(50, this.chunkSize - 1);
+    if (!Number.isInteger(this.chunkSize) || this.chunkSize <= 0) {
+      throw new RangeError('chunkSize must be a positive integer');
+    }
+    if (!Number.isInteger(this.overlap) || this.overlap < 0 || this.overlap >= this.chunkSize) {
+      throw new RangeError('overlap must be a non-negative integer smaller than chunkSize');
+    }
     this.strategy = config.strategy ?? 'size';
     this.separator = config.separator ?? ' ';
   }

@@ -45,7 +45,7 @@ export interface ChonkieConfig {
     strategy?: ChonkieStrategy;
     /** Target chunk size (tokens or characters) */
     chunkSize?: number;
-    /** Overlap between chunks */
+    /** Overlap between chunks; omitted values default to at most 50, below chunkSize. */
     overlap?: number;
     /** Tokenizer to use (for token strategy) */
     tokenizer?: string;
@@ -104,7 +104,7 @@ export class ChonkieAdapter {
         this.config = {
             strategy: config.strategy ?? 'token',
             chunkSize: config.chunkSize ?? 512,
-            overlap: config.overlap ?? 50,
+            overlap: config.overlap ?? Math.min(50, (config.chunkSize ?? 512) - 1),
             tokenizer: config.tokenizer ?? 'cl100k_base',
             language: config.language ?? 'auto',
             model: config.model ?? '',

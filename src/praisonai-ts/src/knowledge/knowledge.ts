@@ -86,7 +86,7 @@ export interface KnowledgeStoreConfig {
   llm?: Record<string, any>;
   /** Graph store config (recorded verbatim). */
   graph_store?: Record<string, any>;
-  /** Chunker: `type` (default "recursive"), `chunk_size` (default 512), `chunk_overlap` (default 50). */
+  /** Chunker: `type` (default "recursive"), `chunk_size` (default 512), `chunk_overlap` (default at most 50, below chunk_size). */
   chunker?: { type?: string; chunk_size?: number; chunk_overlap?: number; [key: string]: any };
   /** TS-only: embedding provider enabling semantic search in the in-process store. */
   embeddingProvider?: EmbeddingProvider;
@@ -254,7 +254,7 @@ export class Knowledge implements KnowledgeStoreProtocol {
       this._chunker = new Chunking({
         strategy: toChunkStrategy(cfg.type ?? 'recursive'),
         chunkSize: cfg.chunk_size ?? 512,
-        overlap: cfg.chunk_overlap ?? 50,
+        overlap: cfg.chunk_overlap,
       });
     }
     return this._chunker;
