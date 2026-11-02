@@ -1,7 +1,14 @@
 const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
 const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
-const { ListToolsRequestSchema, CallToolRequestSchema, McpError, ErrorCode } = require('@modelcontextprotocol/sdk/types.js');
+const { ListToolsRequestSchema, CallToolRequestSchema, InitializeRequestSchema, McpError, ErrorCode } = require('@modelcontextprotocol/sdk/types.js');
 const server = new Server({ name: 'offline-echo', version: '1.0.0' }, { capabilities: { tools: {} } });
+if (process.env.PRAISON_MCP_FIXTURE_HANDSHAKE_FILE) {
+  server.setRequestHandler(InitializeRequestSchema, async request => {
+    require('node:fs').writeFileSync(process.env.PRAISON_MCP_FIXTURE_HANDSHAKE_FILE, String(process.pid));
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    return { protocolVersion: request.params.protocolVersion, capabilities: { tools: {} }, serverInfo: { name: 'offline-echo', version: '1.0.0' } };
+  });
+}
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   if (process.env.PRAISON_MCP_FIXTURE_EXIT_ON_LIST === '1') process.exit(0);
   return { tools: [{ name: 'echo', inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } }] };
