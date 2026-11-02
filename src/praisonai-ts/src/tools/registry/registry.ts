@@ -5,6 +5,8 @@
  * Supports lazy loading, middleware, and multi-agent safety.
  */
 
+import { composeMiddleware } from './middleware';
+
 import type {
   ToolMetadata,
   ToolFactory,
@@ -158,16 +160,7 @@ export class ToolsRegistry {
         if (this.middleware.length === 0) {
           result = await executeWithMiddleware();
         } else {
-          // Chain middleware
-          let index = 0;
-          const next = async (): Promise<unknown> => {
-            if (index < this.middleware.length) {
-              const mw = this.middleware[index++];
-              return mw(input, ctx, next);
-            }
-            return executeWithMiddleware();
-          };
-          result = await next();
+          result = await composeMiddleware(...this.middleware)(input, ctx, executeWithMiddleware);
         }
 
         // Call afterToolCall hook

@@ -227,17 +227,16 @@ export function createValidationMiddleware(): ToolMiddleware {
  */
 export function composeMiddleware(...middlewares: ToolMiddleware[]): ToolMiddleware {
   return async (input, context, next) => {
-    let index = 0;
-    
-    const composedNext = async (): Promise<unknown> => {
+    // Each continuation keeps its own downstream position so retry middleware
+    // can invoke next() again without skipping the remaining layers.
+    const dispatch = async (index: number): Promise<unknown> => {
       if (index < middlewares.length) {
-        const mw = middlewares[index++];
-        return mw(input, context, composedNext);
+        return middlewares[index](input, context, () => dispatch(index + 1));
       }
       return next();
     };
 
-    return composedNext();
+    return dispatch(0);
   };
 }
 
