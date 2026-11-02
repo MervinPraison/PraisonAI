@@ -2,11 +2,15 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const fs = require('node:fs');
 const os = require('node:os');
+const childProcess = require('node:child_process');
+const nativeSpawn = childProcess.spawn;
+const spawned = [];
+childProcess.spawn = function (...args) { const child = nativeSpawn.apply(this, args); spawned.push(child); return child; };
 const scenario = process.argv[2];
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'praison-mcp-'));
 const handshakeFile = path.join(directory, 'handshake');
 const { MCPClient } = require('../../../src/mcp');
-const client = new MCPClient({ transport: 'stdio', command: process.execPath, args: [path.join(__dirname, 'stdio-server.cjs')], env: { PRAISON_MCP_FIXTURE_VALUE: 'retained', PRAISON_MCP_FIXTURE_HANDSHAKE_FILE: scenario === 'handshake-disconnect' ? handshakeFile : '', PRAISON_MCP_FIXTURE_EXIT_ON_LIST: process.argv[2] === 'startup-close' ? '1' : '0' }, timeout: scenario.startsWith('request-') ? 1000 : 5000, requestTimeout: scenario === 'request-timeout' ? 100 : 3000 });
+const client = new MCPClient({ transport: 'stdio', command: process.execPath, args: [path.join(__dirname, 'stdio-server.cjs')], env: { PRAISON_MCP_FIXTURE_VALUE: 'retained', PRAISON_MCP_FIXTURE_NO_TOOLS: scenario === 'no-tools' ? '1' : '0', PRAISON_MCP_FIXTURE_SLOW_LIST: scenario === 'discovery-timeout' ? '1' : '0', PRAISON_MCP_FIXTURE_HANDSHAKE_FILE: scenario === 'handshake-disconnect' ? handshakeFile : '', PRAISON_MCP_FIXTURE_EXIT_ON_LIST: process.argv[2] === 'startup-close' ? '1' : '0' }, timeout: scenario.startsWith('request-') ? 1000 : 5000, requestTimeout: ['request-timeout', 'discovery-timeout'].includes(scenario) ? 100 : 3000 });
 const deadline = setTimeout(() => { client.disconnect().finally(() => process.exit(2)); }, 10000);
 process.on('uncaughtException', error => { console.error(error); client.disconnect().finally(() => process.exit(1)); });
 (async () => {
@@ -23,10 +27,18 @@ process.on('uncaughtException', error => { console.error(error); client.disconne
       await client.disconnect();
       await rejected;
       assert.equal(client.isConnected(), false);
-      if (fs.existsSync(handshakeFile)) {
-        const pid = Number(fs.readFileSync(handshakeFile, 'utf8'));
-        assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+      assert.equal(spawned.length, scenario === 'early-disconnect' ? 0 : 1);
+      for (const peer of spawned) {
+        assert.equal(typeof peer.pid, 'number');
+        assert.throws(() => process.kill(peer.pid, 0), { code: 'ESRCH' });
       }
+      return;
+    }
+    if (scenario === 'discovery-timeout') {
+      await assert.rejects(client.connect(), /timed out/i);
+      assert.equal(client.isConnected(), false);
+      assert.equal(spawned.length, 1);
+      assert.throws(() => process.kill(spawned[0].pid, 0), { code: 'ESRCH' });
       return;
     }
     if (process.argv[2] === 'startup-close') {
@@ -36,6 +48,10 @@ process.on('uncaughtException', error => { console.error(error); client.disconne
     }
     await client.connect();
     switch (process.argv[2]) {
+      case 'no-tools':
+        assert.deepEqual(await client.listTools(), []);
+        assert.equal(client.isConnected(), true);
+        break;
       case 'request-long':
         assert.equal((await client.callTool('echo', { text: 'slow result', delay: 1500 })).content[0].text, 'slow result');
         break;
@@ -69,6 +85,7 @@ process.on('uncaughtException', error => { console.error(error); client.disconne
     }
   } finally {
     clearTimeout(deadline);
+    childProcess.spawn = nativeSpawn;
     await client.disconnect();
     assert.equal(client.isConnected(), false);
     fs.rmSync(directory, { recursive: true, force: true });

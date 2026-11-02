@@ -194,7 +194,17 @@ export class MCPClient {
             if (this.transport.type === 'stdio') {
                 const stdioClient = this.transport.client;
                 // The SDK negotiates and sends notifications/initialized itself.
-                await this.refreshTools();
+                try {
+                    await this.discoverTools();
+                } catch (error) {
+                    this.session.tools = [];
+                    const { ErrorCode } = await import('@modelcontextprotocol/sdk/types.js');
+                    if ((error as { code?: number })?.code === ErrorCode.RequestTimeout) {
+                        await stdioClient.close();
+                        throw error;
+                    }
+                    // Servers without tool support may still provide resources/prompts.
+                }
                 if (!stdioClient.transport) {
                     throw new Error('MCP stdio connection closed during initialization');
                 }
@@ -392,13 +402,17 @@ export class MCPClient {
         return this.transport.send(method, params);
     }
 
+    private async discoverTools(): Promise<void> {
+        const result = await this.rpc('tools/list', {});
+        this.session.tools = result.tools ?? [];
+    }
+
     /**
      * Refresh tools list from server
      */
     async refreshTools(): Promise<void> {
         try {
-            const result = await this.rpc('tools/list', {});
-            this.session.tools = result.tools ?? [];
+            await this.discoverTools();
         } catch {
             // Server may not support tools
             this.session.tools = [];
