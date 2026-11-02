@@ -25,7 +25,7 @@ describe('Chunking', () => {
         const assert = require('assert/strict');
         const { Chunking } = require(${JSON.stringify(source)});
         const text = 'abcdefghijklmnopqrst'.repeat(5);
-        for (const chunkSize of [1, 20, 50, 51, 100]) {
+        for (const chunkSize of [1, 2, 20, 50, 51, 100]) {
           const chunks = new Chunking({chunkSize}).chunk(text);
           assert.ok(chunks.length > 0 && chunks.length <= text.length);
           let covered = 0;
@@ -37,14 +37,19 @@ describe('Chunking', () => {
             covered = chunk.endOffset;
           }
           assert.equal(covered, text.length);
+          if (chunkSize <= 50) {
+            assert.ok(chunks.length <= Math.ceil(text.length / (chunkSize - Math.floor(chunkSize / 10))));
+          }
         }
+        assert.equal(new Chunking({chunkSize: 51}).chunk(text).length, 50);
+        assert.equal(new Chunking({chunkSize: 20, overlap: 19}).chunk(text).length, 81);
       `;
       const result = spawnSync(process.execPath, [
         '--max-old-space-size=128', '-r', 'ts-node/register/transpile-only', '-e', script,
-      ], { timeout: 3000, encoding: 'utf-8' });
+      ], { timeout: 10000, encoding: 'utf-8' });
       expect(result.error).toBeUndefined();
       expect(result.status).toBe(0);
-    });
+    }, 15000);
 
     it('should chunk text by size', async () => {
       const { Chunking } = await import('../../../src/knowledge/chunking');

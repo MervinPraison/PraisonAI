@@ -9,6 +9,7 @@ describe('small chunk defaults through public callers', () => {
     const adapter = new ChonkieAdapter({ strategy, chunkSize: 20 });
     const chunks = await adapter.chunk('First sentence. Second sentence.');
     expect(chunks.length).toBeGreaterThan(0);
+    expect(chunks.length).toBeLessThanOrEqual(2);
     expect(chunks[chunks.length - 1].endOffset).toBe(32);
   });
 
@@ -16,6 +17,7 @@ describe('small chunk defaults through public callers', () => {
     const knowledge = new Knowledge({ chunker: { type, chunk_size: 20 } });
     const chunks = knowledge.chunker.chunk('First sentence. Second sentence.');
     expect(chunks.length).toBeGreaterThan(0);
+    expect(chunks.length).toBeLessThanOrEqual(2);
     expect(chunks[chunks.length - 1].endOffset).toBe(32);
   });
 });

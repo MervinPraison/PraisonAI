@@ -86,7 +86,7 @@ export interface KnowledgeStoreConfig {
   llm?: Record<string, any>;
   /** Graph store config (recorded verbatim). */
   graph_store?: Record<string, any>;
-  /** Chunker: `type` (default "recursive"), `chunk_size` (default 512), `chunk_overlap` (default at most 50, below chunk_size). */
+  /** Chunker: `type` (default "recursive"), `chunk_size` (512), `chunk_overlap` (50, or floor(10% of sizes <= 50)). */
   chunker?: { type?: string; chunk_size?: number; chunk_overlap?: number; [key: string]: any };
   /** TS-only: embedding provider enabling semantic search in the in-process store. */
   embeddingProvider?: EmbeddingProvider;
