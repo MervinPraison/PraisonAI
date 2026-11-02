@@ -8,8 +8,9 @@ Default Search Provider Priority:
 2. Brave (requires BRAVE_API_KEY + requests)
 3. Exa (requires EXA_API_KEY + exa_py)
 4. You.com (requires YDC_API_KEY + youdotcom)
-5. DuckDuckGo (requires ddgs package, no API key)
-6. SearxNG (requires requests + running SearxNG instance)
+5. Outcrawl (requires OUTCRAWL_API_KEY + requests)
+6. DuckDuckGo (requires ddgs package, no API key)
+7. SearxNG (requires requests + running SearxNG instance)
 
 Parallel Search MCP is available when explicitly selected.
 
@@ -38,6 +39,9 @@ PARALLEL_MAX_RESULTS = 10
 PARALLEL_MAX_TITLE_CHARS = 256
 PARALLEL_MAX_URL_CHARS = 2048
 PARALLEL_MAX_SNIPPET_CHARS = 1200
+
+OUTCRAWL_SEARCH_URL = "https://api.outcrawl.ai/v1/search"
+OUTCRAWL_MAX_RESULTS = 20
 
 def _check_tavily() -> tuple[bool, Optional[str]]:
     """Check if Tavily is available."""
@@ -79,6 +83,14 @@ def _check_brave() -> tuple[bool, Optional[str]]:
 
 def _check_searxng() -> tuple[bool, Optional[str]]:
     """Check if SearxNG is available."""
+    if util.find_spec("requests") is None:
+        return False, "requests package not installed"
+    return True, None
+
+def _check_outcrawl() -> tuple[bool, Optional[str]]:
+    """Check if Outcrawl is available."""
+    if not os.environ.get("OUTCRAWL_API_KEY"):
+        return False, "OUTCRAWL_API_KEY not set"
     if util.find_spec("requests") is None:
         return False, "requests package not installed"
     return True, None
@@ -302,6 +314,30 @@ def _search_brave(query: str, max_results: int = 5, extra_snippets: bool = True)
         })
     return results
 
+def _search_outcrawl(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
+    """Search using Outcrawl."""
+    import requests
+
+    headers = {
+        "Authorization": f"Bearer {os.environ.get('OUTCRAWL_API_KEY')}",
+        "Content-Type": "application/json",
+    }
+    payload = {"query": query, "limit": max(1, min(int(max_results), OUTCRAWL_MAX_RESULTS))}
+
+    response = requests.post(OUTCRAWL_SEARCH_URL, headers=headers, json=payload, timeout=30)
+    response.raise_for_status()
+    data = response.json()
+
+    results = []
+    for r in data.get("hits", [])[:max_results]:
+        results.append({
+            "title": r.get("title", "") or "",
+            "url": r.get("url", "") or "",
+            "snippet": r.get("snippet", "") or "",
+            "provider": "outcrawl"
+        })
+    return results
+
 from praisonaiagents.utils.resilience import retry_with_backoff
 
 @retry_with_backoff(retries=3, backoff_in_seconds=1.0, exceptions=(Exception,), jitter_factor=0.25)
@@ -367,6 +403,7 @@ SEARCH_PROVIDERS = [
     ("brave", _check_brave, _search_brave),
     ("exa", _check_exa, _search_exa),
     ("youdotcom", _check_youdotcom, _search_youdotcom),
+    ("outcrawl", _check_outcrawl, _search_outcrawl),
     ("duckduckgo", _check_duckduckgo, _search_duckduckgo),
     ("searxng", _check_searxng, _search_searxng),
 ]
@@ -387,7 +424,7 @@ def search_web(
 ) -> List[Dict[str, Any]]:
     """Search the web using one or more providers with automatic fallback.
     
-    VALID PROVIDER NAMES: tavily, brave, exa, youdotcom, duckduckgo, searxng, parallel
+    VALID PROVIDER NAMES: tavily, brave, exa, youdotcom, outcrawl, duckduckgo, searxng, parallel
     Parallel is opt-in and does not change the existing automatic provider order.
     
     Args:
