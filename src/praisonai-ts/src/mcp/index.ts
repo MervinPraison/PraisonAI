@@ -30,6 +30,7 @@
  */
 
 import { randomUUID } from '../utils/uuid';
+import type { Request } from '@modelcontextprotocol/sdk/types.js';
 
 /**
  * MCP Transport types
@@ -179,7 +180,12 @@ export class MCPClient {
             }
 
             // Initialize session
-            await this.initialize();
+            if (this.transport.type === 'stdio') {
+                // The SDK negotiates and sends notifications/initialized itself.
+                await this.refreshTools();
+            } else {
+                await this.initialize();
+            }
             this.session.connected = true;
 
             if (this.config.verbose) {
@@ -199,25 +205,40 @@ export class MCPClient {
             throw new Error('Command is required for stdio transport');
         }
 
-        // Lazy import child_process
-        const { spawn } = await import('child_process');
-
-        const proc = spawn(this.config.command, this.config.args, {
-            env: { ...process.env, ...this.config.env },
-            stdio: ['pipe', 'pipe', 'inherit'],
+        const [{ Client }, { StdioClientTransport }, { ResultSchema }] = await Promise.all([
+            import('@modelcontextprotocol/sdk/client/index.js'),
+            import('@modelcontextprotocol/sdk/client/stdio.js'),
+            import('@modelcontextprotocol/sdk/types.js'),
+        ]);
+        const client = new Client<Request>({ name: 'praisonai-ts', version: '1.0.0' });
+        const env: Record<string, string> = {};
+        for (const [key, value] of Object.entries(process.env)) {
+            if (value !== undefined) env[key] = value;
+        }
+        Object.assign(env, this.config.env);
+        const stdio = new StdioClientTransport({
+            command: this.config.command,
+            args: this.config.args,
+            env,
+            stderr: 'inherit',
         });
-
+        try {
+            await client.connect(stdio, { timeout: this.config.timeout });
+        } catch (error) {
+            await stdio.close();
+            throw error;
+        }
+        this.session.serverInfo = client.getServerVersion();
         this.transport = {
             type: 'stdio',
-            process: proc,
-            send: (message: any) => {
-                proc.stdin.write(JSON.stringify(message) + '\n');
-            },
-            receive: () => new Promise((resolve) => {
-                proc.stdout.once('data', (data) => {
-                    resolve(JSON.parse(data.toString()));
-                });
-            }),
+            client,
+            send: (method: string, params?: any) => client.request(
+                { method, params }, ResultSchema, { timeout: this.config.timeout }
+            ),
+            close: () => client.close(),
+        };
+        client.onclose = () => {
+            if (this.transport?.client === client) this.session.connected = false;
         };
     }
 
@@ -345,11 +366,6 @@ export class MCPClient {
             throw new Error('Not connected');
         }
 
-        if (this.transport.type === 'stdio') {
-            this.transport.send({ jsonrpc: '2.0', id: randomUUID(), method, params });
-            return this.transport.receive();
-        }
-
         return this.transport.send(method, params);
     }
 
@@ -415,8 +431,8 @@ export class MCPClient {
      * Disconnect from server
      */
     async disconnect(): Promise<void> {
-        if (this.transport?.type === 'stdio' && this.transport.process) {
-            this.transport.process.kill();
+        if (this.transport?.type === 'stdio') {
+            await this.transport.close();
         } else if (this.transport?.type === 'websocket' && this.transport.ws) {
             this.transport.ws.close();
         }

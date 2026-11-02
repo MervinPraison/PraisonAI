@@ -1,0 +1,11 @@
+const { Server } = require('@modelcontextprotocol/sdk/server/index.js');
+const { StdioServerTransport } = require('@modelcontextprotocol/sdk/server/stdio.js');
+const { ListToolsRequestSchema, CallToolRequestSchema, McpError, ErrorCode } = require('@modelcontextprotocol/sdk/types.js');
+const server = new Server({ name: 'offline-echo', version: '1.0.0' }, { capabilities: { tools: {} } });
+server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{ name: 'echo', inputSchema: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } }] }));
+server.setRequestHandler(CallToolRequestSchema, async request => {
+  if (request.params.name === 'fail') throw new McpError(ErrorCode.InvalidParams, 'fixture tool error');
+  if (request.params.arguments.delay) await new Promise(resolve => setTimeout(resolve, request.params.arguments.delay));
+  return { content: [{ type: 'text', text: request.params.name === 'environment' ? process.env.PRAISON_MCP_FIXTURE_VALUE : request.params.arguments.text }] };
+});
+server.connect(new StdioServerTransport()).catch(error => { console.error(error); process.exitCode = 1; });
