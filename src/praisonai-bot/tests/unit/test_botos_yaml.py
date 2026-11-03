@@ -280,3 +280,19 @@ class TestBotOSFromConfigGatewayDrift:
             assert "gateway.drain_timeout" not in caplog.text
         finally:
             os.unlink(path)
+
+    def test_non_string_unknown_key_warns_not_crashes(self, caplog):
+        from praisonai_bot.bots.botos import BotOS
+
+        path = self._write_yaml({
+            "platforms": {"telegram": {"token": "fake"}},
+            123: "ignored",
+            "zzz": 1,
+        })
+        try:
+            with caplog.at_level("WARNING"):
+                botos = BotOS.from_config(path)
+            assert "telegram" in botos.list_bots()
+            assert "123" in caplog.text and "zzz" in caplog.text
+        finally:
+            os.unlink(path)

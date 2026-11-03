@@ -135,7 +135,7 @@ def _check_botos_config_shape(raw: Dict[str, Any], path: str) -> None:
             "asyncio.run(WebSocketGateway().start_with_config(path)) "
             "(from praisonai_bot import WebSocketGateway)."
         )
-    ignored = [k for k in raw if k not in _BOTOS_TOP_KEYS]
+    ignored = [str(k) for k in raw if k not in _BOTOS_TOP_KEYS]
     gateway_cfg = raw.get("gateway")
     if isinstance(gateway_cfg, dict):
         ignored += [f"gateway.{k}" for k in gateway_cfg if k not in _BOTOS_GATEWAY_KEYS]
