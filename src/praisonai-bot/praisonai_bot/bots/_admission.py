@@ -261,9 +261,11 @@ class AdmissionGate:
         self._policy = policy
         # Issue #6215: optional per-identity request-rate ceiling (a core
         # ``RateLimitPolicyProtocol``, e.g. ``SlidingWindowRateLimitPolicy``)
-        # checked before a turn is admitted, keyed by the caller's session id.
+        # checked before a turn is admitted, keyed by the caller's rate key
+        # (defaults to the session id).
         self._rate_limit_policy = rate_limit_policy
         self.rate_limited = 0
+        self._rate_prune_after = 0.0
         # Optional memory/resource-pressure policy (Issue #3445). When set, a
         # lightweight RSS sample is folded into each admit decision so the gate
         # queues under soft pressure and sheds under hard pressure before the
@@ -315,6 +317,11 @@ class AdmissionGate:
         # A policy exposing ``enabled`` self-reports whether a threshold is set;
         # otherwise assume active (it was explicitly supplied).
         return bool(getattr(pol, "enabled", True))
+
+    def set_rate_limit_policy(self, policy: Optional[object]) -> None:
+        """Swap the per-identity rate budget in place (config hot-reload)."""
+        self._rate_limit_policy = policy
+        self._rate_prune_after = 0.0
 
     @property
     def _rate_limit_enabled(self) -> bool:
@@ -384,8 +391,13 @@ class AdmissionGate:
         return self._sem
 
     @asynccontextmanager
-    async def admit(self, *, session_id: str = ""):
+    async def admit(self, *, session_id: str = "", rate_key: Optional[str] = None):
         """Admit (or shed) an inbound turn, holding a slot for its duration.
+
+        ``rate_key`` is the identity charged against the per-user request
+        budget. It defaults to ``session_id``; surfaces where the session id is
+        client-chosen (API headers, WebSocket sessions) pass a stable caller
+        identity instead so a new conversation cannot reset the budget.
 
         Yields when capacity is available (immediately or after waiting in the
         bounded queue). Raises :class:`AdmissionRejected` when the policy sheds
@@ -396,7 +408,7 @@ class AdmissionGate:
             yield
             return
 
-        self._check_rate_limit(session_id)
+        self._check_rate_limit(rate_key or session_id)
 
         # Issue #5168: the scope key is the caller-supplied session_id (the
         # per-user/per-tenant storage key at the call sites). Only tracked when
@@ -509,7 +521,11 @@ class AdmissionGate:
             logger.warning("AdmissionGate: rate-limit policy failed (%s); admitting", e)
             return
         finally:
-            self._prune_rate_limit_state(pol, now)
+            # Bounded cadence: a burst of distinct callers must not trigger a
+            # full scan on every request while their windows are still live.
+            if now >= self._rate_prune_after:
+                self._rate_prune_after = now + _RATE_PRUNE_INTERVAL
+                self._prune_rate_limit_state(pol, now)
         if decision.allowed:
             return
         self.rate_limited += 1
@@ -664,6 +680,46 @@ def build_memory_pressure_policy(
     return MemoryPressurePolicy(soft_rss_mb=soft, hard_rss_mb=hard)
 
 
+_RATE_PRUNE_INTERVAL = 5.0
+
+
+def build_rate_limit_policy(per_user_per_minute: object) -> Optional[object]:
+    """Return a per-user request budget policy, or ``None`` when unlimited.
+
+    Accepts a non-negative whole number (``0``/``None`` = unlimited). Fractional,
+    boolean, negative or non-numeric values raise ``ValueError`` so a typo never
+    silently disables the budget the operator asked for.
+    """
+    value = per_user_per_minute
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise ValueError(
+            f"per_user_per_minute must be a non-negative integer, got {value!r}"
+        )
+    try:
+        if isinstance(value, float):
+            if not value.is_integer():
+                raise ValueError
+            value = int(value)
+        else:
+            value = int(value)
+    except (TypeError, ValueError) as err:
+        raise ValueError(
+            f"per_user_per_minute must be a non-negative integer, "
+            f"got {per_user_per_minute!r}"
+        ) from err
+    if value < 0:
+        raise ValueError(
+            f"per_user_per_minute must be >= 0, got {per_user_per_minute!r}"
+        )
+    if value == 0:
+        return None
+    from praisonaiagents.gateway import SlidingWindowRateLimitPolicy
+
+    return SlidingWindowRateLimitPolicy(max_requests=value, window_seconds=60.0)
+
+
 def build_admission_gate(
     max_concurrent_runs: int = 0,
     queue_depth: int = 0,
@@ -694,14 +750,8 @@ def build_admission_gate(
     start per minute; ``0`` (the default) leaves ingress unlimited. Over the cap
     the turn is refused with a ``retry_after`` hint before any work starts.
     """
-    rate_limit_policy = None
-    if per_user_per_minute not in (None, 0, "0"):
-        from praisonaiagents.gateway import SlidingWindowRateLimitPolicy
-
-        # Raises ValueError on a negative / non-integer value (fail fast).
-        rate_limit_policy = SlidingWindowRateLimitPolicy(
-            max_requests=per_user_per_minute, window_seconds=60.0
-        )
+    # Raises ValueError on a negative / non-integer value (fail fast).
+    rate_limit_policy = build_rate_limit_policy(per_user_per_minute)
     if policy is None:
         # Only an explicit ``0`` (or ``None``) disables admission control. A
         # *negative* ceiling is a misconfiguration, not "disabled": fall through

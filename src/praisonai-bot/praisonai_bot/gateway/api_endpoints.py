@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import hashlib
 import json
 import time
 import uuid
@@ -373,7 +374,13 @@ class GatewayApiEndpoints:
         if gate is not None and getattr(gate, "enabled", False):
             from ..bots._admission import AdmissionRejected
             try:
-                async with gate.admit(session_id=session.session_id):
+                # Issue #6215: charge a stable caller identity, only when a
+                # budget is set (keeps duck-typed gates' signature intact).
+                rk = (
+                    {"rate_key": self._rate_key_var.get()}
+                    if getattr(gate, "_rate_limit_enabled", False) else {}
+                )
+                async with gate.admit(session_id=session.session_id, **rk):
                     result = await self._gw._dispatch_agent_turn(
                         agent, content, on_complete=_capture, **extra
                     )
@@ -554,6 +561,23 @@ class GatewayApiEndpoints:
         session_id = f"api:{key}:{agent_id}"
         return self._gw.create_session(agent_id=agent_id, session_id=session_id)
 
+    # Per-request stable identity for the per-user request budget (#6215);
+    # inherited by the turn's task/stream context like ``_stream_turn_var``.
+    _rate_key_var: "contextvars.ContextVar[Optional[str]]" = (
+        contextvars.ContextVar("praisonai_gw_rate_key", default=None)
+    )
+
+    @staticmethod
+    def _rate_key(request: Any) -> Optional[str]:
+        """Stable caller identity that a new session header cannot reset."""
+        auth = request.headers.get("authorization", "")
+        if auth.startswith("Bearer ") and auth[7:]:
+            digest = hashlib.sha256(auth[7:].encode("utf-8")).hexdigest()[:16]
+            return "token:" + digest
+        client = getattr(request, "client", None)
+        host = getattr(client, "host", None)
+        return f"ip:{host}" if host else None
+
     @staticmethod
     def _caller_key(request: Any) -> str:
         """Derive a stable per-caller session key from the request.
@@ -568,6 +592,10 @@ class GatewayApiEndpoints:
         (Issue #2715 review, Greptile P2). Such callers are stateless by design;
         they should pass a session header to pin a conversation.
         """
+        # Issue #6215: the session header is client-chosen, so charge the
+        # per-user request budget to a stable caller identity (bearer token
+        # digest, else peer address) bound for this request's turn.
+        GatewayApiEndpoints._rate_key_var.set(GatewayApiEndpoints._rate_key(request))
         for header in ("openai-session", "x-session-id"):
             val = request.headers.get(header)
             if val:

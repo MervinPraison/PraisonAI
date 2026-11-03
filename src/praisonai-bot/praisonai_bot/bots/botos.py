@@ -1848,11 +1848,9 @@ class BotOS:
         # + admission while any explicit field above still overrides it.
         reliability = raw.get("reliability", gateway_cfg.get("reliability"))
         # Issue #6215: per-user inbound request budget. Default 0 = unlimited.
-        per_user_per_minute = int(
-            raw.get(
-                "per_user_per_minute", gateway_cfg.get("per_user_per_minute", 0)
-            )
-            or 0
+        # Validated (not truncated) by ``build_rate_limit_policy``.
+        per_user_per_minute = raw.get(
+            "per_user_per_minute", gateway_cfg.get("per_user_per_minute", 0)
         )
 
         return cls(

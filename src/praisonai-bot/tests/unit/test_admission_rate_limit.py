@@ -80,3 +80,102 @@ def test_botos_kwarg_and_yaml(tmp_path):
     cfg = tmp_path / "botos.yaml"
     cfg.write_text("gateway:\n  per_user_per_minute: 7\n")
     assert BotOS.from_config(str(cfg)).admission_stats["per_user_per_minute"] == 7
+
+
+@pytest.mark.parametrize("bad", [0.5, -0.5, 1.5, "0.5", "abc", True, -1])
+def test_fractional_or_invalid_budget_rejected(bad):
+    with pytest.raises(ValueError):
+        build_admission_gate(per_user_per_minute=bad)
+
+
+def test_botos_yaml_fractional_budget_rejected(tmp_path):
+    try:
+        from praisonai_bot.bots.botos import BotOS
+    except ModuleNotFoundError:  # pragma: no cover - optional deps
+        pytest.skip("BotOS optional dependency not installed")
+    pytest.importorskip("yaml")
+    cfg = tmp_path / "botos.yaml"
+    cfg.write_text("gateway:\n  per_user_per_minute: 0.5\n")
+    with pytest.raises(ValueError):
+        BotOS.from_config(str(cfg))
+    with pytest.raises(ValueError):
+        BotOS(per_user_per_minute=0.5)
+
+
+def test_rate_key_shared_across_new_sessions():
+    """A caller cannot reset the budget by switching conversation ids."""
+    gate = build_admission_gate(per_user_per_minute=1)
+
+    async def run():
+        async with gate.admit(session_id="conv-1", rate_key="ip:1.2.3.4"):
+            pass
+        with pytest.raises(AdmissionRejected):
+            async with gate.admit(session_id="conv-2", rate_key="ip:1.2.3.4"):
+                pass
+
+    asyncio.run(run())
+
+
+def test_prune_runs_at_bounded_interval(monkeypatch):
+    gate = build_admission_gate(per_user_per_minute=5)
+    calls = []
+    monkeypatch.setattr(
+        AdmissionGate, "_prune_rate_limit_state",
+        staticmethod(lambda pol, now, cap=4096: calls.append(now)),
+    )
+    for i in range(50):
+        gate._check_rate_limit(f"user-{i}")
+    assert len(calls) == 1
+
+
+def test_set_rate_limit_policy_swaps_budget_in_place():
+    from praisonai_bot.bots._admission import build_rate_limit_policy
+
+    gate = build_admission_gate(max_concurrent_runs=4)
+    gate.set_rate_limit_policy(build_rate_limit_policy(1))
+    assert gate.stats()["per_user_per_minute"] == 1
+
+    async def run():
+        await _turn(gate, "u")
+        with pytest.raises(AdmissionRejected):
+            await _turn(gate, "u")
+
+    asyncio.run(run())
+    gate.set_rate_limit_policy(build_rate_limit_policy(0))
+    assert gate.stats()["per_user_per_minute"] == 0
+    assert asyncio.run(_turn(gate, "u")) == "ran"
+
+
+def test_gateway_reload_applies_budget():
+    try:
+        from praisonai_bot.gateway.server import WebSocketGateway
+    except ModuleNotFoundError:  # pragma: no cover - optional deps
+        pytest.skip("gateway optional dependency not installed")
+    gw = WebSocketGateway.__new__(WebSocketGateway)
+    gw._admission_gate = None
+    gw._apply_rate_policy(
+        gw._rate_policy_from_config({"gateway": {"per_user_per_minute": 3}})
+    )
+    assert gw._admission_gate.stats()["per_user_per_minute"] == 3
+    gw._apply_rate_policy(gw._rate_policy_from_config({"gateway": {}}))
+    assert gw._admission_gate.stats()["per_user_per_minute"] == 0
+    with pytest.raises(ValueError):
+        gw._rate_policy_from_config({"gateway": {"per_user_per_minute": 0.5}})
+
+
+def test_api_rate_key_ignores_session_header():
+    try:
+        from praisonai_bot.gateway.api_endpoints import GatewayApiEndpoints
+    except ModuleNotFoundError:  # pragma: no cover - optional deps
+        pytest.skip("gateway optional dependency not installed")
+
+    class _Req:
+        def __init__(self, headers, host="10.0.0.1"):
+            self.headers = headers
+            self.client = type("C", (), {"host": host})()
+
+    a = GatewayApiEndpoints._rate_key(_Req({"x-session-id": "one"}))
+    b = GatewayApiEndpoints._rate_key(_Req({"x-session-id": "two"}))
+    assert a == b == "ip:10.0.0.1"
+    tok = GatewayApiEndpoints._rate_key(_Req({"authorization": "Bearer secret-token"}))
+    assert tok.startswith("token:") and "secret" not in tok

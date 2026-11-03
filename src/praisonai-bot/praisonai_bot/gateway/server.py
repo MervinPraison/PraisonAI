@@ -5089,7 +5089,14 @@ class WebSocketGateway:
                         # so enforce the shared gate here too.
                         from ..bots._admission import AdmissionRejected
                         try:
-                            async with gate.admit(session_id=session.session_id):
+                            # Issue #6215: stable per-user budget key (only
+                            # when a budget is set; duck-typed gates unchanged).
+                            _rk = (
+                                {"rate_key": self._client_rate_key(client_id)}
+                                if getattr(gate, "_rate_limit_enabled", False)
+                                else {}
+                            )
+                            async with gate.admit(session_id=session.session_id, **_rk):
                                 if getattr(session, "_stop_epoch", 0) != dequeued_stop_epoch:
                                     response = _stop_sentinel
                                 else:
@@ -5894,6 +5901,17 @@ class WebSocketGateway:
     
     # ── Client Management (Public API) ────────────────────────────────
     
+    def _client_rate_key(self, client_id: Optional[str]) -> Optional[str]:
+        """Stable per-user budget key for a WebSocket turn (#6215).
+
+        Session ids are client-chosen, so charge the peer address instead;
+        ``None`` falls back to the session id (e.g. no live connection).
+        """
+        ws = self._clients.get(client_id) if client_id else None
+        peer = getattr(ws, "client", None)
+        host = getattr(peer, "host", None)
+        return f"ip:{host}" if host else None
+
     def add_client(self, client_id: str, websocket: Any) -> None:
         """Register a client WebSocket connection.
         
@@ -11281,6 +11299,29 @@ class WebSocketGateway:
         self._shell_routed_agents.clear()
         self._shell_routed_agents.update(candidate.get("shell", {}))
 
+    @staticmethod
+    def _rate_policy_from_config(cfg: Any) -> Any:
+        """Build the ``gateway.per_user_per_minute`` policy (#6215); may raise."""
+        from ..bots._admission import build_rate_limit_policy
+
+        gw_cfg = (cfg or {}).get("gateway") or {}
+        return build_rate_limit_policy(gw_cfg.get("per_user_per_minute", 0))
+
+    def _apply_rate_policy(self, policy: Any) -> None:
+        """Install a reloaded per-user budget on the live admission gate (#6215).
+
+        An existing gate is updated in place (bots/API/WS already share it); a
+        budget added to a gateway that had no gate builds a rate-only gate,
+        which channels started afterwards pick up via ``_stamp_admission_gate``.
+        """
+        gate = getattr(self, "_admission_gate", None)
+        if gate is not None:
+            gate.set_rate_limit_policy(policy)
+        elif policy is not None:
+            from ..bots._admission import AdmissionGate
+
+            self._admission_gate = AdmissionGate(None, rate_limit_policy=policy)
+
     async def _restore_previous_config(
         self, error: str, changed_paths: Set[str]
     ) -> None:
@@ -11302,6 +11343,10 @@ class WebSocketGateway:
             )
             return
         try:
+            try:
+                self._apply_rate_policy(self._rate_policy_from_config(prev_cfg))
+            except ValueError:
+                pass  # previous config was validated when it went live
             prev_agents_cfg = prev_cfg.get("agents", {})
             if prev_agents_cfg:
                 provider_cfg = prev_cfg.get("provider", {})
@@ -11431,6 +11476,13 @@ class WebSocketGateway:
             # drain window keep resolving the previous agents until the cutover
             # commits.
             report = self._validate_candidate(new_cfg)
+            # Issue #6215: validate the per-user budget with the candidate so a
+            # bad value rejects the reload instead of failing mid-cutover.
+            try:
+                rate_policy = self._rate_policy_from_config(new_cfg)
+            except ValueError as e:
+                report.ok = False
+                report.failures.append(f"gateway.per_user_per_minute: {e}")
             if not report.ok:
                 error = "; ".join(report.failures) or "candidate validation failed"
                 logger.error(f"Reload rejected — {error}; keeping previous config")
@@ -11453,6 +11505,7 @@ class WebSocketGateway:
             # channel is accepting turns (greptile #1 — never expose the
             # candidate before the cutover commits).
             self._activate_candidate(report.candidate)
+            self._apply_rate_policy(rate_policy)
 
             channels_cfg = new_cfg.get("channels", {})
             try:
@@ -12182,7 +12235,7 @@ class WebSocketGateway:
             overflow_policy=_overflow,
             max_concurrent_runs_per_scope=_max_runs_per_scope,
             # Issue #6215: per-user inbound request budget (0 = unlimited).
-            per_user_per_minute=gw_cfg.get("per_user_per_minute", 0) or 0,
+            per_user_per_minute=gw_cfg.get("per_user_per_minute", 0),
         )
         if self._admission_gate is not None:
             logger.info(
