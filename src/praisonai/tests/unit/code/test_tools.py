@@ -390,6 +390,26 @@ class TestSearchReplace:
             with open(path) as f:
                 assert f.read() == "NEW=2"
 
+    @pytest.mark.skipif(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                        reason="POSIX permissions; root bypasses them")
+    def test_atomic_write_refuses_read_only_target(self):
+        """Like open(path, 'w'), a read-only file must not be replaced via inode swap."""
+        from praisonai.code.utils.file_utils import atomic_write
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = os.path.join(temp_dir, "locked.txt")
+            with open(path, "w") as f:
+                f.write("orig")
+            os.chmod(path, 0o444)
+            try:
+                with pytest.raises(PermissionError):
+                    atomic_write(path, "new")
+                with open(path) as f:
+                    assert f.read() == "orig"
+                assert os.listdir(temp_dir) == ["locked.txt"]
+            finally:
+                os.chmod(path, 0o644)
+
     def test_multiple_operations(self):
         """Test multiple search/replace operations."""
         from praisonai.code.tools.search_replace import search_replace

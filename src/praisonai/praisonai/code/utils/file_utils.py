@@ -8,6 +8,7 @@ Provides utilities for file operations including:
 - Line ending normalization
 """
 
+import errno
 import os
 import re
 import uuid
@@ -329,6 +330,10 @@ def atomic_write(path: str, content: str, *, encoding: Optional[str] = "utf-8") 
         existing_stat = os.stat(path)
     except OSError:
         existing_stat = None
+    # An inode swap would bypass a read-only target's permissions, so keep the
+    # old open(path, 'w') behaviour and refuse to replace a file we can't write.
+    if existing_stat is not None and not os.access(path, os.W_OK):
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), path)
     # Create the temp file with the target's permission bits (setuid/setgid
     # dropped) so private files (e.g. 0600 .env) are never readable by others
     # while the new content is written. New files use 0o666 so the kernel
