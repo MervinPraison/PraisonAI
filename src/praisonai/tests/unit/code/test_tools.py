@@ -286,7 +286,31 @@ class TestSearchReplace:
             
             with open(file_path, 'r') as f:
                 assert f.read() == "Hello, new world!"
-    
+
+    def test_interrupted_write_keeps_original(self, monkeypatch):
+        """A failure mid-write must not truncate the original file."""
+        from praisonai.code.tools.search_replace import search_replace
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path = os.path.join(temp_dir, "test.txt")
+            with open(file_path, 'w') as f:
+                f.write("Hello, old world!")
+
+            def boom(*args, **kwargs):
+                raise KeyboardInterrupt
+
+            monkeypatch.setattr(os, "fsync", boom)
+            try:
+                search_replace(file_path, [
+                    {'search': 'old', 'replace': 'new'}
+                ], workspace=temp_dir)
+            except KeyboardInterrupt:
+                pass
+
+            with open(file_path, 'r') as f:
+                assert f.read() == "Hello, old world!"
+            assert os.listdir(temp_dir) == ["test.txt"]
+
     def test_multiple_operations(self):
         """Test multiple search/replace operations."""
         from praisonai.code.tools.search_replace import search_replace
