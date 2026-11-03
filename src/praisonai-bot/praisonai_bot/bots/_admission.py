@@ -28,7 +28,9 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
+import math
 import sys
+import time
 from contextlib import asynccontextmanager
 from typing import Dict, Optional
 
@@ -106,9 +108,14 @@ class AdmissionRejected(Exception):
     busy acknowledgement to the user instead of an opaque error.
     """
 
-    def __init__(self, message: str = "Busy right now — please resend in a moment."):
+    def __init__(
+        self,
+        message: str = "Busy right now — please resend in a moment.",
+        retry_after: Optional[float] = None,
+    ):
         super().__init__(message)
         self.message = message
+        self.retry_after = retry_after
 
 
 class _TurnSlot:
@@ -249,8 +256,14 @@ class AdmissionGate:
         *,
         resource_policy: Optional[object] = None,
         resource_sampler: Optional[object] = None,
+        rate_limit_policy: Optional[object] = None,
     ):
         self._policy = policy
+        # Issue #6215: optional per-identity request-rate ceiling (a core
+        # ``RateLimitPolicyProtocol``, e.g. ``SlidingWindowRateLimitPolicy``)
+        # checked before a turn is admitted, keyed by the caller's session id.
+        self._rate_limit_policy = rate_limit_policy
+        self.rate_limited = 0
         # Optional memory/resource-pressure policy (Issue #3445). When set, a
         # lightweight RSS sample is folded into each admit decision so the gate
         # queues under soft pressure and sheds under hard pressure before the
@@ -304,6 +317,11 @@ class AdmissionGate:
         return bool(getattr(pol, "enabled", True))
 
     @property
+    def _rate_limit_enabled(self) -> bool:
+        pol = self._rate_limit_policy
+        return pol is not None and bool(getattr(pol, "enabled", True))
+
+    @property
     def enabled(self) -> bool:
         """Whether the gate is active.
 
@@ -313,7 +331,7 @@ class AdmissionGate:
         """
         if self._policy is not None and self._max > 0:
             return True
-        return self._resource_enabled
+        return self._resource_enabled or self._rate_limit_enabled
 
     @property
     def in_flight(self) -> int:
@@ -337,6 +355,10 @@ class AdmissionGate:
             "admitted": self.admitted,
             "rejected": self.rejected,
             "shed": self.shed,
+            "per_user_per_minute": int(
+                getattr(self._rate_limit_policy, "max_requests", 0) or 0
+            ),
+            "rate_limited": self.rate_limited,
             "max_rss_mb": float(
                 getattr(self._resource_policy, "hard_rss_mb", 0.0) or 0.0
             ),
@@ -373,6 +395,8 @@ class AdmissionGate:
             # Disabled: preserve legacy always-admit behaviour with no overhead.
             yield
             return
+
+        self._check_rate_limit(session_id)
 
         # Issue #5168: the scope key is the caller-supplied session_id (the
         # per-user/per-tenant storage key at the call sites). Only tracked when
@@ -472,6 +496,50 @@ class AdmissionGate:
                 except ValueError:  # pragma: no cover — exited in another context
                     pass
             slot.close()
+
+    def _check_rate_limit(self, session_id: str) -> None:
+        """Shed the turn if *session_id* is over its request-rate budget (#6215)."""
+        if not self._rate_limit_enabled:
+            return
+        pol = self._rate_limit_policy
+        now = time.monotonic()
+        try:
+            decision = pol.check(identity=session_id or "-", scope="ingress", now=now)
+        except Exception as e:  # pragma: no cover — never block on policy error
+            logger.warning("AdmissionGate: rate-limit policy failed (%s); admitting", e)
+            return
+        finally:
+            self._prune_rate_limit_state(pol, now)
+        if decision.allowed:
+            return
+        self.rate_limited += 1
+        retry = decision.retry_after_seconds
+        wait = max(1, math.ceil(retry)) if retry is not None else None
+        logger.info("AdmissionGate: rate-limited session=%s retry_after=%s", session_id or "-", wait)
+        if wait is None:
+            raise AdmissionRejected("Rate limit reached — please try again later.")
+        raise AdmissionRejected(
+            f"Rate limit reached — please try again in {wait}s.", retry_after=float(wait)
+        )
+
+    @staticmethod
+    def _prune_rate_limit_state(pol: object, now: float, cap: int = 4096) -> None:
+        """Drop expired per-identity entries so an open bot cannot grow them forever.
+
+        ``SlidingWindowRateLimitPolicy`` reclaims a key only when that key is
+        checked again and leaves reclamation of an unbounded identity space to
+        the wrapper; inbound users are such a space.
+        """
+        windows = getattr(pol, "_windows", None)
+        lockouts = getattr(pol, "_lockouts", None)
+        if not isinstance(windows, dict) or len(windows) + len(lockouts or {}) <= cap:
+            return
+        span = float(getattr(pol, "window_seconds", 0) or 0)
+        for key in [k for k, (start, _) in windows.items() if now - start >= span]:
+            windows.pop(key, None)
+        if isinstance(lockouts, dict):
+            for key in [k for k, until in lockouts.items() if now >= until]:
+                lockouts.pop(key, None)
 
     def _take_slot(self, scope: str) -> None:
         self._in_flight += 1
@@ -603,6 +671,7 @@ def build_admission_gate(
     policy: Optional[object] = None,
     resource_policy: Optional[object] = None,
     max_concurrent_runs_per_scope: int = 0,
+    per_user_per_minute: int = 0,
 ) -> Optional[AdmissionGate]:
     """Construct an :class:`AdmissionGate` from config, or return ``None``.
 
@@ -620,7 +689,19 @@ def build_admission_gate(
     gate so it queues under soft RSS pressure and sheds under hard pressure. A
     gate is built when *either* a concurrency ceiling *or* a resource policy is
     configured, so a memory-only deployment still gets backpressure.
+
+    ``per_user_per_minute`` (Issue #6215) caps how many turns one identity may
+    start per minute; ``0`` (the default) leaves ingress unlimited. Over the cap
+    the turn is refused with a ``retry_after`` hint before any work starts.
     """
+    rate_limit_policy = None
+    if per_user_per_minute not in (None, 0, "0"):
+        from praisonaiagents.gateway import SlidingWindowRateLimitPolicy
+
+        # Raises ValueError on a negative / non-integer value (fail fast).
+        rate_limit_policy = SlidingWindowRateLimitPolicy(
+            max_requests=per_user_per_minute, window_seconds=60.0
+        )
     if policy is None:
         # Only an explicit ``0`` (or ``None``) disables admission control. A
         # *negative* ceiling is a misconfiguration, not "disabled": fall through
@@ -634,8 +715,12 @@ def build_admission_gate(
         if no_ceiling:
             # No concurrency ceiling: build a resource-only gate when a
             # resource policy is supplied, else no gate (legacy behaviour).
-            if resource_policy is not None:
-                return AdmissionGate(None, resource_policy=resource_policy)
+            if resource_policy is not None or rate_limit_policy is not None:
+                return AdmissionGate(
+                    None,
+                    resource_policy=resource_policy,
+                    rate_limit_policy=rate_limit_policy,
+                )
             return None
         try:
             from praisonaiagents.gateway import ConcurrencyLimitPolicy
@@ -647,4 +732,6 @@ def build_admission_gate(
             overflow_policy=overflow_policy,
             max_concurrent_runs_per_scope=max_concurrent_runs_per_scope,
         )
-    return AdmissionGate(policy, resource_policy=resource_policy)
+    return AdmissionGate(
+        policy, resource_policy=resource_policy, rate_limit_policy=rate_limit_policy
+    )
