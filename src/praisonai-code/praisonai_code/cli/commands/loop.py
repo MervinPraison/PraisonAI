@@ -31,6 +31,8 @@ def loop_main(
     observe: bool = typer.Option(False, "--observe", "-o", help="Enable observability event logging"),
     recovery: bool = typer.Option(True, "--recovery/--no-recovery", help="Enable graduated doom loop recovery (default: on)"),
     level: Optional[str] = typer.Option(None, "--level", "-l", help="Autonomy level: suggest, auto_edit, full_auto"),
+    max_budget: Optional[float] = typer.Option(None, "--max-budget", help="Hard USD spend cap for the whole run"),
+    on_budget_exceeded: str = typer.Option("stop", "--on-budget-exceeded", help="When --max-budget is hit: stop or warn"),
 ):
     """Run an agent in an autonomous loop.
     
@@ -66,6 +68,8 @@ def loop_main(
         observe=observe,
         recovery=recovery,
         level=level,
+        max_budget=max_budget,
+        on_budget_exceeded=on_budget_exceeded,
     )
 
 
@@ -80,8 +84,13 @@ def _run_loop(
     observe: bool = False,
     recovery: bool = True,
     level: Optional[str] = None,
+    max_budget: Optional[float] = None,
+    on_budget_exceeded: str = "stop",
 ):
     """Execute the autonomous loop."""
+    if on_budget_exceeded not in ("stop", "warn"):
+        typer.echo("Error: --on-budget-exceeded must be 'stop' or 'warn'", err=True)
+        raise typer.Exit(2)
     try:
         from praisonaiagents import Agent
     except ImportError:
@@ -117,6 +126,13 @@ def _run_loop(
     
     if not verbose:
         agent_kwargs["output"] = "silent"
+
+    # Only forward a budget when the user set one (None = no cap, zero overhead).
+    if max_budget is not None:
+        agent_kwargs["execution"] = {
+            "max_budget": max_budget,
+            "on_budget_exceeded": on_budget_exceeded,
+        }
     
     # Add completion promise instructions if provided
     if completion_promise:
@@ -138,6 +154,8 @@ def _run_loop(
             typer.echo("   Context clearing: enabled")
         if timeout:
             typer.echo(f"   Timeout: {timeout}s")
+        if max_budget is not None:
+            typer.echo(f"   Max budget: ${max_budget} ({on_budget_exceeded})")
         typer.echo("")
     
     # Run autonomous loop using unified API
@@ -200,6 +218,8 @@ OPTIONS:
   -p, --completion-promise STR Promise text to signal completion
   -c, --clear-context          Clear chat history between iterations
   -t, --timeout FLOAT          Timeout in seconds
+      --max-budget FLOAT       Hard USD spend cap for the whole run
+      --on-budget-exceeded STR stop (default) or warn when the cap is hit
   -m, --model STR              LLM model to use
   -v, --verbose                Show verbose output
 
