@@ -239,3 +239,44 @@ class TestBotOSFromConfigEnhanced:
             assert botos.list_bots() == []
         finally:
             os.unlink(path)
+
+
+class TestBotOSFromConfigGatewayDrift:
+    """Issue #6210: gateway.yaml must not be silently degraded by BotOS."""
+
+    def _write_yaml(self, data):
+        f = tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False)
+        yaml.dump(data, f)
+        f.close()
+        return f.name
+
+    @pytest.mark.parametrize("section", ["channels", "agents", "routing", "schedules"])
+    def test_gateway_sections_raise(self, section):
+        from praisonai_bot.bots.botos import BotOS
+
+        path = self._write_yaml({
+            "platforms": {"telegram": {"token": "fake"}},
+            section: {"x": {}},
+        })
+        try:
+            with pytest.raises(ValueError, match="start_with_config"):
+                BotOS.from_config(path)
+        finally:
+            os.unlink(path)
+
+    def test_unknown_keys_warn(self, caplog):
+        from praisonai_bot.bots.botos import BotOS
+
+        path = self._write_yaml({
+            "platforms": {"telegram": {"token": "fake"}},
+            "helth": {"interval": 5},
+            "gateway": {"port": 9999, "drain_timeout": 5},
+        })
+        try:
+            with caplog.at_level("WARNING"):
+                botos = BotOS.from_config(path)
+            assert "telegram" in botos.list_bots()
+            assert "helth" in caplog.text and "gateway.port" in caplog.text
+            assert "gateway.drain_timeout" not in caplog.text
+        finally:
+            os.unlink(path)
