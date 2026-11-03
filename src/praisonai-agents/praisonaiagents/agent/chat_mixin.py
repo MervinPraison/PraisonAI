@@ -4485,7 +4485,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     except Exception:
                         # Catch any exception from the inner try block and re-raise to outer handler
                         raise
-            except ToolExecutionError:
+            except (ToolExecutionError, BudgetExceededError):
+                # Parity with the custom-LLM and async paths: a budget stop must
+                # reach the caller, not turn into a ``None`` reply.
                 raise
             except Exception as e:
                 self._last_stop_reason = "error"
