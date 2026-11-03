@@ -321,34 +321,38 @@ def atomic_write(path: str, content: str, *, encoding: Optional[str] = "utf-8") 
     # writes through the link) instead of turning the symlink into a plain file.
     path = os.path.realpath(path)
     target_dir = os.path.dirname(path) or "."
-    # Create the temp file ourselves with 0o666 so the kernel applies the
-    # current umask (same mode as open(path, 'w') for new files). Never call
-    # os.umask(): it is process-wide and would race with other threads.
+    # Atomic replace swaps in a fresh inode, so carry over the metadata that
+    # matters for a replaced file: permission bits and ownership (uid/gid).
+    # Hard-link identity and xattrs/ACLs cannot be preserved through an inode
+    # swap and are out of scope for this tool.
+    try:
+        existing_stat = os.stat(path)
+    except OSError:
+        existing_stat = None
+    # Create the temp file with the target's permission bits (setuid/setgid
+    # dropped) so private files (e.g. 0600 .env) are never readable by others
+    # while the new content is written. New files use 0o666 so the kernel
+    # applies the umask, like open(path, 'w'). Never call os.umask(): it is
+    # process-wide and would race with other threads.
+    mode = (existing_stat.st_mode & 0o777) if existing_stat is not None else 0o666
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
     while True:
         tmp_path = os.path.join(target_dir, f".tmp_{uuid.uuid4().hex}")
         try:
-            fd = os.open(tmp_path, flags, 0o666)
+            fd = os.open(tmp_path, flags, mode)
             break
         except FileExistsError:
             continue
     try:
-        # Atomic replace swaps in a fresh inode, so carry over the metadata that
-        # matters for a replaced file: mode and ownership (uid/gid) so editing a
-        # group-/shared-owned file does not silently change its owner. Hard-link
-        # identity and xattrs/ACLs cannot be preserved through an inode swap and
-        # are out of scope for this tool.
-        try:
-            existing_stat = os.stat(path)
-        except OSError:
-            existing_stat = None
         with os.fdopen(fd, "w", encoding=encoding) as f:
             f.write(content)
             f.flush()
             os.fsync(f.fileno())  # durability before rename
         if existing_stat is not None:
+            # Restore bits the umask may have removed; never widens beyond the
+            # target. If this fails the temp file is at most as open as the target.
             try:
-                os.chmod(tmp_path, existing_stat.st_mode)
+                os.chmod(tmp_path, mode)
             except OSError:
                 pass  # best-effort
             if hasattr(os, "chown"):

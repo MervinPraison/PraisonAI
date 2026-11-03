@@ -363,6 +363,33 @@ class TestSearchReplace:
                 assert f.read() == "new"
             assert sorted(os.listdir(temp_dir)) == ["link.txt", "real.txt"]
 
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_atomic_write_temp_file_never_wider_than_private_target(self, monkeypatch):
+        """A 0600 target's new content must never sit in a more readable temp file."""
+        import stat
+        from praisonai.code.utils import file_utils
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = os.path.join(temp_dir, ".env")
+            with open(path, "w") as f:
+                f.write("OLD=1")
+            os.chmod(path, 0o600)
+
+            seen = []
+            real_fdopen = os.fdopen
+
+            def spy_fdopen(fd, *a, **kw):
+                seen.append(stat.S_IMODE(os.fstat(fd).st_mode))
+                return real_fdopen(fd, *a, **kw)
+
+            monkeypatch.setattr(file_utils.os, "fdopen", spy_fdopen)
+            file_utils.atomic_write(path, "NEW=2")
+
+            assert seen and all(m & 0o077 == 0 for m in seen), seen
+            assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+            with open(path) as f:
+                assert f.read() == "NEW=2"
+
     def test_multiple_operations(self):
         """Test multiple search/replace operations."""
         from praisonai.code.tools.search_replace import search_replace
