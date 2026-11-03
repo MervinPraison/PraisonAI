@@ -308,7 +308,7 @@ def count_file_lines(file_path: str) -> int:
     return count
 
 
-def atomic_write(path: str, content: str, *, encoding: str = "utf-8") -> None:
+def atomic_write(path: str, content: str, *, encoding: Optional[str] = "utf-8") -> None:
     """Write ``content`` to ``path`` atomically (temp file + fsync + os.replace).
 
     ``open(path, 'w')`` truncates the target immediately, so any interrupt
@@ -333,11 +333,18 @@ def atomic_write(path: str, content: str, *, encoding: str = "utf-8") -> None:
             f.write(content)
             f.flush()
             os.fsync(f.fileno())  # durability before rename
-        if existing_stat is not None:
-            try:
+        try:
+            if existing_stat is not None:
                 os.chmod(tmp_path, existing_stat.st_mode)
-            except OSError:
-                pass  # best-effort
+            else:
+                # New file: match open(path, 'w') (0666 filtered by umask)
+                # instead of mkstemp's private 0600.
+                umask = os.umask(0)
+                os.umask(umask)
+                os.chmod(tmp_path, 0o666 & ~umask)
+        except OSError:
+            pass  # best-effort
+        if existing_stat is not None:
             if hasattr(os, "chown"):
                 try:
                     os.chown(tmp_path, existing_stat.st_uid, existing_stat.st_gid)

@@ -4,6 +4,7 @@ Tests for praisonai.code.tools module.
 
 import os
 import tempfile
+import pytest
 
 
 class TestReadFile:
@@ -310,6 +311,20 @@ class TestSearchReplace:
             with open(file_path, 'r') as f:
                 assert f.read() == "Hello, old world!"
             assert os.listdir(temp_dir) == ["test.txt"]
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
+    def test_atomic_write_new_file_respects_umask(self):
+        """New files get 0666 & ~umask like open(path, 'w'), not mkstemp's 0600."""
+        from praisonai.code.utils.file_utils import atomic_write
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            old = os.umask(0o022)
+            try:
+                path = os.path.join(temp_dir, "new.txt")
+                atomic_write(path, "x")
+            finally:
+                os.umask(old)
+            assert (os.stat(path).st_mode & 0o777) == 0o644
 
     def test_multiple_operations(self):
         """Test multiple search/replace operations."""

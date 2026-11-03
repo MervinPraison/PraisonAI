@@ -207,7 +207,7 @@ def _run_edits(
 
     # Write file atomically if not dry run (crash-safe: no zero-byte truncation)
     if not dry_run and result["edits_applied"] > 0:
-        _atomic_write(filepath, content)
+        _atomic_write(filepath, content, encoding=None)  # match locale-default read above
 
     result["success"] = result["edits_failed"] == 0
 
