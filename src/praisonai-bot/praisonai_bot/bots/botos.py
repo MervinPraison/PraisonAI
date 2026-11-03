@@ -112,10 +112,12 @@ _BOTOS_TOP_KEYS = frozenset({
     "name", "agent", "platforms", "health", "supervision", "gateway",
     "drain_timeout", "max_concurrent_runs", "queue_depth", "overflow_policy",
     "max_concurrent_runs_per_scope", "max_rss_mb", "reliability",
+    "per_user_per_minute",
 })
 _BOTOS_GATEWAY_KEYS = frozenset({
     "drain_timeout", "max_concurrent_runs", "queue_depth", "overflow_policy",
     "max_concurrent_runs_per_scope", "max_rss_mb", "reliability",
+    "per_user_per_minute",
 })
 # Sections that only the gateway runtime (``praisonai gateway start``) honours.
 _GATEWAY_ONLY_KEYS = frozenset({
@@ -191,6 +193,7 @@ class BotOS:
         admission_policy: Optional[Any] = None,
         max_rss_mb: float = 0.0,
         reliability: Optional[str] = None,
+        per_user_per_minute: int = 0,
         turn_lock: Optional[Any] = None,
         redis_config: Optional[Any] = None,
         degraded_registry: Optional[Any] = None,
@@ -265,6 +268,8 @@ class BotOS:
             max_concurrent_runs_per_scope=max_concurrent_runs_per_scope,
             policy=admission_policy,
             resource_policy=build_memory_pressure_policy(max_rss_mb),
+            # Issue #6215: per-user inbound request budget (0 = unlimited).
+            per_user_per_minute=per_user_per_minute,
         )
         self._on_quiesce = None  # optional callable(): host-suspend driver
         # W1: shared identity resolver applied to every managed bot —
@@ -1842,6 +1847,11 @@ class BotOS:
         # ``reliability`` or ``gateway.reliability``; the preset composes drain
         # + admission while any explicit field above still overrides it.
         reliability = raw.get("reliability", gateway_cfg.get("reliability"))
+        # Issue #6215: per-user inbound request budget. Default 0 = unlimited.
+        # Validated (not truncated) by ``build_rate_limit_policy``.
+        per_user_per_minute = raw.get(
+            "per_user_per_minute", gateway_cfg.get("per_user_per_minute", 0)
+        )
 
         return cls(
             bots=bots,
@@ -1854,6 +1864,7 @@ class BotOS:
             max_concurrent_runs_per_scope=max_concurrent_runs_per_scope,
             max_rss_mb=max_rss_mb,
             reliability=reliability,
+            per_user_per_minute=per_user_per_minute,
         )
 
     async def probe_all(self, timeout: float = 15.0) -> Dict[str, Any]:

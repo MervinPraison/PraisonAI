@@ -912,6 +912,8 @@ class GatewayServerSchema(BaseModel):
     max_concurrent_runs: Optional[int] = Field(None, ge=0)
     queue_depth: Optional[int] = Field(None, ge=0)
     overflow_policy: Optional[str] = None
+    # Per-user inbound request budget (#6215). 0 = unlimited (default).
+    per_user_per_minute: Optional[int] = Field(None, ge=0)
     preauth_max_connections_per_ip: Optional[int] = Field(None, ge=0)
     max_unauthorized_frames: Optional[int] = Field(None, ge=0)
     # Graceful-drain windows (#2375 / #2533)
