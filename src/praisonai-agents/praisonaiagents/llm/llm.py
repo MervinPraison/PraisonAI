@@ -5557,6 +5557,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             break
                         last_tool_call_fingerprint = fingerprint
 
+                        # Any prose the model emitted alongside the calls is
+                        # still part of the answer -- yield it before the cap
+                        # check so it is not lost when the limit is reached.
+                        if content:
+                            yield content
+
                         # Enforce the same per-turn guardrail the streaming and
                         # non-streaming loops apply (before recording the assistant turn, so no
                         # declared tool_call_id is left without a reply), so the fallback cannot run
@@ -5584,11 +5590,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 "content": content or "",
                                 "tool_calls": self._serialize_tool_calls(tool_calls),
                             })
-
-                        # Any prose the model emitted alongside the calls is
-                        # still part of the answer.
-                        if content:
-                            yield content
 
                         for tool_call in tool_calls:
                             tool_call_count += 1
