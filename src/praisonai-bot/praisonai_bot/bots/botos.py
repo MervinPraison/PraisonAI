@@ -106,6 +106,47 @@ def _coerce_drain_timeout(value: Optional[Any]) -> Optional[float]:
     return timeout
 
 
+# Issue #6210: keys ``BotOS.from_config`` actually reads. Anything else in a
+# BotOS YAML used to be dropped silently.
+_BOTOS_TOP_KEYS = frozenset({
+    "name", "agent", "platforms", "health", "supervision", "gateway",
+    "drain_timeout", "max_concurrent_runs", "queue_depth", "overflow_policy",
+    "max_concurrent_runs_per_scope", "max_rss_mb", "reliability",
+})
+_BOTOS_GATEWAY_KEYS = frozenset({
+    "drain_timeout", "max_concurrent_runs", "queue_depth", "overflow_policy",
+    "max_concurrent_runs_per_scope", "max_rss_mb", "reliability",
+})
+# Sections that only the gateway runtime (``praisonai gateway start``) honours.
+_GATEWAY_ONLY_KEYS = frozenset({
+    "channels", "agents", "routing", "schedules", "rooms", "hooks",
+    "access_groups", "mcp_servers", "identity",
+})
+
+
+def _check_botos_config_shape(raw: Dict[str, Any], path: str) -> None:
+    """Fail loudly on gateway-only YAML and warn on keys BotOS will not read."""
+    gateway_only = sorted(k for k in raw if k in _GATEWAY_ONLY_KEYS)
+    if gateway_only:
+        raise ValueError(
+            f"{path} is a gateway config (sections: {', '.join(gateway_only)}) "
+            "which BotOS.from_config() cannot honour. Run it the same way as "
+            "`praisonai gateway start --config`: "
+            "asyncio.run(WebSocketGateway().start_with_config(path)) "
+            "(from praisonai_bot import WebSocketGateway)."
+        )
+    ignored = [str(k) for k in raw if k not in _BOTOS_TOP_KEYS]
+    gateway_cfg = raw.get("gateway")
+    if isinstance(gateway_cfg, dict):
+        ignored += [f"gateway.{k}" for k in gateway_cfg if k not in _BOTOS_GATEWAY_KEYS]
+    if ignored:
+        logger.warning(
+            "BotOS.from_config(%s): ignoring unsupported keys %s "
+            "(use WebSocketGateway().start_with_config() for full gateway configs)",
+            path, ", ".join(sorted(ignored)),
+        )
+
+
 class BotOS:
     """Multi-platform bot orchestrator.
 
@@ -1600,11 +1641,22 @@ class BotOS:
               startup_grace: 60
               max_restarts_per_hour: 10
 
+        This is the lightweight BotOS dialect. A full ``gateway.yaml`` (with
+        ``channels:``/``agents:``/``routing:``/``schedules:`` …) is *not*
+        accepted here — it raises ``ValueError`` instead of being silently
+        degraded. Run such a file exactly like ``praisonai gateway start``::
+
+            from praisonai_bot import WebSocketGateway
+            asyncio.run(WebSocketGateway().start_with_config("gateway.yaml"))
+
         Args:
             path: Path to YAML config file.
 
         Returns:
             Configured BotOS instance.
+
+        Raises:
+            ValueError: If the file uses gateway-only sections.
         """
         import os
         import re
@@ -1619,6 +1671,8 @@ class BotOS:
 
         if not raw or not isinstance(raw, dict):
             raise ValueError(f"Invalid BotOS config: {path}")
+
+        _check_botos_config_shape(raw, path)
 
         def _resolve_env(val):
             if isinstance(val, str):
