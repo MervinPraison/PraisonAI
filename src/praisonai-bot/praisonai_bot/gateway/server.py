@@ -1546,13 +1546,17 @@ class WebSocketGateway:
             raise RuntimeError(error_msg)
         
         self._pid_lock = pid_lock
+        # When ``start_with_config`` already claimed the state root, its channel
+        # bots are still polling if we fail here; only it may release that lock
+        # (after channels stop), or a second gateway could claim the state.
+        owns_state_lock = self._state_lock is None
         try:
             self._acquire_state_lock()
             await self._start_locked()
         except BaseException:
             # Any failure after claiming (bad config, bind error, cancel) must
             # not leave a live process holding the locks and blocking restarts.
-            self._release_locks()
+            self._release_locks(state=owns_state_lock)
             raise
 
     def _acquire_state_lock(self) -> None:
@@ -1571,9 +1575,9 @@ class WebSocketGateway:
             raise RuntimeError(format_state_collision_error(state_dir, st_lock.get_lock_info()))
         self._state_lock = st_lock
 
-    def _release_locks(self) -> None:
-        """Release the port and state locks if held (idempotent)."""
-        for attr in ("_pid_lock", "_state_lock"):
+    def _release_locks(self, state: bool = True) -> None:
+        """Release the port lock and (if ``state``) the state lock (idempotent)."""
+        for attr in ("_pid_lock", "_state_lock") if state else ("_pid_lock",):
             lock = getattr(self, attr, None)
             if lock:
                 lock.release_lock()
