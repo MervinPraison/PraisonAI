@@ -1412,6 +1412,7 @@ class WebSocketGateway:
         
         # PID lock for single-instance enforcement
         self._pid_lock: Optional[Any] = None
+        self._state_lock: Optional[Any] = None
         
         # Channel supervisor for resilient bot management. Share the gateway's
         # degraded-capability registry so the fleet crash-loop breaker (Issue
@@ -1544,8 +1545,20 @@ class WebSocketGateway:
             logger.error("Gateway startup failed - another instance is running")
             raise RuntimeError(error_msg)
         
-        # Store PID lock for cleanup
+        # The port lock alone admits a second gateway on another port that shares
+        # the same state + bot tokens (split-brain). Also lock the state root.
+        from .port_utils import state_lock, resolve_state_dir, format_state_collision_error
+        state_dir = resolve_state_dir()
+        st_lock = state_lock(state_dir, host=self._host, port=self._port)
+        if not st_lock.acquire_lock(self._host, self._port):
+            lock_info = st_lock.get_lock_info()
+            pid_lock.release_lock()
+            logger.error("Gateway startup failed - another instance owns the shared state")
+            raise RuntimeError(format_state_collision_error(state_dir, lock_info))
+
+        # Store PID locks for cleanup
         self._pid_lock = pid_lock
+        self._state_lock = st_lock
         
         # Validate bind-aware auth configuration before starting
         from .auth import assert_external_bind_safe
@@ -2774,6 +2787,9 @@ class WebSocketGateway:
             if hasattr(self, '_pid_lock') and self._pid_lock:
                 self._pid_lock.release_lock()
                 self._pid_lock = None
+            if getattr(self, '_state_lock', None):
+                self._state_lock.release_lock()
+                self._state_lock = None
             # Re-raise the original exception
             raise
         finally:
@@ -3996,6 +4012,9 @@ class WebSocketGateway:
         # Release PID lock
         if hasattr(self, '_pid_lock') and self._pid_lock:
             self._pid_lock.release_lock()
+        if getattr(self, '_state_lock', None):
+            self._state_lock.release_lock()
+            self._state_lock = None
         
         logger.info("Gateway stopped")
     

@@ -86,19 +86,21 @@ def _process_create_time(pid: int) -> Optional[float]:
 class GatewayPIDLock:
     """Manages PID lock file for single-instance gateway enforcement."""
     
-    def __init__(self, lock_dir: Optional[Path] = None, host: str = "127.0.0.1", port: int = 8765):
+    def __init__(self, lock_dir: Optional[Path] = None, host: str = "127.0.0.1", port: int = 8765,
+                 lock_name: Optional[str] = None):
         """Initialize PID lock manager.
         
         Args:
             lock_dir: Directory for lock file (default: ~/.praisonai/)
             host: Gateway host
             port: Gateway port
+            lock_name: Override the lock file name (used by the state lock)
         """
         self.lock_dir = lock_dir or Path.home() / ".praisonai"
         # Make lock file specific to host and port to allow multiple instances
         safe_host = host.replace(":", "_").replace(".", "_")
-        self.lock_file = self.lock_dir / f"gateway-{safe_host}-{port}.pid"
-        self.lock_dir.mkdir(exist_ok=True)
+        self.lock_file = self.lock_dir / (lock_name or f"gateway-{safe_host}-{port}.pid")
+        self.lock_dir.mkdir(parents=True, exist_ok=True)
     
     def acquire_lock(self, host: str, port: int) -> bool:
         """Acquire the PID lock for the gateway.
@@ -120,6 +122,9 @@ class GatewayPIDLock:
                     lines = lock_content.split('\n')
                     if lines:
                         existing_pid = int(lines[0])
+                        if existing_pid == current_pid:
+                            # Re-acquire by the same process (in-process restart).
+                            return True
                         existing_create_time = None
                         if len(lines) >= 5 and lines[4]:
                             try:
@@ -253,6 +258,43 @@ class GatewayPIDLock:
             pass
 
 
+def resolve_state_dir() -> Path:
+    """Return the gateway's shared mutable state root (``$PRAISONAI_HOME`` or ``~/.praisonai``).
+
+    The durable outbox / inbound journal / DLQ / pairing stores live here, so it
+    (not the TCP port) is what identifies a gateway instance.
+    """
+    base = os.environ.get("PRAISONAI_HOME")
+    return Path(base).expanduser() if base else Path.home() / ".praisonai"
+
+
+def state_lock(state_dir: Optional[Path] = None, host: str = "127.0.0.1",
+               port: int = 8765) -> GatewayPIDLock:
+    """Single-instance lock keyed on the shared state directory, regardless of port.
+
+    Two gateways sharing one state root would poll the same bot tokens and write
+    the same SQLite stores concurrently (split-brain), so only one may own it.
+    """
+    return GatewayPIDLock(lock_dir=state_dir or resolve_state_dir(), host=host,
+                          port=port, lock_name="gateway.state.pid")
+
+
+def format_state_collision_error(state_dir: Path, lock_info: Optional[dict] = None) -> str:
+    """Error shown when another live gateway already owns the shared state."""
+    holder = ""
+    if lock_info:
+        holder = f" (PID {lock_info['pid']} on {lock_info['host']}:{lock_info['port']})"
+    return "\n".join([
+        f"Error: another gateway already owns the state at {state_dir}{holder}.",
+        "",
+        "  Two gateways sharing state poll the same bot tokens and write the same",
+        "  queues, causing 409 Conflict errors and duplicate delivery.",
+        "  Stop it:  praisonai gateway stop",
+        "  Or run an isolated gateway with its own state and bot tokens:",
+        "    PRAISONAI_HOME=~/.praisonai-b praisonai gateway start",
+    ])
+
+
 def format_collision_error(host: str, port: int, lock_info: Optional[dict] = None) -> str:
     """Format a user-friendly error message for port collisions.
     
@@ -275,10 +317,11 @@ def format_collision_error(host: str, port: int, lock_info: Optional[dict] = Non
         pid = lock_info['pid']
         lines.extend([
             f"  Another gateway may be running (PID {pid}).",
-            f"  Stop it:  praisonai gateway stop",
-            f"  Or use a different port:  GATEWAY_PORT={port + 1} praisonai gateway start",
+            "  Stop it:  praisonai gateway stop",
             "",
-            "  Only ONE gateway process should poll each Telegram bot token.",
+            "  Only ONE gateway process may poll each bot token. To run a second,",
+            "  isolated gateway give it its own state, bot tokens and port:",
+            f"    PRAISONAI_HOME=~/.praisonai-b GATEWAY_PORT={port + 1} praisonai gateway start",
         ])
     else:
         lines.extend([
