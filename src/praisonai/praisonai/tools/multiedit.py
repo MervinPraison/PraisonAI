@@ -8,54 +8,11 @@ without multiple file read/write cycles.
 import contextlib
 import difflib
 import os
-import tempfile
 from typing import Any, Dict, List, Optional
 
+from praisonai.code.utils.file_utils import atomic_write as _atomic_write
 from praisonai.code.utils.file_utils import is_path_within_directory
 
-
-def _atomic_write(path: str, content: str) -> None:
-    """Write ``content`` to ``path`` atomically (temp file + fsync + os.replace).
-
-    ``open(path, 'w')`` truncates the target immediately, so any interrupt
-    (cancellation, SIGTERM, disk-full) between open and write leaves the file
-    zero-byte or half-written and the original content lost. multiedit runs on
-    LLM-driven tool calls that regularly hit timeouts/cancellations, so it needs
-    the same crash-safe write the rest of the wrapper already uses for configs.
-    """
-    target_dir = os.path.dirname(os.path.abspath(path)) or "."
-    fd, tmp_path = tempfile.mkstemp(prefix=".tmp_", dir=target_dir)
-    try:
-        # Atomic replace swaps in a fresh inode, so carry over the metadata that
-        # matters for a replaced file: mode (mkstemp creates 0600 by default) and
-        # ownership (uid/gid) so editing a group-/shared-owned file does not
-        # silently change its owner. Hard-link identity and xattrs/ACLs cannot be
-        # preserved through an inode swap and are out of scope for this tool.
-        try:
-            existing_stat = os.stat(path)
-        except OSError:
-            existing_stat = None
-        with os.fdopen(fd, "w") as f:
-            f.write(content)
-            f.flush()
-            os.fsync(f.fileno())  # durability before rename
-        if existing_stat is not None:
-            try:
-                os.chmod(tmp_path, existing_stat.st_mode)
-            except OSError:
-                pass  # best-effort
-            if hasattr(os, "chown"):
-                try:
-                    os.chown(tmp_path, existing_stat.st_uid, existing_stat.st_gid)
-                except (OSError, AttributeError):
-                    pass  # best-effort (needs privilege; no-op on Windows)
-        os.replace(tmp_path, path)  # atomic on POSIX + Windows
-    except BaseException:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-        raise
 
 
 @contextlib.contextmanager
@@ -250,7 +207,7 @@ def _run_edits(
 
     # Write file atomically if not dry run (crash-safe: no zero-byte truncation)
     if not dry_run and result["edits_applied"] > 0:
-        _atomic_write(filepath, content)
+        _atomic_write(filepath, content, encoding=None)  # match locale-default read above
 
     result["success"] = result["edits_failed"] == 0
 
