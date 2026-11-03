@@ -326,6 +326,23 @@ class TestSearchReplace:
                 os.umask(old)
             assert (os.stat(path).st_mode & 0o777) == 0o644
 
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
+    def test_atomic_write_does_not_touch_process_umask(self, monkeypatch):
+        """os.umask is process-wide; changing it races with other threads."""
+        from praisonai.code.utils.file_utils import atomic_write
+
+        def no_umask(*args, **kwargs):
+            raise AssertionError("atomic_write must not call os.umask")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            monkeypatch.setattr(os, "umask", no_umask)
+            new_path = os.path.join(temp_dir, "new.txt")
+            atomic_write(new_path, "a")
+            atomic_write(new_path, "b")
+            with open(new_path) as f:
+                assert f.read() == "b"
+            assert os.listdir(temp_dir) == ["new.txt"]
+
     def test_multiple_operations(self):
         """Test multiple search/replace operations."""
         from praisonai.code.tools.search_replace import search_replace

@@ -10,7 +10,7 @@ Provides utilities for file operations including:
 
 import os
 import re
-import tempfile
+import uuid
 from typing import Optional, Tuple
 
 
@@ -318,13 +318,23 @@ def atomic_write(path: str, content: str, *, encoding: Optional[str] = "utf-8") 
     so they need the same crash-safe write the wrapper already uses for configs.
     """
     target_dir = os.path.dirname(os.path.abspath(path)) or "."
-    fd, tmp_path = tempfile.mkstemp(prefix=".tmp_", dir=target_dir)
+    # Create the temp file ourselves with 0o666 so the kernel applies the
+    # current umask (same mode as open(path, 'w') for new files). Never call
+    # os.umask(): it is process-wide and would race with other threads.
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    while True:
+        tmp_path = os.path.join(target_dir, f".tmp_{uuid.uuid4().hex}")
+        try:
+            fd = os.open(tmp_path, flags, 0o666)
+            break
+        except FileExistsError:
+            continue
     try:
         # Atomic replace swaps in a fresh inode, so carry over the metadata that
-        # matters for a replaced file: mode (mkstemp creates 0600 by default) and
-        # ownership (uid/gid) so editing a group-/shared-owned file does not
-        # silently change its owner. Hard-link identity and xattrs/ACLs cannot be
-        # preserved through an inode swap and are out of scope for this tool.
+        # matters for a replaced file: mode and ownership (uid/gid) so editing a
+        # group-/shared-owned file does not silently change its owner. Hard-link
+        # identity and xattrs/ACLs cannot be preserved through an inode swap and
+        # are out of scope for this tool.
         try:
             existing_stat = os.stat(path)
         except OSError:
@@ -333,18 +343,11 @@ def atomic_write(path: str, content: str, *, encoding: Optional[str] = "utf-8") 
             f.write(content)
             f.flush()
             os.fsync(f.fileno())  # durability before rename
-        try:
-            if existing_stat is not None:
-                os.chmod(tmp_path, existing_stat.st_mode)
-            else:
-                # New file: match open(path, 'w') (0666 filtered by umask)
-                # instead of mkstemp's private 0600.
-                umask = os.umask(0)
-                os.umask(umask)
-                os.chmod(tmp_path, 0o666 & ~umask)
-        except OSError:
-            pass  # best-effort
         if existing_stat is not None:
+            try:
+                os.chmod(tmp_path, existing_stat.st_mode)
+            except OSError:
+                pass  # best-effort
             if hasattr(os, "chown"):
                 try:
                     os.chown(tmp_path, existing_stat.st_uid, existing_stat.st_gid)
