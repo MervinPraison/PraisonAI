@@ -1412,6 +1412,7 @@ class WebSocketGateway:
         
         # PID lock for single-instance enforcement
         self._pid_lock: Optional[Any] = None
+        self._state_lock: Optional[Any] = None
         
         # Channel supervisor for resilient bot management. Share the gateway's
         # degraded-capability registry so the fleet crash-loop breaker (Issue
@@ -1544,9 +1545,46 @@ class WebSocketGateway:
             logger.error("Gateway startup failed - another instance is running")
             raise RuntimeError(error_msg)
         
-        # Store PID lock for cleanup
         self._pid_lock = pid_lock
-        
+        # When ``start_with_config`` already claimed the state root, its channel
+        # bots are still polling if we fail here; only it may release that lock
+        # (after channels stop), or a second gateway could claim the state.
+        owns_state_lock = self._state_lock is None
+        try:
+            self._acquire_state_lock()
+            await self._start_locked()
+        except BaseException:
+            # Any failure after claiming (bad config, bind error, cancel) must
+            # not leave a live process holding the locks and blocking restarts.
+            self._release_locks(state=owns_state_lock)
+            raise
+
+    def _acquire_state_lock(self) -> None:
+        """Claim the shared state root (idempotent).
+
+        The port lock alone admits a second gateway on another port sharing the
+        same state + bot tokens (split-brain), so the state root is locked too.
+        """
+        if self._state_lock is not None:
+            return
+        from .port_utils import state_lock, resolve_state_dir, format_state_collision_error
+        state_dir = resolve_state_dir()
+        st_lock = state_lock(state_dir, host=self._host, port=self._port)
+        if not st_lock.acquire_lock(self._host, self._port):
+            logger.error("Gateway startup failed - another instance owns the shared state")
+            raise RuntimeError(format_state_collision_error(state_dir, st_lock.get_lock_info()))
+        self._state_lock = st_lock
+
+    def _release_locks(self, state: bool = True) -> None:
+        """Release the port lock and (if ``state``) the state lock (idempotent)."""
+        for attr in ("_pid_lock", "_state_lock") if state else ("_pid_lock",):
+            lock = getattr(self, attr, None)
+            if lock:
+                lock.release_lock()
+                setattr(self, attr, None)
+
+    async def _start_locked(self) -> None:
+        """Body of :meth:`start` once the single-instance locks are held."""
         # Validate bind-aware auth configuration before starting
         from .auth import assert_external_bind_safe
         self.config.host = self._host
@@ -2768,14 +2806,8 @@ class WebSocketGateway:
                 self._ledger_heartbeat_loop(), name="gateway-lifecycle-ledger"
             )
         try:
+            # Lock cleanup on failure is handled by ``start()``.
             await self._server.serve()
-        except Exception as e:
-            # Clean up PID lock on any startup failure
-            if hasattr(self, '_pid_lock') and self._pid_lock:
-                self._pid_lock.release_lock()
-                self._pid_lock = None
-            # Re-raise the original exception
-            raise
         finally:
             self._disarm_watchdog()
             await self._cancel_liveness_task()
@@ -3993,9 +4025,7 @@ class WebSocketGateway:
                 logger.debug("Failed to shut down pooled MCP client")
         self._mcp_pool.clear()
 
-        # Release PID lock
-        if hasattr(self, '_pid_lock') and self._pid_lock:
-            self._pid_lock.release_lock()
+        self._release_locks()
         
         logger.info("Gateway stopped")
     
@@ -12436,6 +12466,9 @@ class WebSocketGateway:
             except (NotImplementedError, OSError, ValueError):
                 pass
 
+        # Claim the state root BEFORE channels start: channel setup replays the
+        # inbound journal, which a rejected second gateway must never touch.
+        self._acquire_state_lock()
         try:
             await _run_all()
         finally:
@@ -12486,3 +12519,4 @@ class WebSocketGateway:
                             logger.warning("Error draining websocket sessions: %s", e)
             finally:
                 self._cancel_shutdown_deadline()
+                self._release_locks()
