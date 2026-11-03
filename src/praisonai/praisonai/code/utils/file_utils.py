@@ -317,7 +317,10 @@ def atomic_write(path: str, content: str, *, encoding: Optional[str] = "utf-8") 
     tools run on LLM-driven tool calls that regularly hit timeouts/cancellations,
     so they need the same crash-safe write the wrapper already uses for configs.
     """
-    target_dir = os.path.dirname(os.path.abspath(path)) or "."
+    # Resolve symlinks so we replace the link target (like open(path, 'w')
+    # writes through the link) instead of turning the symlink into a plain file.
+    path = os.path.realpath(path)
+    target_dir = os.path.dirname(path) or "."
     # Create the temp file ourselves with 0o666 so the kernel applies the
     # current umask (same mode as open(path, 'w') for new files). Never call
     # os.umask(): it is process-wide and would race with other threads.

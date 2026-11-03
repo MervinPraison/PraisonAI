@@ -343,6 +343,26 @@ class TestSearchReplace:
                 assert f.read() == "b"
             assert os.listdir(temp_dir) == ["new.txt"]
 
+    @pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlinks unsupported")
+    def test_atomic_write_writes_through_symlink(self):
+        """Like open(path, 'w'), editing a symlink must update its target and keep the link."""
+        from praisonai.code.utils.file_utils import atomic_write
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            real = os.path.join(temp_dir, "real.txt")
+            link = os.path.join(temp_dir, "link.txt")
+            with open(real, "w") as f:
+                f.write("orig")
+            try:
+                os.symlink(real, link)
+            except OSError:
+                pytest.skip("cannot create symlink")
+            atomic_write(link, "new")
+            assert os.path.islink(link)
+            with open(real) as f:
+                assert f.read() == "new"
+            assert sorted(os.listdir(temp_dir)) == ["link.txt", "real.txt"]
+
     def test_multiple_operations(self):
         """Test multiple search/replace operations."""
         from praisonai.code.tools.search_replace import search_replace
