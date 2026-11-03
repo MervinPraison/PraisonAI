@@ -31,3 +31,27 @@ def test_flat_max_iter_overrides_execution_block():
 def test_no_execution_block_keeps_defaults():
     agent = YAMLWorkflowParser()._create_agent("worker", {"role": "Worker"})
     assert not agent._max_budget
+
+
+def test_roles_format_keeps_execution_block():
+    """The agents.yaml `roles:` format must not drop `execution:` in conversion."""
+    parser = YAMLWorkflowParser()
+    parser.parse_string(
+        "framework: praisonai\n"
+        "topic: t\n"
+        "roles:\n"
+        "  worker:\n"
+        "    role: Worker\n"
+        "    goal: g\n"
+        "    backstory: b\n"
+        "    execution:\n"
+        "      max_budget: 2.0\n"
+        "      on_budget_exceeded: warn\n"
+        "    tasks:\n"
+        "      t1:\n"
+        "        description: do it\n"
+        "        expected_output: done\n"
+    )
+    agent = parser._agents["worker"]
+    assert agent._max_budget == 2.0
+    assert agent._on_budget_exceeded == "warn"

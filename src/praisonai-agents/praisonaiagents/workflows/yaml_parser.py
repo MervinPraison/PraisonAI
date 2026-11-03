@@ -473,7 +473,10 @@ class YAMLWorkflowParser:
             
             if 'reasoning' in role_config:
                 agent['reasoning'] = role_config['reasoning']
-            
+
+            if isinstance(role_config.get('execution'), dict):
+                agent['execution'] = role_config['execution']
+
             agents[role_id] = agent
         
         return agents

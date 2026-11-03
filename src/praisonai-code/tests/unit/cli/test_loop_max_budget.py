@@ -66,3 +66,11 @@ def test_budget_dict_builds_real_execution_config():
 
     agent = Agent(name="a", execution={"max_budget": 0.25, "on_budget_exceeded": "stop"})
     assert agent._max_budget == 0.25
+
+
+@pytest.mark.parametrize("bad", [0.0, -1.0, float("nan"), float("inf")])
+def test_invalid_max_budget_rejected(monkeypatch, bad):
+    captured = _capture(monkeypatch)
+    with pytest.raises(typer.Exit):
+        _run(max_budget=bad)
+    assert "agent_kwargs" not in captured

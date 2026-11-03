@@ -7,6 +7,7 @@ Provides CLI interface for running agents in autonomous loops with:
 - Iteration limits and timeouts
 """
 
+import math
 from typing import Optional
 
 import typer
@@ -90,6 +91,10 @@ def _run_loop(
     """Execute the autonomous loop."""
     if on_budget_exceeded not in ("stop", "warn"):
         typer.echo("Error: --on-budget-exceeded must be 'stop' or 'warn'", err=True)
+        raise typer.Exit(2)
+    # 0 would mean "no cap" downstream; negatives and NaN/inf are never a real cap.
+    if max_budget is not None and not (math.isfinite(max_budget) and max_budget > 0):
+        typer.echo("Error: --max-budget must be a positive number", err=True)
         raise typer.Exit(2)
     try:
         from praisonaiagents import Agent
