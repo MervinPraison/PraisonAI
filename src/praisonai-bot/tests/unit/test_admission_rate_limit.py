@@ -177,5 +177,64 @@ def test_api_rate_key_ignores_session_header():
     a = GatewayApiEndpoints._rate_key(_Req({"x-session-id": "one"}))
     b = GatewayApiEndpoints._rate_key(_Req({"x-session-id": "two"}))
     assert a == b == "ip:10.0.0.1"
-    tok = GatewayApiEndpoints._rate_key(_Req({"authorization": "Bearer secret-token"}))
+    tok = GatewayApiEndpoints._rate_key(
+        _Req({"authorization": "Bearer secret-token"}), "secret-token"
+    )
     assert tok.startswith("token:") and "secret" not in tok
+
+
+def test_api_rate_key_rotating_unvalidated_bearer_shares_ip_budget():
+    """An unvalidated bearer (auth open, or wrong token) cannot mint budgets."""
+    try:
+        from praisonai_bot.gateway.api_endpoints import GatewayApiEndpoints
+    except ModuleNotFoundError:  # pragma: no cover - optional deps
+        pytest.skip("gateway optional dependency not installed")
+
+    class _Req:
+        def __init__(self, headers, host="10.0.0.1"):
+            self.headers = headers
+            self.client = type("C", (), {"host": host})()
+
+    for configured in (None, "", "real-token"):
+        keys = {
+            GatewayApiEndpoints._rate_key(
+                _Req({"authorization": f"Bearer rotate-{i}"}), configured
+            )
+            for i in range(5)
+        }
+        assert keys == {"ip:10.0.0.1"}
+
+
+def test_api_rate_key_missing_peer_never_falls_back_to_session():
+    try:
+        from praisonai_bot.gateway.api_endpoints import GatewayApiEndpoints
+    except ModuleNotFoundError:  # pragma: no cover - optional deps
+        pytest.skip("gateway optional dependency not installed")
+
+    class _Req:
+        headers = {"x-session-id": "chosen"}
+        client = None
+
+    assert GatewayApiEndpoints._rate_key(_Req()) == "ip:unknown"
+
+    gate = build_admission_gate(per_user_per_minute=1)
+
+    async def run():
+        async with gate.admit(session_id="conv-1", rate_key="ip:unknown"):
+            pass
+        with pytest.raises(AdmissionRejected):
+            async with gate.admit(session_id="conv-2", rate_key="ip:unknown"):
+                pass
+
+    asyncio.run(run())
+
+
+def test_ws_rate_key_missing_peer_is_shared():
+    try:
+        from praisonai_bot.gateway.server import WebSocketGateway
+    except ModuleNotFoundError:  # pragma: no cover - optional deps
+        pytest.skip("gateway optional dependency not installed")
+    gw = WebSocketGateway.__new__(WebSocketGateway)
+    gw._clients = {}
+    assert gw._client_rate_key(None) == "ip:unknown"
+    assert gw._client_rate_key("gone") == "ip:unknown"

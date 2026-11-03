@@ -2631,6 +2631,8 @@ class WebSocketGateway:
                     auth_err = _check_auth(request)
                     if auth_err:
                         return auth_err
+                    # Issue #6215: bind the per-user budget key post-auth.
+                    self._api_endpoints._bind_rate_key(request)
                     return await handler(request)
                 return _wrapped
 
@@ -5901,16 +5903,17 @@ class WebSocketGateway:
     
     # ── Client Management (Public API) ────────────────────────────────
     
-    def _client_rate_key(self, client_id: Optional[str]) -> Optional[str]:
+    def _client_rate_key(self, client_id: Optional[str]) -> str:
         """Stable per-user budget key for a WebSocket turn (#6215).
 
-        Session ids are client-chosen, so charge the peer address instead;
-        ``None`` falls back to the session id (e.g. no live connection).
+        Session ids are client-chosen, so charge the peer address instead.
+        With no known peer, callers share one ``ip:unknown`` budget rather
+        than falling back to the client-chosen session id.
         """
         ws = self._clients.get(client_id) if client_id else None
         peer = getattr(ws, "client", None)
         host = getattr(peer, "host", None)
-        return f"ip:{host}" if host else None
+        return f"ip:{host}" if host else "ip:unknown"
 
     def add_client(self, client_id: str, websocket: Any) -> None:
         """Register a client WebSocket connection.

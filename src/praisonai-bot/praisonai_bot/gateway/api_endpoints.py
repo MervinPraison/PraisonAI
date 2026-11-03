@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import contextvars
 import hashlib
+import hmac
 import json
 import time
 import uuid
@@ -377,7 +378,7 @@ class GatewayApiEndpoints:
                 # Issue #6215: charge a stable caller identity, only when a
                 # budget is set (keeps duck-typed gates' signature intact).
                 rk = (
-                    {"rate_key": self._rate_key_var.get()}
+                    {"rate_key": self._rate_key_var.get() or "ip:unknown"}
                     if getattr(gate, "_rate_limit_enabled", False) else {}
                 )
                 async with gate.admit(session_id=session.session_id, **rk):
@@ -568,15 +569,33 @@ class GatewayApiEndpoints:
     )
 
     @staticmethod
-    def _rate_key(request: Any) -> Optional[str]:
-        """Stable caller identity that a new session header cannot reset."""
+    def _rate_key(request: Any, auth_token: Optional[str] = None) -> str:
+        """Stable caller identity that a client-chosen value cannot reset.
+
+        A bearer token is used only when it *is* the gateway's configured
+        ``auth_token`` (so it was validated); any other bearer value is
+        attacker-chosen and would mint a fresh budget per request, so such
+        callers are charged to their peer address. Never returns ``None``, so the
+        budget never falls back to the client-chosen session id.
+        """
         auth = request.headers.get("authorization", "")
-        if auth.startswith("Bearer ") and auth[7:]:
-            digest = hashlib.sha256(auth[7:].encode("utf-8")).hexdigest()[:16]
-            return "token:" + digest
+        bearer = auth[7:] if auth.startswith("Bearer ") else ""
+        if bearer and auth_token and hmac.compare_digest(
+            bearer.encode("utf-8"), str(auth_token).encode("utf-8")
+        ):
+            return "token:" + hashlib.sha256(bearer.encode("utf-8")).hexdigest()[:16]
         client = getattr(request, "client", None)
         host = getattr(client, "host", None)
-        return f"ip:{host}" if host else None
+        return f"ip:{host}" if host else "ip:unknown"
+
+    def _bind_rate_key(self, request: Any) -> None:
+        """Bind this request's per-user budget key for its turn (#6215).
+
+        Called by the auth-guarded route wrapper after auth has passed.
+        """
+        cfg = getattr(self._gw, "config", None)
+        token = getattr(cfg, "auth_token", None)
+        self._rate_key_var.set(self._rate_key(request, token))
 
     @staticmethod
     def _caller_key(request: Any) -> str:
@@ -592,10 +611,6 @@ class GatewayApiEndpoints:
         (Issue #2715 review, Greptile P2). Such callers are stateless by design;
         they should pass a session header to pin a conversation.
         """
-        # Issue #6215: the session header is client-chosen, so charge the
-        # per-user request budget to a stable caller identity (bearer token
-        # digest, else peer address) bound for this request's turn.
-        GatewayApiEndpoints._rate_key_var.set(GatewayApiEndpoints._rate_key(request))
         for header in ("openai-session", "x-session-id"):
             val = request.headers.get(header)
             if val:
