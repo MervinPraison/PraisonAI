@@ -108,8 +108,22 @@ def test_a_tool_renamed_to_edit_file_counts(make):
 
 
 def test_nested_tool_list_offers_the_edit_hint(make):
-    agent = make(llm="gpt-4o-mini", tools=[["edit_file"]])
+    # _format_tools_for_completion flattens nested lists of tool dicts.
+    agent = make(llm="gpt-4o-mini", tools=[[EDIT_SCHEMA]])
     assert OPENAI_HINT in agent._build_system_prompt()
+
+
+def test_nested_names_the_formatter_drops_get_no_hint(make):
+    # A nested string is not sent to the model, so neither is the hint.
+    agent = make(llm="gpt-4o-mini", tools=[["edit_file"]])
+    assert OPENAI_HINT not in agent._build_system_prompt()
+
+
+def test_nested_bare_name_dict_gets_no_hint(make):
+    # A nested dict without a function schema is dropped by the formatter.
+    agent = make(llm="gpt-4o-mini", tools=[[{"name": "edit_file"}]])
+    assert agent._format_tools_for_completion() == []
+    assert OPENAI_HINT not in agent._build_system_prompt()
 
 
 EDIT_SCHEMA = {"type": "function", "function": {
@@ -125,7 +139,9 @@ def _system_sent(agent, monkeypatch, run):
 
     def fake(messages=None, temperature=None, tools=None, *a, **k):
         sent.append(messages if messages is not None else k.get("messages"))
-        sent_tools.append([t.get("function", {}).get("name") for t in tools or []])
+        # Record the payload the real request builds (inherit, flatten, prune).
+        formatted = agent._format_tools_for_completion(tools)
+        sent_tools.append([t.get("function", {}).get("name") for t in formatted])
         message = SimpleNamespace(content="ok", tool_calls=None, role="assistant", reasoning_content=None)
         return SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason="stop", index=0)],
                                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2),
@@ -145,6 +161,51 @@ def test_native_chat_follows_per_call_edit_tools(make, monkeypatch):
     system, tool_names = _system_sent(agent, monkeypatch, lambda a: a.chat("hi", tools=[EDIT_SCHEMA]))
     assert OPENAI_HINT in system
     assert "edit_file" in tool_names
+
+
+def test_nested_edit_schema_is_sent_with_the_hint(make, monkeypatch):
+    agent = make(llm="gpt-4o-mini", tools=[[EDIT_SCHEMA]])
+    system, tool_names = _system_sent(agent, monkeypatch, lambda a: a.chat("hi"))
+    assert OPENAI_HINT in system
+    assert "edit_file" in tool_names
+
+
+def test_permission_denied_edit_tool_gets_no_hint(make, monkeypatch):
+    agent = make(llm="gpt-4o-mini", tools=[edit_file, lookup])
+    agent._perm_deny = frozenset({"edit_file"})
+    system, tool_names = _system_sent(agent, monkeypatch, lambda a: a.chat("hi"))
+    assert "edit_file" not in tool_names
+    assert OPENAI_HINT not in system
+
+
+def test_deny_added_after_caching_prunes_cached_tools(make):
+    agent = make(llm="gpt-4o-mini", tools=[edit_file, lookup])
+    assert "edit_file" in [t["function"]["name"] for t in agent._format_tools_for_completion()]
+    agent._perm_deny = frozenset({"edit_file"})
+    assert "edit_file" not in [t["function"]["name"] for t in agent._format_tools_for_completion()]
+    assert OPENAI_HINT not in agent._build_system_prompt()
+    # Lifting the denial restores the tool from the same cache entry.
+    agent._perm_deny = frozenset()
+    assert "edit_file" in [t["function"]["name"] for t in agent._format_tools_for_completion()]
+
+
+def test_deny_before_first_format_restores_after_lift(make):
+    agent = make(llm="gpt-4o-mini", tools=[edit_file, lookup])
+    agent._perm_deny = frozenset({"edit_file"})
+    assert "edit_file" not in [t["function"]["name"] for t in agent._format_tools_for_completion()]
+    agent._perm_deny = frozenset()
+    assert "edit_file" in [t["function"]["name"] for t in agent._format_tools_for_completion()]
+
+
+def test_bridge_tool_search_hides_denied_tools(make):
+    agent = make(llm="gpt-4o-mini")
+    agent._tool_search_config = None
+    agent._tool_search_metadata = {"bridge_mode": True, "deferrable_tools": [EDIT_SCHEMA]}
+    agent._perm_deny = frozenset({"edit_file"})
+    out = agent._handle_bridge_tool_call("tool_describe", {"tool_name": "edit_file"})
+    assert "not found" in out
+    agent._perm_deny = frozenset()
+    assert "not found" not in agent._handle_bridge_tool_call("tool_describe", {"tool_name": "edit_file"})
 
 
 def test_native_achat_follows_per_call_edit_tools(make, monkeypatch):

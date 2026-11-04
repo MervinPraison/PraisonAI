@@ -548,9 +548,14 @@ class ChatMixin:
     def _offers_edit_tool(self, tools=None):
         """True when ``tools`` (default: the agent's tools) include a file-edit primitive."""
         for tool in (tools if tools is not None else getattr(self, "tools", None)) or ():
-            if isinstance(tool, (list, tuple)):
-                # Nested tool lists are flattened by _format_tools_for_completion.
-                if self._offers_edit_tool(tool):
+            if isinstance(tool, list):
+                # _format_tools_for_completion flattens a nested list but keeps
+                # only its function-schema dicts, so only those can offer an edit tool.
+                if self._offers_edit_tool([
+                    t for t in tool
+                    if isinstance(t, dict) and t.get("type") == "function"
+                    and isinstance(t.get("function"), dict)
+                ]):
                     return True
                 continue
             if isinstance(tool, str):
@@ -564,7 +569,9 @@ class ChatMixin:
                 name = getattr(tool, "name", None)
                 if not isinstance(name, str):
                     name = getattr(tool, "__name__", None)
-            if name in self._EDIT_TOOL_NAMES:
+            # _prune_denied_tools drops denied tools from the payload, so a
+            # denied edit tool must not earn the hint either.
+            if name in self._EDIT_TOOL_NAMES and self._tool_name_allowed(name):
                 return True
         return False
 
@@ -1239,7 +1246,8 @@ Your Role: {self.role}"""
         if cached_entry is not None:
             cached_tools, cached_metadata = cached_entry
             self._tool_search_metadata = cached_metadata
-            return cached_tools
+            # Re-prune: permissions may have changed since the entry was cached.
+            return self._prune_denied_tools(cached_tools)
             
         formatted_tools = []
         # Provider-hosted tool specs have no local callable; the provider
@@ -1359,20 +1367,19 @@ Your Role: {self.role}"""
             return sorted(tools_list, key=sort_key)
         
         cleaned_tools = sort_formatted_tools(cleaned_tools)
-        
-        # Prune permission-denied tools from the advertised set so the model is
-        # only ever offered tools it can actually call. Mirrors the execution-time
-        # enforcement in tool_execution.py (_perm_deny / _perm_allow). No-op when
-        # no deny set and no allow set are configured (backward compatible).
-        cleaned_tools = self._prune_denied_tools(cleaned_tools)
-        
-        # Cache the formatted tools with LRU eviction, including tool search metadata
+
+        # Cache the unpruned tools with LRU eviction, including tool search
+        # metadata, so a later change to the deny/allow sets takes effect.
         self._cache_put(
             self._formatted_tools_cache,
             cache_key,
             (cleaned_tools, getattr(self, "_tool_search_metadata", None)),
         )
-        return cleaned_tools
+        # Prune permission-denied tools from the advertised set so the model is
+        # only ever offered tools it can actually call. Mirrors the execution-time
+        # enforcement in tool_execution.py (_perm_deny / _perm_allow). No-op when
+        # no deny set and no allow set are configured (backward compatible).
+        return self._prune_denied_tools(cleaned_tools)
 
     def _build_before_tool_definitions_input(self, formatted_tools):
         """Build the BEFORE_TOOL_DEFINITIONS hook input.
