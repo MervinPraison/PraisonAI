@@ -7,6 +7,15 @@ from datetime import datetime
 from typing import Dict, List, Optional, Any
 from .decorator import tool
 
+import warnings
+
+warnings.warn(
+    "praisonaiagents.tools.jira_tools is deprecated and will be removed in a future release; "
+    "use praisonai_tools.tools.jira_watch_tool instead (pip install praisonai-tools)",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 logger = logging.getLogger(__name__)
 
 def _get_jira_connection(
