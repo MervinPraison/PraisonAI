@@ -4646,7 +4646,7 @@ class WebSocketGateway:
 
         elif msg_type == "server_reply":
             # Issue #5351: a client's correlated answer to a server→client
-            # interactive request (approval / choice / input).
+            # interactive request (approval / choice / input / secret).
             request_id = data.get("request_id")
             value = data.get("value")
             if not request_id or not isinstance(value, str):
@@ -4680,7 +4680,7 @@ class WebSocketGateway:
                 return True
             # Answering an approval on behalf of the turn is an approval decision
             # and requires the APPROVALS scope (parity with approvals.resolve);
-            # choice/input answers require WRITE like sending a message.
+            # choice/input/secret answers require WRITE like sending a message.
             required_scope = (
                 OperatorScope.APPROVALS if req_kind == "approval" else OperatorScope.WRITE
             )
@@ -5851,7 +5851,9 @@ class WebSocketGateway:
 
         * ``approval`` → ``"allow"`` or ``"deny"``.
         * ``choice`` → one of the offered ``options`` (any value if none given).
-        * ``input`` → any string.
+        * ``input`` / ``secret`` → any string. A ``secret`` value is handed
+          only to the waiting caller — never logged, echoed, or journalled
+          (Issue #6223).
         """
         kind = getattr(req, "kind", "input")
         if kind == "approval":
