@@ -565,7 +565,9 @@ class ChatMixin:
                 name = getattr(tool, "name", None)
                 if not isinstance(name, str):
                     name = getattr(tool, "__name__", None)
-            if name in self._EDIT_TOOL_NAMES:
+            # _prune_denied_tools drops denied tools from the payload, so a
+            # denied edit tool must not earn the hint either.
+            if name in self._EDIT_TOOL_NAMES and self._tool_name_allowed(name):
                 return True
         return False
 

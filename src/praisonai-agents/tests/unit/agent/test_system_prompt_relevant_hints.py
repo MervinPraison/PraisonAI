@@ -132,7 +132,9 @@ def _system_sent(agent, monkeypatch, run):
 
     def fake(messages=None, temperature=None, tools=None, *a, **k):
         sent.append(messages if messages is not None else k.get("messages"))
-        sent_tools.append([t.get("function", {}).get("name") for t in tools or []])
+        # Record the payload the real request builds (inherit, flatten, prune).
+        formatted = agent._format_tools_for_completion(tools)
+        sent_tools.append([t.get("function", {}).get("name") for t in formatted])
         message = SimpleNamespace(content="ok", tool_calls=None, role="assistant", reasoning_content=None)
         return SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason="stop", index=0)],
                                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2),
@@ -152,6 +154,21 @@ def test_native_chat_follows_per_call_edit_tools(make, monkeypatch):
     system, tool_names = _system_sent(agent, monkeypatch, lambda a: a.chat("hi", tools=[EDIT_SCHEMA]))
     assert OPENAI_HINT in system
     assert "edit_file" in tool_names
+
+
+def test_nested_edit_schema_is_sent_with_the_hint(make, monkeypatch):
+    agent = make(llm="gpt-4o-mini", tools=[[EDIT_SCHEMA]])
+    system, tool_names = _system_sent(agent, monkeypatch, lambda a: a.chat("hi"))
+    assert OPENAI_HINT in system
+    assert "edit_file" in tool_names
+
+
+def test_permission_denied_edit_tool_gets_no_hint(make, monkeypatch):
+    agent = make(llm="gpt-4o-mini", tools=[edit_file, lookup])
+    agent._perm_deny = frozenset({"edit_file"})
+    system, tool_names = _system_sent(agent, monkeypatch, lambda a: a.chat("hi"))
+    assert "edit_file" not in tool_names
+    assert OPENAI_HINT not in system
 
 
 def test_native_achat_follows_per_call_edit_tools(make, monkeypatch):
