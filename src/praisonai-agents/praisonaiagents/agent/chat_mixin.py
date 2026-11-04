@@ -543,17 +543,46 @@ class ChatMixin:
             return int(getattr(execution, "max_tool_calls_per_turn", default))
         return default
 
-    def _resolve_harness_base_prompt(self):
+    _EDIT_TOOL_NAMES = frozenset({"edit_file", "apply_patch"})
+
+    def _offers_edit_tool(self, tools=None):
+        """True when ``tools`` (default: the agent's tools) include a file-edit primitive."""
+        for tool in (tools if tools is not None else getattr(self, "tools", None)) or ():
+            if isinstance(tool, (list, tuple)):
+                # Nested tool lists are flattened by _format_tools_for_completion.
+                if self._offers_edit_tool(tool):
+                    return True
+                continue
+            if isinstance(tool, str):
+                name = tool
+            elif isinstance(tool, dict):
+                function = tool.get("function")
+                name = function.get("name") if isinstance(function, dict) else tool.get("name")
+            else:
+                # A tool's ``name`` is what the model is sent (``@tool(name=...)``
+                # keeps the function's own ``__name__``), so it wins.
+                name = getattr(tool, "name", None)
+                if not isinstance(name, str):
+                    name = getattr(tool, "__name__", None)
+            if name in self._EDIT_TOOL_NAMES:
+                return True
+        return False
+
+    def _resolve_harness_base_prompt(self, tools=None):
         """Resolve the model-family harness base-prompt fragment, if any.
 
         Honours an explicit ``harness_base_prompt`` override on the agent when
-        set; otherwise resolves lazily from the active model id. Returns an
-        empty string when no fragment applies (behaviour-preserving default).
-        Never raises: any resolution error collapses to no fragment.
+        set; otherwise resolves lazily from the active model id. The family
+        fragments are file-editing guidance, so they apply only when ``tools``
+        (default: the agent's tools) include ``edit_file`` or ``apply_patch``.
+        Returns an empty string when no fragment applies. Never raises: any
+        resolution error collapses to no fragment.
         """
         override = getattr(self, "harness_base_prompt", None)
         if override is not None:
             return override
+        if not self._offers_edit_tool(tools):
+            return ""
         try:
             from ..model_harness import resolve_harness
             # self.llm may be a string model id or an LLM object; resolve the
@@ -580,7 +609,10 @@ class ChatMixin:
         # Check cache first (skip cache if memory is enabled since context is dynamic)
         if not self._memory_instance:
             tools_key = self._get_tools_cache_key(tools)
-            cache_key = f"{self.role}:{self.goal}:{tools_key}"
+            # tools=None keys as "none" whatever self.tools holds, so key the
+            # edit-hint decision too; otherwise a cached prefix would keep (or
+            # miss) the hint after the agent's tools change.
+            cache_key = f"{self.role}:{self.goal}:{hash(self.backstory)}:{tools_key}:{self._offers_edit_tool(tools)}"
             
             cached_prompt = self._cache_get(self._system_prompt_cache, cache_key)
             if cached_prompt is not None:
@@ -591,13 +623,16 @@ class ChatMixin:
             cache_key = None  # Don't cache when memory is enabled
             
         system_prompt = f"""{self.backstory}\n
-Your Role: {self.role}\n
-Your Goal: {self.goal}"""
+Your Role: {self.role}"""
+        # Agent(instructions=...) sets backstory and goal to the same text;
+        # state it once.
+        if self.goal != self.backstory:
+            system_prompt += f"\n\nYour Goal: {self.goal}"
 
         # Prepend the model-family harness base prompt when one applies.
         # Resolution is lazy and falls back to a behaviour-preserving default
-        # (no fragment) for unknown models, so output is unchanged by default.
-        harness_prompt = self._resolve_harness_base_prompt()
+        # (no fragment) for unknown models or agents without edit tools.
+        harness_prompt = self._resolve_harness_base_prompt(tools)
         if harness_prompt:
             system_prompt = f"{harness_prompt}\n\n{system_prompt}"
         
@@ -4222,6 +4257,7 @@ Your Goal: {self.goal}"""
             # Pass llm_prompt (which includes multimodal content if attachments present)
             messages, original_prompt = self._build_messages(
                 llm_prompt, temperature, output_json, output_pydantic,
+                tools=tools,
                 use_native_format=use_native_format,
                 memory_prefetch_context=memory_prefetch_context,
             )
@@ -4943,6 +4979,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 temperature,
                 output_json,
                 output_pydantic,
+                tools=tools,
                 restore_durable=False,
                 memory_prefetch_context=memory_prefetch_context,
             )
@@ -5970,6 +6007,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # Build messages using the helper method
                 messages, original_prompt = self._build_messages(actual_prompt, kwargs.get('temperature', 1.0), 
                                                                kwargs.get('output_json'), kwargs.get('output_pydantic'),
+                                                               tools=tool_param,
                                                                memory_prefetch_context=memory_prefetch_context)
                 
                 # Apply context management so the streaming path compacts long
