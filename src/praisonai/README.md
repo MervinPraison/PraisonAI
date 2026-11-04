@@ -26,6 +26,8 @@ PraisonAI helps banks, insurers and hospitals run AI agents on their own compute
 pip install praisonaiagents
 ```
 
+For the `praisonai` CLI, bots, dashboard and YAML agents, also run `pip install praisonai`.
+
 ## Using PraisonAI for something else?
 
 PraisonAI is still a general-purpose, open-source agent framework, and everything works as before: the same packages, imports, commands and examples. Go straight to what you came for:
@@ -64,6 +66,8 @@ print(agent.start("In two sentences, why do some companies keep their data on th
 ## Run fully offline
 
 Run the same agent on a model on your own computer with [Ollama](https://ollama.com). You need no API key, and your prompts and answers stay on the machine.
+
+Install the package and pull the model while you still have internet; after that, the agent runs with no network at all.
 
 ```bash
 pip install "praisonaiagents[llm]"   # adds the local-model support
