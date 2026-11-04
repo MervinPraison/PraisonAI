@@ -14,27 +14,143 @@
 <a href="https://github.com/MervinPraison/PraisonAI"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License" /></a>
 </p>
 
-<div align="center">
+# PraisonAI
 
-# PraisonAI 🦞
+**Private AI that earns trust one task at a time.**
 
-<a href="https://trendshift.io/repositories/9130" target="_blank"><img src="https://trendshift.io/api/badge/repositories/9130" alt="MervinPraison%2FPraisonAI | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+PraisonAI runs AI agents on your own computers, even fully offline, so private data never has to leave the building.
 
-</div>
+- **For highly regulated teams (early access):** each task moves to your own AI only after it passes a test. If quality slips, it moves back automatically, and every step is recorded for regulators. [How it works](#how-the-handover-works-early-access)
+- **For everyone else:** a free, open-source Python agent framework. With a local model you need no API key and pay no cloud bill, and your files stay yours.
 
-PraisonAI 🦞 — **Hire a 24/7 AI Workforce.** Stop writing boilerplate and start shipping autonomous, self-improving agents that research, plan, and execute tasks across your apps. From one agent to an entire organization, deployed in 5 lines of code.
+[2M+ downloads](https://pepy.tech/projects/praisonai) · [9.3K stars](https://github.com/MervinPraison/PraisonAI) · [600+ releases in the last year](https://github.com/MervinPraison/PraisonAI/releases) · [80+ contributors](https://github.com/MervinPraison/PraisonAI/graphs/contributors) · Python
 
 ```bash
-curl -fsSL https://praison.ai/install.sh | bash
+pip install praisonai
 ```
 
+Only need the Python library? `pip install praisonaiagents` installs just the lightweight core.
+
+## Using PraisonAI for something else?
+
+PraisonAI is still a general-purpose, open-source agent framework, and everything works as before: the same packages, imports, commands and examples. Go straight to what you came for:
+
+- **Agents and multi-agent teams:** [Agents](https://praison.ai/docs/concepts/agents) · [Handoffs](https://praison.ai/docs/concepts/handoffs)
+- **Workflows:** [AgentFlow: route, parallel, loop, repeat](https://praison.ai/docs/concepts/agentflow)
+- **Memory and knowledge:** [Memory](https://praison.ai/docs/concepts/memory) · [Knowledge](https://praison.ai/docs/concepts/knowledge) · [RAG](https://praison.ai/docs/concepts/rag)
+- **Tools and MCP:** [Tools](https://praison.ai/docs/tools/tools) · [MCP](https://praison.ai/docs/mcp/transports)
+- **Bots (Telegram, Discord, Slack, WhatsApp):** [Bot CLI](https://praison.ai/docs/cli/bot) · [Bot gateway](https://praison.ai/docs/features/bot-gateway)
+- **Terminal CLI:** [`praisonai code`](https://praison.ai/docs/cli/code) · [`praisonai run`](https://praison.ai/docs/cli/run) · [`praisonai chat`](https://praison.ai/docs/cli/chat) · [CLI reference](https://praison.ai/docs/cli/cli-reference)
+- **Training and fine-tuning:** [PraisonAI Train](https://praison.ai/docs/train)
+- **Browser automation:** [Browser agent](https://praison.ai/docs/features/browser-agent) · [Browser CLI](https://praison.ai/docs/cli/browser)
+- **Sandboxes:** [Sandboxed code execution](https://praison.ai/docs/features/sandbox)
+- **Deploy:** [Deploy guide](https://praison.ai/docs/deploy)
+- **Dashboard and UI:** [Claw dashboard](https://praison.ai/docs/concepts/claw) · [Chat UI](https://praison.ai/docs/ui)
+- **YAML, no code:** [YAML agents](#-using-yaml-no-code) · [YAML reference](https://praison.ai/docs/features/yaml-configuration-reference)
+- **JavaScript and TypeScript:** [JavaScript SDK](https://praison.ai/docs/js)
+- **Desktop app:** [PraisonAI Desktop](https://praison.ai/docs/features/desktop/index) · [Downloads](#desktop-app)
+- **Everything else:** the [full feature reference](#full-feature-reference) further down this page
+
+## Quick start
+
+Set a key for any supported provider (OpenAI shown here), or skip the key and use a local model as in the next section.
+
+```bash
+export OPENAI_API_KEY="your-api-key"
+```
+
+```python
+from praisonaiagents import Agent
+
+agent = Agent(instructions="You are a helpful assistant.")
+print(agent.start("In two sentences, why do some companies keep their data on their own computers?"))
+```
+
+## Run fully offline
+
+Run the same agent on a model on your own computer with [Ollama](https://ollama.com). You need no API key, and your prompts and answers stay on the machine.
+
+Install the package and pull the model while you still have internet; after that, the agent runs with no network at all. If you installed only the core library, use `pip install "praisonaiagents[llm]"`, which adds the local-model support.
+
+```bash
+# Start Ollama first (the app, or "ollama serve" in another terminal)
+ollama pull llama3.2
+export DO_NOT_TRACK=true   # keeps telemetry off (PraisonAI sends none unless you turn it on)
+```
+
+```python
+from praisonaiagents import Agent
+
+agent = Agent(instructions="You are a helpful assistant.", model="ollama/llama3.2")
+print(agent.start("Why is the sky blue?"))
+```
+
+If Ollama runs on another computer on your network, pass `base_url` (or set `OLLAMA_API_BASE`):
+
+```python
+agent = Agent(instructions="...", model="ollama/llama3.2", base_url="http://192.168.1.10:11434")
+```
+
+vLLM and LM Studio work the same way: use `hosted_vllm/` (vLLM) or `lm_studio/` with your server's `base_url`. More in the [Ollama guide](https://praison.ai/docs/models/ollama) and [Models docs](https://praison.ai/docs/models).
+
+## How the handover works (early access)
+
+1. **Watch:** records how each task is done today.
+2. **Test:** turns that real work into tests.
+3. **Hand over:** a task moves to your own AI only when it passes.
+4. **Roll back:** if quality drops, the task moves back automatically.
+5. **Record:** every handover leaves a record your regulator can check.
+
+Highly regulated teams, such as banks, insurers and hospitals, want AI but can't send customer data to outside models. From 6 January 2027, OpenAI also takes no new self-serve fine-tuning jobs ([notice](https://developers.openai.com/api/docs/deprecations)), so teams that customise models need models they own. The handover lets these teams move work to AI they own, one task at a time, with a record that shows why each step was trusted.
+
+It is built on parts of this framework that are live today: tracing, evaluation, fine-tuning, model routing and local models. The handover itself is in early access, and we are taking on our first design partners. To take part, see [praison.ai/enterprise](https://praison.ai/enterprise/).
+
+## Features
+
+- **Agents and multi-agent teams:** [Agents](https://praison.ai/docs/concepts/agents) · [Handoffs](https://praison.ai/docs/concepts/handoffs) · [Workflows](https://praison.ai/docs/concepts/agentflow)
+- **Memory:** [Memory](https://praison.ai/docs/concepts/memory) · [Knowledge and RAG](https://praison.ai/docs/concepts/rag) · [Sessions](https://praison.ai/docs/concepts/session-management)
+- **Tools and MCP:** [Tools](https://praison.ai/docs/tools/tools) · [MCP](https://praison.ai/docs/mcp/transports)
+- **Guardrails and approval:** [Guardrails](https://praison.ai/docs/concepts/guardrails) · [Human approval](https://praison.ai/docs/concepts/approval) · [Policy engine](https://praison.ai/docs/features/policy-engine)
+- **Tracing and evaluation:** [Tracing](https://praison.ai/docs/observability/overview) · [Telemetry](https://praison.ai/docs/features/telemetry) · [Langfuse](https://praison.ai/docs/observability/langfuse) · [Evaluation](https://praison.ai/docs/concepts/evaluation)
+- **Your choice of model:** [Models](https://praison.ai/docs/models) · [Model router](https://praison.ai/docs/features/model-router)
+- **Fine-tuning:** [PraisonAI Train](https://praison.ai/docs/train)
+- **Deploy:** [Deploy guide](https://praison.ai/docs/deploy)
+
+## JavaScript and TypeScript
+
+```bash
+npm install praisonai
+```
+
+The TypeScript and JavaScript SDK has its own guide at [praison.ai/docs/js](https://praison.ai/docs/js). A short example is in [Using JavaScript Code](#-using-javascript-code) below.
+
+## The company
+
+- **Who:** Praison AI Limited in Cambridge, UK, building PraisonAI since September 2023. Co-founders Mervin Praison (CEO), Leebana Smith (COO) and Karthick Subramanian (CBO). [About us](https://praison.ai/about/)
+- **What we're building:** the task handover above, as a self-hosted product on top of this framework. It is in early access, and we are taking on our first design partners.
+- **Why now:** highly regulated teams want AI but can't send customer data to outside models, and from 6 January 2027 OpenAI takes no new self-serve fine-tuning jobs.
+- **How it fits together:** the framework stays free and MIT-licensed, and brings developers in. Regulated teams license the handover to run inside their own walls.
+- **Traction:** every number at the top of this page is public and linked to its source.
+- **Get in touch:** design partners, investors and press: enterprise@praison.ai or [praison.ai/enterprise](https://praison.ai/enterprise/)
+
+## Docs, community and licence
+
+- **Documentation:** [praison.ai/docs](https://praison.ai/docs)
+- **Questions and bugs:** [Discussions](https://github.com/MervinPraison/PraisonAI/discussions) · [Issues](https://github.com/MervinPraison/PraisonAI/issues)
+- **Contributing:** [Contributing guide](https://github.com/MervinPraison/PraisonAI/blob/main/CONTRIBUTING.md)
+- **Videos and news:** [YouTube](https://youtube.com/@MervinPraison) · [X](https://x.com/MervinPraison) · [LinkedIn](https://linkedin.com/in/mervinpraison)
+- **Desktop app:** macOS, Windows and Linux builds are on the [latest release](https://github.com/MervinPraison/PraisonAI/releases/latest)
+- **Licence:** [MIT](https://github.com/MervinPraison/PraisonAI/blob/main/LICENSE)
+
+---
+
+## Full feature reference
+
+Everything below is the full reference that was on this page before. Nothing has been removed; the longest parts are folded, so click a heading's summary to open it.
+
+### Desktop app
+
 <div align="center">
-  <br>
-  <a href="https://x.com/elonmusk/status/1893870468249141688" target="_blank">
-    <img src="https://img.shields.io/badge/Highlighted_by_Elon_Musk-000000?style=for-the-badge&logo=x&logoColor=white" alt="Highlighted by Elon Musk" />
-  </a>
-  <br>
-  <br>
   <a href="https://github.com/MervinPraison/PraisonAI/releases/latest">
     <img src="https://img.shields.io/badge/Download_for_macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" />
   </a>
@@ -46,12 +162,17 @@ curl -fsSL https://praison.ai/install.sh | bash
   <a href="https://github.com/MervinPraison/PraisonAI/releases/latest">
     <img src="https://img.shields.io/badge/Download_for_Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux" />
   </a>
-  <br>
 </div>
 
-<p align="center">
-  <img src=".github/images/dashboard.png" alt="PraisonAI Dashboard" width="800" />
-</p>
+### Other ways to install
+
+One-line installer:
+
+```bash
+curl -fsSL https://praison.ai/install.sh | bash
+```
+
+The full `praisonai` package, with the CLI, bots, dashboard and integrations:
 
 ```
  ██████╗ ██████╗  █████╗ ██╗███████╗ ██████╗ ███╗   ██╗     █████╗ ██╗
@@ -64,10 +185,20 @@ curl -fsSL https://praison.ai/install.sh | bash
  pip install praisonai
 ```
 
+<p align="center">
+  <img src=".github/images/dashboard.png" alt="PraisonAI Dashboard" width="800" />
+</p>
+
 <div align="center">
-  <a href="https://docs.praison.ai">
+
+<a href="https://trendshift.io/repositories/9130" target="_blank"><img src="https://trendshift.io/api/badge/repositories/9130" alt="MervinPraison%2FPraisonAI | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+
+</div>
+
+<div align="center">
+  <a href="https://praison.ai/docs">
     <p align="center">
-      <img src="https://img.shields.io/badge/📚_Documentation-Visit_docs.praison.ai-blue?style=for-the-badge&logo=bookstack&logoColor=white" alt="Documentation" />
+      <img src="https://img.shields.io/badge/📚_Documentation-Visit_praison.ai%2Fdocs-blue?style=for-the-badge&logo=bookstack&logoColor=white" alt="Documentation" />
     </p>
   </a>
 </div>
@@ -113,6 +244,9 @@ agent.start("Analyze the top 3 tech trends of 2026 and format as a markdown tabl
 Most frameworks hand you one or two layers and leave the rest as homework. PraisonAI covers **all five** — plus the outer layer that decides *where* your agent actually runs.
 
 Each layer wraps the one inside it. When an agent misbehaves, the layer tells you where to look.
+
+<details>
+<summary><strong>Show the five layers, examples and Managed Agents</strong></summary>
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -174,7 +308,7 @@ agent = Agent(
 )
 ```
 
-> **Isolate** is `handoffs=[specialist]` — a sub-agent inherits the last few messages and the intersection of your tools, not your whole transcript. [📖 Handoffs](https://docs.praison.ai/docs/concepts/handoffs)
+> **Isolate** is `handoffs=[specialist]` — a sub-agent inherits the last few messages and the intersection of your tools, not your whole transcript. [📖 Handoffs](https://praison.ai/docs/concepts/handoffs)
 
 ### Layer 3 · Harness — *Can it act, and be checked?*
 
@@ -217,7 +351,7 @@ print(result.completion_reason)
 #  surfaced here as completion_reason="error")
 ```
 
-> **Doom-loop detection is on by default.** Repeated identical tool calls and A→B→A→B oscillation get caught — while a poller whose output keeps changing does not. [📖 Doom Loop Detection](https://docs.praison.ai/docs/features/doom-loop-detection)
+> **Doom-loop detection is on by default.** Repeated identical tool calls and A→B→A→B oscillation get caught — while a poller whose output keeps changing does not. [📖 Doom Loop Detection](https://praison.ai/docs/features/doom-loop-detection)
 
 ### Layer 5 · Graph — *Who runs when, and who checks whom?*
 
@@ -237,7 +371,7 @@ flow = AgentFlow(steps=[
 flow.run("Ticket #123: login fails on Safari")
 ```
 
-> The same graph is expressible in YAML with no Python at all. [📖 AgentFlow](https://docs.praison.ai/docs/concepts/agentflow)
+> The same graph is expressible in YAML with no Python at all. [📖 AgentFlow](https://praison.ai/docs/concepts/agentflow)
 
 ### ⬡ Outside the stack: Managed Agents — *Where does it actually run?*
 
@@ -332,6 +466,8 @@ Sandboxes shut themselves down when idle (`auto_shutdown`, `idle_timeout_s`), an
 
 <sub>Stack framing adapted from [The Five-Layer Agent Stack](https://mer.vin/2026/07/five-layer-agent-stack-match-bug-to-right-layer/) and [Agent Harnesses vs Orbs](https://mer.vin/2026/08/agent-harnesses-vs-orbs-why-remote-sandboxes-beat-local-agent-loops/).</sub>
 
+</details>
+
 ---
 
 ## 🌌 The PraisonAI Ecosystem
@@ -412,6 +548,11 @@ Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
 
 <div align="center">
   <a href="https://x.com/elonmusk/status/1893870468249141688" target="_blank">
+    <img src="https://img.shields.io/badge/Highlighted_by_Elon_Musk-000000?style=for-the-badge&logo=x&logoColor=white" alt="Highlighted by Elon Musk" />
+  </a>
+  <br>
+  <br>
+  <a href="https://x.com/elonmusk/status/1893870468249141688" target="_blank">
     <img src=".github/images/elon_musk_praisonai.png" alt="Highlighted by Elon Musk" width="600" />
   </a>
   <p><em>"Grok 3 customer support" — <a href="https://x.com/elonmusk/status/1893870468249141688">Elon Musk quoting PraisonAI's tutorial</a></em></p>
@@ -426,13 +567,13 @@ Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
 |--|---------|-----|
 | 🔌 | **MCP Protocol** — stdio, HTTP, WebSocket, SSE | `tools=MCP("npx ...")` |
 | 🧠 | **Planning Mode** — plan → execute → reason | `planning=True` |
-| 🔍 | **Deep Research** — multi-step autonomous research | [Docs](https://docs.praison.ai/docs/agents/deep-research) |
-| 🤖 | **External Agents** — orchestrate Claude Code, Gemini CLI, Codex | [Docs](https://docs.praison.ai/docs/code/external-agents) |
+| 🔍 | **Deep Research** — multi-step autonomous research | [Docs](https://praison.ai/docs/agents/deep-research) |
+| 🤖 | **External Agents** — orchestrate Claude Code, Gemini CLI, Codex | [Docs](https://praison.ai/docs/code/external-agents) |
 | 🔄 | **Agent Handoffs** — seamless conversation passing | `handoffs=[other_agent]` |
-| 🛡️ | **Guardrails** — input/output validation | [Docs](https://docs.praison.ai/docs/concepts/guardrails) |
+| 🛡️ | **Guardrails** — input/output validation | [Docs](https://praison.ai/docs/concepts/guardrails) |
 |  | **Web Search + Fetch** — native browsing | `web=True` |
-| 🪞 | **Self Reflection** — agent reviews its own output | [Docs](https://docs.praison.ai/docs/concepts/reflection) |
-| 🔀 | **Workflow Patterns** — route, parallel, loop, repeat | [Docs](https://docs.praison.ai/docs/concepts/agentflow) |
+| 🪞 | **Self Reflection** — agent reviews its own output | [Docs](https://praison.ai/docs/concepts/reflection) |
+| 🔀 | **Workflow Patterns** — route, parallel, loop, repeat | [Docs](https://praison.ai/docs/concepts/agentflow) |
 | 🧠 | **Memory (zero deps)** — works out of the box | `memory=True` |
 
 <details>
@@ -443,18 +584,18 @@ Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
 | 💡 | **Prompt Caching** — reduce latency + cost | `caching=True` |
 | 💾 | **Sessions + Auto-Save** — persistent state across restarts | `auto_save="my-project"` |
 | 💭 | **Thinking Budgets** — control reasoning depth | `agent.thinking_budget = 1024` |
-| 📚 | **RAG + Quality-Based RAG** — auto quality scoring retrieval | [Docs](https://docs.praison.ai/docs/concepts/rag) |
-| 📊 | **Model Router** — auto-routes to cheapest capable model | [Docs](https://docs.praison.ai/docs/features/model-router) |
-| 🧊 | **Shadow Git Checkpoints** — auto-rollback on failure | [Docs](https://docs.praison.ai/docs/features/checkpoints) |
-| 📡 | **A2A Protocol** — agent-to-agent interop | [Docs](https://docs.praison.ai/docs/features/a2a) |
-| 📏 | **Context Compaction** — never hit token limits | [Docs](https://docs.praison.ai/docs/features/context-compaction) |
-| 📡 | **Telemetry** — OpenTelemetry traces, spans, metrics | [Docs](https://docs.praison.ai/docs/features/telemetry) |
-| 📜 | **Policy Engine** — declarative agent behavior control | [Docs](https://docs.praison.ai/docs/features/policy-engine) |
-| 🔄 | **Background Tasks** — fire-and-forget agents | [Docs](https://docs.praison.ai/docs/features/background-tasks) |
-| 🔁 | **Doom Loop Detection** — auto-recovery from stuck agents | [Docs](https://docs.praison.ai/docs/features/doom-loop-detection) |
-| 🕸️ | **Graph Memory** — Neo4j-style relationship tracking | [Docs](https://docs.praison.ai/docs/features/graph-memory) |
-| 🏖️ | **Sandbox Execution** — isolated code execution | [Docs](https://docs.praison.ai/docs/features/sandbox) |
-| 🖥️ | **Bot Gateway** — multi-agent routing across channels | [Docs](https://docs.praison.ai/docs/features/bot-gateway) |
+| 📚 | **RAG + Quality-Based RAG** — auto quality scoring retrieval | [Docs](https://praison.ai/docs/concepts/rag) |
+| 📊 | **Model Router** — auto-routes to cheapest capable model | [Docs](https://praison.ai/docs/features/model-router) |
+| 🧊 | **Shadow Git Checkpoints** — auto-rollback on failure | [Docs](https://praison.ai/docs/features/checkpoints) |
+| 📡 | **A2A Protocol** — agent-to-agent interop | [Docs](https://praison.ai/docs/features/a2a) |
+| 📏 | **Context Compaction** — never hit token limits | [Docs](https://praison.ai/docs/features/context-compaction) |
+| 📡 | **Telemetry** — OpenTelemetry traces, spans, metrics | [Docs](https://praison.ai/docs/features/telemetry) |
+| 📜 | **Policy Engine** — declarative agent behavior control | [Docs](https://praison.ai/docs/features/policy-engine) |
+| 🔄 | **Background Tasks** — fire-and-forget agents | [Docs](https://praison.ai/docs/features/background-tasks) |
+| 🔁 | **Doom Loop Detection** — auto-recovery from stuck agents | [Docs](https://praison.ai/docs/features/doom-loop-detection) |
+| 🕸️ | **Graph Memory** — Neo4j-style relationship tracking | [Docs](https://praison.ai/docs/features/graph-memory) |
+| 🏖️ | **Sandbox Execution** — isolated code execution | [Docs](https://praison.ai/docs/features/sandbox) |
+| 🖥️ | **Bot Gateway** — multi-agent routing across channels | [Docs](https://praison.ai/docs/features/bot-gateway) |
 
 </details>
 
@@ -464,6 +605,9 @@ Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
 ---
 
 ## 📘 Using Python Code
+
+<details>
+<summary><strong>Show Python examples: single agent, multi-agent, MCP, tools, databases, Claw, Langflow, UI</strong></summary>
 
 > Unsure whether a result is a bug or model randomness? Check the [SDK Behavior Matrix](https://github.com/MervinPraison/PraisonAI/blob/main/src/praisonai-agents/docs/sdk-behavior-matrix.md) for `stream`, memory prefetch, structured output, teams and AG-UI.
 
@@ -510,7 +654,7 @@ agent = Agent(
 )
 ```
 
-> 📖 [Full MCP docs](https://docs.praison.ai/docs/mcp/transports) — stdio, HTTP, WebSocket, SSE transports
+> 📖 [Full MCP docs](https://praison.ai/docs/mcp/transports) — stdio, HTTP, WebSocket, SSE transports
 
 ### 4. Custom Tools
 
@@ -562,7 +706,7 @@ agent.start("Search for AI news and calculate 15*4")
 ```
 
 > ⚠️ **Security Note:** Never use `eval()`, `exec()`, or `subprocess` in tool functions that process LLM-generated or user-supplied input. Always validate and sanitize inputs to prevent code injection attacks.
-> 📖 [Full tools docs](https://docs.praison.ai/docs/tools/tools) — BaseTool, tool packages, 100+ built-in tools
+> 📖 [Full tools docs](https://praison.ai/docs/tools/tools) — BaseTool, tool packages, 100+ built-in tools
 
 ### 5. Persistence (Databases)
 
@@ -579,7 +723,7 @@ agent = Agent(
 agent.chat("Hello!")  # Auto-persists messages, runs, traces
 ```
 
-> 📖 [Full persistence docs](https://docs.praison.ai/docs/databases/overview) — PostgreSQL, MySQL, SQLite, MongoDB, Redis, and 20+ more
+> 📖 [Full persistence docs](https://praison.ai/docs/databases/overview) — PostgreSQL, MySQL, SQLite, MongoDB, Redis, and 20+ more
 
 ### 6. PraisonAI Claw 🦞 (Dashboard UI)
 
@@ -601,7 +745,7 @@ Copy `.env.example` to `.env` and configure the following variables:
 
 Open **http://localhost:8082** — the dashboard comes with 13 built-in pages: Chat, Agents, Memory, Knowledge, Channels, Guardrails, Cron, and more. Add messaging channels directly from the UI.
 
-> 📖 [Full Claw docs](https://docs.praison.ai/docs/concepts/claw) — platform tokens, CLI options, Docker, and YAML agent mode
+> 📖 [Full Claw docs](https://praison.ai/docs/concepts/claw) — platform tokens, CLI options, Docker, and YAML agent mode
 
 ### 7. Langflow Integration 🔗 (Visual Flow Builder)
 
@@ -614,7 +758,7 @@ praisonai flow
 
 Open **http://localhost:7861** — use the **Agent** and **Agent Team** components to create sequential or parallel workflows. Connect Chat Input → Agent Team → Chat Output for instant multi-agent pipelines.
 
-> 📖 [Full Flow docs](https://docs.praison.ai/docs/concepts/agentflow) — visual agent building, component reference, and deployment
+> 📖 [Full Flow docs](https://praison.ai/docs/concepts/agentflow) — visual agent building, component reference, and deployment
 
 ### 8. PraisonAI UI 🤖 (Clean Chat)
 
@@ -625,9 +769,14 @@ pip install "praisonai[ui]"
 praisonai ui
 ```
 
+</details>
+
 ---
 
 ## 📄 Using YAML (No Code)
+
+<details>
+<summary><strong>Show YAML examples</strong></summary>
 
 ### Example 1: Two Agents Working Together
 
@@ -700,6 +849,8 @@ praisonai agents.yaml
 > - Tools in `tools.py` are automatically discovered
 > - The function's docstring helps the AI understand how to use it
 
+</details>
+
 ---
 
 ## 🎯 CLI Quick Reference
@@ -718,23 +869,26 @@ praisonai agents.yaml
 | **Development** | `commit`, `docs`, `checkpoint`, `hooks` |
 | **Scheduling** | `schedule start`, `schedule list`, `schedule stop` |
 
-> 📖 [Full CLI reference](https://docs.praison.ai/docs/cli/cli-reference)
+> 📖 [Full CLI reference](https://praison.ai/docs/cli/cli-reference)
 
 ---
 
 ## ✨ Key Features
+
+<details>
+<summary><strong>Show all features by category</strong></summary>
 
 <details open>
 <summary><strong>🤖 Core Agents</strong></summary>
 
 | Feature | Code | Docs |
 |---------|:----:|:----:|
-| Single Agent | [Example](examples/python/agents/single-agent.py) | [📖](https://docs.praison.ai/docs/agents/single) |
-| Multi Agents | [Example](examples/python/general/mini_agents_example.py) | [📖](https://docs.praison.ai/docs/concepts/agents) |
-| Auto Agents | [Example](examples/python/general/auto_agents_example.py) | [📖](https://docs.praison.ai/docs/features/autoagents) |
-| Self Reflection AI Agents | [Example](examples/python/concepts/self-reflection-details.py) | [📖](https://docs.praison.ai/docs/concepts/reflection) |
-| Reasoning AI Agents | [Example](examples/python/concepts/reasoning-extraction.py) | [📖](https://docs.praison.ai/docs/features/reasoning) |
-| Multi Modal AI Agents | [Example](examples/python/general/multimodal.py) | [📖](https://docs.praison.ai/docs/features/multimodal) |
+| Single Agent | [Example](examples/python/agents/single-agent.py) | [📖](https://praison.ai/docs/agents/single) |
+| Multi Agents | [Example](examples/python/general/mini_agents_example.py) | [📖](https://praison.ai/docs/concepts/agents) |
+| Auto Agents | [Example](examples/python/general/auto_agents_example.py) | [📖](https://praison.ai/docs/features/autoagents) |
+| Self Reflection AI Agents | [Example](examples/python/concepts/self-reflection-details.py) | [📖](https://praison.ai/docs/concepts/reflection) |
+| Reasoning AI Agents | [Example](examples/python/concepts/reasoning-extraction.py) | [📖](https://praison.ai/docs/features/reasoning) |
+| Multi Modal AI Agents | [Example](examples/python/general/multimodal.py) | [📖](https://praison.ai/docs/features/multimodal) |
 
 </details>
 
@@ -743,16 +897,16 @@ praisonai agents.yaml
 
 | Feature | Code | Docs |
 |---------|:----:|:----:|
-| Simple Workflow | [Example](examples/python/workflows/simple_workflow.py) | [📖](https://docs.praison.ai/docs/concepts/agentflow) |
-| Workflow with Agents | [Example](examples/python/workflows/workflow_with_agents.py) | [📖](https://docs.praison.ai/docs/concepts/agentflow) |
-| Agentic Routing (`route()`) | [Example](examples/python/workflows/workflow_routing.py) | [📖](https://docs.praison.ai/docs/features/routing) |
-| Parallel Execution (`parallel()`) | [Example](examples/python/workflows/workflow_parallel.py) | [📖](https://docs.praison.ai/docs/features/parallelisation) |
-| Loop over List/CSV (`loop()`) | [Example](examples/python/workflows/workflow_loop_csv.py) | [📖](https://docs.praison.ai/docs/features/repetitive) |
-| Evaluator-Optimizer (`repeat()`) | [Example](examples/python/workflows/workflow_repeat.py) | [📖](https://docs.praison.ai/docs/concepts/evaluation) |
-| Conditional Steps | [Example](examples/python/workflows/workflow_conditional.py) | [📖](https://docs.praison.ai/docs/concepts/agentflow) |
-| Workflow Branching | [Example](examples/python/workflows/workflow_branching.py) | [📖](https://docs.praison.ai/docs/concepts/agentflow) |
-| Workflow Early Stop | [Example](examples/python/workflows/workflow_early_stop.py) | [📖](https://docs.praison.ai/docs/concepts/agentflow) |
-| Workflow Checkpoints | [Example](examples/python/workflows/workflow_checkpoints.py) | [📖](https://docs.praison.ai/docs/concepts/agentflow) |
+| Simple Workflow | [Example](examples/python/workflows/simple_workflow.py) | [📖](https://praison.ai/docs/concepts/agentflow) |
+| Workflow with Agents | [Example](examples/python/workflows/workflow_with_agents.py) | [📖](https://praison.ai/docs/concepts/agentflow) |
+| Agentic Routing (`route()`) | [Example](examples/python/workflows/workflow_routing.py) | [📖](https://praison.ai/docs/features/routing) |
+| Parallel Execution (`parallel()`) | [Example](examples/python/workflows/workflow_parallel.py) | [📖](https://praison.ai/docs/features/parallelisation) |
+| Loop over List/CSV (`loop()`) | [Example](examples/python/workflows/workflow_loop_csv.py) | [📖](https://praison.ai/docs/features/repetitive) |
+| Evaluator-Optimizer (`repeat()`) | [Example](examples/python/workflows/workflow_repeat.py) | [📖](https://praison.ai/docs/concepts/evaluation) |
+| Conditional Steps | [Example](examples/python/workflows/workflow_conditional.py) | [📖](https://praison.ai/docs/concepts/agentflow) |
+| Workflow Branching | [Example](examples/python/workflows/workflow_branching.py) | [📖](https://praison.ai/docs/concepts/agentflow) |
+| Workflow Early Stop | [Example](examples/python/workflows/workflow_early_stop.py) | [📖](https://praison.ai/docs/concepts/agentflow) |
+| Workflow Checkpoints | [Example](examples/python/workflows/workflow_checkpoints.py) | [📖](https://praison.ai/docs/concepts/agentflow) |
 
 </details>
 
@@ -761,13 +915,13 @@ praisonai agents.yaml
 
 | Feature | Code | Docs |
 |---------|:----:|:----:|
-| Code Interpreter Agents | [Example](examples/python/agents/code-agent.py) | [📖](https://docs.praison.ai/docs/features/codeagent) |
-| AI Code Editing Tools | [Example](examples/python/code/code_editing_example.py) | [📖](https://docs.praison.ai/docs/code/editing) |
-| External Agents (All) | [Example](examples/python/code/external_agents_example.py) | [📖](https://docs.praison.ai/docs/code/external-agents) |
-| Claude Code CLI | [Example](examples/python/code/claude_code_example.py) | [📖](https://docs.praison.ai/docs/code/claude-code) |
-| Gemini CLI | [Example](examples/python/code/gemini_cli_example.py) | [📖](https://docs.praison.ai/docs/code/gemini-cli) |
-| Codex CLI | [Example](examples/python/code/codex_cli_example.py) | [📖](https://docs.praison.ai/docs/code/codex-cli) |
-| Cursor CLI | [Example](examples/python/code/cursor_cli_example.py) | [📖](https://docs.praison.ai/docs/code/cursor-cli) |
+| Code Interpreter Agents | [Example](examples/python/agents/code-agent.py) | [📖](https://praison.ai/docs/features/codeagent) |
+| AI Code Editing Tools | [Example](examples/python/code/code_editing_example.py) | [📖](https://praison.ai/docs/code/editing) |
+| External Agents (All) | [Example](examples/python/code/external_agents_example.py) | [📖](https://praison.ai/docs/code/external-agents) |
+| Claude Code CLI | [Example](examples/python/code/claude_code_example.py) | [📖](https://praison.ai/docs/code/claude-code) |
+| Gemini CLI | [Example](examples/python/code/gemini_cli_example.py) | [📖](https://praison.ai/docs/code/gemini-cli) |
+| Codex CLI | [Example](examples/python/code/codex_cli_example.py) | [📖](https://praison.ai/docs/code/codex-cli) |
+| Cursor CLI | [Example](examples/python/code/cursor_cli_example.py) | [📖](https://praison.ai/docs/code/cursor-cli) |
 
 </details>
 
@@ -776,18 +930,18 @@ praisonai agents.yaml
 
 | Feature | Code | Docs |
 |---------|:----:|:----:|
-| Memory (Short & Long Term) | [Example](examples/python/general/memory_example.py) | [📖](https://docs.praison.ai/docs/concepts/memory) |
-| File-Based Memory | [Example](examples/python/general/memory_example.py) | [📖](https://docs.praison.ai/docs/concepts/memory) |
-| Claude Memory Tool | [Example](examples/python/memory/claude_memory_example.py) | [📖](https://docs.praison.ai/docs/features/claude-memory-tool) |
-| Add Custom Knowledge | [Example](examples/python/concepts/knowledge-agents.py) | [📖](https://docs.praison.ai/docs/concepts/knowledge) |
-| RAG Agents | [Example](examples/python/concepts/rag-agents.py) | [📖](https://docs.praison.ai/docs/concepts/rag) |
-| Chat with PDF Agents | [Example](examples/python/concepts/chat-with-pdf.py) | [📖](https://docs.praison.ai/docs/features/chat-with-pdf) |
-| Data Readers (PDF, DOCX, etc.) | [CLI](https://docs.praison.ai/docs/cli/knowledge) | [📖](https://docs.praison.ai/docs/features/chunking-strategies) |
-| Vector Store Selection | [CLI](https://docs.praison.ai/docs/cli/knowledge) | [📖](https://docs.praison.ai/docs/features/knowledge-backends) |
-| Retrieval Strategies | [CLI](https://docs.praison.ai/docs/cli/knowledge) | [📖](https://docs.praison.ai/docs/features/retrieval-strategies) |
-| Rerankers | [CLI](https://docs.praison.ai/docs/cli/knowledge) | [📖](https://docs.praison.ai/docs/features/smart-retrieval) |
-| Index Types (Vector/Keyword/Hybrid) | [CLI](https://docs.praison.ai/docs/cli/knowledge) | [📖](https://docs.praison.ai/docs/features/incremental-indexing) |
-| Query Engines (Sub-Question, etc.) | [CLI](https://docs.praison.ai/docs/cli/knowledge) | [📖](https://docs.praison.ai/docs/features/retrieval) |
+| Memory (Short & Long Term) | [Example](examples/python/general/memory_example.py) | [📖](https://praison.ai/docs/concepts/memory) |
+| File-Based Memory | [Example](examples/python/general/memory_example.py) | [📖](https://praison.ai/docs/concepts/memory) |
+| Claude Memory Tool | [Example](examples/python/memory/claude_memory_example.py) | [📖](https://praison.ai/docs/features/claude-memory-tool) |
+| Add Custom Knowledge | [Example](examples/python/concepts/knowledge-agents.py) | [📖](https://praison.ai/docs/concepts/knowledge) |
+| RAG Agents | [Example](examples/python/concepts/rag-agents.py) | [📖](https://praison.ai/docs/concepts/rag) |
+| Chat with PDF Agents | [Example](examples/python/concepts/chat-with-pdf.py) | [📖](https://praison.ai/docs/features/chat-with-pdf) |
+| Data Readers (PDF, DOCX, etc.) | [CLI](https://praison.ai/docs/cli/knowledge) | [📖](https://praison.ai/docs/features/chunking-strategies) |
+| Vector Store Selection | [CLI](https://praison.ai/docs/cli/knowledge) | [📖](https://praison.ai/docs/features/knowledge-backends) |
+| Retrieval Strategies | [CLI](https://praison.ai/docs/cli/knowledge) | [📖](https://praison.ai/docs/features/retrieval-strategies) |
+| Rerankers | [CLI](https://praison.ai/docs/cli/knowledge) | [📖](https://praison.ai/docs/features/smart-retrieval) |
+| Index Types (Vector/Keyword/Hybrid) | [CLI](https://praison.ai/docs/cli/knowledge) | [📖](https://praison.ai/docs/features/incremental-indexing) |
+| Query Engines (Sub-Question, etc.) | [CLI](https://praison.ai/docs/cli/knowledge) | [📖](https://praison.ai/docs/features/retrieval) |
 
 </details>
 
@@ -796,12 +950,12 @@ praisonai agents.yaml
 
 | Feature | Code | Docs |
 |---------|:----:|:----:|
-| Deep Research Agents | [Example](examples/python/agents/research-agent.py) | [📖](https://docs.praison.ai/docs/agents/deep-research) |
-| Query Rewriter Agent | [Example](examples/python/agents/query-rewriter-agent.py) | [📖](https://docs.praison.ai/docs/agents/query-rewriter) |
-| Native Web Search | [Example](examples/python/agents/websearch-agent.py) | [📖](https://docs.praison.ai/docs/agents/websearch) |
-| Built-in Search Tools | [Example](examples/python/agents/websearch-agent.py) | [📖](https://docs.praison.ai/docs/tools/tavily) |
-| Unified Web Search | [Example](examples/python/web_search_example.py) | [📖](https://docs.praison.ai/docs/tools/web-search) |
-| Web Fetch (Anthropic) | [Example](examples/python/agents/web-fetch-agent.py) | [📖](https://docs.praison.ai/docs/features/model-capabilities) |
+| Deep Research Agents | [Example](examples/python/agents/research-agent.py) | [📖](https://praison.ai/docs/agents/deep-research) |
+| Query Rewriter Agent | [Example](examples/python/agents/query-rewriter-agent.py) | [📖](https://praison.ai/docs/agents/query-rewriter) |
+| Native Web Search | [Example](examples/python/agents/websearch-agent.py) | [📖](https://praison.ai/docs/agents/websearch) |
+| Built-in Search Tools | [Example](examples/python/agents/websearch-agent.py) | [📖](https://praison.ai/docs/tools/tavily) |
+| Unified Web Search | [Example](examples/python/web_search_example.py) | [📖](https://praison.ai/docs/tools/web-search) |
+| Web Fetch (Anthropic) | [Example](examples/python/agents/web-fetch-agent.py) | [📖](https://praison.ai/docs/features/model-capabilities) |
 
 </details>
 
@@ -810,12 +964,12 @@ praisonai agents.yaml
 
 | Feature | Code | Docs |
 |---------|:----:|:----:|
-| Planning Mode | [Example](examples/python/agents/planning-agent.py) | [📖](https://docs.praison.ai/docs/concepts/planning) |
-| Planning Tools | [Example](examples/python/agents/planning-agent.py) | [📖](https://docs.praison.ai/docs/concepts/planning) |
-| Planning Reasoning | [Example](examples/python/agents/planning-agent.py) | [📖](https://docs.praison.ai/docs/concepts/planning) |
-| Prompt Chaining | [Example](examples/python/general/prompt_chaining.py) | [📖](https://docs.praison.ai/docs/features/promptchaining) |
-| Evaluator Optimiser | [Example](examples/python/general/evaluator-optimiser.py) | [📖](https://docs.praison.ai/docs/concepts/evaluation) |
-| Orchestrator Workers | [Example](examples/python/general/orchestrator-workers.py) | [📖](https://docs.praison.ai/docs/concepts/orchestration) |
+| Planning Mode | [Example](examples/python/agents/planning-agent.py) | [📖](https://praison.ai/docs/concepts/planning) |
+| Planning Tools | [Example](examples/python/agents/planning-agent.py) | [📖](https://praison.ai/docs/concepts/planning) |
+| Planning Reasoning | [Example](examples/python/agents/planning-agent.py) | [📖](https://praison.ai/docs/concepts/planning) |
+| Prompt Chaining | [Example](examples/python/general/prompt_chaining.py) | [📖](https://praison.ai/docs/features/promptchaining) |
+| Evaluator Optimiser | [Example](examples/python/general/evaluator-optimiser.py) | [📖](https://praison.ai/docs/concepts/evaluation) |
+| Orchestrator Workers | [Example](examples/python/general/orchestrator-workers.py) | [📖](https://praison.ai/docs/concepts/orchestration) |
 
 </details>
 
@@ -824,15 +978,15 @@ praisonai agents.yaml
 
 | Feature | Code | Docs |
 |---------|:----:|:----:|
-| Data Analyst Agent | [Example](examples/python/agents/data-analyst-agent.py) | [📖](https://docs.praison.ai/docs/agents/data-analyst) |
-| Finance Agent | [Example](examples/python/agents/finance-agent.py) | [📖](https://docs.praison.ai/docs/agents/finance) |
-| Shopping Agent | [Example](examples/python/agents/shopping-agent.py) | [📖](https://docs.praison.ai/docs/agents/shopping) |
-| Recommendation Agent | [Example](examples/python/agents/recommendation-agent.py) | [📖](https://docs.praison.ai/docs/agents/recommendation) |
-| Wikipedia Agent | [Example](examples/python/agents/wikipedia-agent.py) | [📖](https://docs.praison.ai/docs/agents/wikipedia) |
-| Programming Agent | [Example](examples/python/agents/programming-agent.py) | [📖](https://docs.praison.ai/docs/agents/programming) |
-| Math Agents | [Example](examples/python/agents/math-agent.py) | [📖](https://docs.praison.ai/docs/features/mathagent) |
-| Markdown Agent | [Example](examples/python/agents/markdown-agent.py) | [📖](https://docs.praison.ai/docs/agents/markdown) |
-| Prompt Expander Agent | [Example](examples/python/agents/prompt-expander-agent.py) | [📖](https://docs.praison.ai/docs/agents/prompt-expander) |
+| Data Analyst Agent | [Example](examples/python/agents/data-analyst-agent.py) | [📖](https://praison.ai/docs/agents/data-analyst) |
+| Finance Agent | [Example](examples/python/agents/finance-agent.py) | [📖](https://praison.ai/docs/agents/finance) |
+| Shopping Agent | [Example](examples/python/agents/shopping-agent.py) | [📖](https://praison.ai/docs/agents/shopping) |
+| Recommendation Agent | [Example](examples/python/agents/recommendation-agent.py) | [📖](https://praison.ai/docs/agents/recommendation) |
+| Wikipedia Agent | [Example](examples/python/agents/wikipedia-agent.py) | [📖](https://praison.ai/docs/agents/wikipedia) |
+| Programming Agent | [Example](examples/python/agents/programming-agent.py) | [📖](https://praison.ai/docs/agents/programming) |
+| Math Agents | [Example](examples/python/agents/math-agent.py) | [📖](https://praison.ai/docs/features/mathagent) |
+| Markdown Agent | [Example](examples/python/agents/markdown-agent.py) | [📖](https://praison.ai/docs/agents/markdown) |
+| Prompt Expander Agent | [Example](examples/python/agents/prompt-expander-agent.py) | [📖](https://praison.ai/docs/agents/prompt-expander) |
 
 </details>
 
@@ -841,10 +995,10 @@ praisonai agents.yaml
 
 | Feature | Code | Docs |
 |---------|:----:|:----:|
-| Image Generation Agent | [Example](examples/python/image/image-agent.py) | [📖](https://docs.praison.ai/docs/features/image-generation) |
-| Image to Text Agent | [Example](examples/python/agents/image-to-text-agent.py) | [📖](https://docs.praison.ai/docs/agents/image-to-text) |
-| Video Agent | [Example](examples/python/agents/video-agent.py) | [📖](https://docs.praison.ai/docs/agents/video) |
-| Camera Integration | [Example](examples/python/camera/) | [📖](https://docs.praison.ai/docs/features/camera-integration) |
+| Image Generation Agent | [Example](examples/python/image/image-agent.py) | [📖](https://praison.ai/docs/features/image-generation) |
+| Image to Text Agent | [Example](examples/python/agents/image-to-text-agent.py) | [📖](https://praison.ai/docs/agents/image-to-text) |
+| Video Agent | [Example](examples/python/agents/video-agent.py) | [📖](https://praison.ai/docs/agents/video) |
+| Camera Integration | [Example](examples/python/camera/) | [📖](https://praison.ai/docs/features/camera-integration) |
 
 </details>
 
@@ -853,12 +1007,12 @@ praisonai agents.yaml
 
 | Feature | Code | Docs |
 |---------|:----:|:----:|
-| MCP Transports | [Example](examples/python/mcp/mcp-transports-overview.py) | [📖](https://docs.praison.ai/docs/mcp/transports) |
-| WebSocket MCP | [Example](examples/python/mcp/websocket-mcp.py) | [📖](https://docs.praison.ai/docs/mcp/sse-transport) |
-| MCP Security | [Example](examples/python/mcp/mcp-security.py) | [📖](https://docs.praison.ai/docs/mcp/transports) |
-| MCP Resumability | [Example](examples/python/mcp/mcp-resumability.py) | [📖](https://docs.praison.ai/docs/mcp/sse-transport) |
-| MCP Config Management | [Docs](https://docs.praison.ai/docs/cli/mcp) | [📖](https://docs.praison.ai/docs/cli/mcp) |
-| LangChain Integrated Agents | [Example](examples/python/general/langchain_example.py) | [📖](https://docs.praison.ai/docs/features/langchain) |
+| MCP Transports | [Example](examples/python/mcp/mcp-transports-overview.py) | [📖](https://praison.ai/docs/mcp/transports) |
+| WebSocket MCP | [Example](examples/python/mcp/websocket-mcp.py) | [📖](https://praison.ai/docs/mcp/sse-transport) |
+| MCP Security | [Example](examples/python/mcp/mcp-security.py) | [📖](https://praison.ai/docs/mcp/transports) |
+| MCP Resumability | [Example](examples/python/mcp/mcp-resumability.py) | [📖](https://praison.ai/docs/mcp/sse-transport) |
+| MCP Config Management | [Docs](https://praison.ai/docs/cli/mcp) | [📖](https://praison.ai/docs/cli/mcp) |
+| LangChain Integrated Agents | [Example](examples/python/general/langchain_example.py) | [📖](https://praison.ai/docs/features/langchain) |
 
 </details>
 
@@ -867,9 +1021,9 @@ praisonai agents.yaml
 
 | Feature | Code | Docs |
 |---------|:----:|:----:|
-| Guardrails | [Example](examples/python/guardrails/comprehensive-guardrails-example.py) | [📖](https://docs.praison.ai/docs/concepts/guardrails) |
-| Human Approval | [Example](examples/python/general/human_approval_example.py) | [📖](https://docs.praison.ai/docs/concepts/approval) |
-| Rules & Instructions | [Docs](https://docs.praison.ai/docs/features/rules) | [📖](https://docs.praison.ai/docs/features/rules) |
+| Guardrails | [Example](examples/python/guardrails/comprehensive-guardrails-example.py) | [📖](https://praison.ai/docs/concepts/guardrails) |
+| Human Approval | [Example](examples/python/general/human_approval_example.py) | [📖](https://praison.ai/docs/concepts/approval) |
+| Rules & Instructions | [Docs](https://praison.ai/docs/features/rules) | [📖](https://praison.ai/docs/features/rules) |
 
 </details>
 
@@ -878,16 +1032,16 @@ praisonai agents.yaml
 
 | Feature | Code | Docs |
 |---------|:----:|:----:|
-| Async & Parallel Processing | [Example](examples/python/general/async_example.py) | [📖](https://docs.praison.ai/docs/features/async) |
-| Parallelisation | [Example](examples/python/general/parallelisation.py) | [📖](https://docs.praison.ai/docs/features/parallelisation) |
-| Repetitive Agents | [Example](examples/python/concepts/repetitive-agents.py) | [📖](https://docs.praison.ai/docs/features/repetitive) |
-| Agent Handoffs | [Example](examples/python/handoff/handoff_basic.py) | [📖](https://docs.praison.ai/docs/concepts/handoffs) |
-| Stateful Agents | [Example](examples/python/stateful/workflow-state-example.py) | [📖](https://docs.praison.ai/docs/features/stateful-agents) |
-| Autonomous Workflow | [Example](examples/python/general/autonomous-agent.py) | [📖](https://docs.praison.ai/docs/concepts/autonomy) |
-| Structured Output Agents | [Example](examples/python/general/structured_agents_example.py) | [📖](https://docs.praison.ai/docs/features/structured) |
-| Model Router | [Example](examples/python/agents/router-agent-cost-optimization.py) | [📖](https://docs.praison.ai/docs/features/model-router) |
-| Prompt Caching | [Example](examples/python/agents/prompt-caching-agent.py) | [📖](https://docs.praison.ai/docs/features/model-capabilities) |
-| Fast Context | [Example](examples/context/00_agent_fast_context_basic.py) | [📖](https://docs.praison.ai/docs/features/fast-context) |
+| Async & Parallel Processing | [Example](examples/python/general/async_example.py) | [📖](https://praison.ai/docs/features/async) |
+| Parallelisation | [Example](examples/python/general/parallelisation.py) | [📖](https://praison.ai/docs/features/parallelisation) |
+| Repetitive Agents | [Example](examples/python/concepts/repetitive-agents.py) | [📖](https://praison.ai/docs/features/repetitive) |
+| Agent Handoffs | [Example](examples/python/handoff/handoff_basic.py) | [📖](https://praison.ai/docs/concepts/handoffs) |
+| Stateful Agents | [Example](examples/python/stateful/workflow-state-example.py) | [📖](https://praison.ai/docs/features/stateful-agents) |
+| Autonomous Workflow | [Example](examples/python/general/autonomous-agent.py) | [📖](https://praison.ai/docs/concepts/autonomy) |
+| Structured Output Agents | [Example](examples/python/general/structured_agents_example.py) | [📖](https://praison.ai/docs/features/structured) |
+| Model Router | [Example](examples/python/agents/router-agent-cost-optimization.py) | [📖](https://praison.ai/docs/features/model-router) |
+| Prompt Caching | [Example](examples/python/agents/prompt-caching-agent.py) | [📖](https://praison.ai/docs/features/model-capabilities) |
+| Fast Context | [Example](examples/context/00_agent_fast_context_basic.py) | [📖](https://praison.ai/docs/features/fast-context) |
 
 </details>
 
@@ -896,21 +1050,21 @@ praisonai agents.yaml
 
 | Feature | Code | Docs |
 |---------|:----:|:----:|
-| 100+ Custom Tools | [Example](examples/python/general/tools_example.py) | [📖](https://docs.praison.ai/docs/tools/tools) |
-| YAML Configuration | [Example](examples/cookbooks/yaml/secondary_market_research_agents.yaml) | [📖](https://docs.praison.ai/docs/developers/agents-playbook) |
-| 100+ LLM Support | [Example](examples/python/providers/openai/openai_gpt4_example.py) | [📖](https://docs.praison.ai/docs/models) |
-| Callback Agents | [Example](examples/python/general/advanced-callback-systems.py) | [📖](https://docs.praison.ai/docs/concepts/hooks) |
-| Hooks | [Example](examples/python/hooks/hooks_example.py) | [📖](https://docs.praison.ai/docs/concepts/hooks) |
-| Middleware System | [Example](examples/middleware/basic_middleware.py) | [📖](https://docs.praison.ai/docs/features/middleware) |
-| Configurable Model | [Example](examples/middleware/configurable_model.py) | [📖](https://docs.praison.ai/docs/features/configurable-model) |
-| Rate Limiter | [Example](examples/middleware/rate_limiter.py) | [📖](https://docs.praison.ai/docs/features/rate-limiter) |
-| Injected Tool State | [Example](examples/middleware/injected_state.py) | [📖](https://docs.praison.ai/docs/features/injected-state) |
-| Shadow Git Checkpoints | [Example](examples/checkpoints/basic_checkpoint.py) | [📖](https://docs.praison.ai/docs/features/checkpoints) |
-| Background Tasks | [Example](examples/background/basic_background.py) | [📖](https://docs.praison.ai/docs/features/background-tasks) |
-| Policy Engine | [Example](examples/policy/basic_policy.py) | [📖](https://docs.praison.ai/docs/features/policy-engine) |
-| Thinking Budgets | [Example](examples/thinking/basic_thinking.py) | [📖](https://docs.praison.ai/docs/features/thinking-budgets) |
-| Output Styles | [Example](examples/output/basic_output.py) | [📖](https://docs.praison.ai/docs/features/output-styles) |
-| Context Compaction | [Example](examples/compaction/basic_compaction.py) | [📖](https://docs.praison.ai/docs/features/context-compaction) |
+| 100+ Custom Tools | [Example](examples/python/general/tools_example.py) | [📖](https://praison.ai/docs/tools/tools) |
+| YAML Configuration | [Example](examples/cookbooks/yaml/secondary_market_research_agents.yaml) | [📖](https://praison.ai/docs/developers/agents-playbook) |
+| 100+ LLM Support | [Example](examples/python/providers/openai/openai_gpt4_example.py) | [📖](https://praison.ai/docs/models) |
+| Callback Agents | [Example](examples/python/general/advanced-callback-systems.py) | [📖](https://praison.ai/docs/concepts/hooks) |
+| Hooks | [Example](examples/python/hooks/hooks_example.py) | [📖](https://praison.ai/docs/concepts/hooks) |
+| Middleware System | [Example](examples/middleware/basic_middleware.py) | [📖](https://praison.ai/docs/features/middleware) |
+| Configurable Model | [Example](examples/middleware/configurable_model.py) | [📖](https://praison.ai/docs/features/configurable-model) |
+| Rate Limiter | [Example](examples/middleware/rate_limiter.py) | [📖](https://praison.ai/docs/features/rate-limiter) |
+| Injected Tool State | [Example](examples/middleware/injected_state.py) | [📖](https://praison.ai/docs/features/injected-state) |
+| Shadow Git Checkpoints | [Example](examples/checkpoints/basic_checkpoint.py) | [📖](https://praison.ai/docs/features/checkpoints) |
+| Background Tasks | [Example](examples/background/basic_background.py) | [📖](https://praison.ai/docs/features/background-tasks) |
+| Policy Engine | [Example](examples/policy/basic_policy.py) | [📖](https://praison.ai/docs/features/policy-engine) |
+| Thinking Budgets | [Example](examples/thinking/basic_thinking.py) | [📖](https://praison.ai/docs/features/thinking-budgets) |
+| Output Styles | [Example](examples/output/basic_output.py) | [📖](https://praison.ai/docs/features/output-styles) |
+| Context Compaction | [Example](examples/compaction/basic_compaction.py) | [📖](https://praison.ai/docs/features/context-compaction) |
 
 </details>
 
@@ -919,14 +1073,14 @@ praisonai agents.yaml
 
 | Feature | Code | Docs |
 |---------|:----:|:----:|
-| Sessions Management | [Example](examples/python/sessions/comprehensive-session-management.py) | [📖](https://docs.praison.ai/docs/concepts/session-management) |
-| Auto-Save Sessions | [Docs](https://docs.praison.ai/docs/cli/session) | [📖](https://docs.praison.ai/docs/cli/session) |
-| History in Context | [Docs](https://docs.praison.ai/docs/cli/session) | [📖](https://docs.praison.ai/docs/cli/session) |
-| Telemetry | [Example](examples/python/telemetry/production-telemetry-example.py) | [📖](https://docs.praison.ai/docs/features/telemetry) |
-| Langfuse Tracing | [Docs](https://docs.praison.ai/docs/observability/langfuse) | [📖](https://docs.praison.ai/docs/observability/langfuse) |
-| Project Docs (.praison/docs/) | [Docs](https://docs.praison.ai/docs/cli/docs) | [📖](https://docs.praison.ai/docs/cli/docs) |
-| AI Commit Messages | [Docs](https://docs.praison.ai/docs/cli/commit) | [📖](https://docs.praison.ai/docs/cli/commit) |
-| @Mentions in Prompts | [Docs](https://docs.praison.ai/docs/cli/mentions) | [📖](https://docs.praison.ai/docs/cli/mentions) |
+| Sessions Management | [Example](examples/python/sessions/comprehensive-session-management.py) | [📖](https://praison.ai/docs/concepts/session-management) |
+| Auto-Save Sessions | [Docs](https://praison.ai/docs/cli/session) | [📖](https://praison.ai/docs/cli/session) |
+| History in Context | [Docs](https://praison.ai/docs/cli/session) | [📖](https://praison.ai/docs/cli/session) |
+| Telemetry | [Example](examples/python/telemetry/production-telemetry-example.py) | [📖](https://praison.ai/docs/features/telemetry) |
+| Langfuse Tracing | [Docs](https://praison.ai/docs/observability/langfuse) | [📖](https://praison.ai/docs/observability/langfuse) |
+| Project Docs (.praison/docs/) | [Docs](https://praison.ai/docs/cli/docs) | [📖](https://praison.ai/docs/cli/docs) |
+| AI Commit Messages | [Docs](https://praison.ai/docs/cli/commit) | [📖](https://praison.ai/docs/cli/commit) |
+| @Mentions in Prompts | [Docs](https://praison.ai/docs/cli/mentions) | [📖](https://praison.ai/docs/cli/mentions) |
 
 </details>
 
@@ -935,20 +1089,20 @@ praisonai agents.yaml
 
 | Feature | Code | Docs |
 |---------|:----:|:----:|
-| Slash Commands | [Example](examples/python/cli/slash_commands_example.py) | [📖](https://docs.praison.ai/docs/cli/slash-commands) |
-| Autonomy Modes | [Example](examples/python/cli/autonomy_modes_example.py) | [📖](https://docs.praison.ai/docs/cli/autonomy-modes) |
-| Cost Tracking | [Example](examples/python/cli/cost_tracking_example.py) | [📖](https://docs.praison.ai/docs/cli/cost-tracking) |
-| Repository Map | [Example](examples/python/cli/repo_map_example.py) | [📖](https://docs.praison.ai/docs/cli/repo-map) |
-| Interactive TUI | [Example](examples/python/cli/interactive_tui_example.py) | [📖](https://docs.praison.ai/docs/cli/interactive-tui) |
-| Git Integration | [Example](examples/python/cli/git_integration_example.py) | [📖](https://docs.praison.ai/docs/cli/git-integration) |
-| Sandbox Execution | [Example](examples/python/cli/sandbox_execution_example.py) | [📖](https://docs.praison.ai/docs/cli/sandbox-execution) |
-| CLI Compare | [Example](examples/compare/cli_compare_basic.py) | [📖](https://docs.praison.ai/docs/cli/compare) |
-| Profile/Benchmark | [Docs](https://docs.praison.ai/docs/cli/profile) | [📖](https://docs.praison.ai/docs/cli/profile) |
-| Auto Mode | [Docs](https://docs.praison.ai/docs/cli/auto) | [📖](https://docs.praison.ai/docs/cli/auto) |
-| Init | [Docs](https://docs.praison.ai/docs/cli/init) | [📖](https://docs.praison.ai/docs/cli/init) |
-| File Input | [Docs](https://docs.praison.ai/docs/cli/file-input) | [📖](https://docs.praison.ai/docs/cli/file-input) |
-| Final Agent | [Docs](https://docs.praison.ai/docs/cli/final-agent) | [📖](https://docs.praison.ai/docs/cli/final-agent) |
-| Max Tokens | [Docs](https://docs.praison.ai/docs/cli/max-tokens) | [📖](https://docs.praison.ai/docs/cli/max-tokens) |
+| Slash Commands | [Example](examples/python/cli/slash_commands_example.py) | [📖](https://praison.ai/docs/cli/slash-commands) |
+| Autonomy Modes | [Example](examples/python/cli/autonomy_modes_example.py) | [📖](https://praison.ai/docs/cli/autonomy-modes) |
+| Cost Tracking | [Example](examples/python/cli/cost_tracking_example.py) | [📖](https://praison.ai/docs/cli/cost-tracking) |
+| Repository Map | [Example](examples/python/cli/repo_map_example.py) | [📖](https://praison.ai/docs/cli/repo-map) |
+| Interactive TUI | [Example](examples/python/cli/interactive_tui_example.py) | [📖](https://praison.ai/docs/cli/interactive-tui) |
+| Git Integration | [Example](examples/python/cli/git_integration_example.py) | [📖](https://praison.ai/docs/cli/git-integration) |
+| Sandbox Execution | [Example](examples/python/cli/sandbox_execution_example.py) | [📖](https://praison.ai/docs/cli/sandbox-execution) |
+| CLI Compare | [Example](examples/compare/cli_compare_basic.py) | [📖](https://praison.ai/docs/cli/compare) |
+| Profile/Benchmark | [Docs](https://praison.ai/docs/cli/profile) | [📖](https://praison.ai/docs/cli/profile) |
+| Auto Mode | [Docs](https://praison.ai/docs/cli/auto) | [📖](https://praison.ai/docs/cli/auto) |
+| Init | [Docs](https://praison.ai/docs/cli/init) | [📖](https://praison.ai/docs/cli/init) |
+| File Input | [Docs](https://praison.ai/docs/cli/file-input) | [📖](https://praison.ai/docs/cli/file-input) |
+| Final Agent | [Docs](https://praison.ai/docs/cli/final-agent) | [📖](https://praison.ai/docs/cli/final-agent) |
+| Max Tokens | [Docs](https://praison.ai/docs/cli/max-tokens) | [📖](https://praison.ai/docs/cli/max-tokens) |
 
 </details>
 
@@ -957,10 +1111,10 @@ praisonai agents.yaml
 
 | Feature | Code | Docs |
 |---------|:----:|:----:|
-| Accuracy Evaluation | [Example](examples/eval/accuracy_example.py) | [📖](https://docs.praison.ai/docs/cli/eval) |
-| Performance Evaluation | [Example](examples/eval/performance_example.py) | [📖](https://docs.praison.ai/docs/cli/eval) |
-| Reliability Evaluation | [Example](examples/eval/reliability_example.py) | [📖](https://docs.praison.ai/docs/cli/eval) |
-| Criteria Evaluation | [Example](examples/eval/criteria_example.py) | [📖](https://docs.praison.ai/docs/cli/eval) |
+| Accuracy Evaluation | [Example](examples/eval/accuracy_example.py) | [📖](https://praison.ai/docs/cli/eval) |
+| Performance Evaluation | [Example](examples/eval/performance_example.py) | [📖](https://praison.ai/docs/cli/eval) |
+| Reliability Evaluation | [Example](examples/eval/reliability_example.py) | [📖](https://praison.ai/docs/cli/eval) |
+| Criteria Evaluation | [Example](examples/eval/criteria_example.py) | [📖](https://praison.ai/docs/cli/eval) |
 
 </details>
 
@@ -969,8 +1123,8 @@ praisonai agents.yaml
 
 | Feature | Code | Docs |
 |---------|:----:|:----:|
-| Skills Management | [Example](examples/skills/basic_skill_usage.py) | [📖](https://docs.praison.ai/docs/concepts/skills) |
-| Custom Skills | [Example](examples/skills/custom_skill_example.py) | [📖](https://docs.praison.ai/docs/concepts/skills) |
+| Skills Management | [Example](examples/skills/basic_skill_usage.py) | [📖](https://praison.ai/docs/concepts/skills) |
+| Custom Skills | [Example](examples/skills/custom_skill_example.py) | [📖](https://praison.ai/docs/concepts/skills) |
 
 </details>
 
@@ -979,7 +1133,9 @@ praisonai agents.yaml
 
 | Feature | Code | Docs |
 |---------|:----:|:----:|
-| Agent Scheduler | [Example](examples/python/scheduled_agents/news_checker_live.py) | [📖](https://docs.praison.ai/docs/cli/scheduler) |
+| Agent Scheduler | [Example](examples/python/scheduled_agents/news_checker_live.py) | [📖](https://praison.ai/docs/cli/scheduler) |
+
+</details>
 
 </details>
 
@@ -1008,7 +1164,7 @@ PraisonAI keeps framework overhead microsecond-class: creating an `Agent` (one t
 |--------------------|-----------|----------|
 | Avg Agent instantiation (1 tool, 1000 iterations) | **46 μs** | 2026-10-15 · praisonaiagents 1.7.12 |
 
-Methodology, comparisons and how to reproduce: [benchmarks/BENCHMARK_RESULTS.md](https://github.com/MervinPraison/PraisonAI/blob/main/src/praisonai-agents/benchmarks/BENCHMARK_RESULTS.md) · [docs](https://docs.praison.ai/docs/developers/benchmarks)
+Methodology, comparisons and how to reproduce: [benchmarks/BENCHMARK_RESULTS.md](https://github.com/MervinPraison/PraisonAI/blob/main/src/praisonai-agents/benchmarks/BENCHMARK_RESULTS.md) · [docs](https://praison.ai/docs/developers/benchmarks)
 
 ---
 
@@ -1018,7 +1174,7 @@ Methodology, comparisons and how to reproduce: [benchmarks/BENCHMARK_RESULTS.md]
 
 ## ⭐ Star History
 
-[![Star History Chart](https://api.star-history.com/svg?repos=MervinPraison/PraisonAI&type=Date)](https://docs.praison.ai)
+[![Star History Chart](https://api.star-history.com/svg?repos=MervinPraison/PraisonAI&type=Date)](https://praison.ai/docs)
 
 ---
 
@@ -1090,6 +1246,9 @@ We welcome contributions! Fork the repo, create a branch, and submit a PR → [C
 ## ❓ FAQ & Troubleshooting
 
 <details>
+<summary><strong>Show FAQ and troubleshooting</strong></summary>
+
+<details>
 <summary><strong>ModuleNotFoundError: No module named 'praisonaiagents'</strong></summary>
 
 Install the package:
@@ -1107,7 +1266,7 @@ Ensure your API key is set:
 export OPENAI_API_KEY=your_key_here
 ```
 
-For other providers, see [Models docs](https://docs.praison.ai/docs/models).
+For other providers, see [Models docs](https://praison.ai/docs/models).
 
 </details>
 
@@ -1148,7 +1307,7 @@ agent = Agent(instructions="...", llm="ollama/llama3.2", base_url="http://192.16
 The same shape works for other local runtimes — `lm_studio/`, `vllm/` and
 `hosted_vllm/` with their server's `base_url`.
 
-See [Models docs](https://docs.praison.ai/docs/models) for more details.
+See [Models docs](https://praison.ai/docs/models) for more details.
 
 </details>
 
@@ -1168,7 +1327,7 @@ agent = Agent(
 )
 ```
 
-See [Persistence docs](https://docs.praison.ai/docs/databases/overview) for supported databases.
+See [Persistence docs](https://praison.ai/docs/databases/overview) for supported databases.
 
 </details>
 
@@ -1185,7 +1344,7 @@ agent = Agent(
 )
 ```
 
-See [Memory docs](https://docs.praison.ai/docs/concepts/memory) for more options.
+See [Memory docs](https://praison.ai/docs/concepts/memory) for more options.
 
 </details>
 
@@ -1201,7 +1360,7 @@ agents = Agents(agents=[agent1, agent2])
 agents.start()
 ```
 
-See [Agents docs](https://docs.praison.ai/docs/concepts/agents) for more examples.
+See [Agents docs](https://praison.ai/docs/concepts/agents) for more examples.
 
 </details>
 
@@ -1216,13 +1375,15 @@ agent = Agent(
 )
 ```
 
-See [MCP docs](https://docs.praison.ai/docs/mcp/transports) for all transport options.
+See [MCP docs](https://praison.ai/docs/mcp/transports) for all transport options.
+
+</details>
 
 </details>
 
 ### Getting Help
 
-- 📚 [Full Documentation](https://docs.praison.ai)
+- 📚 [Full Documentation](https://praison.ai/docs)
 - 🐛 [Report Issues](https://github.com/MervinPraison/PraisonAI/issues)
 - 💬 [Discussions](https://github.com/MervinPraison/PraisonAI/discussions)
 
@@ -1231,7 +1392,7 @@ See [MCP docs](https://docs.praison.ai/docs/mcp/transports) for all transport op
 <div align="center">
   <p><strong>Made with ❤️ by the PraisonAI Team</strong></p>
   <p>
-    <a href="https://docs.praison.ai">📚 Documentation</a> •
+    <a href="https://praison.ai/docs">📚 Documentation</a> •
     <a href="https://github.com/MervinPraison/PraisonAI">GitHub</a> •
     <a href="https://youtube.com/@MervinPraison">▶️ YouTube</a> •
     <a href="https://x.com/MervinPraison">𝕏 X</a> •

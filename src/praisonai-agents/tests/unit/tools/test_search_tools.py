@@ -64,6 +64,35 @@ def test_grep_glob_filters_by_pattern(sample_tree):
     assert "src" not in out
 
 
+@pytest.mark.parametrize("pattern", ["**/*.py", "src/**/*.py", "src/**/**/test_*.py"])
+def test_grep_recursive_glob_matches_zero_directories(sample_tree, pattern):
+    from praisonaiagents.tools import grep
+
+    direct = sample_tree / "src" / "test_direct.py"
+    direct.write_text("needle\n")
+    nested = sample_tree / "src" / "nested"
+    nested.mkdir()
+    (nested / "test_nested.py").write_text("needle\n")
+    with patch("shutil.which", return_value=None):
+        out = grep("needle", glob=pattern)
+    assert "src/test_direct.py:1:" in out.replace(os.sep, "/")
+    assert "src/nested/test_nested.py:1:" in out.replace(os.sep, "/")
+    if pattern == "**/*.py":
+        assert "a.py:2:" in out
+    else:
+        assert "a.py:2:" not in out
+    if "test_" in pattern:
+        assert "src/d.py:1:" not in out.replace(os.sep, "/")
+
+
+def test_grep_recursive_glob_single_file(sample_tree):
+    from praisonaiagents.tools import grep
+
+    with patch("shutil.which", return_value=None):
+        out = grep("needle", path="a.py", glob="**/*.py")
+    assert "a.py:2:" in out
+
+
 def test_grep_case_insensitive(sample_tree):
     from praisonaiagents.tools import grep
     with patch("shutil.which", return_value=None):

@@ -4,6 +4,7 @@ Tests for praisonai.code.tools module.
 
 import os
 import tempfile
+import pytest
 
 
 class TestReadFile:
@@ -286,7 +287,129 @@ class TestSearchReplace:
             
             with open(file_path, 'r') as f:
                 assert f.read() == "Hello, new world!"
-    
+
+    def test_interrupted_write_keeps_original(self, monkeypatch):
+        """A failure mid-write must not truncate the original file."""
+        from praisonai.code.tools.search_replace import search_replace
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path = os.path.join(temp_dir, "test.txt")
+            with open(file_path, 'w') as f:
+                f.write("Hello, old world!")
+
+            def boom(*args, **kwargs):
+                raise KeyboardInterrupt
+
+            monkeypatch.setattr(os, "fsync", boom)
+            try:
+                search_replace(file_path, [
+                    {'search': 'old', 'replace': 'new'}
+                ], workspace=temp_dir)
+            except KeyboardInterrupt:
+                pass
+
+            with open(file_path, 'r') as f:
+                assert f.read() == "Hello, old world!"
+            assert os.listdir(temp_dir) == ["test.txt"]
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
+    def test_atomic_write_new_file_respects_umask(self):
+        """New files get 0666 & ~umask like open(path, 'w'), not mkstemp's 0600."""
+        from praisonai.code.utils.file_utils import atomic_write
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            old = os.umask(0o022)
+            try:
+                path = os.path.join(temp_dir, "new.txt")
+                atomic_write(path, "x")
+            finally:
+                os.umask(old)
+            assert (os.stat(path).st_mode & 0o777) == 0o644
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
+    def test_atomic_write_does_not_touch_process_umask(self, monkeypatch):
+        """os.umask is process-wide; changing it races with other threads."""
+        from praisonai.code.utils.file_utils import atomic_write
+
+        def no_umask(*args, **kwargs):
+            raise AssertionError("atomic_write must not call os.umask")
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            monkeypatch.setattr(os, "umask", no_umask)
+            new_path = os.path.join(temp_dir, "new.txt")
+            atomic_write(new_path, "a")
+            atomic_write(new_path, "b")
+            with open(new_path) as f:
+                assert f.read() == "b"
+            assert os.listdir(temp_dir) == ["new.txt"]
+
+    @pytest.mark.skipif(not hasattr(os, "symlink"), reason="symlinks unsupported")
+    def test_atomic_write_writes_through_symlink(self):
+        """Like open(path, 'w'), editing a symlink must update its target and keep the link."""
+        from praisonai.code.utils.file_utils import atomic_write
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            real = os.path.join(temp_dir, "real.txt")
+            link = os.path.join(temp_dir, "link.txt")
+            with open(real, "w") as f:
+                f.write("orig")
+            try:
+                os.symlink(real, link)
+            except OSError:
+                pytest.skip("cannot create symlink")
+            atomic_write(link, "new")
+            assert os.path.islink(link)
+            with open(real) as f:
+                assert f.read() == "new"
+            assert sorted(os.listdir(temp_dir)) == ["link.txt", "real.txt"]
+
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX permission bits")
+    def test_atomic_write_temp_file_never_wider_than_private_target(self, monkeypatch):
+        """A 0600 target's new content must never sit in a more readable temp file."""
+        import stat
+        from praisonai.code.utils import file_utils
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = os.path.join(temp_dir, ".env")
+            with open(path, "w") as f:
+                f.write("OLD=1")
+            os.chmod(path, 0o600)
+
+            seen = []
+            real_fdopen = os.fdopen
+
+            def spy_fdopen(fd, *a, **kw):
+                seen.append(stat.S_IMODE(os.fstat(fd).st_mode))
+                return real_fdopen(fd, *a, **kw)
+
+            monkeypatch.setattr(file_utils.os, "fdopen", spy_fdopen)
+            file_utils.atomic_write(path, "NEW=2")
+
+            assert seen and all(m & 0o077 == 0 for m in seen), seen
+            assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+            with open(path) as f:
+                assert f.read() == "NEW=2"
+
+    @pytest.mark.skipif(os.name == "nt" or (hasattr(os, "geteuid") and os.geteuid() == 0),
+                        reason="POSIX permissions; root bypasses them")
+    def test_atomic_write_refuses_read_only_target(self):
+        """Like open(path, 'w'), a read-only file must not be replaced via inode swap."""
+        from praisonai.code.utils.file_utils import atomic_write
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            path = os.path.join(temp_dir, "locked.txt")
+            with open(path, "w") as f:
+                f.write("orig")
+            os.chmod(path, 0o444)
+            try:
+                with pytest.raises(PermissionError):
+                    atomic_write(path, "new")
+                with open(path) as f:
+                    assert f.read() == "orig"
+                assert os.listdir(temp_dir) == ["locked.txt"]
+            finally:
+                os.chmod(path, 0o644)
+
     def test_multiple_operations(self):
         """Test multiple search/replace operations."""
         from praisonai.code.tools.search_replace import search_replace

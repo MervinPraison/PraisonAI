@@ -1412,6 +1412,7 @@ class WebSocketGateway:
         
         # PID lock for single-instance enforcement
         self._pid_lock: Optional[Any] = None
+        self._state_lock: Optional[Any] = None
         
         # Channel supervisor for resilient bot management. Share the gateway's
         # degraded-capability registry so the fleet crash-loop breaker (Issue
@@ -1544,9 +1545,46 @@ class WebSocketGateway:
             logger.error("Gateway startup failed - another instance is running")
             raise RuntimeError(error_msg)
         
-        # Store PID lock for cleanup
         self._pid_lock = pid_lock
-        
+        # When ``start_with_config`` already claimed the state root, its channel
+        # bots are still polling if we fail here; only it may release that lock
+        # (after channels stop), or a second gateway could claim the state.
+        owns_state_lock = self._state_lock is None
+        try:
+            self._acquire_state_lock()
+            await self._start_locked()
+        except BaseException:
+            # Any failure after claiming (bad config, bind error, cancel) must
+            # not leave a live process holding the locks and blocking restarts.
+            self._release_locks(state=owns_state_lock)
+            raise
+
+    def _acquire_state_lock(self) -> None:
+        """Claim the shared state root (idempotent).
+
+        The port lock alone admits a second gateway on another port sharing the
+        same state + bot tokens (split-brain), so the state root is locked too.
+        """
+        if self._state_lock is not None:
+            return
+        from .port_utils import state_lock, resolve_state_dir, format_state_collision_error
+        state_dir = resolve_state_dir()
+        st_lock = state_lock(state_dir, host=self._host, port=self._port)
+        if not st_lock.acquire_lock(self._host, self._port):
+            logger.error("Gateway startup failed - another instance owns the shared state")
+            raise RuntimeError(format_state_collision_error(state_dir, st_lock.get_lock_info()))
+        self._state_lock = st_lock
+
+    def _release_locks(self, state: bool = True) -> None:
+        """Release the port lock and (if ``state``) the state lock (idempotent)."""
+        for attr in ("_pid_lock", "_state_lock") if state else ("_pid_lock",):
+            lock = getattr(self, attr, None)
+            if lock:
+                lock.release_lock()
+                setattr(self, attr, None)
+
+    async def _start_locked(self) -> None:
+        """Body of :meth:`start` once the single-instance locks are held."""
         # Validate bind-aware auth configuration before starting
         from .auth import assert_external_bind_safe
         self.config.host = self._host
@@ -2631,6 +2669,8 @@ class WebSocketGateway:
                     auth_err = _check_auth(request)
                     if auth_err:
                         return auth_err
+                    # Issue #6215: bind the per-user budget key post-auth.
+                    self._api_endpoints._bind_rate_key(request)
                     return await handler(request)
                 return _wrapped
 
@@ -2768,14 +2808,8 @@ class WebSocketGateway:
                 self._ledger_heartbeat_loop(), name="gateway-lifecycle-ledger"
             )
         try:
+            # Lock cleanup on failure is handled by ``start()``.
             await self._server.serve()
-        except Exception as e:
-            # Clean up PID lock on any startup failure
-            if hasattr(self, '_pid_lock') and self._pid_lock:
-                self._pid_lock.release_lock()
-                self._pid_lock = None
-            # Re-raise the original exception
-            raise
         finally:
             self._disarm_watchdog()
             await self._cancel_liveness_task()
@@ -3993,9 +4027,7 @@ class WebSocketGateway:
                 logger.debug("Failed to shut down pooled MCP client")
         self._mcp_pool.clear()
 
-        # Release PID lock
-        if hasattr(self, '_pid_lock') and self._pid_lock:
-            self._pid_lock.release_lock()
+        self._release_locks()
         
         logger.info("Gateway stopped")
     
@@ -4614,7 +4646,7 @@ class WebSocketGateway:
 
         elif msg_type == "server_reply":
             # Issue #5351: a client's correlated answer to a server→client
-            # interactive request (approval / choice / input).
+            # interactive request (approval / choice / input / secret).
             request_id = data.get("request_id")
             value = data.get("value")
             if not request_id or not isinstance(value, str):
@@ -4648,7 +4680,7 @@ class WebSocketGateway:
                 return True
             # Answering an approval on behalf of the turn is an approval decision
             # and requires the APPROVALS scope (parity with approvals.resolve);
-            # choice/input answers require WRITE like sending a message.
+            # choice/input/secret answers require WRITE like sending a message.
             required_scope = (
                 OperatorScope.APPROVALS if req_kind == "approval" else OperatorScope.WRITE
             )
@@ -5089,7 +5121,14 @@ class WebSocketGateway:
                         # so enforce the shared gate here too.
                         from ..bots._admission import AdmissionRejected
                         try:
-                            async with gate.admit(session_id=session.session_id):
+                            # Issue #6215: stable per-user budget key (only
+                            # when a budget is set; duck-typed gates unchanged).
+                            _rk = (
+                                {"rate_key": self._client_rate_key(client_id)}
+                                if getattr(gate, "_rate_limit_enabled", False)
+                                else {}
+                            )
+                            async with gate.admit(session_id=session.session_id, **_rk):
                                 if getattr(session, "_stop_epoch", 0) != dequeued_stop_epoch:
                                     response = _stop_sentinel
                                 else:
@@ -5812,7 +5851,9 @@ class WebSocketGateway:
 
         * ``approval`` → ``"allow"`` or ``"deny"``.
         * ``choice`` → one of the offered ``options`` (any value if none given).
-        * ``input`` → any string.
+        * ``input`` / ``secret`` → any string. A ``secret`` value is handed
+          only to the waiting caller — never logged, echoed, or journalled
+          (Issue #6223).
         """
         kind = getattr(req, "kind", "input")
         if kind == "approval":
@@ -5894,6 +5935,18 @@ class WebSocketGateway:
     
     # ── Client Management (Public API) ────────────────────────────────
     
+    def _client_rate_key(self, client_id: Optional[str]) -> str:
+        """Stable per-user budget key for a WebSocket turn (#6215).
+
+        Session ids are client-chosen, so charge the peer address instead.
+        With no known peer, callers share one ``ip:unknown`` budget rather
+        than falling back to the client-chosen session id.
+        """
+        ws = self._clients.get(client_id) if client_id else None
+        peer = getattr(ws, "client", None)
+        host = getattr(peer, "host", None)
+        return f"ip:{host}" if host else "ip:unknown"
+
     def add_client(self, client_id: str, websocket: Any) -> None:
         """Register a client WebSocket connection.
         
@@ -11281,6 +11334,29 @@ class WebSocketGateway:
         self._shell_routed_agents.clear()
         self._shell_routed_agents.update(candidate.get("shell", {}))
 
+    @staticmethod
+    def _rate_policy_from_config(cfg: Any) -> Any:
+        """Build the ``gateway.per_user_per_minute`` policy (#6215); may raise."""
+        from ..bots._admission import build_rate_limit_policy
+
+        gw_cfg = (cfg or {}).get("gateway") or {}
+        return build_rate_limit_policy(gw_cfg.get("per_user_per_minute", 0))
+
+    def _apply_rate_policy(self, policy: Any) -> None:
+        """Install a reloaded per-user budget on the live admission gate (#6215).
+
+        An existing gate is updated in place (bots/API/WS already share it); a
+        budget added to a gateway that had no gate builds a rate-only gate,
+        which channels started afterwards pick up via ``_stamp_admission_gate``.
+        """
+        gate = getattr(self, "_admission_gate", None)
+        if gate is not None:
+            gate.set_rate_limit_policy(policy)
+        elif policy is not None:
+            from ..bots._admission import AdmissionGate
+
+            self._admission_gate = AdmissionGate(None, rate_limit_policy=policy)
+
     async def _restore_previous_config(
         self, error: str, changed_paths: Set[str]
     ) -> None:
@@ -11302,6 +11378,10 @@ class WebSocketGateway:
             )
             return
         try:
+            try:
+                self._apply_rate_policy(self._rate_policy_from_config(prev_cfg))
+            except ValueError:
+                pass  # previous config was validated when it went live
             prev_agents_cfg = prev_cfg.get("agents", {})
             if prev_agents_cfg:
                 provider_cfg = prev_cfg.get("provider", {})
@@ -11431,6 +11511,13 @@ class WebSocketGateway:
             # drain window keep resolving the previous agents until the cutover
             # commits.
             report = self._validate_candidate(new_cfg)
+            # Issue #6215: validate the per-user budget with the candidate so a
+            # bad value rejects the reload instead of failing mid-cutover.
+            try:
+                rate_policy = self._rate_policy_from_config(new_cfg)
+            except ValueError as e:
+                report.ok = False
+                report.failures.append(f"gateway.per_user_per_minute: {e}")
             if not report.ok:
                 error = "; ".join(report.failures) or "candidate validation failed"
                 logger.error(f"Reload rejected — {error}; keeping previous config")
@@ -11453,6 +11540,7 @@ class WebSocketGateway:
             # channel is accepting turns (greptile #1 — never expose the
             # candidate before the cutover commits).
             self._activate_candidate(report.candidate)
+            self._apply_rate_policy(rate_policy)
 
             channels_cfg = new_cfg.get("channels", {})
             try:
@@ -12181,6 +12269,8 @@ class WebSocketGateway:
             queue_depth=_queue_depth,
             overflow_policy=_overflow,
             max_concurrent_runs_per_scope=_max_runs_per_scope,
+            # Issue #6215: per-user inbound request budget (0 = unlimited).
+            per_user_per_minute=gw_cfg.get("per_user_per_minute", 0),
         )
         if self._admission_gate is not None:
             logger.info(
@@ -12436,6 +12526,9 @@ class WebSocketGateway:
             except (NotImplementedError, OSError, ValueError):
                 pass
 
+        # Claim the state root BEFORE channels start: channel setup replays the
+        # inbound journal, which a rejected second gateway must never touch.
+        self._acquire_state_lock()
         try:
             await _run_all()
         finally:
@@ -12486,3 +12579,4 @@ class WebSocketGateway:
                             logger.warning("Error draining websocket sessions: %s", e)
             finally:
                 self._cancel_shutdown_deadline()
+                self._release_locks()

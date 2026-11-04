@@ -395,7 +395,7 @@ class YAMLConfig(BaseModel):
     config: Optional[GlobalConfig] = Field(default=None, description="Global configuration")
     
     # LLM config
-    llm: Optional[str] = Field(default=None, description="Default LLM")
+    llm: Optional[Union[str, Dict[str, Any]]] = Field(default=None, description="Default LLM (string or dict with 'model' key)")
     models: Optional[Dict[str, Any]] = Field(default=None, description="Model configurations")
     providers: Optional[Dict[str, Any]] = Field(default=None, description="Provider configurations")
 

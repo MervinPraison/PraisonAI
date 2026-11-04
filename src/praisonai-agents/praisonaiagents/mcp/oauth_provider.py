@@ -14,10 +14,11 @@ and only runs when a server actually challenges for OAuth, so servers without
 auth — or with pre-supplied client info/tokens — behave exactly as before.
 """
 
+import sys
 import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from threading import Thread
+from threading import Lock, Thread
 from typing import Any, Dict, Optional
 from urllib.parse import urlencode, urlparse, parse_qs
 
@@ -67,6 +68,38 @@ def _make_callback_server(handler: OAuthCallbackHandler, port: int) -> HTTPServe
             pass
 
     return HTTPServer(("127.0.0.1", port), _Handler)
+
+
+# One loopback callback server per process, shared by every in-flight flow.
+# The redirect URI is fixed (it is what dynamic registration whitelisted), so
+# concurrent flows must not each try to bind the port; the state-keyed
+# ``OAuthCallbackHandler`` already routes each code to the right flow.
+_callback_lock = Lock()
+_callback_server: Optional[HTTPServer] = None
+_callback_handler: Optional[OAuthCallbackHandler] = None
+_callback_refs = 0
+
+
+def _acquire_callback() -> OAuthCallbackHandler:
+    global _callback_server, _callback_handler, _callback_refs
+    with _callback_lock:
+        if _callback_server is None:
+            handler = OAuthCallbackHandler()
+            server = _make_callback_server(handler, OAUTH_CALLBACK_PORT)
+            Thread(target=server.serve_forever, daemon=True).start()
+            _callback_server, _callback_handler = server, handler
+        _callback_refs += 1
+        return _callback_handler
+
+
+def _release_callback() -> None:
+    global _callback_server, _callback_handler, _callback_refs
+    with _callback_lock:
+        _callback_refs -= 1
+        if _callback_refs <= 0 and _callback_server is not None:
+            _callback_server.shutdown()
+            _callback_server.server_close()
+            _callback_server, _callback_handler, _callback_refs = None, None, 0
 
 
 class MCPOAuthProvider:
@@ -198,11 +231,11 @@ class MCPOAuthProvider:
         if not self.open_browser:
             raise InteractiveAuthRequired(
                 f"Interactive OAuth is required to authenticate with "
-                f"{self.server_url}. Run this from an interactive session, or "
+                f"{self.server_url}. Run `praisonai mcp auth {self.mcp_name}` "
+                f"from a terminal on this host (works headless/over SSH), or "
                 f"pre-supply tokens, to complete authentication."
             )
 
-        callback = OAuthCallbackHandler()
         state = generate_state()
         code_verifier = generate_code_verifier()
         code_challenge = generate_code_challenge(code_verifier)
@@ -222,15 +255,30 @@ class MCPOAuthProvider:
 
         auth_url = f"{metadata['authorization_endpoint']}?{urlencode(params)}"
 
-        server = _make_callback_server(callback, OAUTH_CALLBACK_PORT)
-        thread = Thread(target=server.serve_forever, daemon=True)
-        thread.start()
+        callback = _acquire_callback()
         try:
             logger.debug(f"Opening browser for OAuth authorization: {auth_url}")
-            webbrowser.open(auth_url)
+            try:
+                opened = webbrowser.open(auth_url)
+            except Exception:  # noqa: BLE001 - no usable browser
+                opened = False
+            if not opened:
+                # Headless/remote host: let the operator consent on any device.
+                # No stdin reading: a library must not consume the host's input.
+                print(
+                    f"Open this URL on any device to authorise "
+                    f"{self.mcp_name}:\n  {auth_url}\n"
+                    f"After consenting, the browser is redirected to "
+                    f"{get_redirect_url()}. On another device either forward "
+                    f"that port (ssh -L {OAUTH_CALLBACK_PORT}:127.0.0.1:"
+                    f"{OAUTH_CALLBACK_PORT} <host>) or copy the redirect URL "
+                    f"and run `curl '<redirect URL>'` on this host.",
+                    file=sys.stderr,
+                )
             code = callback.wait_for_callback(state, timeout=300.0)
         finally:
-            server.shutdown()
+            callback.clear_state(state)
+            _release_callback()
 
         tokens = self._exchange_code(
             metadata, client_info, code, code_verifier, timeout=timeout
