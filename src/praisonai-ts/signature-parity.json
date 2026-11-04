@@ -5142,7 +5142,7 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/session/session.ts:132",
+        "ctor_location": "src/praisonai-ts/src/session/session.ts:133",
         "location": "src/praisonai-ts/src/session/session.ts:29",
         "options_parameters": [
           "config"

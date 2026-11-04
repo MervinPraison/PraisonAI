@@ -316,7 +316,7 @@ TS-only members: `config`
 ### `Session.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/session/api.py:67`
-- TypeScript: `src/praisonai-ts/src/session/session.ts:29` (ctor `src/praisonai-ts/src/session/session.ts:132`)
+- TypeScript: `src/praisonai-ts/src/session/session.ts:29` (ctor `src/praisonai-ts/src/session/session.ts:133`)
 - Counts: 7 python params: 1 exact, 6 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 5 TS-only of 12
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
