@@ -119,6 +119,13 @@ def test_nested_names_the_formatter_drops_get_no_hint(make):
     assert OPENAI_HINT not in agent._build_system_prompt()
 
 
+def test_nested_bare_name_dict_gets_no_hint(make):
+    # A nested dict without a function schema is dropped by the formatter.
+    agent = make(llm="gpt-4o-mini", tools=[[{"name": "edit_file"}]])
+    assert agent._format_tools_for_completion() == []
+    assert OPENAI_HINT not in agent._build_system_prompt()
+
+
 EDIT_SCHEMA = {"type": "function", "function": {
     "name": "edit_file", "description": "Edit a file.",
     "parameters": {"type": "object", "properties": {}}}}

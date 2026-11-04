@@ -550,8 +550,12 @@ class ChatMixin:
         for tool in (tools if tools is not None else getattr(self, "tools", None)) or ():
             if isinstance(tool, list):
                 # _format_tools_for_completion flattens a nested list but keeps
-                # only its tool dicts, so only those can put an edit tool in play.
-                if self._offers_edit_tool([t for t in tool if isinstance(t, dict)]):
+                # only its function-schema dicts, so only those can offer an edit tool.
+                if self._offers_edit_tool([
+                    t for t in tool
+                    if isinstance(t, dict) and t.get("type") == "function"
+                    and isinstance(t.get("function"), dict)
+                ]):
                     return True
                 continue
             if isinstance(tool, str):
