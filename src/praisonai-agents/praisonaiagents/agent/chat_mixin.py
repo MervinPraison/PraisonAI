@@ -548,9 +548,10 @@ class ChatMixin:
     def _offers_edit_tool(self, tools=None):
         """True when ``tools`` (default: the agent's tools) include a file-edit primitive."""
         for tool in (tools if tools is not None else getattr(self, "tools", None)) or ():
-            if isinstance(tool, (list, tuple)):
-                # Nested tool lists are flattened by _format_tools_for_completion.
-                if self._offers_edit_tool(tool):
+            if isinstance(tool, list):
+                # _format_tools_for_completion flattens a nested list but keeps
+                # only its tool dicts, so only those can put an edit tool in play.
+                if self._offers_edit_tool([t for t in tool if isinstance(t, dict)]):
                     return True
                 continue
             if isinstance(tool, str):

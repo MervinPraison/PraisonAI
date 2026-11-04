@@ -108,8 +108,15 @@ def test_a_tool_renamed_to_edit_file_counts(make):
 
 
 def test_nested_tool_list_offers_the_edit_hint(make):
-    agent = make(llm="gpt-4o-mini", tools=[["edit_file"]])
+    # _format_tools_for_completion flattens nested lists of tool dicts.
+    agent = make(llm="gpt-4o-mini", tools=[[EDIT_SCHEMA]])
     assert OPENAI_HINT in agent._build_system_prompt()
+
+
+def test_nested_names_the_formatter_drops_get_no_hint(make):
+    # A nested string is not sent to the model, so neither is the hint.
+    agent = make(llm="gpt-4o-mini", tools=[["edit_file"]])
+    assert OPENAI_HINT not in agent._build_system_prompt()
 
 
 EDIT_SCHEMA = {"type": "function", "function": {
