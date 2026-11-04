@@ -1,7 +1,7 @@
 [project]
 name = "PraisonAI"
 dynamic = ["version"]
-description = "PraisonAI is an AI Agents Framework with Self Reflection. PraisonAI application combines PraisonAI Agents, AutoGen, and CrewAI into a low-code solution for building and managing multi-agent LLM systems, focusing on simplicity, customisation, and efficient human-agent collaboration."
+description = "Open-source Python AI agent framework that runs on your own computers, even fully offline."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10,<3.15"
