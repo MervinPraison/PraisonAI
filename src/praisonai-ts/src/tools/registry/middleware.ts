@@ -212,7 +212,9 @@ export function createValidationMiddleware(): ToolMiddleware {
     const limits = context.limits;
     
     if (limits?.maxPayloadBytes) {
-      const size = JSON.stringify(input).length;
+      const serialized = JSON.stringify(input);
+      if (serialized === undefined) throw new TypeError('Input payload is not JSON serializable');
+      const size = new TextEncoder().encode(serialized).byteLength;
       if (size > limits.maxPayloadBytes) {
         throw new Error(`Input payload size (${size} bytes) exceeds limit (${limits.maxPayloadBytes} bytes)`);
       }
