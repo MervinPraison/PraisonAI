@@ -2042,6 +2042,21 @@ Your Goal: {self.goal}"""
                 return fn(*args, **kwargs)
         return {**llm_kwargs, 'execute_tool_fn': tracked}, ran
 
+    @staticmethod
+    def _history_before_turn(history, content):
+        """``history`` without the copy of this turn's user message stored before the call.
+
+        ``LLM._build_messages`` appends ``prompt`` after ``chat_history``, so
+        forwarding the stored copy as well sends the prompt twice. Only a
+        trailing match is dropped: messages a durable replay restored after
+        the turn keep their order.
+        """
+        if history:
+            last = history[-1]
+            if isinstance(last, dict) and last.get("role") == "user" and last.get("content") == content:
+                return list(history[:-1])
+        return history
+
     def _custom_llm_hook_messages(self, llm_kwargs):
         """The custom-LLM request as the message list BEFORE_LLM / AFTER_LLM hooks see."""
         messages = []
@@ -4090,7 +4105,7 @@ Your Goal: {self.goal}"""
                     llm_kwargs = dict(
                         prompt=llm_prompt,
                         system_prompt=system_prompt_for_llm,
-                        chat_history=processed_history,
+                        chat_history=self._history_before_turn(processed_history, normalized_content),
                         temperature=temperature,
                         tools=tool_param,
                         output_json=output_json,
@@ -4834,7 +4849,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             tools,
                             memory_prefetch_context=memory_prefetch_context,
                         ),
-                        'chat_history': effective_history,
+                        'chat_history': self._history_before_turn(effective_history, normalized_content),
                         'temperature': temperature,
                         'tools': tools,
                         'output_json': output_json,
@@ -5880,7 +5895,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     for chunk in self.llm_instance.get_response_stream(
                         prompt=actual_prompt,
                         system_prompt=stream_system_prompt,
-                        chat_history=stream_history,
+                        chat_history=self._history_before_turn(stream_history, normalized_content),
                         temperature=kwargs.get('temperature', 1.0),
                         tools=tool_param,
                         output_json=kwargs.get('output_json'),
