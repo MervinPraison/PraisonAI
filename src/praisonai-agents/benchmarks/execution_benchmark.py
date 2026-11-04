@@ -71,8 +71,13 @@ def agno_runner(model, prompt):
     from agno.agent import Agent
     from agno.models.openai import OpenAIChat
 
+    # One model object per runner: each OpenAIChat opens its own HTTP client,
+    # so a fresh one per round would put a new connection inside the timer,
+    # while PraisonAI and CrewAI agents share theirs.
+    llm = OpenAIChat(id=model)
+
     def build():
-        agent = Agent(model=OpenAIChat(id=model), instructions=[INSTRUCTIONS])
+        agent = Agent(model=llm, instructions=[INSTRUCTIONS])
 
         def call():
             response = agent.run(prompt)
@@ -226,6 +231,10 @@ def main():
     parser.add_argument('--warmup', '-w', type=int, default=DEFAULT_WARMUP, help=f'Untimed warm-up calls per framework (default: {DEFAULT_WARMUP})')
     parser.add_argument('--prompt', '-p', type=str, default=DEFAULT_PROMPT, help=f'Prompt to use (default: "{DEFAULT_PROMPT}")')
     args = parser.parse_args()
+    if args.iterations < 1:
+        parser.error('--iterations must be at least 1')
+    if args.warmup < 0:
+        parser.error('--warmup must be 0 or more')
 
     if not os.environ.get('OPENAI_API_KEY'):
         print("ERROR: Set OPENAI_API_KEY environment variable")
