@@ -87,6 +87,7 @@ export class Memory {
    * Get recent entries
    */
   getRecent(count: number): MemoryEntry[] {
+    if (count === 0) return [];
     return this.getAll().slice(-count);
   }
 
@@ -179,7 +180,7 @@ export class Memory {
    * Build context string from recent memory
    */
   buildContext(count?: number): string {
-    const entries = count ? this.getRecent(count) : this.getAll();
+    const entries = count !== undefined ? this.getRecent(count) : this.getAll();
     return entries
       .map(e => `${e.role}: ${e.content}`)
       .join('\n');
