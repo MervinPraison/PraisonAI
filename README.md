@@ -70,7 +70,7 @@ print(agent.start("In two sentences, why do some companies keep their data on th
 
 Run the same agent on a model on your own computer with [Ollama](https://ollama.com). You need no API key, and your prompts and answers stay on the machine.
 
-Install the package and pull the model while you still have internet; after that, the agent runs with no network at all.
+Install the package and pull the model while you still have internet; after that, the agent runs with no network at all. If you installed only the core library, use `pip install "praisonaiagents[llm]"`, which adds the local-model support.
 
 ```bash
 # Start Ollama first (the app, or "ollama serve" in another terminal)
