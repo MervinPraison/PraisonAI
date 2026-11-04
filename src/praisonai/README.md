@@ -18,7 +18,7 @@
 
 **Private AI that earns trust one task at a time.**
 
-PraisonAI runs AI agents on your own computers, even fully offline, so private data never leaves the building.
+PraisonAI runs AI agents on your own computers, even fully offline, so private data never has to leave the building.
 
 - **For highly regulated teams:** each task moves to your own AI only after it passes a test. If quality slips, it moves back automatically, and every step is recorded for regulators. [Early access](#how-the-handover-works-early-access)
 - **For everyone else:** a free, open-source Python agent framework. With a local model you need no API key and pay no cloud bill, and your files stay yours.
