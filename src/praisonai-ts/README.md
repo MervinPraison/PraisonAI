@@ -1,6 +1,8 @@
 # PraisonAI TypeScript Node.js AI Agents Framework
 
-PraisonAI is a production-ready Multi AI Agents framework, designed to create AI Agents to automate and solve problems ranging from simple tasks to complex challenges. It provides a low-code solution to streamline the building and management of multi-agent LLM systems, emphasising simplicity, customisation, and effective human-agent collaboration.
+PraisonAI helps banks, insurers and hospitals run AI agents on their own computers, even fully offline, so their private data never leaves the building.
+
+This package is the TypeScript and JavaScript SDK of the open-source PraisonAI agent framework. Build single agents, multi-agent workflows, tools and memory in Node.js, on hosted models or on local models such as Ollama. The Python framework and the full docs are at [github.com/MervinPraison/PraisonAI](https://github.com/MervinPraison/PraisonAI) and [docs.praison.ai](https://docs.praison.ai).
 
 ## Installation
 
