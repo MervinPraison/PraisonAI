@@ -189,6 +189,25 @@ def test_deny_added_after_caching_prunes_cached_tools(make):
     assert "edit_file" in [t["function"]["name"] for t in agent._format_tools_for_completion()]
 
 
+def test_deny_before_first_format_restores_after_lift(make):
+    agent = make(llm="gpt-4o-mini", tools=[edit_file, lookup])
+    agent._perm_deny = frozenset({"edit_file"})
+    assert "edit_file" not in [t["function"]["name"] for t in agent._format_tools_for_completion()]
+    agent._perm_deny = frozenset()
+    assert "edit_file" in [t["function"]["name"] for t in agent._format_tools_for_completion()]
+
+
+def test_bridge_tool_search_hides_denied_tools(make):
+    agent = make(llm="gpt-4o-mini")
+    agent._tool_search_config = None
+    agent._tool_search_metadata = {"bridge_mode": True, "deferrable_tools": [EDIT_SCHEMA]}
+    agent._perm_deny = frozenset({"edit_file"})
+    out = agent._handle_bridge_tool_call("tool_describe", {"tool_name": "edit_file"})
+    assert "not found" in out
+    agent._perm_deny = frozenset()
+    assert "not found" not in agent._handle_bridge_tool_call("tool_describe", {"tool_name": "edit_file"})
+
+
 def test_native_achat_follows_per_call_edit_tools(make, monkeypatch):
     import asyncio
     agent = make(llm="gpt-4o-mini")
