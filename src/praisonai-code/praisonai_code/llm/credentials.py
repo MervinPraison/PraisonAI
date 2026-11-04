@@ -123,6 +123,43 @@ def detect_local_endpoint():
         return None
 
 
+_OLLAMA_PREFIXES = ("ollama/", "ollama_chat/")
+
+
+def _ollama_host_for_model(
+    model: Optional[str], base_url: Optional[str] = None
+) -> Optional[str]:
+    """Return the Ollama host to probe for an ``ollama/`` model, else ``None``.
+
+    Ollama needs no key, so an explicit Ollama model is gated on the server
+    being reachable rather than on a credential. The endpoint the caller will
+    actually use (e.g. an agent's ``llm.base_url``) wins, then
+    ``OLLAMA_API_BASE`` (what the runtime honours), then ``OLLAMA_HOST``, then
+    the default port.
+    """
+    import os
+
+    if not model or not model.lower().startswith(_OLLAMA_PREFIXES):
+        return None
+    from praisonai_code.llm.local_detect import _DEFAULT_OLLAMA_HOST
+
+    return (
+        base_url
+        or os.environ.get("OLLAMA_API_BASE")
+        or os.environ.get("OLLAMA_HOST")
+        or _DEFAULT_OLLAMA_HOST
+    )
+
+
+def _ollama_reachable(host: str) -> bool:
+    try:
+        from praisonai_code.llm.local_detect import ollama_reachable
+
+        return ollama_reachable(host)
+    except Exception:
+        return False
+
+
 def _provider_key_vars_for_model(model: str) -> tuple[str, ...]:
     """Map a model id to the environment variable(s) for its provider.
 
@@ -258,6 +295,10 @@ def is_configured(model: Optional[str] = None) -> bool:
     if model is None:
         model = default_model_for_available_provider()
 
+    ollama_host = _ollama_host_for_model(model) if explicit_model else None
+    if ollama_host is not None:
+        return _ollama_reachable(ollama_host)
+
     required_vars = _provider_key_vars_for_model(model)
 
     if required_vars:
@@ -303,6 +344,7 @@ def ensure_configured_or_onboard(
     *,
     model: Optional[str] = None,
     interactive: bool = True,
+    base_url: Optional[str] = None,
 ) -> Optional[str]:
     """Shared first-run credential gate for LLM-bound interactive commands.
 
@@ -331,6 +373,9 @@ def ensure_configured_or_onboard(
             keyless local-first fallback (its own provider gate applies).
         interactive: Whether a wizard prompt may be shown. Callers pass ``False``
             for headless (``-p``, piped, ``--output json``) paths.
+        base_url: The endpoint the caller will actually use (e.g. a custom
+            agent's ``llm.base_url``). For an explicit Ollama model this is the
+            server probed, instead of ``OLLAMA_API_BASE``/``OLLAMA_HOST``.
 
     Returns:
         The model id to proceed with. May be a detected local model id when the
@@ -343,6 +388,21 @@ def ensure_configured_or_onboard(
     import typer
 
     inject_credentials_into_env()
+
+    # An explicit Ollama model needs a running server, not a key: probe the
+    # endpoint the caller will really use and, if it is down, say so instead
+    # of sending the user to an API-key wizard.
+    ollama_host = _ollama_host_for_model(model, base_url)
+    if ollama_host is not None:
+        if _ollama_reachable(ollama_host):
+            return model
+        typer.echo(
+            f"Error: Ollama isn't reachable at {ollama_host} — start it with "
+            "`ollama serve` (or set OLLAMA_API_BASE).",
+            err=True,
+        )
+        raise typer.Exit(1)
+
     if is_configured(model):
         return model
 
@@ -360,11 +420,16 @@ def ensure_configured_or_onboard(
         return local.model
 
     if not interactive:
+        # Only mention auto-detection when it actually ran and found nothing.
+        hint = f" for model {model}" if model else ""
+        tail = (
+            "" if model else
+            "\n(no running local endpoint such as Ollama was found; one "
+            "would be used automatically)"
+        )
         typer.echo(
-            "Error: No API key configured. Run: praisonai setup\n"
-            "or set environment variables like OPENAI_API_KEY\n"
-            "(a running local endpoint such as Ollama would be used "
-            "automatically)",
+            f"Error: No API key configured{hint}. Run: praisonai setup\n"
+            f"or set environment variables like OPENAI_API_KEY{tail}",
             err=True,
         )
         raise typer.Exit(1)

@@ -1712,6 +1712,7 @@ def run_main(
     # execution path does not discover and execute the same definitions twice.
     preloaded_agent_config = None
     custom_agent_model = None
+    custom_agent_base_url = None
     if target or agent or command:  # Any execution surface may need model/budget resolution
         import sys
         from praisonai_code.llm.credentials import ensure_configured_or_onboard
@@ -1731,6 +1732,10 @@ def run_main(
                 _preview_llm = (_preview_config or {}).get("llm")
                 if isinstance(_preview_llm, dict):
                     custom_agent_model = _preview_llm.get("model")
+                    # Gate an Ollama agent on the server it will really call.
+                    _base = _preview_llm.get("base_url")
+                    if isinstance(_base, str) and _base.strip():
+                        custom_agent_base_url = _base.strip()
                 else:
                     custom_agent_model = _preview_llm
                 if isinstance(custom_agent_model, str):
@@ -1747,7 +1752,9 @@ def run_main(
         # endpoint, credentials, sampling, and retry options.
         credential_model = model or custom_agent_model
         resolved_model = ensure_configured_or_onboard(
-            model=credential_model, interactive=not _headless
+            model=credential_model,
+            interactive=not _headless,
+            base_url=None if model else custom_agent_base_url,
         )
         if not (agent and model is None and custom_agent_model):
             model = resolved_model
