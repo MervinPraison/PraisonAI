@@ -70,17 +70,19 @@ export class WebSocketTransport implements MCPTransport {
         }
         const WebSocket = wsModule.default;
 
-        this.ws = new WebSocket(this.url);
+        const socket = new WebSocket(this.url);
+        this.ws = socket;
 
         await new Promise<void>((resolve, reject) => {
-            this.ws.on('open', () => {
+            socket.on('open', () => {
                 this.connected = true;
                 resolve();
             });
-            this.ws.on('error', (err: Error) => reject(err));
+            socket.on('error', (err: Error) => reject(err));
         });
 
-        this.ws.on('message', (data: Buffer | string) => {
+        socket.on('message', (data: Buffer | string) => {
+            if (this.ws !== socket) return;
             try {
                 const message = JSON.parse(data.toString()) as TransportMessage;
 
@@ -102,16 +104,29 @@ export class WebSocketTransport implements MCPTransport {
             }
         });
 
-        this.ws.on('error', (err: Error) => this.errorHandler?.(err));
-        this.ws.on('close', () => { this.connected = false; });
+        socket.on('error', (err: Error) => {
+            if (this.ws === socket) this.errorHandler?.(err);
+        });
+        socket.on('close', () => {
+            if (this.ws !== socket) return;
+            this.connected = false;
+            this.ws = null;
+            this.rejectPendingRequests();
+        });
     }
 
     async disconnect(): Promise<void> {
-        if (this.ws) {
-            this.ws.close();
-            this.ws = null;
-            this.connected = false;
-        }
+        const socket = this.ws;
+        this.ws = null;
+        this.connected = false;
+        this.rejectPendingRequests();
+        socket?.close();
+    }
+
+    private rejectPendingRequests(): void {
+        const error = new Error('WebSocket connection closed');
+        for (const { reject } of this.pendingRequests.values()) reject(error);
+        this.pendingRequests.clear();
     }
 
     async send(message: TransportMessage): Promise<TransportMessage> {
