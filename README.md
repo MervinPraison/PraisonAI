@@ -58,7 +58,7 @@ export OPENAI_API_KEY="your-api-key"
 from praisonaiagents import Agent
 
 agent = Agent(instructions="You are a helpful assistant.")
-agent.start("In two sentences, why do some companies keep their data on their own computers?")
+print(agent.start("In two sentences, why do some companies keep their data on their own computers?"))
 ```
 
 ## Run fully offline
@@ -67,16 +67,16 @@ Run the same agent on a model on your own computer with [Ollama](https://ollama.
 
 ```bash
 pip install "praisonaiagents[llm]"   # adds the local-model support
-ollama serve
+# Start Ollama first (the app, or "ollama serve" in another terminal)
 ollama pull llama3.2
-export DO_NOT_TRACK=true   # also turns off PraisonAI's anonymous usage telemetry
+export DO_NOT_TRACK=true   # keeps telemetry off (PraisonAI sends none unless you turn it on)
 ```
 
 ```python
 from praisonaiagents import Agent
 
 agent = Agent(instructions="You are a helpful assistant.", model="ollama/llama3.2")
-agent.start("Why is the sky blue?")
+print(agent.start("Why is the sky blue?"))
 ```
 
 If Ollama runs on another computer on your network, pass `base_url` (or set `OLLAMA_API_BASE`):
@@ -85,7 +85,7 @@ If Ollama runs on another computer on your network, pass `base_url` (or set `OLL
 agent = Agent(instructions="...", model="ollama/llama3.2", base_url="http://192.168.1.10:11434")
 ```
 
-vLLM and LM Studio work the same way: use `vllm/`, `hosted_vllm/` or `lm_studio/` with your server's `base_url`. More in the [Ollama guide](https://docs.praison.ai/docs/models/ollama) and [Models docs](https://docs.praison.ai/docs/models).
+vLLM and LM Studio work the same way: use `hosted_vllm/` (vLLM) or `lm_studio/` with your server's `base_url`. More in the [Ollama guide](https://docs.praison.ai/docs/models/ollama) and [Models docs](https://docs.praison.ai/docs/models).
 
 ## How the handover works (early access)
 
@@ -103,12 +103,12 @@ The open-source framework is live today; the handover is in early access with de
 - **Memory:** [Memory](https://docs.praison.ai/docs/concepts/memory) · [Knowledge and RAG](https://docs.praison.ai/docs/concepts/rag) · [Sessions](https://docs.praison.ai/docs/concepts/session-management)
 - **Tools and MCP:** [Tools](https://docs.praison.ai/docs/tools/tools) · [MCP](https://docs.praison.ai/docs/mcp/transports)
 - **Guardrails and approval:** [Guardrails](https://docs.praison.ai/docs/concepts/guardrails) · [Human approval](https://docs.praison.ai/docs/concepts/approval) · [Policy engine](https://docs.praison.ai/docs/features/policy-engine)
-- **Tracing and evaluation:** [Telemetry](https://docs.praison.ai/docs/features/telemetry) · [Langfuse](https://docs.praison.ai/docs/observability/langfuse) · [Evaluation](https://docs.praison.ai/docs/concepts/evaluation)
+- **Tracing and evaluation:** [Tracing](https://docs.praison.ai/docs/observability/overview) · [Telemetry](https://docs.praison.ai/docs/features/telemetry) · [Langfuse](https://docs.praison.ai/docs/observability/langfuse) · [Evaluation](https://docs.praison.ai/docs/concepts/evaluation)
 - **Your choice of model:** [Models](https://docs.praison.ai/docs/models) · [Model router](https://docs.praison.ai/docs/features/model-router)
 - **Fine-tuning:** [PraisonAI Train](https://docs.praison.ai/docs/train)
 - **Deploy:** [Deploy guide](https://docs.praison.ai/docs/deploy)
 
-## JavaScript SDK
+## JavaScript and TypeScript
 
 ```bash
 npm install praisonai
@@ -123,7 +123,7 @@ The TypeScript and JavaScript SDK has its own guide at [docs.praison.ai/docs/js]
 - **Contributing:** [Contributing guide](https://github.com/MervinPraison/PraisonAI/blob/main/CONTRIBUTING.md)
 - **Videos and news:** [YouTube](https://youtube.com/@MervinPraison) · [X](https://x.com/MervinPraison) · [LinkedIn](https://linkedin.com/in/mervinpraison)
 - **Desktop app:** macOS, Windows and Linux builds are on the [latest release](https://github.com/MervinPraison/PraisonAI/releases/latest)
-- **Licence:** [MIT](LICENSE)
+- **Licence:** [MIT](https://github.com/MervinPraison/PraisonAI/blob/main/LICENSE)
 
 ---
 
