@@ -82,16 +82,20 @@ export class Chunking {
    * Chunk by sentences
    */
   chunkBySentence(text: string): Chunk[] {
-    const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
-    return sentences.map((content, index) => {
-      const startOffset = text.indexOf(content);
-      return {
-        content: content.trim(),
-        index,
+    const chunks: Chunk[] = [];
+    // Include the unterminated tail and punctuation-only spans as well.
+    for (const match of text.matchAll(/[^.!?]+[.!?]*|[.!?]+/g)) {
+      const content = match[0].trim();
+      if (!content) continue;
+      const startOffset = match.index + match[0].indexOf(content);
+      chunks.push({
+        content,
+        index: chunks.length,
         startOffset,
         endOffset: startOffset + content.length
-      };
-    });
+      });
+    }
+    return chunks;
   }
 
   /**
