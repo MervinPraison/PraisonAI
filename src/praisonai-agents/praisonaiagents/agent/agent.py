@@ -2698,6 +2698,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         self.system_prompt = f"""{self.backstory}\n
 Your Role: {self.role}\n
 Your Goal: {self.goal}
+        """ if self.goal != self.backstory else f"""{self.backstory}\n
+Your Role: {self.role}
         """
 
         # Per-invocation system-prompt append (never persisted). Sourced from the
