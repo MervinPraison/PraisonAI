@@ -137,6 +137,7 @@ export class MemoryCache extends BaseCache {
  */
 export class FileCache extends BaseCache {
   private cacheDir: string;
+  private ttl?: number;
   private fs: any;
   private path: any;
   private listQueues: Map<string, Promise<void>> = new Map();
@@ -144,6 +145,7 @@ export class FileCache extends BaseCache {
   constructor(config: CacheConfig & { cacheDir?: string } = {}) {
     super(config);
     this.cacheDir = config.cacheDir || '.cache';
+    this.ttl = config.ttl;
   }
 
   private async ensureDir(): Promise<void> {
@@ -178,10 +180,11 @@ export class FileCache extends BaseCache {
 
   async set<T = any>(key: string, value: T, ttl?: number): Promise<void> {
     await this.ensureDir();
+    const effectiveTtl = ttl ?? this.ttl;
     const entry: CacheEntry<T> = {
       value,
       createdAt: Date.now(),
-      expiresAt: ttl ? Date.now() + ttl : undefined
+      expiresAt: effectiveTtl ? Date.now() + effectiveTtl : undefined
     };
     await this.fs.writeFile(this.getFilePath(key), JSON.stringify(entry));
   }
