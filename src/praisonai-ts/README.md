@@ -1,6 +1,6 @@
 # PraisonAI TypeScript Node.js AI Agents Framework
 
-PraisonAI runs AI agents on your own computers, even fully offline, so private data never leaves the building. It is built for highly regulated teams, and free and open source for everyone.
+PraisonAI runs AI agents on your own computers, even fully offline, so private data never has to leave the building. It is built for highly regulated teams, and free and open source for everyone.
 
 This package is the TypeScript and JavaScript SDK of the open-source PraisonAI agent framework. Build single agents, multi-agent workflows, tools and memory in Node.js, on hosted models or on local models such as Ollama. Data stays on your own machines only when the model runs locally too; with a hosted model such as the default OpenAI one, prompts are sent to that provider. The Python framework and the full docs are at [github.com/MervinPraison/PraisonAI](https://github.com/MervinPraison/PraisonAI) and [praison.ai/docs](https://praison.ai/docs).
 
