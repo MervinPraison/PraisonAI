@@ -84,6 +84,19 @@ def test_replace_chat_history_keeps_unsaved_survivors(store):
     assert saved == ["q0", "q1"]
 
 
+def test_replace_chat_history_saves_appended_messages(store):
+    # Durable resume appends replayed tool pairs to a fully-saved history.
+    a = _agent("sess_replay", store)
+    a._append_to_chat_history({"role": "user", "content": "q0"})
+    a._auto_save_session()
+    replay = _tool_history()[1:3]
+    a._replace_chat_history(list(a.chat_history) + replay)
+    a._auto_save_session()
+    saved = store.get_chat_history("sess_replay")
+    assert [m["role"] for m in saved] == ["user", "assistant", "tool"]
+    assert saved[2]["tool_call_id"] == "call_1"
+
+
 def test_prune_history_does_not_orphan_tool_result():
     a = _agent()
     a.chat_history.extend(_tool_history())
