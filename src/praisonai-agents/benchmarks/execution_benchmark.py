@@ -57,45 +57,51 @@ def get_package_versions():
 
 
 def praisonai_runner(model, prompt):
-    """PraisonAI: a new agent per run, timed through agent.start()."""
+    """PraisonAI: a new agent per run; only agent.start() is timed."""
     from praisonaiagents import Agent
 
-    def run():
+    def build():
         agent = Agent(name="Calculator", instructions=INSTRUCTIONS, llm=model)
-        return agent.start(prompt, output="silent")
-    return run
+        return lambda: agent.start(prompt, output="silent")
+    return build
 
 
 def agno_runner(model, prompt):
-    """Agno: a new agent per run, timed through agent.run()."""
+    """Agno: a new agent per run; only agent.run() is timed."""
     from agno.agent import Agent
     from agno.models.openai import OpenAIChat
 
-    def run():
+    def build():
         agent = Agent(model=OpenAIChat(id=model), instructions=[INSTRUCTIONS])
-        response = agent.run(prompt)
-        # Agno reports a failed run in ``status`` and puts the error text in
-        # ``content``, so the content alone would pass for an answer.
-        if str(getattr(response, 'status', '')).lower().endswith('error'):
-            raise RuntimeError(f"Agno run failed: {str(response.content)[:200]}")
-        return getattr(response, 'content', response)
-    return run
+
+        def call():
+            response = agent.run(prompt)
+            # Agno reports a failed run in ``status`` and puts the error text in
+            # ``content``, so the content alone would pass for an answer.
+            if str(getattr(response, 'status', '')).lower().endswith('error'):
+                raise RuntimeError(f"Agno run failed: {str(response.content)[:200]}")
+            return getattr(response, 'content', response)
+        return call
+    return build
 
 
 def crewai_runner(model, prompt):
-    """CrewAI: a new one-agent crew per run, timed through crew.kickoff()."""
+    """CrewAI: a new one-agent crew per run; only crew.kickoff() is timed."""
     from crewai import Agent, Crew, Task
 
-    def run():
+    def build():
         agent = Agent(role="Calculator", goal="Answer math questions",
                       backstory=INSTRUCTIONS, llm=model, verbose=False)
         task = Task(description=prompt, expected_output="A number", agent=agent)
-        return Crew(agents=[agent], tasks=[task], verbose=False).kickoff()
-    return run
+        return Crew(agents=[agent], tasks=[task], verbose=False).kickoff
+    return build
 
 
 def build_runners(model, prompt):
-    """Return {framework: run()} for every framework that is installed."""
+    """Return {framework: build()} for every installed framework.
+
+    ``build()`` creates fresh objects (untimed) and returns the call to time.
+    """
     factories = [
         ('PraisonAI', lambda: praisonai_runner(model, prompt)),
         ('PraisonAI (LiteLLM)', lambda: praisonai_runner(f"openai/{model}", prompt)),
@@ -122,30 +128,32 @@ def answer_text(response):
 def run_benchmark(runners, iterations, warmup):
     """Warm up each framework, then time interleaved rounds.
 
+    A failed warm-up is reported but the framework stays in the timed rounds,
+    so one transient error does not discard it. Object construction happens
+    before the timer starts; only the execution call is timed.
+
     Returns {framework: {"times": [...], "failures": [...]}}.
     """
     results = {name: {"times": [], "failures": []} for name in runners}
 
-    for name, run in list(runners.items()):
+    for name, build in runners.items():
         for _ in range(warmup):
             try:
-                if not answer_text(run()):
+                if not answer_text(build()()):
                     raise RuntimeError("empty answer")
             except Exception as e:
-                print(f"  {name}: warm-up failed ({type(e).__name__}: {str(e)[:120]}); excluded")
-                runners.pop(name)
-                results[name]["failures"].append(f"warm-up: {type(e).__name__}: {e}")
-                break
+                print(f"  {name}: warm-up failed ({type(e).__name__}: {str(e)[:120]})")
 
     for i in range(iterations):
-        for name, run in runners.items():
-            start = time.perf_counter()
+        for name, build in runners.items():
             try:
-                text = answer_text(run())
+                call = build()
+                start = time.perf_counter()
+                text = answer_text(call())
+                elapsed = time.perf_counter() - start
                 error = None if text else "empty answer"
             except Exception as e:
                 text, error = '', f"{type(e).__name__}: {e}"
-            elapsed = time.perf_counter() - start
             if error:
                 results[name]["failures"].append(error)
                 print(f"  Round {i + 1} {name}: FAILED ({error[:120]})")
