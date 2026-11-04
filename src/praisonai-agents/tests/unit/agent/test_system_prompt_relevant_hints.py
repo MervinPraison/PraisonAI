@@ -107,18 +107,25 @@ def test_a_tool_renamed_to_edit_file_counts(make):
     assert OPENAI_HINT in agent._build_system_prompt()
 
 
+def test_nested_tool_list_offers_the_edit_hint(make):
+    agent = make(llm="gpt-4o-mini", tools=[["edit_file"]])
+    assert OPENAI_HINT in agent._build_system_prompt()
+
+
 EDIT_SCHEMA = {"type": "function", "function": {
     "name": "edit_file", "description": "Edit a file.",
     "parameters": {"type": "object", "properties": {}}}}
 
 
 def _system_sent(agent, monkeypatch, run):
-    """Run ``run(agent)`` on the native path and return the system prompt it sent."""
+    """Run ``run(agent)`` on the native path; return the system prompt and tool names sent."""
     from types import SimpleNamespace
     sent = []
+    sent_tools = []
 
-    def fake(messages=None, *a, **k):
+    def fake(messages=None, temperature=None, tools=None, *a, **k):
         sent.append(messages if messages is not None else k.get("messages"))
+        sent_tools.append([t.get("function", {}).get("name") for t in tools or []])
         message = SimpleNamespace(content="ok", tool_calls=None, role="assistant", reasoning_content=None)
         return SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason="stop", index=0)],
                                usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2),
@@ -130,20 +137,22 @@ def _system_sent(agent, monkeypatch, run):
     monkeypatch.setattr(agent, "_chat_completion", fake)
     monkeypatch.setattr(agent, "_achat_completion_with_retry", afake)
     run(agent)
-    return next(m["content"] for m in sent[-1] if m["role"] == "system")
+    return next(m["content"] for m in sent[-1] if m["role"] == "system"), sent_tools[-1]
 
 
 def test_native_chat_follows_per_call_edit_tools(make, monkeypatch):
     agent = make(llm="gpt-4o-mini")
-    system = _system_sent(agent, monkeypatch, lambda a: a.chat("hi", tools=[EDIT_SCHEMA]))
+    system, tool_names = _system_sent(agent, monkeypatch, lambda a: a.chat("hi", tools=[EDIT_SCHEMA]))
     assert OPENAI_HINT in system
+    assert "edit_file" in tool_names
 
 
 def test_native_achat_follows_per_call_edit_tools(make, monkeypatch):
     import asyncio
     agent = make(llm="gpt-4o-mini")
-    system = _system_sent(agent, monkeypatch, lambda a: asyncio.run(a.achat("hi", tools=[EDIT_SCHEMA])))
+    system, tool_names = _system_sent(agent, monkeypatch, lambda a: asyncio.run(a.achat("hi", tools=[EDIT_SCHEMA])))
     assert OPENAI_HINT in system
+    assert "edit_file" in tool_names
 
 
 def test_system_prompt_attribute_states_instructions_once(make):
