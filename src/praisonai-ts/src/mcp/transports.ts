@@ -85,7 +85,7 @@ export class WebSocketTransport implements MCPTransport {
                 const message = JSON.parse(data.toString()) as TransportMessage;
 
                 // Handle response
-                if (message.id && this.pendingRequests.has(String(message.id))) {
+                if (message.id !== undefined && this.pendingRequests.has(String(message.id))) {
                     const { resolve, reject } = this.pendingRequests.get(String(message.id))!;
                     this.pendingRequests.delete(String(message.id));
                     if (message.error) {
