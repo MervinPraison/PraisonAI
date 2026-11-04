@@ -42,7 +42,7 @@ def test_warm_up_calls_are_not_timed_and_rounds_interleave(bench):
     results = bench.run_benchmark(runners, iterations=2, warmup=1)
     assert [len(r["times"]) for r in results.values()] == [2, 2]
     calls = [name for kind, name in log if kind == "call"]
-    assert calls == ["A", "B", "A", "B", "A", "B"]  # warm-ups, then round 1, round 2
+    assert calls == ["A", "B", "A", "B", "B", "A"]  # warm-ups, round 1, round 2 rotated
 
 
 def test_errors_and_empty_answers_are_failures_not_timings(bench):

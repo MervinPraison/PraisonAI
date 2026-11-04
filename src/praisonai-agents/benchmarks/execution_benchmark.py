@@ -134,7 +134,8 @@ def run_benchmark(runners, iterations, warmup):
     """Warm up each framework, then time interleaved rounds.
 
     A failed warm-up is reported but the framework stays in the timed rounds,
-    so one transient error does not discard it. Object construction happens
+    so one transient error does not discard it. The order within a round
+    rotates every round. Object construction happens
     before the timer starts; only the execution call is timed.
 
     Returns {framework: {"times": [...], "failures": [...]}}.
@@ -149,8 +150,12 @@ def run_benchmark(runners, iterations, warmup):
             except Exception as e:
                 print(f"  {name}: warm-up failed ({type(e).__name__}: {str(e)[:120]})")
 
+    # Rotate the start each round so no framework always holds the same slot.
+    names = list(runners)
     for i in range(iterations):
-        for name, build in runners.items():
+        shift = i % len(names) if names else 0
+        for name in names[shift:] + names[:shift]:
+            build = runners[name]
             try:
                 call = build()
                 start = time.perf_counter()
