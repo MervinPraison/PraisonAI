@@ -5851,7 +5851,9 @@ class WebSocketGateway:
 
         * ``approval`` → ``"allow"`` or ``"deny"``.
         * ``choice`` → one of the offered ``options`` (any value if none given).
-        * ``input`` → any string.
+        * ``input`` / ``secret`` → any string. A ``secret`` value is handed
+          only to the waiting caller — never logged, echoed, or journalled
+          (Issue #6223).
         """
         kind = getattr(req, "kind", "input")
         if kind == "approval":
