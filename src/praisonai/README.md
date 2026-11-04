@@ -20,7 +20,7 @@
 
 PraisonAI runs AI agents on your own computers, even fully offline, so private data never has to leave the building.
 
-- **For highly regulated teams:** each task moves to your own AI only after it passes a test. If quality slips, it moves back automatically, and every step is recorded for regulators. [Early access](#how-the-handover-works-early-access)
+- **For highly regulated teams (early access):** each task moves to your own AI only after it passes a test. If quality slips, it moves back automatically, and every step is recorded for regulators. [How it works](#how-the-handover-works-early-access)
 - **For everyone else:** a free, open-source Python agent framework. With a local model you need no API key and pay no cloud bill, and your files stay yours.
 
 [2M+ downloads](https://pepy.tech/projects/praisonai) · [9.3K stars](https://github.com/MervinPraison/PraisonAI) · [600+ releases in the last year](https://github.com/MervinPraison/PraisonAI/releases) · [80+ contributors](https://github.com/MervinPraison/PraisonAI/graphs/contributors) · Python
@@ -101,9 +101,9 @@ vLLM and LM Studio work the same way: use `hosted_vllm/` (vLLM) or `lm_studio/` 
 4. **Roll back:** if quality drops, the task moves back automatically.
 5. **Record:** every handover leaves a record your regulator can check.
 
-Highly regulated teams, such as banks, insurers and hospitals, want AI but can't send customer data to outside models. From 6 January 2027, OpenAI also takes no new self-serve fine-tuning jobs. The handover lets these teams move work to AI they own, one task at a time, with a record that shows why each step was trusted.
+Highly regulated teams, such as banks, insurers and hospitals, want AI but can't send customer data to outside models. From 6 January 2027, OpenAI also takes no new self-serve fine-tuning jobs ([notice](https://developers.openai.com/api/docs/deprecations)), so teams that customise models need models they own. The handover lets these teams move work to AI they own, one task at a time, with a record that shows why each step was trusted.
 
-It is built on parts of this framework that are live today: tracing, evaluation, fine-tuning, model routing and local models. The handover itself is in early access with our first design partners. To take part, see [praison.ai/enterprise](https://praison.ai/enterprise/).
+It is built on parts of this framework that are live today: tracing, evaluation, fine-tuning, model routing and local models. The handover itself is in early access, and we are taking on our first design partners. To take part, see [praison.ai/enterprise](https://praison.ai/enterprise/).
 
 ## Features
 
@@ -126,11 +126,12 @@ The TypeScript and JavaScript SDK has its own guide at [praison.ai/docs/js](http
 
 ## The company
 
-- **Who:** Praison AI Limited in Cambridge, UK, building PraisonAI since September 2023. Mervin Praison (CEO), Leebana Smith (COO) and Karthick Subramanian (CBO). [About us](https://praison.ai/about/)
-- **What we're building:** the task handover above, as a self-hosted product on top of this framework. It is in early access with our first design partners.
+- **Who:** Praison AI Limited in Cambridge, UK, building PraisonAI since September 2023. Co-founders Mervin Praison (CEO), Leebana Smith (COO) and Karthick Subramanian (CBO). [About us](https://praison.ai/about/)
+- **What we're building:** the task handover above, as a self-hosted product on top of this framework. It is in early access, and we are taking on our first design partners.
+- **Why now:** highly regulated teams want AI but can't send customer data to outside models, and from 6 January 2027 OpenAI takes no new self-serve fine-tuning jobs.
 - **How it fits together:** the framework stays free and MIT-licensed, and brings developers in. Regulated teams license the handover to run inside their own walls.
-- **Traction:** every number at the top of this page is public and linked to its source. The framework ships about 12 releases a week.
-- **Get in touch:** design partners, investors and press: [praison.ai/enterprise](https://praison.ai/enterprise/)
+- **Traction:** every number at the top of this page is public and linked to its source.
+- **Get in touch:** design partners, investors and press: enterprise@praison.ai or [praison.ai/enterprise](https://praison.ai/enterprise/)
 
 ## Docs, community and licence
 
