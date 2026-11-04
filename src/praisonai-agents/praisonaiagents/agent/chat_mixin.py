@@ -1367,20 +1367,19 @@ Your Role: {self.role}"""
             return sorted(tools_list, key=sort_key)
         
         cleaned_tools = sort_formatted_tools(cleaned_tools)
-        
-        # Prune permission-denied tools from the advertised set so the model is
-        # only ever offered tools it can actually call. Mirrors the execution-time
-        # enforcement in tool_execution.py (_perm_deny / _perm_allow). No-op when
-        # no deny set and no allow set are configured (backward compatible).
-        cleaned_tools = self._prune_denied_tools(cleaned_tools)
-        
-        # Cache the formatted tools with LRU eviction, including tool search metadata
+
+        # Cache the unpruned tools with LRU eviction, including tool search
+        # metadata, so a later change to the deny/allow sets takes effect.
         self._cache_put(
             self._formatted_tools_cache,
             cache_key,
             (cleaned_tools, getattr(self, "_tool_search_metadata", None)),
         )
-        return cleaned_tools
+        # Prune permission-denied tools from the advertised set so the model is
+        # only ever offered tools it can actually call. Mirrors the execution-time
+        # enforcement in tool_execution.py (_perm_deny / _perm_allow). No-op when
+        # no deny set and no allow set are configured (backward compatible).
+        return self._prune_denied_tools(cleaned_tools)
 
     def _build_before_tool_definitions_input(self, formatted_tools):
         """Build the BEFORE_TOOL_DEFINITIONS hook input.

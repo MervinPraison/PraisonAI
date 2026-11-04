@@ -184,6 +184,9 @@ def test_deny_added_after_caching_prunes_cached_tools(make):
     agent._perm_deny = frozenset({"edit_file"})
     assert "edit_file" not in [t["function"]["name"] for t in agent._format_tools_for_completion()]
     assert OPENAI_HINT not in agent._build_system_prompt()
+    # Lifting the denial restores the tool from the same cache entry.
+    agent._perm_deny = frozenset()
+    assert "edit_file" in [t["function"]["name"] for t in agent._format_tools_for_completion()]
 
 
 def test_native_achat_follows_per_call_edit_tools(make, monkeypatch):
