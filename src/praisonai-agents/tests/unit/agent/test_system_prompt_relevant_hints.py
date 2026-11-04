@@ -178,6 +178,14 @@ def test_permission_denied_edit_tool_gets_no_hint(make, monkeypatch):
     assert OPENAI_HINT not in system
 
 
+def test_deny_added_after_caching_prunes_cached_tools(make):
+    agent = make(llm="gpt-4o-mini", tools=[edit_file, lookup])
+    assert "edit_file" in [t["function"]["name"] for t in agent._format_tools_for_completion()]
+    agent._perm_deny = frozenset({"edit_file"})
+    assert "edit_file" not in [t["function"]["name"] for t in agent._format_tools_for_completion()]
+    assert OPENAI_HINT not in agent._build_system_prompt()
+
+
 def test_native_achat_follows_per_call_edit_tools(make, monkeypatch):
     import asyncio
     agent = make(llm="gpt-4o-mini")

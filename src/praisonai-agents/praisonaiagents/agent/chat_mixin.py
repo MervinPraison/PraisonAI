@@ -1246,7 +1246,8 @@ Your Role: {self.role}"""
         if cached_entry is not None:
             cached_tools, cached_metadata = cached_entry
             self._tool_search_metadata = cached_metadata
-            return cached_tools
+            # Re-prune: permissions may have changed since the entry was cached.
+            return self._prune_denied_tools(cached_tools)
             
         formatted_tools = []
         # Provider-hosted tool specs have no local callable; the provider
