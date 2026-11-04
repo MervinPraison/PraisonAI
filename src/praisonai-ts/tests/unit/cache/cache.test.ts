@@ -158,3 +158,32 @@ describe('Factory functions', () => {
     expect(cache).toBeInstanceOf(FileCache);
   });
 });
+
+describe('MemoryCache capacity with empty keys', () => {
+  it.each([1, 2])('keeps capacity %i bounded when the oldest key is empty', async (maxSize) => {
+    const cache = new MemoryCache({ maxSize });
+    await cache.set('', 'oldest');
+    for (let i = 0; i <= maxSize; i++) {
+      await cache.set(`key-${i}`, i);
+    }
+
+    expect(await cache.size()).toBe(maxSize);
+    expect(await cache.has('')).toBe(false);
+    expect(await cache.keys()).toEqual(
+      Array.from({ length: maxSize }, (_, i) => `key-${i + 1}`)
+    );
+    expect(await cache.get(`key-${maxSize}`)).toBe(maxSize);
+  });
+
+  it('updates an existing empty key without evicting another entry', async () => {
+    const cache = new MemoryCache({ maxSize: 2 });
+    await cache.set('', 'old value');
+    await cache.set('other', 'retained');
+    await cache.set('', 'new value');
+
+    expect(await cache.size()).toBe(2);
+    expect(await cache.keys()).toEqual(['', 'other']);
+    expect(await cache.get('')).toBe('new value');
+    expect(await cache.get('other')).toBe('retained');
+  });
+});
