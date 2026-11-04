@@ -122,3 +122,23 @@ def test_keyless_no_model_error_mentions_auto_detect(clean_env, capsys):
     with pytest.raises(typer.Exit):
         credentials.ensure_configured_or_onboard(model=None, interactive=False)
     assert "automatically" in capsys.readouterr().err
+
+
+def test_gate_probes_agent_base_url_not_env_host(clean_env):
+    """A custom agent's ``llm.base_url`` is the server gated, not OLLAMA_HOST."""
+    seen = []
+    clean_env.setenv("OLLAMA_HOST", "http://down-box:11434")
+
+    def _urlopen(url, timeout):
+        seen.append(url)
+        if "down-box" in url:
+            raise ConnectionRefusedError()
+        return _Resp(json.dumps({"models": []}).encode())
+
+    clean_env.setattr(local_detect.urllib.request, "urlopen", _urlopen)
+    assert credentials.ensure_configured_or_onboard(
+        model="ollama/llama3.2",
+        interactive=False,
+        base_url="http://gpu-box:11434/v1",
+    ) == "ollama/llama3.2"
+    assert seen == ["http://gpu-box:11434/api/tags"]

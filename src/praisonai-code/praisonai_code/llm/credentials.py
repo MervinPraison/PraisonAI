@@ -126,12 +126,16 @@ def detect_local_endpoint():
 _OLLAMA_PREFIXES = ("ollama/", "ollama_chat/")
 
 
-def _ollama_host_for_model(model: Optional[str]) -> Optional[str]:
+def _ollama_host_for_model(
+    model: Optional[str], base_url: Optional[str] = None
+) -> Optional[str]:
     """Return the Ollama host to probe for an ``ollama/`` model, else ``None``.
 
     Ollama needs no key, so an explicit Ollama model is gated on the server
-    being reachable rather than on a credential. ``OLLAMA_API_BASE`` (what the
-    runtime honours) wins, then ``OLLAMA_HOST``, then the default port.
+    being reachable rather than on a credential. The endpoint the caller will
+    actually use (e.g. an agent's ``llm.base_url``) wins, then
+    ``OLLAMA_API_BASE`` (what the runtime honours), then ``OLLAMA_HOST``, then
+    the default port.
     """
     import os
 
@@ -140,7 +144,8 @@ def _ollama_host_for_model(model: Optional[str]) -> Optional[str]:
     from praisonai_code.llm.local_detect import _DEFAULT_OLLAMA_HOST
 
     return (
-        os.environ.get("OLLAMA_API_BASE")
+        base_url
+        or os.environ.get("OLLAMA_API_BASE")
         or os.environ.get("OLLAMA_HOST")
         or _DEFAULT_OLLAMA_HOST
     )
@@ -339,6 +344,7 @@ def ensure_configured_or_onboard(
     *,
     model: Optional[str] = None,
     interactive: bool = True,
+    base_url: Optional[str] = None,
 ) -> Optional[str]:
     """Shared first-run credential gate for LLM-bound interactive commands.
 
@@ -367,6 +373,9 @@ def ensure_configured_or_onboard(
             keyless local-first fallback (its own provider gate applies).
         interactive: Whether a wizard prompt may be shown. Callers pass ``False``
             for headless (``-p``, piped, ``--output json``) paths.
+        base_url: The endpoint the caller will actually use (e.g. a custom
+            agent's ``llm.base_url``). For an explicit Ollama model this is the
+            server probed, instead of ``OLLAMA_API_BASE``/``OLLAMA_HOST``.
 
     Returns:
         The model id to proceed with. May be a detected local model id when the
@@ -379,19 +388,23 @@ def ensure_configured_or_onboard(
     import typer
 
     inject_credentials_into_env()
-    if is_configured(model):
-        return model
 
-    # An explicit Ollama model needs a running server, not a key: say so
-    # instead of sending the user to an API-key wizard.
-    ollama_host = _ollama_host_for_model(model)
+    # An explicit Ollama model needs a running server, not a key: probe the
+    # endpoint the caller will really use and, if it is down, say so instead
+    # of sending the user to an API-key wizard.
+    ollama_host = _ollama_host_for_model(model, base_url)
     if ollama_host is not None:
+        if _ollama_reachable(ollama_host):
+            return model
         typer.echo(
             f"Error: Ollama isn't reachable at {ollama_host} — start it with "
             "`ollama serve` (or set OLLAMA_API_BASE).",
             err=True,
         )
         raise typer.Exit(1)
+
+    if is_configured(model):
+        return model
 
     # Keyless local-first: prefer a reachable local endpoint (e.g. Ollama) when
     # no explicit model was requested, so the first run just works before auth.
