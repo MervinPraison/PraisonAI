@@ -2,7 +2,7 @@
 
 PraisonAI helps banks, insurers and hospitals run AI agents on their own computers, even fully offline, so their private data never leaves the building.
 
-This package is the TypeScript and JavaScript SDK of the open-source PraisonAI agent framework. Build single agents, multi-agent workflows, tools and memory in Node.js, on hosted models or on local models such as Ollama. The Python framework and the full docs are at [github.com/MervinPraison/PraisonAI](https://github.com/MervinPraison/PraisonAI) and [docs.praison.ai](https://docs.praison.ai).
+This package is the TypeScript and JavaScript SDK of the open-source PraisonAI agent framework. Build single agents, multi-agent workflows, tools and memory in Node.js, on hosted models or on local models such as Ollama. Data stays on your own machines only when the model runs locally too; with a hosted model such as the default OpenAI one, prompts are sent to that provider. The Python framework and the full docs are at [github.com/MervinPraison/PraisonAI](https://github.com/MervinPraison/PraisonAI) and [docs.praison.ai](https://docs.praison.ai).
 
 ## Installation
 
