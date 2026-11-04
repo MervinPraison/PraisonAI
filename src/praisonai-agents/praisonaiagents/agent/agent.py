@@ -3572,7 +3572,18 @@ Your Goal: {self.goal}
     def _replace_chat_history(self, new_history: List[Dict[str, Any]]):
         """Thread-safe replacement of entire chat history using proper locking."""
         with self._history_lock.lock():
-            self._history_lock.value[:] = new_history
+            history = self._history_lock.value
+            # Re-sync the positional auto-save cursor (#6217): resume saving at
+            # the first not-yet-saved message that survived the rewrite, else
+            # after the new (already persisted / summarised) working set.
+            unsaved = {id(m) for m in history[getattr(self, '_auto_save_last_index', 0):]}
+            cursor = len(new_history)
+            for i, m in enumerate(new_history):
+                if id(m) in unsaved:
+                    cursor = i
+                    break
+            history[:] = new_history
+            self._auto_save_last_index = cursor
 
     @property
     def _cache_lock(self):
