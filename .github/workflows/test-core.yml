@@ -319,6 +319,7 @@ jobs:
               tests/unit/test_sandbox_adapter.py::test_a_sandbox_only_name_resolves_to_the_adapter
               tests/unit/test_sandbox_adapter.py::test_a_name_that_needs_connection_details_says_so
               tests/unit/test_lazy_imports.py::TestReplayStaysLazy
+              tests/unit/test_jira_tools.py
               tests/unit/test_placement.py::test_no_place_at_all_says_how_to_name_one
               tests/unit/test_thread_safety.py::TestMCPCleanup
               tests/unit/test_robustness_issue_5870.py::test_allowlist_failed_save_keeps_previous_file
