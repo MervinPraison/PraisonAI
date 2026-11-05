@@ -380,6 +380,8 @@ jobs:
               tests/unit/test_placement.py::test_a_clone_does_not_inherit_the_source_agents_sandbox
               tests/unit/test_placement.py::test_an_agent_with_its_own_sandbox_is_left_alone_by_a_flow
               tests/unit/test_placement.py::test_a_batch_provisions_one_sandbox_not_one_per_row
+              tests/unit/test_placement.py::test_a_flow_does_not_clobber_an_agent_that_named_its_own_place
+              tests/unit/test_placement.py::test_a_placed_agent_inside_a_team_gets_its_sandbox_tools
               tests/unit/test_sandbox_adapter.py::test_sandbox_only_backends_are_selectable_as_places
               tests/unit/test_sandbox_adapter.py::test_the_registry_is_the_union_of_both_stacks
               tests/unit/test_sandbox_adapter.py::test_a_sandbox_only_name_resolves_to_the_adapter

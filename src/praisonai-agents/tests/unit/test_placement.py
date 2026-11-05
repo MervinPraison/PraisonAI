@@ -401,7 +401,7 @@ def test_run_on_builds_the_same_thing_backend_would(_no_hosted_credentials):
     assert isinstance(_agent("t", run_on="anthropic").backend, HostedAgent)
 
 
-def test_a_flow_does_not_clobber_an_agent_that_named_its_own_place():
+def test_a_flow_does_not_clobber_an_agent_that_named_its_own_place(monkeypatch):
     """Ordering matters: a flow attaches at the start of the run, before the
     agent's first turn. Checking only for a *live* sandbox would let the flow
     attach first and the agent attach again on its first chat() -- two sandboxes
@@ -412,6 +412,13 @@ def test_a_flow_does_not_clobber_an_agent_that_named_its_own_place():
         ensure_tools_placed,
     )
     from praisonaiagents.managed.shared_compute import SharedCompute
+    from praisonaiagents.managed import shared_compute
+
+    monkeypatch.setattr(shared_compute, "resolve_compute", lambda _: object())
+    monkeypatch.setattr(
+        SharedCompute, "ensure_provisioned",
+        lambda self: pytest.fail("attachment must not provision a sandbox"),
+    )
 
     own = _agent("own", tools_run_on="subprocess")
     plain = _agent("plain")
@@ -436,7 +443,7 @@ def test_a_flow_does_not_clobber_an_agent_that_named_its_own_place():
 
 
 # ── regressions found by adversarial validation ──────────────────────────────
-def test_a_placed_agent_inside_a_team_gets_its_sandbox_tools():
+def test_a_placed_agent_inside_a_team_gets_its_sandbox_tools(monkeypatch):
     """The sandbox was provisioned and the model never saw it.
 
     AgentTeam snapshots agent.tools and passes it to chat() as an explicit
@@ -444,6 +451,16 @@ def test_a_placed_agent_inside_a_team_gets_its_sandbox_tools():
     every tool ran on the host while a real sandbox sat unused.
     """
     from praisonaiagents.agent.agent import Agent as _A
+    from praisonaiagents.managed import shared_compute
+
+    monkeypatch.setattr(shared_compute, "resolve_compute", lambda _: object())
+    monkeypatch.setattr(
+        shared_compute.SharedCompute, "ensure_provisioned",
+        lambda self: pytest.fail("tool inspection must not provision a sandbox"),
+    )
+    monkeypatch.setattr("socket.socket.connect", lambda *a, **k: pytest.fail("unexpected network connection"))
+    monkeypatch.setattr("socket.socket.connect_ex", lambda *a, **k: pytest.fail("unexpected network connection"))
+    monkeypatch.setattr(Task, "execute_callback_sync", lambda *a, **k: None)
 
     def mytool(x: str) -> str:
         """A local tool."""
