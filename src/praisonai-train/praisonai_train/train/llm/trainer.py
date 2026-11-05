@@ -974,8 +974,8 @@ class TrainModel:
         if len(dataset) == 0:
             raise ValueError(
                 "All examples formatted to empty text. The dataset columns are "
-                f"{columns_before}; this trainer understands ShareGPT "
-                "('conversations'), Alpaca ('instruction'/'input'/'output') and "
+                f"{columns_before}; this trainer understands chat "
+                "('conversations' or 'messages'), Alpaca ('instruction'/'input'/'output') and "
                 "raw text ('text'). Rename your columns to one of those shapes, "
                 "or set chat_template to match your data.")
         return dataset
