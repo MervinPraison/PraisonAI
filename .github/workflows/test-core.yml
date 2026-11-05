@@ -649,6 +649,7 @@ jobs:
           tests/unit/test_lazy_imports.py::TestLazyImports::test_tools_loaded_eagerly \
           tests/unit/test_lazy_imports.py::TestLitePackage::test_lite_agent_no_litellm \
           tests/unit/test_lazy_imports.py::TestLitePackage::test_lite_agent_with_custom_llm \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_all_exports_accessible \
           -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
           -q --tb=line --disable-warnings --timeout=60
 
