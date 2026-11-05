@@ -599,6 +599,16 @@ jobs:
           tests/unit/test_paths_wiring.py::TestSchedulerStoreWiring::test_default_dir_matches_paths \
           -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
           -q --tb=line --disable-warnings --timeout=60
+    - name: Run isolated timeout-worker tests
+      if: matrix.shard == 'agents-core'
+      working-directory: src/praisonai-agents
+      run: |
+        python -m pytest \
+          tests/unit/test_async_bridge_invariants.py::test_tool_timeout_uses_daemon_worker_and_does_not_leak \
+          tests/unit/test_async_bridge_invariants.py::test_many_concurrent_healthy_timed_calls_are_not_refused \
+          tests/unit/test_async_bridge_invariants.py::test_saturated_orphan_pool_reports_capacity_not_timeout \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings --timeout=60
     - name: Run isolated lazy import tests
       if: matrix.shard == 'agents-core'
       working-directory: src/praisonai-agents
