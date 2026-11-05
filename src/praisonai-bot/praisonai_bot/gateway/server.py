@@ -1287,6 +1287,9 @@ class WebSocketGateway:
         # {client_id: SessionSharingRole}). The owner stays ``session.client_id``.
         self._session_observers: Dict[str, Dict[str, Any]] = {}
         self._client_scopes: Dict[str, List[str]] = {}  # client_id -> operator scopes
+        # Issue #6253: client_id -> agent ids the operator is confined to
+        # (absent/None = every agent).
+        self._client_agents: Dict[str, Optional[List[str]]] = {}
         # Issue #3467: in-flight turn registry so a running turn can be aborted
         # (by a WS ``abort`` frame or a portable ``/stop`` chat command) and so
         # a per-turn timeout can cancel a runaway turn. Maps session_id ->
@@ -2070,6 +2073,7 @@ class WebSocketGateway:
             self._register_client_conn(client_id, websocket)
             # Resolve operator scopes for this connection (all scopes if no policy).
             self._client_scopes[client_id] = self.config.resolve_scopes(operator_token)
+            self._client_agents[client_id] = self.config.resolve_agents(operator_token)
             # Issue #2661: stamp the session with the active secret's generation
             # so a later rotation can force-close it (instant revocation).
             self._client_auth_generation[client_id] = self._auth_generation()
@@ -2120,6 +2124,7 @@ class WebSocketGateway:
                 self._clients.pop(client_id, None)
                 await self._teardown_client_conn(client_id)
                 self._client_scopes.pop(client_id, None)
+                self._client_agents.pop(client_id, None)
                 self._client_auth_generation.pop(client_id, None)
                 self._release_client_session(client_id)
                 
@@ -3992,6 +3997,7 @@ class WebSocketGateway:
         self._client_conns.clear()
         self._client_sessions.clear()
         self._client_scopes.clear()
+        self._client_agents.clear()
         self._client_auth_generation.clear()
         
         for session_id in list(self._sessions.keys()):
@@ -4104,8 +4110,14 @@ class WebSocketGateway:
         if msg_type == "hello":
             agent_id = data.get("agent_id")
             
-            # Check if agent exists
-            if not agent_id or agent_id not in self._agents:
+            # Check if agent exists. An agent outside the operator's grant
+            # (Issue #6253) is reported identically so its existence is not
+            # disclosed to a confined operator.
+            if (
+                not agent_id
+                or agent_id not in self._agents
+                or not self._client_may_reach_agent(client_id, agent_id)
+            ):
                 error = HelloError(
                     code=ConnectErrorCode.AGENT_NOT_FOUND,
                     message=f"Agent not found: {agent_id}",
@@ -4311,7 +4323,11 @@ class WebSocketGateway:
         # Keep backward compatibility with old join message
         elif msg_type == "join":
             agent_id = data.get("agent_id")
-            if agent_id and agent_id in self._agents:
+            if (
+                agent_id
+                and agent_id in self._agents
+                and self._client_may_reach_agent(client_id, agent_id)
+            ):
                 # Protocol version negotiation with validation
                 try:
                     client_min_version = int(data.get("min_version", MIN_PROTOCOL_VERSION))
@@ -4380,7 +4396,16 @@ class WebSocketGateway:
                     client_id=client_id,
                     since_cursor=since_cursor,
                 )
-                
+
+                # Issue #6253: a resumed session_id must not smuggle a confined
+                # operator onto another agent's session.
+                if not self._client_may_reach_agent(client_id, session.agent_id):
+                    await self._send_to_client(client_id, {
+                        "type": "error",
+                        "message": "Session does not belong to the requested agent",
+                    })
+                    return
+
                 # Set negotiated protocol version for the session
                 session._protocol_version = negotiated_version
 
@@ -5372,6 +5397,7 @@ class WebSocketGateway:
         # Mirror the normal disconnect cleanup so evicted clients do not leave
         # stale scope/session entries that accumulate until shutdown.
         self._client_scopes.pop(client_id, None)
+        self._client_agents.pop(client_id, None)
         self._client_auth_generation.pop(client_id, None)
         self._release_client_session(client_id)
         if ws is not None:
@@ -5442,6 +5468,7 @@ class WebSocketGateway:
         ws = self._clients.pop(client_id, None)
         await self._teardown_client_conn(client_id)
         self._client_scopes.pop(client_id, None)
+        self._client_agents.pop(client_id, None)
         self._client_auth_generation.pop(client_id, None)
         self._release_client_session(client_id)
         if ws is not None:
@@ -5494,6 +5521,7 @@ class WebSocketGateway:
         ws = self._clients.pop(client_id, None)
         await self._teardown_client_conn(client_id)
         self._client_scopes.pop(client_id, None)
+        self._client_agents.pop(client_id, None)
         self._client_auth_generation.pop(client_id, None)
         self._release_client_session(client_id)
         self._reaped_connections += 1
@@ -7001,6 +7029,15 @@ class WebSocketGateway:
             return func
         return decorator
     
+    def _client_may_reach_agent(self, client_id: str, agent_id: Any) -> bool:
+        """Whether a connected client's operator grant covers ``agent_id``.
+
+        Issue #6253: unconfined clients (no ``agents`` in their grant) reach
+        every agent, preserving prior behaviour.
+        """
+        allowed = self._client_agents.get(client_id)
+        return allowed is None or agent_id in allowed
+
     def _client_has_scope(self, client_id: str, scope: OperatorScope) -> bool:
         """Whether a connected client holds ``scope`` (ADMIN implies all).
 
@@ -7045,6 +7082,11 @@ class WebSocketGateway:
 
     def _event_visible_to(self, event: GatewayEvent, client_id: str) -> bool:
         """Whether ``event`` should be delivered to ``client_id`` given its scopes."""
+        # Issue #6253: an event sourced from an agent outside the client's
+        # operator grant is withheld; non-agent (system) events are unaffected.
+        source = getattr(event, "source", None)
+        if source in self._agents and not self._client_may_reach_agent(client_id, source):
+            return False
         return self._client_has_scope(client_id, self._event_required_scope(event))
 
     async def emit(self, event: GatewayEvent) -> None:

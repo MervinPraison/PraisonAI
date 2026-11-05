@@ -1150,7 +1150,9 @@ class GatewayConfig:
             scope names (see OperatorScope). When None/empty (default), any
             successfully authenticated client is granted all scopes — identical
             to the previous binary behaviour. Single-operator setups are
-            unaffected.
+            unaffected. A token's value may instead be a mapping
+            ``{"scopes": [...], "agents": [...]}`` to also confine the operator
+            to the listed agent ids (omitted ``agents`` = all agents).
     """
     
     host: str = "127.0.0.1"
@@ -1208,7 +1210,9 @@ class GatewayConfig:
     # (0 = disabled).
     max_unauthorized_frames: int = 10
     push: PushConfig = field(default_factory=PushConfig)
-    auth_scopes: Optional[Dict[str, List[str]]] = None
+    # Issue #6253: a value is either a scope list or
+    # ``{"scopes": [...], "agents": [...]}`` (agent confinement).
+    auth_scopes: Optional[Dict[str, Any]] = None
     # Additive protocol surfaces (OpenAI-compatible / MCP) served on the same
     # app and auth. Opt-in; disabled by default so the gateway is unchanged.
     api: ApiConfig = field(default_factory=ApiConfig)
@@ -1329,6 +1333,8 @@ class GatewayConfig:
         if token is None:
             return []
         granted = self.auth_scopes.get(token)
+        if isinstance(granted, dict):
+            granted = granted.get("scopes") or []
         if granted is None:
             return []
         resolved: List[str] = []
@@ -1347,6 +1353,22 @@ class GatewayConfig:
                 sorted(valid_scopes),
             )
         return resolved
+
+    def resolve_agents(self, token: Optional[str]) -> Optional[List[str]]:
+        """Resolve the agent ids ``token`` is confined to (Issue #6253).
+
+        ``None`` means unconfined (every agent) — the result whenever no
+        policy is set or the token's entry carries no ``agents`` list, so
+        existing ``token -> [scopes]`` policies are unchanged. A token absent
+        from a configured policy holds no scopes, so it never reaches an
+        agent regardless of this value.
+        """
+        if not self.auth_scopes or token is None:
+            return None
+        entry = self.auth_scopes.get(token)
+        if not isinstance(entry, dict) or entry.get("agents") is None:
+            return None
+        return [str(a) for a in entry["agents"]]
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary (hides sensitive data)."""
@@ -1578,16 +1600,29 @@ class MultiChannelGatewayConfig:
         #   gateway:
         #     auth_scopes:
         #       "${VIEWER_TOKEN}": [read]
-        auth_scopes: Optional[Dict[str, List[str]]] = None
+        # Either shape may add ``agents: [...]`` per token (Issue #6253):
+        #     auth_scopes:
+        #       "${SUPPORT_TOKEN}": {scopes: [read, write], agents: [support]}
+        def _grant(scopes: Any, agents: Any = None) -> Any:
+            if isinstance(scopes, dict):
+                scopes, agents = scopes.get("scopes", []), scopes.get("agents")
+            scopes = list(scopes or [])
+            if agents is None:
+                return scopes
+            return {"scopes": scopes, "agents": [str(a) for a in agents]}
+
+        auth_scopes: Optional[Dict[str, Any]] = None
         auth_section = gw_data.get("auth")
         if isinstance(auth_section, dict) and isinstance(auth_section.get("tokens"), list):
             auth_scopes = {}
             for entry in auth_section["tokens"]:
                 if isinstance(entry, dict) and entry.get("token"):
-                    auth_scopes[str(entry["token"])] = list(entry.get("scopes", []))
+                    auth_scopes[str(entry["token"])] = _grant(
+                        entry.get("scopes", []), entry.get("agents"),
+                    )
         elif isinstance(gw_data.get("auth_scopes"), dict):
             auth_scopes = {
-                str(tok): list(scopes)
+                str(tok): _grant(scopes)
                 for tok, scopes in gw_data["auth_scopes"].items()
             }
 

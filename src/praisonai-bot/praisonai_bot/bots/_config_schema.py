@@ -896,7 +896,8 @@ class GatewayServerSchema(BaseModel):
     allowed_origins: Optional[List[str]] = None
     auth_token: Optional[str] = None
     auth: Optional[Dict[str, Any]] = None
-    auth_scopes: Optional[Dict[str, List[str]]] = None
+    # Issue #6253: token -> [scopes] or {scopes: [...], agents: [...]}.
+    auth_scopes: Optional[Dict[str, Union[List[str], Dict[str, List[str]]]]] = None
     max_connections: Optional[int] = Field(None, ge=0)
     max_sessions_per_agent: Optional[int] = Field(None, ge=0)
     session_config: Optional[Dict[str, Any]] = None
