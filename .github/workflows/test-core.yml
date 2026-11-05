@@ -283,6 +283,22 @@ jobs:
               tests/unit/test_provider_matrix.py::test_modal_honours_a_non_default_image_from_the_registry
               tests/unit/test_provider_matrix.py::test_the_two_docker_implementations_agree_on_their_image
               tests/unit/test_provider_matrix.py::test_every_install_hint_names_an_extra_that_exists
+              tests/unit/test_placement.py::test_a_name_in_both_sets_is_valid_for_both_parameters
+              tests/unit/test_placement.py::test_the_two_scopes_are_reported_differently
+              tests/unit/test_placement.py::test_the_sandbox_only_backends_are_reachable
+              tests/unit/test_placement.py::test_run_on_a_tools_only_place_names_the_right_parameter
+              tests/unit/test_placement.py::test_tools_run_on_a_managed_runtime_names_the_right_parameter
+              tests/unit/test_placement.py::test_an_unknown_place_lists_both_registries
+              tests/unit/test_placement.py::test_two_places_for_the_same_work_is_a_type_error
+              tests/unit/test_placement.py::test_run_on_is_refused_on_orchestrators
+              tests/unit/test_placement.py::test_tools_run_on_is_recorded_without_provisioning_anything
+              tests/unit/test_placement.py::test_a_plain_agent_is_untouched
+              tests/unit/test_placement.py::test_the_default_path_runs_no_registry_lookups
+              tests/unit/test_placement.py::test_a_named_placement_still_runs_the_lookups
+              tests/unit/test_placement.py::test_orchestrators_take_tools_run_on
+              tests/unit/test_placement.py::test_repr_uses_the_same_word_you_typed
+              tests/unit/test_placement.py::test_explain_names_the_tools_that_do_not_move
+              tests/unit/test_placement.py::test_explain_says_nothing_about_local_tools_when_nothing_moves
               tests/unit/test_output_file_containment.py::test_task_output_file_traversal_blocked
               tests/unit/test_output_file_containment.py::test_task_output_file_inside_root
               tests/unit/test_output_file_containment.py::test_task_output_file_respects_create_directory
