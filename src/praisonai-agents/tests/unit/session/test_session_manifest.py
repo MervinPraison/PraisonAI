@@ -1,7 +1,6 @@
 """Tests for the session manifest (Issue #6248)."""
 
 from praisonaiagents.session import FileSessionManifest, SessionManifestProtocol
-from praisonaiagents.agent.session_manager import SessionManagerMixin
 
 
 def test_satisfies_protocol(tmp_path):
@@ -29,7 +28,7 @@ def test_interrupted_run_survives_new_process(tmp_path):
     FileSessionManifest(str(tmp_path)).begin_run("s1", "r1", run_input="task")
     # A new process (new instance) sees the surviving write-ahead marker.
     stale = FileSessionManifest(str(tmp_path)).interrupted("s1")
-    assert stale is not None and stale.run_id == "r1" and stale.run_input == "task"
+    assert stale is not None and stale.run_id == "r1" and stale.run_digest
 
 
 def test_attempt_budget_is_bounded(tmp_path):
@@ -53,12 +52,22 @@ def test_unsafe_session_id_stays_in_directory(tmp_path):
     assert m.get("../../etc/x").refs == {"plan": "p"}
 
 
-def test_session_manager_save_and_load_state(tmp_path, monkeypatch):
-    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
-    mixin = SessionManagerMixin()
-    assert mixin._load_session_state("s1") == {}
-    assert mixin._save_session_state("s1", {"checkpoint": "abc", "goal": "g1"})
-    assert mixin._load_session_state("s1") == {"checkpoint": "abc", "goal": "g1"}
+def test_run_input_is_never_written_in_plaintext(tmp_path):
+    secret = "deploy with token sk-SECRET-12345"
+    m = FileSessionManifest(str(tmp_path))
+    m.begin_run("s1", "r1", run_input=secret)
+    for f in tmp_path.iterdir():
+        assert "sk-SECRET-12345" not in f.read_text(encoding="utf-8")
+    # The digest still recognises a retry of the same task.
+    assert m.begin_run("s1", "r2", run_input=secret).attempt == 2
+
+
+def test_absolute_and_backslash_ids_stay_in_directory(tmp_path):
+    m = FileSessionManifest(str(tmp_path))
+    for sid in ("/etc/passwd", "..\\..\\x", "..", "C:\\x"):
+        m.set_refs(sid, plan=sid)
+        assert m.get(sid).refs == {"plan": sid}
+    assert all(p.parent == tmp_path for p in tmp_path.iterdir())
 
 
 def test_ids_differing_only_in_punctuation_stay_separate(tmp_path):

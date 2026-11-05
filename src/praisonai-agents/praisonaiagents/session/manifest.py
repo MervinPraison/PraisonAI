@@ -22,6 +22,10 @@ Usage::
     # Next launch:
     stale = manifest.interrupted("my-session")   # entry or None
 
+The run input itself is never written to disk: only a SHA-256 digest of it
+is kept (``run_digest``), enough to recognise a retry of the same task without
+storing prompts (which may contain secrets) in plaintext.
+
 A run that keeps dying is bounded by ``max_attempts``: once the budget is
 spent, ``begin_run`` terminalises the stale marker (``run_status="abandoned"``)
 instead of counting it as yet another attempt of the same run.
@@ -29,6 +33,7 @@ instead of counting it as yet another attempt of the same run.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -56,7 +61,7 @@ class ManifestEntry:
     run_id: Optional[str] = None
     run_status: Optional[str] = None
     run_in_flight: bool = False
-    run_input: Optional[str] = None
+    run_digest: Optional[str] = None
     attempt: int = 0
     updated_at: float = 0.0
 
@@ -66,6 +71,12 @@ class ManifestEntry:
         if not isinstance(known.get("refs"), dict):
             known["refs"] = {}
         return cls(**known)
+
+
+def _digest(run_input: Optional[str]) -> Optional[str]:
+    if run_input is None:
+        return None
+    return hashlib.sha256(run_input.encode("utf-8")).hexdigest()
 
 
 @runtime_checkable
@@ -172,6 +183,7 @@ class FileSessionManifest:
     ) -> ManifestEntry:
         """Commit the write-ahead in-flight marker for a run on this session.
 
+        Only a digest of ``run_input`` is persisted, never the text itself.
         If the previous run never released its marker it was interrupted; a new
         run with the same ``run_input`` counts as another attempt of it. Once
         ``max_attempts`` is exceeded the stale run is abandoned and the counter
@@ -179,7 +191,8 @@ class FileSessionManifest:
         """
         with self._locked(session_id):
             entry = self._read(session_id) or ManifestEntry(session_id=session_id)
-            if entry.run_in_flight and entry.run_input == run_input:
+            digest = _digest(run_input)
+            if entry.run_in_flight and entry.run_digest == digest:
                 attempt = entry.attempt + 1
                 if attempt > max_attempts:
                     logger.warning(
@@ -190,7 +203,7 @@ class FileSessionManifest:
             else:
                 attempt = 1
             entry.run_id = run_id
-            entry.run_input = run_input
+            entry.run_digest = digest
             entry.run_status = "running"
             entry.run_in_flight = True
             entry.attempt = attempt

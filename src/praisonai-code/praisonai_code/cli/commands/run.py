@@ -2816,9 +2816,10 @@ def _begin_manifest_run(session_key, prompt, output, *, quiet: bool = False):
         manifest = FileSessionManifest(str(get_project_sessions_dir() / "manifests"))
         stale = manifest.interrupted(session_key)
         if stale is not None and not quiet:
+            # The prompt itself is not stored (only a digest), so it is not echoed.
             output.print_warning(
                 f"The previous run in this session was interrupted "
-                f"(attempt {stale.attempt}): {stale.run_input or '<unknown>'}"
+                f"(attempt {stale.attempt}); re-issue it to retry."
             )
         run_id = uuid.uuid4().hex[:12]
         manifest.begin_run(session_key, run_id, run_input=prompt)
