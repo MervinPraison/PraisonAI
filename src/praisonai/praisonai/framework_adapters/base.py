@@ -23,6 +23,9 @@ logger = logging.getLogger(__name__)
 # Structural keys handled by the spec builder itself — never "unsupported".
 _STRUCTURAL_FIELDS = {"tools", "tasks", "role", "goal", "backstory"}
 
+# Explicit safety gates: an adapter that cannot honour them must not run.
+_SAFETY_FIELDS = frozenset({"approval", "guardrails"})
+
 
 def warn_unsupported_fields(adapter: Any, spec_extras: Dict[str, Any]) -> None:
     """Warn once per agent when a backend ignores declared YAML fields.
@@ -33,15 +36,21 @@ def warn_unsupported_fields(adapter: Any, spec_extras: Dict[str, Any]) -> None:
     means "supports everything" — ``framework: praisonai`` honours the full
     feature set, so no warning is emitted there.
 
-    Non-breaking: pure visibility. Anything a YAML declares that the target
-    adapter does not read is silently dropped otherwise, so warn rather than
-    let a safety-relevant field (e.g. ``approval``) be ignored without any
-    diagnostic.
+    Non-safety fields only warn. Explicit safety gates (``approval``,
+    ``guardrails``) fail closed: running with the gate silently dropped would
+    execute tools the YAML author asked to be gated (safe by default).
     """
     supported = getattr(adapter, "SUPPORTED_YAML_FIELDS", frozenset())
     if not supported:
         return
     unhandled = set(spec_extras.keys()) - supported - _STRUCTURAL_FIELDS
+    dropped_safety = sorted(unhandled & _SAFETY_FIELDS)
+    if dropped_safety:
+        raise ValueError(
+            f"framework={getattr(adapter, 'name', '?')!r} cannot enforce safety "
+            f"field(s) {dropped_safety} for agent {spec_extras.get('role')!r}. "
+            f"Use framework: praisonai, or remove the field(s) to run ungated."
+        )
     if unhandled:
         logger.warning(
             "framework=%r ignores YAML field(s) %s for agent %r; "
