@@ -234,6 +234,8 @@ jobs:
               tests/unit/test_history_parameter.py tests/unit/test_lazy.py
               tests/unit/test_llm_consolidation.py tests/unit/test_permissions.py
               tests/unit/test_process_timeout.py tests/unit/test_push_client.py tests/unit/test_run_lock.py
+              tests/unit/test_allowed_tools_filter.py tests/unit/test_approval_auto.py
+              tests/unit/test_approval_protocol.py tests/unit/test_toolsets.py
               tests/unit/test_handoff_unified.py tests/unit/test_identity_canonicalizer_protocol.py
               tests/unit/test_idle_timeout_breaker.py tests/unit/test_json_fence_cleanup.py
               tests/unit/test_kanban_protocol.py tests/unit/test_loop_detection.py
