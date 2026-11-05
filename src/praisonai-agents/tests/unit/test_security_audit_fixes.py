@@ -9,6 +9,8 @@ import pytest
 
 
 def test_workflow_include_skips_tools_without_opt_in(tmp_path, monkeypatch):
+    monkeypatch.setattr("socket.socket.connect", lambda *a, **k: pytest.fail("unexpected network connection"))
+    monkeypatch.setattr("socket.socket.connect_ex", lambda *a, **k: pytest.fail("unexpected network connection"))
     monkeypatch.delenv("PRAISONAI_ALLOW_LOCAL_TOOLS", raising=False)
     monkeypatch.delenv("PRAISONAI_ALLOW_TEMPLATE_TOOLS", raising=False)
     monkeypatch.chdir(tmp_path)
