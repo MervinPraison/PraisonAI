@@ -178,6 +178,77 @@ class TestImagesCapabilities:
         captured = mock_image_generation.call_args.kwargs
         assert captured.get('drop_params') is False
 
+    @patch('litellm.image_generation')
+    def test_image_generate_default_model_is_not_retired(self, mock_image_generation):
+        """dall-e-2/3 were retired 2026-05-12; the default must be a GPT image model (#6259)."""
+        from praisonai.capabilities.images import image_generate
+
+        mock_image_generation.return_value = Mock(data=[])
+        image_generate("x")
+
+        captured = mock_image_generation.call_args.kwargs
+        assert captured['model'] == "gpt-image-2.5-flare"
+        assert 'quality' not in captured  # "standard" is not a valid gpt-image quality
+
+    @patch('litellm.image_generation')
+    def test_image_generate_forwards_quality_and_images_26_params(self, mock_image_generation):
+        """quality must reach gpt-image models, not only dall-e-3 (#6259)."""
+        from praisonai.capabilities.images import image_generate
+
+        mock_image_generation.return_value = Mock(data=[])
+        params = {"frame_count": 4, "frame_duration_ms": 100, "complexity": "low",
+                  "output_format": "gif"}
+        image_generate("x", model="gpt-image-2.6-flare", quality="low", **params)
+
+        captured = mock_image_generation.call_args.kwargs
+        assert captured['quality'] == "low"
+        assert params.items() <= captured.items()
+
+    def test_image_generate_images_26_params_reach_the_wire(self):
+        """Real LiteLLM, fake HTTP: params must be in the request body, not just in
+        the kwargs handed to litellm (drop_params=True could strip them silently)."""
+        import json
+        httpx = pytest.importorskip("httpx")
+        openai = pytest.importorskip("openai")
+        pytest.importorskip("litellm")
+        from praisonai.capabilities.images import image_generate
+
+        bodies = []
+
+        def handler(request):
+            bodies.append(json.loads(request.content))
+            return httpx.Response(200, json={"created": 1, "data": [{"b64_json": "AA=="}]})
+
+        client = openai.OpenAI(api_key="sk-test",
+                               http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+        params = {"quality": "low", "frame_count": 4, "frame_duration_ms": 100, "complexity": "low"}
+        results = image_generate("x", model="gpt-image-2.6-flare", api_key="sk-test",
+                                 client=client, **params)
+
+        assert results[0].b64_json == "AA=="
+        assert params.items() <= bodies[0].items()
+        assert "response_format" not in bodies[0]
+
+    @patch('litellm.aimage_generation')
+    def test_aimage_generate_forwards_quality(self, mock_aimage_generation):
+        import asyncio
+        from praisonai.capabilities.images import aimage_generate
+
+        async def fake(**kw):
+            return Mock(data=[])
+        mock_aimage_generation.side_effect = fake
+        asyncio.run(aimage_generate("x", model="gpt-image-2.5-flare", quality="low"))
+        assert mock_aimage_generation.call_args.kwargs['quality'] == "low"
+
+    @patch('litellm.image_edit')
+    def test_image_edit_rejects_markup(self, mock_image_edit):
+        """markup is never uploaded as a file by LiteLLM, so fail loudly (#6259)."""
+        from praisonai.capabilities.images import image_edit
+
+        with pytest.raises(ValueError, match="markup"):
+            image_edit(b"img", "make it blue", model="gpt-image-2.5-flare", markup=b"m")
+        mock_image_edit.assert_not_called()
+
     @patch('litellm.image_edit')
     def test_image_edit_drops_response_format_for_gpt_image(self, mock_image_edit):
         """image_edit must also drop response_format for gpt-image-* and scope drop_params."""

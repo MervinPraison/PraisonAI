@@ -12,6 +12,24 @@ from praisonaiagents._logging import get_logger
 import warnings
 # Filter out Pydantic warning about fields
 warnings.filterwarnings("ignore", "Valid config keys have changed in V2", UserWarning)
+# dall-e-2/dall-e-3 were retired by OpenAI on 2026-05-12; gpt-image-1 on 2026-10-23.
+DEFAULT_IMAGE_MODEL = "gpt-image-2.5-flare"
+
+
+def _reject_markup(kwargs: Dict[str, Any]) -> None:
+    """Fail loudly instead of sending a broken ``markup`` edit.
+
+    LiteLLM only uploads ``image``/``mask`` as file parts; any ``markup`` value is
+    either dropped or sent as a plain text field, so the edit would silently
+    ignore the user's markup.
+    """
+    if kwargs.get("markup") is not None:
+        raise ValueError(
+            "'markup' is not supported through LiteLLM's image_edit yet (it is not "
+            "uploaded as a file). Use 'mask' or call the OpenAI SDK's images.edit directly."
+        )
+
+
 class ImageGenerationConfig(BaseModel):
     """Configuration for image generation settings."""
     style: Optional[str] = Field(default=None, description="Style of the generated image (only sent when set)")
@@ -141,7 +159,7 @@ class ImageAgent(Agent):
         config = self.image_config.dict(exclude_none=True)
         config.update(kwargs)
         
-        model_name = self._image_model("dall-e-3")
+        model_name = self._image_model(DEFAULT_IMAGE_MODEL)
         
         # Use the model name in config
         config['model'] = model_name
@@ -269,7 +287,7 @@ class ImageAgent(Agent):
             
         Example:
             ```python
-            agent = ImageAgent(llm="openai/dall-e-2")
+            agent = ImageAgent(llm="openai/gpt-image-2.5-flare")
             result = agent.edit("photo.png", "Add a sunset in the background")
             ```
         """
@@ -277,7 +295,8 @@ class ImageAgent(Agent):
             import litellm
             litellm.telemetry = False
             
-            model_name = self._image_model("dall-e-2")
+            _reject_markup(kwargs)
+            model_name = self._image_model(DEFAULT_IMAGE_MODEL)
             
             config = {
                 "model": model_name,
