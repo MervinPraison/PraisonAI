@@ -545,6 +545,7 @@ class TrainModel:
         "optim", "weight_decay", "lr_scheduler_type", "seed", "output_dir",
         "assistant_only_loss", "train_on_responses_only", "save_steps",
         "train", "huggingface_save", "huggingface_save_gguf", "ollama_save",
+        "ollama_push",
         "method", "beta", "max_prompt_length", "desirable_weight", "undesirable_weight",
         "reward_funcs", "num_generations", "max_completion_length",
         "embedding_learning_rate",
@@ -1784,6 +1785,7 @@ class TrainModel:
             self.config.get('model_parameters', 'latest'),
             modelfile_content,
             quantization=self.config.get('quantization_method'),
+            push=self._flag(self.config.get('ollama_push'), default=True),
         )
 
     def run(self):
