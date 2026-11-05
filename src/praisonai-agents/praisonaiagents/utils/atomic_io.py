@@ -9,13 +9,13 @@ the previous good file: the old bytes stay intact and ``os.replace`` swaps in th
 new content atomically on both POSIX and Windows.
 """
 
-import hashlib
 import json
 import os
 import tempfile
 import threading
 import time
 from collections import defaultdict
+from urllib.parse import quote
 from typing import Any, Callable
 
 __all__ = [
@@ -29,19 +29,15 @@ __all__ = [
 def safe_join(base: str, name: str, suffix: str = "") -> str:
     """Join a caller-supplied ``name`` under ``base`` without escaping it.
 
-    Names already made of ``[A-Za-z0-9._~-]`` (and not starting with ``.``)
-    keep their exact filename, so encoded names round-trip unchanged. Any other name gets a sanitised readable
-    stem plus a digest of the full name, so distinct inputs never share a file
-    and separators/``..`` can never leave ``base``. Mirrors the session
-    store's filename scheme (Issue #6024 / #6238).
+    The name is percent-encoded (``urllib.parse.quote`` with no safe chars,
+    plus a leading ``.`` as ``%2E``), so plain names like ``current`` keep
+    their exact filename, separators and ``..`` can never leave ``base``, and
+    the mapping is reversible: distinct names never share a file and
+    ``urllib.parse.unquote`` recovers the original name (Issue #6238).
     """
-    name = str(name)
-    stem = "".join(c if c.isalnum() or c in "._-~" else "_" for c in name).lstrip(".")
-    if stem != name or not stem:
-        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
-        stem = f"{stem[:64]}~{digest}"
-    # The stem has no separators and never starts with ".", so it cannot
-    # resolve to "..", an absolute path, or anything outside ``base``.
+    stem = quote(str(name), safe="")
+    if stem.startswith("."):
+        stem = "%2E" + stem[1:]
     return os.path.join(base, stem + suffix)
 
 

@@ -234,6 +234,7 @@ class PlanStorage:
             not os.path.exists(path)
             and name not in ("", ".", "..")
             and "\0" not in name
+            and "%" not in name
             and os.path.basename(name) == name
             and not (os.altsep and os.altsep in name)
         ):
@@ -290,12 +291,13 @@ class PlanStorage:
         Returns:
             List of todo list names
         """
+        from urllib.parse import unquote
         todos = []
         
         for filename in os.listdir(self.todos_dir):
             if filename.endswith(".json"):
-                name = filename[:-5]  # Remove .json extension
-                todos.append(name)
+                # Decode so listed names round-trip through load/delete_todo.
+                todos.append(unquote(filename[:-5]))
                 
         return todos
     

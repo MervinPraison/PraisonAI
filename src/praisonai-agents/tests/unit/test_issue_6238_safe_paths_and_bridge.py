@@ -74,3 +74,16 @@ def test_custom_plan_filename_keeps_md_suffix(tmp_path):
     path = storage.save_plan(plan, filename="my plan.md")
     assert path.endswith(".md") and os.path.dirname(path) == storage.plans_dir
     assert len(storage.list_plans()) == 1
+
+
+def test_encoded_looking_names_do_not_share_a_file(tmp_path):
+    storage = PlanStorage(base_path=str(tmp_path / "store"))
+    names = ["a/b", "a_b~c14cddc033f6", "a%2Fb", "a b", "a%20b", "~x", ".."]
+    paths = {storage.save_todo(TodoList(name=n), name=n) for n in names}
+    assert len(paths) == len(names)
+    assert all(os.path.dirname(p) == storage.todos_dir for p in paths)
+    assert sorted(storage.list_todos()) == sorted(names)
+    for n in names:
+        assert storage.load_todo(n).name == n
+    assert storage.delete_todo("a/b") is True
+    assert storage.load_todo("a%2Fb") is not None
