@@ -7,6 +7,15 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'praisonai'))
 
 
+@pytest.fixture(autouse=True)
+def _isolate_gateway_pairing(tmp_path, monkeypatch):
+    """Keep generated gateway credentials in this test's temporary directory."""
+    from praisonai_bot.gateway import pairing
+
+    monkeypatch.setattr(pairing, "_DEFAULT_STORE_DIR", str(tmp_path))
+    monkeypatch.setenv("GATEWAY_AUTH_TOKEN", "gateway-test-token")
+
+
 class MockAgent:
     def __init__(self, name="agent"):
         self.name = name

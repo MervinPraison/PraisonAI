@@ -7,12 +7,23 @@ Tests existing functionality and multi-bot extensions (Agent 2).
 
 from unittest.mock import Mock
 
+import pytest
+
 from praisonaiagents.gateway import (
     GatewayConfig,
     GatewayEvent,
     GatewayMessage,
     EventType,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_gateway_pairing(tmp_path, monkeypatch):
+    """Keep generated gateway credentials in this test's temporary directory."""
+    from praisonai_bot.gateway import pairing
+
+    monkeypatch.setattr(pairing, "_DEFAULT_STORE_DIR", str(tmp_path))
+    monkeypatch.setenv("GATEWAY_AUTH_TOKEN", "gateway-test-token")
 
 
 class TestGatewayImports:
