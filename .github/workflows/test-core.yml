@@ -317,6 +317,7 @@ jobs:
               tests/unit/test_sandbox_adapter.py::test_the_registry_is_the_union_of_both_stacks
               tests/unit/test_sandbox_adapter.py::test_a_sandbox_only_name_resolves_to_the_adapter
               tests/unit/test_sandbox_adapter.py::test_a_name_that_needs_connection_details_says_so
+              tests/unit/test_lazy_imports.py::TestReplayStaysLazy
               tests/unit/test_robustness_issue_5870.py::test_allowlist_failed_save_keeps_previous_file
               tests/unit/test_robustness_issue_5870.py::test_allowlist_load_quarantines_corrupt_file
               tests/unit/test_robustness_issue_5870.py::test_git_fetch_timeout_without_cache_returns_empty
