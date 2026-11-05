@@ -292,6 +292,15 @@ jobs:
               tests/unit/test_provider_matrix.py::test_an_unknown_place_still_falls_back_to_its_name
               tests/unit/test_provider_matrix.py::test_sandbox_backends_from_plugins_are_selectable
               tests/unit/test_provider_matrix.py::test_a_plugin_sandbox_reaches_both_parameters
+              tests/unit/test_provider_matrix.py::test_every_place_resolves_to_a_provider[local]
+              tests/unit/test_provider_matrix.py::test_every_place_resolves_to_a_provider[docker]
+              tests/unit/test_provider_matrix.py::test_every_place_resolves_to_a_provider[modal]
+              tests/unit/test_provider_matrix.py::test_every_provider_satisfies_the_protocol[local]
+              tests/unit/test_provider_matrix.py::test_every_provider_satisfies_the_protocol[docker]
+              tests/unit/test_provider_matrix.py::test_every_provider_satisfies_the_protocol[modal]
+              tests/unit/test_provider_matrix.py::test_every_protocol_method_is_awaitable[local]
+              tests/unit/test_provider_matrix.py::test_every_protocol_method_is_awaitable[docker]
+              tests/unit/test_provider_matrix.py::test_every_protocol_method_is_awaitable[modal]
               tests/unit/test_placement.py::test_a_name_in_both_sets_is_valid_for_both_parameters
               tests/unit/test_placement.py::test_the_two_scopes_are_reported_differently
               tests/unit/test_placement.py::test_the_sandbox_only_backends_are_reachable
