@@ -265,6 +265,7 @@ jobs:
               tests/unit/test_managed_backend.py
               tests/unit/test_secrets.py
               tests/unit/test_gateway_server.py tests/unit/test_gateway_routing.py
+              tests/unit/test_whatsapp_bot.py
               tests/unit/test_output_file_containment.py::test_task_output_file_traversal_blocked
               tests/unit/test_output_file_containment.py::test_task_output_file_inside_root
               tests/unit/test_output_file_containment.py::test_task_output_file_respects_create_directory
