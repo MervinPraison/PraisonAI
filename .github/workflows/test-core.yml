@@ -255,6 +255,7 @@ jobs:
               tests/unit/test_parameter_naming.py
               tests/unit/test_api_exports.py
               tests/unit/test_tools_reliability.py
+              tests/unit/test_accepted_and_ignored_config.py
               tests/unit/test_handoff_unified.py tests/unit/test_identity_canonicalizer_protocol.py
               tests/unit/test_idle_timeout_breaker.py tests/unit/test_json_fence_cleanup.py
               tests/unit/test_kanban_protocol.py tests/unit/test_loop_detection.py
