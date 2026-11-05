@@ -327,6 +327,9 @@ jobs:
               tests/unit/test_run_on_docker.py::test_hosted_config_spellings_are_translated
               tests/unit/test_run_on_docker.py::test_an_empty_config_still_produces_a_valid_agent
               tests/unit/test_run_on_docker.py::test_the_result_is_read_from_a_marked_line
+              tests/unit/test_run_on_docker.py::test_places_that_cannot_host_a_loop_are_still_refused
+              tests/unit/test_run_on_docker.py::test_the_remote_agent_is_rebuilt_without_callables
+              tests/unit/test_run_on_docker.py::test_the_generic_backend_honours_a_requested_image
               tests/unit/test_placement.py::test_no_place_at_all_says_how_to_name_one
               tests/unit/test_thread_safety.py::TestMCPCleanup
               tests/unit/test_robustness_issue_5870.py::test_allowlist_failed_save_keeps_previous_file
