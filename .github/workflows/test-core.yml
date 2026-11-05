@@ -171,6 +171,7 @@ jobs:
               tests/unit/test_gateway_drain_marker.py tests/unit/test_gateway_forensics.py
               tests/unit/test_gateway_hook_coalesce.py tests/unit/test_gateway_hook_signature_schemes.py
               tests/unit/test_gateway_ingress_attribution.py tests/unit/test_gateway_lifecycle_guard.py
+              tests/unit/test_gateway_lifecycle_hooks.py
               tests/unit/test_gateway_lifecycle_record.py tests/unit/test_gateway_loop_watchdog.py
               tests/unit/test_gateway_method_scopes.py tests/unit/test_gateway_pressure_eviction.py
               tests/unit/test_gateway_restart_loop_guard.py
