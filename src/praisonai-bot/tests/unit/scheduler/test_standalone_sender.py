@@ -394,6 +394,50 @@ def test_failed_failure_summary_is_not_recorded_as_delivered():
     assert "telegram:42" in (result.delivery_error or "")
 
 
+def _boom_executor(sent):
+    async def deliver(target, text):
+        sent.append((target.channel, target.channel_id, text))
+
+    return ScheduledAgentExecutor(
+        runner=FakeRunner(),
+        agent_resolver=lambda aid: _BoomAgent(),
+        delivery_handler=deliver,
+        run_policy=_DeliverOnFailurePolicy(),
+    )
+
+
+def test_failure_summary_routes_to_failure_delivery():
+    """A set ``failure_delivery`` receives the failure notice instead of the
+    result lane (#6255)."""
+    sent: list = []
+    job = _job(deliver="slack:metrics")
+    job.failure_delivery = DeliveryTarget.parse("slack:ops")
+    result = _run(_boom_executor(sent)._execute_one(job))
+
+    assert result.status == "failed"
+    assert [(c, cid) for c, cid, _ in sent] == [("slack", "ops")]
+
+
+def test_failure_delivery_none_suppresses_notice():
+    """``failure_delivery`` of ``none`` keeps failure noise out of every
+    channel while the run is still recorded as failed (#6255)."""
+    sent: list = []
+    job = _job(deliver="slack:metrics")
+    job.failure_delivery = DeliveryTarget.parse("none")
+    result = _run(_boom_executor(sent)._execute_one(job))
+
+    assert result.status == "failed"
+    assert sent == []
+
+
+def test_failure_delivery_round_trips_and_defaults_absent():
+    job = _job(deliver="slack:metrics")
+    assert "failure_delivery" not in job.to_dict()
+    job.failure_delivery = DeliveryTarget.parse("slack:ops")
+    restored = ScheduleJob.from_dict(job.to_dict())
+    assert restored.failure_delivery.channel_id == "ops"
+
+
 # ── new-platform standalone senders (#4050) ──────────────────────────
 
 
