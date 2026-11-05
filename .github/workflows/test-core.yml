@@ -208,6 +208,11 @@ jobs:
               tests/unit/test_cli_backend_protocol.py tests/unit/test_context_compaction_policy.py
               tests/unit/test_cost_utils_cache.py tests/unit/test_degraded_delivery.py
               tests/unit/test_failure_reply.py tests/unit/test_framework_protocol.py
+              tests/unit/test_issue_5741_atomic_state.py tests/unit/test_issue_5771_hot_path_and_leaks.py
+              tests/unit/test_issue_5806_robustness.py tests/unit/test_issue_5838_shared_helpers.py
+              tests/unit/test_issue_5900_job_manager_reliability.py tests/unit/test_issue_5920_guardrail_and_rules.py
+              tests/unit/test_issue_5957.py tests/unit/test_issue_6116_workflow_team_fixes.py
+              tests/unit/test_issue_6171_hardening.py
               tests/unit/test_handoff_unified.py tests/unit/test_identity_canonicalizer_protocol.py
               tests/unit/test_idle_timeout_breaker.py tests/unit/test_json_fence_cleanup.py
               tests/unit/test_kanban_protocol.py tests/unit/test_loop_detection.py
