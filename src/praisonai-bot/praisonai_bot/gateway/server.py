@@ -6768,7 +6768,12 @@ class WebSocketGateway:
                     session = GatewaySession.from_dict(session_data, self.config.session_config.max_messages)
                 else:
                     # Fallback: create new session but restore messages
-                    stored_agent_id = getattr(session_data_obj, "agent_id", None) or agent_id
+                    stored_agent_id = getattr(session_data_obj, "agent_id", None)
+                    if not stored_agent_id and self._client_agents.get(client_id) is not None:
+                        # Do not cache or attach an identity-less legacy record for
+                        # a confined client: its requested ID proves nothing.
+                        return GatewaySession(_session_id=sid, _agent_id="", _client_id=None)
+                    stored_agent_id = stored_agent_id or agent_id
                     session = GatewaySession(
                         _session_id=sid,
                         _agent_id=stored_agent_id,

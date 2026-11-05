@@ -81,3 +81,52 @@ async def test_join_uses_persisted_agent_id_when_snapshot_is_missing():
     assert "candidate" not in gateway._client_sessions
     assert gateway._sessions["stored-session"].client_id is None
     assert socket.sent[-1]["type"] == "error"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("frame", ["join", "hello"])
+async def test_confined_operator_cannot_resume_record_without_agent_identity(frame):
+    from types import SimpleNamespace
+
+    gateway = WebSocketGateway(config=GatewayConfig(auth_token="test-token"))
+    gateway._agents["support"] = object()
+
+    class Store:
+        def session_exists(self, session_id):
+            return session_id == "legacy-session"
+
+        def get_session(self, session_id):
+            return SimpleNamespace(agent_id=None, messages=[])
+
+    gateway._session_store = Store()
+    gateway._client_agents["candidate"] = ["support"]
+    socket = FakeSocket()
+    gateway._clients["candidate"] = socket
+    await gateway._handle_client_message("candidate", {
+        "type": frame, "agent_id": "support", "session_id": "legacy-session",
+    })
+    assert "candidate" not in gateway._client_sessions
+    assert "legacy-session" not in gateway._sessions
+    assert socket.sent[-1]["type"] == ("hello_error" if frame == "hello" else "error")
+
+
+@pytest.mark.asyncio
+async def test_unconfined_operator_can_resume_record_without_agent_identity():
+    from types import SimpleNamespace
+
+    gateway = WebSocketGateway(config=GatewayConfig(auth_token="test-token"))
+    gateway._agents["support"] = object()
+
+    class Store:
+        def session_exists(self, session_id):
+            return session_id == "legacy-session"
+
+        def get_session(self, session_id):
+            return SimpleNamespace(agent_id=None, messages=[])
+
+    gateway._session_store = Store()
+    gateway._clients["candidate"] = FakeSocket()
+    await gateway._handle_client_message("candidate", {
+        "type": "join", "agent_id": "support", "session_id": "legacy-session",
+    })
+    assert gateway._client_sessions["candidate"] == "legacy-session"
