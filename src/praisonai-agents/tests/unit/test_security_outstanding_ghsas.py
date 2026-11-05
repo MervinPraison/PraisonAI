@@ -78,11 +78,20 @@ def test_skill_tools_blocks_outside_script(tmp_path, monkeypatch):
     assert "outside working directory" in result.lower()
 
 
-def test_web_crawl_blocks_private_ip():
+def test_web_crawl_blocks_private_ip(monkeypatch):
     """GHSA-qg25: web_crawl SSRF blocks private targets."""
-    from praisonaiagents.tools.web_crawl_tools import web_crawl
+    from praisonaiagents.tools import web_crawl_tools
 
-    result = web_crawl("http://169.254.169.254/latest/meta-data/")
+    monkeypatch.delenv("ALLOW_LOCAL_CRAWL", raising=False)
+    monkeypatch.setattr(
+        "socket.getaddrinfo",
+        lambda *args, **kwargs: [(2, 1, 6, "", ("169.254.169.254", 0))],
+    )
+    monkeypatch.setattr(
+        web_crawl_tools, "_get_available_crawl_providers",
+        lambda: pytest.fail("unsafe URL reached provider discovery"),
+    )
+    result = web_crawl_tools.web_crawl("http://169.254.169.254/latest/meta-data/")
     assert "error" in result
 
 
