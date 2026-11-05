@@ -9,6 +9,7 @@ the previous good file: the old bytes stay intact and ``os.replace`` swaps in th
 new content atomically on both POSIX and Windows.
 """
 
+import hashlib
 import json
 import os
 import tempfile
@@ -21,8 +22,28 @@ __all__ = [
     "atomic_write_json",
     "atomic_write_text",
     "quarantine_corrupt_file",
+    "safe_join",
     "update_json",
 ]
+
+def safe_join(base: str, name: str, suffix: str = "") -> str:
+    """Join a caller-supplied ``name`` under ``base`` without escaping it.
+
+    Names already made of ``[A-Za-z0-9._-]`` (and not starting with ``.``)
+    keep their exact legacy filename. Any other name gets a sanitised readable
+    stem plus a digest of the full name, so distinct inputs never share a file
+    and separators/``..`` can never leave ``base``. Mirrors the session
+    store's filename scheme (Issue #6024 / #6238).
+    """
+    name = str(name)
+    stem = "".join(c if c.isalnum() or c in "._-" else "_" for c in name).lstrip(".")
+    if stem != name or not stem:
+        digest = hashlib.sha256(name.encode("utf-8")).hexdigest()[:12]
+        stem = f"{stem[:64]}~{digest}"
+    # The stem has no separators and never starts with ".", so it cannot
+    # resolve to "..", an absolute path, or anything outside ``base``.
+    return os.path.join(base, stem + suffix)
+
 
 # Per-path in-process mutexes so threads in one process serialise before they
 # even reach the cross-process ``FileLock``. Keyed by absolute path.

@@ -104,7 +104,8 @@ class PlanStorage:
         if filename is None:
             filename = self._get_plan_filename(plan)
             
-        path = os.path.join(self.plans_dir, filename)
+        from ..utils.atomic_io import safe_join
+        path = safe_join(self.plans_dir, filename)
         
         # Convert plan to markdown
         markdown = plan.to_markdown()
@@ -226,11 +227,10 @@ class PlanStorage:
         Returns:
             Path to the saved file
         """
-        filename = f"{name}.json"
-        path = os.path.join(self.todos_dir, filename)
+        from ..utils.atomic_io import atomic_write_text, safe_join
+        path = safe_join(self.todos_dir, name, ".json")
 
         # Atomic write so a crash mid-write never truncates the previous todos.
-        from ..utils.atomic_io import atomic_write_text
         atomic_write_text(path, todo.to_json())
 
         logger.debug(f"Saved todo list to {path}")
@@ -246,8 +246,8 @@ class PlanStorage:
         Returns:
             TodoList instance, or None if not found
         """
-        filename = f"{name}.json"
-        path = os.path.join(self.todos_dir, filename)
+        from ..utils.atomic_io import safe_join
+        path = safe_join(self.todos_dir, name, ".json")
         
         if not os.path.exists(path):
             return None
@@ -284,8 +284,8 @@ class PlanStorage:
         Returns:
             True if deleted, False if not found
         """
-        filename = f"{name}.json"
-        path = os.path.join(self.todos_dir, filename)
+        from ..utils.atomic_io import safe_join
+        path = safe_join(self.todos_dir, name, ".json")
         
         if os.path.exists(path):
             os.remove(path)
