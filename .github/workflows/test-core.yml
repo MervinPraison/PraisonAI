@@ -200,6 +200,14 @@ jobs:
               tests/unit/test_param_consolidation.py tests/unit/test_presentation_poll.py
               tests/unit/test_runtime_capabilities.py tests/unit/test_runtime_doctor.py
               tests/unit/test_task_failure_policies.py tests/unit/test_team_rerun_and_retrieval_state.py
+              tests/unit/test_a2a_stream_lifecycle.py tests/unit/test_agent_as_tool.py
+              tests/unit/test_async_offload_6152.py tests/unit/test_base_platform_adapter.py
+              tests/unit/test_bot_commands_shared.py tests/unit/test_bot_loop_guard.py
+              tests/unit/test_bot_message_hooks.py tests/unit/test_botos_protocol.py
+              tests/unit/test_callback_payload_store.py tests/unit/test_circuit_breaker.py
+              tests/unit/test_cli_backend_protocol.py tests/unit/test_context_compaction_policy.py
+              tests/unit/test_cost_utils_cache.py tests/unit/test_degraded_delivery.py
+              tests/unit/test_failure_reply.py tests/unit/test_framework_protocol.py
               tests/unit/test_handoff_unified.py tests/unit/test_identity_canonicalizer_protocol.py
               tests/unit/test_idle_timeout_breaker.py tests/unit/test_json_fence_cleanup.py
               tests/unit/test_kanban_protocol.py tests/unit/test_loop_detection.py
