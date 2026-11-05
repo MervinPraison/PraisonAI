@@ -3146,7 +3146,7 @@ Your Role: {self.role}"""
                     temperature=temperature,
                     max_tokens=getattr(self, 'max_tokens', None),
                     stream=True,  # Try streaming first
-                    **self._native_reasoning_kwargs(self._unified_dispatcher.model),
+                    **self._native_reasoning_kwargs(getattr(self._unified_dispatcher, 'model', None)),
                     response_format=response_format,
                     execute_tool_fn=self._durable_sync_tool_executor(
                         getattr(self, 'execute_tool', None)
@@ -3196,7 +3196,7 @@ Your Role: {self.role}"""
                 temperature=temperature,
                 max_tokens=getattr(self, 'max_tokens', None),
                 stream=stream,
-                **self._native_reasoning_kwargs(self._unified_dispatcher.model),
+                **self._native_reasoning_kwargs(getattr(self._unified_dispatcher, 'model', None)),
                 response_format=response_format,
                 execute_tool_fn=self._durable_sync_tool_executor(
                     getattr(self, 'execute_tool', None)

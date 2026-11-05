@@ -7857,7 +7857,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # _build_completion_params does, but in the Responses API shape
         # ``reasoning: {"effort": ...}``. A per-call value wins over the
         # instance setting; an explicit ``reasoning`` object is kept as is.
-        effort = kwargs.get('reasoning_effort', self.reasoning_effort)
+        effort = kwargs.get('reasoning_effort', getattr(self, 'reasoning_effort', None))
         if effort is not None and 'reasoning' not in params:
             from ..thinking.effort import resolve_reasoning_params
             native = resolve_reasoning_params(effort, params['model'])
