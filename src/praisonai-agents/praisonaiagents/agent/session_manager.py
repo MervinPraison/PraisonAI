@@ -55,9 +55,11 @@ class SessionManagerMixin:
             True if saved successfully, False otherwise
         """
         try:
-            # This is a placeholder implementation
-            # In practice, this would integrate with the actual session store
-            logger.debug(f"Saving session state for {session_id}: {len(state)} keys")
+            # Plane references (checkpoint/plan/goal/artifacts ...) live in the
+            # session manifest; the planes themselves keep their own stores.
+            from ..session.manifest import FileSessionManifest
+            FileSessionManifest().set_refs(session_id, **state)
+            logger.debug(f"Saved session state for {session_id}: {len(state)} keys")
             return True
         except Exception as e:
             logger.error(f"Failed to save session state: {e}")
@@ -73,10 +75,10 @@ class SessionManagerMixin:
             State dictionary if found, None otherwise
         """
         try:
-            # This is a placeholder implementation
-            # In practice, this would integrate with the actual session store
+            from ..session.manifest import FileSessionManifest
+            entry = FileSessionManifest().get(session_id)
             logger.debug(f"Loading session state for {session_id}")
-            return {}  # Return empty state as placeholder
+            return dict(entry.refs) if entry is not None else {}
         except Exception as e:
             logger.error(f"Failed to load session state: {e}")
             return None

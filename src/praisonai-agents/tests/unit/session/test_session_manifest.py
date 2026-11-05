@@ -1,0 +1,61 @@
+"""Tests for the session manifest (Issue #6248)."""
+
+from praisonaiagents.session import FileSessionManifest, SessionManifestProtocol
+from praisonaiagents.agent.session_manager import SessionManagerMixin
+
+
+def test_satisfies_protocol(tmp_path):
+    assert isinstance(FileSessionManifest(str(tmp_path)), SessionManifestProtocol)
+
+
+def test_refs_merge_and_persist(tmp_path):
+    FileSessionManifest(str(tmp_path)).set_refs("s1", checkpoint="abc")
+    FileSessionManifest(str(tmp_path)).set_refs("s1", plan="p1")
+    entry = FileSessionManifest(str(tmp_path)).get("s1")
+    assert entry.refs == {"checkpoint": "abc", "plan": "p1"}
+    assert FileSessionManifest(str(tmp_path)).get("missing") is None
+
+
+def test_completed_run_is_not_interrupted(tmp_path):
+    m = FileSessionManifest(str(tmp_path))
+    m.begin_run("s1", "r1", run_input="task")
+    assert m.interrupted("s1") is not None
+    m.end_run("s1", "completed")
+    assert m.interrupted("s1") is None
+    assert m.get("s1").run_status == "completed"
+
+
+def test_interrupted_run_survives_new_process(tmp_path):
+    FileSessionManifest(str(tmp_path)).begin_run("s1", "r1", run_input="task")
+    # A new process (new instance) sees the surviving write-ahead marker.
+    stale = FileSessionManifest(str(tmp_path)).interrupted("s1")
+    assert stale is not None and stale.run_id == "r1" and stale.run_input == "task"
+
+
+def test_attempt_budget_is_bounded(tmp_path):
+    m = FileSessionManifest(str(tmp_path))
+    attempts = [m.begin_run("s1", f"r{i}", run_input="task", max_attempts=2).attempt
+                for i in range(4)]
+    # Retries of the same interrupted task count up, then the budget resets.
+    assert attempts == [1, 2, 1, 2]
+
+
+def test_new_task_after_interruption_is_a_fresh_attempt(tmp_path):
+    m = FileSessionManifest(str(tmp_path))
+    m.begin_run("s1", "r1", run_input="task a")
+    assert m.begin_run("s1", "r2", run_input="task b").attempt == 1
+
+
+def test_unsafe_session_id_stays_in_directory(tmp_path):
+    m = FileSessionManifest(str(tmp_path))
+    m.set_refs("../../etc/x", plan="p")
+    assert all(p.parent == tmp_path for p in tmp_path.iterdir())
+    assert m.get("../../etc/x").refs == {"plan": "p"}
+
+
+def test_session_manager_save_and_load_state(tmp_path, monkeypatch):
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+    mixin = SessionManagerMixin()
+    assert mixin._load_session_state("s1") == {}
+    assert mixin._save_session_state("s1", {"checkpoint": "abc", "goal": "g1"})
+    assert mixin._load_session_state("s1") == {"checkpoint": "abc", "goal": "g1"}
