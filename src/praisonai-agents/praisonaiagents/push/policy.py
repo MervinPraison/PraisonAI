@@ -27,7 +27,7 @@ imports and is trivially testable.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, time
+from datetime import datetime, time, timezone
 from enum import Enum
 from typing import Optional, Set
 
@@ -201,7 +201,7 @@ def _localised_time(now: Optional[datetime], tz_name: str) -> time:
     the naive time rather than raising.
     """
     if now is None:
-        now = datetime.now()
+        now = datetime.now(timezone.utc)
     if now.tzinfo is not None:
         try:
             from zoneinfo import ZoneInfo

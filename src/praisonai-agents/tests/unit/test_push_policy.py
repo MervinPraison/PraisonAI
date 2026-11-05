@@ -145,6 +145,18 @@ class TestQuietHours:
         )
         assert d.send is True
 
+    def test_timezone_applied_when_now_is_omitted(self, monkeypatch):
+        import praisonaiagents.push.policy as policy
+
+        class FixedDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return cls(2026, 1, 1, 23, 0, tzinfo=tz)
+
+        monkeypatch.setattr(policy, "datetime", FixedDatetime)
+        d = evaluate(NotificationCategory.AGENT_FINISHED, self._prefs(timezone="Asia/Tokyo"))
+        assert d.send is True
+
     def test_no_quiet_hours_always_considered(self):
         prefs = NotificationPreference(
             categories={NotificationCategory.AGENT_FINISHED}
