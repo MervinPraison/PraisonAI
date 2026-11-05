@@ -252,6 +252,7 @@ jobs:
               tests/unit/test_launch_mcp_delegation.py
               tests/unit/test_gateway.py tests/unit/test_chainlit_bot_ui.py
               tests/unit/test_sandbox.py tests/unit/test_cost_persistence.py
+              tests/unit/test_parameter_naming.py
               tests/unit/test_handoff_unified.py tests/unit/test_identity_canonicalizer_protocol.py
               tests/unit/test_idle_timeout_breaker.py tests/unit/test_json_fence_cleanup.py
               tests/unit/test_kanban_protocol.py tests/unit/test_loop_detection.py
@@ -274,6 +275,7 @@ jobs:
               --deselect=tests/unit/test_rate_limiter.py::TestRateLimiterBasic::test_rate_limiter_acquire_sync
               --deselect=tests/unit/test_lazy.py::TestLazyImportPerformance::test_lazy_import_is_fast
               --deselect=tests/unit/test_injected_state.py::TestInjectionZeroOverhead::test_schema_generation_fast
+              --deselect=tests/unit/test_parameter_naming.py::TestPerformance::test_import_time_acceptable
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents
           - shard: train
