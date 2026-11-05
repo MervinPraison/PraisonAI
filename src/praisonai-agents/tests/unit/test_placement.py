@@ -679,15 +679,24 @@ def _exercise_fake_team_tool(monkeypatch):
     pytest.param(lambda a: asyncio.run(a.achat("hi")), id="achat"),
     pytest.param(lambda a: next(iter(a._start_stream("hi")), None), id="_start_stream"),
 ])
-def test_every_entry_point_places_tools_before_the_first_turn(drive):
+def test_every_entry_point_places_tools_before_the_first_turn(drive, monkeypatch):
     """Deleting the ensure_tools_placed() call sites left the suite green.
 
     Whatever happens downstream -- no API key, a stubbed model, an outright
     error -- the hook runs at the top, so the sandbox must exist afterwards.
     """
     from praisonaiagents.agent.tools_placement import close_tools_sandbox
+    from praisonaiagents.managed import shared_compute
 
+    monkeypatch.setattr(shared_compute, "resolve_compute", lambda _: object())
+    monkeypatch.setattr(
+        shared_compute.SharedCompute, "ensure_provisioned",
+        lambda self: pytest.fail("entry point inspection must not provision a sandbox"),
+    )
     agent = _agent("driver", tools_run_on="subprocess")
+    monkeypatch.setattr(agent, "_resolve_skill_invocation", lambda prompt: prompt)
+    monkeypatch.setattr(agent, "_validate_input_with_guardrail", lambda prompt: (False, prompt, "test stop"))
+    monkeypatch.setattr(agent, "_guardrail_blocked_message", lambda error: "blocked")
     try:
         try:
             drive(agent)
