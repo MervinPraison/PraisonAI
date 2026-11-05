@@ -144,6 +144,7 @@ jobs:
               tests/unit/auth/ tests/unit/background/ tests/unit/checkpoints/
               tests/unit/cli/ tests/unit/compaction/ tests/unit/conditions/
               tests/unit/config/ tests/unit/context/ tests/unit/embedding/
+              tests/unit/decisions/ tests/unit/thinking/
               tests/unit/eval/ tests/unit/gateway/ tests/unit/goal/
               tests/unit/hooks/ tests/unit/llm/ tests/unit/lsp/ tests/unit/mcp/
               tests/unit/memory/ tests/unit/permissions/ tests/unit/policy/
@@ -347,6 +348,7 @@ jobs:
             # against a temp HOME and asserts the paths module is used.
             # Skip strict timings and probes requiring process or service isolation.
             extra_ignore: >-
+              --deselect=tests/unit/decisions/test_system_one.py::test_system_one_live_ollama
               --deselect=tests/unit/test_profiling.py::TestZeroOverhead::test_record_timing_overhead
               --deselect=tests/unit/test_profiling.py::TestZeroOverhead::test_phase_context_overhead
               --deselect=tests/unit/test_rate_limiter.py::TestRateLimiterBasic::test_rate_limiter_acquire_sync
