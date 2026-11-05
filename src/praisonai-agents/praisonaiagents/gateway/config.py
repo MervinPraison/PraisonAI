@@ -144,6 +144,9 @@ def _parse_grant(scopes: Any, agents: Any, path: str) -> Any:
     scopes = list(scopes or [])
     if agents is None:
         return scopes
+    if not isinstance(agents, (list, tuple)):
+        # ``agents: support`` would otherwise iterate into ['s', 'u', ...].
+        raise ValueError(f"{path}: 'agents' must be a list of agent ids")
     return {"scopes": scopes, "agents": [str(a) for a in agents]}
 
 

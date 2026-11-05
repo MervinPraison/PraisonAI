@@ -132,6 +132,18 @@ def test_misspelled_grant_key_fails_closed():
     GatewayServerSchema(auth_scopes=POLICY)  # valid shapes still accepted
 
 
+@pytest.mark.parametrize("gw", [
+    {"auth_scopes": {"tok": {"scopes": ["read"], "agents": "support"}}},
+    {"auth": {"tokens": [{"token": "tok", "scopes": ["read"], "agents": "support"}]}},
+])
+def test_scalar_agents_value_rejected(gw):
+    # A scalar must not be split into single-character agent ids.
+    from praisonaiagents.gateway.config import MultiChannelGatewayConfig
+
+    with pytest.raises(ValueError, match="agents"):
+        MultiChannelGatewayConfig.from_dict({"gateway": gw})
+
+
 class _StopStartup(Exception):
     pass
 
