@@ -182,6 +182,13 @@ jobs:
               tests/unit/test_gateway_turn_lock.py tests/unit/test_handoff_context_policy.py
               tests/unit/test_handoff_filters.py tests/unit/test_handoff_lazy_import.py
               tests/unit/test_handoff_runtime_resolution.py tests/unit/test_handoff_tool_policy.py
+              tests/unit/test_middleware.py tests/unit/test_model_alias_rule.py
+              tests/unit/test_multimodal_tool_output.py tests/unit/test_namespace_guard.py
+              tests/unit/test_param_resolver_dict.py tests/unit/test_presentation_adapt.py
+              tests/unit/test_protocols.py tests/unit/test_push_protocols.py
+              tests/unit/test_quota_coordinator.py tests/unit/test_route_bindings.py
+              tests/unit/test_route_tool_policy.py tests/unit/test_run_outcome.py
+              tests/unit/test_run_status.py
               tests/unit/test_handoff_unified.py tests/unit/test_identity_canonicalizer_protocol.py
               tests/unit/test_idle_timeout_breaker.py tests/unit/test_json_fence_cleanup.py
               tests/unit/test_kanban_protocol.py tests/unit/test_loop_detection.py
