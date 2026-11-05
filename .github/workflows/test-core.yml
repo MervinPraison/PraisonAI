@@ -240,6 +240,8 @@ jobs:
               tests/unit/test_schedule_timezone.py tests/unit/test_schedule_tools.py
               tests/unit/test_scheduler_provider.py tests/unit/test_autonomy_dry_refactor.py
               tests/unit/test_heartbeat.py
+              tests/unit/test_streaming_integration.py tests/unit/test_tool_retry_integration.py
+              tests/unit/test_push_policy.py
               tests/unit/test_handoff_unified.py tests/unit/test_identity_canonicalizer_protocol.py
               tests/unit/test_idle_timeout_breaker.py tests/unit/test_json_fence_cleanup.py
               tests/unit/test_kanban_protocol.py tests/unit/test_loop_detection.py
