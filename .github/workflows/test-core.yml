@@ -224,6 +224,12 @@ jobs:
               tests/unit/test_async_memory.py tests/unit/test_autonomy_budget.py
               tests/unit/test_autonomy_gaps.py tests/unit/test_autonomy_system_fixes.py
               tests/unit/test_autonomy_unified.py tests/unit/test_compaction_wiring.py
+              tests/unit/test_chat_commands.py tests/unit/test_cli_backend_hook.py
+              tests/unit/test_configurable_model.py tests/unit/test_execution_location.py
+              tests/unit/test_failover.py tests/unit/test_gateway_emergency_stop.py
+              tests/unit/test_gateway_health_pressure.py tests/unit/test_memory_history_separation.py
+              tests/unit/test_memory_system_fixes.py tests/unit/test_messaging_mailbox.py
+              tests/unit/test_stream_preset.py tests/unit/test_tool_decorator_retry.py
               tests/unit/test_handoff_unified.py tests/unit/test_identity_canonicalizer_protocol.py
               tests/unit/test_idle_timeout_breaker.py tests/unit/test_json_fence_cleanup.py
               tests/unit/test_kanban_protocol.py tests/unit/test_loop_detection.py
