@@ -662,8 +662,16 @@ def _exercise_fake_team_tool(monkeypatch):
         next(tool for tool in tools if tool.__name__ == "execute_command")("true")
         return "done"
 
+    async def achat(self, prompt, *args, **kwargs):
+        return chat(self, prompt, *args, **kwargs)
+
+    async def callback(*args, **kwargs):
+        return None
+
     monkeypatch.setattr(_A, "chat", chat)
+    monkeypatch.setattr(_A, "achat", achat)
     monkeypatch.setattr(Task, "execute_callback_sync", lambda *a, **k: None)
+    monkeypatch.setattr(Task, "execute_callback", callback)
 
 
 @pytest.mark.parametrize("drive", [
@@ -705,10 +713,12 @@ def test_a_team_run_provisions_exactly_one_sandbox(monkeypatch):
 def test_an_async_team_run_provisions_its_sandbox(monkeypatch):
     """astart() used to provision nothing at all -- every tool ran on the host
     and nothing said so."""
-    provisioned, _ = _counting_provider(monkeypatch)
+    provisioned, shut = _counting_provider(monkeypatch)
+    _exercise_fake_team_tool(monkeypatch)
     team = _team(tools_run_on="subprocess")
     asyncio.run(team.astart())
-    assert len(provisioned) <= 1, f"astart() provisioned {provisioned}"
+    assert len(provisioned) == 1, f"astart() provisioned {provisioned}"
+    assert shut == provisioned
 
 
 def test_a_batch_shares_one_sandbox_across_every_row(monkeypatch):
