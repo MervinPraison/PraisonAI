@@ -195,6 +195,11 @@ jobs:
               tests/unit/test_schedule_job_state.py tests/unit/test_schedule_misfire.py
               tests/unit/test_schedule_principal.py tests/unit/test_schedule_quota_hold.py
               tests/unit/test_schedule_store_persistence.py
+              tests/unit/test_model_harness.py tests/unit/test_model_harness_guard.py
+              tests/unit/test_model_harness_scripted.py tests/unit/test_output_encoding.py
+              tests/unit/test_param_consolidation.py tests/unit/test_presentation_poll.py
+              tests/unit/test_runtime_capabilities.py tests/unit/test_runtime_doctor.py
+              tests/unit/test_task_failure_policies.py tests/unit/test_team_rerun_and_retrieval_state.py
               tests/unit/test_handoff_unified.py tests/unit/test_identity_canonicalizer_protocol.py
               tests/unit/test_idle_timeout_breaker.py tests/unit/test_json_fence_cleanup.py
               tests/unit/test_kanban_protocol.py tests/unit/test_loop_detection.py
