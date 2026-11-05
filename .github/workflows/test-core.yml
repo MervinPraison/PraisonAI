@@ -259,6 +259,12 @@ jobs:
               tests/unit/test_code_tools_bridge.py
               tests/unit/test_paths.py
               tests/unit/test_advanced_features.py
+              tests/unit/test_output_file_containment.py::test_task_output_file_traversal_blocked
+              tests/unit/test_output_file_containment.py::test_task_output_file_inside_root
+              tests/unit/test_output_file_containment.py::test_task_output_file_respects_create_directory
+              tests/unit/test_output_file_containment.py::test_task_output_file_project_root_override
+              tests/unit/test_output_file_containment.py::test_workflow_output_file_input_traversal_blocked
+              tests/unit/test_output_file_containment.py::test_workflow_async_output_file_input_traversal_blocked
               tests/unit/test_handoff_unified.py tests/unit/test_identity_canonicalizer_protocol.py
               tests/unit/test_idle_timeout_breaker.py tests/unit/test_json_fence_cleanup.py
               tests/unit/test_kanban_protocol.py tests/unit/test_loop_detection.py
