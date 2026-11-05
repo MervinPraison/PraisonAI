@@ -75,7 +75,7 @@ def test_every_protocol_method_is_awaitable(place, no_provider_credentials):
         assert inspect.iscoroutinefunction(fn), f"{place}.{method}() is not async"
 
 
-def test_availability_can_be_answered_without_raising(place):
+def test_availability_can_be_answered_without_raising(place, no_provider_credentials):
     """`is_available` is consulted before anything is provisioned, so it has to
     survive a machine with no credentials and no daemon."""
     provider = resolve_compute(place)
