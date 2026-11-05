@@ -246,6 +246,8 @@ jobs:
               tests/unit/test_rate_limiter.py tests/unit/test_compute_home.py
               tests/unit/test_gap_closure.py tests/unit/test_bot_session.py tests/unit/test_skill_bridge.py
               tests/unit/test_whatsapp_message_filtering.py
+              tests/unit/test_security_hardening.py tests/unit/test_security_hardening_round2.py
+              tests/unit/test_whatsapp_web_adapter.py tests/unit/test_whatsapp_web_mode.py
               tests/unit/test_handoff_unified.py tests/unit/test_identity_canonicalizer_protocol.py
               tests/unit/test_idle_timeout_breaker.py tests/unit/test_json_fence_cleanup.py
               tests/unit/test_kanban_protocol.py tests/unit/test_loop_detection.py
