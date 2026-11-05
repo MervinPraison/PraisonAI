@@ -121,6 +121,19 @@ _CONFIG_ATTRS = ("role", "goal", "backstory", "instructions", "llm", "action",
                  "description", "expected_output")
 
 
+def _config(obj: Any) -> Dict[str, Any]:
+    config: Dict[str, Any] = {
+        a: getattr(obj, a) for a in _CONFIG_ATTRS if isinstance(getattr(obj, a, None), str)
+    }
+    tools = getattr(obj, "tools", None)
+    if isinstance(tools, (list, tuple)):
+        config["tools"] = sorted(
+            t if isinstance(t, str) else str(getattr(t, "name", None) or getattr(t, "__name__", type(t).__name__))
+            for t in tools
+        )
+    return config
+
+
 def _definition(step: Any) -> Optional[str]:
     # A step edited but kept under the same name must not be served its old
     # result from a durable cache, so its definition is part of the key: a
@@ -129,13 +142,15 @@ def _definition(step: Any) -> Optional[str]:
     fn = step if hasattr(step, "__code__") else getattr(step, "handler", None)
     if hasattr(fn, "__code__"):
         return _function_fingerprint(fn, set())
-    config = {a: getattr(step, a) for a in _CONFIG_ATTRS if isinstance(getattr(step, a, None), str)}
-    tools = getattr(step, "tools", None)
-    if isinstance(tools, (list, tuple)):
-        config["tools"] = sorted(
-            t if isinstance(t, str) else str(getattr(t, "name", None) or getattr(t, "__name__", type(t).__name__))
-            for t in tools
-        )
+    config = _config(step)
+    # AgentFlow wraps an Agent step in a Task(agent=...), so the agent's own
+    # role, instructions and model live one level down.
+    agent = getattr(step, "agent", None)
+    if agent is not None and not isinstance(agent, str):
+        config["agent"] = _config(agent)
+    agent_config = getattr(step, "agent_config", None)
+    if isinstance(agent_config, dict):
+        config["agent_config"] = {k: str(v) for k, v in sorted(agent_config.items())}
     if not config:
         return None
     return hashlib.sha256(json.dumps(config, sort_keys=True).encode("utf-8")).hexdigest()[:16]

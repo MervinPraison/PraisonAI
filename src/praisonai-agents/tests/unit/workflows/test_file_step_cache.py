@@ -184,3 +184,20 @@ def test_agent_step_with_same_name_but_new_instructions_misses():
     assert k(FakeAgent("be brief")) == k(FakeAgent("be brief"))
     assert k(FakeAgent("be brief")) != k(FakeAgent("be verbose"))
     assert k(FakeAgent("be brief")) != k(FakeAgent("be brief", llm="gpt-4o"))
+
+
+def test_agent_wrapped_in_task_keys_on_agent_config():
+    # AgentFlow normalises an Agent step to Task(agent=...) before keying it,
+    # so the wrapped agent's instructions and model must reach the key.
+    from praisonaiagents import Agent
+    from praisonaiagents.workflows.step_cache import make_step_key
+
+    def key(instructions, llm="gpt-4o-mini"):
+        agent = Agent(name="writer", instructions=instructions, llm=llm)
+        task = AgentFlow(steps=[agent])._normalize_single_step(agent, 0)
+        assert task.agent is agent
+        return make_step_key(task, None, "x", {})
+
+    assert key("be brief") == key("be brief")
+    assert key("be brief") != key("be verbose")
+    assert key("be brief") != key("be brief", llm="gpt-4o")
