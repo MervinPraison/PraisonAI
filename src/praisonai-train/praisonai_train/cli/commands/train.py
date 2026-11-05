@@ -717,8 +717,8 @@ def train_export(
     mtp_draft: bool = typer.Option(
         False, "--mtp-draft/--no-mtp-draft",
         help="Also download the stock MTP drafter (Gemma-4 only) for fast inference"),
-    push: bool = typer.Option(
-        True, "--push/--no-push",
+    push: Optional[bool] = typer.Option(
+        None, "--push/--no-push",
         help="ollama: push to ollama.com after `ollama create` (--no-push keeps it local)"),
 ):
     """
@@ -769,8 +769,9 @@ def train_export(
         cfg["hf_model_name"] = hf
     if ollama:
         cfg["ollama_model"] = ollama
-    if not push:
-        cfg["ollama_push"] = False
+    # Either explicit flag overrides the config; unset keeps config/default (push).
+    if isinstance(push, bool):
+        cfg["ollama_push"] = push
 
     # Recover the model name (drives chat-template selection) from --base-model or
     # the trained model's config.json (_name_or_path), falling back to the dir name.
