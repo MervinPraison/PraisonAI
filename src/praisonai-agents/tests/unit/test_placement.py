@@ -457,10 +457,18 @@ def test_a_placed_agent_inside_a_team_gets_its_sandbox_tools():
         assert bridged in seen[0], f"{bridged} never reached the model"
 
 
-def test_one_teams_run_does_not_suppress_another_teams_sandbox():
+def test_one_teams_run_does_not_suppress_another_teams_sandbox(monkeypatch):
     """The scope depth was a single class-level integer, so any team started
     while another team's run was on the stack saw depth==1 and silently skipped
     its own sandbox."""
+    from praisonaiagents.managed import shared_compute
+
+    # This case only inspects scope nesting, never sandbox operations.
+    monkeypatch.setattr(shared_compute, "resolve_compute", lambda _: object())
+    monkeypatch.setattr(
+        shared_compute.SharedCompute, "ensure_provisioned",
+        lambda self: pytest.fail("scope inspection must not provision a sandbox"),
+    )
     outer = _team(tools_run_on="subprocess")
     inner = _team(tools_run_on="subprocess")
 
