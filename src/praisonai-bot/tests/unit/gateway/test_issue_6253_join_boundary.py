@@ -56,3 +56,28 @@ async def test_join_rejects_rehydrated_session_for_another_agent(monkeypatch):
     assert gateway._client_sessions.get("candidate") != foreign.session_id
     assert foreign.client_id == "original"
     assert socket.sent[-1]["type"] == "error"
+
+
+@pytest.mark.asyncio
+async def test_join_uses_persisted_agent_id_when_snapshot_is_missing():
+    from types import SimpleNamespace
+
+    gateway = WebSocketGateway(config=GatewayConfig(auth_token="test-token"))
+    gateway._agents["support"] = object()
+
+    class Store:
+        def session_exists(self, session_id):
+            return session_id == "stored-session"
+
+        def get_session(self, session_id):
+            return SimpleNamespace(agent_id="finance", messages=[])
+
+    gateway._session_store = Store()
+    socket = FakeSocket()
+    gateway._clients["candidate"] = socket
+    await gateway._handle_client_message("candidate", {
+        "type": "join", "agent_id": "support", "session_id": "stored-session",
+    })
+    assert "candidate" not in gateway._client_sessions
+    assert gateway._sessions["stored-session"].client_id is None
+    assert socket.sent[-1]["type"] == "error"

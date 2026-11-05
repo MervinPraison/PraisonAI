@@ -6768,10 +6768,11 @@ class WebSocketGateway:
                     session = GatewaySession.from_dict(session_data, self.config.session_config.max_messages)
                 else:
                     # Fallback: create new session but restore messages
+                    stored_agent_id = getattr(session_data_obj, "agent_id", None) or agent_id
                     session = GatewaySession(
                         _session_id=sid,
-                        _agent_id=agent_id,
-                        _client_id=client_id,
+                        _agent_id=stored_agent_id,
+                        _client_id=client_id if stored_agent_id == agent_id else None,
                         _max_messages=self.config.session_config.max_messages,
                     )
                     # Mark as resumed since we're restoring from persistence
