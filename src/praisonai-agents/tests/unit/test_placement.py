@@ -681,11 +681,18 @@ def test_a_batch_shares_one_sandbox_across_every_row(monkeypatch):
     )
 
 
-def test_a_clone_does_not_inherit_the_source_agents_sandbox():
+def test_a_clone_does_not_inherit_the_source_agents_sandbox(monkeypatch):
     """The clone got tools bound to the ORIGINAL's instance and then attached
     its own, ending up with two copies of the capability prompt and its work
     split across two machines."""
     from praisonaiagents.agent.tools_placement import close_tools_sandbox, ensure_tools_placed
+    from praisonaiagents.managed import shared_compute
+
+    monkeypatch.setattr(shared_compute, "resolve_compute", lambda _: object())
+    monkeypatch.setattr(
+        shared_compute.SharedCompute, "ensure_provisioned",
+        lambda self: pytest.fail("cloning must not provision a sandbox"),
+    )
 
     source = _agent("source", tools_run_on="subprocess")
     ensure_tools_placed(source)
