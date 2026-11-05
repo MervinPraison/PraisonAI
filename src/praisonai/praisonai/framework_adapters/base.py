@@ -27,6 +27,23 @@ _STRUCTURAL_FIELDS = {"tools", "tasks", "role", "goal", "backstory"}
 _SAFETY_FIELDS = frozenset({"approval", "guardrails"})
 
 
+def _is_active_gate(field: str, value: Any) -> bool:
+    """True when dropping ``field`` would remove a real gate.
+
+    Disabled values (``approval: false``, ``guardrails: null``) and
+    auto-approve (``--trust`` -> backend ``auto``) gate nothing, so dropping
+    them is harmless. Unparseable approval config fails closed.
+    """
+    if field != "approval":
+        return bool(value)
+    try:
+        from .._approval_spec import ApprovalSpec
+        spec = ApprovalSpec.from_yaml(value)
+    except Exception:
+        return True
+    return spec.enabled and spec.backend not in ("auto", "none")
+
+
 def warn_unsupported_fields(adapter: Any, spec_extras: Dict[str, Any]) -> None:
     """Warn once per agent when a backend ignores declared YAML fields.
 
@@ -44,7 +61,9 @@ def warn_unsupported_fields(adapter: Any, spec_extras: Dict[str, Any]) -> None:
     if not supported:
         return
     unhandled = set(spec_extras.keys()) - supported - _STRUCTURAL_FIELDS
-    dropped_safety = sorted(unhandled & _SAFETY_FIELDS)
+    dropped_safety = sorted(
+        f for f in unhandled & _SAFETY_FIELDS if _is_active_gate(f, spec_extras[f])
+    )
     if dropped_safety:
         raise ValueError(
             f"framework={getattr(adapter, 'name', '?')!r} cannot enforce safety "

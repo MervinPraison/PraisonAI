@@ -48,3 +48,20 @@ def test_dropped_safety_field_fails_closed(field):
 def test_dropped_non_safety_field_only_warns(caplog):
     warn_unsupported_fields(_Adapter(), {"role": "r", "memory": True})
     assert "ignores YAML field" in caplog.text
+
+
+@pytest.mark.parametrize("extras", [
+    {"approval": False},
+    {"approval": None},
+    {"approval": {"enabled": True, "backend": "auto", "approve_all_tools": False}},  # --trust
+    {"guardrails": None},
+    {"guardrails": ""},
+])
+def test_inactive_safety_field_does_not_block(extras, caplog):
+    warn_unsupported_fields(_Adapter(), {"role": "r", **extras})
+    assert "ignores YAML field" in caplog.text
+
+
+def test_unparseable_approval_fails_closed():
+    with pytest.raises(ValueError, match="cannot enforce safety"):
+        warn_unsupported_fields(_Adapter(), {"role": "r", "approval": {"typo": 1}})
