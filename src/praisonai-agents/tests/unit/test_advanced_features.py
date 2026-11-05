@@ -584,17 +584,31 @@ class TestSafeBashExecution:
         assert validate_command("sudo rm -rf /") == False
         assert validate_command("curl http://evil.com") == False
         
-    def test_safe_execute(self):
+    def test_safe_execute(self, monkeypatch):
         """Test safe execution blocks dangerous commands."""
-        from praisonai.cli.features.safe_shell import safe_execute
+        from types import SimpleNamespace
+        from praisonai.cli.features import safe_shell
+
+        def fake_popen(args, **kwargs):
+            assert args == ["echo", "hello"], "unexpected command reached the process backend"
+            process = Mock(returncode=0)
+            process.communicate.return_value = ("hello\n", "")
+            return process
+
+        fake_subprocess = SimpleNamespace(
+            Popen=fake_popen,
+            PIPE=safe_shell.subprocess.PIPE,
+            TimeoutExpired=safe_shell.subprocess.TimeoutExpired,
+        )
+        monkeypatch.setattr(safe_shell, "subprocess", fake_subprocess)
         
         # Safe command should work
-        result = safe_execute("echo hello")
+        result = safe_shell.safe_execute("echo hello")
         assert result.success == True
         assert "hello" in result.stdout
         
         # Dangerous command should be blocked
-        result = safe_execute("sudo rm -rf /")
+        result = safe_shell.safe_execute("sudo rm -rf /")
         assert result.success == False
         assert "blocked" in result.error.lower() or "banned" in result.error.lower()
 

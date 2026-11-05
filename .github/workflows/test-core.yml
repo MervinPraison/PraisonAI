@@ -433,7 +433,6 @@ jobs:
               --deselect=tests/unit/test_parameter_naming.py::TestPerformance::test_import_time_acceptable
               --deselect=tests/unit/test_api_exports.py::TestImportPerformance::test_import_time_under_200ms
               --deselect=tests/unit/test_paths.py::TestImportPerformance::test_import_time_under_10ms
-              --deselect=tests/unit/test_advanced_features.py::TestSafeBashExecution::test_safe_execute
               --deselect=tests/unit/test_security_outstanding_ghsas.py::test_workflow_yaml_approve_gated_without_allow_dangerous
               --deselect=tests/unit/test_security_outstanding_ghsas.py::test_web_crawl_blocks_private_ip
               --deselect=tests/unit/test_paths_wiring.py::TestPolicyConfigWiring::test_default_rules_dir_matches_paths
