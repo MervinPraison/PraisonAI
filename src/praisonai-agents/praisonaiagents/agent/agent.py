@@ -6336,7 +6336,8 @@ Summary:"""
             # matches on reload. Zero-config runs still avoid injection cost.
             stats = self._rules_manager.get_stats()
             if stats["total_rules"] > 0:
-                logging.debug(f"RulesManager: Discovered {stats['total_rules']} rules")
+                names = ", ".join(sorted({r.name for r in self._rules_manager._rules.values()}))
+                logging.info(f"Applied rules: {names} (pass rules=False to turn off)")
             elif not extra_files:
                 self._rules_manager = None
         except ImportError:
@@ -7345,7 +7346,8 @@ Answer:"""
         task_output = TaskOutput(
             description="Agent response output",
             raw=response_text,
-            agent=self.name
+            # TaskOutput.agent is a required str; an Agent built without name= has name None.
+            agent=self.name or getattr(self, "role", None) or "Agent"
         )
         
         guardrail_result = self._process_guardrail(task_output)
