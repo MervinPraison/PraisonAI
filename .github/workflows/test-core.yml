@@ -263,7 +263,10 @@ jobs:
             # directory and asserted every discovered dir was named "skills",
             # which is false once a remote skill has ever been cached; it runs
             # against a temp HOME and asserts the paths module is used.
-            extra_ignore: ""
+            # Strict wall-clock benchmarks are unsuitable for shared runners.
+            extra_ignore: >-
+              --deselect=tests/unit/test_profiling.py::TestZeroOverhead::test_record_timing_overhead
+              --deselect=tests/unit/test_profiling.py::TestZeroOverhead::test_phase_context_overhead
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents
           - shard: train
