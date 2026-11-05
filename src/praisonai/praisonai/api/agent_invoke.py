@@ -157,6 +157,7 @@ else:
 
 # Agent Registry
 import threading
+from praisonai._errors import _WrapperError
 
 
 class AgentRegistry:
@@ -365,7 +366,7 @@ _APPLYABLE_OVERRIDES = frozenset({
 })
 
 
-class AgentConfigError(ValueError):
+class AgentConfigError(_WrapperError, ValueError):
     """Raised when an agent_config override is unsupported or cannot be applied."""
 
 

@@ -111,6 +111,8 @@ export class FileSessionStore implements ISessionStore {
     private autoSaveInterval?: number;
     private saveTimer?: NodeJS.Timeout;
     private dirty: boolean = false;
+    private saveQueue: Promise<void> = Promise.resolve();
+    private pendingSaves: number = 0;
 
     constructor(filePath: string, config?: { defaultTTL?: number; autoSaveInterval?: number }) {
         this.filePath = filePath;
@@ -120,7 +122,7 @@ export class FileSessionStore implements ISessionStore {
 
         if (this.autoSaveInterval) {
             this.saveTimer = setInterval(() => {
-                if (this.dirty) this.save();
+                if (this.dirty && this.pendingSaves === 0) this.save();
             }, this.autoSaveInterval);
         }
     }
@@ -146,10 +148,26 @@ export class FileSessionStore implements ISessionStore {
     }
 
     async save(): Promise<void> {
-        const fs = await import('fs').then(m => m.promises);
-        const sessions = Array.from(this.sessions.values());
-        await fs.writeFile(this.filePath, JSON.stringify(sessions, null, 2));
-        this.dirty = false;
+        this.pendingSaves++;
+        const saving = this.saveQueue.then(async () => {
+            const fs = await import('fs').then(m => m.promises);
+            const data = JSON.stringify(Array.from(this.sessions.values()), null, 2);
+            // Only this snapshot is clean; mutations during the write stay dirty.
+            this.dirty = false;
+            try {
+                await fs.writeFile(this.filePath, data);
+            } catch (error) {
+                this.dirty = true;
+                throw error;
+            }
+        });
+        // Keep the queue usable after a failure, while this caller still sees it.
+        this.saveQueue = saving.catch(() => {});
+        try {
+            await saving;
+        } finally {
+            this.pendingSaves--;
+        }
     }
 
     async get(id: string): Promise<StoredSession | null> {
@@ -205,6 +223,7 @@ export class FileSessionStore implements ISessionStore {
         if (this.saveTimer) {
             clearInterval(this.saveTimer);
         }
+        await this.saveQueue;
         if (this.dirty) {
             await this.save();
         }

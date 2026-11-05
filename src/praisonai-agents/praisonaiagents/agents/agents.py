@@ -3926,44 +3926,9 @@ class AgentTeam(SpawnAnnounceProtocol):
             endpoints = _server_registry.list_routes(port)
             print(f"🔌 Registered HTTP endpoints on port {port}: {', '.join(endpoints)}")
             
-            # Get the stack frame to check if this is the last launch() call in the script
-            import inspect
-            stack = inspect.stack()
-            
-            # If this is called from a Python script (not interactive), try to detect if it's the last launch call
-            if len(stack) > 1 and stack[1].filename.endswith('.py'):
-                caller_frame = stack[1]
-                caller_line = caller_frame.lineno
-                
-                try:
-                    # Read the file to check if there are more launch calls after this one
-                    with open(caller_frame.filename, 'r') as f:
-                        lines = f.readlines()
-                    
-                    # Check if there are more launch() calls after the current line
-                    has_more_launches = False
-                    for line_content in lines[caller_line:]: # Renamed variable
-                        if '.launch(' in line_content and not line_content.strip().startswith('#'):
-                            has_more_launches = True
-                            break
-                    
-                    # If this is the last launch call, block the main thread
-                    if not has_more_launches:
-                        try:
-                            print("\nAll agent groups registered for HTTP mode. Press Ctrl+C to stop the servers.")
-                            while True:
-                                time.sleep(1)
-                        except KeyboardInterrupt:
-                            print("\nServers stopped")
-                except Exception as e:
-                    # If something goes wrong with detection, block anyway to be safe
-                    logging.error(f"Error in HTTP launch detection: {e}")
-                    try:
-                        print("\nKeeping HTTP servers alive. Press Ctrl+C to stop.")
-                        while True:
-                            time.sleep(1)
-                    except KeyboardInterrupt:
-                        print("\nServers stopped")
+            # Keep the daemon server threads alive once the script finishes
+            # (no source-text inspection of the caller).
+            _server_registry.keep_alive_at_exit()
             return None
 
         elif protocol == "mcp":

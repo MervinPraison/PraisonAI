@@ -123,7 +123,7 @@ class UnknownUserHandler:
         """Handle the pairing request workflow."""
         # Generate pairing code
         try:
-            code = bot_ctx.pairing_store.generate_code(channel_type=channel_type)
+            code = bot_ctx.pairing_store.generate_code(channel_type=channel_type, channel_id=user_id)
         except RuntimeError as e:
             logger.error(f"Failed to generate pairing code: {e}")
             if bot_ctx.adapter:

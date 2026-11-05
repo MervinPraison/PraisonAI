@@ -5,6 +5,7 @@ Provides utilities for streaming PraisonAI agent responses as AG-UI events.
 """
 
 import asyncio
+import contextvars
 import json
 import uuid
 from dataclasses import dataclass, field
@@ -29,6 +30,12 @@ from praisonaiagents.ui.agui.types import (
 )
 from praisonaiagents.ui.protocols import A2UI_MIME_TYPE
 from praisonaiagents.streaming.events import StreamEventType as _SE
+
+# Identifies which AG-UI run owns the current task/thread. The agent's
+# stream_emitter is shared by every request served by one Agent, and its
+# callbacks fire synchronously in the emitting context, so each run's callback
+# only accepts events emitted while its own owner token is active.
+_RUN_OWNER: contextvars.ContextVar = contextvars.ContextVar("agui_run_owner", default=None)
 
 
 @dataclass
@@ -466,20 +473,29 @@ async def async_stream_agent_response(
     text_started = False
     text_ended = False
     original_emitter = getattr(agent, "stream_emitter", None)
+    owner = object()
 
     def on_stream_event(event: Any) -> None:
+        # Drop events emitted by another concurrent run on the same agent.
+        if _RUN_OWNER.get() is not owner:
+            return
         loop.call_soon_threadsafe(queue.put_nowait, ("stream", event))
 
     if original_emitter is not None:
         original_emitter.add_callback(on_stream_event)
 
     async def run_chat() -> Any:
+        # Tasks run in a copy of the creator's context, so this set is local
+        # to the chat task and never leaks into the caller's context.
+        _RUN_OWNER.set(owner)
         try:
             if hasattr(agent, "achat"):
                 return await agent.achat(user_input, stream=True)
             if hasattr(agent, "chat"):
+                # run_in_executor does not copy ContextVars; carry the owner.
+                ctx = contextvars.copy_context()
                 return await loop.run_in_executor(
-                    None, lambda: agent.chat(user_input, stream=True)
+                    None, lambda: ctx.run(agent.chat, user_input, stream=True)
                 )
             raise ValueError("Agent must have 'chat' or 'achat' method")
         finally:

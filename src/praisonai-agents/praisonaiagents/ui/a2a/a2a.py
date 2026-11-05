@@ -387,6 +387,8 @@ class A2A:
                 user_input=user_input,
                 task_id=task.id,
                 context_id=task.context_id,
+                task_store=self.task_store,
+                running=self._running,
             ),
             media_type="text/event-stream",
             headers={

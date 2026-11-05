@@ -808,3 +808,140 @@ class TestBotOSWiring:
 
         os._wire_outbound_messenger()
         assert session._delivery_router is os._delivery_router
+
+
+# ---------------------------------------------------------------------------
+# Issue #6160 — outbound effects are bound to the originating turn's liveness
+# ---------------------------------------------------------------------------
+
+
+class TestTurnLivenessBinding:
+    """A stopped/superseded turn cannot deliver outbound effects."""
+
+    def _origin(self):
+        return SessionSource(platform="telegram", channel_id="123", message_id="m1")
+
+    def test_stale_turn_drops_send_fail_closed(self):
+        router, sent = _make_router()
+        messenger = BotOutboundMessenger(
+            router, origin=self._origin(), liveness=lambda: False
+        )
+        result = asyncio.run(messenger.send("origin", "late"))
+        assert result.ok is False
+        assert "no longer live" in (result.detail or "")
+        assert sent == []
+
+    def test_stale_turn_drops_react_thread_edit_delete(self):
+        router, _ = _make_router()
+        router.react = MagicMock(side_effect=AssertionError("must not dispatch"))
+        router.create_thread = MagicMock(side_effect=AssertionError("must not dispatch"))
+        router.edit = MagicMock(side_effect=AssertionError("must not dispatch"))
+        router.delete = MagicMock(side_effect=AssertionError("must not dispatch"))
+        messenger = BotOutboundMessenger(
+            router, origin=self._origin(), liveness=lambda: False
+        )
+
+        async def run():
+            return (
+                await messenger.react("origin", "👍"),
+                await messenger.create_thread("origin", "t"),
+                await messenger.edit("origin", "m1", "x"),
+                await messenger.delete("origin", "m1"),
+            )
+
+        for res in asyncio.run(run()):
+            assert res.status == "failed"
+            assert "no longer live" in (res.detail or "")
+
+    def test_live_turn_and_unbound_deliver(self):
+        router, sent = _make_router()
+        live = BotOutboundMessenger(router, origin=self._origin(), liveness=lambda: True)
+        unbound = BotOutboundMessenger(router, origin=self._origin())
+        assert asyncio.run(live.send("origin", "a")).ok is True
+        assert asyncio.run(unbound.send("origin", "b")).ok is True
+        assert sent == [("123", "a"), ("123", "b")]
+
+    def test_raising_probe_is_treated_as_live(self):
+        router, sent = _make_router()
+
+        def boom():
+            raise RuntimeError("probe bug")
+
+        messenger = BotOutboundMessenger(router, origin=self._origin(), liveness=boom)
+        assert asyncio.run(messenger.send("origin", "x")).ok is True
+        assert sent == [("123", "x")]
+
+    def test_session_binds_retained_messenger_to_turn_interrupt(self):
+        from praisonaiagents.agent.interrupt import InterruptController
+
+        router, sent = _make_router()
+        agent = MagicMock(name="agent")
+        agent.name = "Test"
+        agent.chat_history = []
+        ctrl = InterruptController()
+        agent.interrupt_controller = ctrl
+        captured = {}
+
+        def fake_chat(prompt, *args, **kwargs):
+            captured["messenger"] = get_outbound_messenger()
+            return "ok"
+
+        agent.chat.side_effect = fake_chat
+        mgr = BotSessionManager(platform="telegram", delivery_router=router)
+        asyncio.run(mgr.chat(agent, user_id="u1", prompt="hi", chat_id="123"))
+
+        retained = captured["messenger"]
+        # Normal completion: a retained handle (background worker) still delivers.
+        assert asyncio.run(retained.send("origin", "bg")).ok is True
+        # Turn stopped/superseded: the same retained handle is now fail-closed.
+        ctrl.request("user_stop_command")
+        assert asyncio.run(retained.send("origin", "late")).ok is False
+        assert sent == [("123", "bg")]
+
+
+def test_stop_mid_send_halts_remaining_attachment_uploads(tmp_path):
+    # Issue #6160 (review): /stop only sets the controller flag; it does not
+    # cancel an in-flight send(). Remaining uploads must re-check liveness.
+    uploaded = []
+    state = {"live": True}
+
+    class FakeBot:
+        platform = "telegram"
+
+        async def send_message(self, channel_id, text):
+            pass
+
+        async def send_media(self, channel_id, path, caption=None):
+            uploaded.append(path)
+            state["live"] = False  # /stop arrives during the first upload
+
+    fake_bot = FakeBot()
+
+    class FakeBotOS:
+        def get_bot(self, platform):
+            return fake_bot if platform == "telegram" else None
+
+        def list_bots(self):
+            return ["telegram"]
+
+    router = DeliveryRouter(FakeBotOS())
+    router.directory._home_channels = {}
+    router.directory._aliases = {}
+    router.directory._observed = {}
+
+    files = []
+    for name in ("a.png", "b.png", "c.png"):
+        f = tmp_path / name
+        f.write_bytes(b"\x89PNG\r\n\x1a\n" + b"0" * 32)
+        files.append(str(f))
+
+    messenger = BotOutboundMessenger(
+        router,
+        origin=SessionSource(platform="telegram", channel_id="123"),
+        liveness=lambda: state["live"],
+    )
+    result = asyncio.run(messenger.send("origin", "charts", media=files))
+
+    assert uploaded == [files[0]]
+    assert "2 skipped" in result.summary
+    assert "no longer live" in (result.detail or "")

@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import socket
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -86,19 +87,21 @@ def _process_create_time(pid: int) -> Optional[float]:
 class GatewayPIDLock:
     """Manages PID lock file for single-instance gateway enforcement."""
     
-    def __init__(self, lock_dir: Optional[Path] = None, host: str = "127.0.0.1", port: int = 8765):
+    def __init__(self, lock_dir: Optional[Path] = None, host: str = "127.0.0.1", port: int = 8765,
+                 lock_name: Optional[str] = None):
         """Initialize PID lock manager.
         
         Args:
             lock_dir: Directory for lock file (default: ~/.praisonai/)
             host: Gateway host
             port: Gateway port
+            lock_name: Override the lock file name (used by the state lock)
         """
         self.lock_dir = lock_dir or Path.home() / ".praisonai"
         # Make lock file specific to host and port to allow multiple instances
         safe_host = host.replace(":", "_").replace(".", "_")
-        self.lock_file = self.lock_dir / f"gateway-{safe_host}-{port}.pid"
-        self.lock_dir.mkdir(exist_ok=True)
+        self.lock_file = self.lock_dir / (lock_name or f"gateway-{safe_host}-{port}.pid")
+        self.lock_dir.mkdir(parents=True, exist_ok=True)
     
     def acquire_lock(self, host: str, port: int) -> bool:
         """Acquire the PID lock for the gateway.
@@ -110,6 +113,27 @@ class GatewayPIDLock:
         Returns:
             True if lock acquired successfully, False if conflict
         """
+        # Serialise check-then-claim across processes so two simultaneous
+        # starts can never both observe "no live holder" and both win.
+        with self._claim_guard():
+            return self._acquire_locked(host, port)
+
+    @contextmanager
+    def _claim_guard(self):
+        """Hold an OS advisory lock on a sidecar file for the claim (POSIX)."""
+        try:
+            import fcntl
+        except ImportError:  # Windows: exclusive link() below still applies
+            yield
+            return
+        guard = open(self.lock_file.with_name(self.lock_file.name + ".guard"), "a")
+        try:
+            fcntl.flock(guard, fcntl.LOCK_EX)
+            yield
+        finally:
+            guard.close()  # closing drops the flock
+
+    def _acquire_locked(self, host: str, port: int) -> bool:
         current_pid = os.getpid()
         
         # Check if lock file exists
@@ -120,6 +144,9 @@ class GatewayPIDLock:
                     lines = lock_content.split('\n')
                     if lines:
                         existing_pid = int(lines[0])
+                        if existing_pid == current_pid:
+                            # Re-acquire by the same process (in-process restart).
+                            return True
                         existing_create_time = None
                         if len(lines) >= 5 and lines[4]:
                             try:
@@ -145,14 +172,29 @@ class GatewayPIDLock:
         create_time = _process_create_time(current_pid)
         create_time_line = "" if create_time is None else repr(create_time)
         lock_content = f"{current_pid}\n{host}\n{port}\n{int(time.time())}\n{create_time_line}\n"
+        # Exclusive claim: write a private temp file, then hard-link it into
+        # place. ``link`` fails if the lock already exists, so a racing claimant
+        # can never overwrite a live holder (unlike rename/replace).
+        temp_lock_file = self.lock_file.with_name(f"{self.lock_file.name}.{current_pid}.tmp")
         try:
-            # Use a temporary file and atomic rename to prevent race conditions
-            temp_lock_file = self.lock_file.with_suffix(".tmp")
             temp_lock_file.write_text(lock_content)
-            temp_lock_file.replace(self.lock_file)
+            try:
+                os.link(temp_lock_file, self.lock_file)
+            except FileExistsError:
+                return False
+            except OSError:
+                # Filesystem without hard links: fall back to O_EXCL create.
+                fd = os.open(self.lock_file, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+                with os.fdopen(fd, "w") as f:
+                    f.write(lock_content)
             return True
         except OSError:
             return False
+        finally:
+            try:
+                temp_lock_file.unlink()
+            except OSError:
+                pass
     
     def release_lock(self) -> None:
         """Release the PID lock."""
@@ -253,6 +295,43 @@ class GatewayPIDLock:
             pass
 
 
+def resolve_state_dir() -> Path:
+    """Return the gateway's shared mutable state root (``~/.praisonai``).
+
+    The durable outbox, DLQ, pairing and hook stores are hard-wired under
+    ``~/.praisonai`` (they do not honour ``PRAISONAI_HOME``), so the home root -
+    not the TCP port or ``PRAISONAI_HOME`` - is what identifies a gateway.
+    """
+    return Path.home() / ".praisonai"
+
+
+def state_lock(state_dir: Optional[Path] = None, host: str = "127.0.0.1",
+               port: int = 8765) -> GatewayPIDLock:
+    """Single-instance lock keyed on the shared state directory, regardless of port.
+
+    Two gateways sharing one state root would poll the same bot tokens and write
+    the same SQLite stores concurrently (split-brain), so only one may own it.
+    """
+    return GatewayPIDLock(lock_dir=state_dir or resolve_state_dir(), host=host,
+                          port=port, lock_name="gateway.state.pid")
+
+
+def format_state_collision_error(state_dir: Path, lock_info: Optional[dict] = None) -> str:
+    """Error shown when another live gateway already owns the shared state."""
+    holder = ""
+    if lock_info:
+        holder = f" (PID {lock_info['pid']} on {lock_info['host']}:{lock_info['port']})"
+    return "\n".join([
+        f"Error: another gateway already owns the state at {state_dir}{holder}.",
+        "",
+        "  Two gateways sharing state poll the same bot tokens and write the same",
+        "  queues, causing 409 Conflict errors and duplicate delivery.",
+        "  Stop it:  praisonai gateway stop",
+        "  Or run an isolated gateway with its own state and bot tokens:",
+        "    HOME=/srv/gateway-b praisonai gateway start",
+    ])
+
+
 def format_collision_error(host: str, port: int, lock_info: Optional[dict] = None) -> str:
     """Format a user-friendly error message for port collisions.
     
@@ -275,10 +354,11 @@ def format_collision_error(host: str, port: int, lock_info: Optional[dict] = Non
         pid = lock_info['pid']
         lines.extend([
             f"  Another gateway may be running (PID {pid}).",
-            f"  Stop it:  praisonai gateway stop",
-            f"  Or use a different port:  GATEWAY_PORT={port + 1} praisonai gateway start",
+            "  Stop it:  praisonai gateway stop",
             "",
-            "  Only ONE gateway process should poll each Telegram bot token.",
+            "  Only ONE gateway process may poll each bot token. To run a second,",
+            "  isolated gateway give it its own state, bot tokens and port:",
+            f"    HOME=/srv/gateway-b GATEWAY_PORT={port + 1} praisonai gateway start",
         ])
     else:
         lines.extend([

@@ -3598,6 +3598,19 @@ Respond with ONLY a valid JSON tool call in this format:
                                 reason = _cancel_reason()
                                 logging.debug(f"LLM tool loop cancelled before tool dispatch: {reason}")
                                 return _prepare_return_value(f"Task interrupted: {reason}")
+                            # Same per-turn cap as the chat-completions loop, applied
+                            # before recording the assistant turn so every declared
+                            # tool_call_id gets exactly one tool reply.
+                            if tool_call_count >= max_tool_calls_per_turn:
+                                logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
+                                self._last_stop_reason = "max_steps"
+                                if not (final_response_text and final_response_text.strip()):
+                                    final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
+                                break
+                            if tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
+                                tool_calls = tool_calls[:max_tool_calls_per_turn - tool_call_count]
+                                logging.warning(f"Limiting batch to {len(tool_calls)} tool calls to stay within limit of {max_tool_calls_per_turn}.")
+                            tool_call_count += len(tool_calls)
                             serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                             messages.append({
                                 "role": "assistant",
@@ -3680,7 +3693,7 @@ Respond with ONLY a valid JSON tool call in this format:
 
                                 # Append tool result as standard tool message
                                 messages.append(self._create_tool_message(
-                                    function_name, tool_result,
+                                    tool_result_obj.function_name, tool_result,
                                     tool_result_obj.tool_call_id, is_ollama=False))
 
                             # Report any unparseable tool-call arguments so the
@@ -4316,6 +4329,22 @@ Respond with ONLY a valid JSON tool call in this format:
                             reason = _cancel_reason()
                             logging.debug(f"LLM tool loop cancelled before tool dispatch: {reason}")
                             return _prepare_return_value(f"Task interrupted: {reason}")
+                        # Apply the cap BEFORE recording the assistant turn so every
+                        # declared tool_call_id gets exactly one tool reply.
+                        # Guardrail: Check tool call limit to prevent infinite loops
+                        # Allow execution if we haven't reached the limit yet, but limit the batch size
+                        if tool_call_count >= max_tool_calls_per_turn:
+                            logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
+                            self._last_stop_reason = "max_steps"
+                            if not (final_response_text and final_response_text.strip()):
+                                final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
+                            break
+                        elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
+                            # Limit the batch to stay within the total limit
+                            remaining_calls = max_tool_calls_per_turn - tool_call_count
+                            tool_calls = tool_calls[:remaining_calls]
+                            logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
+                        
                         # Convert tool_calls to a serializable format for all providers
                         serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                         # Check if this is Ollama provider
@@ -4336,20 +4365,6 @@ Respond with ONLY a valid JSON tool call in this format:
                         should_continue = False
                         tool_results = []  # Store current iteration tool results
                         tool_result_mapping = {}  # Store function results by name for Ollama chaining
-                        
-                        # Guardrail: Check tool call limit to prevent infinite loops
-                        # Allow execution if we haven't reached the limit yet, but limit the batch size
-                        if tool_call_count >= max_tool_calls_per_turn:
-                            logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
-                            self._last_stop_reason = "max_steps"
-                            if not (final_response_text and final_response_text.strip()):
-                                final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
-                            break
-                        elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
-                            # Limit the batch to stay within the total limit
-                            remaining_calls = max_tool_calls_per_turn - tool_call_count
-                            tool_calls = tool_calls[:remaining_calls]
-                            logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
                         
                         # Collect media-bearing follow-up messages so they are
                         # flushed only AFTER every tool reply for this assistant
@@ -5542,24 +5557,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             break
                         last_tool_call_fingerprint = fingerprint
 
-                        # Record the assistant turn before the tool replies, so
-                        # the follow-up request is a valid conversation.
-                        if is_ollama:
-                            messages.append({"role": "assistant", "content": content or ""})
-                        else:
-                            messages.append({
-                                "role": "assistant",
-                                "content": content or "",
-                                "tool_calls": self._serialize_tool_calls(tool_calls),
-                            })
-
                         # Any prose the model emitted alongside the calls is
-                        # still part of the answer.
+                        # still part of the answer -- yield it before the cap
+                        # check so it is not lost when the limit is reached.
                         if content:
                             yield content
 
                         # Enforce the same per-turn guardrail the streaming and
-                        # non-streaming loops apply, so the fallback cannot run
+                        # non-streaming loops apply (before recording the assistant turn, so no
+                        # declared tool_call_id is left without a reply), so the fallback cannot run
                         # tools past the caller's configured limit.
                         if tool_call_count >= max_tool_calls_per_turn:
                             logging.warning(
@@ -5573,6 +5579,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             logging.warning(
                                 f"Limiting batch to {remaining_calls} tool calls to stay "
                                 f"within limit of {max_tool_calls_per_turn}.")
+
+                        # Record the assistant turn before the tool replies, so
+                        # the follow-up request is a valid conversation.
+                        if is_ollama:
+                            messages.append({"role": "assistant", "content": content or ""})
+                        else:
+                            messages.append({
+                                "role": "assistant",
+                                "content": content or "",
+                                "tool_calls": self._serialize_tool_calls(tool_calls),
+                            })
 
                         for tool_call in tool_calls:
                             tool_call_count += 1
@@ -5965,13 +5982,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             reason = _cancel_reason()
                             logging.debug(f"Async LLM tool loop cancelled before tool dispatch: {reason}")
                             return _prepare_return_value(f"Task interrupted: {reason}")
-                        serializable_tool_calls = self._serialize_tool_calls(tool_calls)
-                        messages.append({
-                            "role": "assistant",
-                            "content": response_text,
-                            "tool_calls": serializable_tool_calls,
-                        })
-
+                        # Apply the cap BEFORE recording the assistant turn so every
+                        # declared tool_call_id gets exactly one tool reply.
                         # Guardrail: Check tool call limit to prevent infinite loops
                         # Allow execution if we haven't reached the limit yet, but limit the batch size
                         if tool_call_count >= max_tool_calls_per_turn:
@@ -5986,6 +5998,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             tool_calls = tool_calls[:remaining_calls]
                             logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
                         
+                        serializable_tool_calls = self._serialize_tool_calls(tool_calls)
+                        messages.append({
+                            "role": "assistant",
+                            "content": response_text,
+                            "tool_calls": serializable_tool_calls,
+                        })
+
                         # Pre-resolve each tool call, then dispatch the valid ones
                         # as a batch (concurrently when parallel_tool_calls is set).
                         _parsed_calls = []
@@ -6247,6 +6266,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         reason = _cancel_reason()
                         logging.debug(f"Async LLM tool loop cancelled before tool dispatch: {reason}")
                         return _prepare_return_value(f"Task interrupted: {reason}")
+                    # Apply the cap BEFORE recording the assistant turn so every
+                    # declared tool_call_id gets exactly one tool reply.
+                    # Guardrail: Check tool call limit to prevent infinite loops
+                    # Allow execution if we haven't reached the limit yet, but limit the batch size
+                    if tool_call_count >= max_tool_calls_per_turn:
+                        logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
+                        self._last_stop_reason = "max_steps"
+                        if not (final_response_text and final_response_text.strip()):
+                            final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
+                        break
+                    elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
+                        # Limit the batch to stay within the total limit
+                        remaining_calls = max_tool_calls_per_turn - tool_call_count
+                        tool_calls = tool_calls[:remaining_calls]
+                        logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
+                    
                     # Convert tool_calls to a serializable format for all providers
                     serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                     # Check if it's Ollama provider
@@ -6263,20 +6298,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             "content": response_text,
                             "tool_calls": serializable_tool_calls
                         })
-                    
-                    # Guardrail: Check tool call limit to prevent infinite loops
-                    # Allow execution if we haven't reached the limit yet, but limit the batch size
-                    if tool_call_count >= max_tool_calls_per_turn:
-                        logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
-                        self._last_stop_reason = "max_steps"
-                        if not (final_response_text and final_response_text.strip()):
-                            final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
-                        break
-                    elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
-                        # Limit the batch to stay within the total limit
-                        remaining_calls = max_tool_calls_per_turn - tool_call_count
-                        tool_calls = tool_calls[:remaining_calls]
-                        logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
                     
                     tool_results = []  # Store current iteration tool results
                     # Collect media-bearing follow-up messages so they are

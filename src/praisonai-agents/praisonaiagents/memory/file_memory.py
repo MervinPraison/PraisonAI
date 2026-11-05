@@ -572,6 +572,14 @@ class FileMemory:
                     promoted.append(item.id)
         
         if promoted:
+            # Promotion writes the same store as add_long_term, so retain the
+            # same highest-importance, newest-first items within its capacity.
+            limit = self.config["long_term_limit"]
+            if len(self._long_term) > limit:
+                self._long_term.sort(
+                    key=lambda item: (item.importance, item.created_at), reverse=True
+                )
+                self._long_term = self._long_term[:limit]
             self._save_long_term()
             self._log(f"Auto-promoted {len(promoted)} items to long-term memory")
     

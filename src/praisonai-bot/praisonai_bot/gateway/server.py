@@ -200,8 +200,16 @@ class _ChannelBotOS:
     so the scheduled/hook delivery path can reuse the router unchanged.
     """
 
-    def __init__(self, channel_bots: Dict[str, Any]) -> None:
+    def __init__(
+        self, channel_bots: Dict[str, Any], hook_runner: Optional[Any] = None,
+    ) -> None:
         self._channel_bots = channel_bots
+        # #6140: zero-arg factory so the router can fire MESSAGE_UNDELIVERED
+        # on the gateway's outbound hooks (None → no hook runner, as before).
+        self._hook_runner = hook_runner
+
+    def _get_hook_runner(self) -> Optional[Any]:
+        return self._hook_runner() if self._hook_runner is not None else None
 
     def list_bots(self) -> List[str]:
         return list(self._channel_bots.keys())
@@ -1053,6 +1061,15 @@ class WebSocketGateway:
         )
         if undelivered_template is not None:
             config.undelivered_template = undelivered_template
+        # Notification policy (#6138): stamped the same way; the router gates
+        # categorised proactive sends with it.
+        if gateway_config.get("notifications"):
+            from ..bots._notifications import NotificationGate
+
+            # Validate here too: this entry point bypasses the schema, and a bad
+            # block should fail before serving, not on the first scheduled send.
+            NotificationGate(gateway_config["notifications"])
+            config.notifications = gateway_config["notifications"]
 
         logger.info(f"Gateway config loaded from {config_path}")
         return cls(config=config)
@@ -1395,6 +1412,7 @@ class WebSocketGateway:
         
         # PID lock for single-instance enforcement
         self._pid_lock: Optional[Any] = None
+        self._state_lock: Optional[Any] = None
         
         # Channel supervisor for resilient bot management. Share the gateway's
         # degraded-capability registry so the fleet crash-loop breaker (Issue
@@ -1434,6 +1452,9 @@ class WebSocketGateway:
         # raw ``hooks`` dict — because ``GatewayConfig`` carries no idempotency
         # field. ``None`` until a config with a ``hooks:`` block is applied.
         self._hook_idempotency_backend: Optional[str] = None
+        # Ids of ``gateway.hooks_outbound`` command hooks on the default
+        # registry (#6140), so a config reload replaces rather than stacks them.
+        self._outbound_hook_ids: List[str] = []
 
         # Issue #3021: opt-in gateway lifecycle — idle/scale-to-zero, epoch-aware
         # external drain marker, and a crash-loop restart guard. These reuse the
@@ -1524,9 +1545,46 @@ class WebSocketGateway:
             logger.error("Gateway startup failed - another instance is running")
             raise RuntimeError(error_msg)
         
-        # Store PID lock for cleanup
         self._pid_lock = pid_lock
-        
+        # When ``start_with_config`` already claimed the state root, its channel
+        # bots are still polling if we fail here; only it may release that lock
+        # (after channels stop), or a second gateway could claim the state.
+        owns_state_lock = self._state_lock is None
+        try:
+            self._acquire_state_lock()
+            await self._start_locked()
+        except BaseException:
+            # Any failure after claiming (bad config, bind error, cancel) must
+            # not leave a live process holding the locks and blocking restarts.
+            self._release_locks(state=owns_state_lock)
+            raise
+
+    def _acquire_state_lock(self) -> None:
+        """Claim the shared state root (idempotent).
+
+        The port lock alone admits a second gateway on another port sharing the
+        same state + bot tokens (split-brain), so the state root is locked too.
+        """
+        if self._state_lock is not None:
+            return
+        from .port_utils import state_lock, resolve_state_dir, format_state_collision_error
+        state_dir = resolve_state_dir()
+        st_lock = state_lock(state_dir, host=self._host, port=self._port)
+        if not st_lock.acquire_lock(self._host, self._port):
+            logger.error("Gateway startup failed - another instance owns the shared state")
+            raise RuntimeError(format_state_collision_error(state_dir, st_lock.get_lock_info()))
+        self._state_lock = st_lock
+
+    def _release_locks(self, state: bool = True) -> None:
+        """Release the port lock and (if ``state``) the state lock (idempotent)."""
+        for attr in ("_pid_lock", "_state_lock") if state else ("_pid_lock",):
+            lock = getattr(self, attr, None)
+            if lock:
+                lock.release_lock()
+                setattr(self, attr, None)
+
+    async def _start_locked(self) -> None:
+        """Body of :meth:`start` once the single-instance locks are held."""
         # Validate bind-aware auth configuration before starting
         from .auth import assert_external_bind_safe
         self.config.host = self._host
@@ -2611,6 +2669,8 @@ class WebSocketGateway:
                     auth_err = _check_auth(request)
                     if auth_err:
                         return auth_err
+                    # Issue #6215: bind the per-user budget key post-auth.
+                    self._api_endpoints._bind_rate_key(request)
                     return await handler(request)
                 return _wrapped
 
@@ -2748,18 +2808,14 @@ class WebSocketGateway:
                 self._ledger_heartbeat_loop(), name="gateway-lifecycle-ledger"
             )
         try:
+            # Lock cleanup on failure is handled by ``start()``.
             await self._server.serve()
-        except Exception as e:
-            # Clean up PID lock on any startup failure
-            if hasattr(self, '_pid_lock') and self._pid_lock:
-                self._pid_lock.release_lock()
-                self._pid_lock = None
-            # Re-raise the original exception
-            raise
         finally:
             self._disarm_watchdog()
             await self._cancel_liveness_task()
             await self._cancel_sd_notify_task()
+            # #6140: SIGINT/SIGTERM unwinds here without ``stop()``; idempotent.
+            await self._stop_outbound_hooks()
             # Issue #4603: ``serve()`` returns through here on every graceful
             # termination — the SIGINT/SIGTERM handler only flips
             # ``should_exit`` and uvicorn unwinds, so ``stop()`` is not
@@ -3892,6 +3948,11 @@ class WebSocketGateway:
         # healthy shutdown never self-exits. No-op unless a watchdog is set.
         shutdown_grace = self._resolve_shutdown_grace(grace)
         self._arm_shutdown_deadline(drain_timeout + shutdown_grace)
+        # #6140: outbound gateway_stop hooks must finish inside this budget.
+        self._shutdown_deadline_at = (
+            time.monotonic() + drain_timeout + shutdown_grace
+            if self._watchdog is not None else None
+        )
         try:
             await self._stop_inner(drain_timeout)
         finally:
@@ -3915,6 +3976,8 @@ class WebSocketGateway:
 
         if self._hook_coalescer is not None:
             await self._hook_coalescer.aclose()
+
+        await self._stop_outbound_hooks()
         
         self._is_running = False
         
@@ -3964,9 +4027,7 @@ class WebSocketGateway:
                 logger.debug("Failed to shut down pooled MCP client")
         self._mcp_pool.clear()
 
-        # Release PID lock
-        if hasattr(self, '_pid_lock') and self._pid_lock:
-            self._pid_lock.release_lock()
+        self._release_locks()
         
         logger.info("Gateway stopped")
     
@@ -4585,7 +4646,7 @@ class WebSocketGateway:
 
         elif msg_type == "server_reply":
             # Issue #5351: a client's correlated answer to a server→client
-            # interactive request (approval / choice / input).
+            # interactive request (approval / choice / input / secret).
             request_id = data.get("request_id")
             value = data.get("value")
             if not request_id or not isinstance(value, str):
@@ -4619,7 +4680,7 @@ class WebSocketGateway:
                 return True
             # Answering an approval on behalf of the turn is an approval decision
             # and requires the APPROVALS scope (parity with approvals.resolve);
-            # choice/input answers require WRITE like sending a message.
+            # choice/input/secret answers require WRITE like sending a message.
             required_scope = (
                 OperatorScope.APPROVALS if req_kind == "approval" else OperatorScope.WRITE
             )
@@ -5060,7 +5121,14 @@ class WebSocketGateway:
                         # so enforce the shared gate here too.
                         from ..bots._admission import AdmissionRejected
                         try:
-                            async with gate.admit(session_id=session.session_id):
+                            # Issue #6215: stable per-user budget key (only
+                            # when a budget is set; duck-typed gates unchanged).
+                            _rk = (
+                                {"rate_key": self._client_rate_key(client_id)}
+                                if getattr(gate, "_rate_limit_enabled", False)
+                                else {}
+                            )
+                            async with gate.admit(session_id=session.session_id, **_rk):
                                 if getattr(session, "_stop_epoch", 0) != dequeued_stop_epoch:
                                     response = _stop_sentinel
                                 else:
@@ -5783,7 +5851,9 @@ class WebSocketGateway:
 
         * ``approval`` → ``"allow"`` or ``"deny"``.
         * ``choice`` → one of the offered ``options`` (any value if none given).
-        * ``input`` → any string.
+        * ``input`` / ``secret`` → any string. A ``secret`` value is handed
+          only to the waiting caller — never logged, echoed, or journalled
+          (Issue #6223).
         """
         kind = getattr(req, "kind", "input")
         if kind == "approval":
@@ -5865,6 +5935,18 @@ class WebSocketGateway:
     
     # ── Client Management (Public API) ────────────────────────────────
     
+    def _client_rate_key(self, client_id: Optional[str]) -> str:
+        """Stable per-user budget key for a WebSocket turn (#6215).
+
+        Session ids are client-chosen, so charge the peer address instead.
+        With no known peer, callers share one ``ip:unknown`` budget rather
+        than falling back to the client-chosen session id.
+        """
+        ws = self._clients.get(client_id) if client_id else None
+        peer = getattr(ws, "client", None)
+        host = getattr(peer, "host", None)
+        return f"ip:{host}" if host else "ip:unknown"
+
     def add_client(self, client_id: str, websocket: Any) -> None:
         """Register a client WebSocket connection.
         
@@ -6099,6 +6181,7 @@ class WebSocketGateway:
             self._hook_idem = None  # rebuild lazily under the new backend
 
         self._hooks.clear()
+        self._apply_outbound_hooks_from_config(cfg)
         if entries and os.environ.get(
             "PRAISONAI_NO_PLUGINS", ""
         ).strip().lower() in ("true", "1", "yes"):
@@ -6113,6 +6196,92 @@ class WebSocketGateway:
             return
         if entries:
             self._register_hooks_from_config(entries)
+
+    def _apply_outbound_hooks_from_config(self, cfg: Dict[str, Any]) -> None:
+        """(Re)register ``gateway.hooks_outbound`` lifecycle sinks (#6140).
+
+        Each entry ``{command, events, timeout}`` becomes a core ``CommandHook``
+        on the default hook registry — the one agents fire lifecycle events
+        (``session_end``, ``message_undelivered``, ``job_completed``,
+        ``gateway_stop``, ...) on — so the command receives the event JSON on
+        stdin with ``PRAISON_EVENT`` set. Invalid entries are skipped with a
+        warning; safe mode registers none.
+        """
+        from praisonaiagents.hooks import get_default_registry
+        from praisonaiagents.hooks.types import HookEvent
+
+        registry = get_default_registry()
+        for hook_id in getattr(self, "_outbound_hook_ids", []):
+            registry.unregister(hook_id)
+        self._outbound_hook_ids = []
+
+        entries = (cfg.get("gateway") or {}).get("hooks_outbound") or []
+        if entries and os.environ.get(
+            "PRAISONAI_NO_PLUGINS", ""
+        ).strip().lower() in ("true", "1", "yes"):
+            logger.warning(
+                "SAFE MODE: %d outbound hook(s) disabled (PRAISONAI_NO_PLUGINS)",
+                len(entries),
+            )
+            return
+        for entry in entries:
+            try:
+                command = str(entry["command"]).strip()
+                events = [HookEvent(e) for e in entry["events"]]
+                if not command or not events:
+                    raise ValueError("'command' and 'events' are required")
+                timeout = float(entry.get("timeout", 30.0))
+            except (KeyError, ValueError, TypeError) as e:
+                logger.warning("Skipping invalid outbound hook %s: %s", entry, e)
+                continue
+            for event in events:
+                self._outbound_hook_ids.append(registry.register_command(
+                    event, command, name=f"outbound:{event.value}", timeout=timeout,
+                ))
+
+    def _outbound_hook_runner(self) -> Optional[Any]:
+        """HookRunner over the default registry when outbound hooks exist (#6140)."""
+        if not getattr(self, "_outbound_hook_ids", None):
+            return None
+        from praisonaiagents.hooks import HookRunner, get_default_registry
+
+        return HookRunner(registry=get_default_registry())
+
+    async def _stop_outbound_hooks(self) -> None:
+        """Fire ``gateway_stop`` on outbound hooks, then unregister them (#6140)."""
+        runner = self._outbound_hook_runner()
+        if runner is None:
+            return
+        try:
+            from praisonaiagents.hooks.events import GatewayStopInput
+            from praisonaiagents.hooks.types import HookEvent
+
+            platforms = list(getattr(self, "_channel_bots", {}) or {})
+            fire = runner.execute(HookEvent.GATEWAY_STOP, GatewayStopInput(
+                session_id="", cwd=os.getcwd(), event_name=HookEvent.GATEWAY_STOP,
+                timestamp=str(time.time()), agent_name="gateway",
+                platforms=platforms, bot_count=len(platforms), reason="stop",
+            ))
+            # Bound by the remaining shutdown deadline (leaving 1s for the rest
+            # of teardown) so a slow hook never trips the watchdog self-exit.
+            deadline_at = getattr(self, "_shutdown_deadline_at", None)
+            if deadline_at is None:
+                await fire
+            else:
+                await asyncio.wait_for(
+                    fire, max(0.0, deadline_at - time.monotonic() - 1.0),
+                )
+        except asyncio.TimeoutError:
+            logger.warning("GATEWAY_STOP outbound hook cut short by shutdown deadline")
+        except Exception:
+            logger.debug("GATEWAY_STOP outbound hook failed", exc_info=True)
+        finally:
+            from praisonaiagents.hooks import get_default_registry
+
+            registry = get_default_registry()
+            for hook_id in self._outbound_hook_ids:
+                registry.unregister(hook_id)
+            self._outbound_hook_ids = []
 
     def _get_hook_idem_store(self) -> Any:
         """Build (once) and return the inbound idempotency store (#4208).
@@ -6392,7 +6561,7 @@ class WebSocketGateway:
         except Exception as e:  # pragma: no cover - defensive
             logger.debug("DeadTargetRegistry unavailable: %s", e)
             self._dead_targets = None
-        botos = _ChannelBotOS(self._channel_bots)
+        botos = _ChannelBotOS(self._channel_bots, self._outbound_hook_runner)
         # Close-the-loop on permanent delivery failure (issue #3297): opt-in via
         # ``gateway.notify_on_undelivered``. Default OFF so behaviour is
         # unchanged; when enabled, a permanent failure fires MESSAGE_UNDELIVERED
@@ -6406,6 +6575,7 @@ class WebSocketGateway:
             dead_targets=self._dead_targets,
             notify_on_undelivered=notify_on_undelivered,
             undelivered_template=undelivered_template,
+            notifications=getattr(self.config, "notifications", None),
         )
         return self._delivery_router
 
@@ -7587,14 +7757,18 @@ class WebSocketGateway:
             # to the already-``sent`` row and is skipped on drain — no
             # double-post. The router remains the sender (throttle + dead-target
             # + LRU), so those guarantees are preserved on top of durability.
+            # A scheduled result is an ``agent_finished`` notification (#6138):
+            # the configured ``gateway.notifications`` policy decides whether and
+            # how much of it reaches this recipient.
+            notify = {"category": "agent_finished", "identity": session_id}
             outbox = self.scheduled_outbox
             if outbox is not None:
                 delivered = await self._deliver_via_outbox(
-                    outbox, router, route, text, idem,
+                    outbox, router, route, text, idem, **notify,
                 )
             else:
                 delivered = await router.deliver(
-                    route, text, idempotency_key=idem,
+                    route, text, idempotency_key=idem, **notify,
                 )
             if delivered:
                 logger.info(
@@ -7710,6 +7884,7 @@ class WebSocketGateway:
 
     async def _deliver_via_outbox(
         self, outbox: Any, router: Any, route: str, text: str, idem: str,
+        category: Optional[str] = None, identity: Optional[str] = None,
     ) -> bool:
         """Deliver a scheduled result durably via the shared ``OutboundQueue``.
 
@@ -7726,14 +7901,20 @@ class WebSocketGateway:
             await outbox.enqueue(
                 idempotency_key=idem,
                 target=route,
-                payload={"text": text, "idempotency_key": idem},
+                payload={
+                    "text": text, "idempotency_key": idem,
+                    "category": category, "identity": identity,
+                },
             )
         except Exception as e:  # pragma: no cover - defensive
             logger.debug(
                 "Outbox enqueue failed for %s, falling back to router: %s",
                 route, e,
             )
-            return await router.deliver(route, text, idempotency_key=idem)
+            return await router.deliver(
+                route, text, idempotency_key=idem,
+                category=category, identity=identity,
+            )
 
         # The ``scheduled_outbox`` is a single shared queue, so ``drain`` may
         # process rows other than the one we just enqueued. The sender must use
@@ -7747,6 +7928,8 @@ class WebSocketGateway:
                 target,
                 payload.get("text", ""),
                 idempotency_key=payload.get("idempotency_key") or target,
+                category=payload.get("category"),
+                identity=payload.get("identity"),
             )
 
         try:
@@ -11151,6 +11334,29 @@ class WebSocketGateway:
         self._shell_routed_agents.clear()
         self._shell_routed_agents.update(candidate.get("shell", {}))
 
+    @staticmethod
+    def _rate_policy_from_config(cfg: Any) -> Any:
+        """Build the ``gateway.per_user_per_minute`` policy (#6215); may raise."""
+        from ..bots._admission import build_rate_limit_policy
+
+        gw_cfg = (cfg or {}).get("gateway") or {}
+        return build_rate_limit_policy(gw_cfg.get("per_user_per_minute", 0))
+
+    def _apply_rate_policy(self, policy: Any) -> None:
+        """Install a reloaded per-user budget on the live admission gate (#6215).
+
+        An existing gate is updated in place (bots/API/WS already share it); a
+        budget added to a gateway that had no gate builds a rate-only gate,
+        which channels started afterwards pick up via ``_stamp_admission_gate``.
+        """
+        gate = getattr(self, "_admission_gate", None)
+        if gate is not None:
+            gate.set_rate_limit_policy(policy)
+        elif policy is not None:
+            from ..bots._admission import AdmissionGate
+
+            self._admission_gate = AdmissionGate(None, rate_limit_policy=policy)
+
     async def _restore_previous_config(
         self, error: str, changed_paths: Set[str]
     ) -> None:
@@ -11172,6 +11378,10 @@ class WebSocketGateway:
             )
             return
         try:
+            try:
+                self._apply_rate_policy(self._rate_policy_from_config(prev_cfg))
+            except ValueError:
+                pass  # previous config was validated when it went live
             prev_agents_cfg = prev_cfg.get("agents", {})
             if prev_agents_cfg:
                 provider_cfg = prev_cfg.get("provider", {})
@@ -11301,6 +11511,13 @@ class WebSocketGateway:
             # drain window keep resolving the previous agents until the cutover
             # commits.
             report = self._validate_candidate(new_cfg)
+            # Issue #6215: validate the per-user budget with the candidate so a
+            # bad value rejects the reload instead of failing mid-cutover.
+            try:
+                rate_policy = self._rate_policy_from_config(new_cfg)
+            except ValueError as e:
+                report.ok = False
+                report.failures.append(f"gateway.per_user_per_minute: {e}")
             if not report.ok:
                 error = "; ".join(report.failures) or "candidate validation failed"
                 logger.error(f"Reload rejected — {error}; keeping previous config")
@@ -11323,6 +11540,7 @@ class WebSocketGateway:
             # channel is accepting turns (greptile #1 — never expose the
             # candidate before the cutover commits).
             self._activate_candidate(report.candidate)
+            self._apply_rate_policy(rate_policy)
 
             channels_cfg = new_cfg.get("channels", {})
             try:
@@ -11427,6 +11645,13 @@ class WebSocketGateway:
         # effect without a full process restart. No-op when the ``lifecycle``
         # block is absent and unchanged.
         self._reconcile_lifecycle(new_cfg)
+
+        # Issue #6138: apply changed (or removed) ``gateway.notifications`` to
+        # the cached delivery router, which otherwise keeps the boot policy.
+        notifications = (new_cfg.get("gateway") or {}).get("notifications") or None
+        self.config.notifications = notifications
+        if self._delivery_router is not None:
+            self._delivery_router.set_notifications(notifications)
 
         # Issue #2661: pick up a rotated shared gateway secret and force-close
         # every live session that authenticated under the previous secret, so a
@@ -11898,6 +12123,8 @@ class WebSocketGateway:
             self.config.undelivered_template = str(
                 gw_cfg["undelivered_template"]
             )
+        if gw_cfg.get("notifications"):
+            self.config.notifications = gw_cfg["notifications"]
         # Issue #2715: additive OpenAI-compatible / MCP protocol surfaces.
         # YAML ``gateway.api: { openai: true, mcp: true }`` enables them; a
         # CLI ``--openai-api`` / ``--mcp`` override (stamped on the instance)
@@ -12042,6 +12269,8 @@ class WebSocketGateway:
             queue_depth=_queue_depth,
             overflow_policy=_overflow,
             max_concurrent_runs_per_scope=_max_runs_per_scope,
+            # Issue #6215: per-user inbound request budget (0 = unlimited).
+            per_user_per_minute=gw_cfg.get("per_user_per_minute", 0),
         )
         if self._admission_gate is not None:
             logger.info(
@@ -12297,6 +12526,9 @@ class WebSocketGateway:
             except (NotImplementedError, OSError, ValueError):
                 pass
 
+        # Claim the state root BEFORE channels start: channel setup replays the
+        # inbound journal, which a rejected second gateway must never touch.
+        self._acquire_state_lock()
         try:
             await _run_all()
         finally:
@@ -12347,3 +12579,4 @@ class WebSocketGateway:
                             logger.warning("Error draining websocket sessions: %s", e)
             finally:
                 self._cancel_shutdown_deadline()
+                self._release_locks()

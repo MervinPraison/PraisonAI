@@ -1515,6 +1515,15 @@ def run_main(
     output = get_output_controller()
     _ = get_current_context()  # Initialize context
 
+    # Per-tool usage tally for `praisonai usage --by tool` (Issue #6158).
+    try:
+        from ..state.project_sessions import install_tool_stats_hook, reset_tool_stats
+
+        reset_tool_stats()
+        install_tool_stats_hook()
+    except Exception:
+        pass
+
     # --pure / --no-plugins: suppression is scoped by the @scopes_no_plugins
     # decorator, which sets PRAISONAI_NO_PLUGINS (read by the core PluginManager)
     # for the duration of this call and always restores the prior value on
@@ -1703,6 +1712,7 @@ def run_main(
     # execution path does not discover and execute the same definitions twice.
     preloaded_agent_config = None
     custom_agent_model = None
+    custom_agent_base_url = None
     if target or agent or command:  # Any execution surface may need model/budget resolution
         import sys
         from praisonai_code.llm.credentials import ensure_configured_or_onboard
@@ -1722,6 +1732,10 @@ def run_main(
                 _preview_llm = (_preview_config or {}).get("llm")
                 if isinstance(_preview_llm, dict):
                     custom_agent_model = _preview_llm.get("model")
+                    # Gate an Ollama agent on the server it will really call.
+                    _base = _preview_llm.get("base_url")
+                    if isinstance(_base, str) and _base.strip():
+                        custom_agent_base_url = _base.strip()
                 else:
                     custom_agent_model = _preview_llm
                 if isinstance(custom_agent_model, str):
@@ -1738,7 +1752,9 @@ def run_main(
         # endpoint, credentials, sampling, and retry options.
         credential_model = model or custom_agent_model
         resolved_model = ensure_configured_or_onboard(
-            model=credential_model, interactive=not _headless
+            model=credential_model,
+            interactive=not _headless,
+            base_url=None if model else custom_agent_base_url,
         )
         if not (agent and model is None and custom_agent_model):
             model = resolved_model
@@ -3101,6 +3117,11 @@ def _wire_subtree_context_hook(
             matcher=file_tool_matcher(),
             name="subtree_instruction_injection",
         )
+        # This per-agent registry replaces the global one, so register the
+        # per-tool usage tally here too (Issue #6158).
+        from ..state.project_sessions import install_tool_stats_hook
+
+        install_tool_stats_hook(registry)
         agent_config["hooks"] = registry
     except Exception:
         return

@@ -109,3 +109,22 @@ def test_tools_streaming_path_maps_max_tokens():
     assert "max_tokens" not in sent
     assert "temperature" not in sent
     assert sent["max_completion_tokens"] == 100
+
+
+def test_reasoning_model_drops_sampling_params():
+    # #6128: per-call temperature/top_p must not reach reasoning models.
+    client = _client()
+    client.create_completion(
+        messages=[{"role": "user", "content": "hi"}],
+        model="o4-mini", temperature=0.2, top_p=0.9, presence_penalty=0.1,
+    )
+    sent = _sent(client._sync_client.chat.completions.create)
+    for key in ("temperature", "top_p", "presence_penalty"):
+        assert key not in sent
+
+
+def test_responses_input_omits_temperature_for_reasoning_model():
+    client = _client()
+    msgs = [{"role": "user", "content": "hi"}]
+    assert "temperature" not in client._build_responses_input(msgs, "o4-mini", 0.2)
+    assert client._build_responses_input(msgs, "gpt-4o-mini", 0.2)["temperature"] == 0.2

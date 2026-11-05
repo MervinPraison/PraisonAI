@@ -37,6 +37,7 @@ from typing import AsyncIterator, Callable, Dict, Any, Optional, List, Union
 from enum import Enum
 
 from ._managed_base import ManagedBackendBase
+from praisonai._errors import _WrapperError
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ logger = logging.getLogger(__name__)
 # Shared exceptions
 # ---------------------------------------------------------------------------
 
-class ManagedSandboxRequired(RuntimeError):
+class ManagedSandboxRequired(_WrapperError, RuntimeError):
     """Raised when package installation is attempted without proper sandboxing.
     
     This exception is raised when `LocalManagedAgent` is configured with packages

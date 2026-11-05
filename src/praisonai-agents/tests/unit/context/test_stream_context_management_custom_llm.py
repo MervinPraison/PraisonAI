@@ -32,6 +32,7 @@ def _agent_with_history(messages: int, words: int):
 
     def fake_stream(**kwargs):
         sent["history"] = list(kwargs.get("chat_history") or [])
+        sent["prompt"] = kwargs.get("prompt")
         yield "ok"
 
     agent._using_custom_llm = True
@@ -60,7 +61,10 @@ class TestCustomLlmStreamCompaction:
         """Compaction must not fire when it is not needed."""
         agent, sent = _agent_with_history(6, 5)
         history = _drain(agent, sent)
-        assert len(history) == 7, "a short history was compacted unnecessarily"
+        # The six earlier turns go as history; this turn goes once, as the prompt.
+        assert len(history) == 6, "a short history was compacted unnecessarily"
+        assert sent["prompt"] == "hello"
+        assert all(m["content"] != "hello" for m in history)
 
     def test_the_context_manager_is_actually_configured_here(self):
         """Guards the premise: tools present auto-enable context management."""

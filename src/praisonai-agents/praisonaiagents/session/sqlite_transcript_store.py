@@ -474,6 +474,7 @@ class SqliteTranscriptStore(DefaultSessionStore):
                 "model": data.get("model") or data.get("llm") or meta.get("model"),
                 "total_tokens": data.get("total_tokens") or data.get("token_count") or meta.get("total_tokens"),
                 "cost": data.get("cost") or meta.get("cost"),
+                "tool_stats": meta.get("tool_stats"),
             })
             if len(sessions) >= limit:
                 break

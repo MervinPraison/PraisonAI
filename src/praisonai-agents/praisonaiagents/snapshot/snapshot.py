@@ -21,6 +21,9 @@ logger = get_logger(__name__)
 # Default snapshot directory (uses centralized paths - DRY)
 DEFAULT_SNAPSHOT_DIR = str(get_snapshots_dir())
 
+# Bound every git call and never block on an interactive prompt.
+_GIT_TIMEOUT = 60
+
 @dataclass
 class FileDiff:
     """Represents a diff for a single file."""
@@ -158,8 +161,13 @@ class FileSnapshot:
                 capture_output=True,
                 text=True,
                 check=check,
+                timeout=_GIT_TIMEOUT,
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
             )
             return result
+        except subprocess.TimeoutExpired:
+            logger.error("Git command timed out after %ss: %s", _GIT_TIMEOUT, " ".join(cmd))
+            raise
         except subprocess.CalledProcessError as e:
             logger.error(f"Git command failed: {' '.join(cmd)}")
             logger.error(f"stderr: {e.stderr}")

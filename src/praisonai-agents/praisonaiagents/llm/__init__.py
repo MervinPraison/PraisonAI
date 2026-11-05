@@ -9,6 +9,11 @@ import os
 # Ensure litellm telemetry is disabled before any imports
 os.environ["LITELLM_TELEMETRY"] = "False"
 
+# Apply litellm/httpx env defaults only once the LLM layer is actually used
+# (not on `import praisonaiagents`).
+from .._logging import _configure_environment
+_configure_environment()
+
 import threading
 
 # Module-level cache for lazy-loaded classes

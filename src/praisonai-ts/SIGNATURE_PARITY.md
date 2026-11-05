@@ -207,7 +207,7 @@ TS-only members: `dependencies`?
 
 ### `Agent.start`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:819`
+- Python: `src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:815`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:2497`
 - Counts: 1 python params: 1 exact, 0 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 20 TS-only of 21
 
@@ -219,7 +219,7 @@ TS-only members: `previousResult`?, `onToken`?, `signal`?, `onEvent`?, `options`
 
 ### `Agent.chat`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3657`
+- Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3714`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:3592`
 - Counts: 17 python params: 7 exact, 9 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 2 TS-only of 19
 
@@ -316,7 +316,7 @@ TS-only members: `config`
 ### `Session.__init__`
 
 - Python: `src/praisonai-agents/praisonaiagents/session/api.py:67`
-- TypeScript: `src/praisonai-ts/src/session/session.ts:29` (ctor `src/praisonai-ts/src/session/session.ts:132`)
+- TypeScript: `src/praisonai-ts/src/session/session.ts:29` (ctor `src/praisonai-ts/src/session/session.ts:133`)
 - Counts: 7 python params: 1 exact, 6 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 5 TS-only of 12
 
 | Python param | Kind | Py default | Py type | Match | TS name | TS default | TS type | Status |
@@ -386,7 +386,7 @@ TS-only members: `maxIdenticalActions`?, `maxSimilarActions`?, `maxConsecutiveFa
 
 ### `EscalationPipeline.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/escalation/pipeline.py:44`
+- Python: `src/praisonai-agents/praisonaiagents/escalation/pipeline.py:45`
 - TypeScript: `src/praisonai-ts/src/escalation/pipeline.ts:51` (ctor `src/praisonai-ts/src/escalation/pipeline.ts:103`)
 - Counts: 5 python params: 3 exact, 2 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 4 TS-only of 9
 

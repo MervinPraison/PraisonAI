@@ -2698,6 +2698,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         self.system_prompt = f"""{self.backstory}\n
 Your Role: {self.role}\n
 Your Goal: {self.goal}
+        """ if self.goal != self.backstory else f"""{self.backstory}\n
+Your Role: {self.role}
         """
 
         # Per-invocation system-prompt append (never persisted). Sourced from the
@@ -3571,8 +3573,26 @@ Your Goal: {self.goal}
     
     def _replace_chat_history(self, new_history: List[Dict[str, Any]]):
         """Thread-safe replacement of entire chat history using proper locking."""
-        with self._history_lock.lock():
-            self._history_lock.value[:] = new_history
+        # Share _auto_save_session's lock so a save cannot interleave with the
+        # rewrite and the cursor update below (#6217).
+        with self._auto_save_lock, self._history_lock.lock():
+            history = self._history_lock.value
+            # Re-sync the positional auto-save cursor (#6217): resume at the
+            # first unsaved survivor, or right after the last survivor so
+            # appended messages (e.g. durable replays) are saved; summaries
+            # placed before survivors are not re-persisted.
+            last = getattr(self, '_auto_save_last_index', 0)
+            old = {id(m): i >= last for i, m in enumerate(history)}
+            cursor = len(new_history)
+            survivors = [i for i, m in enumerate(new_history) if id(m) in old]
+            if survivors:
+                cursor = survivors[-1] + 1
+                for i in survivors:
+                    if old[id(new_history[i])]:
+                        cursor = i
+                        break
+            history[:] = new_history
+            self._auto_save_last_index = cursor
 
     @property
     def _cache_lock(self):
@@ -7223,7 +7243,7 @@ Answer:"""
         return getattr(self, "_last_guardrail_error", None)
 
     def _guardrail_blocked_message(self, error=None):
-        """Fixed, user-facing string returned when an output guardrail blocks a run.
+        """Fixed, user-facing string returned when an input or output guardrail blocks a run.
 
         A blocked response must never surface the rejected (potentially unsafe)
         model text, but it must also never be ``None`` - callers expect a

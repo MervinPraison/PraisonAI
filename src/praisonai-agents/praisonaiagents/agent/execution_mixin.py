@@ -22,12 +22,6 @@ logger = logging.getLogger(__name__)
 
 from typing import List, Optional, Any, Dict, Union, Generator, TYPE_CHECKING
 
-# Shared HTTP launch state — the process-wide registry is defined in
-# agent/server_registry.py and shared with PraisonAIAgents.launch() so a
-# standalone Agent and a team launched on the same port cannot double-bind it or
-# hide each other's endpoints.
-from .server_registry import _server_registry
-
 
 class _TimeoutCancelToken:
     """cancel_token for caller-mode ``start(timeout=...)``.
@@ -76,6 +70,8 @@ def cleanup_launch_registration(agent_id: str) -> None:
     ``_AgentServerRegistry.teardown_routes_for``) so cleanup cannot race a
     concurrent launch that reserves and registers a route on the same port.
     """
+    from .server_registry import _server_registry  # lazy: launch path only
+
     _server_registry.teardown_routes_for(agent_id)
 
 if TYPE_CHECKING:
@@ -2394,7 +2390,11 @@ Write the complete compiled report:"""
         host = resolve_launch_host(host)
 
         # Get or create the shared FastAPI app for this port (shared with
-        # PraisonAIAgents.launch via the same _server_registry singleton).
+        # PraisonAIAgents.launch via the same _server_registry singleton, so a
+        # standalone Agent and a team on one port cannot double-bind it).
+        # Imported lazily: only the HTTP launch path needs the registry.
+        from .server_registry import _server_registry
+
         app, is_new_app = _server_registry.get_or_create_app(
             port,
             title=f"PraisonAI Agents API (Port {port})",
@@ -2490,44 +2490,9 @@ Write the complete compiled report:"""
             print(f"📚 API documentation available at http://{host}:{port}/docs")
         print(f"🔌 Available endpoints on port {port}: {', '.join(endpoints)}")
 
-        # Get the stack frame to check if this is the last launch() call in the script
-        import inspect
-        stack = inspect.stack()
-
-        # If this is called from a Python script (not interactive), try to detect if it's the last launch call
-        if len(stack) > 1 and stack[1].filename.endswith('.py'):
-            caller_frame = stack[1]
-            caller_line = caller_frame.lineno
-
-            try:
-                # Read the file to check if there are more launch calls after this one
-                with open(caller_frame.filename, 'r') as f:
-                    lines = f.readlines()
-
-                # Check if there are more launch() calls after the current line
-                has_more_launches = False
-                for line_content in lines[caller_line:]: # renamed line to line_content
-                    if '.launch(' in line_content and not line_content.strip().startswith('#'):
-                        has_more_launches = True
-                        break
-
-                # If this is the last launch call, block the main thread
-                if not has_more_launches:
-                    try:
-                        print("\nAll agents registered for HTTP mode. Press Ctrl+C to stop the servers.")
-                        while True:
-                            self._safe_sleep(1)
-                    except KeyboardInterrupt:
-                        print("\nServers stopped")
-            except Exception as e:
-                # If something goes wrong with detection, block anyway to be safe
-                logging.error(f"Error in launch detection: {e}")
-                try:
-                    print("\nKeeping HTTP servers alive. Press Ctrl+C to stop.")
-                    while True:
-                        self._safe_sleep(1)
-                except KeyboardInterrupt:
-                    print("\nServers stopped")
+        # Keep the daemon server threads alive once the script finishes
+        # (no source-text inspection of the caller).
+        _server_registry.keep_alive_at_exit()
         return None
 
     def _launch_mcp_server(self, path: str, port: int, host: str, debug: bool):

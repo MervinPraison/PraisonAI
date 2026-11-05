@@ -686,6 +686,13 @@ def _run_print_code(
         get_token_collector().reset()
     except Exception:
         pass
+    try:
+        from ..state.project_sessions import install_tool_stats_hook, reset_tool_stats
+
+        reset_tool_stats()
+        install_tool_stats_hook()
+    except Exception:
+        pass
 
     # Resolve/continue a session id so --resume/--continue compose with -p for
     # scripted multi-turn. Best-effort: continuity is layered via the shared

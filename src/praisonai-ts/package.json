@@ -1,7 +1,7 @@
 {
   "name": "praisonai",
   "version": "1.7.4",
-  "description": "PraisonAI TypeScript AI Agents Framework - Node.js, npm, and Javascript AI Agents Framework",
+  "description": "Open-source TypeScript and JavaScript AI agent framework for Node.js, on hosted or local models. The JavaScript SDK of PraisonAI.",
   "main": "dist/index.js",
   "module": "dist/esm/index.js",
   "types": "dist/index.d.ts",

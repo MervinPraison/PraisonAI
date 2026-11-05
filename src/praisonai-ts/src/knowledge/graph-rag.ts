@@ -60,7 +60,23 @@ export class GraphStore {
    * Add an edge to the graph
    */
   addEdge(edge: GraphEdge): void {
+    const previous = this.edges.get(edge.id);
     this.edges.set(edge.id, edge);
+
+    if (previous && (previous.source !== edge.source || previous.target !== edge.target)) {
+      // Another edge may still connect the old endpoints.
+      let hasParallelEdge = false;
+      for (const candidate of this.edges.values()) {
+        if (candidate.source === previous.source && candidate.target === previous.target) {
+          hasParallelEdge = true;
+          break;
+        }
+      }
+      if (!hasParallelEdge) {
+        this.adjacencyList.get(previous.source)?.delete(previous.target);
+        this.reverseAdjacencyList.get(previous.target)?.delete(previous.source);
+      }
+    }
     
     // Update adjacency lists
     if (!this.adjacencyList.has(edge.source)) {

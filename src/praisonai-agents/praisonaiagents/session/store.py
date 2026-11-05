@@ -2076,6 +2076,8 @@ class DefaultSessionStore:
                             "model": data.get("model") or data.get("llm") or (data.get("metadata") or {}).get("model"),
                             "total_tokens": data.get("total_tokens") or data.get("token_count") or (data.get("metadata") or {}).get("total_tokens"),
                             "cost": data.get("cost") or (data.get("metadata") or {}).get("cost"),
+                            # Per-tool outcome tally for `usage --by tool` (Issue #6158).
+                            "tool_stats": (data.get("metadata") or {}).get("tool_stats"),
                         })
                     except (UnicodeDecodeError, json.JSONDecodeError, IOError) as exc:
                         self._report_unreadable_session(filename[:-5], filepath, exc)

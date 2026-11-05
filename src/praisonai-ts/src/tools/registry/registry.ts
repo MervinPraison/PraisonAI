@@ -5,6 +5,8 @@
  * Supports lazy loading, middleware, and multi-agent safety.
  */
 
+import { composeMiddleware } from './middleware';
+
 import type {
   ToolMetadata,
   ToolFactory,
@@ -61,6 +63,7 @@ export class ToolsRegistry {
    */
   register(metadata: ToolMetadata, factory: ToolFactory): this {
     this.tools.set(metadata.id, { metadata, factory });
+    this.installCache.delete(metadata.id);
     return this;
   }
 
@@ -68,6 +71,7 @@ export class ToolsRegistry {
    * Unregister a tool
    */
   unregister(id: string): boolean {
+    this.installCache.delete(id);
     return this.tools.delete(id);
   }
 
@@ -158,16 +162,7 @@ export class ToolsRegistry {
         if (this.middleware.length === 0) {
           result = await executeWithMiddleware();
         } else {
-          // Chain middleware
-          let index = 0;
-          const next = async (): Promise<unknown> => {
-            if (index < this.middleware.length) {
-              const mw = this.middleware[index++];
-              return mw(input, ctx, next);
-            }
-            return executeWithMiddleware();
-          };
-          result = await next();
+          result = await composeMiddleware(...this.middleware)(input, ctx, executeWithMiddleware);
         }
 
         // Call afterToolCall hook
@@ -222,27 +217,25 @@ export class ToolsRegistry {
    * Check if a tool's optional dependency is installed
    */
   async checkInstalled(id: string): Promise<boolean> {
-    // Check cache first
+    const registered = this.tools.get(id);
+    if (!registered) return false;
+
     if (this.installCache.has(id)) {
       return this.installCache.get(id)!;
     }
 
-    const registered = this.tools.get(id);
-    if (!registered) {
-      return false;
+    const { packageName } = registered.metadata;
+    let installed: boolean;
+    try {
+      await import(packageName);
+      installed = true;
+    } catch {
+      installed = false;
     }
 
-    const { packageName } = registered.metadata;
-    
-    try {
-      // Try to resolve the package
-      await import(packageName);
-      this.installCache.set(id, true);
-      return true;
-    } catch {
-      this.installCache.set(id, false);
-      return false;
-    }
+    // An earlier import must not repopulate the cache after replacement/removal.
+    if (this.tools.get(id) === registered) this.installCache.set(id, installed);
+    return installed;
   }
 
   /**

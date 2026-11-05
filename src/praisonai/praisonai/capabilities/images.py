@@ -24,11 +24,40 @@ class ImageResult:
             with open(path, 'wb') as f:
                 f.write(base64.b64decode(self.b64_json))
         elif self.url:
-            import urllib.request
-            urllib.request.urlretrieve(self.url, path)
+            _download_image(self.url, path)
         else:
             raise ValueError("No image data available")
         return path
+
+
+_IMAGE_DOWNLOAD_TIMEOUT = 30.0
+_IMAGE_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024
+
+
+def _download_image(url: str, path: str) -> None:
+    """Download a provider-returned image URL safely.
+
+    The URL is untrusted: only http(s) is allowed (no ``file://``), the host is
+    screened against loopback/private/metadata addresses, redirects are
+    refused (they would bypass the screen), and the read is bounded by a
+    timeout and a size cap.
+    """
+    import urllib.request
+    from ..jobs.models import _resolve_and_screen_webhook_host
+
+    _resolve_and_screen_webhook_host(url, label="Image URL")
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+
+    opener = urllib.request.build_opener(_NoRedirect)
+    with opener.open(url, timeout=_IMAGE_DOWNLOAD_TIMEOUT) as resp:
+        data = resp.read(_IMAGE_DOWNLOAD_MAX_BYTES + 1)
+    if len(data) > _IMAGE_DOWNLOAD_MAX_BYTES:
+        raise ValueError("Image exceeds maximum download size")
+    with open(path, 'wb') as f:
+        f.write(data)
 
 
 def _model_rejects_response_format(model: str) -> bool:

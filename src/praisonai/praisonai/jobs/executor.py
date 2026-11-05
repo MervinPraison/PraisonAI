@@ -11,11 +11,12 @@ from typing import Optional, Callable, Any, Dict
 
 from .models import Job, JobStatus
 from .store import JobStore
+from praisonai._errors import _WrapperError
 
 logger = logging.getLogger(__name__)
 
 
-class JobQueueFull(Exception):
+class JobQueueFull(_WrapperError):
     """Raised when the executor is at its admission ceiling.
 
     The router maps this to an HTTP 503 with a ``Retry-After`` header so

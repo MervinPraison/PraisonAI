@@ -111,6 +111,25 @@ def execute_command(
             'stderr': '',
         }
 
+    # Reuse the core SDK's quote-aware shell-syntax guard: this executor runs
+    # with shell=False, so `a > f` or `a && b` would otherwise ship operators as
+    # literal argv and report a false success.
+    from praisonaiagents.tools.shell_tools import _find_shell_syntax, _build_subprocess_env
+
+    token = _find_shell_syntax(command)
+    if token is not None:
+        return {
+            'success': False,
+            'error': (
+                f"Shell syntax {token!r} is not supported (commands run without a shell). "
+                "Run each command separately and handle redirection in code."
+            ),
+            'command': command,
+            'exit_code': -1,
+            'stdout': '',
+            'stderr': '',
+        }
+
     # Self-preservation guard — block explicitly destructive patterns
     if is_forbidden_command(command):
         return {
@@ -166,10 +185,9 @@ def execute_command(
             'stderr': '',
         }
     
-    # Prepare environment
-    cmd_env = os.environ.copy()
-    if env:
-        cmd_env.update(env)
+    # Prepare environment: parent env minus secret-looking names (same policy
+    # as the core SDK shell tool), plus explicit caller-provided extras.
+    cmd_env = _build_subprocess_env(env)
     
     # Set PAGER to cat to avoid interactive pagers
     cmd_env['PAGER'] = 'cat'

@@ -4,6 +4,7 @@ A2A Streaming Events
 SSE streaming support for A2A task updates.
 """
 
+import asyncio
 import json
 from typing import AsyncIterator, Optional
 
@@ -15,7 +16,11 @@ from praisonaiagents.ui.a2a.types import (
     TaskArtifactUpdateEvent,
     Artifact,
     TextPart,
+    Message,
 )
+from praisonaiagents._logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class A2AEventEncoder:
@@ -65,6 +70,7 @@ def create_status_event(
     state: TaskState,
     context_id: Optional[str] = None,
     final: bool = False,
+    message: Optional[Message] = None,
 ) -> TaskStatusUpdateEvent:
     """
     Create a TaskStatusUpdateEvent.
@@ -74,6 +80,7 @@ def create_status_event(
         state: New task state
         context_id: Optional context ID
         final: Whether this is the final event
+        message: Optional status message (e.g. failure reason)
         
     Returns:
         TaskStatusUpdateEvent
@@ -81,7 +88,7 @@ def create_status_event(
     return TaskStatusUpdateEvent(
         task_id=task_id,
         context_id=context_id,
-        status=TaskStatus(state=state),
+        status=TaskStatus(state=state, message=message),
         final=final,
     )
 
@@ -130,60 +137,123 @@ async def stream_agent_response(
     user_input: str,
     task_id: str,
     context_id: Optional[str] = None,
+    *,
+    task_store=None,
+    running: Optional[dict] = None,
 ) -> AsyncIterator[str]:
     """
     Stream agent response as A2A events.
     
+    The sync agent call runs in a worker thread so the event loop stays
+    responsive. When ``task_store``/``running`` are given, the task's
+    lifecycle is mirrored into the store and the call is registered so
+    ``tasks/get`` and ``tasks/cancel`` work for streamed tasks.
+    
     Args:
-        agent: PraisonAI Agent instance
+        agent: PraisonAI Agent (uses ``chat``) or AgentTeam (uses ``start``)
         user_input: User input text
         task_id: Task ID
         context_id: Optional context ID
+        task_store: Optional TaskStore to keep in sync
+        running: Optional dict of task_id -> future, used for cancellation
         
     Yields:
         SSE-formatted event strings
     """
+    from praisonaiagents.ui.a2a.conversion import praisonai_to_a2a_message
+    
     encoder = A2AEventEncoder()
     
-    # Emit working status
-    working_event = create_status_event(
-        task_id=task_id,
-        state=TaskState.WORKING,
-        context_id=context_id,
-    )
-    yield encoder.encode_task_status(working_event)
+    if task_store is not None:
+        task_store.update_status(task_id, TaskState.WORKING)
+        # Keep the task while the agent runs: a cancel can make it
+        # terminal (and evictable) before we finish.
+        task_store._pinned.add(task_id)
     
+    fut = None
     try:
-        # Get response from agent
-        response = agent.chat(user_input)
+        # Emit working status
+        yield encoder.encode_task_status(create_status_event(
+            task_id=task_id,
+            state=TaskState.WORKING,
+            context_id=context_id,
+        ))
         
-        # Emit artifact with response
+        # tasks/cancel may have landed while we were suspended at the
+        # yield above, before the call was registered: don't start it.
+        if task_store is not None:
+            task = task_store.get_task(task_id)
+            if task is not None and task.status.state == TaskState.CANCELLED:
+                raise asyncio.CancelledError()
+        
+        call = agent.chat if hasattr(agent, "chat") else agent.start
+        fut = asyncio.ensure_future(asyncio.to_thread(call, user_input))
+        if running is not None:
+            running[task_id] = fut
+        response = str(await fut)
+        
         artifact_event = create_artifact_event(
             task_id=task_id,
-            content=str(response),
+            content=response,
             context_id=context_id,
             last_chunk=True,
         )
+        if task_store is not None:
+            task_store.add_to_history(
+                task_id, praisonai_to_a2a_message(response, task_id=task_id)
+            )
+            task_store.add_artifact(task_id, artifact_event.artifact)
+            task_store.update_status(task_id, TaskState.COMPLETED)
         yield encoder.encode_task_artifact(artifact_event)
         
-        # Emit completed status
-        completed_event = create_status_event(
+        yield encoder.encode_task_status(create_status_event(
             task_id=task_id,
             state=TaskState.COMPLETED,
             context_id=context_id,
             final=True,
-        )
-        yield encoder.encode_task_status(completed_event)
-        
-    except Exception:
-        # Emit failed status
-        failed_event = create_status_event(
+        ))
+    
+    except asyncio.CancelledError:
+        # tasks/cancel marks the task CANCELLED before cancelling the call;
+        # report that to the client. Any other cancellation (e.g. client
+        # disconnect) is propagated.
+        task = task_store.get_task(task_id) if task_store is not None else None
+        if task is None or task.status.state != TaskState.CANCELLED:
+            if task_store is not None:
+                task_store.update_status(task_id, TaskState.CANCELLED)
+            raise
+        yield encoder.encode_task_status(create_status_event(
+            task_id=task_id,
+            state=TaskState.CANCELLED,
+            context_id=context_id,
+            final=True,
+        ))
+    
+    except Exception as e:
+        logger.error("A2A stream failed for task %s: %s", task_id, e, exc_info=True)
+        reason = praisonai_to_a2a_message(str(e), task_id=task_id)
+        if task_store is not None:
+            task_store.update_status(task_id, TaskState.FAILED, message=reason)
+        yield encoder.encode_task_status(create_status_event(
             task_id=task_id,
             state=TaskState.FAILED,
             context_id=context_id,
             final=True,
-        )
-        yield encoder.encode_task_status(failed_event)
+            message=reason,
+        ))
+    
+    except GeneratorExit:
+        # Stream closed early (client went away): leave a terminal state.
+        # No-op if the task already finished.
+        if task_store is not None:
+            task_store.update_status(task_id, TaskState.CANCELLED)
+        raise
+    
+    finally:
+        if running is not None and running.get(task_id) is fut:
+            running.pop(task_id, None)
+        if task_store is not None:
+            task_store._pinned.discard(task_id)
     
     # Emit done
     yield encoder.encode_done()

@@ -147,6 +147,9 @@ export function createRetryMiddleware(
     let lastError: Error | undefined;
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      if (context.signal?.aborted) {
+        throw context.signal.reason ?? new Error('The operation was aborted');
+      }
       try {
         return await next();
       } catch (error) {
@@ -212,7 +215,9 @@ export function createValidationMiddleware(): ToolMiddleware {
     const limits = context.limits;
     
     if (limits?.maxPayloadBytes) {
-      const size = JSON.stringify(input).length;
+      const serialized = JSON.stringify(input);
+      if (serialized === undefined) throw new TypeError('Input payload is not JSON serializable');
+      const size = new TextEncoder().encode(serialized).byteLength;
       if (size > limits.maxPayloadBytes) {
         throw new Error(`Input payload size (${size} bytes) exceeds limit (${limits.maxPayloadBytes} bytes)`);
       }
@@ -227,17 +232,16 @@ export function createValidationMiddleware(): ToolMiddleware {
  */
 export function composeMiddleware(...middlewares: ToolMiddleware[]): ToolMiddleware {
   return async (input, context, next) => {
-    let index = 0;
-    
-    const composedNext = async (): Promise<unknown> => {
+    // Each continuation keeps its own downstream position so retry middleware
+    // can invoke next() again without skipping the remaining layers.
+    const dispatch = async (index: number): Promise<unknown> => {
       if (index < middlewares.length) {
-        const mw = middlewares[index++];
-        return mw(input, context, composedNext);
+        return middlewares[index](input, context, () => dispatch(index + 1));
       }
       return next();
     };
 
-    return composedNext();
+    return dispatch(0);
   };
 }
 
