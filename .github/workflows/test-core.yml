@@ -619,6 +619,13 @@ jobs:
           tests/unit/test_async_bridge_invariants.py::test_saturated_orphan_pool_reports_capacity_not_timeout \
           -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
           -q --tb=line --disable-warnings --timeout=60
+    - name: Run isolated placement finalizer test
+      if: matrix.shard == 'agents-core'
+      working-directory: src/praisonai-agents
+      run: |
+        python -m pytest tests/unit/test_placement.py::test_a_dropped_agent_releases_its_sandbox \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings --timeout=60
     - name: Run isolated lazy import tests
       if: matrix.shard == 'agents-core'
       working-directory: src/praisonai-agents

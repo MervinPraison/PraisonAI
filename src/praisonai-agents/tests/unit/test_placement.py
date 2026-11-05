@@ -548,7 +548,7 @@ def test_two_concurrent_runs_of_one_team_each_get_their_own_scope():
     assert dict(team._tools_scope_depths.get()).get(id(team), 0) == 0
 
 
-def test_a_dropped_agent_releases_its_sandbox():
+def test_a_dropped_agent_releases_its_sandbox(monkeypatch):
     """Gateways clone an agent per request. An agent and its SharedCompute
     referenced each other, so a dropped agent was collected as a cycle and its
     sandbox was never shut down -- one orphaned container per request."""
@@ -556,6 +556,7 @@ def test_a_dropped_agent_releases_its_sandbox():
 
     from praisonaiagents.agent.tools_placement import ensure_tools_placed
 
+    provisioned, shut = _counting_provider(monkeypatch)
     agent = _agent("throwaway", tools_run_on="subprocess")
     ensure_tools_placed(agent)
     shared = agent._tools_sandbox
@@ -565,6 +566,7 @@ def test_a_dropped_agent_releases_its_sandbox():
     del agent
     gc.collect()
     assert shared.instance_id is None, "the sandbox outlived the agent that owned it"
+    assert shut == provisioned and len(shut) == 1
 
 
 @pytest.mark.parametrize("bad", ["dokcer", "sandbox", "ec2"])
