@@ -283,6 +283,12 @@ jobs:
               tests/unit/test_provider_matrix.py::test_modal_honours_a_non_default_image_from_the_registry
               tests/unit/test_provider_matrix.py::test_the_two_docker_implementations_agree_on_their_image
               tests/unit/test_provider_matrix.py::test_every_install_hint_names_an_extra_that_exists
+              tests/unit/test_provider_matrix.py::test_managed_ps_polls_places_from_the_registry_not_a_literal
+              tests/unit/test_provider_matrix.py::test_a_contributed_place_would_be_polled
+              tests/unit/test_provider_matrix.py::test_a_contributed_place_can_name_itself
+              tests/unit/test_provider_matrix.py::test_an_unknown_place_still_falls_back_to_its_name
+              tests/unit/test_provider_matrix.py::test_sandbox_backends_from_plugins_are_selectable
+              tests/unit/test_provider_matrix.py::test_a_plugin_sandbox_reaches_both_parameters
               tests/unit/test_placement.py::test_a_name_in_both_sets_is_valid_for_both_parameters
               tests/unit/test_placement.py::test_the_two_scopes_are_reported_differently
               tests/unit/test_placement.py::test_the_sandbox_only_backends_are_reachable
