@@ -412,3 +412,21 @@ def test_export_command_bad_target_exits(monkeypatch, tmp_path):
             quant=None,
             base_model=None,
         )
+
+
+def test_ollama_no_push_skips_push(monkeypatch, tmp_path):
+    """push=False stops after `ollama create`; nothing is sent to ollama.com."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(ollama_mod, "_check_ollama_disk", lambda *_a, **_k: None)
+    monkeypatch.setattr(ollama_mod, "ensure_ollama_running", lambda *_a, **_k: None)
+    calls = []
+
+    def _fake_run(cmd, *a, **k):
+        calls.append(cmd)
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(ollama_mod.subprocess, "run", _fake_run)
+    ollama_mod.create_and_push_ollama_model(
+        "my-model", "latest", "FROM ./model\n", push=False)
+    assert [c[1] for c in calls] == ["create"]
+    assert not any("push" in c for c in calls)
