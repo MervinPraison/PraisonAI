@@ -114,6 +114,18 @@ def test_join_denies_foreign_session_before_resume(monkeypatch):
     assert foreign.client_id == "other"
 
 
+def test_attach_refuses_confined_client_on_foreign_agent_session():
+    gw, _ = _gateway_with_client(["support"])
+    foreign = gw.create_session("finance", client_id="other", visibility="shared")
+    with pytest.raises(PermissionError):
+        gw.attach(foreign.session_id, "c1", role="member")
+    assert "c1" not in gw._client_sessions
+    assert "c1" not in gw._session_observers.get(foreign.session_id, {})
+    own = gw.create_session("support", client_id="other", visibility="shared")
+    gw.attach(own.session_id, "c1", role="member")
+    assert gw._client_sessions["c1"] == own.session_id
+
+
 def test_unconfined_operator_reaches_every_agent():
     gw, _ = _gateway_with_client(None)
     asyncio.run(gw._handle_client_message("c1", {"type": "hello", "agent_id": "finance"}))

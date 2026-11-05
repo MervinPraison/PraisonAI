@@ -6883,6 +6883,9 @@ class WebSocketGateway:
         role = SessionSharingRole(role)
         if role is SessionSharingRole.OWNER or client_id == session.client_id:
             raise ValueError("The owner is bound at session creation, not attached")
+        # Issue #6253: a confined operator must not join another agent's session.
+        if not self._client_may_reach_agent(client_id, session.agent_id):
+            raise PermissionError(f"Client {client_id} may not reach this session's agent")
         visibility = SessionVisibility(session._visibility)
         if visibility is SessionVisibility.PRIVATE:
             raise PermissionError(f"Session {session_id} is private")
