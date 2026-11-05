@@ -1,6 +1,6 @@
 import pytest
 
-from praisonaiagents.gateway import GatewayConfig
+from praisonaiagents.gateway import GatewayConfig, SessionConfig
 from praisonai_bot.gateway.server import WebSocketGateway
 
 
@@ -12,9 +12,13 @@ class FakeSocket:
         self.sent.append(data)
 
 
+def _gateway():
+    return WebSocketGateway(config=GatewayConfig(session_config=SessionConfig(persist=False)))
+
+
 @pytest.mark.asyncio
 async def test_join_cannot_resume_a_session_belonging_to_another_agent():
-    gateway = WebSocketGateway(config=GatewayConfig(auth_token="test-token"))
+    gateway = _gateway()
     gateway._agents.update({"support": object(), "finance": object()})
     session = gateway.create_session("finance", client_id="original")
     socket = FakeSocket()
@@ -31,7 +35,7 @@ async def test_join_cannot_resume_a_session_belonging_to_another_agent():
 
 @pytest.mark.asyncio
 async def test_join_can_resume_a_session_for_the_requested_agent():
-    gateway = WebSocketGateway(config=GatewayConfig(auth_token="test-token"))
+    gateway = _gateway()
     gateway._agents["support"] = object()
     session = gateway.create_session("support", client_id="original")
     gateway._clients["candidate"] = FakeSocket()
@@ -43,7 +47,7 @@ async def test_join_can_resume_a_session_for_the_requested_agent():
 
 @pytest.mark.asyncio
 async def test_join_rejects_rehydrated_session_for_another_agent(monkeypatch):
-    gateway = WebSocketGateway(config=GatewayConfig(auth_token="test-token"))
+    gateway = _gateway()
     gateway._agents["support"] = object()
     foreign = gateway.create_session("finance", client_id="original")
     gateway._sessions.pop(foreign.session_id)
@@ -62,7 +66,7 @@ async def test_join_rejects_rehydrated_session_for_another_agent(monkeypatch):
 async def test_join_uses_persisted_agent_id_when_snapshot_is_missing():
     from types import SimpleNamespace
 
-    gateway = WebSocketGateway(config=GatewayConfig(auth_token="test-token"))
+    gateway = _gateway()
     gateway._agents["support"] = object()
 
     class Store:
@@ -88,7 +92,7 @@ async def test_join_uses_persisted_agent_id_when_snapshot_is_missing():
 async def test_confined_operator_cannot_resume_record_without_agent_identity(frame):
     from types import SimpleNamespace
 
-    gateway = WebSocketGateway(config=GatewayConfig(auth_token="test-token"))
+    gateway = _gateway()
     gateway._agents["support"] = object()
 
     class Store:
@@ -114,7 +118,7 @@ async def test_confined_operator_cannot_resume_record_without_agent_identity(fra
 async def test_unconfined_operator_can_resume_record_without_agent_identity():
     from types import SimpleNamespace
 
-    gateway = WebSocketGateway(config=GatewayConfig(auth_token="test-token"))
+    gateway = _gateway()
     gateway._agents["support"] = object()
 
     class Store:
