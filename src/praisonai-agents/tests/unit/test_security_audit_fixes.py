@@ -48,6 +48,7 @@ def test_web_crawl_urllib_fallback_does_not_follow_redirect_to_internal(monkeypa
 
     from praisonaiagents.tools import web_crawl_tools as w
 
+    monkeypatch.delenv("ALLOW_LOCAL_CRAWL", raising=False)
     monkeypatch.setitem(sys.modules, "httpx", None)  # force the urllib fallback
     hits = []
 
@@ -73,8 +74,11 @@ def test_web_crawl_urllib_fallback_does_not_follow_redirect_to_internal(monkeypa
             pass
 
     redir = http.server.HTTPServer(("127.0.0.1", 0), Redir)
+    threads = []
     for server in (internal, redir):
-        threading.Thread(target=server.serve_forever, daemon=True).start()
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        threads.append(thread)
     start = f"http://127.0.0.1:{redir.server_port}/"
     real = w._is_safe_crawl_url
     monkeypatch.setattr(w, "_is_safe_crawl_url", lambda u: u == start or real(u))
@@ -83,6 +87,10 @@ def test_web_crawl_urllib_fallback_does_not_follow_redirect_to_internal(monkeypa
     finally:
         internal.shutdown()
         redir.shutdown()
+        internal.server_close()
+        redir.server_close()
+        for thread in threads:
+            thread.join()
 
     assert hits == []
     assert "internal-metadata" not in result[0]["content"]
