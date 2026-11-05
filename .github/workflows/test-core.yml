@@ -266,6 +266,7 @@ jobs:
               tests/unit/test_secrets.py
               tests/unit/test_gateway_server.py tests/unit/test_gateway_routing.py
               tests/unit/test_whatsapp_bot.py
+              tests/unit/test_mcp_loader.py
               tests/unit/test_import_side_effects.py::test_import_leaves_host_logging_warnings_and_env_untouched
               tests/unit/test_import_side_effects.py::test_launch_does_not_read_caller_source
               tests/unit/test_import_side_effects.py::test_execute_tool_async_tool_inside_running_loop
@@ -307,6 +308,8 @@ jobs:
               --deselect=tests/unit/test_security_outstanding_ghsas.py::test_web_crawl_blocks_private_ip
               --deselect=tests/unit/test_paths_wiring.py::TestPolicyConfigWiring::test_default_rules_dir_matches_paths
               --deselect=tests/unit/test_paths_wiring.py::TestSchedulerStoreWiring::test_default_dir_matches_paths
+              --deselect=tests/unit/test_mcp_loader.py::test_mcp_config_to_mcp_instance_import_fix
+              --deselect=tests/unit/test_mcp_loader.py::test_mcp_filter_parameters
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents
           - shard: train
