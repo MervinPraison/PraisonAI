@@ -243,6 +243,7 @@ jobs:
               tests/unit/test_streaming_integration.py tests/unit/test_tool_retry_integration.py
               tests/unit/test_push_policy.py
               tests/unit/test_profiling.py tests/unit/test_rate_limit_backoff_5755.py
+              tests/unit/test_rate_limiter.py tests/unit/test_compute_home.py
               tests/unit/test_handoff_unified.py tests/unit/test_identity_canonicalizer_protocol.py
               tests/unit/test_idle_timeout_breaker.py tests/unit/test_json_fence_cleanup.py
               tests/unit/test_kanban_protocol.py tests/unit/test_loop_detection.py
