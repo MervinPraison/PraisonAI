@@ -299,6 +299,10 @@ jobs:
               tests/unit/test_placement.py::test_repr_uses_the_same_word_you_typed
               tests/unit/test_placement.py::test_explain_names_the_tools_that_do_not_move
               tests/unit/test_placement.py::test_explain_says_nothing_about_local_tools_when_nothing_moves
+              tests/unit/test_robustness_issue_5870.py::test_allowlist_failed_save_keeps_previous_file
+              tests/unit/test_robustness_issue_5870.py::test_allowlist_load_quarantines_corrupt_file
+              tests/unit/test_robustness_issue_5870.py::test_git_fetch_timeout_without_cache_returns_empty
+              tests/unit/test_robustness_issue_5870.py::test_git_fetch_timeout_falls_back_to_cache
               tests/unit/test_output_file_containment.py::test_task_output_file_traversal_blocked
               tests/unit/test_output_file_containment.py::test_task_output_file_inside_root
               tests/unit/test_output_file_containment.py::test_task_output_file_respects_create_directory
