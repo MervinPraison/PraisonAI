@@ -166,3 +166,60 @@ def test_start_with_config_keeps_python_policy_without_yaml_policy(monkeypatch):
     with pytest.raises(_StopStartup):
         asyncio.run(gw.start_with_config("gateway.yaml"))
     assert gw.config.auth_scopes == POLICY
+
+
+def _start(gw, cfg, monkeypatch):
+    cfg["gateway"].setdefault("session", {"persist": False})
+    monkeypatch.setattr(gw, "load_gateway_config", lambda path: cfg)
+    monkeypatch.setattr(gw, "_session_store_explicit", False, raising=False)
+    monkeypatch.setattr(gw, "_build_session_store", lambda *a, **k: (_ for _ in ()).throw(_StopStartup()))
+    asyncio.run(gw.start_with_config("gateway.yaml"))
+
+
+def test_start_with_config_expands_env_placeholder_keys(monkeypatch):
+    # The loader resolves ${VAR} in values only; auth_scopes keys must be
+    # expanded too, and the literal placeholder must not be a grant key.
+    monkeypatch.setenv("SUPPORT_TOKEN", "real-support-token")
+    gw = WebSocketGateway(config=GatewayConfig(auth_token="tmp"))
+    cfg = {"gateway": {"auth_scopes": {
+        "${SUPPORT_TOKEN}": {"scopes": ["read"], "agents": ["support"]},
+        "${UNSET_TOKEN_6253}": ["read", "write"],
+    }}}
+    with pytest.raises(_StopStartup):
+        _start(gw, cfg, monkeypatch)
+    assert gw.config.auth_scopes == {
+        "real-support-token": {"scopes": ["read"], "agents": ["support"]},
+    }
+    assert gw.config.resolve_agents("real-support-token") == ["support"]
+    assert gw.config.resolve_scopes("${SUPPORT_TOKEN}") == []
+    assert gw.config.resolve_scopes("") == []
+
+
+def test_start_with_config_refuses_policy_with_only_unset_tokens(monkeypatch):
+    # An all-empty policy would mean "no policy" (fail open), so startup stops.
+    monkeypatch.delenv("UNSET_TOKEN_6253", raising=False)
+    gw = WebSocketGateway(config=GatewayConfig(auth_token="tmp"))
+    cfg = {"gateway": {"auth_scopes": {
+        "${UNSET_TOKEN_6253}": {"scopes": ["read"], "agents": ["support"]},
+    }}}
+    with pytest.raises(ValueError, match="resolved to empty"):
+        _start(gw, cfg, monkeypatch)
+    # Tokens form: the loader already turned the unset value into "".
+    cfg = {"gateway": {"auth": {"tokens": [
+        {"token": "", "scopes": ["read"], "agents": ["support"]},
+    ]}}}
+    with pytest.raises(ValueError, match="resolved to empty"):
+        _start(gw, cfg, monkeypatch)
+
+
+def test_start_with_config_tolerates_core_without_policy_parser(monkeypatch):
+    # An older praisonaiagents lacks _parse_auth_scopes / resolve_agents; the
+    # gateway must still start (pre-#6253 behaviour) instead of ImportError.
+    import praisonaiagents.gateway.config as core_cfg
+
+    monkeypatch.delattr(core_cfg, "_parse_auth_scopes")
+    gw = WebSocketGateway(config=GatewayConfig(auth_token="tmp", auth_scopes=POLICY))
+    cfg = {"gateway": {"auth_scopes": {"other": ["read"]}}}
+    with pytest.raises(_StopStartup):
+        _start(gw, cfg, monkeypatch)
+    assert gw.config.auth_scopes == POLICY

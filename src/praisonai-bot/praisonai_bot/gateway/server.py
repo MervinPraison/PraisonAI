@@ -2073,7 +2073,10 @@ class WebSocketGateway:
             self._register_client_conn(client_id, websocket)
             # Resolve operator scopes for this connection (all scopes if no policy).
             self._client_scopes[client_id] = self.config.resolve_scopes(operator_token)
-            self._client_agents[client_id] = self.config.resolve_agents(operator_token)
+            _resolve_agents = getattr(self.config, "resolve_agents", None)  # older core: unconfined
+            self._client_agents[client_id] = (
+                _resolve_agents(operator_token) if _resolve_agents else None
+            )
             # Issue #2661: stamp the session with the active secret's generation
             # so a later rotation can force-close it (instant revocation).
             self._client_auth_generation[client_id] = self._auth_generation()
@@ -12107,10 +12110,35 @@ class WebSocketGateway:
         # Issue #6253: apply the YAML operator policy (scopes and agent
         # confinement). Only overwrite when the YAML declares one, so a policy
         # a Python caller set on ``GatewayConfig`` survives.
-        from praisonaiagents.gateway.config import _parse_auth_scopes
-        _yaml_scopes = _parse_auth_scopes(gw_cfg)
+        try:
+            from praisonaiagents.gateway.config import _parse_auth_scopes
+        except ImportError:  # older core without per-agent grants
+            _parse_auth_scopes = None
+            logger.warning(
+                "Installed praisonaiagents cannot parse gateway operator "
+                "policy; upgrade it to enforce auth_scopes agent confinement."
+            )
+        _yaml_scopes = _parse_auth_scopes(gw_cfg) if _parse_auth_scopes else None
         if _yaml_scopes is not None:
-            self.config.auth_scopes = _yaml_scopes
+            _auth = gw_cfg.get("auth")
+            _tokens_form = isinstance(_auth, dict) and isinstance(_auth.get("tokens"), list)
+            # ``load_gateway_config`` resolves ``${VAR}`` in values only, so
+            # ``auth_scopes`` *keys* still hold placeholders here. An unset
+            # var resolves to "" and that entry is dropped (it matches no one).
+            _policy = {}
+            for _tok, _grant in _yaml_scopes.items():
+                _tok = _tok if _tokens_form else self._substitute_env_vars(_tok)
+                if _tok:
+                    _policy[_tok] = _grant
+            _declared = _auth.get("tokens") if _tokens_form else gw_cfg.get("auth_scopes")
+            if _declared and not _policy:
+                # An empty policy means "no policy" (every scope, every agent),
+                # so refuse to start rather than fail open.
+                raise ValueError(
+                    "gateway operator policy: every token resolved to empty "
+                    "(unset ${VAR}?); refusing to start without it"
+                )
+            self.config.auth_scopes = _policy
         # Issue #3593: the multi-bot CLI builds this gateway with a *default*
         # session config, so ``__init__`` already picked a store before this
         # YAML loaded. Re-read the ``session:`` block here and re-select the
