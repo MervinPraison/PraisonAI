@@ -175,6 +175,13 @@ jobs:
               tests/unit/test_gateway_lifecycle_record.py tests/unit/test_gateway_loop_watchdog.py
               tests/unit/test_gateway_method_scopes.py tests/unit/test_gateway_pressure_eviction.py
               tests/unit/test_gateway_restart_loop_guard.py
+              tests/unit/test_gateway_scope_lockstep.py tests/unit/test_gateway_session_observer.py
+              tests/unit/test_gateway_session_projection.py tests/unit/test_gateway_spend_budget_policy.py
+              tests/unit/test_gateway_thaw_policy.py tests/unit/test_gateway_trace_hook.py
+              tests/unit/test_gateway_ts_event_type_lockstep.py tests/unit/test_gateway_turn_executor.py
+              tests/unit/test_gateway_turn_lock.py tests/unit/test_handoff_context_policy.py
+              tests/unit/test_handoff_filters.py tests/unit/test_handoff_lazy_import.py
+              tests/unit/test_handoff_runtime_resolution.py tests/unit/test_handoff_tool_policy.py
             # Both tests previously deselected here now pass in combination.
             # test_lazy_litellm_import was looking the loader module up by
             # name and could get a different object than the one get_litellm()
