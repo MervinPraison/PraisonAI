@@ -375,6 +375,7 @@ jobs:
               tests/unit/test_placement.py::test_a_backend_holding_a_local_compute_object_is_not_overstated
               tests/unit/test_placement.py::test_a_place_can_be_contributed_by_another_package
               tests/unit/test_placement.py::test_a_broken_plugin_cannot_break_places_that_do_not_name_it
+              tests/unit/test_placement.py::test_two_concurrent_runs_of_one_team_each_get_their_own_scope
               tests/unit/test_sandbox_adapter.py::test_sandbox_only_backends_are_selectable_as_places
               tests/unit/test_sandbox_adapter.py::test_the_registry_is_the_union_of_both_stacks
               tests/unit/test_sandbox_adapter.py::test_a_sandbox_only_name_resolves_to_the_adapter
