@@ -437,8 +437,6 @@ jobs:
               --deselect=tests/unit/test_security_outstanding_ghsas.py::test_web_crawl_blocks_private_ip
               --deselect=tests/unit/test_paths_wiring.py::TestPolicyConfigWiring::test_default_rules_dir_matches_paths
               --deselect=tests/unit/test_paths_wiring.py::TestSchedulerStoreWiring::test_default_dir_matches_paths
-              --deselect=tests/unit/test_mcp_loader.py::test_mcp_config_to_mcp_instance_import_fix
-              --deselect=tests/unit/test_mcp_loader.py::test_mcp_filter_parameters
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents
           - shard: train
