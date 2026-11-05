@@ -653,6 +653,19 @@ def _counting_provider(monkeypatch):
     return provisioned, shut
 
 
+def _exercise_fake_team_tool(monkeypatch):
+    """Make each model turn call a tool backed by the counting fake."""
+    from praisonaiagents.agent.agent import Agent as _A
+
+    def chat(self, prompt, *args, **kwargs):
+        tools = kwargs.get("tools") or self.tools
+        next(tool for tool in tools if tool.__name__ == "execute_command")("true")
+        return "done"
+
+    monkeypatch.setattr(_A, "chat", chat)
+    monkeypatch.setattr(Task, "execute_callback_sync", lambda *a, **k: None)
+
+
 @pytest.mark.parametrize("drive", [
     pytest.param(lambda a: a.chat("hi"), id="chat"),
     pytest.param(lambda a: asyncio.run(a.achat("hi")), id="achat"),
@@ -682,13 +695,10 @@ def test_a_team_run_provisions_exactly_one_sandbox(monkeypatch):
     """Reverting the AgentTeam.start() provisioning changed nothing in the
     suite, because the old test only poked the private _needs_tools_scope()."""
     provisioned, shut = _counting_provider(monkeypatch)
+    _exercise_fake_team_tool(monkeypatch)
     team = _team(tools_run_on="subprocess")
     team.start()
-    # At most one, not exactly one. SharedCompute provisions LAZILY, so a run
-    # that never touches a tool correctly provisions nothing -- an exact count
-    # asserts a timing detail rather than the guarantee. The regression this
-    # guards (a sandbox per call) shows up as more than one.
-    assert len(provisioned) <= 1, f"expected one sandbox at most, got {provisioned}"
+    assert len(provisioned) == 1, f"expected one sandbox, got {provisioned}"
     assert shut == provisioned, "the sandbox must be torn down with the run"
 
 
@@ -704,14 +714,14 @@ def test_an_async_team_run_provisions_its_sandbox(monkeypatch):
 def test_a_batch_shares_one_sandbox_across_every_row(monkeypatch):
     """start_for_each() provisioned one per row: a 50-row batch paid for 50,
     and no row could see what an earlier row wrote."""
-    provisioned, _ = _counting_provider(monkeypatch)
+    provisioned, shut = _counting_provider(monkeypatch)
+    _exercise_fake_team_tool(monkeypatch)
     team = _team(tools_run_on="subprocess")
     team.start_for_each([{"i": 1}, {"i": 2}, {"i": 3}])
-    # Three rows must not mean three sandboxes. Lazily, it may mean none --
-    # what must never happen is one per row, which is what this caught.
-    assert len(provisioned) <= 1, (
+    assert len(provisioned) == 1, (
         f"a 3-row batch provisioned {len(provisioned)} sandboxes: {provisioned}"
     )
+    assert shut == provisioned
 
 
 def test_a_clone_does_not_inherit_the_source_agents_sandbox(monkeypatch):
