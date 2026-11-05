@@ -31,6 +31,17 @@ from praisonaiagents.secrets import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _isolate_secret_registries(monkeypatch):
+    """Keep test secrets and resolvers out of other tests in the worker."""
+    import praisonaiagents.secrets as secrets
+
+    monkeypatch.setattr(secrets, "_resolvers", {})
+    monkeypatch.setattr(secrets, "_redaction_values", set())
+    monkeypatch.setattr(secrets, "_sentinel_to_secret", {})
+    monkeypatch.setattr(secrets, "_secret_to_sentinel", {})
+
+
 def test_secret_ref_validates_source():
     with pytest.raises(ValueError):
         SecretRef(source="bogus", id="x")
