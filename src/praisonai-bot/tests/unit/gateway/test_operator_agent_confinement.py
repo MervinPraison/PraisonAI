@@ -225,13 +225,28 @@ def test_start_with_config_refuses_policy_with_only_unset_tokens(monkeypatch):
 
 
 def test_start_with_config_tolerates_core_without_policy_parser(monkeypatch):
-    # An older praisonaiagents lacks _parse_auth_scopes / resolve_agents; the
-    # gateway must still start (pre-#6253 behaviour) instead of ImportError.
+    # An older praisonaiagents lacks _parse_auth_scopes / resolve_agents; with
+    # no YAML policy the gateway must still start instead of ImportError.
     import praisonaiagents.gateway.config as core_cfg
 
     monkeypatch.delattr(core_cfg, "_parse_auth_scopes")
     gw = WebSocketGateway(config=GatewayConfig(auth_token="tmp", auth_scopes=POLICY))
-    cfg = {"gateway": {"auth_scopes": {"other": ["read"]}}}
     with pytest.raises(_StopStartup):
-        _start(gw, cfg, monkeypatch)
+        _start(gw, {"gateway": {}}, monkeypatch)
     assert gw.config.auth_scopes == POLICY
+
+
+@pytest.mark.parametrize("gw_yaml", [
+    {"auth_scopes": {"support-token": {"scopes": ["read"], "agents": ["support"]}}},
+    {"auth": {"tokens": [{"token": "t", "scopes": ["read"], "agents": ["support"]}]}},
+])
+def test_start_with_config_refuses_unenforceable_policy_on_older_core(gw_yaml, monkeypatch):
+    # A declared policy that the installed core cannot parse must fail closed,
+    # not start with every operator unconfined.
+    import praisonaiagents.gateway.config as core_cfg
+
+    monkeypatch.delattr(core_cfg, "_parse_auth_scopes")
+    gw = WebSocketGateway(config=GatewayConfig(auth_token="tmp"))
+    with pytest.raises(ValueError, match="cannot enforce"):
+        _start(gw, {"gateway": dict(gw_yaml)}, monkeypatch)
+    assert not gw.config.auth_scopes

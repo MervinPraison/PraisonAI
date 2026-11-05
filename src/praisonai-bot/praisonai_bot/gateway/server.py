@@ -12114,10 +12114,14 @@ class WebSocketGateway:
             from praisonaiagents.gateway.config import _parse_auth_scopes
         except ImportError:  # older core without per-agent grants
             _parse_auth_scopes = None
-            logger.warning(
-                "Installed praisonaiagents cannot parse gateway operator "
-                "policy; upgrade it to enforce auth_scopes agent confinement."
-            )
+            _a = gw_cfg.get("auth")
+            if gw_cfg.get("auth_scopes") or (isinstance(_a, dict) and _a.get("tokens")):
+                # A declared policy that cannot be enforced must not start
+                # with every operator unconfined (fail closed).
+                raise ValueError(
+                    "gateway operator policy is declared but the installed "
+                    "praisonaiagents cannot enforce it; upgrade praisonaiagents"
+                )
         _yaml_scopes = _parse_auth_scopes(gw_cfg) if _parse_auth_scopes else None
         if _yaml_scopes is not None:
             _auth = gw_cfg.get("auth")
