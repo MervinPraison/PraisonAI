@@ -64,3 +64,28 @@ async def test_retry_accepted_after_unrun_burst():
     assert not store.reserve("delivery-1")  # still pending: deduped
     await c.aclose()
     assert store.reserve("delivery-1")  # sender retry accepted
+
+
+async def test_replay_deduped_after_successful_burst(tmp_path):
+    """A replay of a delivery whose burst ran successfully stays deduplicated."""
+    from praisonai_bot.bots._idempotency import SqliteIdempotencyStore
+
+    store = SqliteIdempotencyStore(str(tmp_path / "i.sqlite"))
+
+    def settle(keys, ok):
+        for k in keys:
+            store.record(k) if ok else store.release(k)
+
+    runs = []
+
+    async def dispatch(hook, payload, count):
+        runs.append(count)
+        return True
+
+    c = HookCoalescer(dispatch, settle=settle)
+    assert store.reserve("delivery-1")
+    c.submit("k", _hook(), {"pr": 1}, idempotency_key="delivery-1")
+    await asyncio.sleep(0.3)
+    assert runs == [1]
+    assert not store.reserve("delivery-1")  # replay after success: deduped
+    await c.aclose()
