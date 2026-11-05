@@ -16,7 +16,6 @@ Covers issue #5588:
 import ast
 import threading
 import time
-import tokenize
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -80,8 +79,7 @@ def test_no_handrolled_async_bridges_outside_helper():
     for path in root.rglob("*.py"):
         if path in allowed:
             continue
-        with tokenize.open(path) as source:
-            tree = ast.parse(source.read(), filename=str(path))
+        tree = ast.parse(path.read_bytes(), filename=str(path))
         for func in ast.walk(tree):
             if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
@@ -93,6 +91,15 @@ def test_no_handrolled_async_bridges_outside_helper():
         "utils.async_bridge.run_coroutine_from_any_context): "
         + ", ".join(offenders)
     )
+
+
+def test_scan_accepts_python_source_encoding_cookie(tmp_path, monkeypatch):
+    """Scan the same Latin-1 source that Python's parser accepts."""
+    (tmp_path / "example.py").write_bytes(
+        b"# coding: latin-1; caf\xe9\nmessage = 'caf\xe9'\n"
+    )
+    monkeypatch.setitem(globals(), "_package_root", lambda: tmp_path)
+    test_no_handrolled_async_bridges_outside_helper()
 
 
 def test_tool_timeout_uses_daemon_worker_and_does_not_leak():
