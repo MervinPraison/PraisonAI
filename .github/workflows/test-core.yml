@@ -505,6 +505,15 @@ jobs:
         else
           python -m pytest ${{ matrix.paths }} "${PYTEST_ARGS[@]}" ${{ matrix.extra_ignore }}
         fi
+    - name: Run isolated thread safety tests
+      if: matrix.shard == 'agents-core'
+      working-directory: src/praisonai-agents
+      run: |
+        python -m pytest \
+          tests/unit/test_thread_safety.py::TestLiteAgentThreadSafety \
+          tests/unit/test_thread_safety.py::TestAgentThreadSafety \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings --timeout=60
 
   test-core-integration:
     name: test-core-integration
