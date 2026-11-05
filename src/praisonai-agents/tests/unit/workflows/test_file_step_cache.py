@@ -82,3 +82,38 @@ def test_get_returns_a_copy_and_clear_removes_file(tmp_path):
     assert json.loads(path.read_text())["k"]["output"] == "o"
     cache.clear()
     assert len(cache) == 0 and not path.exists()
+
+
+def test_edited_handler_with_same_name_reruns(tmp_path):
+    path = str(tmp_path / "run.json")
+    calls = []
+
+    def a(ctx):
+        calls.append("v1")
+        return "v1"
+
+    AgentFlow(steps=[a], cache=FileStepCache(path)).run("x", verbose=False)
+
+    def a(ctx):  # noqa: F811 - same name, edited body
+        calls.append("v2")
+        return "v2"
+
+    result = AgentFlow(steps=[a], cache=FileStepCache(path)).run("x", verbose=False)
+    assert calls == ["v1", "v2"] and result["output"] == "v2"
+
+
+@pytest.mark.parametrize("value", [{"variables": {"lookup": {1: "one"}}}, {"output": ("a", "b")}])
+def test_value_that_changes_shape_in_json_is_rejected(tmp_path, value):
+    cache = FileStepCache(str(tmp_path / "run.json"))
+    with pytest.raises(TypeError):
+        cache.set("k", value)
+    assert cache.get("k") is None
+
+
+def test_two_writers_on_one_path_keep_both_entries(tmp_path):
+    path = str(tmp_path / "run.json")
+    a, b = FileStepCache(path), FileStepCache(path)
+    a.set("a", {"output": "1"})
+    b.set("b", {"output": "2"})
+    reopened = FileStepCache(path)
+    assert reopened.get("a") == {"output": "1"} and reopened.get("b") == {"output": "2"}

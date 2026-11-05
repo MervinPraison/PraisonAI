@@ -157,11 +157,12 @@ class TestCorrectnessOnAHit:
 
     def test_legacy_cache_entry_restores_output_variable_and_status(self):
         cache = InMemoryStepCache()
-        cache.set(make_step_key("upstream", None, "same", {"input": "same"}), {
+        calls = []
+        upstream = _counting_step("upstream", calls)
+        cache.set(make_step_key(upstream, None, "same", {"input": "same"}), {
             "output": "cached", "variables": {"upstream_output": "cached"},
         })
-        calls = []
-        flow = AgentFlow(steps=[_counting_step("upstream", calls)], cache=cache)
+        flow = AgentFlow(steps=[upstream], cache=cache)
         result = flow.run("same", verbose=False)
         assert calls == []
         assert result["output"] == "cached"

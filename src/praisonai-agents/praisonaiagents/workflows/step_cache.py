@@ -56,6 +56,23 @@ def _identify(step: Any) -> str:
     return f"{type(step).__name__}:{id(step)}"
 
 
+def _code_fingerprint(code: Any) -> str:
+    # Bytecode plus constants, recursing into nested code objects (whose repr
+    # carries a memory address that would differ in every process).
+    parts = [code.co_code.hex(), repr(code.co_names)]
+    for const in code.co_consts:
+        parts.append(_code_fingerprint(const) if hasattr(const, "co_code") else repr(const))
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+def _definition(step: Any) -> Optional[str]:
+    # A handler edited but kept under the same name must not be served its old
+    # result from a durable cache, so the handler's code is part of the key.
+    fn = step if hasattr(step, "__code__") else getattr(step, "handler", None)
+    code = getattr(fn, "__code__", None)
+    return _code_fingerprint(code) if code is not None else None
+
+
 def make_step_key(step: Any, previous_output: Any, input_text: str, variables: Dict[str, Any]) -> str:
     """A stable key for (this step, these inputs).
 
@@ -65,6 +82,7 @@ def make_step_key(step: Any, previous_output: Any, input_text: str, variables: D
     """
     payload = {
         "step": _identify(step),
+        "definition": _definition(step),
         "previous": previous_output if isinstance(previous_output, str) else str(previous_output),
         "input": input_text,
         # Tag each variable with its type so True and "True" (or 1 and "1") do
@@ -176,15 +194,18 @@ class FileStepCache:
         flow.run("input")   # steps 1-3 are served from run.json; step 4 runs
 
     Resume is content-addressed, not index-based: each key covers the step's
-    identity and inputs (and the previous step's output), so editing a step or
-    changing the input misses the cache from that step on and it runs again.
-    Nothing stale is served onto a changed definition. Steps without a stable
-    name (anonymous objects) never hit across processes, so they simply re-run.
+    name, its handler's code, the input, the previous step's output and the
+    variables, so renaming a step, editing a handler or changing the input
+    misses the cache from that step on and it runs again. An agent step is
+    keyed by name only: after changing an agent's instructions, model or tools
+    under the same name, call ``clear()`` (or delete the file) to re-run it.
+    Steps without a stable name never hit across processes; they re-run.
 
-    Every ``set`` is written atomically, so a crash mid-write keeps the last
-    good file. Values must be JSON-serialisable; one that is not is rejected
-    (the workflow logs a warning and carries on) rather than stored lossily.
-    Delete the file, or call ``clear()``, to start fresh.
+    Every ``set`` is a locked read-modify-write of the file, so several caches
+    (or processes) on one path add to it rather than erase each other's
+    entries, and a crash mid-write keeps the last good file. A value that JSON
+    cannot store unchanged (an object, int dict keys, a tuple) is rejected (the
+    workflow logs a warning and carries on) rather than stored lossily.
     """
 
     def __init__(self, path: str):
@@ -207,14 +228,21 @@ class FileStepCache:
         # Round-trip through JSON first so an unserialisable value raises here
         # and never reaches memory or disk in a form a later run cannot read.
         snapshot = json.loads(json.dumps(value))
-        from ..utils.atomic_io import atomic_write_json
+        if snapshot != value:
+            # e.g. {1: "x"} -> {"1": "x"} or (a, b) -> [a, b]: a resumed run
+            # would see different data than the live run did.
+            raise TypeError("Step cache value does not survive a JSON round trip unchanged.")
+        from ..utils.atomic_io import update_json
+
+        def _add(entries: Any) -> Dict[str, Any]:
+            if not isinstance(entries, dict):
+                raise ValueError(f"{self.path} is not a step cache file.")
+            entries[key] = snapshot
+            return dict(entries)
 
         with self._lock:
-            entries = dict(self._entries)
-            entries[key] = snapshot
             os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
-            atomic_write_json(self.path, entries)
-            self._entries = entries
+            self._entries = update_json(self.path, _add)
 
     def clear(self) -> None:
         with self._lock:
