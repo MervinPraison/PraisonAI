@@ -260,6 +260,7 @@ jobs:
               tests/unit/test_paths.py
               tests/unit/test_advanced_features.py
               tests/unit/test_computer_tools.py
+              tests/unit/test_security_outstanding_ghsas.py
               tests/unit/test_output_file_containment.py::test_task_output_file_traversal_blocked
               tests/unit/test_output_file_containment.py::test_task_output_file_inside_root
               tests/unit/test_output_file_containment.py::test_task_output_file_respects_create_directory
@@ -281,7 +282,7 @@ jobs:
             # directory and asserted every discovered dir was named "skills",
             # which is false once a remote skill has ever been cached; it runs
             # against a temp HOME and asserts the paths module is used.
-            # Skip strict timings and unisolated shell/desktop probes here.
+            # Skip strict timings and unisolated shell, desktop, or network probes.
             extra_ignore: >-
               --deselect=tests/unit/test_profiling.py::TestZeroOverhead::test_record_timing_overhead
               --deselect=tests/unit/test_profiling.py::TestZeroOverhead::test_phase_context_overhead
@@ -294,6 +295,8 @@ jobs:
               --deselect=tests/unit/test_advanced_features.py::TestSafeBashExecution::test_safe_execute
               --deselect=tests/unit/test_computer_tools.py::TestApprovalGate::test_control_denied_without_approval
               --deselect=tests/unit/test_computer_tools.py::TestApprovalGate::test_approval_receives_action_description
+              --deselect=tests/unit/test_security_outstanding_ghsas.py::test_workflow_yaml_approve_gated_without_allow_dangerous
+              --deselect=tests/unit/test_security_outstanding_ghsas.py::test_web_crawl_blocks_private_ip
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents
           - shard: train
