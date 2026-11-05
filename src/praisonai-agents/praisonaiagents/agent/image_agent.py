@@ -6,6 +6,7 @@ including support for different image models, sizes, and quality settings.
 import asyncio
 from typing import Optional, Any, Dict, Union, List
 from ..agent.agent import Agent
+from ._image_result import ImageResult
 from pydantic import BaseModel, Field
 import logging
 from praisonaiagents._logging import get_logger
@@ -153,7 +154,7 @@ class ImageAgent(Agent):
         model_info = self.llm_model
         return model_info.model if hasattr(model_info, 'model') else str(model_info)
 
-    def generate_image(self, prompt: str, **kwargs) -> Dict[str, Any]:
+    def generate_image(self, prompt: str, **kwargs) -> ImageResult:
         """Generate an image based on the provided prompt."""
         # Merge default config with any provided kwargs
         config = self.image_config.dict(exclude_none=True)
@@ -208,27 +209,27 @@ class ImageAgent(Agent):
                 
                 # Mark task as complete
                 progress.update(task, completed=True)
-                return response
+                return ImageResult(response)
             except Exception as e:
                 error_msg = f"Error generating image: {str(e)}"
                 if self.verbose:
                     self.console.print(f"[red]{error_msg}[/red]")
                 logging.error(error_msg)
                 raise
-    async def agenerate_image(self, prompt: str, **kwargs) -> Dict[str, Any]:
+    async def agenerate_image(self, prompt: str, **kwargs) -> ImageResult:
         """Offload the synchronous generation path to keep the event loop responsive."""
         return await asyncio.to_thread(self.generate_image, prompt, **kwargs)
     
     # Aliases for consistency with other agents
-    def generate(self, prompt: str, **kwargs) -> Dict[str, Any]:
+    def generate(self, prompt: str, **kwargs) -> ImageResult:
         """Alias for generate_image() - for consistency with VideoAgent/AudioAgent."""
         return self.generate_image(prompt, **kwargs)
     
-    async def agenerate(self, prompt: str, **kwargs) -> Dict[str, Any]:
+    async def agenerate(self, prompt: str, **kwargs) -> ImageResult:
         """Async alias for generate_image()."""
         return await self.agenerate_image(prompt, **kwargs)
 
-    def chat(self, prompt: str, **kwargs) -> Dict[str, Any]:
+    def chat(self, prompt: str, **kwargs) -> Union[ImageResult, Dict[str, Any]]:
         """Generate an image from the prompt."""
         try:
             result = self.generate_image(prompt, **kwargs)
@@ -249,7 +250,7 @@ class ImageAgent(Agent):
         output_pydantic: Optional[Any] = None,
         reasoning_steps: bool = False,
         **kwargs
-    ) -> Union[str, Dict[str, Any]]:
+    ) -> Union[ImageResult, Dict[str, Any]]:
         """Async chat method for image generation."""
         try:
             image_result = await self.agenerate_image(prompt, **kwargs)
@@ -270,7 +271,7 @@ class ImageAgent(Agent):
         n: int = 1,
         size: Optional[str] = None,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> ImageResult:
         """
         Edit an existing image with a prompt.
         
@@ -288,7 +289,7 @@ class ImageAgent(Agent):
         Example:
             ```python
             agent = ImageAgent(llm="openai/gpt-image-2.5-flare")
-            result = agent.edit("photo.png", "Add a sunset in the background")
+            agent.edit("photo.png", "Add a sunset in the background").save("out.png")
             ```
         """
         try:
@@ -318,7 +319,7 @@ class ImageAgent(Agent):
             if self.verbose:
                 self.console.print(f"[cyan]Editing image with {model_name}...[/cyan]")
             
-            response = litellm.image_edit(**config)
+            response = ImageResult(litellm.image_edit(**config))
             
             if self.verbose:
                 self.console.print(f"[green]✓ Image edited successfully[/green]")
@@ -338,7 +339,7 @@ class ImageAgent(Agent):
         n: int = 1,
         size: Optional[str] = None,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> ImageResult:
         """Offload the synchronous editing path to keep the event loop responsive."""
         return await asyncio.to_thread(self.edit, image, prompt, mask, n, size, **kwargs)
 
@@ -348,7 +349,7 @@ class ImageAgent(Agent):
         n: int = 1,
         size: Optional[str] = None,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> ImageResult:
         """
         Generate variations of an existing image.
         
@@ -390,7 +391,7 @@ class ImageAgent(Agent):
             if self.verbose:
                 self.console.print(f"[cyan]Generating variations with {model_name}...[/cyan]")
             
-            response = litellm.image_variation(**config)
+            response = ImageResult(litellm.image_variation(**config))
             
             if self.verbose:
                 self.console.print(f"[green]✓ Variations generated successfully[/green]")
@@ -408,6 +409,6 @@ class ImageAgent(Agent):
         n: int = 1,
         size: Optional[str] = None,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> ImageResult:
         """Offload the synchronous variation path to keep the event loop responsive."""
         return await asyncio.to_thread(self.variation, image, n, size, **kwargs)
