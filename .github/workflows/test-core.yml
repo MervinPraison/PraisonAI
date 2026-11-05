@@ -236,6 +236,10 @@ jobs:
               tests/unit/test_process_timeout.py tests/unit/test_push_client.py tests/unit/test_run_lock.py
               tests/unit/test_allowed_tools_filter.py tests/unit/test_approval_auto.py
               tests/unit/test_approval_protocol.py tests/unit/test_toolsets.py
+              tests/unit/test_schedule_integration.py tests/unit/test_schedule_lifecycle_hooks.py
+              tests/unit/test_schedule_timezone.py tests/unit/test_schedule_tools.py
+              tests/unit/test_scheduler_provider.py tests/unit/test_autonomy_dry_refactor.py
+              tests/unit/test_heartbeat.py
               tests/unit/test_handoff_unified.py tests/unit/test_identity_canonicalizer_protocol.py
               tests/unit/test_idle_timeout_breaker.py tests/unit/test_json_fence_cleanup.py
               tests/unit/test_kanban_protocol.py tests/unit/test_loop_detection.py
