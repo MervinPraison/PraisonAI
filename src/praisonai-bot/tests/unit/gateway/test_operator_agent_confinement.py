@@ -115,3 +115,54 @@ def test_broadcast_withholds_other_agents_events():
 
     asyncio.run(_run())
     assert [f.get("source") for f in ws.sent] == ["support", "system"]
+
+
+def test_misspelled_grant_key_fails_closed():
+    # A typo must not silently drop the confinement (it would reach every agent).
+    from praisonaiagents.gateway.config import (
+        ConfigValidationError, MultiChannelGatewayConfig,
+    )
+    from praisonai_bot.bots._config_schema import GatewayServerSchema
+
+    bad = {"tok": {"scopes": ["read"], "agnts": ["support"]}}
+    with pytest.raises(ConfigValidationError):
+        MultiChannelGatewayConfig.from_dict({"gateway": {"auth_scopes": bad}})
+    with pytest.raises(Exception):
+        GatewayServerSchema(auth_scopes=bad)
+    GatewayServerSchema(auth_scopes=POLICY)  # valid shapes still accepted
+
+
+class _StopStartup(Exception):
+    pass
+
+
+@pytest.mark.parametrize("gw_yaml", [
+    {"auth_scopes": {"tok_support": {"scopes": ["read"], "agents": ["support"]}}},
+    {"auth": {"tokens": [{"token": "tok_support", "scopes": ["read"], "agents": ["support"]}]}},
+])
+def test_start_with_config_applies_yaml_policy(gw_yaml, monkeypatch):
+    # The YAML startup path must stamp the policy onto self.config, otherwise
+    # resolve_agents() returns None and confinement is silently off.
+    gw = WebSocketGateway(config=GatewayConfig(auth_token="tmp"))
+    cfg = {"gateway": dict(gw_yaml, session={"persist": False})}
+    monkeypatch.setattr(gw, "load_gateway_config", lambda path: cfg)
+    monkeypatch.setattr(gw, "_session_store_explicit", False, raising=False)
+
+    def _stop(*a, **k):
+        raise _StopStartup
+
+    monkeypatch.setattr(gw, "_build_session_store", _stop)
+    with pytest.raises(_StopStartup):
+        asyncio.run(gw.start_with_config("gateway.yaml"))
+    assert gw.config.resolve_agents("tok_support") == ["support"]
+    assert gw.config.resolve_scopes("tok_support") == ["read"]
+
+
+def test_start_with_config_keeps_python_policy_without_yaml_policy(monkeypatch):
+    gw = WebSocketGateway(config=GatewayConfig(auth_token="tmp", auth_scopes=POLICY))
+    monkeypatch.setattr(gw, "load_gateway_config", lambda path: {"gateway": {"session": {}}})
+    monkeypatch.setattr(gw, "_session_store_explicit", False, raising=False)
+    monkeypatch.setattr(gw, "_build_session_store", lambda *a, **k: (_ for _ in ()).throw(_StopStartup()))
+    with pytest.raises(_StopStartup):
+        asyncio.run(gw.start_with_config("gateway.yaml"))
+    assert gw.config.auth_scopes == POLICY

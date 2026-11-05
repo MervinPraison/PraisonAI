@@ -128,6 +128,49 @@ def _check_unknown_keys(
     )
 
 
+_GRANT_KEYS = {"scopes", "agents"}
+
+
+def _parse_grant(scopes: Any, agents: Any, path: str) -> Any:
+    """Normalise one operator grant to a scope list or ``{scopes, agents}``.
+
+    Issue #6253: unknown grant keys always fail closed — a typo such as
+    ``agnts`` would otherwise silently drop the agent confinement and leave
+    the token able to reach every agent.
+    """
+    if isinstance(scopes, Mapping):
+        _check_unknown_keys(scopes, _GRANT_KEYS, path, strict=True)
+        scopes, agents = scopes.get("scopes", []), scopes.get("agents")
+    scopes = list(scopes or [])
+    if agents is None:
+        return scopes
+    return {"scopes": scopes, "agents": [str(a) for a in agents]}
+
+
+def _parse_auth_scopes(gw_data: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    """Parse the YAML ``gateway.auth.tokens`` / ``gateway.auth_scopes`` policy.
+
+    Returns ``None`` when neither form is present so callers can leave an
+    existing policy untouched.
+    """
+    auth_section = gw_data.get("auth")
+    if isinstance(auth_section, Mapping) and isinstance(auth_section.get("tokens"), list):
+        policy: Dict[str, Any] = {}
+        for entry in auth_section["tokens"]:
+            if isinstance(entry, Mapping) and entry.get("token"):
+                policy[str(entry["token"])] = _parse_grant(
+                    entry.get("scopes", []), entry.get("agents"),
+                    "gateway.auth.tokens",
+                )
+        return policy
+    if isinstance(gw_data.get("auth_scopes"), Mapping):
+        return {
+            str(tok): _parse_grant(grant, None, "gateway.auth_scopes")
+            for tok, grant in gw_data["auth_scopes"].items()
+        }
+    return None
+
+
 def _check_typo_keys(
     data: Mapping[str, Any],
     reserved: Set[str],
@@ -1153,6 +1196,10 @@ class GatewayConfig:
             unaffected. A token's value may instead be a mapping
             ``{"scopes": [...], "agents": [...]}`` to also confine the operator
             to the listed agent ids (omitted ``agents`` = all agents).
+            Confinement covers WebSocket bind/resume and event delivery only;
+            the HTTP approval endpoints are not yet filtered per agent
+            (tracked in #5151), so do not grant ``approvals`` to a token that
+            must not act on other agents' requests.
     """
     
     host: str = "127.0.0.1"
@@ -1603,28 +1650,7 @@ class MultiChannelGatewayConfig:
         # Either shape may add ``agents: [...]`` per token (Issue #6253):
         #     auth_scopes:
         #       "${SUPPORT_TOKEN}": {scopes: [read, write], agents: [support]}
-        def _grant(scopes: Any, agents: Any = None) -> Any:
-            if isinstance(scopes, dict):
-                scopes, agents = scopes.get("scopes", []), scopes.get("agents")
-            scopes = list(scopes or [])
-            if agents is None:
-                return scopes
-            return {"scopes": scopes, "agents": [str(a) for a in agents]}
-
-        auth_scopes: Optional[Dict[str, Any]] = None
-        auth_section = gw_data.get("auth")
-        if isinstance(auth_section, dict) and isinstance(auth_section.get("tokens"), list):
-            auth_scopes = {}
-            for entry in auth_section["tokens"]:
-                if isinstance(entry, dict) and entry.get("token"):
-                    auth_scopes[str(entry["token"])] = _grant(
-                        entry.get("scopes", []), entry.get("agents"),
-                    )
-        elif isinstance(gw_data.get("auth_scopes"), dict):
-            auth_scopes = {
-                str(tok): _grant(scopes)
-                for tok, scopes in gw_data["auth_scopes"].items()
-            }
+        auth_scopes = _parse_auth_scopes(gw_data)
 
         raw_trusted = gw_data.get("trusted_proxies", [])
         trusted_proxies = (

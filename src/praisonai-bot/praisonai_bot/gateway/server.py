@@ -12104,6 +12104,13 @@ class WebSocketGateway:
                 self.config.trusted_proxies = _trusted
             except Exception:  # pragma: no cover - config is always a GatewayConfig
                 pass
+        # Issue #6253: apply the YAML operator policy (scopes and agent
+        # confinement). Only overwrite when the YAML declares one, so a policy
+        # a Python caller set on ``GatewayConfig`` survives.
+        from praisonaiagents.gateway.config import _parse_auth_scopes
+        _yaml_scopes = _parse_auth_scopes(gw_cfg)
+        if _yaml_scopes is not None:
+            self.config.auth_scopes = _yaml_scopes
         # Issue #3593: the multi-bot CLI builds this gateway with a *default*
         # session config, so ``__init__`` already picked a store before this
         # YAML loaded. Re-read the ``session:`` block here and re-select the
