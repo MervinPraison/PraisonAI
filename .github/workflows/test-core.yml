@@ -525,6 +525,11 @@ jobs:
           tests/unit/test_lazy_imports.py::TestLazyImports::test_litellm_not_loaded_on_import \
           tests/unit/test_lazy_imports.py::TestLazyImports::test_requests_not_loaded_on_import \
           tests/unit/test_lazy_imports.py::TestLazyImports::test_chromadb_not_loaded_on_import \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_agent_available_via_getattr \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_session_available_via_getattr \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_knowledge_available_via_getattr \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_memory_available_via_getattr \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_tools_loaded_eagerly \
           tests/unit/test_lazy_imports.py::TestLitePackage::test_lite_agent_no_litellm \
           tests/unit/test_lazy_imports.py::TestLitePackage::test_lite_agent_with_custom_llm \
           -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
