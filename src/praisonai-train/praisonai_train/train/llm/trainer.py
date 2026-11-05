@@ -951,6 +951,10 @@ class TrainModel:
         if self._flag(dataset_info.get("shuffle"), default=False):
             dataset = dataset.shuffle(
                 seed=int(dataset_info.get("seed", self.config.get("seed", 3407))))
+        # OpenAI-style chat rows ({"messages": [...]}, as written by
+        # praisonaiagents.eval.export_sft) are the ShareGPT shape under another name.
+        if "messages" in dataset.column_names and "conversations" not in dataset.column_names:
+            dataset = dataset.rename_column("messages", "conversations")
         if "conversations" in dataset.column_names:
             print("DEBUG: Standardizing dataset (ShareGPT style)...")
             dataset = standardize_sharegpt(dataset)
