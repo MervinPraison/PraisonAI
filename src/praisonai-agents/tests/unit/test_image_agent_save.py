@@ -74,3 +74,64 @@ def test_save_without_image_data_raises(agent, tmp_path, monkeypatch):
     monkeypatch.setattr(agent, "_litellm", lambda **kw: {"data": []})
     with pytest.raises(ValueError):
         agent.generate("nothing").save(str(tmp_path / "x.png"))
+
+
+def test_save_nonzero_index(agent, tmp_path):
+    src = tmp_path / "photo.png"
+    src.write_bytes(b"png")
+    result = agent.edit(str(src), "two takes", n=2)
+    assert result.save(str(tmp_path / "b.gif"), index=1) == str(tmp_path / "b.gif")
+    assert (tmp_path / "b.gif").read_bytes() == GIF
+
+
+class _FakeHTTP:
+    def __init__(self, body):
+        self.body = body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self, n=-1):
+        return self.body if n < 0 else self.body[:n]
+
+
+def _url_response(url):
+    return {"data": [{"b64_json": None, "url": url}]}
+
+
+def test_save_downloads_url(agent, tmp_path, monkeypatch):
+    import urllib.request
+
+    seen = {}
+
+    def fake_urlopen(url, timeout=None):
+        seen.update(url=url, timeout=timeout)
+        return _FakeHTTP(GIF)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(agent, "_litellm", lambda **kw: _url_response("https://example.com/i.gif"))
+    agent.generate("cat").save(str(tmp_path / "u.gif"))
+    assert (tmp_path / "u.gif").read_bytes() == GIF
+    assert seen == {"url": "https://example.com/i.gif", "timeout": 30}
+
+
+def test_save_rejects_non_http_url(agent, tmp_path, monkeypatch):
+    monkeypatch.setattr(agent, "_litellm", lambda **kw: _url_response("file:///etc/passwd"))
+    with pytest.raises(ValueError, match="http"):
+        agent.generate("x").save(str(tmp_path / "x.png"))
+    assert not (tmp_path / "x.png").exists()
+
+
+def test_save_rejects_oversized_download(agent, tmp_path, monkeypatch):
+    import urllib.request
+    from praisonaiagents.agent import _image_result
+
+    monkeypatch.setattr(_image_result, "_MAX_DOWNLOAD_BYTES", 4)
+    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout=None: _FakeHTTP(b"123456"))
+    monkeypatch.setattr(agent, "_litellm", lambda **kw: _url_response("https://example.com/big.png"))
+    with pytest.raises(ValueError, match="maximum"):
+        agent.generate("x").save(str(tmp_path / "big.png"))
+    assert not (tmp_path / "big.png").exists()
