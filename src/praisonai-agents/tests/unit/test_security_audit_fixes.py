@@ -81,8 +81,14 @@ def test_web_crawl_urllib_fallback_does_not_follow_redirect_to_internal(monkeypa
     assert "SSRF" in result[0]["error"]
 
 
-def test_searxng_may_use_loopback_but_the_crawler_may_not():
+def test_searxng_may_use_loopback_but_the_crawler_may_not(monkeypatch):
     """One predicate, two callers, opposite requirements. Pin both."""
+    monkeypatch.delenv("ALLOW_LOCAL_CRAWL", raising=False)
+    monkeypatch.delenv("SEARXNG_URL_ALLOWLIST", raising=False)
+    monkeypatch.setattr(
+        "socket.getaddrinfo",
+        lambda *args, **kwargs: [(2, 1, 6, "", ("127.0.0.1", 0))],
+    )
     from praisonaiagents.tools.url_safety import validate_searxng_url
     from praisonaiagents.tools.web_crawl_tools import _is_safe_crawl_url
 
