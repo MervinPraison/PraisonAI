@@ -87,3 +87,21 @@ def test_encoded_looking_names_do_not_share_a_file(tmp_path):
         assert storage.load_todo(n).name == n
     assert storage.delete_todo("a/b") is True
     assert storage.load_todo("a%2Fb") is not None
+
+
+def test_long_unicode_names_are_bounded_and_round_trip(tmp_path):
+    storage = PlanStorage(base_path=str(tmp_path / "store"))
+    long_a, long_b = "我的任务" * 40, "我的任务" * 40 + "x"
+    pa = storage.save_todo(TodoList(name=long_a), name=long_a)
+    pb = storage.save_todo(TodoList(name=long_b), name=long_b)
+    assert pa != pb
+    for p in (pa, pb):
+        assert os.path.dirname(p) == storage.todos_dir
+        assert len(os.path.basename(p).encode("utf-8")) <= 200
+    # Short non-ASCII names keep their plain (pre-#6238) filename.
+    assert storage.save_todo(TodoList(), name="我的任务").endswith("我的任务.json")
+    for listed in storage.list_todos():
+        assert storage.load_todo(listed) is not None
+        assert storage.delete_todo(listed) is True
+    assert storage.list_todos() == []
+    assert storage.load_todo(long_a) is None
