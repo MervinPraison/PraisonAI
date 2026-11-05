@@ -342,6 +342,8 @@ jobs:
               tests/unit/test_provider_matrix.py::test_the_repr_names_the_place_it_was_given[sandlock]
               tests/unit/test_provider_matrix.py::test_the_repr_names_the_place_it_was_given[subprocess]
               tests/unit/test_provider_matrix.py::test_the_repr_names_the_place_it_was_given[tenki]
+              tests/unit/test_provider_matrix.py::test_ssh_explains_that_a_name_is_not_enough
+              tests/unit/test_provider_matrix.py::test_native_is_accepted_as_an_alias_for_sandlock
               tests/unit/test_placement.py::test_a_name_in_both_sets_is_valid_for_both_parameters
               tests/unit/test_placement.py::test_the_two_scopes_are_reported_differently
               tests/unit/test_placement.py::test_the_sandbox_only_backends_are_reachable
