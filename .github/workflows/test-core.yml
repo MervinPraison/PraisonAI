@@ -262,6 +262,7 @@ jobs:
               tests/unit/test_computer_tools.py
               tests/unit/test_security_outstanding_ghsas.py
               tests/unit/test_paths_wiring.py
+              tests/unit/test_managed_backend.py
               tests/unit/test_output_file_containment.py::test_task_output_file_traversal_blocked
               tests/unit/test_output_file_containment.py::test_task_output_file_inside_root
               tests/unit/test_output_file_containment.py::test_task_output_file_respects_create_directory
