@@ -47,6 +47,7 @@ def schedule_add_cmd(
     message: str = typer.Option("", "--message", "-m", help="Prompt / reminder text"),
     agent: str = typer.Option("", "--agent", "-a", help="Agent ID to execute this job (default: first registered agent)"),
     deliver: str = typer.Option("", "--deliver", "-d", help="Delivery token: 'origin', 'telegram', 'all', or 'platform:chat_id[:thread_id]'"),
+    failure_deliver: str = typer.Option("", "--failure-deliver", help="Separate target for failure/recovery/hold notices (same grammar as --deliver); 'none' suppresses them. Default: same as --deliver"),
     channel: str = typer.Option("", "--channel", help="[Legacy] Delivery platform: telegram, discord, slack, whatsapp"),
     channel_id: str = typer.Option("", "--channel-id", help="[Legacy] Target chat/channel ID on the platform"),
     session_id: str = typer.Option("", "--session-id", help="Session ID to preserve conversation context"),
@@ -72,6 +73,7 @@ def schedule_add_cmd(
         praisonai schedule add "morning-brief" -s "cron:0 8 * * *" --tz America/New_York -m "summarise activity"
         praisonai schedule add "news" -s daily -m "news summary" --deliver telegram
         praisonai schedule add "report" -s hourly -m "status report" --deliver all
+        praisonai schedule add "metrics" -s daily -m "metrics" --deliver slack:C123 --failure-deliver slack:C999
         praisonai schedule add "tg-reminder" -s daily -m "check email" --agent support --channel telegram --channel-id 12345
         praisonai schedule add "inbox-watch" -s "*/5m" -m "Summarise new emails" --pre-run "scripts/new_mail.sh" --deliver telegram
         praisonai schedule add "price-watch" -s "*/15m" -m "Summarise the change" --monitor-url "https://example.com/api/price" --deliver telegram
@@ -163,6 +165,7 @@ def schedule_add_cmd(
             or command
             or backend
             or want_pin_update
+            or failure_deliver
         ) and job_created:
             try:
                 from praisonaiagents.tools.schedule_tools import _get_store
@@ -171,6 +174,9 @@ def schedule_add_cmd(
                     raise ValueError("schedule_add success response omitted the job id")
                 job = store.get(job_id_match.group(1))
                 if job is not None:
+                    if failure_deliver:
+                        from praisonaiagents.scheduler.models import DeliveryTarget
+                        job.failure_delivery = DeliveryTarget.parse(failure_deliver)
                     job.pre_run = pre_run or None
                     job.condition = condition or None
                     if monitor_command:
