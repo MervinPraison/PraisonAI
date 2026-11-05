@@ -4395,8 +4395,9 @@ class WebSocketGateway:
                 # Issue #6253: deny resuming another agent's live session
                 # *before* the resume call touches it.
                 existing = self.get_session(session_id) if isinstance(session_id, str) else None
-                if existing is not None and not self._client_may_reach_agent(
-                    client_id, existing.agent_id
+                if existing is not None and (
+                    existing.agent_id != agent_id
+                    or not self._client_may_reach_agent(client_id, existing.agent_id)
                 ):
                     await self._send_to_client(client_id, {
                         "type": "error",
@@ -4415,7 +4416,9 @@ class WebSocketGateway:
                 # Issue #6253: a resumed session_id must not smuggle a confined
                 # operator onto another agent's session (covers sessions
                 # rehydrated from the persistent store).
-                if not self._client_may_reach_agent(client_id, session.agent_id):
+                if session.agent_id != agent_id or not self._client_may_reach_agent(
+                    client_id, session.agent_id
+                ):
                     await self._send_to_client(client_id, {
                         "type": "error",
                         "message": "Session does not belong to the requested agent",
