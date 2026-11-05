@@ -385,3 +385,41 @@ def test_reconcile_background_jobs_retries_until_every_route_succeeds(tmp_path, 
         if mgr is not None:
             mgr.shutdown(wait=False)
     assert "telegram:42" in sent
+
+
+def test_reconcile_background_jobs_retires_stale_lost_jobs(tmp_path, monkeypatch):
+    """A job reconciled to LOST days ago is retired silently, not announced."""
+    import time as _time
+
+    import praisonaiagents.background.job_manager as jm
+    from praisonaiagents.background.job_manager import JobInfo, JobStatus
+    from praisonaiagents.background.sqlite_store import SqliteBackgroundJobStore
+
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+    old = _time.time() - 7 * 86_400
+    pre = SqliteBackgroundJobStore()
+    pre.upsert(JobInfo(
+        job_id="job-old", status=JobStatus.LOST, created_at=old,
+        started_at=old, completed_at=old,
+        origin={"deliver": "origin", "platform": "telegram",
+                "chat_id": "12345", "task": "last week's task"},
+    ))
+    pre.close()
+    monkeypatch.setattr(jm, "_global_job_manager", None)
+
+    gateway = _make_gateway()
+    sent = []
+
+    async def _notice(target, text, run_id):
+        sent.append(target)
+        return True
+
+    monkeypatch.setattr(gateway, "_deliver_lost_run_notice", _notice)
+    try:
+        asyncio.run(gateway._reconcile_background_jobs())
+        assert jm._global_job_manager.get_job_info("job-old").delivered
+    finally:
+        mgr, jm._global_job_manager = jm._global_job_manager, None
+        if mgr is not None:
+            mgr.shutdown(wait=False)
+    assert sent == []

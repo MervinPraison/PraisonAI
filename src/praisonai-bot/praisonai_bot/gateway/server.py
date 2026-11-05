@@ -244,6 +244,10 @@ _TURN_ERROR_MESSAGES = {
     "auth_permanent": "The model provider rejected the credentials.",
     "model_not_found": "The configured model is not available.",
 }
+# Background jobs interrupted longer ago than this are not announced at boot
+# (#6038): a days-old "please resend" notice is noise, not recovery.
+_JOB_LOST_NOTICE_MAX_AGE = 86_400.0
+
 _RETRYABLE_TURN_ERRORS = frozenset({"rate_limit", "overloaded", "transient", "idle_timeout"})
 
 
@@ -8158,6 +8162,12 @@ class WebSocketGateway:
             if not routes:
                 return  # nothing deliverable: mark delivered so it does not resurface
             if job.status == JobStatus.LOST:
+                # The job store is never pruned, so jobs reconciled to LOST
+                # long ago (before notices existed) would all be announced on
+                # the first boot after upgrade. Retire stale ones silently.
+                lost_at = job.completed_at or job.started_at or job.created_at or 0
+                if time.time() - lost_at > _JOB_LOST_NOTICE_MAX_AGE:
+                    return
                 task = str(origin.get("task") or "")[:80]
                 text = (
                     f"Your background task '{task}' was interrupted by a "
