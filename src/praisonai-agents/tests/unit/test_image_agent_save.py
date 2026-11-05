@@ -135,3 +135,24 @@ def test_save_rejects_oversized_download(agent, tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="maximum"):
         agent.generate("x").save(str(tmp_path / "big.png"))
     assert not (tmp_path / "big.png").exists()
+
+
+def test_container_protocol_passes_through(agent):
+    from litellm.types.utils import ImageResponse
+
+    raw = ImageResponse(data=[{"b64_json": base64.b64encode(GIF).decode()}])
+    agent._litellm = lambda **kw: raw
+    result = agent.generate("cat")
+    assert "data" in result
+    assert dict(result).keys() == dict(raw).keys()
+
+
+def test_workflow_output_saves_b64_image(agent, tmp_path):
+    from praisonaiagents.workflows.workflows import AgentFlow
+
+    flow = object.__new__(AgentFlow)
+    out = str(tmp_path / "wf.gif")
+    variables = {"output": out}
+    flow._execute_specialized_agent(agent, "ImageAgent", "a cat", None, variables, False)
+    assert (tmp_path / "wf.gif").read_bytes() == GIF
+    assert variables["_last_image_file"] == out

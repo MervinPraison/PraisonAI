@@ -23,6 +23,12 @@ class ImageResult:
     def __getitem__(self, key: Any) -> Any:
         return self._response[key]
 
+    def __contains__(self, key: Any) -> bool:
+        return key in self._response
+
+    def __iter__(self):
+        return iter(self._response)
+
     def __repr__(self) -> str:
         return f"ImageResult({self._response!r})"
 

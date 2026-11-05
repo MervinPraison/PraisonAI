@@ -3005,17 +3005,16 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             result = agent.generate(prompt)
             # Extract URL from result and store in variables for next step
             if hasattr(result, 'data') and result.data:
-                image_url = result.data[0].url if hasattr(result.data[0], 'url') else None
+                image_url = getattr(result.data[0], 'url', None)
                 if image_url:
                     variables['_last_image_url'] = image_url
-                    # Save to file if output path specified
-                    if output_path:
-                        try:
-                            import urllib.request
-                            urllib.request.urlretrieve(image_url, output_path)
-                            variables['_last_image_file'] = output_path
-                        except Exception as e:
-                            logger.warning(f"Failed to save image to {output_path}: {e}")
+            # Save to file if output path specified (handles b64 and URL responses)
+            if output_path:
+                try:
+                    result.save(output_path)
+                    variables['_last_image_file'] = output_path
+                except Exception as e:
+                    logger.warning(f"Failed to save image to {output_path}: {e}")
             return result
         
         # OCRAgent - extract with retry logic for external API failures
