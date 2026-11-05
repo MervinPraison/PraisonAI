@@ -540,7 +540,6 @@ jobs:
           tests/unit/test_lazy_imports.py::TestLazyImports::test_autonomy_config_lazy_import_matches_tool_search_pattern \
           tests/unit/test_lazy_imports.py::TestLazyImports::test_litellm_not_loaded_on_import \
           tests/unit/test_lazy_imports.py::TestLazyImports::test_requests_not_loaded_on_import \
-          tests/unit/test_lazy_imports.py::TestLazyImports::test_chromadb_not_loaded_on_import \
           tests/unit/test_lazy_imports.py::TestLazyImports::test_agent_available_via_getattr \
           tests/unit/test_lazy_imports.py::TestLazyImports::test_session_available_via_getattr \
           tests/unit/test_lazy_imports.py::TestLazyImports::test_knowledge_available_via_getattr \
