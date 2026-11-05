@@ -304,7 +304,7 @@ def test_docker_is_no_longer_a_special_case():
         assert isinstance(_agent(run_on=place).backend, ComputeManagedAgent)
 
 
-def test_a_hosted_backend_reclaims_its_instance_when_collected():
+def test_a_hosted_backend_reclaims_its_instance_when_collected(monkeypatch):
     """run_on= keeps its instance alive across calls on purpose -- keep_alive
     defaults to True -- but it should not outlive the process. There was no
     finalizer at all, so a docker container survived every script and a cloud
@@ -313,7 +313,10 @@ def test_a_hosted_backend_reclaims_its_instance_when_collected():
     import gc
     import threading
 
-    from praisonai.integrations.compute_managed_agent import ComputeManagedAgent
+    from praisonai.integrations.compute_managed_agent import ComputeManagedAgent, _KEY_VARS
+
+    for name in _KEY_VARS:
+        monkeypatch.delenv(name, raising=False)
 
     released = []
     release_done = threading.Event()
