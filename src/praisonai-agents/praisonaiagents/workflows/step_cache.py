@@ -56,21 +56,89 @@ def _identify(step: Any) -> str:
     return f"{type(step).__name__}:{id(step)}"
 
 
-def _code_fingerprint(code: Any) -> str:
-    # Bytecode plus constants, recursing into nested code objects (whose repr
-    # carries a memory address that would differ in every process).
+_SCALARS = (str, int, float, complex, bool, bytes, type(None), type(Ellipsis))
+
+
+def _stable(value: Any, seen: set) -> str:
+    # A text form that is the same in every process. repr() is not: a set or
+    # frozenset (``x in {"a", "b"}`` compiles to a frozenset constant) iterates
+    # in an order that depends on the per-process string hash seed.
+    if hasattr(value, "co_code"):
+        return _code_fingerprint(value, seen)
+    if isinstance(value, (set, frozenset)):
+        return "{" + ",".join(sorted(_stable(v, seen) for v in value)) + "}"
+    if isinstance(value, (tuple, list)):
+        return type(value).__name__ + "(" + ",".join(_stable(v, seen) for v in value) + ")"
+    return repr(value)
+
+
+def _code_fingerprint(code: Any, seen: set) -> str:
+    # Bytecode, names and constants, recursing into nested code objects (whose
+    # repr carries a memory address that would differ in every process).
     parts = [code.co_code.hex(), repr(code.co_names)]
-    for const in code.co_consts:
-        parts.append(_code_fingerprint(const) if hasattr(const, "co_code") else repr(const))
+    parts.extend(_stable(const, seen) for const in code.co_consts)
     return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
 
 
+def _immutable(value: Any) -> bool:
+    if isinstance(value, _SCALARS):
+        return True
+    if isinstance(value, (tuple, frozenset)):
+        return all(_immutable(v) for v in value)
+    return False
+
+
+def _function_fingerprint(fn: Any, seen: set) -> str:
+    # The handler's code plus what it was configured with: immutable defaults
+    # and closure values (a factory's ``output="v2"``), and the module-level
+    # Python functions it calls. Mutable captured state (a list it appends to,
+    # a client object) is left out, or the key would change as the run goes.
+    if id(fn) in seen:
+        return "recursive"
+    seen.add(id(fn))
+    parts = [_code_fingerprint(fn.__code__, seen)]
+    captured = list(getattr(fn, "__defaults__", None) or ())
+    captured += sorted((getattr(fn, "__kwdefaults__", None) or {}).items())
+    for cell in getattr(fn, "__closure__", None) or ():
+        try:
+            captured.append(cell.cell_contents)
+        except ValueError:  # empty cell
+            continue
+    for value in captured:
+        if hasattr(value, "__code__"):
+            parts.append(_function_fingerprint(value, seen))
+        elif _immutable(value):
+            parts.append(_stable(value, seen))
+    fn_globals = getattr(fn, "__globals__", None) or {}
+    for name in fn.__code__.co_names:
+        helper = fn_globals.get(name)
+        if hasattr(helper, "__code__") and not isinstance(helper, type):
+            parts.append(name + "=" + _function_fingerprint(helper, seen))
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()[:16]
+
+
+_CONFIG_ATTRS = ("role", "goal", "backstory", "instructions", "llm", "action",
+                 "description", "expected_output")
+
+
 def _definition(step: Any) -> Optional[str]:
-    # A handler edited but kept under the same name must not be served its old
-    # result from a durable cache, so the handler's code is part of the key.
+    # A step edited but kept under the same name must not be served its old
+    # result from a durable cache, so its definition is part of the key: a
+    # handler's code and configuration, or an agent's instructions, model and
+    # tool names.
     fn = step if hasattr(step, "__code__") else getattr(step, "handler", None)
-    code = getattr(fn, "__code__", None)
-    return _code_fingerprint(code) if code is not None else None
+    if hasattr(fn, "__code__"):
+        return _function_fingerprint(fn, set())
+    config = {a: getattr(step, a) for a in _CONFIG_ATTRS if isinstance(getattr(step, a, None), str)}
+    tools = getattr(step, "tools", None)
+    if isinstance(tools, (list, tuple)):
+        config["tools"] = sorted(
+            t if isinstance(t, str) else str(getattr(t, "name", None) or getattr(t, "__name__", type(t).__name__))
+            for t in tools
+        )
+    if not config:
+        return None
+    return hashlib.sha256(json.dumps(config, sort_keys=True).encode("utf-8")).hexdigest()[:16]
 
 
 def make_step_key(step: Any, previous_output: Any, input_text: str, variables: Dict[str, Any]) -> str:
@@ -88,7 +156,7 @@ def make_step_key(step: Any, previous_output: Any, input_text: str, variables: D
         # Tag each variable with its type so True and "True" (or 1 and "1") do
         # not collapse to the same key and serve one call's answer to another.
         "variables": {
-            k: [type(v).__name__, str(v)]
+            k: [type(v).__name__, _stable(v, set()) if isinstance(v, (set, frozenset)) else str(v)]
             for k, v in sorted((variables or {}).items())
         },
     }
@@ -194,12 +262,15 @@ class FileStepCache:
         flow.run("input")   # steps 1-3 are served from run.json; step 4 runs
 
     Resume is content-addressed, not index-based: each key covers the step's
-    name, its handler's code, the input, the previous step's output and the
-    variables, so renaming a step, editing a handler or changing the input
-    misses the cache from that step on and it runs again. An agent step is
-    keyed by name only: after changing an agent's instructions, model or tools
-    under the same name, call ``clear()`` (or delete the file) to re-run it.
-    Steps without a stable name never hit across processes; they re-run.
+    name and definition (a handler's code, its immutable defaults and closure
+    values and the module-level functions it calls; an agent's role, goal,
+    instructions, model and tool names), the input, the previous step's output
+    and the variables, so renaming or editing a step or changing the input
+    misses the cache from that step on and it runs again. Not covered: a
+    change in mutable captured state, a method or imported library a handler
+    calls, or a tool's implementation. After such an edit, call ``clear()``
+    (or delete the file) to re-run. Steps without a stable name never hit
+    across processes; they re-run.
 
     Every ``set`` is a locked read-modify-write of the file, so several caches
     (or processes) on one path add to it rather than erase each other's

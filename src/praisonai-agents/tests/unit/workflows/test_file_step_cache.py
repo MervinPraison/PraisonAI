@@ -57,12 +57,12 @@ def test_changed_upstream_output_reruns_downstream(tmp_path):
         steps=[_step("a", calls, output="v1"), _step("b", calls)], cache=FileStepCache(path)
     ).run("x", verbose=False)
     calls.clear()
-    # Step "a" was edited (different name => different identity) so it and
-    # everything after it must re-run rather than resume onto stale state.
+    # Step "a" was reconfigured under the SAME name (its closure value
+    # changed), so it and everything after it must re-run.
     AgentFlow(
-        steps=[_step("a2", calls, output="v2"), _step("b", calls)], cache=FileStepCache(path)
+        steps=[_step("a", calls, output="v2"), _step("b", calls)], cache=FileStepCache(path)
     ).run("x", verbose=False)
-    assert calls == ["a2", "b"]
+    assert calls == ["a", "b"]
 
 
 def test_unserialisable_value_is_rejected_not_stored(tmp_path):
@@ -117,3 +117,70 @@ def test_two_writers_on_one_path_keep_both_entries(tmp_path):
     b.set("b", {"output": "2"})
     reopened = FileStepCache(path)
     assert reopened.get("a") == {"output": "1"} and reopened.get("b") == {"output": "2"}
+
+
+
+def test_set_constants_are_encoded_independent_of_iteration_order():
+    # A set literal compiles to a frozenset constant whose iteration order
+    # depends on PYTHONHASHSEED; the key must not, or resume silently re-runs.
+    from praisonaiagents.workflows.step_cache import _stable, make_step_key
+
+    words = ["apple", "banana", "cherry", "date", "elder"]
+    expected = "{" + ",".join(sorted(repr(w) for w in words)) + "}"
+    assert _stable(frozenset(words), set()) == expected
+    assert _stable(frozenset(reversed(words)), set()) == expected
+
+    def lookup(ctx):
+        return "fruit" if ctx.input in {"apple", "banana", "cherry", "date", "elder"} else "other"
+
+    consts = lookup.__code__.co_consts
+    assert any(isinstance(c, frozenset) for c in consts)
+    # Same constants, frozenset rebuilt: the key must not change.
+    rebuilt = lookup.__code__.replace(
+        co_consts=tuple(frozenset(sorted(c, reverse=True)) if isinstance(c, frozenset) else c for c in consts)
+    )
+    import types
+    twin = types.FunctionType(rebuilt, lookup.__globals__, "lookup")
+    assert make_step_key(lookup, None, "apple", {}) == make_step_key(twin, None, "apple", {})
+    assert make_step_key(lookup, None, "x", {"t": {"b", "a"}}) == make_step_key(lookup, None, "x", {"t": {"a", "b"}})
+
+def test_edited_helper_or_default_reruns(tmp_path):
+    from praisonaiagents.workflows.step_cache import make_step_key
+
+    def helper_v1():
+        return 1
+
+    def helper_v2():
+        return 2
+
+    def make(default):
+        def step(ctx, mode=default):
+            return mode
+        return step
+
+    assert make_step_key(make("fast"), None, "x", {}) != make_step_key(make("slow"), None, "x", {})
+    assert make_step_key(make("fast"), None, "x", {}) == make_step_key(make("fast"), None, "x", {})
+
+    import types
+
+    def step(ctx):
+        return helper()  # noqa: F821 - resolved from the globals given below
+
+    def bind(helper):
+        return types.FunctionType(step.__code__, {"helper": helper}, "step")
+
+    assert make_step_key(bind(helper_v1), None, "x", {}) != make_step_key(bind(helper_v2), None, "x", {})
+    assert make_step_key(bind(helper_v1), None, "x", {}) == make_step_key(bind(helper_v1), None, "x", {})
+
+
+def test_agent_step_with_same_name_but_new_instructions_misses():
+    from praisonaiagents.workflows.step_cache import make_step_key
+
+    class FakeAgent:
+        def __init__(self, instructions, llm="gpt-4o-mini"):
+            self.name, self.instructions, self.llm, self.tools = "writer", instructions, llm, []
+
+    k = lambda a: make_step_key(a, None, "x", {})
+    assert k(FakeAgent("be brief")) == k(FakeAgent("be brief"))
+    assert k(FakeAgent("be brief")) != k(FakeAgent("be verbose"))
+    assert k(FakeAgent("be brief")) != k(FakeAgent("be brief", llm="gpt-4o"))
