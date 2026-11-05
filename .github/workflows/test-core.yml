@@ -254,6 +254,7 @@ jobs:
               tests/unit/test_sandbox.py tests/unit/test_cost_persistence.py
               tests/unit/test_parameter_naming.py
               tests/unit/test_api_exports.py
+              tests/unit/test_tools_reliability.py
               tests/unit/test_handoff_unified.py tests/unit/test_identity_canonicalizer_protocol.py
               tests/unit/test_idle_timeout_breaker.py tests/unit/test_json_fence_cleanup.py
               tests/unit/test_kanban_protocol.py tests/unit/test_loop_detection.py
@@ -357,7 +358,7 @@ jobs:
       run: |
         cd src/praisonai
         uv pip install --system duckduckgo_search
-        uv pip install --system pytest pytest-asyncio pytest-timeout pytest-xdist
+        uv pip install --system pytest pytest-asyncio pytest-timeout pytest-xdist psutil
         uv pip install --system "praisonaiagents[knowledge]"
     - uses: ./.github/actions/install-monorepo-packages
       with:
