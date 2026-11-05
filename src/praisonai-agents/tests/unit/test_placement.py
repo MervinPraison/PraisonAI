@@ -320,7 +320,7 @@ def test_every_agent_in_a_flow_shares_one_sandbox():
     assert writer.tools == [] and reader.tools == []
 
 
-def test_an_agent_with_its_own_sandbox_is_left_alone_by_a_flow():
+def test_an_agent_with_its_own_sandbox_is_left_alone_by_a_flow(monkeypatch):
     """Attaching twice appended the capability prompt twice and, on non-LIFO
     teardown, left the agent holding tools bound to a dead instance."""
     from praisonaiagents.agent.tools_placement import (
@@ -328,6 +328,13 @@ def test_an_agent_with_its_own_sandbox_is_left_alone_by_a_flow():
         ensure_tools_placed,
     )
     from praisonaiagents.managed.shared_compute import SharedCompute
+    from praisonaiagents.managed import shared_compute
+
+    monkeypatch.setattr(shared_compute, "resolve_compute", lambda _: object())
+    monkeypatch.setattr(
+        SharedCompute, "ensure_provisioned",
+        lambda self: pytest.fail("attachment must not provision a sandbox"),
+    )
 
     own = _agent("own", tools_run_on="subprocess")
     ensure_tools_placed(own)
@@ -344,9 +351,16 @@ def test_an_agent_with_its_own_sandbox_is_left_alone_by_a_flow():
     assert own.tools == []
 
 
-def test_a_batch_provisions_one_sandbox_not_one_per_row():
+def test_a_batch_provisions_one_sandbox_not_one_per_row(monkeypatch):
     """start_for_each() calls start() per input; each used to provision and
     destroy its own sandbox, so a 50-row batch paid for 50 of them."""
+    from praisonaiagents.managed import shared_compute
+
+    monkeypatch.setattr(shared_compute, "resolve_compute", lambda _: object())
+    monkeypatch.setattr(
+        shared_compute.SharedCompute, "ensure_provisioned",
+        lambda self: pytest.fail("scope inspection must not provision a sandbox"),
+    )
     team = _team(tools_run_on="subprocess")
     assert team._needs_tools_scope()
     with team._shared_tools_scope():
