@@ -204,6 +204,31 @@ class TestImagesCapabilities:
         assert captured['quality'] == "low"
         assert params.items() <= captured.items()
 
+    def test_image_generate_images_26_params_reach_the_wire(self):
+        """Real LiteLLM, fake HTTP: params must be in the request body, not just in
+        the kwargs handed to litellm (drop_params=True could strip them silently)."""
+        import json
+        httpx = pytest.importorskip("httpx")
+        openai = pytest.importorskip("openai")
+        pytest.importorskip("litellm")
+        from praisonai.capabilities.images import image_generate
+
+        bodies = []
+
+        def handler(request):
+            bodies.append(json.loads(request.content))
+            return httpx.Response(200, json={"created": 1, "data": [{"b64_json": "AA=="}]})
+
+        client = openai.OpenAI(api_key="sk-test",
+                               http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+        params = {"quality": "low", "frame_count": 4, "frame_duration_ms": 100, "complexity": "low"}
+        results = image_generate("x", model="gpt-image-2.6-flare", api_key="sk-test",
+                                 client=client, **params)
+
+        assert results[0].b64_json == "AA=="
+        assert params.items() <= bodies[0].items()
+        assert "response_format" not in bodies[0]
+
     @patch('litellm.aimage_generation')
     def test_aimage_generate_forwards_quality(self, mock_aimage_generation):
         import asyncio
