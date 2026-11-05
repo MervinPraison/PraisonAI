@@ -25,9 +25,17 @@ def test_workflow_include_skips_tools_without_opt_in(tmp_path, monkeypatch):
     assert not marker.exists()
 
 
-def test_web_crawl_rejects_redirect_to_loopback():
+def test_web_crawl_rejects_redirect_to_loopback(monkeypatch):
     pytest.importorskip("httpx")
     from praisonaiagents.tools.web_crawl_tools import _is_safe_crawl_url
+
+    monkeypatch.delenv("ALLOW_LOCAL_CRAWL", raising=False)
+
+    def resolve(host, *args, **kwargs):
+        address = "127.0.0.1" if host == "127.0.0.1" else "93.184.216.34"
+        return [(2, 1, 6, "", (address, 0))]
+
+    monkeypatch.setattr("socket.getaddrinfo", resolve)
 
     assert _is_safe_crawl_url("http://127.0.0.1/secret") is False
     assert _is_safe_crawl_url("http://example.com/") is True

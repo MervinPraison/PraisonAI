@@ -272,6 +272,7 @@ jobs:
               tests/unit/test_import_side_effects.py::test_launch_does_not_read_caller_source
               tests/unit/test_import_side_effects.py::test_execute_tool_async_tool_inside_running_loop
               tests/unit/test_security_audit_fixes.py::test_spider_blocks_rebound_hostname
+              tests/unit/test_security_audit_fixes.py::test_web_crawl_rejects_redirect_to_loopback
               tests/unit/test_security_audit_fixes.py::test_searxng_may_use_loopback_but_the_crawler_may_not
               tests/unit/test_security_audit_fixes.py::test_searxng_allowlist_cannot_reach_link_local_metadata
               tests/unit/test_security_audit_fixes.py::test_file_memory_rejects_traversal_user_id
