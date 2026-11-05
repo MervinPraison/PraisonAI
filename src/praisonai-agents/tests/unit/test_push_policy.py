@@ -151,9 +151,40 @@ class TestQuietHours:
         class FixedDatetime(datetime):
             @classmethod
             def now(cls, tz=None):
-                return cls(2026, 1, 1, 23, 0, tzinfo=tz)
+                if tz is not None:
+                    return cls(2026, 1, 1, 23, 0, tzinfo=tz)
+                return cls(2026, 1, 2, 8, 0)
+
+            def astimezone(self, tz=None):
+                if tz is None:
+                    return self.replace(tzinfo=timezone(timedelta(hours=9)))
+                return super().astimezone(tz)
 
         monkeypatch.setattr(policy, "datetime", FixedDatetime)
+        d = evaluate(NotificationCategory.AGENT_FINISHED, self._prefs(timezone="UTC"))
+        assert d.send is False
+
+    def test_missing_zone_falls_back_to_host_local_time(self, monkeypatch):
+        import zoneinfo
+        import praisonaiagents.push.policy as policy
+
+        class FixedDatetime(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                if tz is not None:
+                    return cls(2026, 1, 1, 23, 0, tzinfo=tz)
+                return cls(2026, 1, 2, 8, 0)
+
+            def astimezone(self, tz=None):
+                if tz is None:
+                    return self.replace(tzinfo=timezone(timedelta(hours=9)))
+                return super().astimezone(tz)
+
+        def unavailable_zone(_name):
+            raise zoneinfo.ZoneInfoNotFoundError("unavailable")
+
+        monkeypatch.setattr(policy, "datetime", FixedDatetime)
+        monkeypatch.setattr(zoneinfo, "ZoneInfo", unavailable_zone)
         d = evaluate(NotificationCategory.AGENT_FINISHED, self._prefs(timezone="Asia/Tokyo"))
         assert d.send is True
 
