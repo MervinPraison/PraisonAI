@@ -6,6 +6,7 @@ including support for different image models, sizes, and quality settings.
 import asyncio
 from typing import Optional, Any, Dict, Union, List
 from ..agent.agent import Agent
+from ._image_result import ImageResult
 from pydantic import BaseModel, Field
 import logging
 from praisonaiagents._logging import get_logger
@@ -208,7 +209,7 @@ class ImageAgent(Agent):
                 
                 # Mark task as complete
                 progress.update(task, completed=True)
-                return response
+                return ImageResult(response)
             except Exception as e:
                 error_msg = f"Error generating image: {str(e)}"
                 if self.verbose:
@@ -288,7 +289,7 @@ class ImageAgent(Agent):
         Example:
             ```python
             agent = ImageAgent(llm="openai/gpt-image-2.5-flare")
-            result = agent.edit("photo.png", "Add a sunset in the background")
+            agent.edit("photo.png", "Add a sunset in the background").save("out.png")
             ```
         """
         try:
@@ -318,7 +319,7 @@ class ImageAgent(Agent):
             if self.verbose:
                 self.console.print(f"[cyan]Editing image with {model_name}...[/cyan]")
             
-            response = litellm.image_edit(**config)
+            response = ImageResult(litellm.image_edit(**config))
             
             if self.verbose:
                 self.console.print(f"[green]✓ Image edited successfully[/green]")
@@ -390,7 +391,7 @@ class ImageAgent(Agent):
             if self.verbose:
                 self.console.print(f"[cyan]Generating variations with {model_name}...[/cyan]")
             
-            response = litellm.image_variation(**config)
+            response = ImageResult(litellm.image_variation(**config))
             
             if self.verbose:
                 self.console.print(f"[green]✓ Variations generated successfully[/green]")
