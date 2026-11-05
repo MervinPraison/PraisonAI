@@ -213,6 +213,17 @@ jobs:
               tests/unit/test_issue_5900_job_manager_reliability.py tests/unit/test_issue_5920_guardrail_and_rules.py
               tests/unit/test_issue_5957.py tests/unit/test_issue_6116_workflow_team_fixes.py
               tests/unit/test_issue_6171_hardening.py
+              tests/unit/test_glob_rules_activation.py tests/unit/test_guardrail_object_dispatch.py
+              tests/unit/test_image_agent_async.py tests/unit/test_image_agent_default_model.py
+              tests/unit/test_image_agent_response_format.py tests/unit/test_image_agent_style.py
+              tests/unit/test_ingress_admission.py tests/unit/test_injected_state.py
+              tests/unit/test_interactive_authorization.py tests/unit/test_llm_content_callback.py
+              tests/unit/test_llm_guardrail_fail_closed.py tests/unit/test_tool_call_cap_transcript.py
+              tests/unit/test_tool_guardrails.py tests/unit/test_tool_result_guardrail.py
+              tests/unit/test_architectural_fixes_unit.py tests/unit/test_as_tool_in_tools_param.py
+              tests/unit/test_async_memory.py tests/unit/test_autonomy_budget.py
+              tests/unit/test_autonomy_gaps.py tests/unit/test_autonomy_system_fixes.py
+              tests/unit/test_autonomy_unified.py tests/unit/test_compaction_wiring.py
               tests/unit/test_handoff_unified.py tests/unit/test_identity_canonicalizer_protocol.py
               tests/unit/test_idle_timeout_breaker.py tests/unit/test_json_fence_cleanup.py
               tests/unit/test_kanban_protocol.py tests/unit/test_loop_detection.py
