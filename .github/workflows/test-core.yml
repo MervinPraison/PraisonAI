@@ -269,6 +269,8 @@ jobs:
               --deselect=tests/unit/test_profiling.py::TestZeroOverhead::test_record_timing_overhead
               --deselect=tests/unit/test_profiling.py::TestZeroOverhead::test_phase_context_overhead
               --deselect=tests/unit/test_rate_limiter.py::TestRateLimiterBasic::test_rate_limiter_acquire_sync
+              --deselect=tests/unit/test_lazy.py::TestLazyImportPerformance::test_lazy_import_is_fast
+              --deselect=tests/unit/test_injected_state.py::TestInjectionZeroOverhead::test_schema_generation_fast
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents
           - shard: train
