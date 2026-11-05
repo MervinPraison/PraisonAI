@@ -98,11 +98,14 @@ def test_searxng_may_use_loopback_but_the_crawler_may_not(monkeypatch):
 
 def test_searxng_allowlist_cannot_reach_link_local_metadata(monkeypatch):
     """An allowlist entry may only exempt loopback, never link-local/private."""
+    monkeypatch.delenv("ALLOW_LOCAL_CRAWL", raising=False)
     monkeypatch.setenv("SEARXNG_URL_ALLOWLIST", "169.254.169.254")
-    from importlib import reload
+    monkeypatch.setattr(
+        "socket.getaddrinfo",
+        lambda *args, **kwargs: [(2, 1, 6, "", ("169.254.169.254", 0))],
+    )
     from praisonaiagents.tools import url_safety
 
-    reload(url_safety)
     assert url_safety.validate_searxng_url("http://169.254.169.254/latest/meta-data/") is None
 
 
