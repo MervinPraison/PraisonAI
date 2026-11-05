@@ -49,9 +49,13 @@ def _docker_running() -> bool:
         return False
 
 
-needs_docker = pytest.mark.skipif(
-    not _docker_running(), reason="needs a Docker daemon the runtime agrees is available"
-)
+@pytest.fixture
+def _require_docker():
+    if not _docker_running():
+        pytest.skip("needs a Docker daemon the runtime agrees is available")
+
+
+needs_docker = pytest.mark.usefixtures("_require_docker")
 
 
 def _agent(**kw):
