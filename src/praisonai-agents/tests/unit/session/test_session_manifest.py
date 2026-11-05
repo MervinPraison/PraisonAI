@@ -7,12 +7,17 @@ def test_satisfies_protocol(tmp_path):
     assert isinstance(FileSessionManifest(str(tmp_path)), SessionManifestProtocol)
 
 
-def test_refs_merge_and_persist(tmp_path):
-    FileSessionManifest(str(tmp_path)).set_refs("s1", checkpoint="abc")
-    FileSessionManifest(str(tmp_path)).set_refs("s1", plan="p1")
-    entry = FileSessionManifest(str(tmp_path)).get("s1")
-    assert entry.refs == {"checkpoint": "abc", "plan": "p1"}
-    assert FileSessionManifest(str(tmp_path)).get("missing") is None
+def test_missing_session_has_no_entry(tmp_path):
+    m = FileSessionManifest(str(tmp_path))
+    assert m.get("missing") is None and m.interrupted("missing") is None
+
+
+def test_legacy_entry_with_unknown_keys_still_loads(tmp_path):
+    (tmp_path / "s1.json").write_text(
+        '{"session_id": "s1", "refs": {"plan": "p"}, "run_in_flight": true}',
+        encoding="utf-8",
+    )
+    assert FileSessionManifest(str(tmp_path)).interrupted("s1") is not None
 
 
 def test_completed_run_is_not_interrupted(tmp_path):
@@ -47,9 +52,9 @@ def test_new_task_after_interruption_is_a_fresh_attempt(tmp_path):
 
 def test_unsafe_session_id_stays_in_directory(tmp_path):
     m = FileSessionManifest(str(tmp_path))
-    m.set_refs("../../etc/x", plan="p")
+    m.begin_run("../../etc/x", "r1")
     assert all(p.parent == tmp_path for p in tmp_path.iterdir())
-    assert m.get("../../etc/x").refs == {"plan": "p"}
+    assert m.get("../../etc/x").run_id == "r1"
 
 
 def test_run_input_is_never_written_in_plaintext(tmp_path):
@@ -65,17 +70,17 @@ def test_run_input_is_never_written_in_plaintext(tmp_path):
 def test_absolute_and_backslash_ids_stay_in_directory(tmp_path):
     m = FileSessionManifest(str(tmp_path))
     for sid in ("/etc/passwd", "..\\..\\x", "..", "C:\\x"):
-        m.set_refs(sid, plan=sid)
-        assert m.get(sid).refs == {"plan": sid}
+        m.begin_run(sid, sid)
+        assert m.get(sid).run_id == sid
     assert all(p.parent == tmp_path for p in tmp_path.iterdir())
 
 
 def test_ids_differing_only_in_punctuation_stay_separate(tmp_path):
     m = FileSessionManifest(str(tmp_path))
-    m.set_refs("a:b", plan="colon")
-    m.set_refs("a_b", plan="underscore")
-    assert m.get("a:b").refs == {"plan": "colon"}
-    assert m.get("a_b").refs == {"plan": "underscore"}
+    m.begin_run("a:b", "colon")
+    m.begin_run("a_b", "underscore")
+    assert m.get("a:b").run_id == "colon"
+    assert m.get("a_b").run_id == "underscore"
 
 
 def test_end_run_only_releases_its_own_marker(tmp_path):
