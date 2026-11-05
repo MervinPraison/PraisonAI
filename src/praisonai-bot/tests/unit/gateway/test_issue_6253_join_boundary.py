@@ -134,3 +134,22 @@ async def test_unconfined_operator_can_resume_record_without_agent_identity():
         "type": "join", "agent_id": "support", "session_id": "legacy-session",
     })
     assert gateway._client_sessions["candidate"] == "legacy-session"
+
+
+def test_direct_resume_rejects_identityless_record_for_confined_client():
+    from types import SimpleNamespace
+
+    gateway = _gateway()
+
+    class Store:
+        def session_exists(self, session_id):
+            return True
+
+        def get_session(self, session_id):
+            return SimpleNamespace(agent_id=None, messages=[])
+
+    gateway._session_store = Store()
+    gateway._client_agents["candidate"] = ["support"]
+    with pytest.raises(ValueError, match="no agent identity"):
+        gateway.resume_or_create_session("legacy-session", "support", "candidate")
+    assert "legacy-session" not in gateway._sessions
