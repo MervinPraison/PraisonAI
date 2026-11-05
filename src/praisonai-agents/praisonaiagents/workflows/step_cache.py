@@ -7,6 +7,7 @@ after it.
 
     flow = AgentFlow(steps=[...], cache=True)          # in-memory, this run
     flow = AgentFlow(steps=[...], cache=InMemoryStepCache(max_entries=256))
+    flow = AgentFlow(steps=[...], cache=FileStepCache("run.json"))  # durable resume
 
 The key is (step identity, input, previous output, the variables the step can
 see). Two different steps, or the same step on different input, never collide.
@@ -20,11 +21,15 @@ codebase has been full of. Nothing caches unless asked.
 import copy
 import hashlib
 import json
+import os
 import threading
 from collections import OrderedDict
 from typing import Any, Dict, Optional
 
-__all__ = ["StepCacheProtocol", "InMemoryStepCache", "make_step_key", "resolve_step_cache"]
+__all__ = [
+    "StepCacheProtocol", "InMemoryStepCache", "FileStepCache",
+    "make_step_key", "resolve_step_cache",
+]
 
 
 def _snapshot(value: Any) -> Any:
@@ -157,6 +162,65 @@ class InMemoryStepCache:
         with self._lock:
             self._entries.clear()
             self.hits = self.misses = 0
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._entries)
+
+
+class FileStepCache:
+    """Durable step cache: resume an interrupted flow in a later process.
+
+        flow = AgentFlow(steps=[...], cache=FileStepCache("run.json"))
+        flow.run("input")   # crashes at step 4
+        flow.run("input")   # steps 1-3 are served from run.json; step 4 runs
+
+    Resume is content-addressed, not index-based: each key covers the step's
+    identity and inputs (and the previous step's output), so editing a step or
+    changing the input misses the cache from that step on and it runs again.
+    Nothing stale is served onto a changed definition. Steps without a stable
+    name (anonymous objects) never hit across processes, so they simply re-run.
+
+    Every ``set`` is written atomically, so a crash mid-write keeps the last
+    good file. Values must be JSON-serialisable; one that is not is rejected
+    (the workflow logs a warning and carries on) rather than stored lossily.
+    Delete the file, or call ``clear()``, to start fresh.
+    """
+
+    def __init__(self, path: str):
+        self.path = os.path.abspath(os.path.expanduser(str(path)))
+        self._lock = threading.Lock()
+        self._entries: Dict[str, Dict[str, Any]] = {}
+        if os.path.exists(self.path):
+            with open(self.path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                raise ValueError(f"{self.path} is not a step cache file.")
+            self._entries = data
+
+    def get(self, key: str) -> Optional[Dict[str, Any]]:
+        with self._lock:
+            entry = self._entries.get(key)
+            return copy.deepcopy(entry) if entry is not None else None
+
+    def set(self, key: str, value: Dict[str, Any]) -> None:
+        # Round-trip through JSON first so an unserialisable value raises here
+        # and never reaches memory or disk in a form a later run cannot read.
+        snapshot = json.loads(json.dumps(value))
+        from ..utils.atomic_io import atomic_write_json
+
+        with self._lock:
+            entries = dict(self._entries)
+            entries[key] = snapshot
+            os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
+            atomic_write_json(self.path, entries)
+            self._entries = entries
+
+    def clear(self) -> None:
+        with self._lock:
+            self._entries = {}
+            if os.path.exists(self.path):
+                os.remove(self.path)
 
     def __len__(self) -> int:
         with self._lock:
