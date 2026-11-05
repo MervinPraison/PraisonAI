@@ -87,6 +87,9 @@ class TestMissingBackend:
     def setup_method(self):
         _reset_approval()
 
+    def teardown_method(self):
+        _reset_approval()
+
     def test_graceful_message_when_backend_missing(self, monkeypatch):
         from praisonaiagents.tools import (
             computer_screenshot, computer_tools, set_computer_approval,
@@ -173,6 +176,9 @@ class TestScreenshotSaveGated:
 
 class TestInputValidation:
     def setup_method(self):
+        _reset_approval()
+
+    def teardown_method(self):
         _reset_approval()
 
     def teardown_method(self):
