@@ -42,8 +42,11 @@ class TestApprovalGate:
     def teardown_method(self):
         _reset_approval()
 
-    def test_control_denied_without_approval(self):
-        from praisonaiagents.tools import computer_click
+    def test_control_denied_without_approval(self, monkeypatch):
+        from praisonaiagents.tools import computer_click, computer_tools
+        monkeypatch.setattr(
+            computer_tools, "_get_backend", lambda: pytest.fail("backend reached without approval")
+        )
         result = computer_click(10, 20)
         assert "denied" in result.lower()
 
@@ -57,8 +60,11 @@ class TestApprovalGate:
         result = computer_click(10, 20)
         assert "denied" not in result.lower()
 
-    def test_approval_receives_action_description(self):
-        from praisonaiagents.tools import computer_key, set_computer_approval
+    def test_approval_receives_action_description(self, monkeypatch):
+        from praisonaiagents.tools import computer_key, computer_tools, set_computer_approval
+        monkeypatch.setattr(
+            computer_tools, "_get_backend", lambda: pytest.fail("backend reached without approval")
+        )
         seen = {}
         set_computer_approval(lambda action: seen.setdefault("action", action) and False or False)
         computer_key("ctrl+c")
