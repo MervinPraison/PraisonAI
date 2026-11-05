@@ -161,6 +161,10 @@ def _parse_auth_scopes(gw_data: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
         policy: Dict[str, Any] = {}
         for entry in auth_section["tokens"]:
             if isinstance(entry, Mapping) and entry.get("token"):
+                # A typo such as ``agnts`` must fail closed here too.
+                _check_unknown_keys(
+                    entry, _GRANT_KEYS | {"token"}, "gateway.auth.tokens", strict=True
+                )
                 policy[str(entry["token"])] = _parse_grant(
                     entry.get("scopes", []), entry.get("agents"),
                     "gateway.auth.tokens",

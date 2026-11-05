@@ -99,6 +99,21 @@ def test_join_cannot_resume_foreign_agent_session():
     assert ws.sent[-1]["type"] == "error"
 
 
+def test_join_denies_foreign_session_before_resume(monkeypatch):
+    # The denial must happen before resume touches the foreign session.
+    gw, ws = _gateway_with_client(["support"])
+    foreign = gw.create_session("finance", client_id="other")
+    calls = []
+    monkeypatch.setattr(gw, "resume_or_create_session", lambda **kw: calls.append(kw))
+    asyncio.run(gw._handle_client_message(
+        "c1",
+        {"type": "join", "agent_id": "support", "session_id": foreign.session_id, "since": 0},
+    ))
+    assert calls == []
+    assert ws.sent[-1]["type"] == "error"
+    assert foreign.client_id == "other"
+
+
 def test_unconfined_operator_reaches_every_agent():
     gw, _ = _gateway_with_client(None)
     asyncio.run(gw._handle_client_message("c1", {"type": "hello", "agent_id": "finance"}))
@@ -130,6 +145,11 @@ def test_misspelled_grant_key_fails_closed():
     with pytest.raises(Exception):
         GatewayServerSchema(auth_scopes=bad)
     GatewayServerSchema(auth_scopes=POLICY)  # valid shapes still accepted
+
+    # Same for the ``auth.tokens[]`` form.
+    bad_tokens = {"tokens": [{"token": "tok", "scopes": ["read"], "agnts": ["support"]}]}
+    with pytest.raises(ConfigValidationError):
+        MultiChannelGatewayConfig.from_dict({"gateway": {"auth": bad_tokens}})
 
 
 @pytest.mark.parametrize("gw", [
