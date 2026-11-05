@@ -305,6 +305,18 @@ jobs:
               tests/unit/test_placement.py::test_repr_uses_the_same_word_you_typed
               tests/unit/test_placement.py::test_explain_names_the_tools_that_do_not_move
               tests/unit/test_placement.py::test_explain_says_nothing_about_local_tools_when_nothing_moves
+              tests/unit/test_placement.py::test_an_unknown_tools_place_fails_at_construction
+              tests/unit/test_placement.py::test_ssh_says_it_needs_more_than_a_name
+              tests/unit/test_placement.py::test_local_is_described_by_the_backend_it_actually_gets
+              tests/unit/test_placement.py::test_a_local_place_still_warns_that_it_is_not_a_boundary
+              tests/unit/test_placement.py::test_resolver_aliases_are_accepted_at_construction
+              tests/unit/test_placement.py::test_a_backend_holding_a_local_compute_object_is_not_overstated
+              tests/unit/test_placement.py::test_a_place_can_be_contributed_by_another_package
+              tests/unit/test_placement.py::test_a_broken_plugin_cannot_break_places_that_do_not_name_it
+              tests/unit/test_sandbox_adapter.py::test_sandbox_only_backends_are_selectable_as_places
+              tests/unit/test_sandbox_adapter.py::test_the_registry_is_the_union_of_both_stacks
+              tests/unit/test_sandbox_adapter.py::test_a_sandbox_only_name_resolves_to_the_adapter
+              tests/unit/test_sandbox_adapter.py::test_a_name_that_needs_connection_details_says_so
               tests/unit/test_robustness_issue_5870.py::test_allowlist_failed_save_keeps_previous_file
               tests/unit/test_robustness_issue_5870.py::test_allowlist_load_quarantines_corrupt_file
               tests/unit/test_robustness_issue_5870.py::test_git_fetch_timeout_without_cache_returns_empty

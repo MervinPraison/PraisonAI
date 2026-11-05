@@ -17,10 +17,15 @@ from praisonaiagents.gateway import (
 )
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def _isolate_gateway_pairing(tmp_path, monkeypatch):
     """Keep generated gateway credentials in this test's temporary directory."""
-    from praisonai_bot.gateway import pairing
+    try:
+        from praisonai_bot.gateway import pairing
+    except ModuleNotFoundError as exc:
+        if exc.name == "praisonai_bot":
+            return  # Wrapper-dependent tests retain their existing skip behavior.
+        raise
 
     monkeypatch.setattr(pairing, "_DEFAULT_STORE_DIR", str(tmp_path))
     monkeypatch.setenv("GATEWAY_AUTH_TOKEN", "gateway-test-token")
@@ -202,6 +207,7 @@ class TestEventType:
         assert EventType.BROADCAST.value == "broadcast"
 
 
+@pytest.mark.usefixtures("_isolate_gateway_pairing")
 class TestWebSocketGateway:
     """Tests for WebSocketGateway server (wrapper package)."""
 
@@ -426,6 +432,7 @@ class TestWebSocketGateway:
         assert health["agents"] == 1
 
 
+@pytest.mark.usefixtures("_isolate_gateway_pairing")
 class TestGatewaySession:
     """Tests for GatewaySession (from wrapper)."""
 
@@ -494,6 +501,7 @@ class TestGatewaySession:
         assert session.is_active is False
 
 
+@pytest.mark.usefixtures("_isolate_gateway_pairing")
 class TestGatewayDispatch:
     """Test the gateway agent-turn dispatch helper (native async vs sync fallback)."""
 
