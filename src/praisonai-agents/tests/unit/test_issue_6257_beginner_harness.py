@@ -38,3 +38,25 @@ def test_openai_timeout_reaches_sync_client(monkeypatch):
         "praisonaiagents.llm.openai_client.check_model_request", lambda *a, **k: None
     )
     assert client.sync_client.timeout == 12.0
+
+
+def test_rules_notice_lists_only_active_rules_once(tmp_path, monkeypatch, caplog):
+    import logging
+    from praisonaiagents.agent import agent as agent_mod
+
+    rules_dir = tmp_path / ".praisonai" / "rules"
+    rules_dir.mkdir(parents=True)
+    (rules_dir / "always_on.md").write_text("---\nactivation: always\n---\nBe brief.\n")
+    (rules_dir / "manual_only.md").write_text("---\nactivation: manual\n---\nOnly on @mention.\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setattr(agent_mod, "_RULES_NOTICE_SEEN", set())
+
+    with caplog.at_level(logging.WARNING):
+        for _ in range(2):
+            a = Agent(instructions="test", llm="gpt-4o-mini")
+            a._init_rules_manager()
+
+    notices = [r.getMessage() for r in caplog.records if "Applied rules" in r.getMessage()]
+    assert len(notices) == 1
+    assert "always_on" in notices[0] and "manual_only" not in notices[0]
