@@ -356,7 +356,19 @@ def test_a_batch_provisions_one_sandbox_not_one_per_row():
 
 
 # ── run_on= moves the thinking too ───────────────────────────────────────────
-def test_a_hosted_agent_says_its_thinking_moved():
+@pytest.fixture
+def _no_hosted_credentials(monkeypatch):
+    for name in ("ANTHROPIC_API_KEY", "CLAUDE_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+    def no_network(*args, **kwargs):
+        pytest.fail("unexpected network connection")
+
+    monkeypatch.setattr("socket.socket.connect", no_network)
+    monkeypatch.setattr("socket.socket.connect_ex", no_network)
+
+
+def test_a_hosted_agent_says_its_thinking_moved(_no_hosted_credentials):
     """describe() used to report thinks_on='this machine' for a hosted agent --
     the diagnostic lying about the one thing it exists to answer."""
     from praisonaiagents.agent.execution_location import describe
@@ -368,7 +380,7 @@ def test_a_hosted_agent_says_its_thinking_moved():
     assert "Anthropic" in places["thinks_on"]
 
 
-def test_run_on_builds_the_same_thing_backend_would():
+def test_run_on_builds_the_same_thing_backend_would(_no_hosted_credentials):
     pytest.importorskip("praisonai.integrations")
     from praisonai.integrations import HostedAgent
 
