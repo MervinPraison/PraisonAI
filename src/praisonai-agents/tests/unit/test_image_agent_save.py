@@ -50,8 +50,8 @@ def test_generate_save_writes_decoded_bytes(agent, tmp_path):
 def test_edit_save_index_and_raw_access(agent, tmp_path):
     src = tmp_path / "photo.png"
     src.write_bytes(b"png")
-    result = agent.edit(str(src), "make the cup blue", markup="circle.png", n=2)
-    assert agent.sent["edit"]["markup"] == "circle.png"
+    result = agent.edit(str(src), "make the cup blue", n=2)
+    assert agent.sent["edit"]["n"] == 2
     assert len(result.images) == 2
     assert result.usage == {"total_tokens": 5}
     assert base64.b64decode(result.data[1].b64_json) == GIF
