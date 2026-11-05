@@ -275,6 +275,14 @@ jobs:
               tests/unit/test_security_audit_fixes.py::test_file_memory_uses_sanitised_user_id_for_path
               tests/unit/test_security_audit_fixes.py::test_file_memory_rejects_path_object_user_id
               tests/unit/test_security_audit_fixes.py::test_agent_server_enforces_auth_token
+              tests/unit/test_provider_matrix.py::test_daytona_asks_for_memory_in_the_unit_the_sdk_documents
+              tests/unit/test_provider_matrix.py::test_daytona_uploads_content_then_destination
+              tests/unit/test_provider_matrix.py::test_both_implementations_of_a_vendor_exist_and_are_distinct
+              tests/unit/test_provider_matrix.py::test_neither_implementation_passes_megabytes_where_gib_is_wanted
+              tests/unit/test_provider_matrix.py::test_e2b_honours_a_non_default_image_as_its_template
+              tests/unit/test_provider_matrix.py::test_modal_honours_a_non_default_image_from_the_registry
+              tests/unit/test_provider_matrix.py::test_the_two_docker_implementations_agree_on_their_image
+              tests/unit/test_provider_matrix.py::test_every_install_hint_names_an_extra_that_exists
               tests/unit/test_output_file_containment.py::test_task_output_file_traversal_blocked
               tests/unit/test_output_file_containment.py::test_task_output_file_inside_root
               tests/unit/test_output_file_containment.py::test_task_output_file_respects_create_directory
