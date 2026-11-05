@@ -1195,10 +1195,6 @@ class SQLiteKanbanStore:
             "WHERE id = ? AND (ended_at IS NULL OR ended_at = '')",
             (RunOutcome.CRASHED.value, error, now.isoformat(), run_id),
         )
-        conn.execute(
-            "UPDATE tasks SET current_run_id = NULL WHERE id = ? AND current_run_id = ?",
-            (task_id, run_id),
-        )
         if result.rowcount > 0:
             self._log_event(conn, task_id, 'run_closed', {
                 'run_id': run_id, 'outcome': RunOutcome.CRASHED.value,

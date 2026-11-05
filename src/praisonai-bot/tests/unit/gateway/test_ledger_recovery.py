@@ -404,6 +404,13 @@ def test_reconcile_background_jobs_retires_stale_lost_jobs(tmp_path, monkeypatch
         origin={"deliver": "origin", "platform": "telegram",
                 "chat_id": "12345", "task": "last week's task"},
     ))
+    # An old undelivered result is retired too, even if its target no longer
+    # resolves (otherwise it would be retried on every boot forever).
+    pre.upsert(JobInfo(
+        job_id="job-old-done", status=JobStatus.COMPLETED, created_at=old,
+        started_at=old, completed_at=old, result="old report",
+        origin={"deliver": "gone-alias", "task": "last week's report"},
+    ))
     pre.close()
     monkeypatch.setattr(jm, "_global_job_manager", None)
 
@@ -418,6 +425,7 @@ def test_reconcile_background_jobs_retires_stale_lost_jobs(tmp_path, monkeypatch
     try:
         asyncio.run(gateway._reconcile_background_jobs())
         assert jm._global_job_manager.get_job_info("job-old").delivered
+        assert jm._global_job_manager.get_job_info("job-old-done").delivered
     finally:
         mgr, jm._global_job_manager = jm._global_job_manager, None
         if mgr is not None:
