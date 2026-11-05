@@ -43,3 +43,34 @@ def test_generate_title_works_inside_running_loop(monkeypatch):
         return title.generate_title("hello", "world")
 
     assert asyncio.run(main()) == "LLM Title"
+
+
+def test_listed_todo_names_round_trip(tmp_path):
+    storage = PlanStorage(base_path=str(tmp_path / "store"))
+    storage.save_todo(TodoList(), name="my tasks")
+    (listed,) = storage.list_todos()
+    assert storage.load_todo(listed) is not None
+    assert storage.load_todo("my tasks") is not None
+    assert storage.delete_todo(listed) is True
+    assert storage.list_todos() == []
+
+
+def test_legacy_todo_file_still_found(tmp_path):
+    storage = PlanStorage(base_path=str(tmp_path / "store"))
+    legacy = os.path.join(storage.todos_dir, "my tasks.json")
+    with open(legacy, "w", encoding="utf-8") as f:
+        f.write(TodoList().to_json())
+    assert storage.load_todo("my tasks") is not None
+    assert storage.save_todo(TodoList(), name="my tasks") == legacy
+    assert storage.list_todos() == ["my tasks"]
+    assert storage.delete_todo("my tasks") is True
+
+
+def test_custom_plan_filename_keeps_md_suffix(tmp_path):
+    from praisonaiagents.planning.plan import Plan
+
+    storage = PlanStorage(base_path=str(tmp_path / "store"))
+    plan = Plan(name="demo")
+    path = storage.save_plan(plan, filename="my plan.md")
+    assert path.endswith(".md") and os.path.dirname(path) == storage.plans_dir
+    assert len(storage.list_plans()) == 1

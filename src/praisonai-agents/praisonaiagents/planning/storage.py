@@ -105,7 +105,11 @@ class PlanStorage:
             filename = self._get_plan_filename(plan)
             
         from ..utils.atomic_io import safe_join
-        path = safe_join(self.plans_dir, filename)
+        # Keep ".md" as the suffix so listing/lookup still find the file.
+        stem, ext = os.path.splitext(filename)
+        if ext.lower() != ".md":
+            stem, ext = filename, ".md"
+        path = safe_join(self.plans_dir, stem, ext)
         
         # Convert plan to markdown
         markdown = plan.to_markdown()
@@ -216,6 +220,28 @@ class PlanStorage:
             
         return False
     
+    def _todo_path(self, name: str) -> str:
+        """Confined path for a todo name, reusing a pre-existing legacy file.
+
+        Legacy files (``<name>.json`` written before Issue #6238) are reused
+        only when ``name`` is a plain filename, so upgrades keep working
+        without ever allowing traversal out of ``todos_dir``.
+        """
+        from ..utils.atomic_io import safe_join
+        path = safe_join(self.todos_dir, name, ".json")
+        name = str(name)
+        if (
+            not os.path.exists(path)
+            and name not in ("", ".", "..")
+            and "\0" not in name
+            and os.path.basename(name) == name
+            and not (os.altsep and os.altsep in name)
+        ):
+            legacy = os.path.join(self.todos_dir, f"{name}.json")
+            if os.path.isfile(legacy):
+                return legacy
+        return path
+
     def save_todo(self, todo: TodoList, name: str = "current") -> str:
         """
         Save a todo list to storage.
@@ -227,8 +253,8 @@ class PlanStorage:
         Returns:
             Path to the saved file
         """
-        from ..utils.atomic_io import atomic_write_text, safe_join
-        path = safe_join(self.todos_dir, name, ".json")
+        from ..utils.atomic_io import atomic_write_text
+        path = self._todo_path(name)
 
         # Atomic write so a crash mid-write never truncates the previous todos.
         atomic_write_text(path, todo.to_json())
@@ -246,8 +272,7 @@ class PlanStorage:
         Returns:
             TodoList instance, or None if not found
         """
-        from ..utils.atomic_io import safe_join
-        path = safe_join(self.todos_dir, name, ".json")
+        path = self._todo_path(name)
         
         if not os.path.exists(path):
             return None
@@ -284,8 +309,7 @@ class PlanStorage:
         Returns:
             True if deleted, False if not found
         """
-        from ..utils.atomic_io import safe_join
-        path = safe_join(self.todos_dir, name, ".json")
+        path = self._todo_path(name)
         
         if os.path.exists(path):
             os.remove(path)
