@@ -101,6 +101,8 @@ vLLM and LM Studio work the same way: use `hosted_vllm/` (vLLM) or `lm_studio/` 
 4. **Roll back:** if quality drops, the task moves back automatically.
 5. **Record:** every handover leaves a record your regulator can check.
 
+**What is "your own AI"?** An open model, such as Llama, Qwen or Gemma, running on your own computers. Use it as it is, or train it on your own past work with [PraisonAI Train](https://praison.ai/docs/train) on your own GPU servers. Your team decides when to train; nothing trains automatically. Either way, a task moves to it only after it passes its tests.
+
 Highly regulated teams, such as banks, insurers and hospitals, want AI but can't send customer data to outside models. From 6 January 2027, OpenAI also takes no new self-serve fine-tuning jobs ([notice](https://developers.openai.com/api/docs/deprecations)), so teams that customise models need models they own. The handover lets these teams move work to AI they own, one task at a time, with a record that shows why each step was trusted.
 
 It is built on parts of this framework that are live today: tracing, evaluation, fine-tuning, model routing and local models. The handover itself is in early access, and we are taking on our first design partners. To take part, see [praison.ai/enterprise](https://praison.ai/enterprise/).
