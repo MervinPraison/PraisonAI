@@ -162,6 +162,11 @@ jobs:
               tests/unit/test_agent_instantiation_lazy.py tests/unit/test_agent_os_exports.py
               tests/unit/test_agent_prefix_rename.py tests/unit/test_agent_presentation_reply.py
               tests/unit/test_async_input_guardrail_offload.py tests/unit/test_agentteam_stream_fanin.py
+              tests/unit/test_gateway_addressing.py tests/unit/test_gateway_concurrency_policy.py
+              tests/unit/test_gateway_dead_letter_policy.py tests/unit/test_gateway_drain_policy.py
+              tests/unit/test_gateway_exit_codes.py tests/unit/test_gateway_frame_codec.py
+              tests/unit/test_gateway_hook_signature.py tests/unit/test_gateway_idle_policy.py
+              tests/unit/test_gateway_liveness_policy.py tests/unit/test_gateway_rate_limit_policy.py
             # Both tests previously deselected here now pass in combination.
             # test_lazy_litellm_import was looking the loader module up by
             # name and could get a different object than the one get_litellm()
