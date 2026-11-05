@@ -2800,42 +2800,46 @@ def _begin_manifest_run(session_key, prompt, output, *, quiet: bool = False):
 
     If the previous run on this session never released its marker it was
     interrupted; say so, so the user can re-issue it. Returns the session key
-    to release later, or ``None`` when there is no session or the manifest is
-    unavailable (manifest problems never block a run).
+    a ``(manifest, session_key, run_id)`` handle to release later, or ``None``
+    when there is no session or the manifest is unavailable (manifest problems
+    never block a run).
     """
     if not session_key:
         return None
     try:
         import uuid
         from praisonaiagents.session.manifest import FileSessionManifest
+        from ..utils.project import get_project_sessions_dir
 
-        manifest = FileSessionManifest()
+        # Scope manifests like the project session store, so equal session
+        # names in different projects never share a run marker.
+        manifest = FileSessionManifest(str(get_project_sessions_dir() / "manifests"))
         stale = manifest.interrupted(session_key)
         if stale is not None and not quiet:
             output.print_warning(
                 f"The previous run in this session was interrupted "
                 f"(attempt {stale.attempt}): {stale.run_input or '<unknown>'}"
             )
-        manifest.begin_run(session_key, uuid.uuid4().hex[:12], run_input=prompt)
-        return session_key
+        run_id = uuid.uuid4().hex[:12]
+        manifest.begin_run(session_key, run_id, run_input=prompt)
+        return manifest, session_key, run_id
     except Exception:
         return None
 
 
-def _end_manifest_run(session_key) -> None:
-    """Release the in-flight marker unless the run was interrupted (Ctrl+C)."""
-    if not session_key:
+def _end_manifest_run(handle) -> None:
+    """Release this run's own in-flight marker unless it was interrupted (Ctrl+C)."""
+    if not handle:
         return
     import sys
 
     exc = sys.exc_info()[1]
     if isinstance(exc, KeyboardInterrupt):
         return
+    manifest, session_key, run_id = handle
     try:
-        from praisonaiagents.session.manifest import FileSessionManifest
-
-        FileSessionManifest().end_run(
-            session_key, "completed" if exc is None else "ended"
+        manifest.end_run(
+            session_key, "completed" if exc is None else "ended", run_id=run_id
         )
     except Exception:
         pass

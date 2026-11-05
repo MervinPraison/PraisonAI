@@ -59,3 +59,22 @@ def test_session_manager_save_and_load_state(tmp_path, monkeypatch):
     assert mixin._load_session_state("s1") == {}
     assert mixin._save_session_state("s1", {"checkpoint": "abc", "goal": "g1"})
     assert mixin._load_session_state("s1") == {"checkpoint": "abc", "goal": "g1"}
+
+
+def test_ids_differing_only_in_punctuation_stay_separate(tmp_path):
+    m = FileSessionManifest(str(tmp_path))
+    m.set_refs("a:b", plan="colon")
+    m.set_refs("a_b", plan="underscore")
+    assert m.get("a:b").refs == {"plan": "colon"}
+    assert m.get("a_b").refs == {"plan": "underscore"}
+
+
+def test_end_run_only_releases_its_own_marker(tmp_path):
+    m = FileSessionManifest(str(tmp_path))
+    m.begin_run("s1", "r1", run_input="first")
+    m.begin_run("s1", "r2", run_input="second")  # second terminal takes over
+    assert m.end_run("s1", "completed", run_id="r1") is None
+    stale = m.interrupted("s1")
+    assert stale is not None and stale.run_id == "r2"
+    m.end_run("s1", "completed", run_id="r2")
+    assert m.interrupted("s1") is None

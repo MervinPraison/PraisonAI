@@ -17,7 +17,7 @@ Usage::
 
     entry = manifest.begin_run("my-session", "run-42", run_input="fix the bug")
     ...  # run the agent
-    manifest.end_run("my-session", "completed")
+    manifest.end_run("my-session", "completed", run_id="run-42")
 
     # Next launch:
     stale = manifest.interrupted("my-session")   # entry or None
@@ -32,19 +32,19 @@ from __future__ import annotations
 import json
 import logging
 import os
-import re
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Protocol, runtime_checkable
+from typing import Any, Dict, Iterator, Optional, Protocol, runtime_checkable
+
+from .store import FileLock, _safe_session_filename
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_ATTEMPTS = 3
-
-_SAFE_ID = re.compile(r"[^A-Za-z0-9._-]")
 
 
 @dataclass
@@ -84,7 +84,9 @@ class SessionManifestProtocol(Protocol):
         max_attempts: int = DEFAULT_MAX_ATTEMPTS,
     ) -> ManifestEntry: ...
 
-    def end_run(self, session_id: str, status: str) -> Optional[ManifestEntry]: ...
+    def end_run(
+        self, session_id: str, status: str, run_id: Optional[str] = None
+    ) -> Optional[ManifestEntry]: ...
 
     def interrupted(self, session_id: str) -> Optional[ManifestEntry]: ...
 
@@ -93,6 +95,9 @@ class FileSessionManifest:
     """Default JSON-file manifest: ``<dir>/<session_id>.json``, atomic writes."""
 
     def __init__(self, directory: Optional[str] = None):
+        """``directory`` defaults to ``<sessions>/manifests``; callers whose
+        session store is scoped (e.g. per project) should pass the matching
+        directory so equal ids in different scopes never share a manifest."""
         if directory is None:
             from ..paths import get_sessions_dir
 
@@ -103,7 +108,15 @@ class FileSessionManifest:
     def _path(self, session_id: str) -> Path:
         if not session_id:
             raise ValueError("session_id is required")
-        return self._dir / f"{_SAFE_ID.sub('_', session_id)}.json"
+        # Same injective naming as the conversation store: ids that differ
+        # only in ``:``/``.``/``/`` never share a file, and none escape ``_dir``.
+        return self._dir / f"{_safe_session_filename(session_id)}.json"
+
+    @contextmanager
+    def _locked(self, session_id: str) -> Iterator[None]:
+        """Serialise read-modify-write across threads *and* processes."""
+        with self._lock, FileLock(str(self._path(session_id))):
+            yield
 
     def _read(self, session_id: str) -> Optional[ManifestEntry]:
         path = self._path(session_id)
@@ -145,7 +158,7 @@ class FileSessionManifest:
 
     def set_refs(self, session_id: str, **refs: Any) -> ManifestEntry:
         """Merge plane references (e.g. ``checkpoint=``, ``plan=``) into the entry."""
-        with self._lock:
+        with self._locked(session_id):
             entry = self._read(session_id) or ManifestEntry(session_id=session_id)
             entry.refs.update(refs)
             return self._write(entry)
@@ -164,7 +177,7 @@ class FileSessionManifest:
         ``max_attempts`` is exceeded the stale run is abandoned and the counter
         restarts, so a run that keeps dying is not counted up forever.
         """
-        with self._lock:
+        with self._locked(session_id):
             entry = self._read(session_id) or ManifestEntry(session_id=session_id)
             if entry.run_in_flight and entry.run_input == run_input:
                 attempt = entry.attempt + 1
@@ -183,11 +196,18 @@ class FileSessionManifest:
             entry.attempt = attempt
             return self._write(entry)
 
-    def end_run(self, session_id: str, status: str) -> Optional[ManifestEntry]:
-        """Release the in-flight marker with a terminal ``status``."""
-        with self._lock:
+    def end_run(
+        self, session_id: str, status: str, run_id: Optional[str] = None
+    ) -> Optional[ManifestEntry]:
+        """Release the in-flight marker with a terminal ``status``.
+
+        With ``run_id``, only that run's own marker is released: if another
+        run on the same session has since taken the marker, it is left alone
+        (returns ``None``) so that run's later crash is still reported.
+        """
+        with self._locked(session_id):
             entry = self._read(session_id)
-            if entry is None:
+            if entry is None or (run_id is not None and entry.run_id != run_id):
                 return None
             entry.run_in_flight = False
             entry.run_status = status
