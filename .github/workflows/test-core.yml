@@ -592,6 +592,15 @@ jobs:
         python -m pytest tests/unit/test_security_audit_fixes.py::test_ast_grep_rewrite_requires_approval \
           -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
           -q --tb=line --disable-warnings --timeout=60
+    - name: Run isolated path reload tests
+      if: matrix.shard == 'agents-core'
+      working-directory: src/praisonai-agents
+      run: |
+        python -m pytest \
+          tests/unit/test_paths_wiring.py::TestPolicyConfigWiring::test_default_rules_dir_matches_paths \
+          tests/unit/test_paths_wiring.py::TestSchedulerStoreWiring::test_default_dir_matches_paths \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings --timeout=60
     - name: Run isolated lazy import tests
       if: matrix.shard == 'agents-core'
       working-directory: src/praisonai-agents
