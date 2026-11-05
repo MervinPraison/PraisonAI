@@ -153,12 +153,12 @@ def test_the_result_is_read_from_a_marked_line():
 # ── failure is reported, not swallowed ───────────────────────────────────────
 def test_a_missing_daemon_says_what_to_do():
     import asyncio
+    from types import SimpleNamespace
 
     from praisonai.integrations.compute_managed_agent import ComputeManagedAgent
 
     backend = ComputeManagedAgent("docker")
-    if backend.is_available:
-        pytest.skip("Docker is running, so this path cannot be exercised")
+    backend._provider = SimpleNamespace(is_available=False)
     with pytest.raises(RuntimeError) as exc:
         asyncio.run(backend._ensure())
     message = str(exc.value)

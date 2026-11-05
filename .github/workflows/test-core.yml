@@ -388,6 +388,7 @@ jobs:
               tests/unit/test_run_on_docker.py::test_hosted_config_spellings_are_translated
               tests/unit/test_run_on_docker.py::test_an_empty_config_still_produces_a_valid_agent
               tests/unit/test_run_on_docker.py::test_the_result_is_read_from_a_marked_line
+              tests/unit/test_run_on_docker.py::test_a_missing_daemon_says_what_to_do
               tests/unit/test_run_on_docker.py::test_places_that_cannot_host_a_loop_are_still_refused
               tests/unit/test_run_on_docker.py::test_the_remote_agent_is_rebuilt_without_callables
               tests/unit/test_run_on_docker.py::test_the_generic_backend_honours_a_requested_image
