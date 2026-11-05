@@ -16,6 +16,7 @@ Covers issue #5588:
 import ast
 import threading
 import time
+import tokenize
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -79,7 +80,8 @@ def test_no_handrolled_async_bridges_outside_helper():
     for path in root.rglob("*.py"):
         if path in allowed:
             continue
-        tree = ast.parse(path.read_text(), filename=str(path))
+        with tokenize.open(path) as source:
+            tree = ast.parse(source.read(), filename=str(path))
         for func in ast.walk(tree):
             if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 continue
