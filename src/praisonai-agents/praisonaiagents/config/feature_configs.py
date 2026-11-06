@@ -1072,13 +1072,14 @@ class ExecutionConfig:
         return self.max_iter
 
     def resolved_max_tool_calls(self) -> int:
-        """Per-turn tool-call guardrail (max parallel tool calls in one response).
+        """Return the configured tool-call budget.
 
-        This is intentionally *independent* of ``max_steps``: ``max_steps``
-        bounds outer-loop iterations (one LLM round-trip each), whereas this
-        caps how many tool calls may fire within a single LLM response. Coupling
-        them would let a single parallel-tool response exhaust the step budget
-        (e.g. ``max_steps=5`` truncating after one round of 5 parallel calls).
+        LiteLLM tool loops count calls across model responses, not just calls
+        in one parallel batch. Their counter starts fresh on durable resume,
+        so an interrupted and resumed turn may exceed the configured budget
+        in total. The native OpenAI tool loop does not enforce this budget.
+        ``max_steps`` separately bounds loop iterations; it is not a tool-call
+        count limit.
         """
         return self.max_tool_calls_per_turn
 
