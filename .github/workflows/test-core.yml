@@ -410,6 +410,7 @@ jobs:
               tests/unit/test_placement.py::test_run_on_builds_the_same_thing_backend_would
               tests/unit/test_thread_safety.py::TestMCPCleanup
               tests/unit/test_robustness_issue_5870.py::test_allowlist_failed_save_keeps_previous_file
+              tests/unit/test_robustness_issue_5870.py::test_config_dump_preserves_symlink_and_mode
               tests/unit/test_robustness_issue_5870.py::test_allowlist_load_quarantines_corrupt_file
               tests/unit/test_robustness_issue_5870.py::test_git_fetch_timeout_without_cache_returns_empty
               tests/unit/test_robustness_issue_5870.py::test_git_fetch_timeout_falls_back_to_cache
