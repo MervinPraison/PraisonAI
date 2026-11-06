@@ -99,5 +99,14 @@ def test_agent_failure_does_not_leak_exception_text(agents_file, boom_arun):
 def test_oversize_query_is_rejected(agents_file, boom_arun):
     big = "x" * (_MAX_QUERY_CHARS + 1)
     for app, route in _apps(agents_file):
+        resp = TestClient(app).post(route, json={"query": big})
+        if resp.status_code == 422:
+            # Pydantic route: must fail on length, not on a missing field.
+            types_ = {e["type"] for e in resp.json()["detail"]}
+            assert types_ == {"string_too_long"}, (route, resp.json())
+        else:
+            assert resp.status_code == 413, route
+    # Raw-body routes also bound the ``message`` alias.
+    for app, route in _apps(agents_file)[1:]:
         resp = TestClient(app).post(route, json={"message": big})
-        assert resp.status_code in (413, 422), route
+        assert resp.status_code == 413, route
