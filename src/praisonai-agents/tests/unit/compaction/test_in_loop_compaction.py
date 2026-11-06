@@ -163,3 +163,35 @@ class TestManageContextInLoop:
         assert len(cleared) > 0
         # tool_calls preserved
         assert len([m for m in out if m.get("tool_calls")]) == 12
+
+    def test_clear_pass_has_hysteresis_to_keep_cached_prefix_stable(self, monkeypatch):
+        """Past the clear threshold, the prefix must not be rewritten every turn.
+
+        Without a reserve band, each iteration clears one more old tool result,
+        moving the request prefix and busting the provider prompt cache.
+        """
+        import json
+
+        llm = _make_llm()
+        monkeypatch.setattr(llm, "_resolve_context_window", lambda: 4000)
+
+        messages = [{"role": "system", "content": "s"}, {"role": "user", "content": "task"}]
+        rewrites = 0
+        iterations = 120
+        for i in range(iterations):
+            messages.append({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": f"c{i}", "function": {"name": "f", "arguments": "{}"}}],
+            })
+            messages.append({"role": "tool", "tool_call_id": f"c{i}", "content": "x " * 150})
+            before = json.dumps(messages[:-2])[:-1]
+            messages = llm._manage_context_in_loop(messages)
+            if not json.dumps(messages).startswith(before):
+                rewrites += 1
+
+        # Management still bounds the context...
+        compactor = llm._loop_compactor
+        assert compactor.count_total_tokens(messages) < 4000
+        # ...but rewrites the prefix in batches, not on (nearly) every turn.
+        assert rewrites < iterations // 3
