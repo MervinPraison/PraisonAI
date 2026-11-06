@@ -784,6 +784,7 @@ Respond with ONLY a valid JSON tool call in this format:
         self._keep_recent_tool_results = extra_settings.get('keep_recent_tool_results', 6)
         self._loop_compactor = None  # Lazily created on first in-loop management call
         self._loop_compactor_model = None  # Model the cached compactor was built for
+        self._loop_managed_tokens = {}  # Per-conversation token count after the last in-loop clear/compact pass
         
         # Tool calling reliability settings (for weak models like Ollama)
         # These are auto-configured for Ollama providers if not explicitly set
@@ -3188,6 +3189,15 @@ Respond with ONLY a valid JSON tool call in this format:
         except Exception:
             return 8000
 
+    #: Share of the context window the conversation must grow by, since the
+    #: last in-loop clear pass, before another clear pass rewrites the prefix.
+    _LOOP_CLEAR_RESERVE_PCT = 0.1
+
+    @staticmethod
+    def _loop_conversation_key(messages: list) -> int:
+        """Identify a conversation by its first two messages (system + task)."""
+        return hash(repr([(m.get("role"), m.get("content")) for m in messages[:2] if isinstance(m, dict)]))
+
     def _manage_context_in_loop(self, messages: list) -> list:
         """
         Clear-then-compact between tool iterations. No-op when under threshold.
@@ -3234,12 +3244,27 @@ Respond with ONLY a valid JSON tool call in this format:
                 )
                 self._loop_compactor = compactor
                 self._loop_compactor_model = self.model
+                self._loop_managed_tokens = {}
 
             clear_at = int(budget * compactor.config.clear_threshold_pct)
             compact_at = int(budget * compactor.config.compact_threshold_pct)
 
             tokens = compactor.count_total_tokens(messages)
             if tokens < clear_at:
+                return messages
+
+            # Hysteresis: every pass rewrites the message prefix and so busts the
+            # provider prompt cache. Below the summarise threshold, wait until the
+            # context has grown by a reserve band since the last pass, so old tool
+            # results are cleared in batches instead of one per iteration.
+            # The baseline is kept per conversation (keyed by its stable head) so
+            # interleaved tool loops sharing this LLM don't reset each other's band.
+            managed = getattr(self, "_loop_managed_tokens", None)
+            if not isinstance(managed, dict):
+                managed = self._loop_managed_tokens = {}
+            last = managed.get(self._loop_conversation_key(messages))
+            reserve = int(budget * self._LOOP_CLEAR_RESERVE_PCT)
+            if tokens < compact_at and last is not None and last <= tokens < last + reserve:
                 return messages
 
             # Tier 1: clear re-fetchable tool results
@@ -3252,6 +3277,9 @@ Respond with ONLY a valid JSON tool call in this format:
             if compactor.count_total_tokens(messages) >= compact_at:
                 messages, _ = compactor.compact(messages)
 
+            if len(managed) >= 64:  # bound memory for long-lived shared LLMs
+                managed.clear()
+            managed[self._loop_conversation_key(messages)] = compactor.count_total_tokens(messages)
             return messages
         except Exception as e:
             logging.debug(f"In-loop context management skipped: {e}")
