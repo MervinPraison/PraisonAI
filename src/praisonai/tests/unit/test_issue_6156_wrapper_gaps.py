@@ -45,9 +45,16 @@ def test_code_execute_command_scrubs_secret_env(tmp_path, monkeypatch):
     assert "sk-should-not-leak" not in result["stdout"]
 
 
+def _interpreter_path_unusable():
+    from praisonaiagents.tools.shell_tools import _find_shell_syntax
+
+    exe = sys.executable
+    return any(c.isspace() for c in exe) or _find_shell_syntax(exe) is not None
+
+
 @pytest.mark.skipif(
-    any(c.isspace() for c in sys.executable),
-    reason="interpreter path contains whitespace",
+    _interpreter_path_unusable(),
+    reason="interpreter path has whitespace or shell metacharacters",
 )
 def test_code_execute_command_scrubs_secret_env_cross_platform(tmp_path, monkeypatch):
     """Platform-neutral env-scrub probe (#6264): a Python child dumps its env."""
