@@ -283,13 +283,6 @@ def test_chat_gate_receives_resolved_model(clean_env, monkeypatch):
         mr_mod, "resolve_default_model", lambda explicit=None: "gemini/gemini-1.5-pro"
     )
 
-    # The interactive (no-prompt) path only gates once the wrapper-resident TUI
-    # can start; force it available so this test exercises the gate rather than
-    # the standalone install-hint short-circuit (see chat_main).
-    import praisonai_code._wrapper_bridge as _bridge
-
-    monkeypatch.setattr(_bridge, "wrapper_available", lambda: True)
-
     seen = {"model": "unset"}
 
     def _gate(*, model=None, interactive=True):
@@ -344,14 +337,10 @@ def test_chat_gate_receives_resolved_model(clean_env, monkeypatch):
     assert seen["model"] == "gemini/gemini-1.5-pro"
 
 
-def test_chat_interactive_standalone_skips_gate_for_install_hint(clean_env, monkeypatch):
-    # Regression (smoke): keyless interactive `chat` on a standalone
-    # `pip install praisonai-code` (no wrapper) must NOT be preempted by the
-    # onboarding gate. The wrapper-resident TUI surfaces its own actionable
-    # install hint (`pip install praisonai[tui]`); running the credential gate
-    # first would dead-end a newcomer with "No API key configured" for a session
-    # that cannot even start. The gate is skipped when the wrapper is absent and
-    # no prompt was given.
+def test_chat_interactive_standalone_runs_gate_and_launches_tui(clean_env, monkeypatch):
+    # Issue #6271: the TUI is resident in praisonai-code, so keyless interactive
+    # `chat` on a lean install (no wrapper) runs the onboarding gate and then
+    # launches the TUI — no wrapper-only short-circuit.
     from praisonai_code.cli.commands import chat as chat_mod
     from praisonai_code.cli.configuration import model_resolver as mr_mod
     import praisonai_code._wrapper_bridge as _bridge
@@ -361,8 +350,11 @@ def test_chat_interactive_standalone_skips_gate_for_install_hint(clean_env, monk
     )
     monkeypatch.setattr(_bridge, "wrapper_available", lambda: False)
 
+    gated = {"ran": False}
+
     def _gate(*, model=None, interactive=True):
-        raise AssertionError("gate must not run for standalone interactive chat")
+        gated["ran"] = True
+        return model
 
     monkeypatch.setattr(creds, "ensure_configured_or_onboard", _gate)
 
@@ -421,4 +413,44 @@ def test_chat_interactive_standalone_skips_gate_for_install_hint(clean_env, monk
         pure=False,
     )
 
+    assert launched["tui"] is True
+    assert gated["ran"] is True
+
+
+def test_bare_invocation_standalone_runs_gate_and_launches_tui(clean_env, monkeypatch):
+    # Issue #6271: bare `praisonai-code` with no wrapper must reach the
+    # onboarding gate and launch the resident TUI instead of standalone help.
+    import sys
+    import praisonai_code._wrapper_bridge as _bridge
+    import praisonai_code.__main__ as entry
+
+    monkeypatch.setattr(_bridge, "wrapper_available", lambda: False)
+    monkeypatch.setattr(sys, "argv", ["praisonai-code"])
+
+    gated = {"ran": False}
+
+    def _gate(*, model=None, interactive=True):
+        gated["ran"] = True
+        return model
+
+    monkeypatch.setattr(creds, "ensure_configured_or_onboard", _gate)
+
+    launched = {"tui": False}
+
+    class _StubTUI:
+        def __init__(self, *a, **k):
+            pass
+
+        def run(self):
+            launched["tui"] = True
+
+    monkeypatch.setattr(
+        "praisonai_code.cli.interactive.async_tui.AsyncTUI", _StubTUI
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        entry.main()
+
+    assert exc.value.code in (0, None)
+    assert gated["ran"] is True
     assert launched["tui"] is True
