@@ -1072,13 +1072,14 @@ class ExecutionConfig:
         return self.max_iter
 
     def resolved_max_tool_calls(self) -> int:
-        """Return the tool-call budget accumulated across an agent turn.
+        """Return the configured tool-call budget.
 
-        The budget counts calls across model responses, not just calls in one
-        parallel batch. ``max_steps`` separately bounds loop iterations; either
-        limit may stop a turn first. For example, four one-call responses can
-        reach a tool-call budget of three even though no batch contains more
-        than one call.
+        LiteLLM tool loops count calls across model responses, not just calls
+        in one parallel batch. Their counter starts fresh on durable resume,
+        so an interrupted and resumed turn may exceed the configured budget
+        in total. The native OpenAI tool loop does not enforce this budget.
+        ``max_steps`` separately bounds loop iterations; it is not a tool-call
+        count limit.
         """
         return self.max_tool_calls_per_turn
 
