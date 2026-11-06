@@ -195,7 +195,7 @@ jobs:
               tests/unit/test_schedule_history.py tests/unit/test_schedule_incidents.py
               tests/unit/test_schedule_job_state.py tests/unit/test_schedule_misfire.py
               tests/unit/test_schedule_principal.py tests/unit/test_schedule_quota_hold.py
-              tests/unit/test_schedule_store_persistence.py
+              tests/unit/test_schedule_store_persistence.py tests/unit/test_schedule_at_wall_clock.py
               tests/unit/test_model_harness.py tests/unit/test_model_harness_guard.py
               tests/unit/test_model_harness_scripted.py tests/unit/test_output_encoding.py
               tests/unit/test_param_consolidation.py tests/unit/test_presentation_poll.py
