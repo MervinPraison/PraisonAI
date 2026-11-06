@@ -69,13 +69,20 @@ class FileBackend:
     def _key_to_path(self, key: str) -> Path:
         """Convert key to file path.
 
-        ``safe_join`` encodes reversibly, so distinct keys never share a file
-        (``a@b.com`` vs ``a_b.com`` used to collide) and ``list_keys`` returns
-        the real keys (Issue #6266). Records written under the old lossy name
+        Reversible percent-encoding, so distinct keys never share a file
+        (``a@b.com`` vs ``a_b.com`` used to collide), ``list_keys`` returns
+        the real keys and separators/``..`` cannot leave the directory
+        (Issue #6266). ``safe_join``'s truncation is deliberately not used: its
+        shortened name is an alias a caller could pass to reach another key's
+        file. With an empty suffix ``.`` is encoded too so records never look
+        like they carry an extension. Records written under the old lossy name
         stay on disk and are listed under that sanitised name.
         """
-        from ..utils.atomic_io import safe_join
-        return Path(safe_join(str(self.storage_dir), key, self.suffix))
+        from ..utils.atomic_io import _escape
+        stem = _escape(str(key))
+        if not self.suffix:
+            stem = stem.replace(".", "%2E")
+        return self.storage_dir / f"{stem}{self.suffix}"
 
     def _path_to_key(self, file_path: Path) -> Optional[str]:
         """Recognize records using the full configured suffix."""
