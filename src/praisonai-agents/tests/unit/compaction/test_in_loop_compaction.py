@@ -195,3 +195,33 @@ class TestManageContextInLoop:
         assert compactor.count_total_tokens(messages) < 4000
         # ...but rewrites the prefix in batches, not on (nearly) every turn.
         assert rewrites < iterations // 3
+
+    def test_clear_hysteresis_is_per_conversation(self, monkeypatch):
+        """Interleaved tool loops sharing one LLM must not reset each other's band."""
+        llm = _make_llm()
+        monkeypatch.setattr(llm, "_resolve_context_window", lambda: 4000)
+
+        def conv(task, n, size):
+            msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": task}]
+            for i in range(n):
+                add_turn(msgs, f"{task}-{i}", size)
+            return msgs
+
+        def add_turn(msgs, cid, size):
+            msgs.append({
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [{"id": cid, "function": {"name": "f", "arguments": "{}"}}],
+            })
+            msgs.append({"role": "tool", "tool_call_id": cid, "content": "x " * size})
+
+        # A: smaller history; a clear pass leaves it near the clear threshold.
+        a = llm._manage_context_in_loop(conv("A", 8, 700))
+        # B: a larger history on the same LLM, outside A's reserve band.
+        llm._manage_context_in_loop(conv("B", 7, 860))
+
+        # A grows by one turn, well inside its own reserve band: no rewrite.
+        add_turn(a, "A-x", 10)
+        snapshot = [dict(m) for m in a]
+        out = llm._manage_context_in_loop(a)
+        assert out == snapshot
