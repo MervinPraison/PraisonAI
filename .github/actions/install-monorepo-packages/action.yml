@@ -24,6 +24,11 @@ runs:
   steps:
     - name: Install monorepo packages
       shell: bash
+      env:
+        # pip's resolver can backtrack (e.g. across new boto3/botocore releases
+        # pulled by litellm) down to pandas 1.4.4, an sdist whose setup.py
+        # imports pkg_resources and fails on modern setuptools. Wheels only.
+        PIP_ONLY_BINARY: pandas
       run: |
         set -euo pipefail
         WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
