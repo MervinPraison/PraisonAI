@@ -416,6 +416,11 @@ jobs:
               tests/unit/test_robustness_issue_5870.py::test_git_fetch_timeout_without_cache_returns_empty
               tests/unit/test_robustness_issue_5870.py::test_git_fetch_timeout_falls_back_to_cache
               tests/unit/test_output_file_containment.py::test_task_output_file_traversal_blocked
+              tests/unit/test_output_file_containment.py::test_task_output_file_symlink_escape_blocked
+              tests/unit/test_output_file_containment.py::test_task_output_file_overwrite_preserves_permissions
+              tests/unit/test_output_file_containment.py::test_task_output_file_hardlink_does_not_write_outside
+              tests/unit/test_output_file_containment.py::test_task_output_file_hardlink_keeps_mode_under_umask
+              tests/unit/test_output_file_containment.py::test_task_output_file_hardlink_group_kept_or_bits_dropped
               tests/unit/test_output_file_containment.py::test_task_output_file_inside_root
               tests/unit/test_output_file_containment.py::test_task_output_file_respects_create_directory
               tests/unit/test_output_file_containment.py::test_task_output_file_project_root_override
