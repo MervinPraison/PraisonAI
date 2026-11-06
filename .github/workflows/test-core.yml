@@ -251,7 +251,7 @@ jobs:
               tests/unit/test_whatsapp_web_adapter.py tests/unit/test_whatsapp_web_mode.py
               tests/unit/test_bots.py tests/unit/test_opt_in_modules_lazy.py
               tests/unit/test_launch_mcp_delegation.py
-              tests/unit/test_gateway.py tests/unit/test_chainlit_bot_ui.py
+              tests/unit/test_gateway.py tests/unit/test_gateway_config.py tests/unit/test_chainlit_bot_ui.py
               tests/unit/test_sandbox.py tests/unit/test_cost_persistence.py
               tests/unit/test_parameter_naming.py
               tests/unit/test_api_exports.py
