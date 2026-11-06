@@ -1072,13 +1072,13 @@ class ExecutionConfig:
         return self.max_iter
 
     def resolved_max_tool_calls(self) -> int:
-        """Per-turn tool-call guardrail (max parallel tool calls in one response).
+        """Return the tool-call budget accumulated across an agent turn.
 
-        This is intentionally *independent* of ``max_steps``: ``max_steps``
-        bounds outer-loop iterations (one LLM round-trip each), whereas this
-        caps how many tool calls may fire within a single LLM response. Coupling
-        them would let a single parallel-tool response exhaust the step budget
-        (e.g. ``max_steps=5`` truncating after one round of 5 parallel calls).
+        The budget counts calls across model responses, not just calls in one
+        parallel batch. ``max_steps`` separately bounds loop iterations; either
+        limit may stop a turn first. For example, four one-call responses can
+        reach a tool-call budget of three even though no batch contains more
+        than one call.
         """
         return self.max_tool_calls_per_turn
 
