@@ -65,7 +65,7 @@ def test_headless_keyless_exits_nonzero_with_setup_hint(clean_env, monkeypatch, 
 
     assert exc.value.exit_code == 1
     err = capsys.readouterr().err
-    assert "praisonai setup" in err
+    assert "praisonai-code setup" in err
 
 
 def test_headless_does_not_prompt(clean_env, monkeypatch):
@@ -127,7 +127,7 @@ def test_interactive_declining_wizard_exits_zero(clean_env, monkeypatch, capsys)
 
     assert exc.value.exit_code == 0
     out = capsys.readouterr().out
-    assert "praisonai setup" in out
+    assert "praisonai-code setup" in out
 
 
 def test_interactive_accepting_wizard_runs_setup_and_rechecks(clean_env, monkeypatch):
@@ -282,13 +282,8 @@ def test_chat_gate_receives_resolved_model(clean_env, monkeypatch):
     monkeypatch.setattr(
         mr_mod, "resolve_default_model", lambda explicit=None: "gemini/gemini-1.5-pro"
     )
-
-    # The interactive (no-prompt) path only gates once the wrapper-resident TUI
-    # can start; force it available so this test exercises the gate rather than
-    # the standalone install-hint short-circuit (see chat_main).
-    import praisonai_code._wrapper_bridge as _bridge
-
-    monkeypatch.setattr(_bridge, "wrapper_available", lambda: True)
+    # A key for some other provider is present (any-provider check passes).
+    monkeypatch.setattr(creds, "is_configured", lambda model=None: model is None)
 
     seen = {"model": "unset"}
 
@@ -344,14 +339,10 @@ def test_chat_gate_receives_resolved_model(clean_env, monkeypatch):
     assert seen["model"] == "gemini/gemini-1.5-pro"
 
 
-def test_chat_interactive_standalone_skips_gate_for_install_hint(clean_env, monkeypatch):
-    # Regression (smoke): keyless interactive `chat` on a standalone
-    # `pip install praisonai-code` (no wrapper) must NOT be preempted by the
-    # onboarding gate. The wrapper-resident TUI surfaces its own actionable
-    # install hint (`pip install praisonai[tui]`); running the credential gate
-    # first would dead-end a newcomer with "No API key configured" for a session
-    # that cannot even start. The gate is skipped when the wrapper is absent and
-    # no prompt was given.
+def test_chat_interactive_standalone_runs_gate_and_launches_tui(clean_env, monkeypatch):
+    # Issue #6271: the TUI is resident in praisonai-code, so keyless interactive
+    # `chat` on a lean install (no wrapper) runs the onboarding gate and then
+    # launches the TUI — no wrapper-only short-circuit.
     from praisonai_code.cli.commands import chat as chat_mod
     from praisonai_code.cli.configuration import model_resolver as mr_mod
     import praisonai_code._wrapper_bridge as _bridge
@@ -361,8 +352,11 @@ def test_chat_interactive_standalone_skips_gate_for_install_hint(clean_env, monk
     )
     monkeypatch.setattr(_bridge, "wrapper_available", lambda: False)
 
+    gated = {"ran": False}
+
     def _gate(*, model=None, interactive=True):
-        raise AssertionError("gate must not run for standalone interactive chat")
+        gated["ran"] = True
+        return model
 
     monkeypatch.setattr(creds, "ensure_configured_or_onboard", _gate)
 
@@ -422,3 +416,156 @@ def test_chat_interactive_standalone_skips_gate_for_install_hint(clean_env, monk
     )
 
     assert launched["tui"] is True
+    assert gated["ran"] is True
+
+
+def test_bare_invocation_standalone_runs_gate_and_launches_tui(clean_env, monkeypatch):
+    # Issue #6271: bare `praisonai-code` with no wrapper must reach the
+    # onboarding gate and launch the resident TUI instead of standalone help.
+    import sys
+    import praisonai_code._wrapper_bridge as _bridge
+    import praisonai_code.__main__ as entry
+
+    monkeypatch.setattr(_bridge, "wrapper_available", lambda: False)
+    monkeypatch.setattr(sys, "argv", ["praisonai-code"])
+
+    gated = {"ran": False}
+
+    def _gate(*, model=None, interactive=True):
+        gated["ran"] = True
+        return model
+
+    monkeypatch.setattr(creds, "ensure_configured_or_onboard", _gate)
+
+    launched = {"tui": False}
+
+    class _StubTUI:
+        def __init__(self, *a, **k):
+            pass
+
+        def run(self):
+            launched["tui"] = True
+
+    monkeypatch.setattr(
+        "praisonai_code.cli.interactive.async_tui.AsyncTUI", _StubTUI
+    )
+
+    with pytest.raises(SystemExit) as exc:
+        entry.main()
+
+    assert exc.value.code in (0, None)
+    assert gated["ran"] is True
+    assert launched["tui"] is True
+
+
+def test_chat_fresh_install_accepts_setup_for_other_provider(clean_env, monkeypatch):
+    # Regression (greptile P1 on #6272): on a fresh install `chat` resolves an
+    # OpenAI fallback; if the wizard configures Anthropic instead, chat must
+    # proceed with an Anthropic model rather than exit "credentials still not
+    # detected".
+    from praisonai_code.cli.commands import chat as chat_mod
+    from praisonai_code.cli.configuration import model_resolver as mr_mod
+    from praisonai_code.llm import env as env_mod
+
+    monkeypatch.setattr(mr_mod, "resolve_default_model", lambda explicit=None: "gpt-4o")
+    monkeypatch.setattr(mr_mod, "get_recent_model", lambda: None)
+    state = {"setup_done": False}
+
+    def _is_configured(model=None):
+        if not state["setup_done"]:
+            return False
+        return model is None or model.startswith("anthropic/")
+
+    monkeypatch.setattr(creds, "is_configured", _is_configured)
+    seen = {}
+
+    def _gate(*, model=None, interactive=True):
+        seen["gate_model"] = model
+        state["setup_done"] = True  # wizard configured Anthropic
+        return None
+
+    monkeypatch.setattr(creds, "ensure_configured_or_onboard", _gate)
+    monkeypatch.setattr(
+        env_mod, "default_model_for_available_provider",
+        lambda **k: "anthropic/claude-sonnet",
+    )
+
+    class _StubTUI:
+        def __init__(self, config=None, *a, **k):
+            seen["tui_model"] = getattr(config, "model", None)
+
+        def run(self):
+            pass
+
+    monkeypatch.setattr("praisonai_code.cli.interactive.async_tui.AsyncTUI", _StubTUI)
+
+    class _StubCfg:
+        def __init__(self, *a, **k):
+            self.model = k.get("model")
+
+    monkeypatch.setattr("praisonai_code.cli.interactive.async_tui.AsyncTUIConfig", _StubCfg)
+
+    chat_mod.chat_main(
+        ctx=None, prompt=None, model=None, verbose=False, memory=None,
+        no_memory=False, tools=None, toolset=None, user_id=None, session_id=None,
+        continue_session=False, file=None, workspace=None, no_acp=False,
+        no_lsp=False, safe_mode=False, autonomy=True, append_system_prompt=None,
+        knowledge=None, guardrails=None, web=None, reflection=None, planning=None,
+        context=None, output=None, execution=None, hooks=None, caching=None,
+        approval=None, profile=False, profile_deep=False, debug=False,
+        ui_backend="auto", json_output=False, no_color=False, theme="default",
+        compact=False, no_rules=False, pure=False,
+    )
+
+    assert seen["gate_model"] is None
+    assert seen["tui_model"] == "anthropic/claude-sonnet"
+
+
+def test_chat_env_model_is_gated_exactly_not_replaced(clean_env, monkeypatch):
+    # Regression (greptile P1 on #6272): MODEL_NAME=ollama/qwen with no cloud key
+    # must gate on that exact model, not take the fresh-install path that would
+    # swap it for whichever local model onboarding detects first.
+    from praisonai_code.cli.commands import chat as chat_mod
+    from praisonai_code.cli.configuration import model_resolver as mr_mod
+
+    monkeypatch.setenv("MODEL_NAME", "ollama/qwen")
+    monkeypatch.setattr(mr_mod, "resolve_default_model", lambda explicit=None: "ollama/qwen")
+    monkeypatch.setattr(mr_mod, "get_recent_model", lambda: None)
+    monkeypatch.setattr(creds, "is_configured", lambda model=None: False)
+    seen = {}
+
+    def _gate(*, model=None, interactive=True):
+        seen["gate_model"] = model
+        return model
+
+    monkeypatch.setattr(creds, "ensure_configured_or_onboard", _gate)
+
+    class _StubTUI:
+        def __init__(self, config=None, *a, **k):
+            seen["tui_model"] = getattr(config, "model", None)
+
+        def run(self):
+            pass
+
+    monkeypatch.setattr("praisonai_code.cli.interactive.async_tui.AsyncTUI", _StubTUI)
+
+    class _StubCfg:
+        def __init__(self, *a, **k):
+            self.model = k.get("model")
+
+    monkeypatch.setattr("praisonai_code.cli.interactive.async_tui.AsyncTUIConfig", _StubCfg)
+
+    chat_mod.chat_main(
+        ctx=None, prompt=None, model=None, verbose=False, memory=None,
+        no_memory=False, tools=None, toolset=None, user_id=None, session_id=None,
+        continue_session=False, file=None, workspace=None, no_acp=False,
+        no_lsp=False, safe_mode=False, autonomy=True, append_system_prompt=None,
+        knowledge=None, guardrails=None, web=None, reflection=None, planning=None,
+        context=None, output=None, execution=None, hooks=None, caching=None,
+        approval=None, profile=False, profile_deep=False, debug=False,
+        ui_backend="auto", json_output=False, no_color=False, theme="default",
+        compact=False, no_rules=False, pure=False,
+    )
+
+    assert seen["gate_model"] == "ollama/qwen"
+    assert seen["tui_model"] == "ollama/qwen"

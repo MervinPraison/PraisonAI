@@ -218,17 +218,36 @@ def chat_main(
 
     _headless = bool(json_output) or not _sys.stdin.isatty()
 
-    # The interactive (no-prompt) TUI is wrapper-resident: it renders through
-    # ``praisonai.cli.features.tui`` and fails fast with its own install hint
-    # (``pip install praisonai[tui]``) on a bare ``pip install praisonai-code``.
-    # Running the credential gate first would preempt that hint with a raw
-    # "No API key configured" exit, telling a keyless standalone newcomer to
-    # configure a key for a session that cannot even start. Only gate the
-    # interactive path once the wrapper is present; single-prompt mode runs
-    # in-process (no wrapper needed) and is always gated.
-    from praisonai_code._wrapper_bridge import wrapper_available
+    # Both single-prompt and interactive modes run in praisonai-code (the TUI is
+    # resident here), so the gate always applies — no wrapper needed (#6271).
+    # Fresh install (no user-chosen model — no --model, recent, or MODEL_NAME /
+    # OPENAI_MODEL_NAME — and no provider configured at all): the resolved model
+    # is only a fallback guess, so gate on *any* provider — a wizard run that
+    # configures Anthropic/Google is accepted — then re-pick a model for
+    # whichever provider is now available. Otherwise gate on the exact model so
+    # a user-chosen model (e.g. MODEL_NAME=ollama/qwen) is never replaced.
+    from praisonai_code.llm.credentials import is_configured
 
-    if prompt or wrapper_available():
+    try:
+        from ..configuration.model_resolver import get_recent_model
+        _recent = get_recent_model()
+    except Exception:
+        _recent = None
+    _user_chose_model = bool(
+        model or _recent
+        or os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL_NAME")
+    )
+
+    if not _user_chose_model and not is_configured():
+        local_model = ensure_configured_or_onboard(
+            model=None, interactive=not _headless
+        )
+        if local_model is not None:
+            resolved_model = local_model
+        elif not is_configured(resolved_model):
+            from praisonai_code.llm.env import default_model_for_available_provider
+            resolved_model = default_model_for_available_provider()
+    else:
         resolved_model = ensure_configured_or_onboard(
             model=resolved_model, interactive=not _headless
         )
