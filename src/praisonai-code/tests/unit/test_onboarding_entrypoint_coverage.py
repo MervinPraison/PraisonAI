@@ -468,6 +468,7 @@ def test_chat_fresh_install_accepts_setup_for_other_provider(clean_env, monkeypa
     from praisonai_code.llm import env as env_mod
 
     monkeypatch.setattr(mr_mod, "resolve_default_model", lambda explicit=None: "gpt-4o")
+    monkeypatch.setattr(mr_mod, "get_recent_model", lambda: None)
     state = {"setup_done": False}
 
     def _is_configured(model=None):
@@ -518,3 +519,53 @@ def test_chat_fresh_install_accepts_setup_for_other_provider(clean_env, monkeypa
 
     assert seen["gate_model"] is None
     assert seen["tui_model"] == "anthropic/claude-sonnet"
+
+
+def test_chat_env_model_is_gated_exactly_not_replaced(clean_env, monkeypatch):
+    # Regression (greptile P1 on #6272): MODEL_NAME=ollama/qwen with no cloud key
+    # must gate on that exact model, not take the fresh-install path that would
+    # swap it for whichever local model onboarding detects first.
+    from praisonai_code.cli.commands import chat as chat_mod
+    from praisonai_code.cli.configuration import model_resolver as mr_mod
+
+    monkeypatch.setenv("MODEL_NAME", "ollama/qwen")
+    monkeypatch.setattr(mr_mod, "resolve_default_model", lambda explicit=None: "ollama/qwen")
+    monkeypatch.setattr(mr_mod, "get_recent_model", lambda: None)
+    monkeypatch.setattr(creds, "is_configured", lambda model=None: False)
+    seen = {}
+
+    def _gate(*, model=None, interactive=True):
+        seen["gate_model"] = model
+        return model
+
+    monkeypatch.setattr(creds, "ensure_configured_or_onboard", _gate)
+
+    class _StubTUI:
+        def __init__(self, config=None, *a, **k):
+            seen["tui_model"] = getattr(config, "model", None)
+
+        def run(self):
+            pass
+
+    monkeypatch.setattr("praisonai_code.cli.interactive.async_tui.AsyncTUI", _StubTUI)
+
+    class _StubCfg:
+        def __init__(self, *a, **k):
+            self.model = k.get("model")
+
+    monkeypatch.setattr("praisonai_code.cli.interactive.async_tui.AsyncTUIConfig", _StubCfg)
+
+    chat_mod.chat_main(
+        ctx=None, prompt=None, model=None, verbose=False, memory=None,
+        no_memory=False, tools=None, toolset=None, user_id=None, session_id=None,
+        continue_session=False, file=None, workspace=None, no_acp=False,
+        no_lsp=False, safe_mode=False, autonomy=True, append_system_prompt=None,
+        knowledge=None, guardrails=None, web=None, reflection=None, planning=None,
+        context=None, output=None, execution=None, hooks=None, caching=None,
+        approval=None, profile=False, profile_deep=False, debug=False,
+        ui_backend="auto", json_output=False, no_color=False, theme="default",
+        compact=False, no_rules=False, pure=False,
+    )
+
+    assert seen["gate_model"] == "ollama/qwen"
+    assert seen["tui_model"] == "ollama/qwen"
