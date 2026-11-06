@@ -18,6 +18,7 @@ import threading
 import tempfile
 from praisonaiagents._logging import get_logger
 from pathlib import Path
+from urllib.parse import unquote
 from typing import Any, Dict, List, Optional
 
 from ..paths import get_storage_dir, get_storage_path
@@ -66,10 +67,15 @@ class FileBackend:
         self.storage_dir.mkdir(parents=True, exist_ok=True)
     
     def _key_to_path(self, key: str) -> Path:
-        """Convert key to file path."""
-        # Sanitize key for filesystem
-        safe_key = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)
-        return self.storage_dir / f"{safe_key}{self.suffix}"
+        """Convert key to file path.
+
+        ``safe_join`` encodes reversibly, so distinct keys never share a file
+        (``a@b.com`` vs ``a_b.com`` used to collide) and ``list_keys`` returns
+        the real keys (Issue #6266). Records written under the old lossy name
+        stay on disk and are listed under that sanitised name.
+        """
+        from ..utils.atomic_io import safe_join
+        return Path(safe_join(str(self.storage_dir), key, self.suffix))
 
     def _path_to_key(self, file_path: Path) -> Optional[str]:
         """Recognize records using the full configured suffix."""
@@ -77,10 +83,10 @@ class FileBackend:
             return None
         if self.suffix:
             if file_path.name.endswith(self.suffix):
-                return file_path.name[:-len(self.suffix)]
+                return unquote(file_path.name[:-len(self.suffix)])
             return None
         # Preserve the existing no-extension selection for an empty suffix.
-        return file_path.name if not file_path.suffix else None
+        return unquote(file_path.name) if not file_path.suffix else None
     
     def save(self, key: str, data: Dict[str, Any]) -> None:
         """Save data with the given key."""
