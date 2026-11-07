@@ -1005,9 +1005,18 @@ def main_callback(
                         restored_model = None
             except typer.Exit:
                 raise
-            except Exception:
-                # Continuity is opt-in and best-effort; never block launch.
+            except Exception as exc:
+                # Continuity is best-effort and never blocks launch, but a
+                # requested resume that fails must not silently drop the
+                # user's context (Issue #6284).
+                target = session or resume_id or "last session"
+                typer.echo(
+                    f"Warning: could not resume session {target} ({exc}). "
+                    "Starting a new session.",
+                    err=True,
+                )
                 resume_id = None
+                restored_model = None
 
         # Route the bare-TUI launch through the shared resolver so a user with
         # only, say, ANTHROPIC_API_KEY set is defaulted to an appropriate model
