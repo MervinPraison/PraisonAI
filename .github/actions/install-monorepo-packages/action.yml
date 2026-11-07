@@ -52,6 +52,16 @@ runs:
           fi
         }
 
+        # kubernetes>=37.0.2 (pulled in by chromadb) requires python-dateutil>=3,
+        # but botocore (litellm -> boto3) caps it at <3. pip does not reject
+        # kubernetes early; it backtracks through pandas/shapely sdists that
+        # fail to build (missing pkg_resources). Pin dateutil to the version
+        # range botocore accepts, so pip picks a compatible kubernetes right away.
+        CONSTRAINTS_FILE="${RUNNER_TEMP:-/tmp}/praisonai-ci-constraints.txt"
+        printf 'python-dateutil<3\n' > "$CONSTRAINTS_FILE"
+        export PIP_CONSTRAINT="$CONSTRAINTS_FILE"
+        export UV_CONSTRAINT="$CONSTRAINTS_FILE"
+
         AGENTS_SUFFIX="$(normalise_extras "${{ inputs.agents-extras }}")"
         WRAPPER_SUFFIX="$(normalise_extras "${{ inputs.wrapper-extras }}")"
 
