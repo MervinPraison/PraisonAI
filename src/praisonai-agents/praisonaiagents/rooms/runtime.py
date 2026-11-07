@@ -47,6 +47,9 @@ class RoomConfig:
         planner: Planner selector; ``"round_robin"`` -> :class:`RoundRobinRoomPlanner`.
         max_rounds: Hard cap on turn-taking rounds (passed to the planner).
         max_messages: Hard cap on messages per human-initiated activity.
+        lead: Optional roster id that alone answers an unaddressed human
+            message and routes it by ``@``-mentioning the right agents
+            (default ``None``: every agent answers).
     """
 
     name: str
@@ -54,6 +57,7 @@ class RoomConfig:
     planner: str = "round_robin"
     max_rounds: int = 3
     max_messages: int = 20
+    lead: Optional[str] = None
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -66,11 +70,17 @@ class RoomConfig:
             raise ValueError("max_rounds must be >= 1")
         if self.max_messages < 1:
             raise ValueError("max_messages must be >= 1")
+        if self.lead is not None and self.lead not in self.roster:
+            raise ValueError(
+                f"RoomConfig {self.name!r}: lead {self.lead!r} is not in the roster"
+            )
 
     def build_planner(self) -> RoomTurnPlannerProtocol:
         """Construct the planner this config selects."""
         return RoundRobinRoomPlanner(
-            max_rounds=self.max_rounds, max_messages=self.max_messages
+            max_rounds=self.max_rounds,
+            max_messages=self.max_messages,
+            lead=self.lead,
         )
 
     def to_dict(self) -> Dict[str, object]:
@@ -81,6 +91,7 @@ class RoomConfig:
             "planner": self.planner,
             "max_rounds": self.max_rounds,
             "max_messages": self.max_messages,
+            "lead": self.lead,
         }
 
     @classmethod
@@ -119,6 +130,7 @@ class RoomConfig:
             planner=str(data.get("planner", "round_robin")),
             max_rounds=int(data.get("max_rounds", 3)),
             max_messages=int(data.get("max_messages", 20)),
+            lead=None if data.get("lead") is None else str(data["lead"]),
         )
 
 
@@ -180,7 +192,7 @@ class Room:
         """Round the planner scheduled ``speaker`` into for the current activity.
 
         Only :class:`RoundRobinRoomPlanner` defines round semantics (round 0
-        fan-out, later rounds admitted by ``@``-mentions). For any other custom
+        opening, later rounds admitted by ``@``-mentions). For any other custom
         planner the round taxonomy is unknown, so we simply tag turns with the
         activity's current round rather than inventing round-robin admission —
         imposing round-robin rules on a custom planner would mislabel its turns
@@ -189,9 +201,8 @@ class Room:
         if not isinstance(self.planner, RoundRobinRoomPlanner):
             return self._current_round()
 
-        from .protocols import extract_mentions
-
-        roster_set = set(self.config.roster)
+        roster_list = list(self.config.roster)
+        roster_set = set(roster_list)
         last_human = -1
         for idx, ev in enumerate(self.transcript):
             if ev.speaker not in roster_set:
@@ -202,16 +213,7 @@ class Room:
 
         for rnd in range(current_round, max_rounds):
             spoken = {ev.speaker for ev in activity if ev.round == rnd}
-            if rnd == 0:
-                admitted = set(roster_set)
-            else:
-                admitted = set()
-                for ev in activity:
-                    if ev.round != rnd - 1 or ev.speaker not in roster_set:
-                        continue
-                    for name in extract_mentions(ev.content):
-                        if name in roster_set:
-                            admitted.add(name)
+            admitted = self.planner.admitted(roster_list, roster_set, activity, rnd)
             if speaker in admitted and speaker not in spoken:
                 return rnd
         return current_round
