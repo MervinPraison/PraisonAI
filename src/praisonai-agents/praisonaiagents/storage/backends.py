@@ -11,13 +11,16 @@ without changing application code.
 DRY: All backends implement StorageBackendProtocol for consistent interface.
 """
 
+import hashlib
 import json
 import os
+import re
 import time
 import threading
 import tempfile
 from praisonaiagents._logging import get_logger
 from pathlib import Path
+from urllib.parse import unquote
 from typing import Any, Dict, List, Optional
 
 from ..paths import get_storage_dir, get_storage_path
@@ -26,6 +29,9 @@ logger = get_logger(__name__)
 
 # Default storage directory (uses centralized paths - DRY)
 DEFAULT_STORAGE_DIR = str(get_storage_dir())
+
+# Filename stem used for keys too long for the filesystem (see _key_to_path).
+_LONG_KEY = re.compile(r"(.*)%~([0-9a-f]{64})", re.S)
 
 class FileBackend:
     """
@@ -66,10 +72,44 @@ class FileBackend:
         self.storage_dir.mkdir(parents=True, exist_ok=True)
     
     def _key_to_path(self, key: str) -> Path:
-        """Convert key to file path."""
-        # Sanitize key for filesystem
-        safe_key = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)
-        return self.storage_dir / f"{safe_key}{self.suffix}"
+        """Convert key to file path.
+
+        Reversible percent-encoding, so distinct keys never share a file
+        (``a@b.com`` vs ``a_b.com`` used to collide), ``list_keys`` returns
+        the real keys and separators/``..`` cannot leave the directory
+        (Issue #6266). ``safe_join``'s truncation is deliberately not used: its
+        shortened name is an alias a caller could pass to reach another key's
+        file. With an empty suffix ``.`` is encoded too so records never look
+        like they carry an extension. Records written under the old lossy name
+        stay on disk and are listed under that sanitised name.
+
+        A name over the 255-byte filename limit becomes ``<key prefix>%~<sha256>``,
+        so prefix searches still find it. No escaped key can contain a raw
+        ``%~``, so it cannot alias another key, and that listed form maps back
+        to the same file.
+        """
+        from ..utils.atomic_io import _escape
+
+        def enc(text: str) -> str:
+            stem = _escape(text)
+            return stem if self.suffix else stem.replace(".", "%2E")
+
+        def size(text: str) -> int:
+            return len(text.encode("utf-8", "surrogatepass"))
+
+        key = str(key)
+        hashed = _LONG_KEY.fullmatch(key)
+        if hashed:
+            return self.storage_dir / f"{enc(hashed.group(1))}%~{hashed.group(2)}{self.suffix}"
+        stem = enc(key)
+        budget = 255 - size(self.suffix)
+        if size(stem) > budget:
+            tag = "%~" + hashlib.sha256(key.encode("utf-8", "surrogatepass")).hexdigest()
+            n = min(len(key), budget)
+            while n and size(enc(key[:n])) + size(tag) > budget:
+                n -= 1
+            stem = enc(key[:n]) + tag
+        return self.storage_dir / f"{stem}{self.suffix}"
 
     def _path_to_key(self, file_path: Path) -> Optional[str]:
         """Recognize records using the full configured suffix."""
@@ -77,10 +117,10 @@ class FileBackend:
             return None
         if self.suffix:
             if file_path.name.endswith(self.suffix):
-                return file_path.name[:-len(self.suffix)]
+                return unquote(file_path.name[:-len(self.suffix)])
             return None
         # Preserve the existing no-extension selection for an empty suffix.
-        return file_path.name if not file_path.suffix else None
+        return unquote(file_path.name) if not file_path.suffix else None
     
     def save(self, key: str, data: Dict[str, Any]) -> None:
         """Save data with the given key."""
