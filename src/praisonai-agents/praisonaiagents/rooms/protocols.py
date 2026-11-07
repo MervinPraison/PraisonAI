@@ -97,8 +97,12 @@ class RoundRobinRoomPlanner:
 
     Turn-taking rules:
 
-    * **Round 0 (opening).** After a human message every rostered agent speaks
-      once, in roster order. This is the "everyone on round 0" default.
+    * **Round 0 (opening).** If the human message ``@``-mentions rostered
+      agents, only those speak (in roster order). Otherwise, when ``lead`` is
+      set, only the lead speaks — it answers or hands off by ``@``-mentioning
+      the right agents, and that handoff is an ordinary transcript message, so
+      a restart reproduces the exact same routing without calling a model again.
+      If neither applies, every rostered agent speaks once, in roster order.
     * **Later rounds (addressing).** A round *N+1* admits only the agents that
       were ``@``-mentioned by an agent during round *N* — and only agents that
       are actually on the roster. Mentions are honoured in roster order and an
@@ -115,6 +119,7 @@ class RoundRobinRoomPlanner:
 
     max_rounds: int = 3
     max_messages: int = 20
+    lead: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.max_rounds < 1:
@@ -165,8 +170,8 @@ class RoundRobinRoomPlanner:
             # admitted speakers via @mentions. Keep scanning forward.
         return None
 
-    @staticmethod
     def _next_in_round(
+        self,
         roster_list: List[str],
         roster_set: set,
         transcript: Sequence[RoomEvent],
@@ -174,27 +179,44 @@ class RoundRobinRoomPlanner:
     ) -> Optional[str]:
         """Return the next roster agent eligible to speak in round ``rnd``.
 
-        Round 0 admits every rostered agent (opening round). Any later round
-        admits only agents ``@``-mentioned by an agent during the *previous*
-        round. In all rounds an agent speaks at most once, and admitted agents
-        are honoured in roster order for determinism.
+        An agent speaks at most once per round, and admitted agents are
+        honoured in roster order for determinism.
         """
+        admitted = self.admitted(roster_list, roster_set, transcript, rnd)
         spoken = {ev.speaker for ev in transcript if ev.round == rnd}
-
-        if rnd == 0:
-            admitted = roster_list
-        else:
-            admitted = []
-            for ev in transcript:
-                if ev.round != rnd - 1 or ev.speaker not in roster_set:
-                    continue
-                for name in extract_mentions(ev.content):
-                    if name in roster_set and name not in admitted:
-                        admitted.append(name)
-            if not admitted:
-                return None
-
         for name in roster_list:
             if name in admitted and name not in spoken:
                 return name
         return None
+
+    def admitted(
+        self,
+        roster_list: List[str],
+        roster_set: set,
+        activity: Sequence[RoomEvent],
+        rnd: int,
+    ) -> List[str]:
+        """Return the agents admitted to round ``rnd`` of the current activity.
+
+        ``activity`` starts at the human message that opened it. Round 0 admits
+        the agents that human ``@``-mentioned, else the ``lead`` (if rostered),
+        else the whole roster. A later round admits only agents ``@``-mentioned
+        by an agent during the previous round.
+        """
+        if rnd == 0:
+            opener = activity[0] if activity and activity[0].speaker not in roster_set else None
+            if opener is not None:
+                addressed = [n for n in extract_mentions(opener.content) if n in roster_set]
+                if addressed:
+                    return addressed
+            if self.lead is not None and self.lead in roster_set:
+                return [self.lead]
+            return roster_list
+        admitted: List[str] = []
+        for ev in activity:
+            if ev.round != rnd - 1 or ev.speaker not in roster_set:
+                continue
+            for name in extract_mentions(ev.content):
+                if name in roster_set and name not in admitted:
+                    admitted.append(name)
+        return admitted

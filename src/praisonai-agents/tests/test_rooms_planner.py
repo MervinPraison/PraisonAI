@@ -194,3 +194,54 @@ def test_invalid_config_rejected():
         RoundRobinRoomPlanner(max_rounds=0)
     with pytest.raises(ValueError):
         RoundRobinRoomPlanner(max_messages=0)
+
+
+# ── Issue #6289: route an unaddressed message instead of fanning out ──────
+
+
+def test_human_mention_restricts_round0_to_addressed_agents():
+    roster = ["researcher", "coder", "reviewer"]
+    planner = RoundRobinRoomPlanner()
+    transcript = [RoomEvent(speaker="user", content="@reviewer @coder how to test?")]
+    # Roster order, only the addressed agents.
+    assert planner.plan_next(roster, transcript) == "coder"
+    transcript.append(RoomEvent(speaker="coder", content="pytest", round=0))
+    assert planner.plan_next(roster, transcript) == "reviewer"
+    transcript.append(RoomEvent(speaker="reviewer", content="ok", round=0))
+    assert planner.plan_next(roster, transcript) is None
+
+
+def test_human_mention_of_non_roster_falls_back_to_full_fanout():
+    roster = ["a", "b"]
+    planner = RoundRobinRoomPlanner()
+    transcript = [RoomEvent(speaker="user", content="@nobody hi")]
+    assert planner.plan_next(roster, transcript) == "a"
+
+
+def test_lead_alone_answers_then_routes_by_mention():
+    roster = ["lead", "coder", "reviewer", "writer"]
+    planner = RoundRobinRoomPlanner(lead="lead")
+    transcript = [RoomEvent(speaker="user", content="how do we test this?")]
+    assert planner.plan_next(roster, transcript) == "lead"
+    transcript.append(RoomEvent(speaker="lead", content="@coder @reviewer", round=0))
+    # The lead's handoff is a durable transcript message -> replay-safe.
+    assert planner.plan_next(roster, transcript) == "coder"
+    transcript.append(RoomEvent(speaker="coder", content="pytest", round=1))
+    assert planner.plan_next(roster, transcript) == "reviewer"
+    transcript.append(RoomEvent(speaker="reviewer", content="ok", round=1))
+    assert planner.plan_next(roster, transcript) is None
+
+
+def test_lead_answering_without_mention_settles():
+    planner = RoundRobinRoomPlanner(lead="lead")
+    transcript = [
+        RoomEvent(speaker="user", content="hi"),
+        RoomEvent(speaker="lead", content="hello!", round=0),
+    ]
+    assert planner.plan_next(["lead", "coder"], transcript) is None
+
+
+def test_human_mention_overrides_lead():
+    planner = RoundRobinRoomPlanner(lead="lead")
+    transcript = [RoomEvent(speaker="user", content="@coder fix it")]
+    assert planner.plan_next(["lead", "coder"], transcript) == "coder"

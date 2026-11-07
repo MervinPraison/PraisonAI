@@ -165,3 +165,41 @@ def test_room_custom_planner_gets_current_round_not_roundrobin_labels():
 
     assert [e.speaker for e in produced] == ["a"]
     assert all(e.round == 0 for e in produced)
+
+
+# ── Issue #6289: lead routing through the runtime ─────────────────────────
+
+
+def test_room_config_lead_roundtrip_and_validation():
+    import pytest as _pytest
+
+    cfg = RoomConfig.from_dict("s", {"agents": ["lead", "coder"], "lead": "lead"})
+    assert cfg.lead == "lead"
+    assert cfg.build_planner().lead == "lead"
+    assert cfg.to_dict()["lead"] == "lead"
+    with _pytest.raises(ValueError):
+        RoomConfig(name="s", roster=["coder"], lead="ghost")
+
+
+def test_room_lead_routes_unaddressed_message():
+    import asyncio as _asyncio
+
+    calls = []
+
+    def agent(aid, text):
+        async def reply(_prompt):
+            calls.append(aid)
+            return text
+        return reply
+
+    room = Room(
+        RoomConfig(name="s", roster=["lead", "coder", "writer"], lead="lead"),
+        {
+            "lead": agent("lead", "@coder please"),
+            "coder": agent("coder", "done"),
+            "writer": agent("writer", "words"),
+        },
+    )
+    turns = _asyncio.run(room.on_message(RoomEvent(speaker="user", content="fix bug")))
+    assert calls == ["lead", "coder"]
+    assert [(t.speaker, t.round) for t in turns] == [("lead", 0), ("coder", 1)]

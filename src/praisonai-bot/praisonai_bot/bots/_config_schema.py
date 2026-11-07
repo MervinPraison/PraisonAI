@@ -1154,7 +1154,7 @@ class GatewayConfigSchema(BaseModel):
     schedules: Optional[Dict[str, Dict[str, Any]]] = None
 
     # Multi-agent conversation rooms (Issue #5768). Each ``rooms.<name>`` entry
-    # (``agents:``/``roster:``, ``max_rounds``, ``max_messages``) is parsed by
+    # (``agents:``/``roster:``, ``lead``, ``max_rounds``, ``max_messages``) is parsed by
     # core ``RoomConfig.from_dict`` and bound like an agent via ``room:<name>``.
     rooms: Optional[Dict[str, Dict[str, Any]]] = None
 
