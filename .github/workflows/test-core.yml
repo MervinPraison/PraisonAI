@@ -421,6 +421,7 @@ jobs:
               tests/unit/test_output_file_containment.py::test_task_output_file_hardlink_does_not_write_outside
               tests/unit/test_output_file_containment.py::test_task_output_file_hardlink_keeps_mode_under_umask
               tests/unit/test_output_file_containment.py::test_task_output_file_hardlink_group_kept_or_bits_dropped
+              tests/unit/test_output_file_containment.py::test_task_output_file_overwrite_in_readonly_directory
               tests/unit/test_output_file_containment.py::test_task_output_file_inside_root
               tests/unit/test_output_file_containment.py::test_task_output_file_respects_create_directory
               tests/unit/test_output_file_containment.py::test_task_output_file_project_root_override
