@@ -197,6 +197,13 @@ class TestShellWorkspaceBoundary:
 
 
 class TestConsoleBackendScope:
+    @pytest.fixture(autouse=True)
+    def _interactive_tty(self):
+        # The prompt is mocked; pretend a human terminal is attached so the
+        # no-TTY fail-closed guard does not short-circuit it.
+        with patch("praisonaiagents.approval.backends._stdin_is_tty", return_value=True):
+            yield
+
     def _make_request(self, **overrides):
         from praisonaiagents.approval.protocols import ApprovalRequest
 

@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import re
+import sys
+import threading
 from praisonaiagents._logging import get_logger
 from typing import Any, Optional
 
@@ -178,6 +180,39 @@ class AutoApproveBackend:
     def request_approval_sync(self, request: ApprovalRequest, timeout: Optional[float] = None) -> ApprovalDecision:
         return ApprovalDecision(approved=True, reason="auto-approved", approver="system")
 
+class _ApprovalUnavailable(Exception):
+    """Nobody can answer the prompt (no TTY, or the approval timeout elapsed)."""
+
+
+def _stdin_is_tty() -> bool:
+    try:
+        return bool(sys.stdin) and sys.stdin.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
+def _ask_with_timeout(ask, timeout: Optional[float]):
+    """Run a blocking prompt, raising ``_ApprovalUnavailable`` after ``timeout``."""
+    if not timeout or timeout <= 0:
+        return ask()
+    box: dict = {}
+
+    def _run():
+        try:
+            box["value"] = ask()
+        except BaseException as exc:  # noqa: BLE001 -- re-raised in caller thread
+            box["error"] = exc
+
+    worker = threading.Thread(target=_run, name="praison-approval-prompt", daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        raise _ApprovalUnavailable(f"no response within {timeout:g}s")
+    if "error" in box:
+        raise box["error"]
+    return box["value"]
+
+
 class ConsoleBackend:
     """Interactive Rich terminal prompt.  Default for CLI usage."""
 
@@ -210,7 +245,7 @@ class ConsoleBackend:
                 rendered.append(f"[dim]{safe}[/dim]")
         return "\n".join(rendered) + "\n"
 
-    def _prompt_user(self, request: ApprovalRequest):
+    def _prompt_user(self, request: ApprovalRequest, timeout: Optional[float] = None):
         """Show Rich panel and ask once/session/always/no/deny-with-guidance.
 
         Returns a ``(approved, scope, scope_pattern, feedback)`` tuple where
@@ -271,10 +306,17 @@ class ConsoleBackend:
                 f"[o] once   [s] this session   [a] {always_label}   "
                 f"[n] no   [d] deny & redirect"
             )
-            choice = Prompt.ask(
-                "Choice",
-                choices=["o", "s", "a", "n", "d"],
-                default="n",
+            # Fail closed when nobody can answer: a headless process whose
+            # stdin is an open pipe would otherwise block here forever.
+            if not _stdin_is_tty():
+                raise _ApprovalUnavailable("No interactive terminal to approve the tool call")
+            choice = _ask_with_timeout(
+                lambda: Prompt.ask(
+                    "Choice",
+                    choices=["o", "s", "a", "n", "d"],
+                    default="n",
+                ),
+                timeout,
             )
         except (KeyboardInterrupt, EOFError):
             return (False, "once", None, None)
@@ -296,7 +338,7 @@ class ConsoleBackend:
     def request_approval_sync(self, request: ApprovalRequest, timeout: Optional[float] = None) -> ApprovalDecision:
         """Synchronous approval via Rich console prompt."""
         try:
-            approved, scope, scope_pattern, feedback = self._prompt_user(request)
+            approved, scope, scope_pattern, feedback = self._prompt_user(request, timeout=timeout)
             if approved:
                 return ApprovalDecision(
                     approved=True,
@@ -311,6 +353,14 @@ class ConsoleBackend:
                 reason=reason,
                 approver="console",
                 feedback=feedback,
+            )
+        except _ApprovalUnavailable as e:
+            logger.warning("Console approval for %s denied: %s", request.tool_name, e)
+            return ApprovalDecision(
+                approved=False,
+                reason=f"Approval expired: {e}",
+                approver="console",
+                metadata={"expired": True},
             )
         except Exception as e:
             logger.error("Console approval error: %s", e)
