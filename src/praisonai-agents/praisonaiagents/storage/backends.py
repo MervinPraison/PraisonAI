@@ -11,8 +11,10 @@ without changing application code.
 DRY: All backends implement StorageBackendProtocol for consistent interface.
 """
 
+import hashlib
 import json
 import os
+import re
 import time
 import threading
 import tempfile
@@ -27,6 +29,9 @@ logger = get_logger(__name__)
 
 # Default storage directory (uses centralized paths - DRY)
 DEFAULT_STORAGE_DIR = str(get_storage_dir())
+
+# Filename stem used for keys too long for the filesystem (see _key_to_path).
+_LONG_KEY = re.compile(r"%~[0-9a-f]{64}")
 
 class FileBackend:
     """
@@ -77,11 +82,20 @@ class FileBackend:
         file. With an empty suffix ``.`` is encoded too so records never look
         like they carry an extension. Records written under the old lossy name
         stay on disk and are listed under that sanitised name.
+
+        A name over the 255-byte filename limit becomes ``%~<sha256>``. No
+        escaped key can contain a raw ``%~``, so it cannot alias another key,
+        and that listed form maps back to the same file.
         """
         from ..utils.atomic_io import _escape
-        stem = _escape(str(key))
+        key = str(key)
+        if _LONG_KEY.fullmatch(key):
+            return self.storage_dir / f"{key}{self.suffix}"
+        stem = _escape(key)
         if not self.suffix:
             stem = stem.replace(".", "%2E")
+        if len(f"{stem}{self.suffix}".encode("utf-8", "surrogatepass")) > 255:
+            stem = "%~" + hashlib.sha256(key.encode("utf-8", "surrogatepass")).hexdigest()
         return self.storage_dir / f"{stem}{self.suffix}"
 
     def _path_to_key(self, file_path: Path) -> Optional[str]:

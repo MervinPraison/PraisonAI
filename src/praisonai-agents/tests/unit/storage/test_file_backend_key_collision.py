@@ -36,6 +36,21 @@ def test_listed_long_key_is_not_an_alias(tmp_path):
     assert b.load(long_key) == {"v": "A"}
 
 
+def test_over_long_keys_save_and_round_trip(tmp_path):
+    b = FileBackend(str(tmp_path))
+    k1, k2 = "a" * 249 + "/", "a" * 249 + "?"
+    b.save(k1, {"v": 1})
+    b.save(k2, {"v": 2})
+    assert all(len(p.name.encode()) <= 255 for p in tmp_path.iterdir())
+    assert b.load(k1) == {"v": 1} and b.load(k2) == {"v": 2}
+    listed = b.list_keys()
+    assert len(listed) == 2
+    assert sorted(b.load(k)["v"] for k in listed) == [1, 2]
+    # A literal key can never reach the hashed file form.
+    b.save("%~" + "0" * 64 + "x", {"v": 3})
+    assert b.load(k1) == {"v": 1}
+
+
 def test_empty_suffix_dotted_keys_list_and_clear(tmp_path):
     b = FileBackend(str(tmp_path), suffix="")
     b.save("a.b", {"x": 1})
