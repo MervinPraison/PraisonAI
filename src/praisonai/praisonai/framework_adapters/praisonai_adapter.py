@@ -378,6 +378,68 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         return None
 
     @staticmethod
+    def _translate_tool_planning_web(details, agent_kwargs, tools_dict, role_name):
+        """Map ``tool_retry_policy``/``planning_tools``/``web_fetch`` onto core.
+
+        These fields are schema-valid and stamped by CLI flags, but core
+        ``Agent`` only accepts them via ``tool_config``/``planning``/``web``
+        config objects. Without this translation they were silently dropped.
+        """
+        retry = details.get('tool_retry_policy')
+        if retry is not None:
+            from praisonaiagents.config.feature_configs import ToolConfig
+            from praisonaiagents.tools.retry import RetryPolicy
+            if not isinstance(retry, RetryPolicy):
+                get = retry.get if isinstance(retry, dict) else (
+                    lambda k, d=None: getattr(retry, k, d)
+                )
+                retry = RetryPolicy(
+                    max_attempts=int(get('max_attempts', 3) or 3),
+                    initial_delay_ms=int(float(get('delay', 1.0) or 0) * 1000),
+                    backoff_factor=float(get('backoff_factor', 2.0) or 2.0),
+                    max_delay_ms=int(float(get('max_delay', 60.0) or 0) * 1000),
+                )
+            agent_kwargs['tool_config'] = ToolConfig(retry_policy=retry)
+
+        planning_tools = details.get('planning_tools')
+        if planning_tools:
+            planning = agent_kwargs.get('planning')
+            if not planning:
+                logger.warning(
+                    "Agent %r sets planning_tools but planning is disabled; "
+                    "ignoring planning_tools (set planning: true).", role_name,
+                )
+            else:
+                resolved, missing = [], []
+                for name in planning_tools:
+                    tool = (tools_dict or {}).get(name) if isinstance(name, str) else name
+                    (resolved if tool is not None else missing).append(tool or name)
+                if missing:
+                    logger.warning(
+                        "Agent %r: planning_tools %s could not be resolved.",
+                        role_name, missing,
+                    )
+                from praisonaiagents.config.feature_configs import PlanningConfig
+                if isinstance(planning, PlanningConfig):
+                    planning.tools = resolved
+                else:
+                    agent_kwargs['planning'] = PlanningConfig(
+                        llm=planning if isinstance(planning, str) else None,
+                        tools=resolved,
+                    )
+
+        web_fetch = details.get('web_fetch')
+        if web_fetch is not None:
+            from praisonaiagents.config.feature_configs import WebConfig
+            web = agent_kwargs.get('web')
+            if isinstance(web, WebConfig):
+                web.fetch = bool(web_fetch)
+            elif isinstance(web, dict):
+                agent_kwargs['web'] = {**web, 'fetch': bool(web_fetch)}
+            elif (web is None or isinstance(web, bool)) and (web or web_fetch):
+                agent_kwargs['web'] = WebConfig(search=bool(web), fetch=bool(web_fetch))
+
+    @staticmethod
     def _normalize_autonomy(value):
         """Translate a wrapper autonomy value into one core Agent accepts.
 
@@ -598,6 +660,12 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             if autonomy_value is not None:
                 agent_kwargs['autonomy'] = autonomy_value
 
+            # tool_retry_policy / planning_tools / web_fetch are schema-valid
+            # and CLI-stamped, but core only accepts them via config objects.
+            self._translate_tool_planning_web(
+                details, agent_kwargs, tools_dict, role_filled
+            )
+
             # Add approval config if present
             if agent_approval:
                 agent_kwargs['approval'] = agent_approval
@@ -612,9 +680,19 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             native_timeout_resolver = (cli_config or {}).get(
                 "_native_tool_timeout_resolver"
             )
-            if callable(native_timeout_resolver) and 'tool_config' not in agent_kwargs:
-                budget = native_timeout_resolver(role)
-                if isinstance(budget, (int, float)) and not isinstance(budget, bool) and budget > 0:
+            existing_tool_config = agent_kwargs.get('tool_config')
+            budget = (
+                native_timeout_resolver(role)
+                if callable(native_timeout_resolver)
+                and getattr(existing_tool_config, 'timeout', None) is None
+                else None
+            )
+            if isinstance(budget, (int, float)) and not isinstance(budget, bool) and budget > 0:
+                if existing_tool_config is not None:
+                    # tool_config built from tool_retry_policy above: keep the
+                    # retry policy and add the resolved timeout to it.
+                    existing_tool_config.timeout = budget
+                else:
                     try:
                         from praisonaiagents.config.feature_configs import ToolConfig
                         # Preserve the resolved budget as-is (float seconds).

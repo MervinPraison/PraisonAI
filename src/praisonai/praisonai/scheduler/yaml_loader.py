@@ -117,6 +117,13 @@ def load_agent_yaml_with_schedule(yaml_path: str) -> Tuple[Dict[str, Any], Dict[
     return agent_config, schedule_config
 
 
+# Fields create_agent_from_config consumes (plus loader-injected keys).
+_SCHEDULED_AGENT_FIELDS = frozenset({
+    'name', 'role', 'goal', 'instructions', 'backstory', 'verbose', 'tools',
+    'tasks', 'llm', 'task', 'framework',
+})
+
+
 def create_agent_from_config(agent_config: Dict[str, Any]) -> Any:
     """
     Create a PraisonAI Agent instance from configuration.
@@ -135,6 +142,16 @@ def create_agent_from_config(agent_config: Dict[str, Any]) -> Any:
     except ImportError:
         raise ImportError("praisonaiagents package is required. Install with: pip install praisonaiagents")
     
+    # Only the fields below are honoured for scheduled agents. Fail closed on
+    # dropped safety gates (approval/guardrails) and warn on anything else,
+    # instead of silently running a differently-configured agent.
+    from types import SimpleNamespace
+    from ..framework_adapters.base import warn_unsupported_fields
+    warn_unsupported_fields(
+        SimpleNamespace(name="scheduler", SUPPORTED_YAML_FIELDS=_SCHEDULED_AGENT_FIELDS),
+        agent_config,
+    )
+
     # Extract agent parameters
     name = agent_config.get('name', 'Scheduled Agent')
     role = agent_config.get('role', '')
@@ -171,6 +188,10 @@ def create_agent_from_config(agent_config: Dict[str, Any]) -> Any:
             )
     
     # Create agent
+    agent_kwargs = {}
+    if agent_config.get('llm') is not None:
+        agent_kwargs['llm'] = agent_config['llm']
+
     agent = Agent(
         name=name,
         role=role,
@@ -178,6 +199,7 @@ def create_agent_from_config(agent_config: Dict[str, Any]) -> Any:
         instructions=instructions,
         tools=tools,
         output="verbose" if verbose else "silent",
+        **agent_kwargs,
     )
     
     return agent
