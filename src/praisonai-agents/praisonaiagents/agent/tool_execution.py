@@ -59,6 +59,19 @@ _SIMPLE_ARG_TYPES = {
     dict: lambda v: isinstance(v, dict),
 }
 
+
+def _signature_target(func, target):
+    """Callable whose signature describes the tool's real arguments.
+
+    ``@tool`` functions are dispatched through ``FunctionTool.run(**kwargs)``,
+    which hides the wrapped function's parameters; check those instead.
+    """
+    inner = getattr(func, "_func", None)
+    if callable(inner) and target is not inner and getattr(target, "__self__", None) is func:
+        return inner
+    return target
+
+
 # Worker count for the per-agent tool ThreadPoolExecutor. Used both when the
 # pool is created and to decide (with the per-executor in-flight counter)
 # whether a fresh call would have to queue behind hung workers. Matches the
@@ -3887,7 +3900,7 @@ class ToolExecutionMixin:
                 if isinstance(func, BaseTool):
                     bind_target = func.run
                     keyed_arguments = _with_durable_key(func.run, arguments)
-                    casted_arguments = self._cast_arguments(func.run, keyed_arguments)
+                    casted_arguments = self._cast_arguments(_signature_target(func, func.run), keyed_arguments)
                     bind_arguments = casted_arguments
                     invalid = self._invalid_arguments_result(function_name, func, func.run, casted_arguments)
                     if invalid is not None:
@@ -4205,6 +4218,7 @@ class ToolExecutionMixin:
         Dependency-free: checks missing/unknown keyword arguments against the
         signature and plain builtin annotations (str/int/float/bool/list/dict).
         """
+        target = _signature_target(func, target)
         if inspect.isclass(target) or not callable(target):
             return None
         try:

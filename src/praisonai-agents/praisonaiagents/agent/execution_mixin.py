@@ -1983,7 +1983,8 @@ Write the complete compiled report:"""
                 # reject a malformed call back to the model without running the
                 # tool body or ending the run.
                 if hasattr(self, "_invalid_arguments_result"):
-                    call_arguments = self._cast_arguments(call_target, call_arguments)
+                    from .tool_execution import _signature_target
+                    call_arguments = self._cast_arguments(_signature_target(func, call_target), call_arguments)
                     invalid = self._invalid_arguments_result(function_name, func, call_target, call_arguments)
                     if invalid is not None:
                         return invalid

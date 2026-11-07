@@ -14,6 +14,7 @@ import asyncio
 import re
 import sys
 import threading
+import time
 from praisonaiagents._logging import get_logger
 from typing import Any, Optional
 
@@ -191,10 +192,50 @@ def _stdin_is_tty() -> bool:
         return False
 
 
-def _ask_with_timeout(ask, timeout: Optional[float]):
-    """Run a blocking prompt, raising ``_ApprovalUnavailable`` after ``timeout``."""
-    if not timeout or timeout <= 0:
+def _ask_with_timeout(ask, deadline: Optional[float], console=None, prompt: str = "",
+                      choices=None, default: Optional[str] = None):
+    """Run a prompt, raising ``_ApprovalUnavailable`` once ``deadline`` passes.
+
+    ``deadline`` is a ``time.monotonic()`` value shared by every question of one
+    approval. With no deadline the blocking ``ask()`` is used unchanged. On
+    POSIX the terminal is read with ``select`` so an expired prompt stops
+    reading: pending input is discarded first, so a late answer typed for an
+    earlier request can never answer this one. Elsewhere a daemon thread waits.
+    """
+    if deadline is None:
         return ask()
+    try:
+        import select
+        import termios
+        fd = sys.stdin.fileno()
+    except (ImportError, AttributeError, ValueError, OSError):
+        return _ask_in_thread(ask, deadline)
+    try:
+        termios.tcflush(fd, termios.TCIFLUSH)
+    except (termios.error, OSError):
+        pass
+    suffix = f" [{'/'.join(choices)}]" if choices else ""
+    suffix += f" ({default})" if default is not None else ""
+    while True:
+        if console is not None:
+            console.print(f"{prompt}{suffix}: ", end="")
+        remaining = deadline - time.monotonic()
+        if remaining <= 0 or not select.select([fd], [], [], remaining)[0]:
+            raise _ApprovalUnavailable("approval timed out")
+        line = sys.stdin.readline()
+        if not line:
+            raise EOFError
+        answer = line.strip() or (default or "")
+        if not choices or answer in choices:
+            return answer
+        if console is not None:
+            console.print("[prompt.invalid]Please select one of the available options")
+
+
+def _ask_in_thread(ask, deadline: float):
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise _ApprovalUnavailable("approval timed out")
     box: dict = {}
 
     def _run():
@@ -205,9 +246,9 @@ def _ask_with_timeout(ask, timeout: Optional[float]):
 
     worker = threading.Thread(target=_run, name="praison-approval-prompt", daemon=True)
     worker.start()
-    worker.join(timeout)
+    worker.join(remaining)
     if worker.is_alive():
-        raise _ApprovalUnavailable(f"no response within {timeout:g}s")
+        raise _ApprovalUnavailable("approval timed out")
     if "error" in box:
         raise box["error"]
     return box["value"]
@@ -310,13 +351,12 @@ class ConsoleBackend:
             # stdin is an open pipe would otherwise block here forever.
             if not _stdin_is_tty():
                 raise _ApprovalUnavailable("No interactive terminal to approve the tool call")
+            # One deadline covers every question of this approval.
+            deadline = time.monotonic() + timeout if timeout and timeout > 0 else None
+            choices = ["o", "s", "a", "n", "d"]
             choice = _ask_with_timeout(
-                lambda: Prompt.ask(
-                    "Choice",
-                    choices=["o", "s", "a", "n", "d"],
-                    default="n",
-                ),
-                timeout,
+                lambda: Prompt.ask("Choice", choices=choices, default="n"),
+                deadline, console, "Choice", choices, "n",
             )
         except (KeyboardInterrupt, EOFError):
             return (False, "once", None, None)
@@ -325,7 +365,10 @@ class ConsoleBackend:
             return (False, "once", None, None)
         if choice == "d":
             try:
-                feedback = Prompt.ask("What should the agent do instead?").strip()
+                question = "What should the agent do instead?"
+                feedback = _ask_with_timeout(
+                    lambda: Prompt.ask(question), deadline, console, question,
+                ).strip()
             except (KeyboardInterrupt, EOFError):
                 feedback = ""
             return (False, "once", None, feedback or None)

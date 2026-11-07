@@ -1,6 +1,7 @@
 """Regression tests for #6279: tools cache key, argument validation, approval TTY/timeout."""
 
 import asyncio
+import sys
 import threading
 from unittest.mock import MagicMock, patch
 
@@ -191,3 +192,57 @@ class TestConsoleBackendHeadless:
         reg.set_backend(Backend())
         reg.approve_sync("x", "execute_command", {"command": "ls"}, force=True)
         assert seen["timeout"] == reg.timeout
+
+    @pytest.mark.skipif(sys.platform == "win32", reason="select() on stdin is POSIX-only")
+    def test_expired_prompt_stops_reading_and_guidance_shares_deadline(self):
+        """An answer of 'd' then silence must expire (no unbounded guidance
+        prompt), and no reader may linger to swallow later input."""
+        import os
+        from praisonaiagents.approval.backends import ConsoleBackend
+
+        r, w = os.pipe()
+        os.write(w, b"d\n")
+        stdin = os.fdopen(r, "r")
+        before = {t.name for t in threading.enumerate()}
+        try:
+            with patch("praisonaiagents.approval.backends._get_rich_console"), \
+                 patch("praisonaiagents.approval.backends._get_rich_panel"), \
+                 patch("praisonaiagents.approval.backends._get_rich_prompt") as prompt, \
+                 patch("praisonaiagents.approval.backends._stdin_is_tty", return_value=True), \
+                 patch("sys.stdin", stdin):
+                decision = ConsoleBackend().request_approval_sync(_request(), timeout=0.3)
+                prompt.return_value.ask.assert_not_called()
+            assert decision.approved is False
+            assert decision.metadata.get("expired") is True
+            assert "praison-approval-prompt" not in (
+                {t.name for t in threading.enumerate()} - before
+            )
+            # A late answer is still unread, not consumed by an expired prompt.
+            os.write(w, b"o\n")
+            assert stdin.readline() == "o\n"
+        finally:
+            stdin.close()
+            os.close(w)
+
+
+def test_decorated_tool_arguments_validated():
+    from praisonaiagents import Agent
+    from praisonaiagents.tools import tool
+
+    calls = []
+
+    @tool
+    def mul(a: int, b: int = 2) -> int:
+        "Multiply"
+        calls.append(a)
+        return a * b
+
+    ag = Agent(name="x", instructions="hi", tools=[mul], output="silent")
+    for bad in ({}, {"a": "abc"}, {"a": 1, "zz": 2}):
+        result = ag.execute_tool("mul", bad)
+        assert isinstance(result, dict) and "expected_parameters" in result, bad
+        result = asyncio.run(ag.execute_tool_async("mul", bad))
+        assert isinstance(result, dict) and "expected_parameters" in result, bad
+    assert calls == []
+    ag.execute_tool("mul", {"a": "3"})  # coerced, then runs
+    assert calls == [3]
