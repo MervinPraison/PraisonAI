@@ -16,6 +16,7 @@ import contextvars
 import concurrent.futures
 import threading
 import random
+import typing
 from typing import List, Optional, Any, Dict, Union, TYPE_CHECKING
 from ..errors import ToolExecutionError
 from ..config.feature_configs import DEFAULT_TOOL_OUTPUT_LIMIT
@@ -46,6 +47,30 @@ _CALLER_ERROR_TYPES = (
     ValueError, TypeError, AttributeError, LookupError,
     FileNotFoundError, FileExistsError, IsADirectoryError, NotADirectoryError, PermissionError,
 )
+
+# Plain builtin annotations whose JSON-decoded values are type-checked before a
+# tool body runs (see _invalid_arguments_result). Anything else is left alone.
+_SIMPLE_ARG_TYPES = {
+    str: lambda v: isinstance(v, str),
+    bool: lambda v: isinstance(v, bool),
+    int: lambda v: isinstance(v, int) and not isinstance(v, bool),
+    float: lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+    list: lambda v: isinstance(v, list),
+    dict: lambda v: isinstance(v, dict),
+}
+
+
+def _signature_target(func, target):
+    """Callable whose signature describes the tool's real arguments.
+
+    ``@tool`` functions are dispatched through ``FunctionTool.run(**kwargs)``,
+    which hides the wrapped function's parameters; check those instead.
+    """
+    inner = getattr(func, "_func", None)
+    if callable(inner) and target is not inner and getattr(target, "__self__", None) is func:
+        return inner
+    return target
+
 
 # Worker count for the per-agent tool ThreadPoolExecutor. Used both when the
 # pool is created and to decide (with the per-executor in-flight counter)
@@ -902,23 +927,34 @@ class ToolExecutionMixin:
                 else:
                     sanitized[clean] = arg_value
             arguments = sanitized
-            
+            # Resolve string annotations (``from __future__ import annotations``)
+            # the same way _invalid_arguments_result does, so "3" -> int is
+            # coerced before validation instead of being rejected.
+            try:
+                hints = typing.get_type_hints(func)
+            except Exception:  # noqa: BLE001 -- fall back to raw annotations
+                hints = {}
+
             for param_name, arg_value in arguments.items():
                 if param_name in sig.parameters:
                     param = sig.parameters[param_name]
-                    if param.annotation != inspect.Parameter.empty:
+                    annotation = hints.get(param_name, param.annotation)
+                    if annotation != inspect.Parameter.empty:
                         # Handle common type conversions
-                        if param.annotation == int and isinstance(arg_value, (str, float)):
+                        if annotation == str and isinstance(arg_value, (int, float)) \
+                                and not isinstance(arg_value, bool):
+                            casted_args[param_name] = str(arg_value)
+                        elif annotation == int and isinstance(arg_value, (str, float)):
                             try:
                                 casted_args[param_name] = int(float(arg_value))
                             except (ValueError, TypeError):
                                 casted_args[param_name] = arg_value
-                        elif param.annotation == float and isinstance(arg_value, (str, int)):
+                        elif annotation == float and isinstance(arg_value, (str, int)):
                             try:
                                 casted_args[param_name] = float(arg_value)
                             except (ValueError, TypeError):
                                 casted_args[param_name] = arg_value
-                        elif param.annotation == bool and isinstance(arg_value, str):
+                        elif annotation == bool and isinstance(arg_value, str):
                             casted_args[param_name] = arg_value.lower() in ('true', '1', 'yes', 'on')
                         else:
                             casted_args[param_name] = arg_value
@@ -3457,8 +3493,9 @@ class ToolExecutionMixin:
                 # non-retryable) say nothing about the tool's health: record
                 # them as neither failure nor success, so they can neither open the
                 # breaker for other callers nor close a half-open one.
-                if isinstance(result, dict) and result.get("error") and \
-                   result.get("_praison_retryable") is False:
+                if isinstance(result, dict) and result.get("error") and (
+                        result.get("_praison_retryable") is False
+                        or "expected_parameters" in result):
                     raise _NeutralOutcome(result)
                 # Convert error dicts to exceptions so circuit breaker can detect failures
                 # Don't treat approval/permission denials as circuit breaker failures
@@ -3874,8 +3911,11 @@ class ToolExecutionMixin:
                 if isinstance(func, BaseTool):
                     bind_target = func.run
                     keyed_arguments = _with_durable_key(func.run, arguments)
-                    casted_arguments = self._cast_arguments(func.run, keyed_arguments)
+                    casted_arguments = self._cast_arguments(_signature_target(func, func.run), keyed_arguments)
                     bind_arguments = casted_arguments
+                    invalid = self._invalid_arguments_result(function_name, func, func.run, casted_arguments)
+                    if invalid is not None:
+                        return invalid
                     return _resolve_result(func.run(**casted_arguments))
                 
                 # Langchain: If it's a class with run but not _run, instantiate and call run
@@ -3908,6 +3948,9 @@ class ToolExecutionMixin:
                     keyed_arguments = _with_durable_key(func, arguments)
                     casted_arguments = self._cast_arguments(func, keyed_arguments)
                     bind_arguments = casted_arguments
+                    invalid = self._invalid_arguments_result(function_name, func, func, casted_arguments)
+                    if invalid is not None:
+                        return invalid
                     return _resolve_result(func(**casted_arguments))
             except Exception as e:
                 error_msg = str(e)
@@ -3928,9 +3971,10 @@ class ToolExecutionMixin:
                             f"{error_msg} Expected parameters for '{function_name}' — "
                             f"required: {schema['required']}, optional: {schema['optional']}."
                         )
-                        # An argument-binding error is a programming error — the same
-                        # call will always fail — so mark it terminal and never retry.
-                        return {"error": error_msg, "expected_parameters": schema, "_praison_retryable": False}
+                        # The tool never ran: return the hint to the model so it can
+                        # repair the call (no _praison_retryable tag, so the run is
+                        # not ended and the same call is never blindly retried).
+                        return {"error": error_msg, "expected_parameters": schema}
                 # A tool that *raised* is flattened into an error dict here, which
                 # erases the exception type the retry policy needs. Carry the same
                 # verdict the exception paths use so the outer loop can retry a
@@ -4172,6 +4216,77 @@ class ToolExecutionMixin:
             if run is not None:
                 target = run
         return target
+
+    def _invalid_arguments_result(self, function_name, func, target, arguments):
+        """Validate a model's tool-call arguments before the tool body runs.
+
+        Returns ``None`` when the call is acceptable, otherwise a model-readable
+        error dict carrying ``expected_parameters``. The dict is deliberately
+        NOT tagged ``_praison_retryable``: the tool never ran, so this is a
+        model mistake to be fed back for self-repair, not a tool failure that
+        ends the run (a tool body that *raises* still ends the turn, #6041).
+
+        Dependency-free: checks missing/unknown keyword arguments against the
+        signature and plain builtin annotations (str/int/float/bool/list/dict).
+        """
+        target = _signature_target(func, target)
+        if inspect.isclass(target) or not callable(target):
+            return None
+        try:
+            sig = inspect.signature(target)
+        except (TypeError, ValueError):
+            return None
+        try:
+            hints = typing.get_type_hints(target)
+        except Exception:  # noqa: BLE001 -- unresolvable hints: skip type checks
+            hints = {}
+        try:
+            from ..tools.injected import is_injected_type
+        except ImportError:  # pragma: no cover
+            is_injected_type = lambda _a: False  # noqa: E731
+
+        arguments = arguments or {}
+        accepts_kwargs = False
+        known = set()
+        errors = []
+        for pname, param in sig.parameters.items():
+            if param.kind == inspect.Parameter.VAR_KEYWORD:
+                accepts_kwargs = True
+                continue
+            if pname == 'self' or param.kind == inspect.Parameter.VAR_POSITIONAL:
+                continue
+            annotation = hints.get(pname, param.annotation)
+            if is_injected_type(annotation):
+                known.add(pname)
+                continue
+            known.add(pname)
+            if pname not in arguments:
+                if param.default is inspect.Parameter.empty:
+                    errors.append(f"missing required argument '{pname}'")
+                continue
+            value = arguments[pname]
+            if value is None and param.default is not inspect.Parameter.empty:
+                continue
+            expected = _SIMPLE_ARG_TYPES.get(annotation)
+            if expected is not None and not expected(value):
+                errors.append(
+                    f"argument '{pname}' must be {annotation.__name__}, "
+                    f"got {type(value).__name__}"
+                )
+        if not accepts_kwargs:
+            for key in arguments:
+                if key not in known:
+                    errors.append(f"unexpected argument '{key}'")
+        if not errors:
+            return None
+        schema = self._tool_parameter_hint(func) or {"required": [], "optional": []}
+        error_msg = (
+            f"Invalid arguments for tool '{function_name}': {'; '.join(errors)}. "
+            f"Expected parameters for '{function_name}' — "
+            f"required: {schema['required']}, optional: {schema['optional']}."
+        )
+        logging.warning(error_msg)
+        return {"error": error_msg, "expected_parameters": schema}
 
     def _is_argument_binding_error(self, func, arguments) -> bool:
         """True only when ``arguments`` cannot bind to ``func``'s signature.

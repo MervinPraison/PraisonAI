@@ -648,33 +648,9 @@ class OpenAIClient:
         return fix_array_schemas(schema)
     
     def _get_tools_cache_key(self, tools: List[Any]) -> str:
-        """Generate a cache key for tools."""
-        parts = []
-        for tool in tools:
-            if isinstance(tool, dict):
-                # For dict tools, use sorted JSON representation
-                parts.append(json.dumps(tool, sort_keys=True))
-            elif callable(tool):
-                # For functions, use module.name
-                parts.append(f"{tool.__module__}.{tool.__name__}")
-            elif isinstance(tool, str):
-                # For string tools, use as-is
-                parts.append(tool)
-            elif isinstance(tool, list):
-                # For lists, recursively process
-                subparts = []
-                for subtool in tool:
-                    if isinstance(subtool, dict):
-                        subparts.append(json.dumps(subtool, sort_keys=True))
-                    elif callable(subtool):
-                        subparts.append(f"{subtool.__module__}.{subtool.__name__}")
-                    else:
-                        subparts.append(str(subtool))
-                parts.append(f"[{','.join(subparts)}]")
-            else:
-                # For other types, use string representation
-                parts.append(str(tool))
-        return "|".join(parts)
+        """Generate a content-based cache key for tools."""
+        from ..tools.schema import tools_cache_key
+        return tools_cache_key(tools)
     
     def format_tools(self, tools: Optional[List[Any]]) -> Optional[List[Dict]]:
         """
@@ -700,7 +676,14 @@ class OpenAIClient:
         # Check cache first
         cache_key = self._get_tools_cache_key(tools)
         if cache_key in self._formatted_tools_cache:
-            return self._formatted_tools_cache[cache_key]
+            # LRU: re-insert so the entry becomes most-recently-used.
+            # A concurrent eviction of the same key just falls through to a miss.
+            try:
+                cached = self._formatted_tools_cache.pop(cache_key)
+                self._formatted_tools_cache[cache_key] = cached
+                return cached
+            except KeyError:
+                pass
             
         from ..tools.hosted import is_hosted_tool
         formatted_tools = []
@@ -769,8 +752,13 @@ class OpenAIClient:
         
         # Cache the result
         result = formatted_tools if formatted_tools else None
-        if result is not None and len(self._formatted_tools_cache) < self._max_cache_size:
+        if result is not None:
             self._formatted_tools_cache[cache_key] = result
+            while len(self._formatted_tools_cache) > self._max_cache_size:
+                try:
+                    del self._formatted_tools_cache[next(iter(self._formatted_tools_cache))]
+                except (KeyError, StopIteration, RuntimeError):
+                    break
                 
         return result
     

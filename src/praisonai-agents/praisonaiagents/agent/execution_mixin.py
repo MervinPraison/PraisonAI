@@ -1685,6 +1685,7 @@ Write the complete compiled report:"""
                         result.get("approval_error") or
                         result.get("circuit_open") or
                         result.get("loop_blocked") or
+                        "expected_parameters" in result or
                         result.get("_praison_retryable") is False):
                         return _finish(result, raised)
 
@@ -1977,6 +1978,16 @@ Write the complete compiled report:"""
                     ):
                         call_arguments = dict(arguments)
                         call_arguments["idempotency_key"] = durable_key
+
+                # Same pre-dispatch argument check as the sync path: coerce, then
+                # reject a malformed call back to the model without running the
+                # tool body or ending the run.
+                if hasattr(self, "_invalid_arguments_result"):
+                    from .tool_execution import _signature_target
+                    call_arguments = self._cast_arguments(_signature_target(func, call_target), call_arguments)
+                    invalid = self._invalid_arguments_result(function_name, func, call_target, call_arguments)
+                    if invalid is not None:
+                        return invalid
 
                 # Establish the injection context (Injected[T] params, including
                 # the cooperative cancel_event) around dispatch so the async path

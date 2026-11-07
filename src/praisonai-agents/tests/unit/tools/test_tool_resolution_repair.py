@@ -160,13 +160,12 @@ def test_bind_failure_parameter_hint_reaches_model_via_public_path():
         """Search the web."""
         raise TypeError("missing a required argument: 'query'")
 
-    from praisonaiagents.errors import ToolExecutionError
-
     agent = _make_agent([web_search])
 
-    with pytest.raises(ToolExecutionError) as exc:
-        agent.execute_tool("web_search", {})
-    msg = str(exc.value)
+    # #6279: a call the model got wrong never ran the tool, so the hint is
+    # returned to the model (self-repair) instead of ending the run.
+    msg = str(agent.execute_tool("web_search", {}))
+    assert "Expected parameters" in msg
     assert "query" in msg
     assert "limit" in msg
 

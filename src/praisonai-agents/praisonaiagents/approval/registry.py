@@ -26,6 +26,18 @@ from typing import Callable, Dict, List, Optional, Set
 
 from .protocols import ApprovalDecision, ApprovalRequest
 
+
+def _accepts_timeout(method) -> bool:
+    """True if ``method`` accepts a ``timeout`` keyword (or ``**kwargs``)."""
+    import inspect
+    try:
+        params = inspect.signature(method).parameters
+    except (TypeError, ValueError):
+        return False
+    return "timeout" in params or any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in params.values()
+    )
+
 logger = get_logger(__name__)
 
 # Default dangerous tools — same as old approval.py
@@ -700,7 +712,12 @@ class ApprovalRegistry:
             with _human_wait_scope():
                 # Prefer sync method if available
                 if hasattr(backend, "request_approval_sync"):
-                    decision = backend.request_approval_sync(request)
+                    # Honour the registry timeout on the sync path too, for
+                    # backends whose signature accepts it (legacy ones do not).
+                    if self.timeout and _accepts_timeout(backend.request_approval_sync):
+                        decision = backend.request_approval_sync(request, timeout=self.timeout)
+                    else:
+                        decision = backend.request_approval_sync(request)
                 else:
                     # Use shared utility for consistent async-to-sync bridging
                     from .utils import run_coroutine_safely
