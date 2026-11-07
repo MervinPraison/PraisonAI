@@ -4218,13 +4218,13 @@ Respond with ONLY a valid JSON tool call in this format:
                             logging.debug(f"Recovered tool calls from response text: {tool_calls}")
                     
                     # XML-format models (Qwen, or xml_tool_format=True), or any reply
-                    # carrying a <tool_call> tag: route through the shared salvage,
-                    # which masks fenced code (an example call is never executed)
-                    # and checks names against the advertised tool allowlist.
+                    # carrying a <tool_call> tag: recover only <tool_call> blocks
+                    # outside fenced code (an example call is never executed) whose
+                    # name is advertised. Plain JSON answers are never promoted.
                     if not tool_calls and response_text and formatted_tools and (
                             self._supports_xml_tool_format() or '<tool_call>' in response_text):
-                        from .adapters import _recover_json_tool_calls
-                        tool_calls = _recover_json_tool_calls(response_text, formatted_tools)
+                        from .adapters import _recover_tool_call_tags
+                        tool_calls = _recover_tool_call_tags(response_text, formatted_tools)
                         if tool_calls:
                             logging.debug(f"Parsed {len(tool_calls)} tool call(s) from XML format")
 

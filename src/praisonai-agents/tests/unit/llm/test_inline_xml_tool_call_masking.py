@@ -49,3 +49,20 @@ def test_fenced_example_tool_call_is_not_executed(monkeypatch):
 
 def test_unfenced_tool_call_is_still_recovered(monkeypatch):
     assert _run(monkeypatch, CALL) == ["x"]
+
+
+def test_fence_with_inline_delimiter_still_masks_call(monkeypatch):
+    reply = f"Example:\n```xml\n<!-- literal ``` delimiter -->\n{CALL}\n```\nDone."
+    assert _run(monkeypatch, reply) == []
+
+
+def test_plain_json_answer_is_not_executed(monkeypatch):
+    reply = '{"name": "delete_file", "arguments": {"path": "x"}, "format": "<tool_call>"}'
+    assert _run(monkeypatch, reply) == []
+
+
+def test_unadvertised_json_name_not_recovered_by_local_salvage():
+    from praisonaiagents.llm.adapters import _recover_json_tool_calls
+    tools = [{"type": "function", "function": {"name": "search"}}]
+    assert _recover_json_tool_calls('{"name": "delete_file", "arguments": {}}', tools) is None
+    assert _recover_json_tool_calls('{"name": "search", "arguments": {}}', tools)
