@@ -46,6 +46,9 @@ def test_over_long_keys_save_and_round_trip(tmp_path):
     listed = b.list_keys()
     assert len(listed) == 2
     assert sorted(b.load(k)["v"] for k in listed) == [1, 2]
+    # The listed form keeps a readable prefix, so prefix searches find it.
+    assert sorted(b.list_keys(prefix="aaaa")) == sorted(listed)
+    assert all(k.startswith("a" * 100) for k in listed)
     # A literal key can never reach the hashed file form.
     b.save("%~" + "0" * 64 + "x", {"v": 3})
     assert b.load(k1) == {"v": 1}
@@ -64,3 +67,13 @@ def test_plain_keys_keep_their_filename(tmp_path):
     b = FileBackend(str(tmp_path))
     b.save("session-123_abc", {"x": 1})
     assert (tmp_path / "session-123_abc.json").exists()
+
+
+def test_over_long_dotted_keys_round_trip_with_empty_suffix(tmp_path):
+    for suffix in ("", ".json"):
+        b = FileBackend(str(tmp_path / (suffix or "none")), suffix=suffix)
+        key = ".x." + "é.?" * 120
+        b.save(key, {"v": 1})
+        (listed,) = b.list_keys(prefix=".x.")
+        assert b.load(listed) == {"v": 1}
+        assert b.clear() == 1

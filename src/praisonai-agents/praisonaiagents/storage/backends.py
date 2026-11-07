@@ -31,7 +31,7 @@ logger = get_logger(__name__)
 DEFAULT_STORAGE_DIR = str(get_storage_dir())
 
 # Filename stem used for keys too long for the filesystem (see _key_to_path).
-_LONG_KEY = re.compile(r"%~[0-9a-f]{64}")
+_LONG_KEY = re.compile(r"(.*)%~([0-9a-f]{64})", re.S)
 
 class FileBackend:
     """
@@ -83,19 +83,32 @@ class FileBackend:
         like they carry an extension. Records written under the old lossy name
         stay on disk and are listed under that sanitised name.
 
-        A name over the 255-byte filename limit becomes ``%~<sha256>``. No
-        escaped key can contain a raw ``%~``, so it cannot alias another key,
-        and that listed form maps back to the same file.
+        A name over the 255-byte filename limit becomes ``<key prefix>%~<sha256>``,
+        so prefix searches still find it. No escaped key can contain a raw
+        ``%~``, so it cannot alias another key, and that listed form maps back
+        to the same file.
         """
         from ..utils.atomic_io import _escape
+
+        def enc(text: str) -> str:
+            stem = _escape(text)
+            return stem if self.suffix else stem.replace(".", "%2E")
+
+        def size(text: str) -> int:
+            return len(text.encode("utf-8", "surrogatepass"))
+
         key = str(key)
-        if _LONG_KEY.fullmatch(key):
-            return self.storage_dir / f"{key}{self.suffix}"
-        stem = _escape(key)
-        if not self.suffix:
-            stem = stem.replace(".", "%2E")
-        if len(f"{stem}{self.suffix}".encode("utf-8", "surrogatepass")) > 255:
-            stem = "%~" + hashlib.sha256(key.encode("utf-8", "surrogatepass")).hexdigest()
+        hashed = _LONG_KEY.fullmatch(key)
+        if hashed:
+            return self.storage_dir / f"{enc(hashed.group(1))}%~{hashed.group(2)}{self.suffix}"
+        stem = enc(key)
+        budget = 255 - size(self.suffix)
+        if size(stem) > budget:
+            tag = "%~" + hashlib.sha256(key.encode("utf-8", "surrogatepass")).hexdigest()
+            n = min(len(key), budget)
+            while n and size(enc(key[:n])) + size(tag) > budget:
+                n -= 1
+            stem = enc(key[:n]) + tag
         return self.storage_dir / f"{stem}{self.suffix}"
 
     def _path_to_key(self, file_path: Path) -> Optional[str]:
