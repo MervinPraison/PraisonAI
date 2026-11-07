@@ -927,23 +927,34 @@ class ToolExecutionMixin:
                 else:
                     sanitized[clean] = arg_value
             arguments = sanitized
-            
+            # Resolve string annotations (``from __future__ import annotations``)
+            # the same way _invalid_arguments_result does, so "3" -> int is
+            # coerced before validation instead of being rejected.
+            try:
+                hints = typing.get_type_hints(func)
+            except Exception:  # noqa: BLE001 -- fall back to raw annotations
+                hints = {}
+
             for param_name, arg_value in arguments.items():
                 if param_name in sig.parameters:
                     param = sig.parameters[param_name]
-                    if param.annotation != inspect.Parameter.empty:
+                    annotation = hints.get(param_name, param.annotation)
+                    if annotation != inspect.Parameter.empty:
                         # Handle common type conversions
-                        if param.annotation == int and isinstance(arg_value, (str, float)):
+                        if annotation == str and isinstance(arg_value, (int, float)) \
+                                and not isinstance(arg_value, bool):
+                            casted_args[param_name] = str(arg_value)
+                        elif annotation == int and isinstance(arg_value, (str, float)):
                             try:
                                 casted_args[param_name] = int(float(arg_value))
                             except (ValueError, TypeError):
                                 casted_args[param_name] = arg_value
-                        elif param.annotation == float and isinstance(arg_value, (str, int)):
+                        elif annotation == float and isinstance(arg_value, (str, int)):
                             try:
                                 casted_args[param_name] = float(arg_value)
                             except (ValueError, TypeError):
                                 casted_args[param_name] = arg_value
-                        elif param.annotation == bool and isinstance(arg_value, str):
+                        elif annotation == bool and isinstance(arg_value, str):
                             casted_args[param_name] = arg_value.lower() in ('true', '1', 'yes', 'on')
                         else:
                             casted_args[param_name] = arg_value

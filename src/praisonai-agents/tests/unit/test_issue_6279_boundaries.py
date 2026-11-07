@@ -118,6 +118,25 @@ class TestToolArgumentValidation:
         assert ag.execute_tool("add", {"a": "5"}) == 6
         assert calls == [(5, 1)]
 
+    def test_string_annotations_and_numeric_strings_coerced(self):
+        # ``from __future__ import annotations`` stores annotations as strings;
+        # coercion must resolve them like the validator does, and a number
+        # sent for a ``str`` parameter is stringified rather than rejected.
+        from praisonaiagents import Agent
+
+        calls = []
+
+        def ship(qty: "int", zip_code: "str") -> str:
+            "Ship"
+            calls.append((qty, zip_code))
+            return "ok"
+
+        ag = Agent(name="x", instructions="hi", tools=[ship], output="silent")
+        assert ag.execute_tool("ship", {"qty": "3", "zip_code": 94103}) == "ok"
+        assert calls == [(3, "94103")]
+        result = ag.execute_tool("ship", {"qty": "3", "zip_code": True})
+        assert isinstance(result, dict) and "expected_parameters" in result
+
     def test_async_path_validates(self, agent_and_calls):
         ag, calls = agent_and_calls
         result = asyncio.run(ag.execute_tool_async("add", {"a": "abc"}))
