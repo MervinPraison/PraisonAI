@@ -397,7 +397,7 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                     max_attempts=int(get('max_attempts', 3) or 3),
                     initial_delay_ms=int(float(get('delay', 1.0) or 0) * 1000),
                     backoff_factor=float(get('backoff_factor', 2.0) or 2.0),
-                    max_delay_ms=int(float(get('max_delay', 30.0) or 0) * 1000),
+                    max_delay_ms=int(float(get('max_delay', 60.0) or 0) * 1000),
                 )
             agent_kwargs['tool_config'] = ToolConfig(retry_policy=retry)
 

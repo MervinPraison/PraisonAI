@@ -75,3 +75,17 @@ def test_scheduler_forwards_llm():
         "name": "a", "role": "r", "instructions": "i", "llm": "gpt-4o",
     })
     assert "gpt-4o" in str(getattr(agent, "llm", ""))
+
+
+def test_tool_retry_policy_omitted_max_delay_uses_schema_default():
+    # delay > 30s is schema-valid; the fallback must match the schema's 60s.
+    kwargs = {}
+    translate({"tool_retry_policy": {"delay": 45}}, kwargs, {}, "r")
+    assert kwargs["tool_config"].retry_policy.max_delay_ms == 60000
+
+
+def test_planning_tools_included_in_yaml_tool_discovery():
+    from praisonai_code.tool_resolver import _yaml_tool_names
+
+    cfg = {"roles": {"r": {"tools": ["a"], "planning_tools": ["plan_only"]}}}
+    assert _yaml_tool_names(cfg) == {"a", "plan_only"}
