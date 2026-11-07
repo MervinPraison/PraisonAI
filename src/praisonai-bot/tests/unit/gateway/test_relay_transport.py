@@ -172,3 +172,74 @@ def test_send_outbound_when_disconnected_returns_failure():
         assert r.ok is False
 
     asyncio.run(run())
+
+
+def test_failed_handler_is_not_acked_and_is_redelivered():
+    async def run():
+        async with _Connector() as c:
+            t = WebSocketRelayTransport(c.url, token="secret")
+            seen, fail = [], [True]
+
+            async def on_msg(m):
+                if m.content == "a" and fail[0]:
+                    fail[0] = False
+                    raise RuntimeError("transient")
+                seen.append(m.content)
+
+            t.set_inbound_handler(on_msg)
+            await t.connect()
+            await c.conns[0].send(_inbound(1, "a"))
+            await c.conns[0].send(_inbound(2, "b"))
+            # Failure drops the connection so the connector can redeliver.
+            await _until(lambda: len(c.conns) == 2, timeout=8)
+            assert c.hellos[1]["last_seq"] == 0
+            assert not [f for f in c.frames if f["type"] == "ack"]
+            await c.conns[1].send(_inbound(1, "a"))
+            await c.conns[1].send(_inbound(2, "b"))
+            await _until(lambda: seen == ["a", "b"])
+            await _until(lambda: [f["seq"] for f in c.frames if f["type"] == "ack"] == [1, 2])
+            await t.disconnect()
+
+    asyncio.run(run())
+
+
+def test_manual_reconnect_after_drop_without_auto_reconnect():
+    async def run():
+        async with _Connector() as c:
+            t = WebSocketRelayTransport(c.url, token="secret", reconnect=False)
+            await t.connect()
+            await c.conns[0].close()
+            await _until(lambda: t._reader.done())
+            await t.connect()  # must really reopen, not return stale caps
+            assert len(c.conns) == 2
+            r = await t.send_outbound(
+                TargetInfo(target="c1"),
+                GatewayMessage(content="x", sender_id="g", session_id="c1"),
+            )
+            assert r.ok
+            await t.disconnect()
+
+    asyncio.run(run())
+
+
+def test_stalled_handshake_times_out_and_closes_socket():
+    async def run():
+        closed = asyncio.Event()
+
+        async def silent(ws):
+            await ws.recv()  # read hello, never reply
+            await ws.wait_closed()
+            closed.set()
+
+        server = await websockets.serve(silent, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            t = WebSocketRelayTransport(f"ws://127.0.0.1:{port}", send_timeout=0.2)
+            with pytest.raises(asyncio.TimeoutError):
+                await t.connect()
+            await asyncio.wait_for(closed.wait(), 5)
+        finally:
+            server.close()
+            await server.wait_closed()
+
+    asyncio.run(run())

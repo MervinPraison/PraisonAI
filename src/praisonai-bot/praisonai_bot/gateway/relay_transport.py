@@ -62,7 +62,8 @@ class WebSocketRelayTransport:
         token: Shared secret sent in the ``hello`` frame.
         platform: Platform the connector is fronting (e.g. ``"telegram"``).
         reconnect: Reconnect automatically when the connection drops.
-        send_timeout: Seconds to wait for an outbound ``result`` frame.
+        send_timeout: Seconds to wait for the handshake reply and for each
+            outbound ``result`` frame.
     """
 
     def __init__(
@@ -85,6 +86,7 @@ class WebSocketRelayTransport:
         self._last_seq = 0
         self._dormant = False
         self._closing = False
+        self._stalled = False
         self._connected = asyncio.Event()
         self._pending: Dict[str, asyncio.Future] = {}
         self._inbound: "asyncio.Queue[tuple]" = asyncio.Queue()
@@ -100,16 +102,21 @@ class WebSocketRelayTransport:
 
     async def connect(self) -> CapabilityDescriptor:
         """Dial the connector and handshake; resumes if currently dormant."""
-        if self._ws is not None and self._capabilities is not None:
+        live = self._reader is not None and not self._reader.done()
+        if live and self._capabilities is not None:
             if self._dormant:
                 self._dormant = False
-                await self._send({"type": "resume"})
+                try:
+                    await self._send({"type": "resume"})
+                except ConnectionError:  # mid-reconnect: reopens un-dormant
+                    logger.debug("relay: resume frame not sent", exc_info=True)
             return self._capabilities
 
         self._closing = False
         await self._open()
         self._reader = asyncio.create_task(self._read_loop())
-        self._worker = asyncio.create_task(self._inbound_loop())
+        if self._worker is None or self._worker.done():
+            self._worker = asyncio.create_task(self._inbound_loop())
         return self._capabilities  # type: ignore[return-value]
 
     async def send_outbound(
@@ -117,9 +124,11 @@ class WebSocketRelayTransport:
     ) -> DeliveryResult:
         request_id = str(uuid.uuid4())
         future = asyncio.get_running_loop().create_future()
-        self._pending[request_id] = future
         try:
             await asyncio.wait_for(self._connected.wait(), self.send_timeout)
+            # Register only once connected, so a drop during the wait cannot
+            # pre-fail a request that is then sent anyway.
+            self._pending[request_id] = future
             await self._send({
                 "type": "outbound",
                 "id": request_id,
@@ -155,6 +164,8 @@ class WebSocketRelayTransport:
         for task in (self._reader, self._worker):
             if task is not None:
                 task.cancel()
+        self._reader = self._worker = None
+        self._stalled = False
         ws, self._ws = self._ws, None
         if ws is not None:
             try:
@@ -176,18 +187,35 @@ class WebSocketRelayTransport:
             ) from exc
 
         ws = await websockets.connect(self.url)
-        await ws.send(json.dumps({
-            "type": "hello",
-            "token": self.token,
-            "platform": self.platform,
-            "last_seq": self._last_seq,
-        }))
-        reply = json.loads(await ws.recv())
-        if reply.get("type") != "welcome":
-            await ws.close()
-            raise RelayHandshakeError(reply.get("message", "handshake rejected"))
-        self._capabilities = CapabilityDescriptor.from_dict(reply["capabilities"])
+        try:
+            await ws.send(json.dumps({
+                "type": "hello",
+                "token": self.token,
+                "platform": self.platform,
+                "last_seq": self._last_seq,
+            }))
+            reply = json.loads(
+                await asyncio.wait_for(ws.recv(), self.send_timeout)
+            )
+            if reply.get("type") != "welcome":
+                raise RelayHandshakeError(
+                    reply.get("message", "handshake rejected")
+                )
+            capabilities = CapabilityDescriptor.from_dict(reply["capabilities"])
+        except BaseException:
+            # Never leak a half-open socket (bad reply, timeout, cancellation).
+            try:
+                await ws.close()
+            except Exception:  # pragma: no cover - defensive
+                pass
+            raise
+        self._capabilities = capabilities
         self._ws = ws
+        # Anything still queued came from the previous connection; the
+        # connector redelivers from ``last_seq``, so start clean.
+        while not self._inbound.empty():
+            self._inbound.get_nowait()
+        self._stalled = False
         self._connected.set()
         if self._dormant:
             await self._send({"type": "dormant"})
@@ -209,8 +237,10 @@ class WebSocketRelayTransport:
             except Exception:
                 logger.warning("relay: connection to %s lost", self.url, exc_info=True)
             self._connected.clear()
+            self._ws = None
             self._fail_pending("relay connection lost")
             if self._closing or not self.reconnect:
+                self._capabilities = None
                 return
             # Reconnect with exponential backoff + jitter. A handshake
             # rejection is terminal: retrying a bad token will never succeed.
@@ -223,6 +253,7 @@ class WebSocketRelayTransport:
                     break
                 except RelayHandshakeError:
                     logger.error("relay: handshake rejected; giving up")
+                    self._capabilities = None
                     return
                 except Exception:
                     logger.debug("relay: reconnect failed", exc_info=True)
@@ -241,12 +272,27 @@ class WebSocketRelayTransport:
         # (whose ``result`` frame the reader must deliver) cannot deadlock.
         while True:
             seq, data = await self._inbound.get()
+            if self._stalled:
+                continue  # dropped; redelivered after reconnect
             if seq > self._last_seq:
                 if self._handler is not None:
                     try:
                         await self._handler(GatewayMessage.from_dict(data))
                     except Exception:
-                        logger.exception("relay: inbound handler failed (seq=%s)", seq)
+                        # Leave it unacked and stop advancing; drop the
+                        # connection so the connector redelivers from it.
+                        logger.exception(
+                            "relay: inbound handler failed (seq=%s); "
+                            "awaiting redelivery", seq,
+                        )
+                        self._stalled = True
+                        ws = self._ws
+                        if ws is not None:
+                            try:
+                                await ws.close()
+                            except Exception:  # pragma: no cover - defensive
+                                pass
+                        continue
                 self._last_seq = seq
             try:
                 await self._send({"type": "ack", "seq": seq})

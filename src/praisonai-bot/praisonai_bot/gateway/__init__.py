@@ -83,4 +83,5 @@ __all__ = [
     "HomeChannelRegistry",
     "DeliveryResolver",
     "CgroupMemoryPressure",
+    "WebSocketRelayTransport",
 ]
