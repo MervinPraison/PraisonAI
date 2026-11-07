@@ -245,3 +245,11 @@ def test_human_mention_overrides_lead():
     planner = RoundRobinRoomPlanner(lead="lead")
     transcript = [RoomEvent(speaker="user", content="@coder fix it")]
     assert planner.plan_next(["lead", "coder"], transcript) == "coder"
+
+
+def test_sentence_final_mention_ignores_trailing_punctuation():
+    assert extract_mentions("Please help @coder.") == ["coder"]
+    assert extract_mentions("@agent.v2, thoughts?") == ["agent.v2"]
+    planner = RoundRobinRoomPlanner()
+    transcript = [RoomEvent(speaker="user", content="Please help @coder.")]
+    assert planner.plan_next(["writer", "coder"], transcript) == "coder"

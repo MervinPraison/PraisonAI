@@ -25,7 +25,9 @@ __all__ = [
 # ``@name`` addressing. Names are agent ids: letters, digits, underscore, dash
 # and dot. A leading ``@`` must not be glued to a preceding word character so
 # email-like ``foo@bar`` is not mistaken for a mention.
-_MENTION_RE = re.compile(r"(?<![\w@])@([A-Za-z0-9][\w\-.]*)")
+# A name may contain ``.``/``-`` but must end on a word character, so a
+# sentence-final ``@coder.`` resolves to ``coder`` while ``@agent.v2`` is kept.
+_MENTION_RE = re.compile(r"(?<![\w@])@([A-Za-z0-9](?:[\w\-.]*\w)?)")
 
 
 def extract_mentions(text: str) -> List[str]:
