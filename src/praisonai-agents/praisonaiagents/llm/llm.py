@@ -25,7 +25,6 @@ class FailoverManagerProtocol(Protocol):
 from pydantic import BaseModel
 import time
 import json
-import xml.etree.ElementTree as ET
 from ..errors import AgentErrorKind, BudgetExceededError, FailoverDecision, IdleTimeoutBreaker, ToolExecutionError
 from ..model_harness.guard import check_model_request
 # Gap 2: Tool call execution imports
@@ -4218,64 +4217,17 @@ Respond with ONLY a valid JSON tool call in this format:
                             tool_calls = recovered
                             logging.debug(f"Recovered tool calls from response text: {tool_calls}")
                     
-                    # Parse tool calls from XML format in response text 
-                    # Try for known XML models first, or fallback for any model that might output XML
-                    if not tool_calls and response_text and formatted_tools:
-                        # Check if this model is known to use XML format, or try as fallback
-                        should_try_xml = (self._supports_xml_tool_format() or 
-                                        # Fallback: try XML if response contains XML-like tool call tags
-                                        '<tool_call>' in response_text)
-                        
-                        if should_try_xml:
-                            tool_calls = []
-                            
-                            # Try proper XML parsing first
-                            try:
-                                # Wrap in root element if multiple tool_call tags exist
-                                xml_content = f"<root>{response_text}</root>"
-                                root = ET.fromstring(xml_content)
-                                tool_call_elements = root.findall('.//tool_call')
-                                
-                                for idx, element in enumerate(tool_call_elements):
-                                    if element.text:
-                                        try:
-                                            tool_json = json.loads(element.text.strip())
-                                            if isinstance(tool_json, dict) and "name" in tool_json:
-                                                tool_calls.append({
-                                                    "id": f"tool_{iteration_count}_{idx}",
-                                                    "type": "function",
-                                                    "function": {
-                                                        "name": tool_json["name"],
-                                                        "arguments": json.dumps(tool_json.get("arguments", {}))
-                                                    }
-                                                })
-                                        except (json.JSONDecodeError, KeyError) as e:
-                                            logging.debug(f"Could not parse tool call JSON: {e}")
-                                            continue
-                            except ET.ParseError:
-                                # Fallback to regex if XML parsing fails
-                                tool_call_pattern = r'<tool_call>\s*(\{(?:[^{}]|{[^{}]*})*\})\s*</tool_call>'
-                                matches = re.findall(tool_call_pattern, response_text, re.DOTALL)
-                                
-                                for idx, match in enumerate(matches):
-                                    try:
-                                        tool_json = json.loads(match.strip())
-                                        if isinstance(tool_json, dict) and "name" in tool_json:
-                                            tool_calls.append({
-                                                "id": f"tool_{iteration_count}_{idx}",
-                                                "type": "function",
-                                                "function": {
-                                                    "name": tool_json["name"],
-                                                    "arguments": json.dumps(tool_json.get("arguments", {}))
-                                                }
-                                            })
-                                    except (json.JSONDecodeError, KeyError) as e:
-                                        logging.debug(f"Could not parse XML tool call: {e}")
-                                        continue
-                            
-                            if tool_calls:
-                                logging.debug(f"Parsed {len(tool_calls)} tool call(s) from XML format")
-                    
+                    # XML-format models (Qwen, or xml_tool_format=True), or any reply
+                    # carrying a <tool_call> tag: route through the shared salvage,
+                    # which masks fenced code (an example call is never executed)
+                    # and checks names against the advertised tool allowlist.
+                    if not tool_calls and response_text and formatted_tools and (
+                            self._supports_xml_tool_format() or '<tool_call>' in response_text):
+                        from .adapters import _recover_json_tool_calls
+                        tool_calls = _recover_json_tool_calls(response_text, formatted_tools)
+                        if tool_calls:
+                            logging.debug(f"Parsed {len(tool_calls)} tool call(s) from XML format")
+
                     # Force tool usage logic: if model ignores tools but should use them
                     _force = self._force_tool_usage_message(response_text, tool_calls, formatted_tools, iteration_count)
                     if _force is not None:

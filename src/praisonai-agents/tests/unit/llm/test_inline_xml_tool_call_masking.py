@@ -1,0 +1,51 @@
+"""Non-streaming XML tool-call recovery masks fenced code (issue #6286).
+
+The tool loop in ``llm.py`` used to run a second, unmasked ``<tool_call>``
+parser over the raw reply for every provider, so a call a hosted model only
+*showed* inside a code fence was executed. The model call is stubbed;
+nothing leaves the machine.
+"""
+import pytest
+
+pytest.importorskip("litellm")
+
+from praisonaiagents.llm.llm import LLM  # noqa: E402
+
+MODEL = "openrouter/meta-llama/llama-3.1-70b-instruct"  # hosted -> DefaultAdapter
+CALL = '<tool_call>{"name": "delete_file", "arguments": {"path": "x"}}</tool_call>'
+
+
+def _run(monkeypatch, first_reply):
+    import litellm
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test")
+    replies = [first_reply, "done"]
+    calls = []
+
+    def fake(*a, **k):
+        text = replies.pop(0) if replies else "done"
+        return litellm.ModelResponse(model=k.get("model"), usage={
+            "prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+            choices=[{"index": 0, "finish_reason": "stop",
+                      "message": {"role": "assistant", "content": text}}])
+
+    monkeypatch.setattr(LLM, "_completion_with_retry", lambda self, **k: fake(**k))
+
+    def delete_file(path: str) -> str:
+        """Delete a file."""
+        calls.append(path)
+        return "deleted"
+
+    LLM(model=MODEL).get_response(
+        "How do I call delete_file?", tools=[delete_file],
+        execute_tool_fn=lambda name, args, *a, **k: delete_file(**args),
+        verbose=False, stream=False)
+    return calls
+
+
+def test_fenced_example_tool_call_is_not_executed(monkeypatch):
+    reply = f"Here is an example:\n```\n{CALL}\n```\nThat is how you call it."
+    assert _run(monkeypatch, reply) == []
+
+
+def test_unfenced_tool_call_is_still_recovered(monkeypatch):
+    assert _run(monkeypatch, CALL) == ["x"]
