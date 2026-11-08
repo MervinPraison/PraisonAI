@@ -1057,5 +1057,25 @@ class TestWorkflowFrameworkSupport:
             assert generator.framework == "crewai"
 
 
+
+def test_workflow_generator_strips_live_registry_dangerous_tools(tmp_path):
+    """Workflow YAML gate uses the same live-registry heuristic as AutoGenerator.
+
+    Regression for #6296: a code-exec tool not yet in the static
+    TOOL_CATEGORIES list (e.g. ``python_repl``) must be stripped here too.
+    """
+    import yaml
+    out = tmp_path / "wf.yaml"
+    gen = WorkflowAutoGenerator.__new__(WorkflowAutoGenerator)
+    gen.topic = "Research AI news"
+    gen.framework = "praisonai"
+    gen.workflow_file = str(out)
+    data = {"agents": {"a": {"name": "a", "tools": ["python_repl", "internet_search"]}}}
+    with patch.object(gen, "_available_tools", return_value=["python_repl", "internet_search"]):
+        gen._save_workflow(data, "sequential")
+    saved = yaml.safe_load(out.read_text())
+    assert saved["agents"]["a"]["tools"] == ["internet_search"]
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
