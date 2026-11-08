@@ -7,6 +7,8 @@ for maintainability.
 """
 
 import os
+import dataclasses
+import typing
 import time
 import json
 import logging
@@ -106,9 +108,17 @@ def _coerce_value(value, annotation):
                 value = json.loads(stripped)
         if is_model and isinstance(value, dict):
             return container.model_validate(value)
+        if isinstance(value, dict) and dataclasses.is_dataclass(container):
+            hints = typing.get_type_hints(container)
+            return container(**{k: _coerce_value(v, hints[k]) if k in hints else v
+                                for k, v in value.items()})
         if isinstance(value, (list, tuple)) and not isinstance(value, str):
+            if container is tuple and args and Ellipsis not in args:
+                if len(args) != len(value):
+                    return value
+                return tuple(_coerce_value(v, a) for v, a in zip(value, args))
             if container in (set, frozenset, tuple):
-                item_ann = args[0] if len(args) == 1 or (len(args) == 2 and args[1] is Ellipsis) else None
+                item_ann = args[0] if args else None
                 items = [_coerce_value(v, item_ann) for v in value] if item_ann else list(value)
                 return container(items)
             if container is list and args:
@@ -934,7 +944,17 @@ class ToolExecutionMixin:
             return arguments
         
         try:
+            # ``@tool`` wraps the function in FunctionTool whose run() takes
+            # **kwargs; read parameters from the wrapped function instead.
+            from ..tools.decorator import FunctionTool
+            owner = getattr(func, "__self__", func)
+            if isinstance(owner, FunctionTool):
+                func = owner._func
             sig = inspect.signature(func)
+            try:  # resolve postponed (string) annotations
+                hints = typing.get_type_hints(func)
+            except Exception:
+                hints = {}
             valid_params = set(sig.parameters.keys()) - {'self'}
             casted_args = {}
             
@@ -959,7 +979,8 @@ class ToolExecutionMixin:
                 if param_name in sig.parameters:
                     param = sig.parameters[param_name]
                     if param.annotation != inspect.Parameter.empty:
-                        casted_args[param_name] = _coerce_value(arg_value, param.annotation)
+                        annotation = hints.get(param_name, param.annotation)
+                        casted_args[param_name] = _coerce_value(arg_value, annotation)
                     else:
                         casted_args[param_name] = arg_value
                 else:

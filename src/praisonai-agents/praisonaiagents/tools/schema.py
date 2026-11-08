@@ -103,10 +103,13 @@ def annotation_to_json_schema(annotation: Any) -> dict:
     # Handle other sequence/set-like containers (tuple, set, Sequence, ...)
     if origin in _ARRAY_TYPES or annotation in _ARRAY_TYPES:
         item_args = [a for a in args if a is not Ellipsis]
-        if origin is tuple and len(item_args) > 1:
-            schema = {"type": "array", "items": {"anyOf": [annotation_to_json_schema(a) for a in item_args]}}
-            if Ellipsis not in args:
-                schema["minItems"] = schema["maxItems"] = len(item_args)
+        if origin is tuple and item_args and Ellipsis not in args:
+            # Fixed-length tuple. prefixItems is not accepted by every provider
+            # (e.g. strict mode), so items stay a union; casting is positional.
+            positional = [annotation_to_json_schema(a) for a in item_args]
+            schema = {"type": "array",
+                      "items": positional[0] if len(positional) == 1 else {"anyOf": positional},
+                      "minItems": len(item_args), "maxItems": len(item_args)}
         else:
             schema = {"type": "array"}
             if item_args:

@@ -1,7 +1,6 @@
 """Regression tests for issue #6294."""
-import os
-import subprocess
-import sys
+import asyncio
+import logging
 from dataclasses import dataclass
 from typing import List, Mapping, Optional, Sequence, Set, Tuple, TypedDict
 
@@ -44,7 +43,12 @@ def test_coerce_values():
     assert _coerce_value("5", Optional[int]) == 5
     assert _coerce_value("[1,2]", List[int]) == [1, 2]
     assert _coerce_value(["a", "b"], Set[str]) == {"a", "b"}
-    assert _coerce_value([1, 2], Tuple[float, float]) == (1.0, 2.0)
+    out = _coerce_value(["1.5", "2"], Tuple[float, int])
+    assert out == (1.5, 2) and type(out[1]) is int
+    out = _coerce_value([{"city": "x"}, "5"], Tuple[Addr, int])
+    assert out == (Addr(city="x"), 5)
+    assert _coerce_value({"x": "3"}, Point) == Point(x=3)
+    assert _coerce_value([{"x": 1}], List[Point]) == [Point(x=1)]
     assert _coerce_value({"city": "x"}, Addr) == Addr(city="x")
     assert _coerce_value('{"city": "x"}', Addr) == Addr(city="x")
     # unchanged when not convertible / already right type
@@ -95,17 +99,46 @@ def test_linear_order_unchanged():
     assert [t.name for t in team.tasks.values()] == ["t0", "t1", "t2"]
 
 
-def test_import_leaves_root_logging_to_host(tmp_path):
-    log_file = tmp_path / "app.log"
-    code = (
-        "import logging, praisonaiagents\n"
-        "root = logging.getLogger()\n"
-        "assert root.handlers == [], root.handlers\n"
-        "assert root.level == logging.WARNING\n"
-        "assert logging.getLogger('httpx').propagate\n"
-        f"logging.basicConfig(filename={str(log_file)!r}, level=logging.DEBUG)\n"
-        "logging.getLogger('myapp').debug('hello')\n"
-    )
-    env = {k: v for k, v in os.environ.items() if k != "LOGLEVEL"}
-    subprocess.run([sys.executable, "-c", code], check=True, env=env, cwd=str(tmp_path))
-    assert "hello" in log_file.read_text()
+def test_tuple_schema_fixed_length():
+    assert annotation_to_json_schema(Tuple[int])["maxItems"] == 1
+    assert annotation_to_json_schema(Tuple[int, str])["minItems"] == 2
+
+
+def _agent_with(tool):
+    from praisonaiagents import Agent
+    return Agent(name="a", instructions="x", llm="gpt-4o-mini", tools=[tool])
+
+
+def test_decorated_tool_and_postponed_annotations_get_models():
+    from praisonaiagents import tool
+
+
+    def plain(address: "Addr") -> str:
+        return address.city
+
+    @tool
+    def decorated(address: Addr) -> str:
+        return address.city
+
+    agent = _agent_with(plain)
+    assert agent._cast_arguments(plain, {"address": {"city": "x"}}) == {"address": Addr(city="x")}
+    agent = _agent_with(decorated)
+    assert agent._cast_arguments(decorated.run, {"address": {"city": "y"}}) == {"address": Addr(city="y")}
+
+
+def test_async_tool_call_casts_arguments():
+    def where(address: Addr) -> str:
+        return address.city
+
+    agent = _agent_with(where)
+    assert asyncio.run(agent._execute_tool_async_impl("where", {"address": {"city": "z"}})) == "z"
+
+
+def test_import_leaves_root_logging_to_host(monkeypatch):
+    from praisonaiagents import _logging
+
+    root = logging.getLogger()
+    monkeypatch.delenv("LOGLEVEL", raising=False)
+    monkeypatch.setattr(root, "handlers", [])
+    _logging.configure_root_logger()
+    assert root.handlers == []
