@@ -80,6 +80,14 @@ def render_change_preview(
     concrete change rather than just a tool label.
     """
     args = parameters or {}
+
+    # Real built-in tools (``edit_file``/``write_file``/``apply_patch`` …):
+    # reuse the core pre-apply diff helper for a contextual diff.
+    from praisonaiagents.approval.utils import build_diff_preview
+    diff = build_diff_preview(tool_name, args)
+    if diff:
+        return diff
+
     if tool_name not in ("edit", "write", "apply_patch"):
         return None
 

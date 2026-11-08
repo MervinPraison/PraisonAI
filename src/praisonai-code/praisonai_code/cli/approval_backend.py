@@ -169,12 +169,23 @@ class InteractiveCLIApprovalBackend:
     def _render_preview(self, request: ApprovalRequest) -> Optional[str]:
         """Render a change preview for file-mutating tools.
 
-        For ``edit``/``apply_patch`` a unified diff is shown when available;
-        for ``write`` the content (truncated) is shown. Returns ``None`` when
-        there is nothing meaningful to preview.
+        Prefers the pre-apply unified diff the core tool-execution chokepoint
+        attaches as ``request.context["diff"]``; otherwise computes one with the
+        shared core helper (``edit_file``/``write_file``/``apply_patch`` …), and
+        finally falls back to argument sniffing. Returns ``None`` when there is
+        nothing meaningful to preview.
         """
         tool_name = request.tool_name
         args = request.arguments or {}
+
+        context = request.context if isinstance(request.context, dict) else {}
+        diff = context.get("diff")
+        if not (isinstance(diff, str) and diff.strip()):
+            from praisonaiagents.approval.utils import build_diff_preview
+            diff = build_diff_preview(tool_name, args)
+        if isinstance(diff, str) and diff.strip():
+            return f"\nPreview (diff):\n{diff}"
+
         if tool_name not in ("edit", "write", "apply_patch"):
             return None
 
