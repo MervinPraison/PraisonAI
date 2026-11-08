@@ -5,6 +5,7 @@ These events are emitted by InteractiveCore and consumed by frontends
 (Rich REPL, Textual TUI, etc.) for rendering.
 """
 
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -68,6 +69,39 @@ class InteractiveEvent:
         }
 
 
+_PREVIEW_PATH_KEYS = ("file_path", "path", "filename", "file", "target", "filepath")
+
+
+def workspace_diff_preview(
+    tool_name: str,
+    parameters: Optional[Dict[str, Any]],
+    base_dir: Optional[str] = None,
+) -> Optional[str]:
+    """Pre-apply unified diff for a built-in file tool, read from the workspace.
+
+    Relative paths are resolved against ``base_dir`` (default: the
+    ``PRAISONAI_WORKSPACE`` set by ``--workspace``) so the on-disk context
+    matches the file the tool will actually edit, without touching the process
+    cwd. Returns ``None`` when unavailable (non-file tool, or an older
+    ``praisonaiagents`` without the core helper).
+    """
+    try:
+        from praisonaiagents.approval.utils import build_diff_preview
+    except ImportError:
+        return None
+    args = dict(parameters or {})
+    base = base_dir or os.environ.get("PRAISONAI_WORKSPACE")
+    if base:
+        for key in _PREVIEW_PATH_KEYS:
+            value = args.get(key)
+            if isinstance(value, str) and value.strip() and not os.path.isabs(value.strip()):
+                args[key] = os.path.join(base, value.strip())
+    try:
+        return build_diff_preview(tool_name, args)
+    except Exception:
+        return None
+
+
 def render_change_preview(
     tool_name: str, parameters: Optional[Dict[str, Any]]
 ) -> Optional[str]:
@@ -83,8 +117,7 @@ def render_change_preview(
 
     # Real built-in tools (``edit_file``/``write_file``/``apply_patch`` …):
     # reuse the core pre-apply diff helper for a contextual diff.
-    from praisonaiagents.approval.utils import build_diff_preview
-    diff = build_diff_preview(tool_name, args)
+    diff = workspace_diff_preview(tool_name, args)
     if diff:
         return diff
 

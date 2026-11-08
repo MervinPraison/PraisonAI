@@ -169,20 +169,23 @@ class InteractiveCLIApprovalBackend:
     def _render_preview(self, request: ApprovalRequest) -> Optional[str]:
         """Render a change preview for file-mutating tools.
 
-        Prefers the pre-apply unified diff the core tool-execution chokepoint
-        attaches as ``request.context["diff"]``; otherwise computes one with the
-        shared core helper (``edit_file``/``write_file``/``apply_patch`` …), and
-        finally falls back to argument sniffing. Returns ``None`` when there is
-        nothing meaningful to preview.
+        For built-in file tools (``edit_file``/``write_file``/``apply_patch`` …)
+        a pre-apply unified diff is computed against the workspace (relative
+        paths resolve under ``--workspace``, not the launch cwd). Otherwise the
+        ``request.context["diff"]`` attached by the core chokepoint is used,
+        and finally argument sniffing. Returns ``None`` when there is nothing
+        meaningful to preview.
         """
+        from praisonai_code.cli.interactive.events import workspace_diff_preview
+
         tool_name = request.tool_name
         args = request.arguments or {}
 
-        context = request.context if isinstance(request.context, dict) else {}
-        diff = context.get("diff")
+        base_dir = os.environ.get("PRAISONAI_WORKSPACE") or self.project_dir
+        diff = workspace_diff_preview(tool_name, args, base_dir=base_dir)
         if not (isinstance(diff, str) and diff.strip()):
-            from praisonaiagents.approval.utils import build_diff_preview
-            diff = build_diff_preview(tool_name, args)
+            context = request.context if isinstance(request.context, dict) else {}
+            diff = context.get("diff")
         if isinstance(diff, str) and diff.strip():
             return f"\nPreview (diff):\n{diff}"
 
