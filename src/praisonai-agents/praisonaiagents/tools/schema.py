@@ -14,6 +14,8 @@ Usage:
     # {"type": "string", "enum": ["fast", "deep"]}
 """
 
+import collections.abc as _cabc
+import dataclasses
 import enum
 import inspect
 import logging
@@ -97,6 +99,39 @@ def annotation_to_json_schema(annotation: Any) -> dict:
             return {"type": "array", "items": items_schema}
         else:
             return {"type": "array"}
+
+    # Handle other sequence/set-like containers (tuple, set, Sequence, ...)
+    if origin in _ARRAY_TYPES or annotation in _ARRAY_TYPES:
+        item_args = [a for a in args if a is not Ellipsis]
+        if origin is tuple and len(item_args) > 1:
+            schema = {"type": "array", "items": {"anyOf": [annotation_to_json_schema(a) for a in item_args]}}
+            if Ellipsis not in args:
+                schema["minItems"] = schema["maxItems"] = len(item_args)
+        else:
+            schema = {"type": "array"}
+            if item_args:
+                schema["items"] = annotation_to_json_schema(item_args[0])
+        if origin in _SET_TYPES or annotation in _SET_TYPES:
+            schema["uniqueItems"] = True
+        return schema
+
+    # Handle Mapping types
+    if origin in _MAPPING_TYPES or annotation in _MAPPING_TYPES:
+        if len(args) >= 2:
+            return {"type": "object", "additionalProperties": annotation_to_json_schema(args[1])}
+        return {"type": "object"}
+
+    # Handle Pydantic models, dataclasses and TypedDicts
+    if isinstance(annotation, type):
+        if hasattr(annotation, "model_json_schema"):
+            schema = annotation.model_json_schema()
+            if "$defs" in schema:
+                # Nested $refs point at the root document; keep it a plain object
+                return {"type": "object"}
+            schema.pop("title", None)
+            return schema
+        if dataclasses.is_dataclass(annotation) or hasattr(annotation, "__required_keys__"):
+            return _object_schema_from_hints(annotation)
     
     # Handle Dict types
     if origin is dict:
@@ -118,6 +153,31 @@ def annotation_to_json_schema(annotation: Any) -> dict:
     }
     
     return {"type": type_map.get(annotation, "string")}
+
+
+_SET_TYPES = (set, frozenset, _cabc.Set, _cabc.MutableSet)
+_ARRAY_TYPES = (tuple, _cabc.Sequence, _cabc.MutableSequence, _cabc.Iterable,
+                _cabc.Collection) + _SET_TYPES
+_MAPPING_TYPES = (_cabc.Mapping, _cabc.MutableMapping)
+
+
+def _object_schema_from_hints(cls: type) -> dict:
+    """Build an object schema for a dataclass or TypedDict from its type hints."""
+    hints = get_type_hints(cls)
+    if dataclasses.is_dataclass(cls):
+        required = [
+            f.name for f in dataclasses.fields(cls)
+            if f.default is dataclasses.MISSING and f.default_factory is dataclasses.MISSING
+        ]
+    else:
+        required = [k for k in hints if k in getattr(cls, "__required_keys__", ())]
+    schema = {
+        "type": "object",
+        "properties": {k: annotation_to_json_schema(v) for k, v in hints.items()},
+    }
+    if required:
+        schema["required"] = required
+    return schema
 
 
 def fix_array_schemas(schema: Dict[str, Any]) -> Dict[str, Any]:
@@ -361,7 +421,7 @@ def build_tool_definition(
         try:
             prop_schema = annotation_to_json_schema(annotation)
         except Exception as e:
-            logging.debug(f"Could not generate schema for {function_name}.{name}: {e}")
+            logging.warning(f"Could not generate schema for {function_name}.{name}: {e}")
             prop_schema = {"type": "string"}
 
         if name in param_descriptions:

@@ -69,6 +69,58 @@ _MAX_SPILL_TOOL_THREADS = 8
 _TOOL_ARGUMENTS_PARSE_FAILED = object()
 
 
+def _coerce_value(value, annotation):
+    """Best-effort cast of an LLM-supplied value to ``annotation``.
+
+    Returns ``value`` unchanged when it cannot be converted.
+    """
+    import collections.abc as cabc
+    from typing import get_origin, get_args, Union as _Union
+
+    origin, args = get_origin(annotation), get_args(annotation)
+    if origin is _Union:  # Optional[T] / Union[...]
+        members = [a for a in args if a is not type(None)]
+        if value is None or any(isinstance(a, type) and isinstance(value, a) for a in members):
+            return value
+        for arg in members:
+            coerced = _coerce_value(value, arg)
+            if coerced is not value:
+                return coerced
+        return value
+    try:
+        if annotation is int and isinstance(value, (str, float)) and not isinstance(value, bool):
+            return int(float(value))
+        if annotation is float and isinstance(value, (str, int)) and not isinstance(value, bool):
+            return float(value)
+        if annotation is bool and isinstance(value, str):
+            return value.lower() in ('true', '1', 'yes', 'on')
+        container = origin or annotation
+        if not isinstance(container, type):
+            return value
+        is_model = hasattr(container, "model_validate")
+        if isinstance(value, str) and container is not str and (
+            is_model or issubclass(container, (cabc.Iterable, cabc.Mapping))
+        ):
+            stripped = value.strip()
+            if stripped[:1] in ('[', '{'):
+                value = json.loads(stripped)
+        if is_model and isinstance(value, dict):
+            return container.model_validate(value)
+        if isinstance(value, (list, tuple)) and not isinstance(value, str):
+            if container in (set, frozenset, tuple):
+                item_ann = args[0] if len(args) == 1 or (len(args) == 2 and args[1] is Ellipsis) else None
+                items = [_coerce_value(v, item_ann) for v in value] if item_ann else list(value)
+                return container(items)
+            if container is list and args:
+                return [_coerce_value(v, args[0]) for v in value]
+    except (ValueError, TypeError):
+        return value
+    except Exception as e:  # e.g. pydantic.ValidationError, json.JSONDecodeError
+        logging.debug(f"Could not coerce tool argument to {annotation!r}: {e}")
+        return value
+    return value
+
+
 class _CallableGuardrailAdapter:
     """Expose a plain callable guardrail as a chainable guardrail object.
 
@@ -907,21 +959,7 @@ class ToolExecutionMixin:
                 if param_name in sig.parameters:
                     param = sig.parameters[param_name]
                     if param.annotation != inspect.Parameter.empty:
-                        # Handle common type conversions
-                        if param.annotation == int and isinstance(arg_value, (str, float)):
-                            try:
-                                casted_args[param_name] = int(float(arg_value))
-                            except (ValueError, TypeError):
-                                casted_args[param_name] = arg_value
-                        elif param.annotation == float and isinstance(arg_value, (str, int)):
-                            try:
-                                casted_args[param_name] = float(arg_value)
-                            except (ValueError, TypeError):
-                                casted_args[param_name] = arg_value
-                        elif param.annotation == bool and isinstance(arg_value, str):
-                            casted_args[param_name] = arg_value.lower() in ('true', '1', 'yes', 'on')
-                        else:
-                            casted_args[param_name] = arg_value
+                        casted_args[param_name] = _coerce_value(arg_value, param.annotation)
                     else:
                         casted_args[param_name] = arg_value
                 else:

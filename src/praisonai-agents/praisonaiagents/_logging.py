@@ -72,6 +72,14 @@ def _configure_loggers():
     """
     if _host_configured_logging():
         return
+    if 'LOGLEVEL' not in os.environ:
+        # Default: only raise untouched noisy loggers to WARNING. Keep their
+        # handlers and propagation so the host still sees their errors.
+        for logger_name in _get_all_noisy_loggers():
+            logger = logging.getLogger(logger_name)
+            if logger.level == logging.NOTSET:
+                logger.setLevel(logging.WARNING)
+        return
     loglevel = os.environ.get('LOGLEVEL', 'WARNING').upper()
     
     # When DEBUG or INFO is set, allow some HTTP logging for API endpoints
@@ -143,9 +151,15 @@ def configure_root_logger():
     
     Uses standard StreamHandler by default for performance.
     RichHandler is only used when LOGLEVEL=DEBUG for better debugging experience.
-    Does nothing if the host application already configured the root logger.
+    Does nothing if the host application already configured the root logger,
+    or when ``LOGLEVEL`` is not set explicitly.
     """
     if _host_configured_logging():
+        return
+    if 'LOGLEVEL' not in os.environ:
+        # A library must not install root handlers by default: that turns the
+        # host's later logging.basicConfig() into a no-op. Without handlers,
+        # WARNING+ records still reach stderr via logging.lastResort.
         return
 
     loglevel = os.environ.get('LOGLEVEL', 'WARNING').upper()
