@@ -396,6 +396,9 @@ jobs:
               tests/unit/test_run_on_docker.py::test_run_on_docker_builds_the_self_hosted_backend
               tests/unit/test_run_on_docker.py::test_run_on_moves_the_thinking_too
               tests/unit/test_run_on_docker.py::test_the_two_read_differently_in_the_repr
+              tests/unit/test_run_on_docker.py::test_run_on_covers_the_cloud_places_too
+              tests/unit/test_run_on_docker.py::test_a_cloud_place_builds_its_own_backend_class
+              tests/unit/test_run_on_docker.py::test_docker_is_no_longer_a_special_case
               tests/unit/test_run_on_docker.py::test_tools_run_on_leaves_the_thinking_here
               tests/unit/test_run_on_docker.py::test_naming_both_is_still_a_conflict
               tests/unit/test_run_on_docker.py::test_the_agent_is_rebuilt_from_serialisable_config_only
