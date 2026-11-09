@@ -255,6 +255,9 @@ _LAZY_IMPORTS = {
     "WeakGatewaySecretError": ("praisonaiagents.gateway.protocols", "WeakGatewaySecretError"),
     "is_weak_secret": ("praisonaiagents.gateway.protocols", "is_weak_secret"),
     "assert_gateway_secret_strong": ("praisonaiagents.gateway.protocols", "assert_gateway_secret_strong"),
+    # Client transport-security guard (Issue #6307)
+    "InsecureGatewayTransportError": ("praisonaiagents.gateway.protocols", "InsecureGatewayTransportError"),
+    "assert_secure_gateway_transport": ("praisonaiagents.gateway.protocols", "assert_secure_gateway_transport"),
     # Per-platform identity canonicalization (Issue #3886)
     "IdentityCanonicalizerProtocol": ("praisonaiagents.gateway.protocols", "IdentityCanonicalizerProtocol"),
     # liveness.py — Event-loop liveness watchdog (Issue #3385)
@@ -616,6 +619,9 @@ __all__ = [
     "WeakGatewaySecretError",
     "is_weak_secret",
     "assert_gateway_secret_strong",
+    # Client transport-security guard (Issue #6307)
+    "InsecureGatewayTransportError",
+    "assert_secure_gateway_transport",
     # Per-platform identity canonicalization (Issue #3886)
     "IdentityCanonicalizerProtocol",
     # Event-loop liveness watchdog (Issue #3385)

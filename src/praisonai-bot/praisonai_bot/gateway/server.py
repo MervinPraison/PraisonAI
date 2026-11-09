@@ -2044,9 +2044,13 @@ class WebSocketGateway:
                 except ImportError:
                     pass
                 
-                # Fall back to query param token authentication
+                # Then ``Authorization: Bearer`` (bundled client, Issue #6307),
+                # falling back to the legacy ``?token=`` query param.
                 if not authenticated:
-                    ws_token = websocket.query_params.get("token", "")
+                    auth_header = websocket.headers.get("authorization", "")
+                    ws_token = (
+                        auth_header[7:] if auth_header.startswith("Bearer ") else ""
+                    ) or websocket.query_params.get("token", "")
                     if ws_token and secrets.compare_digest(ws_token, self.config.auth_token):
                         authenticated = True
                         operator_token = ws_token

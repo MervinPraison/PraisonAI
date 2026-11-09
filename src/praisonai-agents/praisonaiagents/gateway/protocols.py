@@ -2694,6 +2694,64 @@ def resolve_auth_mode(bind_host: str, configured: Optional[AuthMode] = None) -> 
     return "local" if is_loopback(bind_host) else "token"
 
 
+class InsecureGatewayTransportError(ValueError):
+    """Raised when a gateway URL would send traffic in cleartext to a public host."""
+
+
+def _is_non_public_host(host: str) -> bool:
+    """True for loopback, private/link-local/CGNAT IPs and single-label names."""
+    import ipaddress
+
+    host = (host or "").strip("[]").rstrip(".").lower()
+    if not host or is_loopback(host) or host.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        # Single-label names (docker-compose service, LAN hostname) never
+        # resolve via public DNS.
+        return "." not in host
+    return (
+        ip.is_private
+        or ip.is_link_local
+        or ip in ipaddress.ip_network("100.64.0.0/10")  # CGNAT / Tailscale
+    )
+
+
+def assert_secure_gateway_transport(url: str, *, allow_insecure: bool = False) -> None:
+    """Fail closed on plaintext ``ws://`` / ``http://`` to a public host.
+
+    Loopback and private-range hosts (local dev, SSH tunnel, VPN) are always
+    allowed, as is ``wss://`` / ``https://``. A public host over plaintext
+    raises unless ``allow_insecure`` is True or ``PRAISONAI_ALLOW_INSECURE_WS=1``.
+
+    Raises:
+        InsecureGatewayTransportError: On plaintext transport to a public host.
+
+    Examples:
+        >>> assert_secure_gateway_transport("ws://localhost:8765")
+        >>> assert_secure_gateway_transport("wss://gateway.example.com")
+    """
+    import os
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    if parts.scheme.lower() not in ("ws", "http"):
+        return
+    if allow_insecure or os.environ.get("PRAISONAI_ALLOW_INSECURE_WS", "").strip().lower() in ("1", "true", "yes"):
+        return
+    if _is_non_public_host(parts.hostname or ""):
+        return
+    raise InsecureGatewayTransportError(
+        f"Refusing plaintext connection to public gateway host "
+        f"{parts.hostname!r}: the auth token and session stream would be sent "
+        f"unencrypted.\n"
+        f"Fix:  use wss:// (start the gateway with ssl_cert/ssl_key or behind a TLS proxy)\n"
+        f"Or:   tunnel it, e.g. ssh -L 8765:localhost:8765 <host> and use ws://localhost:8765\n"
+        f"Break-glass: export PRAISONAI_ALLOW_INSECURE_WS=1"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Ingress attribution / trusted-proxy real-client-IP resolution (Issue #5312)
 # ---------------------------------------------------------------------------

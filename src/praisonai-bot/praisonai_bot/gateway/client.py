@@ -28,9 +28,17 @@ from praisonaiagents.gateway import (
     PROTOCOL_VERSION,
     MIN_PROTOCOL_VERSION,
     is_recoverable,
+    assert_secure_gateway_transport,
 )
 
 logger = logging.getLogger(__name__)
+
+# websockets>=14 renamed the handshake-header kwarg of ``websockets.connect``.
+_HEADERS_KWARG = (
+    "additional_headers"
+    if int(websockets.__version__.split(".")[0]) >= 14
+    else "extra_headers"
+)
 
 # Default capability tokens the bundled client advertises during the handshake.
 DEFAULT_CAPABILITIES = ("streaming", "ack")
@@ -125,6 +133,7 @@ class GatewayClient:
         backoff: Optional[BackoffConfig] = None,
         max_reconnect_attempts: Optional[int] = None,
         capabilities: Optional[List[str]] = None,
+        allow_insecure: bool = False,
     ):
         """Initialize the gateway client.
         
@@ -138,7 +147,16 @@ class GatewayClient:
             capabilities: Capability tokens to advertise during the ``hello``
                 handshake (e.g. ``["streaming", "ack"]``). Defaults to
                 :data:`DEFAULT_CAPABILITIES`.
+            allow_insecure: Permit plaintext ``ws://`` to a public host
+                (break-glass; also ``PRAISONAI_ALLOW_INSECURE_WS=1``).
+                Loopback/private hosts and ``wss://`` never need it.
+
+        Raises:
+            InsecureGatewayTransportError: If ``url`` is plaintext ``ws://``
+                to a public host and insecure transport was not allowed.
         """
+        # Fail closed before any token or session data can leave the process.
+        assert_secure_gateway_transport(url, allow_insecure=allow_insecure)
         self.url = url
         self.agent_id = agent_id
         self.token = token
@@ -387,14 +405,12 @@ class GatewayClient:
         """Establish WebSocket connection and perform handshake."""
         self._set_state(ConnectionState.CONNECTING)
         
-        # Build connection URL with token if provided
-        connect_url = self.url
+        # Send the token as a header, never in the URL where it would land in
+        # proxy/access logs. wss:// uses websockets' default verified TLS.
+        connect_kwargs: Dict[str, Any] = {}
         if self.token:
-            separator = "&" if "?" in connect_url else "?"
-            connect_url = f"{connect_url}{separator}token={self.token}"
-        
-        # Connect to WebSocket
-        self._ws = await websockets.connect(connect_url)
+            connect_kwargs[_HEADERS_KWARG] = {"Authorization": f"Bearer {self.token}"}
+        self._ws = await websockets.connect(self.url, **connect_kwargs)
         
         # Resume fields shared by both handshake paths.
         resume_fields: Dict[str, Any] = {}
