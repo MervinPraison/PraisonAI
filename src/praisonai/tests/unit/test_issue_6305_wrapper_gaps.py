@@ -84,3 +84,33 @@ def test_recipe_serve_cors_wildcard_disables_credentials():
     assert cors
     opts = getattr(cors[0], "kwargs", None) or getattr(cors[0], "options", {})
     assert opts["allow_credentials"] is False
+
+
+@pytest.mark.parametrize("name", ["uv.lock", "poetry.lock"])
+def test_root_level_malformed_lock_fails_closed(tmp_path: Path, name: str):
+    from praisonai.recipe.security import audit_dependencies
+
+    (tmp_path / name).write_text("this is [[ not toml")
+    report = audit_dependencies(tmp_path, check_vulnerabilities=False)
+    assert report["lockfile"].endswith(name)
+    assert report["passed"] is False
+
+
+@pytest.mark.parametrize("body", ["package = 42\n", 'package = "bad"\n', "package = [1, 2]\n"])
+def test_malformed_package_shape_raises(tmp_path: Path, body: str):
+    from praisonai.recipe.security import LockfileError, _parse_uv_lock
+
+    lock = tmp_path / "uv.lock"
+    lock.write_text(body)
+    with pytest.raises(LockfileError):
+        _parse_uv_lock(lock)
+
+
+def test_registry_checksum_matches_security_checksum(tmp_path: Path):
+    from praisonai.templates.registry import TemplateRegistry
+    from praisonai.templates.security import SecurityConfig, TemplateSecurity
+
+    (tmp_path / "agents.yaml").write_text("a: 1")
+    (tmp_path / ".env").write_text("X=1")
+    expected = TemplateSecurity(SecurityConfig()).calculate_checksum(tmp_path)
+    assert TemplateRegistry._calculate_dir_checksum(None, tmp_path) == expected

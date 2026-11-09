@@ -204,34 +204,21 @@ def _generate_spdx(
 
 
 def _get_python_deps(recipe_path: Path) -> List[Dict[str, str]]:
-    """Get Python dependencies from lockfile."""
-    deps = []
-    lock_dir = recipe_path / "lock"
-    
-    # Try uv.lock
-    uv_lock = lock_dir / "uv.lock"
-    if uv_lock.exists():
-        deps.extend(_parse_uv_lock(uv_lock))
-        return deps
-    
-    # Try requirements.lock
-    req_lock = lock_dir / "requirements.lock"
-    if req_lock.exists():
-        deps.extend(_parse_requirements_lock(req_lock))
-        return deps
-    
-    # Try poetry.lock
-    poetry_lock = lock_dir / "poetry.lock"
-    if poetry_lock.exists():
-        deps.extend(_parse_poetry_lock(poetry_lock))
-        return deps
-    
-    # Fallback: try requirements.txt in recipe root
-    req_txt = recipe_path / "requirements.txt"
-    if req_txt.exists():
-        deps.extend(_parse_requirements_lock(req_txt))
-    
-    return deps
+    """Get Python dependencies from the lockfile found by ``_find_lockfile``.
+
+    Uses the same lookup as the audit report (``lock/`` then recipe root), so
+    the lockfile that is reported is also the one that is parsed.
+    """
+    lockfile = _find_lockfile(recipe_path)
+    if lockfile is None:
+        # Fallback: requirements.txt in recipe root
+        req_txt = recipe_path / "requirements.txt"
+        return _parse_requirements_lock(req_txt) if req_txt.exists() else []
+    if lockfile.name == "uv.lock":
+        return _parse_uv_lock(lockfile)
+    if lockfile.name == "poetry.lock":
+        return _parse_poetry_lock(lockfile)
+    return _parse_requirements_lock(lockfile)
 
 
 def _parse_toml_lock(path: Path) -> List[Dict[str, str]]:
@@ -251,11 +238,10 @@ def _parse_toml_lock(path: Path) -> List[Dict[str, str]]:
     except (OSError, ValueError) as exc:  # TOMLDecodeError subclasses ValueError
         raise LockfileError(f"Could not parse lockfile {path}: {exc}") from exc
 
-    return [
-        {"name": pkg.get("name", ""), "version": pkg.get("version", "")}
-        for pkg in data.get("package", [])
-        if isinstance(pkg, dict)
-    ]
+    packages = data.get("package", [])
+    if not isinstance(packages, list) or not all(isinstance(p, dict) for p in packages):
+        raise LockfileError(f"Malformed lockfile {path}: 'package' must be a list of tables")
+    return [{"name": p.get("name", ""), "version": p.get("version", "")} for p in packages]
 
 
 def _parse_uv_lock(path: Path) -> List[Dict[str, str]]:
