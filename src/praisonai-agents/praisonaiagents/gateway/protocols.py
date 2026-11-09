@@ -2701,6 +2701,7 @@ class InsecureGatewayTransportError(ValueError):
 def _is_non_public_host(host: str) -> bool:
     """True for loopback, private/link-local/CGNAT IPs and single-label names."""
     import ipaddress
+    import socket
 
     host = (host or "").strip("[]").rstrip(".").lower()
     if not host or is_loopback(host) or host.endswith(".localhost"):
@@ -2708,9 +2709,15 @@ def _is_non_public_host(host: str) -> bool:
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
-        # Single-label names (docker-compose service, LAN hostname) never
-        # resolve via public DNS.
-        return "." not in host
+        try:
+            # Legacy IPv4 spellings the resolver accepts but ipaddress
+            # rejects ("134744072", "0x08080808", "127.1") — normalise them
+            # so they can't pass as single-label names.
+            ip = ipaddress.IPv4Address(socket.inet_aton(host))
+        except (OSError, ValueError):
+            # Single-label names (docker-compose service, LAN hostname)
+            # never resolve via public DNS.
+            return "." not in host
     return (
         ip.is_private
         or ip.is_link_local

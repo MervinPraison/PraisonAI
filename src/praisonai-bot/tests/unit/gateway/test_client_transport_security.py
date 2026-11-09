@@ -18,6 +18,8 @@ from praisonaiagents.gateway import (
     "ws://gateway:8765",  # docker-compose service name
     "wss://gateway.example.com:8765",
     "wss://203.0.113.7",
+    "ws://127.1:8765",  # short-form loopback
+    "ws://3232235786:8765",  # 192.168.1.10 as an integer
 ])
 def test_allowed(url, monkeypatch):
     monkeypatch.delenv("PRAISONAI_ALLOW_INSECURE_WS", raising=False)
@@ -28,6 +30,11 @@ def test_allowed(url, monkeypatch):
     "ws://gateway.example.com:8765",
     "ws://8.8.8.8:8765",
     "http://gateway.example.com",
+    # Alternate numeric spellings of public 8.8.8.8 must not pass as
+    # single-label hostnames.
+    "ws://134744072:8765",
+    "ws://0x08080808:8765",
+    "ws://0x8.0x8.0x8.0x8:8765",
 ])
 def test_public_plaintext_refused(url, monkeypatch):
     monkeypatch.delenv("PRAISONAI_ALLOW_INSECURE_WS", raising=False)
