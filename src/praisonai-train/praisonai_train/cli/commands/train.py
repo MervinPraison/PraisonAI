@@ -717,6 +717,9 @@ def train_export(
     mtp_draft: bool = typer.Option(
         False, "--mtp-draft/--no-mtp-draft",
         help="Also download the stock MTP drafter (Gemma-4 only) for fast inference"),
+    push: Optional[bool] = typer.Option(
+        None, "--push/--no-push",
+        help="ollama: push to ollama.com after `ollama create` (--no-push keeps it local)"),
 ):
     """
     Export / publish an ALREADY-trained model without re-running training.
@@ -726,6 +729,7 @@ def train_export(
         praisonai-train export gguf   --model-dir lora_model --quant q4_k_m            # local .gguf
         praisonai-train export gguf   --model-dir lora_model --hf   me/my-model        # local + push
         praisonai-train export ollama --model-dir lora_model --ollama me/my-model --quant q4_k_m
+        praisonai-train export ollama --model-dir lora_model --ollama my-model --no-push  # local only
     """
     from ..output.console import get_output_controller
 
@@ -765,6 +769,9 @@ def train_export(
         cfg["hf_model_name"] = hf
     if ollama:
         cfg["ollama_model"] = ollama
+    # Either explicit flag overrides the config; unset keeps config/default (push).
+    if isinstance(push, bool):
+        cfg["ollama_push"] = push
 
     # Recover the model name (drives chat-template selection) from --base-model or
     # the trained model's config.json (_name_or_path), falling back to the dir name.

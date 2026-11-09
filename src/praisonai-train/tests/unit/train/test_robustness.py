@@ -412,3 +412,88 @@ def test_export_command_bad_target_exits(monkeypatch, tmp_path):
             quant=None,
             base_model=None,
         )
+
+
+def test_ollama_no_push_skips_push(monkeypatch, tmp_path):
+    """push=False stops after `ollama create`; nothing is sent to ollama.com."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(ollama_mod, "_check_ollama_disk", lambda *_a, **_k: None)
+    monkeypatch.setattr(ollama_mod, "ensure_ollama_running", lambda *_a, **_k: None)
+    calls = []
+
+    def _fake_run(cmd, *a, **k):
+        calls.append(cmd)
+        return types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(ollama_mod.subprocess, "run", _fake_run)
+    ollama_mod.create_and_push_ollama_model(
+        "my-model", "latest", "FROM ./model\n", push=False)
+    assert [c[1] for c in calls] == ["create"]
+    assert not any("push" in c for c in calls)
+
+
+def _ollama_export_cfg(monkeypatch, tmp_path, push, config_push=None):
+    """Run `export ollama` with a fake trainer; return the config it received."""
+    import praisonai_train.cli.commands.train as cli
+
+    seen = {}
+
+    class _FakeTrainer:
+        @classmethod
+        def for_export(cls, cfg):
+            obj = cls()
+            obj.config = cfg
+            obj.model = None
+            obj.hf_tokenizer = None
+            return obj
+
+        def load_model(self):
+            return ("MODEL", "TOK")
+
+        def create_and_push_ollama_model(self):
+            seen.update(self.config)
+
+    monkeypatch.setattr(trainer_mod, "TrainModel", _FakeTrainer)
+    config = None
+    if config_push is not None:
+        config = tmp_path / "cfg.yaml"
+        config.write_text(f"ollama_push: {config_push}\n")
+    cli.train_export(
+        target="ollama", model_dir=str(tmp_path), config=str(config) if config else None,
+        ollama="my-model", hf=None, quant=None, base_model="unsloth/gemma-2-2b",
+        mtp_draft=False, push=push,
+    )
+    return seen
+
+
+def test_export_ollama_no_push_flag_sets_config(monkeypatch, tmp_path):
+    assert _ollama_export_cfg(monkeypatch, tmp_path, push=False)["ollama_push"] is False
+
+
+def test_export_ollama_explicit_push_overrides_config(monkeypatch, tmp_path):
+    cfg = _ollama_export_cfg(monkeypatch, tmp_path, push=True, config_push="false")
+    assert cfg["ollama_push"] is True
+
+
+def test_export_ollama_unset_push_keeps_config(monkeypatch, tmp_path):
+    cfg = _ollama_export_cfg(monkeypatch, tmp_path, push=None, config_push="false")
+    assert cfg["ollama_push"] is False  # YAML bool preserved, not overridden
+    assert "ollama_push" not in _ollama_export_cfg(monkeypatch, tmp_path, push=None)
+
+
+@pytest.mark.parametrize("value, expected", [
+    (False, False), ("false", False), (True, True), ("true", True), (None, True),
+])
+def test_llm_trainer_forwards_ollama_push(monkeypatch, value, expected):
+    """TrainModel forwards `ollama_push` (bool or string) to the helper."""
+    captured = {}
+    monkeypatch.setattr(
+        ollama_mod, "create_and_push_ollama_model",
+        lambda *a, **k: captured.update(k))
+    fake = types.SimpleNamespace(
+        config={"ollama_model": "m", "ollama_push": value},
+        prepare_modelfile_content=lambda: "FROM ./model\n",
+        _flag=trainer_mod.TrainModel._flag,
+    )
+    trainer_mod.TrainModel.create_and_push_ollama_model(fake)
+    assert captured["push"] is expected

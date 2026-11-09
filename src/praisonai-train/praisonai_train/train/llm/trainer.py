@@ -545,6 +545,7 @@ class TrainModel:
         "optim", "weight_decay", "lr_scheduler_type", "seed", "output_dir",
         "assistant_only_loss", "train_on_responses_only", "save_steps",
         "train", "huggingface_save", "huggingface_save_gguf", "ollama_save",
+        "ollama_push",
         "method", "beta", "max_prompt_length", "desirable_weight", "undesirable_weight",
         "reward_funcs", "num_generations", "max_completion_length",
         "embedding_learning_rate",
@@ -951,6 +952,10 @@ class TrainModel:
         if self._flag(dataset_info.get("shuffle"), default=False):
             dataset = dataset.shuffle(
                 seed=int(dataset_info.get("seed", self.config.get("seed", 3407))))
+        # OpenAI-style chat rows ({"messages": [...]}, as written by
+        # praisonaiagents.eval.export_sft) are the ShareGPT shape under another name.
+        if "messages" in dataset.column_names and "conversations" not in dataset.column_names:
+            dataset = dataset.rename_column("messages", "conversations")
         if "conversations" in dataset.column_names:
             print("DEBUG: Standardizing dataset (ShareGPT style)...")
             dataset = standardize_sharegpt(dataset)
@@ -970,8 +975,8 @@ class TrainModel:
         if len(dataset) == 0:
             raise ValueError(
                 "All examples formatted to empty text. The dataset columns are "
-                f"{columns_before}; this trainer understands ShareGPT "
-                "('conversations'), Alpaca ('instruction'/'input'/'output') and "
+                f"{columns_before}; this trainer understands chat "
+                "('conversations' or 'messages'), Alpaca ('instruction'/'input'/'output') and "
                 "raw text ('text'). Rename your columns to one of those shapes, "
                 "or set chat_template to match your data.")
         return dataset
@@ -1784,6 +1789,7 @@ class TrainModel:
             self.config.get('model_parameters', 'latest'),
             modelfile_content,
             quantization=self.config.get('quantization_method'),
+            push=self._flag(self.config.get('ollama_push'), default=True),
         )
 
     def run(self):

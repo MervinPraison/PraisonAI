@@ -2393,6 +2393,8 @@ def _run_prompt(
     if allow_local_tools:
         _os.environ[_ALLOW_LOCAL_TOOLS_ENV] = "true"
 
+    _manifest_session = None
+
     try:
         # Handle session continuity first (before any execution mode)
         from praisonai_code.cli.main import PraisonAI
@@ -2441,6 +2443,13 @@ def _run_prompt(
         if not no_save:
             import uuid
             auto_save_name = session_id or "session-" + str(uuid.uuid4())[:8]
+
+        # Write-ahead "run in flight" marker on the session manifest, released
+        # in ``finally`` below; a run that dies before then is reported as
+        # interrupted on the next --continue/--session (Issue #6248).
+        _manifest_session = _begin_manifest_run(
+            session_id or auto_save_name, prompt, output, quiet=_json_stdout
+        )
 
         # Detect-and-attach: if a warm runtime is running, forward the plain
         # prompt to it (skipping per-invocation cold-start) and fall back to
@@ -2774,6 +2783,7 @@ def _run_prompt(
             output.print_error(str(e))
         raise typer.Exit(1)
     finally:
+        _end_manifest_run(_manifest_session)
         # Restore the prior opt-in state so the grant is strictly per-invocation.
         if _prev_allow_local_tools is None:
             _os.environ.pop(_ALLOW_LOCAL_TOOLS_ENV, None)
@@ -2783,6 +2793,57 @@ def _run_prompt(
         # is process-wide, so the NDJSON framing must not outlive this run.
         if _prev_mode is not None:
             output.mode = _prev_mode
+
+
+def _begin_manifest_run(session_key, prompt, output, *, quiet: bool = False):
+    """Commit the session manifest's in-flight marker for this run.
+
+    If the previous run on this session never released its marker it was
+    interrupted; say so, so the user can re-issue it. Returns the session key
+    a ``(manifest, session_key, run_id)`` handle to release later, or ``None``
+    when there is no session or the manifest is unavailable (manifest problems
+    never block a run).
+    """
+    if not session_key:
+        return None
+    try:
+        import uuid
+        from praisonaiagents.session.manifest import FileSessionManifest
+        from ..utils.project import get_project_sessions_dir
+
+        # Scope manifests like the project session store, so equal session
+        # names in different projects never share a run marker.
+        manifest = FileSessionManifest(str(get_project_sessions_dir() / "manifests"))
+        stale = manifest.interrupted(session_key)
+        if stale is not None and not quiet:
+            # The prompt itself is not stored (only a digest), so it is not echoed.
+            output.print_warning(
+                f"The previous run in this session was interrupted "
+                f"(attempt {stale.attempt}); re-issue it to retry."
+            )
+        run_id = uuid.uuid4().hex[:12]
+        manifest.begin_run(session_key, run_id, run_input=prompt)
+        return manifest, session_key, run_id
+    except Exception:
+        return None
+
+
+def _end_manifest_run(handle) -> None:
+    """Release this run's own in-flight marker unless it was interrupted (Ctrl+C)."""
+    if not handle:
+        return
+    import sys
+
+    exc = sys.exc_info()[1]
+    if isinstance(exc, KeyboardInterrupt):
+        return
+    manifest, session_key, run_id = handle
+    try:
+        manifest.end_run(
+            session_key, "completed" if exc is None else "ended", run_id=run_id
+        )
+    except Exception:
+        pass
 
 
 def _record_session_usage(session_id, model, output, *, suppress_info: bool = False) -> None:

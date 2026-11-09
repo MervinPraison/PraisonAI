@@ -377,6 +377,15 @@ def process_stream_chunks(chunks):
         print(f"Error processing chunks: {e}")
         return None
 
+def _env_timeout() -> Optional[float]:
+    """Return the OPENAI_TIMEOUT env var as seconds, or None when unset/invalid."""
+    value = os.environ.get("OPENAI_TIMEOUT")
+    try:
+        return float(value) if value else None
+    except ValueError:
+        return None
+
+
 class OpenAIClient:
     """
     Unified OpenAI client wrapper for sync/async operations.
@@ -411,6 +420,8 @@ class OpenAIClient:
                 except (TypeError, ValueError):
                     max_retries = None
         self.max_retries = max_retries
+        # Per-request timeout (seconds) from OPENAI_TIMEOUT; unset keeps the SDK default (600s).
+        self.timeout = _env_timeout()
         
         # For local servers like LM Studio, allow minimal API key
         if self.base_url and not self.api_key:
@@ -479,6 +490,8 @@ class OpenAIClient:
             client_kwargs = {"api_key": self.api_key, "base_url": self.base_url}
             if self.max_retries is not None:
                 client_kwargs["max_retries"] = self.max_retries
+            if getattr(self, "timeout", None) is not None:
+                client_kwargs["timeout"] = self.timeout
             self._sync_client = OpenAI(**client_kwargs)
         return self._sync_client
     
@@ -521,6 +534,8 @@ class OpenAIClient:
                 client_kwargs = {"api_key": self.api_key, "base_url": self.base_url}
                 if self.max_retries is not None:
                     client_kwargs["max_retries"] = self.max_retries
+                if getattr(self, "timeout", None) is not None:
+                    client_kwargs["timeout"] = self.timeout
                 # Use the plain default httpx client rather than openai's
                 # internal wrapper: the wrapper's ``__del__`` schedules
                 # ``aclose()`` on whichever loop is running at GC time. When a
@@ -937,6 +952,12 @@ class OpenAIClient:
             # Reasoning models reject sampling params (#6128).
             if not is_reasoning_model(model):
                 params["temperature"] = temperature
+
+        # Chat Completions takes ``reasoning_effort``; the Responses API takes
+        # the same level as ``reasoning: {"effort": ...}``.
+        reasoning_effort = kwargs.get("reasoning_effort")
+        if reasoning_effort:
+            params["reasoning"] = {"effort": reasoning_effort}
 
         return params
 
@@ -3080,7 +3101,7 @@ def get_openai_client(api_key: Optional[str] = None, base_url: Optional[str] = N
                 normalized_max_retries = int(_env_retries)
             except (TypeError, ValueError):
                 normalized_max_retries = None
-    current_params = (normalized_api_key, normalized_base_url, normalized_max_retries)
+    current_params = (normalized_api_key, normalized_base_url, normalized_max_retries, _env_timeout())
     
     # Thread-safe client creation
     with _global_client_lock:
