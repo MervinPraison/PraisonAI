@@ -234,27 +234,33 @@ def _get_python_deps(recipe_path: Path) -> List[Dict[str, str]]:
     return deps
 
 
-def _parse_uv_lock(path: Path) -> List[Dict[str, str]]:
-    """Parse uv.lock file."""
-    deps = []
+def _parse_toml_lock(path: Path) -> List[Dict[str, str]]:
+    """Parse a TOML lockfile (uv.lock / poetry.lock).
+
+    Raises :class:`LockfileError` when the file cannot be read or parsed, so a
+    malformed lockfile is never mistaken for one with no dependencies.
+    """
     try:
         import tomllib
     except ImportError:
         import tomli as tomllib
-    
+
     try:
         with open(path, "rb") as f:
             data = tomllib.load(f)
-        
-        for pkg in data.get("package", []):
-            deps.append({
-                "name": pkg.get("name", ""),
-                "version": pkg.get("version", ""),
-            })
-    except Exception:
-        pass
-    
-    return deps
+    except (OSError, ValueError) as exc:  # TOMLDecodeError subclasses ValueError
+        raise LockfileError(f"Could not parse lockfile {path}: {exc}") from exc
+
+    return [
+        {"name": pkg.get("name", ""), "version": pkg.get("version", "")}
+        for pkg in data.get("package", [])
+        if isinstance(pkg, dict)
+    ]
+
+
+def _parse_uv_lock(path: Path) -> List[Dict[str, str]]:
+    """Parse uv.lock file. Raises LockfileError on bad content."""
+    return _parse_toml_lock(path)
 
 
 def _parse_requirements_lock(path: Path) -> List[Dict[str, str]]:
@@ -279,26 +285,8 @@ def _parse_requirements_lock(path: Path) -> List[Dict[str, str]]:
 
 
 def _parse_poetry_lock(path: Path) -> List[Dict[str, str]]:
-    """Parse poetry.lock file."""
-    deps = []
-    try:
-        import tomllib
-    except ImportError:
-        import tomli as tomllib
-    
-    try:
-        with open(path, "rb") as f:
-            data = tomllib.load(f)
-        
-        for pkg in data.get("package", []):
-            deps.append({
-                "name": pkg.get("name", ""),
-                "version": pkg.get("version", ""),
-            })
-    except Exception:
-        pass
-    
-    return deps
+    """Parse poetry.lock file. Raises LockfileError on bad content."""
+    return _parse_toml_lock(path)
 
 
 # ============================================================================
@@ -476,8 +464,14 @@ def audit_dependencies(
     else:
         report["warnings"].append("No lockfile found - dependencies may not be reproducible")
     
-    # Get dependencies
-    deps = _get_python_deps(recipe_path)
+    # Get dependencies. Fail CLOSED: a lockfile that exists but cannot be
+    # parsed must not be reported as a clean (empty) dependency set.
+    try:
+        deps = _get_python_deps(recipe_path)
+    except LockfileError as exc:
+        report["passed"] = False
+        report["warnings"].append(f"Vulnerability scan failed: {exc}")
+        return report
     report["dependencies"] = deps
     
     # Check for vulnerabilities using pip-audit if available
