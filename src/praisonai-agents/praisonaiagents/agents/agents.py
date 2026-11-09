@@ -1810,6 +1810,16 @@ class AgentTeam(SpawnAnnounceProtocol):
             logger.info(f"Task with ID {task_id} is already completed")
             return
 
+        # Honour per-agent limits from the ConcurrencyRegistry (no-op when unset).
+        from ..agent.concurrency import get_concurrency_registry
+        _agent_name = getattr(task.agent, "name", None)
+        if _agent_name:
+            async with get_concurrency_registry().throttle(_agent_name):
+                await self._arun_task_traced(task_id, task)
+        else:
+            await self._arun_task_traced(task_id, task)
+
+    async def _arun_task_traced(self, task_id, task):
         _span = _trace_task_begin(self, task)
         _status = "failed"
         try:
