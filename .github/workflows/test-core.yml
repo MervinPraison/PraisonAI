@@ -392,6 +392,10 @@ jobs:
               tests/unit/test_lazy_imports.py::TestReplayStaysLazy
               tests/unit/test_jira_tools.py
               tests/unit/test_run_on_docker.py::test_docker_is_also_a_tool_place
+              tests/unit/test_run_on_docker.py::test_docker_is_a_managed_runtime
+              tests/unit/test_run_on_docker.py::test_run_on_docker_builds_the_self_hosted_backend
+              tests/unit/test_run_on_docker.py::test_run_on_moves_the_thinking_too
+              tests/unit/test_run_on_docker.py::test_the_two_read_differently_in_the_repr
               tests/unit/test_run_on_docker.py::test_tools_run_on_leaves_the_thinking_here
               tests/unit/test_run_on_docker.py::test_naming_both_is_still_a_conflict
               tests/unit/test_run_on_docker.py::test_the_agent_is_rebuilt_from_serialisable_config_only
