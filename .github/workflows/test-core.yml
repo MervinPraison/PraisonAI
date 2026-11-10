@@ -283,6 +283,7 @@ jobs:
               tests/unit/test_security_audit_fixes.py::test_file_memory_rejects_path_object_user_id
               tests/unit/test_security_audit_fixes.py::test_agent_server_enforces_auth_token
               tests/unit/test_provider_matrix.py::test_daytona_asks_for_memory_in_the_unit_the_sdk_documents
+              tests/unit/test_provider_matrix.py::test_run_on_accepts_exactly_the_places_that_host_a_loop
               tests/unit/test_provider_matrix.py::test_daytona_uploads_content_then_destination
               tests/unit/test_provider_matrix.py::test_both_implementations_of_a_vendor_exist_and_are_distinct
               tests/unit/test_provider_matrix.py::test_neither_implementation_passes_megabytes_where_gib_is_wanted
