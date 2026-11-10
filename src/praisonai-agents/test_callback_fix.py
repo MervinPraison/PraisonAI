@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test script to verify callbacks work with output="silent""""
+"""Test script to verify callbacks work with output='silent'"""
 
 import sys
 sys.path.insert(0, 'src/praisonai-agents')
@@ -28,7 +28,7 @@ def simple_callback(message=None, response=None, **kwargs):
 register_display_callback('interaction', simple_callback, is_async=False)
 
 # Test with output="silent"
-print("Testing with output="silent"...")
+print("Testing with output='silent'...")
 agent = Agent(
     name="TestAgent",
     role="Assistant",
@@ -47,7 +47,7 @@ task = Task(
 
 # Clear the log file
 with open('callback_test_log.txt', 'w') as f:
-    f.write("Starting test with output="silent"\n")
+    f.write("Starting test with output='silent'\n")
 
 # Run the agent
 try:
@@ -61,9 +61,9 @@ try:
     
     # Check if callback was executed
     if callback_executed:
-        print("✅ SUCCESS: Callback was executed with output="silent"!")
+        print("✅ SUCCESS: Callback was executed with output='silent'!")
     else:
-        print("❌ FAILED: Callback was NOT executed with output="silent"")
+        print("❌ FAILED: Callback was NOT executed with output='silent'")
         
 except Exception as e:
     print(f"Error during test: {e}")
