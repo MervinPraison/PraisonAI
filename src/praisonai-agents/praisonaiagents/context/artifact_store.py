@@ -371,7 +371,7 @@ class FileSystemArtifactStore:
                 return [d for p in parents if p.is_dir() for d in p.iterdir() if d.is_dir()]
             names = {_safe_segment(value)}
             raw = str(value)
-            if raw not in (".", "..") and not re.search(r"[/\\\x00]", raw):
+            if raw not in (".", "..") and not re.search(r"[/\\:\x00]", raw):
                 names.add(raw)  # legacy, pre-sanitisation directory name
             return [p / n for p in parents for n in names if (p / n).is_dir()]
 
