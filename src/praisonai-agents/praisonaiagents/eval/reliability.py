@@ -4,6 +4,7 @@ Reliability evaluator for PraisonAI Agents.
 Evaluates agent reliability by verifying expected tool calls are made.
 """
 
+import asyncio
 from praisonaiagents._logging import get_logger
 from typing import Dict, List, Optional, Set, Any, TYPE_CHECKING
 
@@ -55,12 +56,20 @@ class ReliabilityEvaluator(BaseEvaluator):
         if agent is None:
             raise ValueError("'agent' must be provided")
     
-    def _extract_tool_calls(self, response: Any) -> Set[str]:
+    def _history_len(self) -> int:
+        try:
+            return len(getattr(self.agent, 'chat_history', None) or [])
+        except TypeError:
+            return 0
+
+    def _extract_tool_calls(self, response: Any, history_start: int = 0) -> Set[str]:
         """
         Extract tool names from agent response.
         
         Args:
             response: Agent response object
+            history_start: Only inspect chat_history entries from this index
+                (messages added during the current run)
             
         Returns:
             Set of tool names that were called
@@ -75,7 +84,11 @@ class ReliabilityEvaluator(BaseEvaluator):
                     tool_calls.add(tc.function.name)
         
         if hasattr(self.agent, 'chat_history'):
-            for msg in self.agent.chat_history:
+            history = list(self.agent.chat_history or [])
+            # History shrank (trimmed/reset) during the run: scan it all.
+            if history_start > len(history):
+                history_start = 0
+            for msg in history[history_start:]:
                 if isinstance(msg, dict):
                     if msg.get('role') == 'assistant' and 'tool_calls' in msg:
                         for tc in msg.get('tool_calls', []):
@@ -106,6 +119,7 @@ class ReliabilityEvaluator(BaseEvaluator):
         )
         
         try:
+            history_start = self._history_len()
             if hasattr(self.agent, 'chat'):
                 response = self.agent.chat(self.input_text)
             elif hasattr(self.agent, 'start'):
@@ -113,7 +127,7 @@ class ReliabilityEvaluator(BaseEvaluator):
             else:
                 raise ValueError("Agent must have 'chat' or 'start' method")
             
-            actual_tools = self._extract_tool_calls(response)
+            actual_tools = self._extract_tool_calls(response, history_start)
             
             if self.verbose:
                 logger.info(f"Expected tools: {self.expected_tools}")
@@ -139,13 +153,23 @@ class ReliabilityEvaluator(BaseEvaluator):
             
         except Exception as e:
             logger.error(f"Error during reliability evaluation: {e}")
-            for tool in self.expected_tools:
+            # A crashed run is never a pass: record a failure even when only
+            # forbidden_tools (or nothing) was configured.
+            for tool in (self.expected_tools or {"<agent_run>"}):
                 result.tool_results.append(ToolCallResult(
                     tool_name=tool,
                     expected=True,
                     actual=False,
                     passed=False,
                     metadata={"error": str(e)}
+                ))
+            for tool in self.forbidden_tools:
+                result.tool_results.append(ToolCallResult(
+                    tool_name=tool,
+                    expected=False,
+                    actual=False,
+                    passed=False,
+                    metadata={"error": str(e), "inconclusive": True}
                 ))
         
         self.after_run(result)
@@ -166,7 +190,8 @@ class ReliabilityEvaluator(BaseEvaluator):
             ReliabilityResult with tool call verification results
         """
         await self.async_before_run()
-        result = self.run(print_summary=False)
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(None, lambda: self.run(print_summary=False))
         await self.async_after_run(result)
         
         if print_summary:
