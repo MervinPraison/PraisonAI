@@ -17,6 +17,7 @@ dependencies = [
     "PyYAML>=6.0",
     "python-dotenv>=0.19.0",
     "litellm>=1.83.14,<1.106",  # 1.106+ imports mcp>=2.2 types; we pin mcp<2
+    "python-dateutil>=2.8.2,<3",  # botocore (via litellm) needs <3; 4.x sends pip backtracking into a pandas sdist
     "mcp>=1.20.0,<2",
     "pydantic>=2.0.0",
     "toml>=0.10.2",

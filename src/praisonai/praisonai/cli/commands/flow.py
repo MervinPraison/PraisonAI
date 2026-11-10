@@ -4,9 +4,17 @@ Provides `praisonai flow` CLI command to launch Langflow with
 PraisonAI custom components (Agent, Agents, Task) pre-loaded.
 """
 
+from enum import Enum
+
 import typer
 
-import click
+
+class _ExportFormat(str, Enum):
+    # Enum, not click_type=click.Choice(...): typer 0.29 removed click_type,
+    # so the old option raised TypeError when this module was imported.
+    yaml = "yaml"
+    json = "json"
+
 
 app = typer.Typer(name="flow", help="Visual workflow builder (Langflow)")
 
@@ -259,11 +267,10 @@ def flow_export(
         "--url", 
         help="Langflow server URL"
     ),
-    format: str = typer.Option(
-        "yaml",
+    format: _ExportFormat = typer.Option(
+        _ExportFormat.yaml,
         "--format",
         help="Output format (yaml, json)",
-        click_type=click.Choice(["yaml", "json"])
     ),
 ):
     """Export Langflow flow to YAML format.
@@ -280,6 +287,7 @@ def flow_export(
     from rich.console import Console
     
     console = Console()
+    format = _ExportFormat(format).value
     
     try:
         from praisonai.flow.client import create_client
