@@ -41,3 +41,16 @@ def test_achat_forwards_cancel_token_to_dispatcher():
     a._unified_dispatcher = D()
     asyncio.run(a.achat("hi", cancel_token=threading.Event()))
     assert seen.get("async") is not None
+
+
+def test_async_recovery_backoff_stops_on_cancel_token():
+    import time
+    from praisonaiagents.agent.chat_mixin import _abackoff
+
+    a = Agent(name="c", instructions="x", llm="gpt-4o-mini")
+    tok = threading.Event()
+    tok.set()
+    t0 = time.monotonic()
+    assert asyncio.run(_abackoff(a, 30.0, tok)) is False
+    assert time.monotonic() - t0 < 1.0
+    assert asyncio.run(_abackoff(a, 0.01, None)) is True

@@ -42,6 +42,14 @@ def _agent_end_status(db_status: str) -> str:
     return "failed" if db_status == "error" else db_status
 
 
+async def _abackoff(agent, seconds, cancel_token):
+    """Recovery wait that stops early on ``cancel_token``/interrupt; False if cancelled."""
+    from .retry_utils import interruptible_sleep
+    _interrupted = getattr(agent, "_is_interrupted", lambda: False)
+    return await interruptible_sleep(seconds, interrupt_fn=lambda: _interrupted() or (
+        cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()))
+
+
 def _enter_turn(agent, cancel):
     """Mark a ``chat``/``achat`` turn in flight and bind its cancel token to this context."""
     with _turns_lock:
@@ -3025,7 +3033,8 @@ Your Role: {self.role}"""
 
                 # Apply backoff if suggested
                 if classification.backoff_seconds and classification.backoff_seconds > 0:
-                    await asyncio.sleep(classification.backoff_seconds)
+                    if not await _abackoff(self, classification.backoff_seconds, cancel_token):
+                        raise exc
                 
                 # Run this single retry against a throwaway dispatcher bound to
                 # the fallback model, passed per-call. This never mutates the
@@ -3058,7 +3067,8 @@ Your Role: {self.role}"""
         elif classification.is_retryable and classification.backoff_seconds > 0:
             if _retry_depth < self._max_retry_depth():  # Bounded by configured RetryBackoffConfig.max_retries
                 logging.info(f"[{self.name}] {classification.user_message} (waiting {classification.backoff_seconds:.1f}s)")
-                await asyncio.sleep(classification.backoff_seconds)
+                if not await _abackoff(self, classification.backoff_seconds, cancel_token):
+                    raise exc
                 # Need to call the full async method that includes error handling
                 try:
                     return await self._execute_unified_achat_completion(
