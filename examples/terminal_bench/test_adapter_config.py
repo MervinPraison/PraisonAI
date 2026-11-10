@@ -28,7 +28,9 @@ def test_smoke_yaml_uses_terminal_bench_21_registry_ids():
     job = yaml.safe_load(
         (EXAMPLES / "job_code_smoke.yaml").read_text(encoding="utf-8")
     )
-    names = job["datasets"][0]["task_names"]
+    dataset = job["datasets"][0]
+    assert dataset["name"] == "terminal-bench/terminal-bench-2-1"
+    names = dataset["task_names"]
 
     assert names
     assert all(name.startswith("terminal-bench/") for name in names)
