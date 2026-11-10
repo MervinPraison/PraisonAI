@@ -56,20 +56,21 @@ class ReliabilityEvaluator(BaseEvaluator):
         if agent is None:
             raise ValueError("'agent' must be provided")
     
-    def _history_len(self) -> int:
+    def _history_snapshot(self) -> list:
         try:
-            return len(getattr(self.agent, 'chat_history', None) or [])
+            return list(getattr(self.agent, 'chat_history', None) or [])
         except TypeError:
-            return 0
+            return []
 
-    def _extract_tool_calls(self, response: Any, history_start: int = 0) -> Set[str]:
+    def _extract_tool_calls(self, response: Any, prior_history: Optional[list] = None) -> Set[str]:
         """
         Extract tool names from agent response.
         
         Args:
             response: Agent response object
-            history_start: Only inspect chat_history entries from this index
-                (messages added during the current run)
+            prior_history: chat_history snapshot taken before the run; only
+                messages not present in it (by identity) are inspected, so
+                trimmed/rewritten histories are handled correctly
             
         Returns:
             Set of tool names that were called
@@ -84,11 +85,12 @@ class ReliabilityEvaluator(BaseEvaluator):
                     tool_calls.add(tc.function.name)
         
         if hasattr(self.agent, 'chat_history'):
-            history = list(self.agent.chat_history or [])
-            # History shrank (trimmed/reset) during the run: scan it all.
-            if history_start > len(history):
-                history_start = 0
-            for msg in history[history_start:]:
+            # Identity, not index: survives history trimming/rewrites. The
+            # snapshot list keeps prior objects alive, so ids stay unique.
+            seen = {id(m) for m in (prior_history or [])}
+            for msg in list(self.agent.chat_history or []):
+                if id(msg) in seen:
+                    continue
                 if isinstance(msg, dict):
                     if msg.get('role') == 'assistant' and 'tool_calls' in msg:
                         for tc in msg.get('tool_calls', []):
@@ -119,7 +121,7 @@ class ReliabilityEvaluator(BaseEvaluator):
         )
         
         try:
-            history_start = self._history_len()
+            prior_history = self._history_snapshot()
             if hasattr(self.agent, 'chat'):
                 response = self.agent.chat(self.input_text)
             elif hasattr(self.agent, 'start'):
@@ -127,7 +129,7 @@ class ReliabilityEvaluator(BaseEvaluator):
             else:
                 raise ValueError("Agent must have 'chat' or 'start' method")
             
-            actual_tools = self._extract_tool_calls(response, history_start)
+            actual_tools = self._extract_tool_calls(response, prior_history)
             
             if self.verbose:
                 logger.info(f"Expected tools: {self.expected_tools}")
@@ -190,8 +192,11 @@ class ReliabilityEvaluator(BaseEvaluator):
             ReliabilityResult with tool call verification results
         """
         await self.async_before_run()
+        from ..trace.context_events import copy_context_to_callable
         loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(None, lambda: self.run(print_summary=False))
+        result = await loop.run_in_executor(
+            None, copy_context_to_callable(lambda: self.run(print_summary=False))
+        )
         await self.async_after_run(result)
         
         if print_summary:

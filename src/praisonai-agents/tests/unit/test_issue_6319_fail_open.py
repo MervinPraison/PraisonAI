@@ -77,3 +77,47 @@ def test_reliability_crash_never_passes():
                                     forbidden_tools=["rm"]).run().passed
     assert not asyncio.run(
         ReliabilityEvaluator(agent=_Crash(), input_text="q").run_async()).passed
+
+
+def test_sync_wrapper_returning_slow_coroutine_times_out():
+    reg = HookRegistry()
+
+    async def slow():
+        await asyncio.sleep(0.08)
+        return HookResult.allow()
+
+    def wrapper(data):
+        return slow()
+
+    reg.register_function(HookEvent.BEFORE_TOOL, wrapper, timeout=0.05)
+    res = HookRunner(reg).execute_sync(HookEvent.BEFORE_TOOL, _before_tool())
+    assert res[0].output.decision == "deny"
+    assert not res[0].success
+
+
+def test_sync_wrapper_returning_coroutine_is_awaited():
+    reg = HookRegistry()
+
+    async def deny():
+        return HookResult.deny("no")
+
+    reg.register_function(HookEvent.BEFORE_TOOL, lambda d: deny())
+    res = HookRunner(reg).execute_sync(HookEvent.BEFORE_TOOL, _before_tool())
+    assert res[0].output.decision == "deny" and res[0].success
+
+
+class _Rewriter:
+    """chat() replaces history with an equal-length new history."""
+
+    def __init__(self):
+        self.chat_history = [{"role": "user", "content": str(i)} for i in range(2)]
+
+    def chat(self, q):
+        self.chat_history = [{"role": "user", "content": q},
+                             {"role": "tool", "name": "rm"}]
+        return "x"
+
+
+def test_reliability_rewritten_history_detects_new_calls():
+    assert not ReliabilityEvaluator(agent=_Rewriter(), input_text="q",
+                                    forbidden_tools=["rm"]).run().passed
