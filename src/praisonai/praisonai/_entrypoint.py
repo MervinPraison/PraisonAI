@@ -55,14 +55,17 @@ def _apply_model_override(config_list: list[dict[str, Any]], extra: dict) -> Non
     Mirrors the CLI's ``--llm`` behaviour (see ``direct_prompt`` /
     ``agents_generator``: model is taken from ``config_list[0]['model']``), so a
     Python caller's ``model=`` is actually applied instead of being ignored.
-    Mutates ``extra`` in place, popping the consumed key so it is not also
-    forwarded through ``cli_config``.
+    Mutates ``extra`` in place, normalising ``llm=`` to ``model`` so it is
+    forwarded as ``cli_config['model']`` — the generator's "explicit override
+    beats YAML top-level ``llm``" signal, exactly like CLI ``--model``.
     """
     model = extra.pop("model", None)
     if model is None:
         model = extra.pop("llm", None)
-    if model and config_list:
-        config_list[0]["model"] = model
+    if model:
+        if config_list:
+            config_list[0]["model"] = model
+        extra["model"] = model
 
 
 def _merge_cli_config(cli_config: dict | None, extra: dict) -> dict | None:
