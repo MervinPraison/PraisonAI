@@ -25,6 +25,11 @@ from .artifacts import (
 )
 
 
+def _safe_segment(value: Any) -> str:
+    """Sanitise an id for use as a single path segment under the store root."""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", str(value)).lstrip(".") or "_"
+
+
 class FileSystemArtifactStore:
     """
     Filesystem-based artifact storage implementation.
@@ -106,7 +111,7 @@ class FileSystemArtifactStore:
         artifact_id = f"{checksum[:12]}_{uuid.uuid4().hex[:8]}"
         
         # Create directory structure
-        artifact_dir = self.base_dir / metadata.agent_id / metadata.run_id
+        artifact_dir = self.base_dir / _safe_segment(metadata.agent_id) / _safe_segment(metadata.run_id)
         artifact_dir.mkdir(parents=True, exist_ok=True)
         
         # Write content to file
@@ -360,6 +365,8 @@ class FileSystemArtifactStore:
             List of matching ArtifactRef objects
         """
         artifacts = []
+        agent_id = _safe_segment(agent_id) if agent_id else agent_id
+        run_id = _safe_segment(run_id) if run_id else run_id
         
         # Determine search path based on filters
         if agent_id and run_id:

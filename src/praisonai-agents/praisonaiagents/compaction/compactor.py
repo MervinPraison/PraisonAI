@@ -759,6 +759,9 @@ class ContextCompactor:
                 and result[end].get("tool_call_id") in drop_ids
             ):
                 end += 1
+            if end >= len(result):
+                # Never evict the newest message (the current user turn).
+                break
             del result[start:end]
         
         return result
@@ -784,6 +787,8 @@ class ContextCompactor:
                 kept += 1
             else:
                 break
+        if non_system and kept == 0:
+            kept = 1  # Always keep the newest message, even if over budget.
         
         # Snap the boundary outward so a tool result kept at the window head is
         # not orphaned from its assistant tool_calls left outside the window.
