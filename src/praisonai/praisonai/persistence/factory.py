@@ -151,12 +151,14 @@ def create_stores_from_config(config: PersistenceConfig) -> Dict[str, Any]:
         mode = conversation_options.pop("mode", "auto")
         
         # Forward an explicit opt-out of DDL to backends that accept it.
-        # sqlite/postgres/mysql in sync/async mode route to stores without it.
+        # sqlite/postgres/mysql in sync/async mode route to stores without it
+        # (routing in create_conversation_store is case-sensitive; registry is not).
         backend = config.conversation_store
+        routed = mode in ("sync", "async") and backend in ("sqlite", "postgres", "mysql")
         if (
             not config.auto_create_tables
-            and backend in _AUTO_CREATE_TABLES_BACKENDS
-            and (mode == "auto" or backend not in ("sqlite", "postgres", "mysql"))
+            and backend.lower() in _AUTO_CREATE_TABLES_BACKENDS
+            and not routed
         ):
             conversation_options.setdefault("auto_create_tables", False)
         
