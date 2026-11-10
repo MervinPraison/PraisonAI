@@ -94,6 +94,22 @@ def test_hosted_agent_returns_hosted_subclass_plugin(monkeypatch):
     assert agent.provider == "acme"  # __init__ ran
 
 
+def test_hosted_agent_plugin_init_runs_exactly_once(monkeypatch):
+    from praisonai.integrations.hosted_agent import HostedAgent
+
+    calls = []
+
+    class AcmeHosted(HostedAgent):
+        def __init__(self, provider="acme", config=None, **kwargs):
+            calls.append((provider, kwargs))
+            super().__init__(provider=provider, config=config, **kwargs)
+
+    _patch_registry(monkeypatch, AcmeHosted)
+    agent = HostedAgent(provider="acme", api_key="k")
+    assert type(agent) is AcmeHosted
+    assert calls == [("acme", {"api_key": "k"})]
+
+
 def test_hosted_agent_builtin_anthropic_still_hosted_agent():
     from praisonai.integrations.hosted_agent import HostedAgent
 
