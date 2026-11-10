@@ -2931,7 +2931,8 @@ Your Role: {self.role}"""
         stream_callback=None,
         emit_events=True,
         _retry_depth=0,
-        _fallback_index=0
+        _fallback_index=0,
+        cancel_token=None,
     ):
         """
         Handle LLM errors in async context using structured classification.
@@ -2985,13 +2986,14 @@ Your Role: {self.role}"""
                         return await self._execute_unified_achat_completion(
                             truncated_messages, temperature, tools, stream, 
                             reasoning_steps, task_name, task_description, task_id, response_format,
-                            stream_callback, emit_events
+                            stream_callback, emit_events, cancel_token=cancel_token,
                         )
                     except Exception as retry_error:
                         return await self._handle_async_llm_error(
                             retry_error, truncated_messages, temperature, tools, stream,
                             reasoning_steps, task_name, task_description, task_id, response_format,
-                            stream_callback, emit_events, _retry_depth + 1, _fallback_index
+                            stream_callback, emit_events, _retry_depth + 1, _fallback_index,
+                            cancel_token=cancel_token,
                         )
             except Exception as compression_error:
                 logging.error(f"[{self.name}] Context compression failed: {compression_error}")
@@ -3040,12 +3042,14 @@ Your Role: {self.role}"""
                         reasoning_steps, task_name, task_description, task_id, response_format,
                         stream_callback, emit_events,
                         _dispatcher=_fallback_dispatcher,
+                        cancel_token=cancel_token,
                     )
                 except Exception as retry_error:
                     return await self._handle_async_llm_error(
                         retry_error, messages, temperature, tools, stream,
                         reasoning_steps, task_name, task_description, task_id, response_format,
-                        stream_callback, emit_events, _retry_depth + 1, _fallback_index + 1
+                        stream_callback, emit_events, _retry_depth + 1, _fallback_index + 1,
+                        cancel_token=cancel_token,
                     )
             else:
                 logging.warning(f"[{self.name}] {classification.user_message} (no more fallback models available)")
@@ -3060,13 +3064,14 @@ Your Role: {self.role}"""
                     return await self._execute_unified_achat_completion(
                         messages, temperature, tools, stream, 
                         reasoning_steps, task_name, task_description, task_id, response_format,
-                        stream_callback, emit_events
+                        stream_callback, emit_events, cancel_token=cancel_token,
                     )
                 except Exception as retry_error:
                     return await self._handle_async_llm_error(
                         retry_error, messages, temperature, tools, stream,
                         reasoning_steps, task_name, task_description, task_id, response_format,
-                        stream_callback, emit_events, _retry_depth + 1, _fallback_index
+                        stream_callback, emit_events, _retry_depth + 1, _fallback_index,
+                        cancel_token=cancel_token,
                     )
         
         # Include remediation hints for unimplemented recovery actions
@@ -3279,6 +3284,7 @@ Your Role: {self.role}"""
         stream_callback=None,
         emit_events=True,
         _dispatcher=None,
+        cancel_token=None,
     ):
         """
         Execute unified async chat completion using composition instead of runtime class mutation.
@@ -3371,6 +3377,7 @@ Your Role: {self.role}"""
             if stream_callback is None and hasattr(self, 'stream_emitter'):
                 stream_callback = getattr(self.stream_emitter, 'emit', None)
             final_response = await dispatcher.achat_completion(
+                cancel_token=cancel_token,
                 messages=messages,
                 tools=tools,
                 tool_choice=getattr(self, 'tool_choice', None),
@@ -3444,7 +3451,8 @@ Your Role: {self.role}"""
             # Apply the same structured error classification for async path
             return await self._handle_async_llm_error(
                 e, messages, temperature, tools, stream, reasoning_steps,
-                task_name, task_description, task_id, response_format, stream_callback, emit_events
+                task_name, task_description, task_id, response_format, stream_callback, emit_events,
+                cancel_token=cancel_token,
             )
 
     def _execute_callback_and_display(self, prompt: str, response: str, generation_time: float, task_name=None, task_description=None, task_id=None):
@@ -5129,7 +5137,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             task_name=task_name,
                             task_description=task_description,
                             task_id=task_id,
-                            response_format=response_format
+                            response_format=response_format,
+                            cancel_token=_cancel,
                         )
                         
                         # Process response - mirror sync _chat_impl behavior (lines ~1544-1602)
@@ -5312,7 +5321,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         task_name=task_name,
                                         task_description=task_description,
                                         task_id=task_id,
-                                        response_format=response_format
+                                        response_format=response_format,
+                                        cancel_token=_cancel,
                                     )
                                     
                                     if new_response:
@@ -7128,7 +7138,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # This should never be reached, but just in case
         raise RuntimeError("Retry loop completed without returning or raising an exception")
 
-    async def _achat_completion_with_retry(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
+    async def _achat_completion_with_retry(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True, cancel_token=None):
         """Async model call with retry, recorded as ``llm_request``/``llm_response`` like the sync path.
 
         ``Agent.astart``/``achat`` recorded no model calls before this, so a replay
@@ -7141,6 +7151,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             messages, temperature, tools, stream, reasoning_steps, task_name,
             task_description, task_id, response_format,
             stream_callback=stream_callback, emit_events=emit_events,
+            cancel_token=cancel_token,
         )
         if not _trace_emitter._enabled:  # zero overhead when tracing is off
             return await call
@@ -7179,7 +7190,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         )
         return response
 
-    async def _achat_completion_with_retry_dispatch(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
+    async def _achat_completion_with_retry_dispatch(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True, cancel_token=None):
         """
         Async wrapper for _execute_unified_achat_completion that adds jittered exponential backoff retry logic.
         
@@ -7206,7 +7217,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         req.messages, effective_temperature, effective_tools, stream,
                         reasoning_steps, task_name, task_description, task_id,
                         response_format, stream_callback=stream_callback,
-                        emit_events=emit_events,
+                        emit_events=emit_events, cancel_token=cancel_token,
                     ),
                     loop,
                 )
@@ -7242,9 +7253,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             messages, temperature, tools, stream, reasoning_steps,
             task_name, task_description, task_id, response_format,
             stream_callback=stream_callback, emit_events=emit_events,
+            cancel_token=cancel_token,
         )
 
-    async def _achat_completion_with_retry_core(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
+    async def _achat_completion_with_retry_core(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True, cancel_token=None):
         """Async retry/backoff core for chat completion (middleware-agnostic)."""
         # Reset the agent-level finish-reason classification at the start of each
         # async OpenAI-native turn, mirroring the sync ``_chat_completion`` reset,
@@ -7258,7 +7270,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             return await self._execute_unified_achat_completion(
                 messages, temperature, tools, stream, reasoning_steps, 
                 task_name, task_description, task_id, response_format,
-                stream_callback=stream_callback, emit_events=emit_events
+                stream_callback=stream_callback, emit_events=emit_events,
+                cancel_token=cancel_token,
             )
         
         from .retry_utils import jittered_backoff, interruptible_sleep
@@ -7274,7 +7287,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 return await self._execute_unified_achat_completion(
                     messages, temperature, tools, stream, reasoning_steps,
                     task_name, task_description, task_id, response_format,
-                    stream_callback=stream_callback, emit_events=emit_events
+                    stream_callback=stream_callback, emit_events=emit_events,
+                    cancel_token=cancel_token,
                 )
             
             except Exception as e:
@@ -7326,7 +7340,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 logger.debug(f"[{self.name}] Async retry {attempt + 1}/{max_attempts} after {delay:.1f}s: {str(e)[:100]}")
                 
                 # Async sleep with interrupt awareness using the helper
-                interrupt_fn = getattr(self, '_is_interrupted', lambda: False)
+                _is_interrupted = getattr(self, '_is_interrupted', lambda: False)
+                _tok = cancel_token
+
+                def interrupt_fn():
+                    return _is_interrupted() or (
+                        _tok is not None and getattr(_tok, "is_set", lambda: False)()
+                    )
                 if not await interruptible_sleep(delay, interrupt_fn=interrupt_fn):
                     raise RuntimeError("Agent interrupted during retry backoff")
         
