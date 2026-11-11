@@ -101,3 +101,30 @@ def test_sync_parallel_propagates_tool_execution_error(monkeypatch):
     with pytest.raises(ToolExecutionError, match="terminal tool failure"):
         llm.get_response("go", tools=tools, execute_tool_fn=execute,
                          parallel_tool_calls=True, stream=False, verbose=False)
+
+
+def test_sync_parallel_error_content_matches_sequential(monkeypatch):
+    from praisonaiagents.llm.llm import LLM
+
+    messages_by_mode = []
+    for parallel in (False, True):
+        requests = []
+        def completion(*args, **kwargs):
+            requests.append(json.loads(json.dumps(kwargs["messages"], default=str)))
+            calls = [
+                {"id": str(i), "type": "function", "function": {"name": "ping", "arguments": "{}"}}
+                for i in range(2)
+            ]
+            message = {"role": "assistant", "content": "", "tool_calls": calls} if len(requests) == 1 else {"role": "assistant", "content": "done"}
+            return litellm.ModelResponse(choices=[{"message": message, "index": 0, "finish_reason": "tool_calls" if len(requests) == 1 else "stop"}])
+
+        def execute(name, arguments, *, tool_call_id):
+            raise ValueError("expected failure")
+
+        monkeypatch.setattr(litellm, "completion", completion)
+        llm = LLM(model="anthropic/claude-3-haiku-20240307")
+        tools = [{"type": "function", "function": {"name": "ping", "parameters": {"type": "object", "properties": {}}}}]
+        assert llm.get_response("go", tools=tools, execute_tool_fn=execute,
+                                parallel_tool_calls=parallel, stream=False, verbose=False) == "done"
+        messages_by_mode.append([m["content"] for m in requests[1] if m.get("role") == "tool"])
+    assert messages_by_mode[0] == messages_by_mode[1]
