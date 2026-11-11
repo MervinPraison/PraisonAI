@@ -924,7 +924,7 @@ class ExecutionConfig:
     retry_backoff_factor: float = 2.0
     retry_jitter: float = 0.1  # fraction of computed delay
     
-    # Tool call limits (loop protection)
+    # Tool-call budget; see resolved_max_tool_calls for provider and resume limits.
     max_tool_calls_per_turn: int = 10
     
     # Code execution (consolidated from allow_code_execution + code_execution_mode)
@@ -1078,8 +1078,8 @@ class ExecutionConfig:
         in one parallel batch. Their counter starts fresh on durable resume,
         so an interrupted and resumed turn may exceed the configured budget
         in total. The native OpenAI tool loop does not enforce this budget.
-        ``max_steps`` separately bounds loop iterations; it is not a tool-call
-        count limit.
+        ``max_steps`` separately bounds loop iterations rather than tool calls,
+        since one model response can request multiple tools.
         """
         return self.max_tool_calls_per_turn
 
