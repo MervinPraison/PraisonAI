@@ -77,3 +77,27 @@ def test_sync_parallel_preserves_errors_and_durable_iteration(monkeypatch):
     replies = [m for m in requests[1] if m.get("role") == "tool"]
     assert [m["tool_call_id"] for m in replies] == ["ok", "bad"]
     assert "expected error" in replies[1]["content"]
+
+
+def test_sync_parallel_propagates_tool_execution_error(monkeypatch):
+    from praisonaiagents.errors import ToolExecutionError
+    from praisonaiagents.llm.llm import LLM
+
+    calls = [
+        {"id": str(i), "type": "function", "function": {"name": "ping", "arguments": "{}"}}
+        for i in range(2)
+    ]
+    def completion(*args, **kwargs):
+        return litellm.ModelResponse(choices=[{"message": {"role": "assistant", "content": "", "tool_calls": calls}, "index": 0, "finish_reason": "tool_calls"}])
+
+    def execute(name, arguments, *, tool_call_id):
+        if tool_call_id == "0":
+            raise ToolExecutionError("terminal tool failure")
+        return "ok"
+
+    monkeypatch.setattr(litellm, "completion", completion)
+    llm = LLM(model="anthropic/claude-3-haiku-20240307")
+    tools = [{"type": "function", "function": {"name": "ping", "parameters": {"type": "object", "properties": {}}}}]
+    with pytest.raises(ToolExecutionError, match="terminal tool failure"):
+        llm.get_response("go", tools=tools, execute_tool_fn=execute,
+                         parallel_tool_calls=True, stream=False, verbose=False)
