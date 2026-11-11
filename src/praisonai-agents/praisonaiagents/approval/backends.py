@@ -12,12 +12,16 @@ from __future__ import annotations
 
 import asyncio
 import re
+import threading
 from praisonaiagents._logging import get_logger
 from typing import Any, Optional
 
 from .protocols import ApprovalDecision, ApprovalRequest
 
 logger = get_logger(__name__)
+
+# All console backends share stdin, even across agents and async wrappers.
+_console_prompt_lock = threading.Lock()
 
 # Lazy Rich imports (same pattern as old approval.py)
 _rich_console = None
@@ -296,7 +300,8 @@ class ConsoleBackend:
     def request_approval_sync(self, request: ApprovalRequest, timeout: Optional[float] = None) -> ApprovalDecision:
         """Synchronous approval via Rich console prompt."""
         try:
-            approved, scope, scope_pattern, feedback = self._prompt_user(request)
+            with _console_prompt_lock:
+                approved, scope, scope_pattern, feedback = self._prompt_user(request)
             if approved:
                 return ApprovalDecision(
                     approved=True,
