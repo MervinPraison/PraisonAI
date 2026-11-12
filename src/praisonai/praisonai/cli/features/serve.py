@@ -17,7 +17,38 @@ All servers include the unified discovery endpoint at /__praisonai__/discovery.
 import os
 import sys
 import logging
+import uuid
 from typing import Any, Dict, List, Optional
+
+# Upper bound on a single /agents query to avoid unbounded prompt payloads.
+_MAX_QUERY_CHARS = 32_000
+
+
+def _query_from_body(body: Any) -> str:
+    """Extract a bounded ``query``/``message`` string from a JSON request body."""
+    from fastapi import HTTPException
+
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Request body must be a JSON object")
+    query = body.get("query", "") or body.get("message", "")
+    if not isinstance(query, str):
+        raise HTTPException(status_code=400, detail="Invalid request")
+    if len(query) > _MAX_QUERY_CHARS:
+        raise HTTPException(status_code=413, detail="Query too long")
+    return query
+
+
+def _internal_error():
+    """500 response that never echoes exception text (paths, provider bodies,
+    config) to clients; the cause is logged server-side under a correlation id."""
+    from fastapi.responses import JSONResponse
+
+    error_id = uuid.uuid4().hex
+    logging.getLogger(__name__).exception("serve agents request failed [%s]", error_id)
+    return JSONResponse(
+        {"error": "Internal server error", "error_id": error_id},
+        status_code=500,
+    )
 
 
 _LOCALHOST_HOSTS = {"127.0.0.1", "localhost", "::1"}
@@ -295,7 +326,7 @@ Launch PraisonAI servers with unified discovery support.
 
         from fastapi import FastAPI, HTTPException, Request
         from fastapi.responses import JSONResponse
-        from pydantic import BaseModel
+        from pydantic import BaseModel, Field
         
         from praisonai.endpoints.discovery import (
             create_discovery_document,
@@ -401,8 +432,8 @@ Launch PraisonAI servers with unified discovery support.
         # is not used to select a single role: POST /agents runs the full YAML
         # workflow through the cached generator (see invoke_agents).
         class AgentQuery(BaseModel):
-            query: str
-            agent: Optional[str] = None  # Accepted for compatibility; ignored
+            query: str = Field(..., max_length=_MAX_QUERY_CHARS)
+            agent: Optional[str] = Field(None, max_length=256)  # Accepted for compatibility; ignored
         
         # Create endpoint for agents
         path = config["path"]
@@ -455,20 +486,17 @@ Launch PraisonAI servers with unified discovery support.
             if query_data is None:
                 try:
                     body = await request.json()
-                    query = body.get("query", "") or body.get("message", "")
                 except Exception:
                     raise HTTPException(status_code=400, detail="Invalid request")
+                query = _query_from_body(body)
             else:
                 query = query_data.query
 
             try:
                 result = await _run_query(request, query)
                 return {"response": result}
-            except Exception as e:
-                return JSONResponse(
-                    {"error": str(e)},
-                    status_code=500,
-                )
+            except Exception:
+                return _internal_error()
 
         # Add simple /agents/{agent_name} endpoint for n8n compatibility. The
         # path segment is accepted as a compatibility alias only: it runs the
@@ -485,9 +513,9 @@ Launch PraisonAI servers with unified discovery support.
             """
             try:
                 body = await request.json()
-                query = body.get("query", "") or body.get("message", "")
-            except Exception as e:
-                raise HTTPException(status_code=400, detail=f"Invalid request: {str(e)}")
+            except Exception:
+                raise HTTPException(status_code=400, detail="Invalid request")
+            query = _query_from_body(body)
 
             if not query:
                 raise HTTPException(status_code=400, detail="No query or message provided")
@@ -495,8 +523,8 @@ Launch PraisonAI servers with unified discovery support.
             try:
                 result = await _run_query(request, query)
                 return {"response": str(result)}
-            except Exception as e:
-                raise HTTPException(status_code=500, detail=f"Agent execution failed: {str(e)}")
+            except Exception:
+                return _internal_error()
         
         # Add endpoint to discovery
         discovery.add_endpoint(EndpointInfo(
@@ -1021,13 +1049,11 @@ Launch PraisonAI servers with unified discovery support.
                     body = await request.json()
                 except Exception:
                     raise HTTPException(status_code=400, detail="Invalid request")
-                if not isinstance(body, dict):
-                    raise HTTPException(status_code=400, detail="Request body must be a JSON object")
-                query = body.get("query", "") or body.get("message", "")
+                query = _query_from_body(body)
                 try:
                     return {"response": await run_query(query)}
-                except Exception as e:
-                    raise HTTPException(status_code=500, detail=f"Agent execution failed: {e}")
+                except Exception:
+                    return _internal_error()
 
             self._add_a2a_route(app, run_query)
             discovery.add_provider(ProviderInfo(
