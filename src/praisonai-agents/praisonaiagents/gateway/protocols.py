@@ -2698,64 +2698,74 @@ class InsecureGatewayTransportError(ValueError):
     """Raised when a gateway URL would send traffic in cleartext to a public host."""
 
 
-def _is_non_public_host(host: str) -> bool:
-    """True for loopback, private/link-local/CGNAT IPs and single-label names."""
+def _parse_ip_host(host: str):
+    """Return the IP for an IP-literal host (incl. legacy IPv4 spellings), else None."""
     import ipaddress
     import socket
 
-    host = (host or "").strip("[]").rstrip(".").lower()
-    if not host or is_loopback(host) or host.endswith(".localhost"):
-        return True
     try:
-        ip = ipaddress.ip_address(host)
+        return ipaddress.ip_address(host)
     except ValueError:
-        try:
-            # Legacy IPv4 spellings the resolver accepts but ipaddress
-            # rejects ("134744072", "0x08080808", "127.1") — normalise them
-            # so they can't pass as single-label names.
-            ip = ipaddress.IPv4Address(socket.inet_aton(host))
-        except (OSError, ValueError):
-            # Single-label names (docker-compose service, LAN hostname)
-            # never resolve via public DNS.
-            return "." not in host
-    return (
-        ip.is_private
-        or ip.is_link_local
-        or ip in ipaddress.ip_network("100.64.0.0/10")  # CGNAT / Tailscale
-    )
+        pass
+    try:
+        # Legacy IPv4 spellings the resolver accepts but ipaddress rejects
+        # ("134744072", "0x08080808", "127.1") — normalise them so they
+        # can't pass as hostnames.
+        return ipaddress.IPv4Address(socket.inet_aton(host))
+    except (OSError, ValueError):
+        return None
 
 
-def assert_secure_gateway_transport(url: str, *, allow_insecure: bool = False) -> None:
-    """Fail closed on plaintext ``ws://`` / ``http://`` to a public host.
+def assert_secure_gateway_transport(url: str) -> None:
+    """Guard plaintext ``ws://`` / ``http://`` gateway URLs.
 
-    Loopback and private-range hosts (local dev, SSH tunnel, VPN) are always
-    allowed, as is ``wss://`` / ``https://``. A public host over plaintext
-    raises unless ``allow_insecure`` is True or ``PRAISONAI_ALLOW_INSECURE_WS=1``.
+    ``wss://`` / ``https://``, loopback, private/link-local/CGNAT IPs and
+    single-label names are always allowed. A plaintext URL to a *public IP
+    literal* raises; a plaintext URL to a multi-label DNS name only logs a
+    warning, because names such as ``gw.default.svc.cluster.local`` or
+    Tailscale MagicDNS hosts are commonly private and cannot be classified
+    without a (blocking) DNS lookup. ``PRAISONAI_ALLOW_INSECURE_WS=1``
+    disables the check.
 
     Raises:
-        InsecureGatewayTransportError: On plaintext transport to a public host.
+        InsecureGatewayTransportError: On plaintext transport to a public IP.
 
     Examples:
         >>> assert_secure_gateway_transport("ws://localhost:8765")
         >>> assert_secure_gateway_transport("wss://gateway.example.com")
     """
+    import ipaddress
+    import logging
     import os
     from urllib.parse import urlsplit
 
     parts = urlsplit(url)
     if parts.scheme.lower() not in ("ws", "http"):
         return
-    if allow_insecure or os.environ.get("PRAISONAI_ALLOW_INSECURE_WS", "").strip().lower() in ("1", "true", "yes"):
+    if os.environ.get("PRAISONAI_ALLOW_INSECURE_WS", "").strip().lower() in ("1", "true", "yes"):
         return
-    if _is_non_public_host(parts.hostname or ""):
+    host = (parts.hostname or "").strip("[]").rstrip(".").lower()
+    if not host or is_loopback(host) or host.endswith(".localhost"):
+        return
+    fix = (
+        "Fix:  use wss:// (start the gateway with ssl_cert/ssl_key or behind a TLS proxy)\n"
+        "Or:   tunnel it, e.g. ssh -L 8765:localhost:8765 <host> and use ws://localhost:8765\n"
+        "Break-glass: export PRAISONAI_ALLOW_INSECURE_WS=1"
+    )
+    ip = _parse_ip_host(host)
+    if ip is None:
+        if "." in host:
+            logging.getLogger(__name__).warning(
+                "Plaintext gateway connection to %r: the auth token and session "
+                "stream are unencrypted unless this host is on a private network.\n%s",
+                host, fix,
+            )
+        return
+    if ip.is_private or ip.is_link_local or ip in ipaddress.ip_network("100.64.0.0/10"):
         return
     raise InsecureGatewayTransportError(
-        f"Refusing plaintext connection to public gateway host "
-        f"{parts.hostname!r}: the auth token and session stream would be sent "
-        f"unencrypted.\n"
-        f"Fix:  use wss:// (start the gateway with ssl_cert/ssl_key or behind a TLS proxy)\n"
-        f"Or:   tunnel it, e.g. ssh -L 8765:localhost:8765 <host> and use ws://localhost:8765\n"
-        f"Break-glass: export PRAISONAI_ALLOW_INSECURE_WS=1"
+        f"Refusing plaintext connection to public gateway host {host!r}: the "
+        f"auth token and session stream would be sent unencrypted.\n{fix}"
     )
 
 

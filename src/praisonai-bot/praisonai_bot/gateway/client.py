@@ -13,6 +13,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from typing import Any, AsyncIterator, Callable, Dict, List, Optional, Union
+from urllib.parse import quote
 
 try:
     import websockets
@@ -133,7 +134,6 @@ class GatewayClient:
         backoff: Optional[BackoffConfig] = None,
         max_reconnect_attempts: Optional[int] = None,
         capabilities: Optional[List[str]] = None,
-        allow_insecure: bool = False,
     ):
         """Initialize the gateway client.
         
@@ -147,16 +147,15 @@ class GatewayClient:
             capabilities: Capability tokens to advertise during the ``hello``
                 handshake (e.g. ``["streaming", "ack"]``). Defaults to
                 :data:`DEFAULT_CAPABILITIES`.
-            allow_insecure: Permit plaintext ``ws://`` to a public host
-                (break-glass; also ``PRAISONAI_ALLOW_INSECURE_WS=1``).
-                Loopback/private hosts and ``wss://`` never need it.
 
         Raises:
             InsecureGatewayTransportError: If ``url`` is plaintext ``ws://``
-                to a public host and insecure transport was not allowed.
+                to a public IP address (override with
+                ``PRAISONAI_ALLOW_INSECURE_WS=1``). Plaintext to a DNS name
+                only logs a warning.
         """
-        # Fail closed before any token or session data can leave the process.
-        assert_secure_gateway_transport(url, allow_insecure=allow_insecure)
+        # Check before any token or session data can leave the process.
+        assert_secure_gateway_transport(url)
         self.url = url
         self.agent_id = agent_id
         self.token = token
@@ -405,12 +404,16 @@ class GatewayClient:
         """Establish WebSocket connection and perform handshake."""
         self._set_state(ConnectionState.CONNECTING)
         
-        # Send the token as a header, never in the URL where it would land in
-        # proxy/access logs. wss:// uses websockets' default verified TLS.
+        # Send the token as ``Authorization: Bearer`` (Issue #6307). Gateways
+        # released before Bearer support only read ``?token=``, so keep the
+        # query param too until the minimum supported server accepts the header.
+        connect_url = self.url
         connect_kwargs: Dict[str, Any] = {}
         if self.token:
             connect_kwargs[_HEADERS_KWARG] = {"Authorization": f"Bearer {self.token}"}
-        self._ws = await websockets.connect(self.url, **connect_kwargs)
+            separator = "&" if "?" in connect_url else "?"
+            connect_url = f"{connect_url}{separator}token={quote(self.token, safe='')}"
+        self._ws = await websockets.connect(connect_url, **connect_kwargs)
         
         # Resume fields shared by both handshake paths.
         resume_fields: Dict[str, Any] = {}

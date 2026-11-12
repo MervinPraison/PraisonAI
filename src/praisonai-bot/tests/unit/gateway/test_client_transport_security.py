@@ -1,5 +1,7 @@
 """Client transport-security guard (Issue #6307)."""
 
+import logging
+
 import pytest
 
 from praisonaiagents.gateway import (
@@ -21,15 +23,31 @@ from praisonaiagents.gateway import (
     "ws://127.1:8765",  # short-form loopback
     "ws://3232235786:8765",  # 192.168.1.10 as an integer
 ])
-def test_allowed(url, monkeypatch):
+def test_allowed(url, monkeypatch, caplog):
     monkeypatch.delenv("PRAISONAI_ALLOW_INSECURE_WS", raising=False)
-    assert_secure_gateway_transport(url)
+    with caplog.at_level(logging.WARNING):
+        assert_secure_gateway_transport(url)
+    assert "Plaintext gateway" not in caplog.text
 
 
 @pytest.mark.parametrize("url", [
     "ws://gateway.example.com:8765",
-    "ws://8.8.8.8:8765",
     "http://gateway.example.com",
+    "ws://gw.default.svc.cluster.local:8765",  # Kubernetes service DNS
+    "ws://my-gw.tail1234.ts.net:8765",  # Tailscale MagicDNS
+    "ws://gateway.internal:8765",
+])
+def test_plaintext_dns_name_warns_not_raises(url, monkeypatch, caplog):
+    monkeypatch.delenv("PRAISONAI_ALLOW_INSECURE_WS", raising=False)
+    with caplog.at_level(logging.WARNING):
+        assert_secure_gateway_transport(url)
+    assert "Plaintext gateway" in caplog.text
+
+
+@pytest.mark.parametrize("url", [
+    "ws://8.8.8.8:8765",
+    "http://8.8.8.8",
+    "ws://[2001:4860:4860::8888]:8765",
     # Alternate numeric spellings of public 8.8.8.8 must not pass as
     # single-label hostnames.
     "ws://134744072:8765",
@@ -44,9 +62,10 @@ def test_public_plaintext_refused(url, monkeypatch):
 
 def test_break_glass(monkeypatch):
     monkeypatch.delenv("PRAISONAI_ALLOW_INSECURE_WS", raising=False)
-    assert_secure_gateway_transport("ws://gateway.example.com", allow_insecure=True)
+    with pytest.raises(InsecureGatewayTransportError):
+        assert_secure_gateway_transport("ws://8.8.8.8")
     monkeypatch.setenv("PRAISONAI_ALLOW_INSECURE_WS", "1")
-    assert_secure_gateway_transport("ws://gateway.example.com")
+    assert_secure_gateway_transport("ws://8.8.8.8")
 
 
 def test_client_refuses_public_plaintext(monkeypatch):
@@ -55,12 +74,13 @@ def test_client_refuses_public_plaintext(monkeypatch):
 
     monkeypatch.delenv("PRAISONAI_ALLOW_INSECURE_WS", raising=False)
     with pytest.raises(InsecureGatewayTransportError):
-        GatewayClient(url="ws://gateway.example.com:8765", agent_id="a")
-    GatewayClient(url="ws://gateway.example.com:8765", agent_id="a", allow_insecure=True)
+        GatewayClient(url="ws://8.8.8.8:8765", agent_id="a")
+    # Private DNS names (e.g. Kubernetes) keep working.
+    GatewayClient(url="ws://gw.default.svc.cluster.local:8765", agent_id="a")
 
 
 @pytest.mark.asyncio
-async def test_client_sends_token_in_header_not_url(monkeypatch):
+async def test_client_sends_bearer_header_and_legacy_query_token(monkeypatch):
     pytest.importorskip("websockets")
     import praisonai_bot.gateway.client as client_mod
 
@@ -76,5 +96,6 @@ async def test_client_sends_token_in_header_not_url(monkeypatch):
     with pytest.raises(ConnectionRefusedError):
         await client._connect_once()
 
-    assert "s3cret" not in seen["url"]
+    # Query param kept for gateways released before Bearer support.
+    assert seen["url"] == "ws://localhost:8765?token=s3cret"
     assert seen["kwargs"][client_mod._HEADERS_KWARG] == {"Authorization": "Bearer s3cret"}
