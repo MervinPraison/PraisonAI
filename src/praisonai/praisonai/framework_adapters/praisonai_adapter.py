@@ -393,11 +393,20 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                 get = retry.get if isinstance(retry, dict) else (
                     lambda k, d=None: getattr(retry, k, d)
                 )
+                initial_ms = int(float(get('delay', 1.0) or 0) * 1000)
+                max_delay = get('max_delay', None)
+                max_ms = int(float(60.0 if max_delay is None else max_delay) * 1000)
+                extra = {}
+                if get('retry_on', None):
+                    extra['retry_on'] = set(get('retry_on'))
                 retry = RetryPolicy(
                     max_attempts=int(get('max_attempts', 3) or 3),
-                    initial_delay_ms=int(float(get('delay', 1.0) or 0) * 1000),
+                    initial_delay_ms=initial_ms,
                     backoff_factor=float(get('backoff_factor', 2.0) or 2.0),
-                    max_delay_ms=int(float(get('max_delay', 60.0) or 0) * 1000),
+                    # RetryPolicy requires max >= initial; an omitted or
+                    # smaller cap must not reject a schema-valid delay.
+                    max_delay_ms=max(max_ms, initial_ms),
+                    **extra,
                 )
             agent_kwargs['tool_config'] = ToolConfig(retry_policy=retry)
 
@@ -420,8 +429,12 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
                         role_name, missing,
                     )
                 from praisonaiagents.config.feature_configs import PlanningConfig
+                # Merge into the existing planning setting; never discard
+                # llm/auto_approve/reasoning the user already configured.
                 if isinstance(planning, PlanningConfig):
                     planning.tools = resolved
+                elif isinstance(planning, dict):
+                    agent_kwargs['planning'] = {**planning, 'tools': resolved}
                 else:
                     agent_kwargs['planning'] = PlanningConfig(
                         llm=planning if isinstance(planning, str) else None,

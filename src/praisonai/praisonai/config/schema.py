@@ -49,6 +49,7 @@ class ToolRetryPolicy(BaseModel):
     delay: float = Field(default=1.0, ge=0, description="Delay between retries in seconds")
     backoff_factor: float = Field(default=2.0, ge=1, description="Exponential backoff factor")
     max_delay: float = Field(default=60.0, ge=0, description="Maximum delay between retries")
+    retry_on: Optional[List[str]] = Field(default=None, description="Error types to retry on")
 
 
 class HandoffConfig(BaseModel):
@@ -151,6 +152,7 @@ class AgentConfig(BaseModel):
                         "delay": policy.initial_delay_ms / 1000.0,
                         "backoff_factor": policy.backoff_factor,
                         "max_delay": policy.max_delay_ms / 1000.0,
+                        "retry_on": sorted(policy.retry_on),
                     }
             except (ImportError, AttributeError, TypeError):
                 pass
@@ -209,6 +211,7 @@ class AgentConfig(BaseModel):
                         delay=self.tool_retry_policy.initial_delay_ms / 1000.0,
                         backoff_factor=self.tool_retry_policy.backoff_factor,
                         max_delay=self.tool_retry_policy.max_delay_ms / 1000.0,
+                        retry_on=sorted(self.tool_retry_policy.retry_on),
                     )
             except (ImportError, AttributeError, TypeError):
                 pass

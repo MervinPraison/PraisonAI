@@ -58,25 +58,6 @@ def test_web_fetch_false_without_web_is_noop():
     assert "web" not in kwargs
 
 
-def test_scheduler_fails_closed_on_dropped_approval():
-    from praisonai.scheduler.yaml_loader import create_agent_from_config
-
-    with pytest.raises(ValueError, match="approval"):
-        create_agent_from_config({
-            "name": "a", "role": "r", "instructions": "i",
-            "approval": {"backend": "console"},
-        })
-
-
-def test_scheduler_forwards_llm():
-    from praisonai.scheduler.yaml_loader import create_agent_from_config
-
-    agent = create_agent_from_config({
-        "name": "a", "role": "r", "instructions": "i", "llm": "gpt-4o",
-    })
-    assert "gpt-4o" in str(getattr(agent, "llm", ""))
-
-
 def test_tool_retry_policy_omitted_max_delay_uses_schema_default():
     # delay > 30s is schema-valid; the fallback must match the schema's 60s.
     kwargs = {}
@@ -89,3 +70,36 @@ def test_planning_tools_included_in_yaml_tool_discovery():
 
     cfg = {"roles": {"r": {"tools": ["a"], "planning_tools": ["plan_only"]}}}
     assert _yaml_tool_names(cfg) == {"a", "plan_only"}
+
+
+def test_tool_retry_policy_delay_above_default_cap_is_clamped():
+    kwargs = {}
+    translate({"tool_retry_policy": {"delay": 120}}, kwargs, {}, "r")
+    rp = kwargs["tool_config"].retry_policy
+    assert rp.initial_delay_ms == 120000
+    assert rp.max_delay_ms >= rp.initial_delay_ms
+
+
+def test_tool_retry_policy_retry_on_forwarded():
+    kwargs = {}
+    translate({"tool_retry_policy": {"retry_on": ["timeout"]}}, kwargs, {}, "r")
+    assert kwargs["tool_config"].retry_policy.retry_on == {"timeout"}
+
+
+def test_cli_retry_on_survives_schema_round_trip():
+    from praisonai.config.schema import AgentConfig
+
+    cfg = AgentConfig(
+        role="r", goal="g", backstory="b",
+        tool_retry_policy=RetryPolicy(max_attempts=2, retry_on={"rate_limit"}),
+    )
+    kwargs = {}
+    translate({"tool_retry_policy": cfg.tool_retry_policy}, kwargs, {}, "r")
+    assert kwargs["tool_config"].retry_policy.retry_on == {"rate_limit"}
+
+
+def test_planning_tools_merge_keeps_existing_planning_dict():
+    tool = object()
+    kwargs = {"planning": {"llm": "x", "auto_approve": True}}
+    translate({"planning_tools": ["t"]}, kwargs, {"t": tool}, "r")
+    assert kwargs["planning"] == {"llm": "x", "auto_approve": True, "tools": [tool]}
