@@ -38,13 +38,19 @@ def _query_from_body(body: Any) -> str:
     return query
 
 
+def _log_error_id() -> str:
+    """Log the active exception server-side and return its correlation id."""
+    error_id = uuid.uuid4().hex
+    logging.getLogger(__name__).exception("serve agents request failed [%s]", error_id)
+    return error_id
+
+
 def _internal_error():
     """500 response that never echoes exception text (paths, provider bodies,
     config) to clients; the cause is logged server-side under a correlation id."""
     from fastapi.responses import JSONResponse
 
-    error_id = uuid.uuid4().hex
-    logging.getLogger(__name__).exception("serve agents request failed [%s]", error_id)
+    error_id = _log_error_id()
     return JSONResponse(
         {"error": "Internal server error", "error_id": error_id},
         status_code=500,
@@ -746,13 +752,23 @@ Launch PraisonAI servers with unified discovery support.
                     "id": request_id,
                     "error": {"code": -32602, "message": "message/send requires a text part"},
                 }
-            try:
-                reply = await run_query(text)
-            except Exception as e:
+            if len(text) > _MAX_QUERY_CHARS:
                 return {
                     "jsonrpc": "2.0",
                     "id": request_id,
-                    "error": {"code": -32603, "message": f"Agent execution failed: {e}"},
+                    "error": {"code": -32602, "message": "Query too long"},
+                }
+            try:
+                reply = await run_query(text)
+            except Exception:
+                return {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32603,
+                        "message": "Internal server error",
+                        "data": {"error_id": _log_error_id()},
+                    },
                 }
             return {
                 "jsonrpc": "2.0",
