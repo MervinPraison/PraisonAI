@@ -251,8 +251,7 @@ class TestDiffPreview:
         )
         with patch("praisonaiagents.approval.backends._get_rich_console") as mock_console_cls, \
              patch("praisonaiagents.approval.backends._get_rich_panel") as mock_panel, \
-             patch("praisonaiagents.approval.backends._get_rich_prompt") as mock_prompt, \
-             patch("praisonaiagents.approval.backends._stdin_is_tty", return_value=True):
+             patch("praisonaiagents.approval.backends._get_rich_prompt") as mock_prompt:
             mock_console_cls.return_value = MagicMock()
             mock_panel.return_value = MagicMock()
             mock_prompt.return_value.ask.return_value = "n"
@@ -272,8 +271,7 @@ class TestDiffPreview:
         )
         with patch("praisonaiagents.approval.backends._get_rich_console") as mock_console_cls, \
              patch("praisonaiagents.approval.backends._get_rich_panel") as mock_panel, \
-             patch("praisonaiagents.approval.backends._get_rich_prompt") as mock_prompt, \
-             patch("praisonaiagents.approval.backends._stdin_is_tty", return_value=True):
+             patch("praisonaiagents.approval.backends._get_rich_prompt") as mock_prompt:
             mock_console_cls.return_value = MagicMock()
             mock_panel.return_value = MagicMock()
             mock_prompt.return_value.ask.return_value = "n"

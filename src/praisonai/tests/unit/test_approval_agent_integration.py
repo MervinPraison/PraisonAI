@@ -77,13 +77,10 @@ def test_agent_tool_execution_with_approval():
         print(f"❌ Agent tool execution test failed: {e}")
         assert False, f"Agent tool execution test failed: {e}"
 
-# The mocked prompt stands in for a human at a terminal; console approval
-# fails closed without a TTY (#6279), so simulate the terminal too.
-@patch('praisonaiagents.approval.backends._stdin_is_tty', return_value=True)
 @patch('rich.prompt.Prompt.ask', return_value="o")
 @patch('rich.prompt.Confirm.ask')
 @patch('praisonaiagents.approval.console_approval_callback')
-def test_agent_with_auto_approval(mock_console_callback, mock_confirm, mock_prompt, _mock_tty, monkeypatch):
+def test_agent_with_auto_approval(mock_console_callback, mock_confirm, mock_prompt, monkeypatch):
     """Test agent tool execution with auto-approval callback."""
     print("\n🤖 Testing Agent with Auto-Approval")
     print("=" * 40)
@@ -168,13 +165,10 @@ def test_agent_with_auto_denial():
         print(f"❌ Auto-denial test failed: {e}")
         assert False, f"Auto-denial test failed: {e}"
 
-# The mocked prompt stands in for a human at a terminal; console approval
-# fails closed without a TTY (#6279), so simulate the terminal too.
-@patch('praisonaiagents.approval.backends._stdin_is_tty', return_value=True)
 @patch('rich.prompt.Prompt.ask', return_value="o")
 @patch('rich.prompt.Confirm.ask')
 @patch('praisonaiagents.approval.console_approval_callback')
-def test_agent_python_code_execution(mock_console_callback, mock_confirm, mock_prompt, _mock_tty, monkeypatch):
+def test_agent_python_code_execution(mock_console_callback, mock_confirm, mock_prompt, monkeypatch):
     """Test Python code execution through agent with approval."""
     print("\n🐍 Testing Agent Python Code Execution")
     print("=" * 45)
@@ -225,13 +219,10 @@ def test_agent_python_code_execution(mock_console_callback, mock_confirm, mock_p
         print(f"❌ Python code execution test failed: {e}")
         assert False, f"Python code execution test failed: {e}"
 
-# The mocked prompt stands in for a human at a terminal; console approval
-# fails closed without a TTY (#6279), so simulate the terminal too.
-@patch('praisonaiagents.approval.backends._stdin_is_tty', return_value=True)
 @patch('rich.prompt.Prompt.ask', return_value="o")
 @patch('rich.prompt.Confirm.ask')
 @patch('praisonaiagents.approval.console_approval_callback')
-def test_agent_file_operations(mock_console_callback, mock_confirm, mock_prompt, _mock_tty, monkeypatch):
+def test_agent_file_operations(mock_console_callback, mock_confirm, mock_prompt, monkeypatch):
     """Test file operations through agent with approval."""
     print("\n📁 Testing Agent File Operations")
     print("=" * 35)
