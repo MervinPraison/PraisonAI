@@ -3901,6 +3901,8 @@ class ToolExecutionMixin:
                                   if k in inspect.signature(instance.run).parameters 
                                   and k != 'self'}
                     casted_params = self._cast_arguments(instance.run, run_params)
+                    from ..tools.injected import inject_into_plain_callable
+                    casted_params = inject_into_plain_callable(instance.run, casted_params)
                     bind_arguments = casted_params
                     return _resolve_result(instance.run(**casted_params))
 
@@ -3913,6 +3915,8 @@ class ToolExecutionMixin:
                                   if k in inspect.signature(instance._run).parameters 
                                   and k != 'self'}
                     casted_params = self._cast_arguments(instance._run, run_params)
+                    from ..tools.injected import inject_into_plain_callable
+                    casted_params = inject_into_plain_callable(instance._run, casted_params)
                     bind_arguments = casted_params
                     return _resolve_result(instance._run(**casted_params))
 
@@ -4190,9 +4194,11 @@ class ToolExecutionMixin:
         """
         if not isinstance(function_name, str):
             return function_name
-        for name, _tool in self._iter_active_named_tools():
-            if name == function_name:
-                return function_name
+        # Dispatch also accepts a tool's ``__name__`` (e.g. ``@tool(name="delete_file")``
+        # on ``def remove_file``); map that alias to the declared name so gates see it.
+        for name, tool in self._iter_active_named_tools():
+            if name == function_name or getattr(tool, '__name__', None) == function_name:
+                return name
         if getattr(self, '_allow_global_tools', False):
             try:
                 from ..tools.registry import get_registry

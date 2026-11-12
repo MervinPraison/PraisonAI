@@ -171,8 +171,9 @@ def get_injected_params(func) -> Dict[str, Any]:
     try:
         hints = get_type_hints(func)
     except Exception:
-        # If we can't get hints, return empty
-        return {}
+        # Same fallback as the schema builder, so a param hidden from the
+        # model schema is still filled at runtime.
+        hints = getattr(func, "__annotations__", None) or {}
     
     injected = {}
     for name, hint in hints.items():

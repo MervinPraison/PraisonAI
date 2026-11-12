@@ -4447,7 +4447,8 @@ Your Role: {self.role}"""
                                 # Apply guardrail to reasoning content
                                 try:
                                     validated_reasoning = self._apply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages)
-                                    self._commit_assistant_reply(response_text)
+                                    # Commit the approved text, not the unchecked answer.
+                                    self._commit_assistant_reply(validated_reasoning)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_reasoning, time.time() - start_time, task_name, task_description, task_id)
                                     return self._trigger_after_agent_hook(original_prompt, validated_reasoning, start_time)
@@ -5178,7 +5179,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 # Apply guardrail to reasoning content
                                 try:
                                     validated_reasoning = await self._aapply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages)
-                                    await self._acommit_assistant_reply(response_text)
+                                    # Commit the approved text, not the unchecked answer.
+                                    await self._acommit_assistant_reply(validated_reasoning)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_reasoning, time.time() - start_time, task_name, task_description, task_id)
                                     return await self._atrigger_after_agent_hook(original_prompt, validated_reasoning, start_time)

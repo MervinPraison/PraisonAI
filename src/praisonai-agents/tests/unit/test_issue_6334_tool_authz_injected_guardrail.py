@@ -164,3 +164,58 @@ def test_guardrail_retry_keeps_response_format():
     assert isinstance(result, City) and result.name == "Paris"
     contents = [m["content"] for m in agent.chat_history if m["role"] == "assistant"]
     assert len(contents) == 1 and "BAD" not in contents[0]
+
+
+# --- Review follow-ups ---------------------------------------------------------
+
+def test_function_name_alias_resolves_to_declared_name_for_gates():
+    calls = []
+
+    @tool(name="delete_file")
+    def remove_file(path: str) -> str:
+        """Delete a file."""
+        calls.append(path)
+        return "deleted"
+
+    agent = Agent(name="h", instructions="x", tools=[remove_file], model="gpt-4o-mini",
+                  approval={"permissions": {"delete_*": "deny"}})
+    assert agent._canonical_tool_name("remove_file") == "delete_file"
+    assert agent.execute_tool("remove_file", {"path": "/tmp/z"}).get("permission_denied")
+    assert asyncio.run(agent.execute_tool_async("remove_file", {"path": "/tmp/z"})).get("permission_denied")
+    assert calls == []
+
+
+def test_reasoning_branch_commits_approved_text_only():
+    def reasoning_response(content, reasoning):
+        resp = _response(content)
+        resp.choices[0].message.reasoning_content = reasoning
+        return resp
+
+    replies = iter([reasoning_response("unchecked answer", "BAD thinking"), _response("GOOD retry")])
+    agent = Agent(name="i", instructions="x", model="gpt-4o-mini", guardrails=_good_only)
+    with patch.object(Agent, "_chat_completion", lambda self, *a, **k: next(replies)), \
+            patch.object(Agent, "_guardrail_retry_delay", lambda self, n: 0):
+        result = agent.chat("hi", reasoning_steps=True)
+    contents = [m["content"] for m in agent.chat_history if m["role"] == "assistant"]
+    assert contents == [str(result)] and "unchecked" not in contents[0]
+
+
+def test_injected_filled_when_type_hints_unresolvable():
+    def lookup(query: str, state: Injected[dict]) -> "UndefinedReturnType":  # noqa: F821
+        """Lookup."""
+        return f"ok:{isinstance(state, dict)}"
+
+    agent = Agent(name="j", instructions="x", tools=[lookup], model="gpt-4o-mini")
+    params = agent._format_tools_for_completion()[0]["function"]["parameters"]
+    assert "state" not in params["properties"]
+    assert agent.execute_tool("lookup", {"query": "q"}) == "ok:True"
+
+
+def test_class_tool_run_method_gets_injected_state():
+    class LookupTool:
+        def _run(self, query: str, state: Injected[dict]) -> str:
+            """Lookup."""
+            return f"cls:{isinstance(state, dict)}"
+
+    agent = Agent(name="k", instructions="x", tools=[LookupTool], model="gpt-4o-mini")
+    assert agent.execute_tool("LookupTool", {"query": "q"}) == "cls:True"
