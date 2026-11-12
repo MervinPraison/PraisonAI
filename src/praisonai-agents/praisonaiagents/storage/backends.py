@@ -67,6 +67,7 @@ class FileBackend:
         self.pretty = pretty
         self._lock = threading.Lock()
         self._unreadable_paths = set()
+        self._legacy_reads = set()  # keys this instance read via the legacy name
         
         # Create directory if needed
         self.storage_dir.mkdir(parents=True, exist_ok=True)
@@ -121,10 +122,20 @@ class FileBackend:
         path = self.storage_dir / name
         return None if path == self._key_to_path(key) else path
 
+    def _tombstone(self, key: str) -> Path:
+        """Hidden marker: ``key`` was deleted, so never fall back to its legacy name."""
+        return self.storage_dir / f".{hashlib.sha256(str(key).encode('utf-8', 'surrogatepass')).hexdigest()}.deleted"
+
     def _existing_path(self, key: str) -> Path:
-        """New-format path, falling back to an existing legacy-named record."""
+        """New-format path, falling back to an existing legacy-named record.
+
+        A legacy name may equally be another key's current record (``a_b.json``
+        is both ``a@b``'s old file and ``a_b``'s file), so the fallback is never
+        used after ``key`` was deleted, and save only removes it once this
+        instance read ``key`` through it.
+        """
         path = self._key_to_path(key)
-        if not path.exists():
+        if not path.exists() and not self._tombstone(key).exists():
             legacy = self._legacy_path(key)
             if legacy is not None and legacy.exists():
                 return legacy
@@ -145,8 +156,8 @@ class FileBackend:
         """Save data with the given key."""
         with self._lock:
             file_path = self._key_to_path(key)
-            # Migrate a legacy-named record only when no new-format file exists.
-            legacy = None if file_path.exists() else self._legacy_path(key)
+            legacy = self._existing_path(key)
+            legacy = None if legacy == file_path else legacy
             for path in (file_path, legacy):
                 if path is not None and path in self._unreadable_paths:
                     if path.exists():
@@ -169,8 +180,10 @@ class FileBackend:
                         json.dump(data, f, default=str, ensure_ascii=False)
                 
                 os.replace(temp_path, file_path)
-                if legacy is not None and legacy.exists():
+                # Move (not copy) only a record this key was seen reading.
+                if legacy is not None and key in self._legacy_reads and legacy.exists():
                     legacy.unlink()
+                self._legacy_reads.discard(key)
             except Exception as e:
                 logger.error(f"Failed to save {key}: {e}")
                 try:
@@ -195,6 +208,8 @@ class FileBackend:
                 with open(file_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
                 self._unreadable_paths.discard(file_path)
+                if file_path != self._key_to_path(key):
+                    self._legacy_reads.add(key)
                 return data
             except (UnicodeDecodeError, json.JSONDecodeError, IOError) as e:
                 self._unreadable_paths.add(file_path)
@@ -205,11 +220,15 @@ class FileBackend:
         """Delete data by key."""
         with self._lock:
             file_path = self._existing_path(key)
+            legacy = self._legacy_path(key)
+            self._legacy_reads.discard(key)
 
             if file_path.exists():
                 try:
                     file_path.unlink()
                     self._unreadable_paths.discard(file_path)
+                    if file_path != legacy and legacy is not None and legacy.exists():
+                        self._tombstone(key).touch()
                     return True
                 except Exception as e:
                     logger.error(f"Failed to delete {key}: {e}")
@@ -244,6 +263,9 @@ class FileBackend:
                         count += 1
                     except Exception:
                         pass
+                elif file_path.name.startswith(".") and file_path.name.endswith(".deleted"):
+                    file_path.unlink(missing_ok=True)
+            self._legacy_reads.clear()
         return count
 
 class SQLiteBackend:

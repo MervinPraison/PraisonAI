@@ -108,3 +108,22 @@ def test_new_record_wins_over_legacy_file(tmp_path):
     b.save("a@b", {"v": "new2"})
     assert b.load("a_b") == {"v": "legacy"}
     assert b.load("a@b") == {"v": "new2"}
+    # Deleting the new record must not re-expose the legacy file.
+    assert b.delete("a@b")
+    assert not b.exists("a@b")
+    assert b.load("a@b") is None
+    assert b.load("a_b") == {"v": "legacy"}
+    assert FileBackend(str(tmp_path)).load("a@b") is None
+    assert b.list_keys() == ["a_b"]
+    assert b.clear() == 1
+    assert not any(tmp_path.iterdir())
+
+
+def test_saving_one_key_never_deletes_another_keys_record(tmp_path):
+    for first, second in (("a_b", "a@b"), ("a@b", "a_b")):
+        d = tmp_path / first.replace("@", "at")
+        b = FileBackend(str(d))
+        b.save(first, {"v": first})
+        b.save(second, {"v": second})
+        assert FileBackend(str(d)).load(first) == {"v": first}
+        assert FileBackend(str(d)).load(second) == {"v": second}
