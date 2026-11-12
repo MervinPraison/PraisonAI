@@ -57,6 +57,15 @@ class ReliabilityEvaluator(BaseEvaluator):
             raise ValueError("'agent' must be provided")
     
     def _history_snapshot(self) -> list:
+        # Resumed sessions restore saved history lazily on the first chat();
+        # load it now (idempotent) so it lands in the snapshot, not the run.
+        for loader in ('_init_db_session', '_init_session_store'):
+            fn = getattr(self.agent, loader, None)
+            if callable(fn):
+                try:
+                    fn()
+                except Exception as e:
+                    logger.debug(f"{loader} before snapshot failed: {e}")
         try:
             return list(getattr(self.agent, 'chat_history', None) or [])
         except TypeError:

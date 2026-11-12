@@ -75,3 +75,28 @@ def test_reliability_crash_never_passes():
 def test_reliability_rewritten_history_detects_new_calls():
     assert not ReliabilityEvaluator(agent=_Rewriter(), input_text="q",
                                     forbidden_tools=["rm"]).run().passed
+
+
+class _Resumed:
+    """Saved history is restored lazily on the first chat() (resumed session)."""
+
+    def __init__(self):
+        self.chat_history = []
+        self._loaded = False
+
+    def _init_session_store(self):
+        if not self._loaded:
+            self._loaded = True
+            self.chat_history.append({"role": "tool", "name": "search"})
+
+    def chat(self, q):
+        self._init_session_store()
+        self.chat_history.append({"role": "assistant", "content": "x"})
+        return "x"
+
+
+def test_reliability_ignores_lazily_restored_session_history():
+    assert not ReliabilityEvaluator(agent=_Resumed(), input_text="q",
+                                    expected_tools=["search"]).run().passed
+    assert ReliabilityEvaluator(agent=_Resumed(), input_text="q",
+                                forbidden_tools=["search"]).run().passed
