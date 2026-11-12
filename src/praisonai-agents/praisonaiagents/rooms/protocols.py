@@ -138,7 +138,7 @@ class RoundRobinRoomPlanner:
         # Scope all accounting to the *current activity*: the slice of the
         # transcript from the last human (non-roster) message onward. A durable
         # room transcript accumulates many activities; each new human message
-        # opens a fresh round-0 fan-out and resets the message cap, so a settled
+        # opens a fresh round 0 and resets the message cap, so a settled
         # room reliably restarts when the next human speaks and can never be
         # permanently disabled by lifetime history.
         last_human = -1
