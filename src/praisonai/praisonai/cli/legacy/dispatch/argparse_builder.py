@@ -18,9 +18,12 @@ from praisonai.cli.legacy.framework_run import fw_registry_module as _fw_registr
 _MAX_TOKENS_SENTINEL = object()
 
 
-# Single source of truth lives in the import-free ``_verbs`` module so the
-# unified dispatcher can read it without importing this builder (#4327).
-from ._verbs import LEGACY_SPECIAL_COMMANDS  # noqa: E402  (re-exported)
+# Authoritative list of verbs the legacy argparse dispatcher implements. Kept as
+# a module-level constant so the unified dispatcher (``praisonai.__main__``) can
+# consult the same oracle: a token that is one of these is an *implemented* verb
+# and must reach its handler, never be reclassified as free text and billed to an
+# LLM (see #4327). ``build_argument_parser`` returns this same object.
+LEGACY_SPECIAL_COMMANDS = ['chat', 'code', 'call', 'realtime', 'train', 'ui', 'context', 'research', 'memory', 'rules', 'workflow', 'hooks', 'knowledge', 'session', 'tools', 'todo', 'docs', 'mcp', 'commit', 'serve', 'schedule', 'skills', 'profile', 'eval', 'agents', 'run', 'thinking', 'compaction', 'output', 'deploy', 'templates', 'recipe', 'endpoints', 'audio', 'embed', 'embedding', 'images', 'moderate', 'files', 'batches', 'vector-stores', 'rerank', 'ocr', 'assistants', 'fine-tuning', 'completions', 'messages', 'guardrails', 'rag', 'videos', 'a2a', 'containers', 'passthrough', 'responses', 'search', 'realtime-api', 'doctor', 'registry', 'package', 'install', 'uninstall', 'acp', 'debug', 'lsp', 'diag', 'browser', 'replay', 'bot', 'gateway', 'sandbox', 'wizard', 'migrate', 'security', 'persistence', 'paths', 'claw', 'github', 'managed', 'flow', 'dashboard', 'backends', 'audit']
 
 
 # Bare verbs that look like a top-level command but do not exist as one.
