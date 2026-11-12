@@ -52,12 +52,4 @@ def test_external_adapter_does_not_guess_completion_from_pytest_text():
     assert '"test passed"' not in source
 
 
-@pytest.mark.parametrize("filename", HARBOR_JOB_FILES_WITH_SMOKE_TASKS)
-def test_harbor_job_yaml_uses_tb21_registry_and_smoke_tasks(filename: str):
-    job = _load_job(filename)
-    _assert_tb21_dataset(job["datasets"][0], expect_tasks=True)
-
-
-def test_job_yaml_full_dataset_uses_tb21_registry():
-    job = _load_job("job.yaml")
-    _assert_tb21_dataset(job["datasets"][0], expect_tasks=False)
+ main

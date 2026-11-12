@@ -10,6 +10,7 @@
 
 # Harbor 0.22+ registry id (not terminal-bench@2.1 — see RESULTS.md).
 datasets:
+ main
   - name: terminal-bench/terminal-bench-2-1
     # A small verified subset for a cheap smoke run. Verify against the registry
     # with `harbor datasets list` before editing.

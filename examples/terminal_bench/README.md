@@ -8,13 +8,18 @@ This directory contains adapters for benchmarking PraisonAI on **Terminal-Bench 
 
 ## Setup
 
-Install Harbor and PraisonAI into **one venv** and run from the repo root with `PYTHONPATH=.` so the adapter import path resolves:
+Install Harbor (0.22+, which needs Python 3.12+) and PraisonAI into **one venv** and run from the repo root with `PYTHONPATH=.` so the adapter import path resolves:
 
 ```bash
-# Harbor 0.22+ requires Python 3.12+
-pip install "harbor==0.22.0"
-pip install -e src/praisonai-agents -e src/praisonai-code -e src/praisonai
+main
 export PYTHONPATH=.
+```
+
+The job files (`job*.yaml`) use the Harbor 0.22 registry id `terminal-bench/terminal-bench-2-1` and namespaced task slugs (e.g. `terminal-bench/build-pmars`). The integration tests also need `PYTHONPATH=.` plus `pytest` and `pytest-asyncio`:
+
+```bash
+pip install pytest pytest-asyncio
+PYTHONPATH=. python -m pytest examples/terminal_bench/test_integration.py -q
 ```
 
 ## Integration Types

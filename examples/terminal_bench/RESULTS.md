@@ -26,7 +26,8 @@ harbor run -d terminal-bench/terminal-bench-2-1 \
   -i terminal-bench/break-filter-js-from-html
 ```
 
-Legacy job YAML (`job_code_smoke.yaml`) expects dataset `terminal-bench@2.1`; use the CLI form above on Harbor 0.22.
+The job YAML (`job_code_smoke.yaml`) uses the same registry id and task slugs:
+`PYTHONPATH=. harbor run -c examples/terminal_bench/job_code_smoke.yaml`.
 
 The workflow uploads the Harbor results directory as a CI artifact and appends
 the pass-rate row above.

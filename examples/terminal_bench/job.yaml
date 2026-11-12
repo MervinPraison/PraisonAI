@@ -7,6 +7,7 @@
 # multiple `---` documents make yaml.safe_load raise ComposerError.
 
 datasets:
+ main
   - name: terminal-bench/terminal-bench-2-1
 
 agents:
