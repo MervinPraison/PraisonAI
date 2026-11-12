@@ -16,42 +16,40 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Dict, List, Optional
+from typing import Dict, List
 from .._lockmap import LockMap
 
 logger = logging.getLogger(__name__)
+
+# A buffer flushes after this many debounce windows, even if messages keep arriving.
+_MAX_WAIT_FACTOR = 5
+# A buffer flushes as soon as it holds this many messages.
+_MAX_BUFFERED = 100
 
 
 class InboundDebouncer:
     """Per-user message debouncer.
 
     Buffers rapid messages from the same user and flushes them as a
-    single joined string after ``debounce_ms`` of silence, or once
-    ``max_wait_ms`` has elapsed since the first buffered message
-    (whichever comes first), so a steady stream still dispatches.
+    single joined string after ``debounce_ms`` of silence.  A buffer is
+    also flushed ``_MAX_WAIT_FACTOR`` x ``debounce_ms`` after its first
+    message, or as soon as it holds ``_MAX_BUFFERED`` messages, so a steady
+    stream still dispatches.
 
     Args:
         debounce_ms: Debounce window in milliseconds.  0 = disabled
             (immediate pass-through).
         separator: String used to join coalesced messages.
-        max_wait_ms: Hard cap on how long a buffer may stay open.
-            ``None`` = 5x ``debounce_ms``; 0 = unbounded (legacy).
-        max_buffered: Flush immediately once this many messages are
-            buffered.  0 = no cap.
     """
 
     def __init__(
         self,
         debounce_ms: int = 0,
         separator: str = "\n",
-        max_wait_ms: Optional[int] = None,
-        max_buffered: int = 100,
     ) -> None:
         self._debounce_s = max(0, debounce_ms) / 1000.0
-        if max_wait_ms is None:
-            max_wait_ms = 5 * max(0, debounce_ms)
-        self._max_wait_s = max(0, max_wait_ms) / 1000.0
-        self._max_buffered = max(0, max_buffered)
+        self._max_wait_s = _MAX_WAIT_FACTOR * self._debounce_s
+        self._max_buffered = _MAX_BUFFERED
         self._first_enqueued: Dict[str, float] = {}
         self._separator = separator
         self._buffers: Dict[str, List[str]] = {}

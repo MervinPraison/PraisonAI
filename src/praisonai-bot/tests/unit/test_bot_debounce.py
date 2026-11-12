@@ -7,6 +7,7 @@ agent.chat() call, preventing duplicate processing and wasted tokens.
 
 import asyncio
 import pytest
+from unittest.mock import patch
 
 
 class TestInboundDebouncer:
@@ -99,8 +100,9 @@ class TestInboundDebouncer:
     @pytest.mark.asyncio
     async def test_max_wait_bounds_sustained_stream(self):
         """A stream faster than debounce_ms still flushes by max_wait_ms."""
-        from praisonai_bot.bots._debounce import InboundDebouncer
-        debouncer = InboundDebouncer(debounce_ms=100, max_wait_ms=250)
+        from praisonai_bot.bots import _debounce
+        with patch.object(_debounce, "_MAX_WAIT_FACTOR", 2.5):
+            debouncer = _debounce.InboundDebouncer(debounce_ms=100)
         loop = asyncio.get_running_loop()
         start = loop.time()
         first = asyncio.create_task(debouncer.debounce("u", "m0"))
@@ -117,8 +119,9 @@ class TestInboundDebouncer:
     @pytest.mark.asyncio
     async def test_max_buffered_flushes_immediately(self):
         """Reaching max_buffered flushes without waiting."""
-        from praisonai_bot.bots._debounce import InboundDebouncer
-        debouncer = InboundDebouncer(debounce_ms=5000, max_buffered=3)
+        from praisonai_bot.bots import _debounce
+        with patch.object(_debounce, "_MAX_BUFFERED", 3):
+            debouncer = _debounce.InboundDebouncer(debounce_ms=5000)
         tasks = [asyncio.create_task(debouncer.debounce("u", str(i))) for i in range(3)]
         results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=1.0)
         assert results == ["0\n1\n2"] * 3
@@ -127,7 +130,7 @@ class TestInboundDebouncer:
     def test_default_max_wait_is_multiple_of_debounce(self):
         from praisonai_bot.bots._debounce import InboundDebouncer
         assert InboundDebouncer(debounce_ms=1000)._max_wait_s == 5.0
-        assert InboundDebouncer(debounce_ms=1000, max_wait_ms=0)._max_wait_s == 0
+        assert InboundDebouncer(debounce_ms=0)._max_wait_s == 0
 
 
 class TestBotConfigDebounce:
