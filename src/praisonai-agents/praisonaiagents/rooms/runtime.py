@@ -47,9 +47,6 @@ class RoomConfig:
         planner: Planner selector; ``"round_robin"`` -> :class:`RoundRobinRoomPlanner`.
         max_rounds: Hard cap on turn-taking rounds (passed to the planner).
         max_messages: Hard cap on messages per human-initiated activity.
-        lead: Optional roster id that alone answers an unaddressed human
-            message and routes it by ``@``-mentioning the right agents
-            (default ``None``: every agent answers).
     """
 
     name: str
@@ -57,7 +54,6 @@ class RoomConfig:
     planner: str = "round_robin"
     max_rounds: int = 3
     max_messages: int = 20
-    lead: Optional[str] = None
 
     def __post_init__(self) -> None:
         if not self.name:
@@ -70,17 +66,11 @@ class RoomConfig:
             raise ValueError("max_rounds must be >= 1")
         if self.max_messages < 1:
             raise ValueError("max_messages must be >= 1")
-        if self.lead is not None and self.lead not in self.roster:
-            raise ValueError(
-                f"RoomConfig {self.name!r}: lead {self.lead!r} is not in the roster"
-            )
 
     def build_planner(self) -> RoomTurnPlannerProtocol:
         """Construct the planner this config selects."""
         return RoundRobinRoomPlanner(
-            max_rounds=self.max_rounds,
-            max_messages=self.max_messages,
-            lead=self.lead,
+            max_rounds=self.max_rounds, max_messages=self.max_messages
         )
 
     def to_dict(self) -> Dict[str, object]:
@@ -91,7 +81,6 @@ class RoomConfig:
             "planner": self.planner,
             "max_rounds": self.max_rounds,
             "max_messages": self.max_messages,
-            "lead": self.lead,
         }
 
     @classmethod
@@ -130,7 +119,6 @@ class RoomConfig:
             planner=str(data.get("planner", "round_robin")),
             max_rounds=int(data.get("max_rounds", 3)),
             max_messages=int(data.get("max_messages", 20)),
-            lead=None if data.get("lead") is None else str(data["lead"]),
         )
 
 

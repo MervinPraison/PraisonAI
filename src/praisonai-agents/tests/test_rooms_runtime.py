@@ -167,21 +167,10 @@ def test_room_custom_planner_gets_current_round_not_roundrobin_labels():
     assert all(e.round == 0 for e in produced)
 
 
-# ── Issue #6289: lead routing through the runtime ─────────────────────────
+# ── Issue #6289: human @mention routing through the runtime ───────────────
 
 
-def test_room_config_lead_roundtrip_and_validation():
-    import pytest as _pytest
-
-    cfg = RoomConfig.from_dict("s", {"agents": ["lead", "coder"], "lead": "lead"})
-    assert cfg.lead == "lead"
-    assert cfg.build_planner().lead == "lead"
-    assert cfg.to_dict()["lead"] == "lead"
-    with _pytest.raises(ValueError):
-        RoomConfig(name="s", roster=["coder"], lead="ghost")
-
-
-def test_room_lead_routes_unaddressed_message():
+def test_room_human_mention_routes_only_to_addressed_agent():
     import asyncio as _asyncio
 
     calls = []
@@ -193,13 +182,16 @@ def test_room_lead_routes_unaddressed_message():
         return reply
 
     room = Room(
-        RoomConfig(name="s", roster=["lead", "coder", "writer"], lead="lead"),
+        RoomConfig(name="s", roster=["writer", "coder", "reviewer"]),
         {
-            "lead": agent("lead", "@coder please"),
-            "coder": agent("coder", "done"),
             "writer": agent("writer", "words"),
+            "coder": agent("coder", "done @reviewer"),
+            "reviewer": agent("reviewer", "lgtm"),
         },
     )
-    turns = _asyncio.run(room.on_message(RoomEvent(speaker="user", content="fix bug")))
-    assert calls == ["lead", "coder"]
-    assert [(t.speaker, t.round) for t in turns] == [("lead", 0), ("coder", 1)]
+    turns = _asyncio.run(
+        room.on_message(RoomEvent(speaker="user", content="Please fix it @coder."))
+    )
+    # No fan-out: only the addressed agent opens, then its own handoff.
+    assert calls == ["coder", "reviewer"]
+    assert [(t.speaker, t.round) for t in turns] == [("coder", 0), ("reviewer", 1)]

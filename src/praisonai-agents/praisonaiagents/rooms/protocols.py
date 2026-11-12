@@ -100,11 +100,8 @@ class RoundRobinRoomPlanner:
     Turn-taking rules:
 
     * **Round 0 (opening).** If the human message ``@``-mentions rostered
-      agents, only those speak (in roster order). Otherwise, when ``lead`` is
-      set, only the lead speaks — it answers or hands off by ``@``-mentioning
-      the right agents, and that handoff is an ordinary transcript message, so
-      a restart reproduces the exact same routing without calling a model again.
-      If neither applies, every rostered agent speaks once, in roster order.
+      agents, only those speak (in roster order). Otherwise every rostered
+      agent speaks once, in roster order.
     * **Later rounds (addressing).** A round *N+1* admits only the agents that
       were ``@``-mentioned by an agent during round *N* — and only agents that
       are actually on the roster. Mentions are honoured in roster order and an
@@ -121,7 +118,6 @@ class RoundRobinRoomPlanner:
 
     max_rounds: int = 3
     max_messages: int = 20
-    lead: Optional[str] = None
 
     def __post_init__(self) -> None:
         if self.max_rounds < 1:
@@ -201,9 +197,9 @@ class RoundRobinRoomPlanner:
         """Return the agents admitted to round ``rnd`` of the current activity.
 
         ``activity`` starts at the human message that opened it. Round 0 admits
-        the agents that human ``@``-mentioned, else the ``lead`` (if rostered),
-        else the whole roster. A later round admits only agents ``@``-mentioned
-        by an agent during the previous round.
+        the agents that human ``@``-mentioned, else the whole roster. A later
+        round admits only agents ``@``-mentioned by an agent during the
+        previous round.
         """
         if rnd == 0:
             opener = activity[0] if activity and activity[0].speaker not in roster_set else None
@@ -211,8 +207,6 @@ class RoundRobinRoomPlanner:
                 addressed = [n for n in extract_mentions(opener.content) if n in roster_set]
                 if addressed:
                     return addressed
-            if self.lead is not None and self.lead in roster_set:
-                return [self.lead]
             return roster_list
         admitted: List[str] = []
         for ev in activity:
