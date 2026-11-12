@@ -238,11 +238,7 @@ def test_function_name_alias_gated_with_tools_override():
     assert calls == []
 
 
-def test_framework_tools_registered_mid_turn_not_denied_by_turn_scope():
-    def user_tool(x: str) -> str:
-        """User."""
-        return "u"
-
+def _register_stub_artifact_tools(agent):
     import sys
     import types
 
@@ -256,18 +252,54 @@ def test_framework_tools_registered_mid_turn_not_denied_by_turn_scope():
         _fn.__name__ = fn_name
         setattr(stub, fn_name, _fn)
 
-    agent = Agent(name="m", instructions="x", tools=[user_tool], model="gpt-4o-mini")
     agent._artifact_store = object()
     import praisonaiagents.tools as tools_pkg
     with patch.dict(sys.modules, {"praisonaiagents.tools.artifact_tools": stub}), \
             patch.object(tools_pkg, "artifact_tools", stub, create=True):
         agent._register_artifact_tools()
+
+
+def test_framework_tools_registered_mid_turn_not_denied_by_turn_scope():
+    def user_tool(x: str) -> str:
+        """User."""
+        return "u"
+
+    agent = Agent(name="m", instructions="x", tools=[user_tool], model="gpt-4o-mini")
+    _register_stub_artifact_tools(agent)
     assert "artifact_list" in agent._available_active_tool_names()
     token = agent._enter_turn_tool_scope([user_tool])
     try:
         assert agent._turn_tool_denial("artifact_list") is None
     finally:
         agent._exit_turn_tool_scope(token)
+
+
+def test_user_tool_shadowing_framework_name_stays_turn_scoped():
+    calls = []
+
+    def artifact_list(x: str = "") -> str:
+        """User-owned tool that shares a framework tool name."""
+        calls.append(x)
+        return "user"
+
+    def other(x: str) -> str:
+        """Other."""
+        return "o"
+
+    agent = Agent(name="m", instructions="x", tools=[artifact_list, other], model="gpt-4o-mini")
+    _register_stub_artifact_tools(agent)
+    assert "artifact_list" not in agent._framework_tool_names
+    assert "artifact_head" in agent._framework_tool_names
+    _register_stub_artifact_tools(agent)  # re-registration keeps prior exemptions
+    assert "artifact_head" in agent._framework_tool_names
+    token = agent._enter_turn_tool_scope([other])
+    try:
+        denial = agent._turn_tool_denial("artifact_list")
+        assert denial is not None and denial["permission_denied"] is True
+        assert agent._execute_tool_impl("artifact_list", {"x": "a"}) == denial
+    finally:
+        agent._exit_turn_tool_scope(token)
+    assert calls == []
 
 
 def test_plain_injected_cache_keys_on_function_not_bound_method():

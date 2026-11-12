@@ -478,13 +478,15 @@ class ToolExecutionMixin:
             
             # Only add if not already present
             existing_tool_names = {getattr(t, '__name__', str(t)) for t in self.tools}
-            self._framework_tool_names = frozenset(
-                getattr(t, '__name__', str(t)) for t in tools_to_add
-            )
+            # Exempt from the per-turn ``tools=`` scope only the framework tools
+            # actually appended; a same-named user tool stays caller-scoped.
+            added = set(getattr(self, '_framework_tool_names', ()))
             for tool in tools_to_add:
                 tool_name = getattr(tool, '__name__', str(tool))
                 if tool_name not in existing_tool_names:
                     self.tools.append(tool)
+                    added.add(tool_name)
+            self._framework_tool_names = frozenset(added)
             
             logging.debug("Registered artifact retrieval tools")
         except Exception as e:
