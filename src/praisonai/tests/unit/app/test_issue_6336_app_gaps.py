@@ -31,6 +31,40 @@ def test_serve_allows_loopback_or_authenticated(monkeypatch, cfg):
     assert run.call_args.kwargs["host"] == cfg["host"]
 
 
+def test_serve_checks_key_of_cached_app(monkeypatch):
+    pytest.importorskip("uvicorn")
+    pytest.importorskip("fastapi")
+    from praisonai import AgentOS
+    from praisonaiagents import AgentOSConfig
+
+    monkeypatch.delenv("PRAISONAI_AGENTOS_API_KEY", raising=False)
+    app = AgentOS(agents=[], config=AgentOSConfig(host="0.0.0.0"))
+    app.get_app()  # built without auth
+    app.config.api_key = "late"
+    with patch("uvicorn.run") as run, pytest.raises(RuntimeError, match="API key"):
+        app.serve()
+    run.assert_not_called()
+
+
+def test_cli_yaml_keeps_legacy_agent_options(tmp_path):
+    from click.testing import CliRunner
+    from praisonai.cli.commands.app import app_command
+
+    cfg = tmp_path / "app.yaml"
+    cfg.write_text("agents:\n  - name: a\n    retrieval_config: {top_k: 3}\n")
+    captured = {}
+
+    def fake_init(self, name=None, agents=None, config=None, **kw):
+        captured.update(agents=agents)
+
+    with patch("praisonai.app.agentos.AgentOS.__init__", fake_init), \
+         patch("praisonai.app.agentos.AgentOS.serve", lambda self: None):
+        result = CliRunner().invoke(app_command, ["--config", str(cfg)])
+    assert result.exit_code == 0, result.output
+    assert "Ignoring unknown agent keys" not in result.output
+    assert len(captured["agents"]) == 1
+
+
 def test_default_host_is_loopback():
     from praisonaiagents import AgentOSConfig
     assert AgentOSConfig().host == "127.0.0.1"

@@ -295,6 +295,8 @@ class DaemonManager:
             # Copy-and-truncate rather than rename: the daemon holds an
             # inherited O_APPEND fd bound to this inode, so a rename would
             # leave it writing to the rotated file forever.
+            # Like logrotate's copytruncate, lines written between the copy
+            # and the truncate are lost; acceptable for best-effort daemon logs.
             import shutil
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             rotated_file = self.log_dir / f"{name}.log.{timestamp}"

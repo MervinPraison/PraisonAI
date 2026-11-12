@@ -97,6 +97,7 @@ class AgentOS:
         
         # FastAPI app instance (lazy initialized)
         self._app = None
+        self._app_token = None
     
     def _create_app(self) -> Any:
         """Create the FastAPI application."""
@@ -133,6 +134,9 @@ class AgentOS:
         self._register_routes(app)
 
         launch_token = self.config.api_key or os.environ.get("PRAISONAI_AGENTOS_API_KEY")
+        # The key is captured at build time; serve() checks this, not the
+        # current config, so a key set after get_app() cannot fake auth.
+        self._app_token = launch_token
         if launch_token:
             from .._api_auth import build_api_key_middleware
             app.add_middleware(build_api_key_middleware(launch_token, {"/health", "/"}))
@@ -613,8 +617,9 @@ class AgentOS:
         enable_reload = reload or self.config.reload
 
         # Fail closed: never expose agents on a non-loopback bind without auth.
-        launch_token = self.config.api_key or os.environ.get("PRAISONAI_AGENTOS_API_KEY")
-        if not launch_token and (resolved_host or "").lower() not in _LOOPBACK_HOSTS:
+        # Check the key baked into the app actually served (it may be cached).
+        app = self.get_app()
+        if not self._app_token and (resolved_host or "").lower() not in _LOOPBACK_HOSTS:
             raise RuntimeError(
                 f"AgentOS refuses to serve on non-loopback host {resolved_host!r} "
                 "without an API key. Set AgentOSConfig(api_key=...) or "
@@ -644,7 +649,7 @@ class AgentOS:
             )
 
         uvicorn.run(
-            self.get_app(),
+            app,
             host=resolved_host,
             port=resolved_port,
             log_level=self.config.log_level,

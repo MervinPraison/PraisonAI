@@ -143,6 +143,8 @@ def _load_app_config(config_path: str, console) -> tuple:
                 n for n, prm in inspect.signature(Agent.__init__).parameters.items()
                 if n != 'self' and prm.kind not in (prm.VAR_POSITIONAL, prm.VAR_KEYWORD)
             }
+            # Deprecated options Agent still accepts via **legacy_kwargs.
+            agent_keys |= set(getattr(Agent, '_LEGACY_AGENT_PARAMS', {}))
             
             for agent_data in agents_config:
                 if not isinstance(agent_data, dict):
