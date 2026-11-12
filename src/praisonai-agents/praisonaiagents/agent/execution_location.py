@@ -31,6 +31,7 @@ _PLACE_WORDS = {
     "flyio": "a Fly.io machine",
     "tenki": "a Tenki cloud sandbox",
     "novita": "a Novita cloud sandbox",
+    "boxd": "a boxd cloud machine",
     "ssh": "a remote machine over SSH",
     "anthropic": "Anthropic's cloud",
 }

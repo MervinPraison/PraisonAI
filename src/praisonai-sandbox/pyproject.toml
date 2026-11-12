@@ -1,7 +1,7 @@
 [project]
 name = "praisonai-sandbox"
 version = "0.1.21"
-description = "Where PraisonAI agents run code — Docker, E2B, Modal, Daytona, Fly.io, Tenki, Novita, Sandlock, SSH and subprocess, as both single sandboxes and multi-instance compute providers."
+description = "Where PraisonAI agents run code: Docker, E2B, Modal, Daytona, Fly.io, Tenki, Novita, boxd, Sandlock, SSH and subprocess, as both single sandboxes and multi-instance compute providers."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10,<3.15"
@@ -45,8 +45,11 @@ daytona = [
 novita = [
     "novita-sandbox>=2.0.0",
 ]
+boxd = [
+    "boxd>=0.3.1",
+]
 all = [
-    "praisonai-sandbox[docker,e2b,sandlock,ssh,modal,daytona,novita,tenki,flyio]",
+    "praisonai-sandbox[docker,e2b,sandlock,ssh,modal,daytona,novita,boxd,tenki,flyio]",
 ]
 
 [project.urls]

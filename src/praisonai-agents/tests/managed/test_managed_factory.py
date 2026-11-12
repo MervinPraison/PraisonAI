@@ -656,7 +656,7 @@ class TestComputeProviderWiring:
     def test_resolve_accepts_sandbox_only_places(self):
         """The whole point of the merged registry: one vocabulary everywhere."""
         from praisonai.integrations.managed_local import LocalManagedAgent
-        for place in ("sandlock", "subprocess", "novita"):
+        for place in ("sandlock", "subprocess", "novita", "boxd"):
             agent = LocalManagedAgent(provider="local", tools_run_on=place)
             assert agent.compute_provider is not None, place
 

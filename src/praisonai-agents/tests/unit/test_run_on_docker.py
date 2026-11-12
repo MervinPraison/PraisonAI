@@ -212,7 +212,7 @@ def test_run_on_covers_the_cloud_places_too():
     from praisonaiagents.agent.placement import managed_runtimes
 
     runtimes = set(managed_runtimes())
-    for place in ("anthropic", "docker", "modal", "e2b", "daytona", "flyio", "tenki", "novita"):
+    for place in ("anthropic", "docker", "modal", "e2b", "daytona", "flyio", "tenki", "novita", "boxd"):
         assert place in runtimes, f"run_on={place!r} should host a whole agent"
 
 

@@ -26,8 +26,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Isolated code execution backends (docker, sandlock, ssh, novita, e2b, modal,
-# daytona) used by Agent(tools_run_on=...) and execute_code(run_in=...).
+# Isolated code execution backends (docker, sandlock, ssh, novita, boxd, e2b,
+# modal, daytona) used by Agent(tools_run_on=...) and execute_code(run_in=...).
 #
 # praisonai-sandbox depends on praisonaiagents, so this extra closes a cycle.
 # That is deliberate and safe here: it is an *optional* edge, so nothing

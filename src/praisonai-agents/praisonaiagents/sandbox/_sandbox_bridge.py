@@ -18,6 +18,7 @@ _EXTRA_HINTS = {
     "modal": "pip install praisonai-sandbox[modal]",
     "daytona": "pip install praisonai-sandbox[daytona]",
     "novita": "pip install praisonai-sandbox[novita]",
+    "boxd": "pip install praisonai-sandbox[boxd]",
 }
 
 

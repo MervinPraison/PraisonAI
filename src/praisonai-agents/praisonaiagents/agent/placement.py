@@ -42,7 +42,7 @@ ManagedRuntime = Literal["anthropic"]
 
 ToolPlace = Literal[
     "local", "subprocess", "sandlock", "docker", "e2b",
-    "modal", "daytona", "flyio", "tenki", "novita", "ssh",
+    "modal", "daytona", "flyio", "tenki", "novita", "boxd", "ssh",
 ]
 
 

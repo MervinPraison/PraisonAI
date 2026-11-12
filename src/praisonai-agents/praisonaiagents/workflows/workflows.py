@@ -1039,7 +1039,7 @@ class AgentFlow:
     # ============================================================
     # Union[str, ComputeProviderProtocol] - where each step's shell/file tools
     # run: "docker", "e2b", "modal", "daytona", "flyio", "tenki", "local",
-    # "subprocess", "sandlock", "ssh", "novita".
+    # "subprocess", "sandlock", "ssh", "novita", "boxd".
     # Every step shares ONE sandbox and one working directory, so a file written
     # by one step is visible to later steps. Orchestration -- routing, parallel,
     # repeat -- stays local, and so does the thinking. Pass a configured

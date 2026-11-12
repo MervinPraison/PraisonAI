@@ -861,7 +861,7 @@ class AgentTeam(SpawnAnnounceProtocol):
         learn: Optional[Any] = None,  # Union[bool, LearnConfig] - continuous learning
         # Union[str, ComputeProviderProtocol] - where every agent's shell/file
         # tools run: "docker", "e2b", "modal", "daytona", "flyio", "tenki",
-        # "local", "subprocess", "sandlock", "ssh", "novita". The team shares
+        # "local", "subprocess", "sandlock", "ssh", "novita", "boxd". The team shares
         # ONE sandbox and one working directory, so files written by one agent
         # are visible to the others. Orchestration and thinking stay local.
         # Pass a configured provider instance to customise resources.

@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 # point, so a hardcoded tuple silently withheld contributed backends from
 # tools_run_on=. `capsule` was the live example -- it ships from
 # praisonai-plugins, worked with run_in=, and was invisible to tools_run_on=.
-_SANDBOX_ONLY_FLOOR = ("subprocess", "sandlock", "ssh", "novita")
+_SANDBOX_ONLY_FLOOR = ("subprocess", "sandlock", "ssh", "novita", "boxd")
 
 
 def sandbox_only_names() -> tuple:

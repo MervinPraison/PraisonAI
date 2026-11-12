@@ -34,7 +34,7 @@ _PROVIDERS = {
 # import is `praisonai_sandbox.compute.*`: point the hint at the lightweight
 # package that owns the module, not the heavy wrapper. Reaching E2B through
 # praisonai-sandbox[e2b] resolves 58 packages against 143 through praisonai.
-# Sandbox-only places (novita/sandlock/ssh) resolve through the
+# Sandbox-only places (novita/boxd/sandlock/ssh) resolve through the
 # SandboxComputeAdapter and only need `praisonai-sandbox`.
 _EXTRA_HINTS = {
     "e2b": "pip install 'praisonai-sandbox[e2b]'",
@@ -42,6 +42,7 @@ _EXTRA_HINTS = {
     "daytona": "pip install 'praisonai-sandbox[daytona]'",
     "docker": "pip install 'praisonai-sandbox[docker]'",
     "novita": "pip install 'praisonai-sandbox[novita]'",
+    "boxd": "pip install 'praisonai-sandbox[boxd]'",
     "sandlock": "pip install 'praisonai-sandbox[sandlock]'",
     "ssh": "pip install 'praisonai-sandbox[ssh]'",
     # flyio and tenki need a credential rather than an SDK; flyio speaks plain

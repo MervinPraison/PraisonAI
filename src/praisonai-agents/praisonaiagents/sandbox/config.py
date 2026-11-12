@@ -166,6 +166,13 @@ class SandboxConfig:
         )
 
     @classmethod
+    def boxd(cls) -> "SandboxConfig":
+        """Create a boxd sandbox configuration."""
+        return cls(
+            sandbox_type="boxd",
+        )
+
+    @classmethod
     def capsule(cls) -> "SandboxConfig":
         """Create a Capsule sandbox configuration.
 

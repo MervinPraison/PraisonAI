@@ -232,7 +232,7 @@ def test_sandbox_backends_from_plugins_are_selectable():
     from praisonaiagents.managed._sandbox_adapter import sandbox_only_names
 
     names = set(sandbox_only_names())
-    assert {"subprocess", "sandlock", "ssh", "novita"} <= names, "the floor must hold"
+    assert {"subprocess", "sandlock", "ssh", "novita", "boxd"} <= names, "the floor must hold"
 
     # Anything the compute registry already provides keeps its richer
     # implementation rather than being downgraded to the one-instance adapter.

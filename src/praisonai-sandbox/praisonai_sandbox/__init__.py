@@ -1,7 +1,7 @@
 """
 Sandbox implementations for PraisonAI.
 
-Provides Docker, subprocess, sandlock, SSH, Modal, Daytona, E2B, and Novita sandbox for safe code execution.
+Provides Docker, subprocess, sandlock, SSH, Modal, Daytona, E2B, Novita, and boxd sandbox for safe code execution.
 """
 
 from typing import TYPE_CHECKING
@@ -17,6 +17,7 @@ if TYPE_CHECKING:
     from .daytona import DaytonaSandbox
     from .e2b import E2BSandbox
     from .novita import NovitaSandbox
+    from .boxd import BoxdSandbox
 
 
 def __getattr__(name: str):
@@ -45,6 +46,9 @@ def __getattr__(name: str):
     if name == "NovitaSandbox":
         from .novita import NovitaSandbox
         return NovitaSandbox
+    if name == "BoxdSandbox":
+        from .boxd import BoxdSandbox
+        return BoxdSandbox
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -57,5 +61,6 @@ __all__ = [
     "DaytonaSandbox",
     "E2BSandbox",
     "NovitaSandbox",
+    "BoxdSandbox",
     "__version__",
 ]

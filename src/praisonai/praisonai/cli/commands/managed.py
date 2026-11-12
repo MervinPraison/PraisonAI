@@ -666,7 +666,7 @@ def ids_restore(
 # nothing to reclaim; "ssh" is someone else's machine, which is not ours to
 # stop; "sandlock" is a process, not an instance; adapter-backed places have no
 # cross-process registry to enumerate (see SandboxComputeAdapter).
-_PS_EXCLUDED = frozenset({"local", "subprocess", "sandlock", "ssh", "native", "novita"})
+_PS_EXCLUDED = frozenset({"local", "subprocess", "sandlock", "ssh", "native", "novita", "boxd"})
 
 
 def _ps_providers() -> tuple:

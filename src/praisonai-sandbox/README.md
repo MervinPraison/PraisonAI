@@ -1,6 +1,6 @@
 # praisonai-sandbox
 
-Isolated agent code execution for PraisonAI — Docker, subprocess, E2B, Modal, Novita, Sandlock, and SSH backends.
+Isolated agent code execution for PraisonAI: Docker, subprocess, E2B, Modal, Novita, boxd, Sandlock, and SSH backends.
 
 ## Install
 
@@ -40,6 +40,37 @@ processes after their launching command returns. Always call `shutdown()` in a
 maximum lifetime is a separate safeguard and is not an idle timeout.
 
 Timed-out commands return exit code `124` and preserve any partial output.
+
+## boxd sandbox
+
+Install `praisonai-sandbox[boxd]` and set `BOXD_API_KEY` (create one with
+`boxd auth keys create <name>`). Each `BoxdSandbox` is one
+[boxd](https://boxd.sh?ref=PraisonAI) machine, a full Ubuntu VM with Python 3,
+created with `isolated=True` and deleted by `stop()`.
+
+```python
+from praisonaiagents import Agent
+
+agent = Agent(name="builder", instructions="You build things.", tools_run_on="boxd")
+```
+
+Or directly:
+
+```python
+from praisonai_sandbox import BoxdSandbox
+
+sandbox = BoxdSandbox(region="fra")  # or BOXD_REGION; BOXD_ORG picks the org
+try:
+    result = await sandbox.execute("print('hello from boxd')")
+finally:
+    await sandbox.stop()
+```
+
+`vcpu` and `memory` pick the machine size (1/`"4G"`, 2/`"8G"`, 4/`"16G"`,
+8/`"32G"`; default: your org's size). `from_snapshot` starts from a saved
+snapshot instead of the base image. A command that runs past
+`ResourceLimits.timeout_seconds` returns `status=TIMEOUT` and is killed in the
+machine.
 
 ## Console script
 

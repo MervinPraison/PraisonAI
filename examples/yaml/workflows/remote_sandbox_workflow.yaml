@@ -8,7 +8,7 @@
 # on your machine, and the sandbox is torn down when the run finishes.
 #
 # Places: docker | e2b | modal | daytona | flyio | tenki | local
-#         subprocess | sandlock | ssh | novita
+#         subprocess | sandlock | ssh | novita | boxd
 #   - docker needs a local Docker daemon and nothing else
 #   - e2b / modal / daytona / flyio need that provider's API key
 #   - sandlock is a kernel-enforced local boundary (Linux 6.12+)

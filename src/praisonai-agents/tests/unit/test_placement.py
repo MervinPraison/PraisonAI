@@ -117,7 +117,7 @@ def test_the_two_scopes_are_reported_differently():
 
 def test_the_sandbox_only_backends_are_reachable():
     """sandlock is the only real local boundary and was unreachable before."""
-    for place in ("sandlock", "subprocess", "ssh", "novita"):
+    for place in ("sandlock", "subprocess", "ssh", "novita", "boxd"):
         assert place in tool_places(), f"{place} must be selectable"
 
 

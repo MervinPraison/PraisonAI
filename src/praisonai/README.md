@@ -418,7 +418,8 @@ from praisonaiagents import Agent
 # A. Only the TOOLS move. Thinking stays on your machine.
 agent = Agent(name="builder", instructions="You build things.",
               tools_run_on="docker")   # docker | e2b | modal | daytona | flyio
-                                       # tenki | sandlock | ssh | novita | subprocess
+                                       # tenki | sandlock | ssh | novita | boxd
+                                       # subprocess
 
 # B. The WHOLE agent moves — model calls, loop and tools
 agent = Agent(name="teacher", instructions="You teach.", run_on="anthropic")  # hosted

@@ -88,6 +88,24 @@ async def test_daytona_live_execute():
 
 
 @pytest.mark.asyncio
+@pytest.mark.skipif(not os.getenv("BOXD_API_KEY"), reason="BOXD_API_KEY not set")
+async def test_boxd_live_execute():
+    from praisonai_sandbox import BoxdSandbox
+
+    sandbox = BoxdSandbox()
+    if not sandbox.is_available:
+        pytest.skip("boxd not available (missing boxd SDK or API key)")
+
+    await sandbox.start()
+    try:
+        result = await sandbox.execute("print('boxd-live-ok')")
+        assert "boxd-live-ok" in (result.stdout or "")
+    finally:
+        await sandbox.stop()
+        await sandbox.cleanup()
+
+
+@pytest.mark.asyncio
 async def test_sandbox_manager_subprocess_live():
     from praisonaiagents.sandbox import SandboxConfig, SandboxManager
 
