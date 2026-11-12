@@ -11,16 +11,13 @@ without changing application code.
 DRY: All backends implement StorageBackendProtocol for consistent interface.
 """
 
-import hashlib
 import json
 import os
-import re
 import time
 import threading
 import tempfile
 from praisonaiagents._logging import get_logger
 from pathlib import Path
-from urllib.parse import unquote
 from typing import Any, Dict, List, Optional
 
 from ..paths import get_storage_dir, get_storage_path
@@ -29,9 +26,6 @@ logger = get_logger(__name__)
 
 # Default storage directory (uses centralized paths - DRY)
 DEFAULT_STORAGE_DIR = str(get_storage_dir())
-
-# Filename stem used for keys too long for the filesystem (see _key_to_path).
-_LONG_KEY = re.compile(r"(.*)%~([0-9a-f]{64})", re.S)
 
 class FileBackend:
     """
@@ -72,63 +66,10 @@ class FileBackend:
         self.storage_dir.mkdir(parents=True, exist_ok=True)
     
     def _key_to_path(self, key: str) -> Path:
-        """Convert key to file path.
-
-        Reversible percent-encoding, so distinct keys never share a file
-        (``a@b.com`` vs ``a_b.com`` used to collide), ``list_keys`` returns
-        the real keys and separators/``..`` cannot leave the directory
-        (Issue #6266). ``safe_join``'s truncation is deliberately not used: its
-        shortened name is an alias a caller could pass to reach another key's
-        file. With an empty suffix ``.`` is encoded too so records never look
-        like they carry an extension. Records written under the old lossy name
-        are still found by load/exists/delete (see ``_existing_path``) and are
-        moved to the new name on the next save.
-
-        A name over the 255-byte filename limit becomes ``<key prefix>%~<sha256>``,
-        so prefix searches still find it. No escaped key can contain a raw
-        ``%~``, so it cannot alias another key, and that listed form maps back
-        to the same file.
-        """
-        from ..utils.atomic_io import _escape
-
-        def enc(text: str) -> str:
-            stem = _escape(text)
-            return stem if self.suffix else stem.replace(".", "%2E")
-
-        def size(text: str) -> int:
-            return len(text.encode("utf-8", "surrogatepass"))
-
-        key = str(key)
-        hashed = _LONG_KEY.fullmatch(key)
-        if hashed:
-            return self.storage_dir / f"{enc(hashed.group(1))}%~{hashed.group(2)}{self.suffix}"
-        stem = enc(key)
-        budget = 255 - size(self.suffix)
-        if size(stem) > budget:
-            tag = "%~" + hashlib.sha256(key.encode("utf-8", "surrogatepass")).hexdigest()
-            n = min(len(key), budget)
-            while n and size(enc(key[:n])) + size(tag) > budget:
-                n -= 1
-            stem = enc(key[:n]) + tag
-        return self.storage_dir / f"{stem}{self.suffix}"
-
-    def _legacy_path(self, key: str) -> Optional[Path]:
-        """Pre-#6266 lossy filename for ``key``, or None if it is the same file."""
-        safe = "".join(c if c.isalnum() or c in "-_" else "_" for c in str(key))
-        name = f"{safe}{self.suffix}"
-        if len(name.encode("utf-8", "surrogatepass")) > 255:
-            return None
-        path = self.storage_dir / name
-        return None if path == self._key_to_path(key) else path
-
-    def _existing_path(self, key: str) -> Path:
-        """New-format path, falling back to an existing legacy-named record."""
-        path = self._key_to_path(key)
-        if not path.exists():
-            legacy = self._legacy_path(key)
-            if legacy is not None and legacy.exists():
-                return legacy
-        return path
+        """Convert key to file path."""
+        # Sanitize key for filesystem
+        safe_key = "".join(c if c.isalnum() or c in "-_" else "_" for c in key)
+        return self.storage_dir / f"{safe_key}{self.suffix}"
 
     def _path_to_key(self, file_path: Path) -> Optional[str]:
         """Recognize records using the full configured suffix."""
@@ -136,23 +77,20 @@ class FileBackend:
             return None
         if self.suffix:
             if file_path.name.endswith(self.suffix):
-                return unquote(file_path.name[:-len(self.suffix)])
+                return file_path.name[:-len(self.suffix)]
             return None
         # Preserve the existing no-extension selection for an empty suffix.
-        return unquote(file_path.name) if not file_path.suffix else None
+        return file_path.name if not file_path.suffix else None
     
     def save(self, key: str, data: Dict[str, Any]) -> None:
         """Save data with the given key."""
         with self._lock:
             file_path = self._key_to_path(key)
-            # Migrate a legacy-named record only when no new-format file exists.
-            legacy = None if file_path.exists() else self._legacy_path(key)
-            for path in (file_path, legacy):
-                if path is not None and path in self._unreadable_paths:
-                    if path.exists():
-                        raise OSError(f"Refusing to overwrite unreadable record: {path}")
-                    self._unreadable_paths.discard(path)
-
+            if file_path in self._unreadable_paths:
+                if file_path.exists():
+                    raise OSError(f"Refusing to overwrite unreadable record: {file_path}")
+                self._unreadable_paths.discard(file_path)
+            
             # Atomic write via temp file
             try:
                 with tempfile.NamedTemporaryFile(
@@ -169,8 +107,6 @@ class FileBackend:
                         json.dump(data, f, default=str, ensure_ascii=False)
                 
                 os.replace(temp_path, file_path)
-                if legacy is not None and legacy.exists():
-                    legacy.unlink()
             except Exception as e:
                 logger.error(f"Failed to save {key}: {e}")
                 try:
@@ -186,8 +122,8 @@ class FileBackend:
         A successful reload or deletion permits writes again. Returning None
         for a failed read must not let a caller persist defaults over its source.
         """
+        file_path = self._key_to_path(key)
         with self._lock:
-            file_path = self._existing_path(key)
             if not file_path.exists():
                 self._unreadable_paths.discard(file_path)
                 return None
@@ -204,8 +140,8 @@ class FileBackend:
     def delete(self, key: str) -> bool:
         """Delete data by key."""
         with self._lock:
-            file_path = self._existing_path(key)
-
+            file_path = self._key_to_path(key)
+            
             if file_path.exists():
                 try:
                     file_path.unlink()
@@ -230,7 +166,7 @@ class FileBackend:
     
     def exists(self, key: str) -> bool:
         """Check if a key exists."""
-        return self._existing_path(key).exists()
+        return self._key_to_path(key).exists()
     
     def clear(self) -> int:
         """Clear all data. Returns number of items deleted."""
