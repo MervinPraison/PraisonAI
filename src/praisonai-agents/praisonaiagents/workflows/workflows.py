@@ -4024,9 +4024,9 @@ CONCISE SUMMARY:"""
         # agent turn still running after timeout/fail_fast/caller exit stop at
         # its next cancel check instead of running on unseen (Issue #6266).
         from ..agent.chat_mixin import _stop_scope
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers)
         abandon_scope = _stop_scope()
         abandon_scope.__enter__()
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers)
         try:
             future_to_idx = {}
             for idx, step in enumerate(parallel_step.steps):
