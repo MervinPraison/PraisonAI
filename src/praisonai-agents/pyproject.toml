@@ -52,9 +52,6 @@ parallel-search = [
 memory = [
     "chromadb>=1.0.0",
     "litellm>=1.83.14,<1.106",  # 1.106 requires mcp>=2.2; mcp is pinned <2
-    # botocore (litellm -> boto3) needs python-dateutil<3; uncapped, pip picks
-    # dateutil 4.x, then backtracks into a pandas sdist that fails to build.
-    "python-dateutil>=2.8.2,<3",
 ]
 
 knowledge = [
@@ -73,9 +70,6 @@ graph = [
 # Add LLM dependencies
 llm = [
     "litellm>=1.83.14,<1.106",  # 1.106 requires mcp>=2.2; mcp is pinned <2
-    # botocore (litellm -> boto3) needs python-dateutil<3; uncapped, pip picks
-    # dateutil 4.x, then backtracks into a pandas sdist that fails to build.
-    "python-dateutil>=2.8.2,<3",
     "pydantic>=2.10.0"
 ]
 
