@@ -1933,23 +1933,28 @@ class AgentTeam(SpawnAnnounceProtocol):
                         "this AgentTeam and has no result"
                     )
 
+        # Iterative DFS so long dependency chains don't hit the recursion limit.
         order, done, visiting = [], set(), set()
-
-        def visit(t):
-            if id(t) in done:
-                return
-            if id(t) in visiting:
-                raise ValueError(f"Circular task dependency involving '{t.name}'")
-            visiting.add(id(t))
-            for d in deps(t):
-                if id(d) in member_ids:
-                    visit(d)
-            visiting.discard(id(t))
-            done.add(id(t))
-            order.append(t)
-
-        for t in tasks:
-            visit(t)
+        for root in tasks:
+            if id(root) in done:
+                continue
+            visiting.add(id(root))
+            stack = [(root, iter(deps(root)))]
+            while stack:
+                t, it = stack[-1]
+                for d in it:
+                    if id(d) not in member_ids or id(d) in done:
+                        continue
+                    if id(d) in visiting:
+                        raise ValueError(f"Circular task dependency involving '{d.name}'")
+                    visiting.add(id(d))
+                    stack.append((d, iter(deps(d))))
+                    break
+                else:
+                    stack.pop()
+                    visiting.discard(id(t))
+                    done.add(id(t))
+                    order.append(t)
         return order
 
     def _depends_on_pending(self, task, pending):
