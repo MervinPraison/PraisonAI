@@ -71,9 +71,6 @@ class TemplateSecurity:
     """
     
     CONFIG_FILE = ".praison/security.yaml"
-
-    # Directories ignored by validation and checksumming
-    _SKIP_DIRS = frozenset({"__pycache__", ".git", ".svn", ".hg", "node_modules", ".venv", "venv"})
     
     def __init__(self, config: Optional[SecurityConfig] = None):
         """
@@ -215,17 +212,10 @@ class TemplateSecurity:
         else:
             raise ValueError(f"Unsupported algorithm: {algorithm}")
         
-        # Hash every file, including dotfiles (``.env``, ``.praisonrc``, ...),
-        # keyed by its relative path so moves/renames change the digest. Only
-        # VCS/cache directories are skipped (same set as validation).
         for file_path in sorted(directory.rglob("*")):
-            if not file_path.is_file():
-                continue
-            rel = file_path.relative_to(directory)
-            if any(part in self._SKIP_DIRS for part in rel.parts[:-1]):
-                continue
-            hasher.update(rel.as_posix().encode())
-            hasher.update(file_path.read_bytes())
+            if file_path.is_file() and not file_path.name.startswith("."):
+                hasher.update(file_path.name.encode())
+                hasher.update(file_path.read_bytes())
         
         return hasher.hexdigest()
     
@@ -282,8 +272,9 @@ class TemplateSecurity:
         errors = []
         total_size = 0
         
-        SKIP_DIRS = self._SKIP_DIRS
-
+        # Directories to skip during validation
+        SKIP_DIRS = {"__pycache__", ".git", ".svn", ".hg", "node_modules", ".venv", "venv"}
+        
         for file_path in directory.rglob("*"):
             if file_path.is_file():
                 # Skip files in excluded directories

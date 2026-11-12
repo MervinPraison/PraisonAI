@@ -5,6 +5,7 @@ Handles fetching templates from remote sources (GitHub, HTTP).
 All network operations are lazy and only performed when explicitly requested.
 """
 
+import hashlib
 import json
 import os
 import tempfile
@@ -338,13 +339,15 @@ class TemplateRegistry:
         )
     
     def _calculate_dir_checksum(self, directory: Path) -> str:
-        """Calculate SHA256 checksum of directory contents.
-
-        Delegates to :meth:`TemplateSecurity.calculate_checksum` so cached
-        hashes cover dotfiles and relative paths, same as verification.
-        """
-        from .security import SecurityConfig, TemplateSecurity
-        return TemplateSecurity(SecurityConfig()).calculate_checksum(directory)
+        """Calculate SHA256 checksum of directory contents."""
+        hasher = hashlib.sha256()
+        
+        for file_path in sorted(directory.rglob("*")):
+            if file_path.is_file() and not file_path.name.startswith("."):
+                hasher.update(file_path.name.encode())
+                hasher.update(file_path.read_bytes())
+        
+        return hasher.hexdigest()
     
     def list_remote_templates(
         self,

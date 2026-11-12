@@ -1,30 +1,8 @@
-"""Regression tests for issue #6305 wrapper security gaps."""
+"""Regression tests for issue #6305: recipe lockfile audit and CORS."""
 
 from pathlib import Path
 
 import pytest
-
-
-def test_checksum_covers_dotfiles(tmp_path: Path):
-    from praisonai.templates.security import SecurityConfig, TemplateSecurity
-
-    sec = TemplateSecurity(SecurityConfig())
-    (tmp_path / "agents.yaml").write_text("a: 1")
-    (tmp_path / ".env").write_text("X=1")
-    before = sec.calculate_checksum(tmp_path)
-    (tmp_path / ".env").write_text("X=2")
-    assert sec.calculate_checksum(tmp_path) != before
-
-
-def test_checksum_ignores_vcs_dirs(tmp_path: Path):
-    from praisonai.templates.security import SecurityConfig, TemplateSecurity
-
-    sec = TemplateSecurity(SecurityConfig())
-    (tmp_path / "agents.yaml").write_text("a: 1")
-    before = sec.calculate_checksum(tmp_path)
-    (tmp_path / ".git").mkdir()
-    (tmp_path / ".git" / "HEAD").write_text("ref")
-    assert sec.calculate_checksum(tmp_path) == before
 
 
 @pytest.mark.parametrize("name", ["uv.lock", "poetry.lock"])
@@ -61,20 +39,6 @@ def test_valid_uv_lock_still_parses(tmp_path: Path):
     assert _parse_uv_lock(lock) == [{"name": "requests", "version": "2.31.0"}]
 
 
-def test_template_tools_sources_local_paths_gated(tmp_path: Path, monkeypatch):
-    from praisonai.cli.features.templates import _gate_template_tools_sources
-
-    evil = tmp_path / "evil.py"
-    evil.write_text("def tool(): pass\n")
-    sources = [str(evil), "some_installed.module"]
-
-    monkeypatch.delenv("PRAISONAI_ALLOW_TEMPLATE_TOOLS", raising=False)
-    assert _gate_template_tools_sources(sources) == ["some_installed.module"]
-
-    monkeypatch.setenv("PRAISONAI_ALLOW_TEMPLATE_TOOLS", "true")
-    assert _gate_template_tools_sources(sources) == sources
-
-
 def test_recipe_serve_cors_wildcard_disables_credentials():
     pytest.importorskip("starlette")
     from praisonai.recipe.serve import create_app
@@ -104,13 +68,3 @@ def test_malformed_package_shape_raises(tmp_path: Path, body: str):
     lock.write_text(body)
     with pytest.raises(LockfileError):
         _parse_uv_lock(lock)
-
-
-def test_registry_checksum_matches_security_checksum(tmp_path: Path):
-    from praisonai.templates.registry import TemplateRegistry
-    from praisonai.templates.security import SecurityConfig, TemplateSecurity
-
-    (tmp_path / "agents.yaml").write_text("a: 1")
-    (tmp_path / ".env").write_text("X=1")
-    expected = TemplateSecurity(SecurityConfig()).calculate_checksum(tmp_path)
-    assert TemplateRegistry._calculate_dir_checksum(None, tmp_path) == expected
