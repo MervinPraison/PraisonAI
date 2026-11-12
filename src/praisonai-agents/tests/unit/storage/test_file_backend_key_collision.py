@@ -77,3 +77,34 @@ def test_over_long_dotted_keys_round_trip_with_empty_suffix(tmp_path):
         (listed,) = b.list_keys(prefix=".x.")
         assert b.load(listed) == {"v": 1}
         assert b.clear() == 1
+
+
+def test_legacy_named_records_stay_readable_and_migrate(tmp_path):
+    # Files written by the pre-#6266 sanitiser ("@", ":", "." -> "_").
+    (tmp_path / "alice_example_com.json").write_text('{"v": "A"}', encoding="utf-8")
+    (tmp_path / "team_session_1.json").write_text('{"v": "T"}', encoding="utf-8")
+    b = FileBackend(str(tmp_path))
+
+    assert b.load("alice@example.com") == {"v": "A"}
+    assert b.exists("team:session.1")
+    assert b.load("team:session.1") == {"v": "T"}
+
+    b.save("alice@example.com", {"v": "A2"})
+    assert not (tmp_path / "alice_example_com.json").exists()
+    assert b.load("alice@example.com") == {"v": "A2"}
+    assert b.list_keys() == ["alice@example.com", "team_session_1"]
+
+    assert b.delete("team:session.1")
+    assert not b.exists("team:session.1")
+    assert b.list_keys() == ["alice@example.com"]
+
+
+def test_new_record_wins_over_legacy_file(tmp_path):
+    b = FileBackend(str(tmp_path))
+    b.save("a@b", {"v": "new"})
+    (tmp_path / "a_b.json").write_text('{"v": "legacy"}', encoding="utf-8")
+    assert b.load("a@b") == {"v": "new"}
+    # With a new-format file present, save does not touch the legacy name.
+    b.save("a@b", {"v": "new2"})
+    assert b.load("a_b") == {"v": "legacy"}
+    assert b.load("a@b") == {"v": "new2"}
