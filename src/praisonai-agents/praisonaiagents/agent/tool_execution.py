@@ -38,6 +38,14 @@ _active_turn_cancel: "contextvars.ContextVar[Optional[tuple]]" = contextvars.Con
     "praisonai_active_turn_cancel", default=None
 )
 
+# Per-turn tool allow-set as ``(agent, frozenset_of_names)``. Set by
+# ``chat``/``achat`` only when the caller passed ``tools=[...]`` (e.g. a handoff
+# ``intersect`` policy) so the subset is enforced at dispatch, not only in the
+# schema sent to the model.
+_turn_tool_scope: "contextvars.ContextVar[Optional[tuple]]" = contextvars.ContextVar(
+    "praisonai_turn_tool_scope", default=None
+)
+
 # Exceptions a tool body raises about its *input* (bad value, missing key or
 # path). They are terminal for the same arguments and say nothing about the
 # tool's health, so they are never retried and never count toward the per-tool
@@ -3760,6 +3768,12 @@ class ToolExecutionMixin:
     def _execute_tool_impl(self, function_name, arguments):
         """Internal tool execution implementation."""
 
+        # Gate on the tool that will actually run, not the raw model-emitted name.
+        function_name = self._canonical_tool_name(function_name)
+        turn_denial = self._turn_tool_denial(function_name)
+        if turn_denial is not None:
+            return turn_denial
+
         # Check if approval is required for this tool (protocol-driven)
         try:
             result = self._check_tool_approval_sync(function_name, arguments)
@@ -3907,6 +3921,8 @@ class ToolExecutionMixin:
                     bind_target = func
                     keyed_arguments = _with_durable_key(func, arguments)
                     casted_arguments = self._cast_arguments(func, keyed_arguments)
+                    from ..tools.injected import inject_into_plain_callable
+                    casted_arguments = inject_into_plain_callable(func, casted_arguments)
                     bind_arguments = casted_arguments
                     return _resolve_result(func(**casted_arguments))
             except Exception as e:
@@ -4145,6 +4161,15 @@ class ToolExecutionMixin:
         to the same key (e.g. 'WebSearch' -> 'web_search'), else ``None``.
         Shared by the sync and async tool-resolution paths.
         """
+        match = self._self_repair_tool_match(function_name)
+        if match is None:
+            return None
+        matched_name, tool = match
+        logging.debug(f"Self-repaired tool name {function_name!r} -> {matched_name!r}")
+        return tool
+
+    def _self_repair_tool_match(self, function_name):
+        """Return ``(canonical_name, tool)`` for a unique self-repair match, else ``None``."""
         def _norm(n):
             return str(n).lower().replace('_', '').replace('-', '').replace(' ', '')
 
@@ -4153,10 +4178,82 @@ class ToolExecutionMixin:
             normalised.setdefault(_norm(name), []).append((name, tool))
         match = normalised.get(_norm(function_name))
         if match and len(match) == 1:
-            matched_name, tool = match[0]
-            logging.debug(f"Self-repaired tool name {function_name!r} -> {matched_name!r}")
-            return tool
+            return match[0]
         return None
+
+    def _canonical_tool_name(self, function_name):
+        """Resolve a model-emitted tool name to the name of the tool that will run.
+
+        Permission/approval/policy gates must see the same name dispatch uses,
+        otherwise a case/separator variant (``DeleteFile``) that self-repair maps
+        to ``delete_file`` would bypass a ``delete_file`` deny rule.
+        """
+        if not isinstance(function_name, str):
+            return function_name
+        for name, _tool in self._iter_active_named_tools():
+            if name == function_name:
+                return function_name
+        if getattr(self, '_allow_global_tools', False):
+            try:
+                from ..tools.registry import get_registry
+                if get_registry().get(function_name) is not None:
+                    return function_name
+            except ImportError:
+                pass
+        match = self._self_repair_tool_match(function_name)
+        return match[0] if match is not None else function_name
+
+    def _turn_tool_denial(self, function_name):
+        """Error dict when ``function_name`` is an agent tool outside this turn's ``tools=``."""
+        scope = _turn_tool_scope.get()
+        if scope is None or scope[0] is not self or function_name in scope[1]:
+            return None
+        if not any(name == function_name for name, _t in self._iter_active_named_tools()):
+            return None
+        return {
+            "error": f"Tool '{function_name}' is not available in this turn",
+            "permission_denied": True,
+        }
+
+    def _enter_turn_tool_scope(self, tools):
+        """Bind the per-turn ``tools=`` allow-set for dispatch; ``None`` = inherit."""
+        if tools is None:
+            return None
+        return _turn_tool_scope.set((self, self._turn_tool_names(tools)))
+
+    @staticmethod
+    def _exit_turn_tool_scope(token):
+        if token is not None:
+            _turn_tool_scope.reset(token)
+
+    def _turn_tool_names(self, tools):
+        """Names of every tool in a per-turn ``tools=`` list (MCP containers expanded)."""
+        MCP = None
+        try:
+            from ..mcp.mcp import MCP
+        except ImportError:
+            pass
+        names = set()
+        for tool in tools if isinstance(tools, (list, tuple)) else [tools]:
+            if isinstance(tool, str):
+                names.add(tool)
+            elif isinstance(tool, dict):
+                fn = tool.get('function') if isinstance(tool.get('function'), dict) else tool
+                if isinstance(fn.get('name'), str):
+                    names.add(fn['name'])
+            elif MCP is not None and isinstance(tool, MCP):
+                try:
+                    for sub in tool:
+                        sub_name = self._get_tool_display_name(sub)
+                        if sub_name:
+                            names.add(sub_name)
+                except Exception:
+                    pass
+            else:
+                name = self._get_tool_display_name(tool)
+                if name:
+                    names.add(name)
+        return frozenset(names)
 
     def _resolve_callable_signature_target(self, func):
         """Return the callable whose signature describes ``func``'s arguments."""

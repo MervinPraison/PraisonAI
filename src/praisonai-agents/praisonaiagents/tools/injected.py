@@ -184,6 +184,38 @@ def get_injected_params(func) -> Dict[str, Any]:
     return injected
 
 
+_plain_injected_cache: Dict[Any, Dict[str, Any]] = {}
+_PLAIN_INJECTED_CACHE_MAX = 1024
+
+
+def inject_into_plain_callable(func, kwargs: Dict[str, Any], state: Optional[AgentState] = None) -> Dict[str, Any]:
+    """Fill ``Injected[...]`` params for an undecorated callable.
+
+    ``@tool`` (FunctionTool) injects on its own call, so it is skipped here.
+    Detected params are cached per function so the hot path stays cheap.
+    """
+    if hasattr(func, "injected_params") or not callable(func):
+        return kwargs
+    try:
+        params = _plain_injected_cache.get(func)
+    except TypeError:  # unhashable callable
+        params = get_injected_params(func)
+    else:
+        if params is None:
+            params = get_injected_params(func)
+            if len(_plain_injected_cache) < _PLAIN_INJECTED_CACHE_MAX:
+                _plain_injected_cache[func] = params
+    if not params:
+        return kwargs
+    if state is None:
+        return inject_state_into_kwargs(kwargs, params)
+    token = _current_state.set(state)
+    try:
+        return inject_state_into_kwargs(kwargs, params)
+    finally:
+        _current_state.reset(token)
+
+
 def inject_state_into_kwargs(kwargs: Dict[str, Any], injected_params: Dict[str, Any]) -> Dict[str, Any]:
     """Inject state values into kwargs for injected parameters.
     
@@ -201,7 +233,10 @@ def inject_state_into_kwargs(kwargs: Dict[str, Any], injected_params: Dict[str, 
     result = kwargs.copy()
     
     for param_name, annotation in injected_params.items():
-        if param_name not in result:
+        # Inside an agent run the framework state is authoritative: a value the
+        # model supplied (prompt injection) must never override it. Outside an
+        # injection context, an explicit caller value is kept.
+        if state is not None or param_name not in result:
             result[param_name] = resolve_injected_value(annotation, state)
     
     return result
