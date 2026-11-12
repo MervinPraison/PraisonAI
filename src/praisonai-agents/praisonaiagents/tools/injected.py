@@ -20,6 +20,7 @@ Usage:
         return f"Query: {query}, Session: {session_id}"
 """
 
+import weakref
 from dataclasses import dataclass, field
 from typing import Any, Dict, Generic, List, Optional, TypeVar, get_type_hints, get_origin, get_args
 from contextvars import ContextVar
@@ -185,8 +186,9 @@ def get_injected_params(func) -> Dict[str, Any]:
     return injected
 
 
-_plain_injected_cache: Dict[Any, Dict[str, Any]] = {}
-_PLAIN_INJECTED_CACHE_MAX = 1024
+# Keyed weakly on the underlying function (bound methods share ``__func__``),
+# so per-call LangChain/CrewAI instances are neither pinned nor re-scanned.
+_plain_injected_cache: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
 
 
 def inject_into_plain_callable(func, kwargs: Dict[str, Any], state: Optional[AgentState] = None) -> Dict[str, Any]:
@@ -197,15 +199,15 @@ def inject_into_plain_callable(func, kwargs: Dict[str, Any], state: Optional[Age
     """
     if hasattr(func, "injected_params") or not callable(func):
         return kwargs
+    key = getattr(func, "__func__", func)
     try:
-        params = _plain_injected_cache.get(func)
-    except TypeError:  # unhashable callable
+        params = _plain_injected_cache.get(key)
+    except TypeError:  # not weak-referenceable / unhashable
         params = get_injected_params(func)
     else:
         if params is None:
             params = get_injected_params(func)
-            if len(_plain_injected_cache) < _PLAIN_INJECTED_CACHE_MAX:
-                _plain_injected_cache[func] = params
+            _plain_injected_cache[key] = params
     if not params:
         return kwargs
     if state is None:

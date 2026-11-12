@@ -1777,8 +1777,8 @@ Write the complete compiled report:"""
             logging.info(f"Executing async tool: {function_name} with arguments: {arguments}")
 
             # Gate on the tool that will actually run (parity with the sync path).
-            if tools_override is None and hasattr(self, "_canonical_tool_name"):
-                function_name = self._canonical_tool_name(function_name)
+            if hasattr(self, "_canonical_tool_name"):
+                function_name = self._canonical_tool_name(function_name, tools_override)
             if hasattr(self, "_turn_tool_denial"):
                 turn_denial = self._turn_tool_denial(function_name)
                 if turn_denial is not None:

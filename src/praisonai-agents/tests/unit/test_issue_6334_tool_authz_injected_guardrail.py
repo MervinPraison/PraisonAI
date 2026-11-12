@@ -219,3 +219,66 @@ def test_class_tool_run_method_gets_injected_state():
 
     agent = Agent(name="k", instructions="x", tools=[LookupTool], model="gpt-4o-mini")
     assert agent.execute_tool("LookupTool", {"query": "q"}) == "cls:True"
+
+
+def test_function_name_alias_gated_with_tools_override():
+    calls = []
+
+    @tool(name="delete_file")
+    def remove_file(path: str) -> str:
+        """Delete a file."""
+        calls.append(path)
+        return "deleted"
+
+    agent = Agent(name="l", instructions="x", tools=[], model="gpt-4o-mini",
+                  approval={"permissions": {"delete_*": "deny"}})
+    result = asyncio.run(agent.execute_tool_async("remove_file", {"path": "/tmp/o"},
+                                                  tools_override=[remove_file]))
+    assert result.get("permission_denied")
+    assert calls == []
+
+
+def test_framework_tools_registered_mid_turn_not_denied_by_turn_scope():
+    def user_tool(x: str) -> str:
+        """User."""
+        return "u"
+
+    import sys
+    import types
+
+    # Stub module: registration only needs ``set_artifact_store`` and the callables.
+    stub = types.ModuleType("praisonaiagents.tools.artifact_tools")
+    stub.set_artifact_store = lambda store: None
+    for fn_name in ("artifact_head", "artifact_tail", "artifact_grep",
+                    "artifact_chunk", "artifact_load", "artifact_list"):
+        def _fn(artifact_id: str = "") -> str:
+            return "a"
+        _fn.__name__ = fn_name
+        setattr(stub, fn_name, _fn)
+
+    agent = Agent(name="m", instructions="x", tools=[user_tool], model="gpt-4o-mini")
+    agent._artifact_store = object()
+    import praisonaiagents.tools as tools_pkg
+    with patch.dict(sys.modules, {"praisonaiagents.tools.artifact_tools": stub}), \
+            patch.object(tools_pkg, "artifact_tools", stub, create=True):
+        agent._register_artifact_tools()
+    assert "artifact_list" in agent._available_active_tool_names()
+    token = agent._enter_turn_tool_scope([user_tool])
+    try:
+        assert agent._turn_tool_denial("artifact_list") is None
+    finally:
+        agent._exit_turn_tool_scope(token)
+
+
+def test_plain_injected_cache_keys_on_function_not_bound_method():
+    from praisonaiagents.tools import injected as inj
+
+    class LookupTool:
+        def _run(self, query: str, state: Injected[dict]) -> str:
+            return "x"
+
+    before = len(inj._plain_injected_cache)
+    for _ in range(5):
+        inj.inject_into_plain_callable(LookupTool()._run, {"query": "q"})
+    assert len(inj._plain_injected_cache) == before + 1
+    assert LookupTool.__dict__["_run"] in inj._plain_injected_cache

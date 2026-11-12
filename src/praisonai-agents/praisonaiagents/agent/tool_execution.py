@@ -478,6 +478,9 @@ class ToolExecutionMixin:
             
             # Only add if not already present
             existing_tool_names = {getattr(t, '__name__', str(t)) for t in self.tools}
+            self._framework_tool_names = frozenset(
+                getattr(t, '__name__', str(t)) for t in tools_to_add
+            )
             for tool in tools_to_add:
                 tool_name = getattr(tool, '__name__', str(tool))
                 if tool_name not in existing_tool_names:
@@ -4185,14 +4188,22 @@ class ToolExecutionMixin:
             return match[0]
         return None
 
-    def _canonical_tool_name(self, function_name):
+    def _canonical_tool_name(self, function_name, tools=None):
         """Resolve a model-emitted tool name to the name of the tool that will run.
 
         Permission/approval/policy gates must see the same name dispatch uses,
         otherwise a case/separator variant (``DeleteFile``) that self-repair maps
-        to ``delete_file`` would bypass a ``delete_file`` deny rule.
+        to ``delete_file`` would bypass a ``delete_file`` deny rule. ``tools`` is
+        an explicit lookup list (async ``tools_override``); dispatch then does
+        no self-repair, so only the ``__name__`` alias is mapped.
         """
         if not isinstance(function_name, str):
+            return function_name
+        if tools is not None:
+            for tool in tools if isinstance(tools, (list, tuple)) else [tools]:
+                name = self._get_tool_display_name(tool)
+                if name == function_name or (name and getattr(tool, '__name__', None) == function_name):
+                    return name
             return function_name
         # Dispatch also accepts a tool's ``__name__`` (e.g. ``@tool(name="delete_file")``
         # on ``def remove_file``); map that alias to the declared name so gates see it.
@@ -4213,6 +4224,9 @@ class ToolExecutionMixin:
         """Error dict when ``function_name`` is an agent tool outside this turn's ``tools=``."""
         scope = _turn_tool_scope.get()
         if scope is None or scope[0] is not self or function_name in scope[1]:
+            return None
+        # Framework tools added mid-turn (artifact retrieval) are not caller-scoped.
+        if function_name in getattr(self, '_framework_tool_names', ()):
             return None
         if not any(name == function_name for name, _t in self._iter_active_named_tools()):
             return None
