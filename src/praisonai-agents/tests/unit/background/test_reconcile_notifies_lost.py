@@ -111,3 +111,26 @@ def test_job_completing_during_scan_is_not_marked_lost(tmp_path):
     assert mgr.get_job_info(job_id).status == JobStatus.COMPLETED
     assert store.get(job_id).status == JobStatus.COMPLETED
     mgr.shutdown()
+
+
+def test_hook_subscriber_may_call_get_job_manager(tmp_path, monkeypatch):
+    """The lazy reconcile fires JOB_COMPLETED outside the global lock."""
+    import threading
+    from praisonaiagents.background import job_manager as jm
+
+    store = _store(tmp_path)
+    _orphan(store, ORIGIN)
+    monkeypatch.setattr(jm, "_global_job_manager", None)
+    monkeypatch.setattr(jm, "_build_default_store", lambda: store)
+    seen = []
+    hook_id = add_hook("job_completed",
+                       lambda inp: seen.append(jm.get_job_manager()) or None)
+    try:
+        t = threading.Thread(target=jm.get_job_manager, daemon=True)
+        t.start()
+        t.join(5)
+        assert not t.is_alive(), "get_job_manager deadlocked in hook subscriber"
+        assert len(seen) == 1 and seen[0] is jm._global_job_manager
+    finally:
+        remove_hook(hook_id)
+        jm._global_job_manager = None

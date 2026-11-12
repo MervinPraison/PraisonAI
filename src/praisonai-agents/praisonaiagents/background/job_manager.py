@@ -713,16 +713,21 @@ def get_job_manager() -> BackgroundJobManager:
     by a prior crash are reconciled to ``LOST`` rather than silently lost.
     """
     global _global_job_manager
+    reconcile = False
     with _global_lock:
         if _global_job_manager is None:
             store = _build_default_store()
             _global_job_manager = BackgroundJobManager(store=store)
-            if store is not None:
-                try:
-                    _global_job_manager.reconcile_on_start()
-                except Exception as e:  # noqa: BLE001 — never crash on startup recovery
-                    logger.debug(
-                        "Background job reconciliation on start failed "
-                        "(non-fatal): %s", e,
-                    )
-        return _global_job_manager
+            reconcile = store is not None
+        manager = _global_job_manager
+    # Outside the lock: reconcile fires JOB_COMPLETED, and a subscriber that
+    # calls get_job_manager() would otherwise deadlock on the plain Lock.
+    if reconcile:
+        try:
+            manager.reconcile_on_start()
+        except Exception as e:  # noqa: BLE001 — never crash on startup recovery
+            logger.debug(
+                "Background job reconciliation on start failed "
+                "(non-fatal): %s", e,
+            )
+    return manager

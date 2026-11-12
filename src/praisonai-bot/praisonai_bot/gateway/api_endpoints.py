@@ -108,9 +108,8 @@ class GatewayApiEndpoints:
         # Lightweight and dependency-free: a background run's status/output
         # survives the originating HTTP request so a client can retrieve it by
         # id later. Each entry also holds the run's InterruptController (for
-        # cancel) and the driving asyncio.Task. Not persisted across restarts:
-        # a restart drops in-flight stored responses (the gateway does not
-        # write them to the run ledger).
+        # cancel) and the driving asyncio.Task. Not persisted across restarts;
+        # the durable-run ledger (Issue #4028) remains the cross-restart store.
         self._responses: Dict[str, dict] = {}
         # Cap the in-process store so a sustained stream of background/stored
         # submissions cannot grow memory without bound in a long-lived gateway
