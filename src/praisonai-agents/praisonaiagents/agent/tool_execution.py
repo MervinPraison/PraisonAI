@@ -77,16 +77,19 @@ def _coerce_value(value, annotation):
     Returns ``value`` unchanged when it cannot be converted.
     """
     import collections.abc as cabc
+    import types
     from typing import get_origin, get_args, Union as _Union
 
     origin, args = get_origin(annotation), get_args(annotation)
-    if origin is _Union:  # Optional[T] / Union[...]
+    if origin is _Union or origin is getattr(types, "UnionType", _Union):  # Optional/Union, X | Y
         members = [a for a in args if a is not type(None)]
         if value is None or any(isinstance(a, type) and isinstance(value, a) for a in members):
             return value
         for arg in members:
             coerced = _coerce_value(value, arg)
-            if coerced is not value:
+            target = get_origin(arg) or arg
+            # Only accept a member's result if it actually produced that type.
+            if coerced is not value and (not isinstance(target, type) or isinstance(coerced, target)):
                 return coerced
         return value
     try:
@@ -101,7 +104,8 @@ def _coerce_value(value, annotation):
             return value
         is_model = hasattr(container, "model_validate")
         if isinstance(value, str) and container is not str and (
-            is_model or issubclass(container, (cabc.Iterable, cabc.Mapping))
+            is_model or dataclasses.is_dataclass(container)
+            or issubclass(container, (cabc.Iterable, cabc.Mapping))
         ):
             stripped = value.strip()
             if stripped[:1] in ('[', '{'):

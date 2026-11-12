@@ -1,7 +1,7 @@
 """Regression tests for issue #6294: tool argument coercion."""
 import asyncio
 from dataclasses import dataclass
-from typing import List, Optional, Set, Tuple
+from typing import List, Optional, Set, Tuple, Union
 
 from pydantic import BaseModel
 
@@ -63,3 +63,13 @@ def test_async_tool_call_casts_arguments():
 
     agent = _agent_with(where)
     assert asyncio.run(agent._execute_tool_async_impl("where", {"address": {"city": "z"}})) == "z"
+
+
+def test_union_edge_cases():
+    # PEP 604 unions are unwrapped like typing.Union
+    assert _coerce_value("[1, 2]", list[int] | None) == [1, 2]
+    assert _coerce_value("3", int | None) == 3
+    # A member that yields the wrong type must not win over a later valid one
+    assert _coerce_value('{"city": "x"}', Union[List[int], Addr]) == Addr(city="x")
+    # Dataclasses accept JSON strings, like models
+    assert _coerce_value('{"x": "4"}', Point) == Point(x=4)
