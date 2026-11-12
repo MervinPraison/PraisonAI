@@ -1,9 +1,0 @@
-# CI-only resolver constraints for install-monorepo-packages.
-#
-# kubernetes 37.0.2 (via chromadb) requires python-dateutil>=3, while every
-# botocore 1.43.x (via litellm -> boto3) requires python-dateutil<3. pip's
-# backtracker then walks botocore and pandas down to pandas 1.4.4 (an sdist
-# that cannot build) instead of stepping kubernetes back to 37.0.1. Pinning the
-# bound botocore already enforces lets pip reject kubernetes 37.0.2 at once.
-# Remove once botocore supports python-dateutil 3.
-python-dateutil<3

@@ -26,9 +26,6 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
-        # Resolver constraints (see constraints.txt for why) — honoured by pip and uv.
-        export PIP_CONSTRAINT="${{ github.action_path }}/constraints.txt"
-        export UV_CONSTRAINT="$PIP_CONSTRAINT"
         WORKSPACE="${GITHUB_WORKSPACE:-$(pwd)}"
         ROOT="${{ inputs.repo-root }}"
         if [ -n "$ROOT" ]; then

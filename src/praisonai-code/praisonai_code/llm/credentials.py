@@ -363,7 +363,7 @@ def ensure_configured_or_onboard(
       first run works before any auth. Honoured only when no explicit model was
       requested. Emits an informational hint on stderr.
     - Keyless + non-interactive/headless → print the actionable
-      ``Run: praisonai-code setup`` hint and raise ``typer.Exit(1)`` (never a raw
+      ``Run: praisonai setup`` hint and raise ``typer.Exit(1)`` (never a raw
       stack trace).
     - Keyless + interactive → offer the ``setup`` wizard, re-check, and either
       return (configured) or raise ``typer.Exit`` (declined / still unconfigured).
@@ -412,7 +412,7 @@ def ensure_configured_or_onboard(
     if local is not None:
         typer.echo(
             f"No cloud key found; using local model {local.model}. "
-            "Run `praisonai-code setup` to add a hosted provider.",
+            "Run `praisonai setup` to add a hosted provider.",
             err=True,
         )
         import os as _os
@@ -428,7 +428,7 @@ def ensure_configured_or_onboard(
             "would be used automatically)"
         )
         typer.echo(
-            f"Error: No API key configured{hint}. Run: praisonai-code setup\n"
+            f"Error: No API key configured{hint}. Run: praisonai setup\n"
             f"or set environment variables like OPENAI_API_KEY{tail}",
             err=True,
         )
@@ -441,7 +441,7 @@ def ensure_configured_or_onboard(
     if not run_setup:
         typer.echo(
             "To configure credentials:\n"
-            "  - Run: praisonai-code setup\n"
+            "  - Run: praisonai setup\n"
             "  - Or set environment variables like OPENAI_API_KEY"
         )
         raise typer.Exit(0)

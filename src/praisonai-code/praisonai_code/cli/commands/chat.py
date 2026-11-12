@@ -220,37 +220,9 @@ def chat_main(
 
     # Both single-prompt and interactive modes run in praisonai-code (the TUI is
     # resident here), so the gate always applies — no wrapper needed (#6271).
-    # Fresh install (no user-chosen model — no --model, recent, or MODEL_NAME /
-    # OPENAI_MODEL_NAME — and no provider configured at all): the resolved model
-    # is only a fallback guess, so gate on *any* provider — a wizard run that
-    # configures Anthropic/Google is accepted — then re-pick a model for
-    # whichever provider is now available. Otherwise gate on the exact model so
-    # a user-chosen model (e.g. MODEL_NAME=ollama/qwen) is never replaced.
-    from praisonai_code.llm.credentials import is_configured
-
-    try:
-        from ..configuration.model_resolver import get_recent_model
-        _recent = get_recent_model()
-    except Exception:
-        _recent = None
-    _user_chose_model = bool(
-        model or _recent
-        or os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL_NAME")
+    resolved_model = ensure_configured_or_onboard(
+        model=resolved_model, interactive=not _headless
     )
-
-    if not _user_chose_model and not is_configured():
-        local_model = ensure_configured_or_onboard(
-            model=None, interactive=not _headless
-        )
-        if local_model is not None:
-            resolved_model = local_model
-        elif not is_configured(resolved_model):
-            from praisonai_code.llm.env import default_model_for_available_provider
-            resolved_model = default_model_for_available_provider()
-    else:
-        resolved_model = ensure_configured_or_onboard(
-            model=resolved_model, interactive=not _headless
-        )
 
     # Handle profiling for single prompt mode. Uses the gate-validated resolved
     # model so profiling exercises the same model the interactive session would.
