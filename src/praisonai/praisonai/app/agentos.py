@@ -13,6 +13,8 @@ import threading
 
 from praisonaiagents import AgentOSConfig, AgentOSProtocol
 
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
 
 def _run_to_dict(record: Any) -> Dict[str, Any]:
     """A RunRecord as JSON. Uses whatever the record exposes rather than
@@ -609,6 +611,15 @@ class AgentOS:
         resolved_host = host or self.config.host
         resolved_port = port or self.config.port
         enable_reload = reload or self.config.reload
+
+        # Fail closed: never expose agents on a non-loopback bind without auth.
+        launch_token = self.config.api_key or os.environ.get("PRAISONAI_AGENTOS_API_KEY")
+        if not launch_token and (resolved_host or "").lower() not in _LOOPBACK_HOSTS:
+            raise RuntimeError(
+                f"AgentOS refuses to serve on non-loopback host {resolved_host!r} "
+                "without an API key. Set AgentOSConfig(api_key=...) or "
+                "PRAISONAI_AGENTOS_API_KEY, or bind to 127.0.0.1."
+            )
 
         if enable_reload:
             # Uvicorn's reload spawns a fresh worker *process* that re-imports
