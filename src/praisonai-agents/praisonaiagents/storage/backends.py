@@ -127,12 +127,10 @@ class FileBackend:
         return self.storage_dir / f".{hashlib.sha256(str(key).encode('utf-8', 'surrogatepass')).hexdigest()}.deleted"
 
     def _existing_path(self, key: str) -> Path:
-        """New-format path, falling back to an existing legacy-named record.
+        """New-format path, else the legacy record unless ``key`` was deleted.
 
-        A legacy name may equally be another key's current record (``a_b.json``
-        is both ``a@b``'s old file and ``a_b``'s file), so the fallback is never
-        used after ``key`` was deleted, and save only removes it once this
-        instance read ``key`` through it.
+        A legacy name may be another key's record (``a_b.json`` is ``a@b``'s
+        old file and ``a_b``'s file), so save only removes one ``key`` read.
         """
         path = self._key_to_path(key)
         if not path.exists() and not self._tombstone(key).exists():
