@@ -124,7 +124,8 @@ class FileBackend:
 
     def _tombstone(self, key: str) -> Path:
         """Hidden marker: ``key`` was deleted, so never fall back to its legacy name."""
-        return self.storage_dir / f".{hashlib.sha256(str(key).encode('utf-8', 'surrogatepass')).hexdigest()}.deleted"
+        digest = hashlib.sha256(str(key).encode("utf-8", "surrogatepass")).hexdigest()
+        return self.storage_dir / f".{digest}~{self.suffix}.deleted"  # per-suffix
 
     def _existing_path(self, key: str) -> Path:
         """New-format path, else the legacy record unless ``key`` was deleted.
@@ -254,15 +255,16 @@ class FileBackend:
         count = 0
         with self._lock:
             for file_path in self.storage_dir.iterdir():
-                if self._path_to_key(file_path) is not None:
+                record = self._path_to_key(file_path) is not None
+                name = file_path.name  # only this suffix's markers (_tombstone)
+                if record or (name.startswith(".") and name.endswith(f"~{self.suffix}.deleted")
+                              and file_path.is_file()):
                     try:
                         file_path.unlink()
                         self._unreadable_paths.discard(file_path)
-                        count += 1
+                        count += record
                     except Exception:
                         pass
-                elif file_path.name.startswith(".") and file_path.name.endswith(".deleted"):
-                    file_path.unlink(missing_ok=True)
             self._legacy_reads.clear()
         return count
 

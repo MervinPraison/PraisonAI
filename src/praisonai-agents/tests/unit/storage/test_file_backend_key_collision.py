@@ -127,3 +127,20 @@ def test_saving_one_key_never_deletes_another_keys_record(tmp_path):
         b.save(second, {"v": second})
         assert FileBackend(str(d)).load(first) == {"v": first}
         assert FileBackend(str(d)).load(second) == {"v": second}
+
+
+def test_deletion_markers_are_per_suffix_and_clear_is_robust(tmp_path):
+    j, t = FileBackend(str(tmp_path)), FileBackend(str(tmp_path), suffix=".txt")
+    j.save("a@b", {"v": "j"})
+    (tmp_path / "a_b.json").write_text('{"v": "jl"}', encoding="utf-8")
+    (tmp_path / "a_b.txt").write_text('{"v": "tl"}', encoding="utf-8")
+    assert j.delete("a@b")
+    assert j.load("a@b") is None
+    assert t.load("a@b") == {"v": "tl"}  # the .json marker does not block .txt
+    t.save("a@b", {"v": "t"})
+    assert t.delete("a@b")
+    (tmp_path / ".cache.deleted").mkdir()  # not a marker: clear() must not stop
+    assert t.clear() == 0
+    assert j.load("a@b") is None  # clearing .txt kept the .json marker
+    assert j.clear() == 1
+    assert sorted(p.name for p in tmp_path.iterdir()) == [".cache.deleted"]
