@@ -619,7 +619,8 @@ class AgentOS:
         # Fail closed: never expose agents on a non-loopback bind without auth.
         # Check the key baked into the app actually served (it may be cached).
         app = self.get_app()
-        if not self._app_token and (resolved_host or "").lower() not in _LOOPBACK_HOSTS:
+        is_loopback = (resolved_host or "").lower() in _LOOPBACK_HOSTS
+        if not self._app_token and not is_loopback:
             raise RuntimeError(
                 f"AgentOS refuses to serve on non-loopback host {resolved_host!r} "
                 "without an API key. Set AgentOSConfig(api_key=...) or "
@@ -632,7 +633,7 @@ class AgentOS:
             "AgentOS binding to %s:%s (auth %s)%s", resolved_host, resolved_port,
             "on" if self._app_token else "off",
             "; set host='0.0.0.0' and an API key to expose (e.g. in Docker)"
-            if resolved_host.lower() in _LOOPBACK_HOSTS else "",
+            if is_loopback else "",
         )
 
         if enable_reload:
