@@ -1249,6 +1249,11 @@ class AgentTeam(SpawnAnnounceProtocol):
                     )
             logger.info(f"Using {len(tasks)} provided tasks")
         
+        # Sequential runs tasks in list order, so order it by depends_on/context.
+        # Workflow/hierarchical keep their order (start task, feedback loops).
+        if process == "sequential":
+            tasks = self._order_tasks_by_dependencies(tasks)
+
         # Add tasks and set their status
         for task in tasks:
             self.add_task(task)
@@ -1906,6 +1911,46 @@ class AgentTeam(SpawnAnnounceProtocol):
             if isinstance(result, BaseException):
                 raise result
         return results
+
+    @staticmethod
+    def _order_tasks_by_dependencies(tasks):
+        """Return ``tasks`` in a stable topological order of ``context``/``depends_on``.
+
+        A list whose dependencies already come first is returned unchanged.
+        Raises ``ValueError`` on a dependency cycle or on a dependency that is
+        neither part of ``tasks`` nor already completed.
+        """
+        member_ids = {id(t) for t in tasks}
+
+        def deps(t):
+            return [d for d in (t.context or []) if isinstance(d, Task) and d is not t]
+
+        for t in tasks:
+            for d in deps(t):
+                if id(d) not in member_ids and getattr(d, "result", None) is None:
+                    raise ValueError(
+                        f"Task '{t.name}' depends on '{d.name}', which is not part of "
+                        "this AgentTeam and has no result"
+                    )
+
+        order, done, visiting = [], set(), set()
+
+        def visit(t):
+            if id(t) in done:
+                return
+            if id(t) in visiting:
+                raise ValueError(f"Circular task dependency involving '{t.name}'")
+            visiting.add(id(t))
+            for d in deps(t):
+                if id(d) in member_ids:
+                    visit(d)
+            visiting.discard(id(t))
+            done.add(id(t))
+            order.append(t)
+
+        for t in tasks:
+            visit(t)
+        return order
 
     def _depends_on_pending(self, task, pending):
         """True if ``task`` depends on a task still pending in the batch.
