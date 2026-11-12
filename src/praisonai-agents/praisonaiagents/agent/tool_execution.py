@@ -92,6 +92,7 @@ def _coerce_value(value, annotation):
             if coerced is not value and (not isinstance(target, type) or isinstance(coerced, target)):
                 return coerced
         return value
+    original = value  # returned whenever conversion does not succeed
     try:
         if annotation is int and isinstance(value, (str, float)) and not isinstance(value, bool):
             return int(float(value))
@@ -119,7 +120,7 @@ def _coerce_value(value, annotation):
         if isinstance(value, (list, tuple)) and not isinstance(value, str):
             if container is tuple and args and Ellipsis not in args:
                 if len(args) != len(value):
-                    return value
+                    return original
                 return tuple(_coerce_value(v, a) for v, a in zip(value, args))
             if container in (set, frozenset, tuple):
                 item_ann = args[0] if args else None
@@ -128,11 +129,12 @@ def _coerce_value(value, annotation):
             if container is list and args:
                 return [_coerce_value(v, args[0]) for v in value]
     except (ValueError, TypeError):
-        return value
+        return original
     except Exception as e:  # e.g. pydantic.ValidationError, json.JSONDecodeError
         logging.debug(f"Could not coerce tool argument to {annotation!r}: {e}")
-        return value
-    return value
+        return original
+    # Keep parsed JSON only if it matches the container (e.g. bare ``list``).
+    return value if isinstance(value, container) else original
 
 
 class _CallableGuardrailAdapter:

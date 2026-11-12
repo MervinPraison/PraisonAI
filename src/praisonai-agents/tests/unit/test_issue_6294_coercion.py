@@ -73,3 +73,11 @@ def test_union_edge_cases():
     assert _coerce_value('{"city": "x"}', Union[List[int], Addr]) == Addr(city="x")
     # Dataclasses accept JSON strings, like models
     assert _coerce_value('{"x": "4"}', Point) == Point(x=4)
+
+
+def test_failed_conversion_returns_original_string():
+    # Parsed JSON must not leak out when the target type is not produced
+    assert _coerce_value('{"town": 1}', Addr) == '{"town": 1}'
+    assert _coerce_value('{"a": 1}', List[int]) == '{"a": 1}'
+    assert _coerce_value("[1, 2]", Tuple[int, int, int]) == "[1, 2]"
+    assert _coerce_value("[1, 2]", list) == [1, 2]
