@@ -138,8 +138,8 @@ _FENCE_RE = re.compile(
     r"[\s\S]*?"                  # body (lazy)
     # Closing fence must sit on its own line (CommonMark): a matching
     # delimiter quoted mid-line inside the block does not end it. Otherwise
-    # the fence runs to end-of-string (fail closed).
-    r"(?:^[ \t]*(?P=fence)[`~]*[ \t]*$|\Z)",
+    # the fence runs to end-of-string (fail closed). ``\r?`` accepts CRLF.
+    r"(?:^[ \t]*(?P=fence)[`~]*[ \t]*\r?$|\Z)",
     re.MULTILINE,
 )
 

@@ -56,6 +56,12 @@ def test_fence_with_inline_delimiter_still_masks_call(monkeypatch):
     assert _run(monkeypatch, reply) == []
 
 
+def test_call_after_crlf_closed_fence_is_recovered(monkeypatch):
+    example = CALL.replace('"x"', '"example"')
+    reply = f"Example:\r\n```\r\n{example}\r\n```\r\nNow: {CALL}"
+    assert _run(monkeypatch, reply) == ["x"]
+
+
 def test_plain_json_answer_is_not_executed(monkeypatch):
     reply = '{"name": "delete_file", "arguments": {"path": "x"}, "format": "<tool_call>"}'
     assert _run(monkeypatch, reply) == []
