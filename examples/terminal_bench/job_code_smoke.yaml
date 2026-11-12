@@ -8,9 +8,9 @@
 # ignored by pydantic, so the older dataset:/agent:/n_concurrent: form runs the
 # default oracle agent on zero tasks — do not use it.
 
+# Harbor 0.22+ registry id (not terminal-bench@2.1 — see RESULTS.md).
 datasets:
-  - name: terminal-bench
-    version: "2.1"
+  - name: terminal-bench/terminal-bench-2-1
     # A small verified subset for a cheap smoke run. Verify against the registry
     # with `harbor datasets list` before editing.
     task_names:
@@ -24,5 +24,6 @@ agents:
     env:
       OPENAI_API_KEY: "${OPENAI_API_KEY}"
 
+agent_setup_timeout_multiplier: 4
 n_concurrent_trials: 2
 n_attempts: 1

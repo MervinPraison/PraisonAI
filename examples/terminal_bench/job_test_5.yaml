@@ -7,12 +7,11 @@
 # before editing.
 
 datasets:
-  - name: terminal-bench
-    version: "2.1"
+  - name: terminal-bench/terminal-bench-2-1
     task_names:
-      - hello-world
-      - fix-permissions
-      - csv-to-parquet
+      - terminal-bench/build-pmars
+      - terminal-bench/bn-fit-modify
+      - terminal-bench/break-filter-js-from-html
 
 agents:
   - import_path: examples.terminal_bench.praisonai_external_agent:PraisonAIExternalAgent

@@ -7,8 +7,7 @@
 # multiple `---` documents make yaml.safe_load raise ComposerError.
 
 datasets:
-  - name: terminal-bench
-    version: "2.1"
+  - name: terminal-bench/terminal-bench-2-1
 
 agents:
   - import_path: examples.terminal_bench.praisonai_external_agent:PraisonAIExternalAgent

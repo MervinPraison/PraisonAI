@@ -11,8 +11,9 @@ This directory contains adapters for benchmarking PraisonAI on **Terminal-Bench 
 Install Harbor and PraisonAI into **one venv** and run from the repo root with `PYTHONPATH=.` so the adapter import path resolves:
 
 ```bash
-pip install harbor
-pip install -e src/praisonai-agents -e src/praisonai
+# Harbor 0.22+ requires Python 3.12+
+pip install "harbor==0.22.0"
+pip install -e src/praisonai-agents -e src/praisonai-code -e src/praisonai
 export PYTHONPATH=.
 ```
 
