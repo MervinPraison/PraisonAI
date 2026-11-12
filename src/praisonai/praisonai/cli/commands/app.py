@@ -59,19 +59,19 @@ def app_command(
         console.print("[yellow]Install with: pip install praisonai[api][/yellow]")
         raise click.Abort()
     
-    # Load agents and server settings from config file if provided
-    agents, server_cfg = [], {}
+    # Load agents from config file if provided
+    agents = []
     if config:
-        agents, server_cfg = _load_app_config(config, console)
+        agents = _load_agents_from_config(config, console)
     
-    # Explicit CLI flags override YAML; YAML overrides CLI defaults.
-    ctx = click.get_current_context()
-    cli_values = dict(name=name, host=host, port=port, reload=reload, debug=debug)
-    for key, value in cli_values.items():
-        if key not in server_cfg or ctx.get_parameter_source(key) != click.core.ParameterSource.DEFAULT:
-            server_cfg[key] = value
-    app_config = AgentOSConfig(**server_cfg)
-    name, host, port, reload = app_config.name, app_config.host, app_config.port, app_config.reload
+    # Create config
+    app_config = AgentOSConfig(
+        name=name,
+        host=host,
+        port=port,
+        reload=reload,
+        debug=debug,
+    )
     
     # Create and start app
     console.print(f"\n[bold green]🚀 Starting {name}[/bold green]")
@@ -102,67 +102,46 @@ def app_command(
         raise click.Abort()
 
 
-def _load_app_config(config_path: str, console) -> tuple:
-    """Load agents and AgentOSConfig fields from a YAML config file.
-
-    Top-level keys matching ``AgentOSConfig`` fields (``api_key``,
-    ``cors_origins``, ...) configure the server; each agent entry is passed
-    to ``Agent`` with every key it accepts. Unknown keys are reported rather
-    than silently dropped.
-    """
-    import dataclasses
-    import inspect
+def _load_agents_from_config(config_path: str, console) -> list:
+    """Load agents from a YAML config file."""
     import yaml
+    from pathlib import Path
     
     try:
         with open(config_path, 'r') as f:
-            config_data = yaml.safe_load(f) or {}
+            config_data = yaml.safe_load(f)
     except Exception as e:
         console.print(f"[red]Error loading config: {e}[/red]")
-        return [], {}
+        return []
     
-    if not isinstance(config_data, dict):
-        return [], {}
-    
-    from praisonaiagents import AgentOSConfig
-    server_keys = {f.name for f in dataclasses.fields(AgentOSConfig)}
-    server_cfg = {k: v for k, v in config_data.items() if k in server_keys}
-    unknown = set(config_data) - server_keys - {'agent', 'agents'}
-    if unknown:
-        console.print(f"[yellow]Ignoring unknown top-level keys: {sorted(unknown)}[/yellow]")
+    if not config_data:
+        return []
     
     agents = []
-    agents_config = config_data.get('agents') or []
+    
+    # Try to load agents from config
+    agents_config = config_data.get('agents', [])
     if not agents_config and 'agent' in config_data:
         agents_config = [config_data['agent']]
     
     if agents_config:
         try:
             from praisonaiagents import Agent
-            agent_keys = {
-                n for n, prm in inspect.signature(Agent.__init__).parameters.items()
-                if n != 'self' and prm.kind not in (prm.VAR_POSITIONAL, prm.VAR_KEYWORD)
-            }
-            # Deprecated options Agent still accepts via **legacy_kwargs.
-            agent_keys |= set(getattr(Agent, '_LEGACY_AGENT_PARAMS', {}))
             
             for agent_data in agents_config:
-                if not isinstance(agent_data, dict):
-                    continue
-                kwargs = {k: v for k, v in agent_data.items() if k in agent_keys}
-                kwargs.setdefault('name', 'Agent')
-                if 'instructions' not in kwargs and 'goal' in agent_data:
-                    kwargs['instructions'] = agent_data['goal']
-                unknown = set(agent_data) - agent_keys
-                if unknown:
-                    console.print(f"[yellow]Ignoring unknown agent keys: {sorted(unknown)}[/yellow]")
-                agent = Agent(**kwargs)
-                agents.append(agent)
-                console.print(f"[green]✓ Loaded agent: {agent.name}[/green]")
+                if isinstance(agent_data, dict):
+                    agent = Agent(
+                        name=agent_data.get('name', 'Agent'),
+                        role=agent_data.get('role'),
+                        instructions=agent_data.get('instructions', agent_data.get('goal', '')),
+                        llm=agent_data.get('llm'),
+                    )
+                    agents.append(agent)
+                    console.print(f"[green]✓ Loaded agent: {agent.name}[/green]")
         except Exception as e:
             console.print(f"[yellow]Warning: Could not load agents from config: {e}[/yellow]")
     
-    return agents, server_cfg
+    return agents
 
 
 # Expose the command under the name the praisonai-code lazy loader looks up

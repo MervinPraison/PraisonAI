@@ -625,6 +625,15 @@ class AgentOS:
                 "without an API key. Set AgentOSConfig(api_key=...) or "
                 "PRAISONAI_AGENTOS_API_KEY, or bind to 127.0.0.1."
             )
+        # Default bind is loopback (unreachable from outside a container);
+        # log it so Docker users see why and how to expose it.
+        import logging
+        logging.getLogger(__name__).warning(
+            "AgentOS binding to %s:%s (auth %s)%s", resolved_host, resolved_port,
+            "on" if self._app_token else "off",
+            "; set host='0.0.0.0' and an API key to expose (e.g. in Docker)"
+            if resolved_host.lower() in _LOOPBACK_HOSTS else "",
+        )
 
         if enable_reload:
             # Uvicorn's reload spawns a fresh worker *process* that re-imports

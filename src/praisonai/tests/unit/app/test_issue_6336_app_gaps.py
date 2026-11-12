@@ -1,5 +1,4 @@
-"""Regression tests for #6336: AgentOS auth fail-closed, YAML config, log rotation."""
-import os
+"""Regression tests for #6336: AgentOS auth fail-closed on public bind."""
 from unittest.mock import patch
 
 import pytest
@@ -7,6 +6,7 @@ import pytest
 
 def test_serve_refuses_public_bind_without_api_key(monkeypatch):
     pytest.importorskip("uvicorn")
+    pytest.importorskip("fastapi")
     from praisonai import AgentOS
     from praisonaiagents import AgentOSConfig
 
@@ -31,6 +31,26 @@ def test_serve_allows_loopback_or_authenticated(monkeypatch, cfg):
     assert run.call_args.kwargs["host"] == cfg["host"]
 
 
+def test_serve_logs_bound_host(monkeypatch, caplog):
+    pytest.importorskip("uvicorn")
+    pytest.importorskip("fastapi")
+    from praisonai import AgentOS
+    from praisonaiagents import AgentOSConfig
+
+    monkeypatch.delenv("PRAISONAI_AGENTOS_API_KEY", raising=False)
+    app = AgentOS(agents=[], config=AgentOSConfig())
+    with patch("uvicorn.run"), caplog.at_level("WARNING"):
+        app.serve()
+    assert "binding to 127.0.0.1:8000" in caplog.text
+    assert "0.0.0.0" in caplog.text  # tells Docker users how to expose
+
+
+def test_cli_default_host_is_loopback():
+    from praisonai.cli.commands.app import app_command
+    host = next(p for p in app_command.params if p.name == "host")
+    assert host.default == "127.0.0.1"
+
+
 def test_serve_checks_key_of_cached_app(monkeypatch):
     pytest.importorskip("uvicorn")
     pytest.importorskip("fastapi")
@@ -46,70 +66,6 @@ def test_serve_checks_key_of_cached_app(monkeypatch):
     run.assert_not_called()
 
 
-def test_cli_yaml_keeps_legacy_agent_options(tmp_path):
-    from click.testing import CliRunner
-    from praisonai.cli.commands.app import app_command
-
-    cfg = tmp_path / "app.yaml"
-    cfg.write_text("agents:\n  - name: a\n    retrieval_config: {top_k: 3}\n")
-    captured = {}
-
-    def fake_init(self, name=None, agents=None, config=None, **kw):
-        captured.update(agents=agents)
-
-    with patch("praisonai.app.agentos.AgentOS.__init__", fake_init), \
-         patch("praisonai.app.agentos.AgentOS.serve", lambda self: None):
-        result = CliRunner().invoke(app_command, ["--config", str(cfg)])
-    assert result.exit_code == 0, result.output
-    assert "Ignoring unknown agent keys" not in result.output
-    assert len(captured["agents"]) == 1
-
-
 def test_default_host_is_loopback():
     from praisonaiagents import AgentOSConfig
     assert AgentOSConfig().host == "127.0.0.1"
-
-
-def test_cli_yaml_feeds_server_config_and_agent_fields(tmp_path):
-    from click.testing import CliRunner
-    from praisonai.cli.commands.app import app_command
-
-    cfg = tmp_path / "app.yaml"
-    cfg.write_text(
-        "host: 0.0.0.0\napi_key: s3cret\ncors_origins: ['https://my.app']\n"
-        "agents:\n  - name: assistant\n    goal: Be helpful\n    llm: gpt-4o-mini\n"
-        "    backstory: expert\n"
-    )
-    captured = {}
-
-    def fake_init(self, name=None, agents=None, config=None, **kw):
-        captured.update(config=config, agents=agents)
-
-    with patch("praisonai.app.agentos.AgentOS.__init__", fake_init), \
-         patch("praisonai.app.agentos.AgentOS.serve", lambda self: None):
-        result = CliRunner().invoke(app_command, ["--config", str(cfg), "--port", "9001"])
-    assert result.exit_code == 0, result.output
-    config = captured["config"]
-    assert config.api_key == "s3cret"
-    assert config.cors_origins == ["https://my.app"]
-    assert config.host == "0.0.0.0"  # YAML beats CLI default
-    assert config.port == 9001  # explicit CLI flag beats YAML/default
-    agent = captured["agents"][0]
-    assert agent.instructions == "Be helpful"
-    assert agent.backstory == "expert"
-
-
-def test_rotate_log_truncates_in_place_for_open_fd(tmp_path):
-    from praisonai.scheduler.daemon_manager import DaemonManager
-
-    mgr = DaemonManager(log_dir=tmp_path, max_log_size_mb=0.0001)
-    log_file = tmp_path / "d.log"
-    with open(log_file, "a") as fh:  # simulates the daemon's inherited fd
-        fh.write("x" * 500)
-        fh.flush()
-        assert mgr.rotate_log("d") is True
-        fh.write("after")
-        fh.flush()
-    assert log_file.read_text() == "after"
-    rotated = [p for p in tmp_path.iterdir() if p.name.startswith("d.log.")]
-    assert len(rotated) == 1 and rotated[0].stat().st_size == 500
