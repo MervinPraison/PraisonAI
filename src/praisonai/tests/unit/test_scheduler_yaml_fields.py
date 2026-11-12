@@ -15,6 +15,7 @@ def test_scheduler_fails_closed_on_dropped_approval():
 
 def test_scheduler_forwards_llm():
     agent = create_agent_from_config({
-        "name": "a", "role": "r", "instructions": "i", "llm": "gpt-4o",
+        "name": "a", "role": "r", "instructions": "i", "llm": "gpt-4.1-nano",
     })
-    assert "gpt-4o" in str(getattr(agent, "llm", ""))
+    # Exact match: the Agent default (gpt-4o-mini) must not satisfy this.
+    assert agent.llm == "gpt-4.1-nano"
