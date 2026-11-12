@@ -15,11 +15,12 @@ Usage:
 """
 
 import collections.abc as _cabc
+import contextvars
 import dataclasses
 import enum
 import inspect
 import logging
-from typing import Any, Union, Literal, get_origin, get_args, get_type_hints, Callable, Dict, Optional, Set
+from typing import Any, Union, Literal, get_origin, get_args, get_type_hints, Callable, Dict, Optional, Set, Tuple
 
 
 def annotation_to_json_schema(annotation: Any) -> dict:
@@ -102,6 +103,8 @@ def annotation_to_json_schema(annotation: Any) -> dict:
 
     # Handle other sequence/set-like containers (tuple, set, Sequence, ...)
     if origin in _ARRAY_TYPES or annotation in _ARRAY_TYPES:
+        if annotation == Tuple[()] or annotation == tuple[()]:
+            return {"type": "array", "maxItems": 0}
         item_args = [a for a in args if a is not Ellipsis]
         if origin is tuple and item_args and Ellipsis not in args:
             # Fixed-length tuple. prefixItems is not accepted by every provider
@@ -164,20 +167,41 @@ _ARRAY_TYPES = (tuple, _cabc.Sequence, _cabc.MutableSequence, _cabc.Iterable,
 _MAPPING_TYPES = (_cabc.Mapping, _cabc.MutableMapping)
 
 
+# Classes currently being expanded, so recursive types stop at a plain object
+_EXPANDING: contextvars.ContextVar = contextvars.ContextVar("_schema_expanding", default=frozenset())
+
+
 def _object_schema_from_hints(cls: type) -> dict:
     """Build an object schema for a dataclass or TypedDict from its type hints."""
+    expanding = _EXPANDING.get()
+    if cls in expanding:
+        return {"type": "object"}
     hints = get_type_hints(cls)
     if dataclasses.is_dataclass(cls):
+        # fields() already drops ClassVar/InitVar; keep only constructor inputs
+        fields = [f for f in dataclasses.fields(cls) if f.init]
+        names = [f.name for f in fields]
         required = [
-            f.name for f in dataclasses.fields(cls)
+            f.name for f in fields
             if f.default is dataclasses.MISSING and f.default_factory is dataclasses.MISSING
         ]
     else:
-        required = [k for k in hints if k in getattr(cls, "__required_keys__", ())]
-    schema = {
-        "type": "object",
-        "properties": {k: annotation_to_json_schema(v) for k, v in hints.items()},
-    }
+        names = list(hints)
+        required_keys = set(getattr(cls, "__required_keys__", ()))
+        # __required_keys__ can be wrong under postponed annotations; trust markers
+        for k, v in get_type_hints(cls, include_extras=True).items():
+            marker = getattr(get_origin(v), "_name", None)
+            if marker == "Required":
+                required_keys.add(k)
+            elif marker == "NotRequired":
+                required_keys.discard(k)
+        required = [k for k in names if k in required_keys]
+    token = _EXPANDING.set(expanding | {cls})
+    try:
+        properties = {k: annotation_to_json_schema(hints[k]) for k in names}
+    finally:
+        _EXPANDING.reset(token)
+    schema = {"type": "object", "properties": properties}
     if required:
         schema["required"] = required
     return schema
