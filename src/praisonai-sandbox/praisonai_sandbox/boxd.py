@@ -10,6 +10,7 @@ import asyncio
 import logging
 import os
 import shlex
+import threading
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Union
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 _INSTALL_HINT = "pip install praisonai-sandbox[boxd]"
 _NAME_PREFIX = "praisonai-"
+_DEFAULT_MAX_LIFETIME = 24 * 60 * 60
 
 
 class BoxdSandbox:
@@ -32,7 +34,8 @@ class BoxdSandbox:
 
     Each sandbox is one boxd machine (a full Ubuntu VM). ``start()`` creates
     it with ``isolated=True``, so it joins no private network and holds no
-    credentials. ``stop()`` deletes it.
+    credentials. ``stop()`` deletes it. If ``stop()`` never runs, boxd deletes
+    the machine itself once it is ``max_lifetime`` seconds old.
 
     Example:
         import os
@@ -57,6 +60,7 @@ class BoxdSandbox:
         vcpu: Optional[int] = None,
         memory: Optional[str] = None,
         from_snapshot: Optional[str] = None,
+        max_lifetime: Optional[int] = _DEFAULT_MAX_LIFETIME,
     ):
         """Initialize the boxd sandbox.
 
@@ -69,6 +73,9 @@ class BoxdSandbox:
                 (defaults to your org's machine size)
             memory: memory, paired with vcpu
             from_snapshot: start from a saved boxd snapshot instead of the base image
+            max_lifetime: seconds after which boxd deletes the machine, whatever
+                it is doing, so a process that dies before ``stop()`` leaves
+                nothing behind (default 24 hours; None or 0 for no limit)
         """
         self.config = config or SandboxConfig(sandbox_type="boxd")
         self._api_key = api_key or os.environ.get("BOXD_API_KEY", "")
@@ -77,9 +84,13 @@ class BoxdSandbox:
         self.vcpu = vcpu
         self.memory = memory
         self.from_snapshot = from_snapshot
+        self.max_lifetime = max_lifetime
         self.machine_id: Optional[str] = None
         self._client = None
         self._is_running = False
+        # A threading lock, not an asyncio one: a sync Agent runs each tool
+        # call on its own event loop, and callers may be on different threads.
+        self._start_lock = threading.Lock()
 
     @property
     def is_available(self) -> bool:
@@ -114,6 +125,16 @@ class BoxdSandbox:
                 f"boxd is not available. Install the boxd SDK and set BOXD_API_KEY. {_INSTALL_HINT}"
             )
 
+        while not self._start_lock.acquire(blocking=False):
+            await asyncio.sleep(0.05)
+        try:
+            # Another caller may have started the machine while this one waited.
+            if not self._is_running:
+                await self._create_and_wait()
+        finally:
+            self._start_lock.release()
+
+    async def _create_and_wait(self) -> None:
         client = self._get_client()
         options: Dict[str, Any] = {"isolated": True}
         if self.org:
@@ -124,9 +145,11 @@ class BoxdSandbox:
             options["memory"] = self.memory
         if self.from_snapshot:
             options["from_snapshot"] = self.from_snapshot
+        if self.max_lifetime:
+            options["delete_after"] = int(self.max_lifetime)
 
         name = f"{_NAME_PREFIX}{uuid.uuid4().hex[:8]}"
-        machine = await asyncio.to_thread(client.machines.create, name, **options)
+        machine = await self._create_machine(client, name, options)
         self.machine_id = machine.id
         try:
             await asyncio.to_thread(client.machines.wait_until_ready, machine.id)
@@ -136,6 +159,31 @@ class BoxdSandbox:
             raise
         self._is_running = True
         logger.info("boxd sandbox started: %s (%s)", name, machine.id)
+
+    async def _create_machine(self, client, name: str, options: Dict[str, Any]):
+        """Create the machine without losing it to a cancel.
+
+        The create call runs in a worker thread, and a cancel cannot stop a
+        thread. So on cancel, wait for the call to finish and delete the
+        machine it made before passing the cancel on.
+        """
+        pending = asyncio.ensure_future(
+            asyncio.to_thread(client.machines.create, name, **options)
+        )
+        try:
+            return await asyncio.shield(pending)
+        except asyncio.CancelledError:
+            while not pending.done():
+                try:
+                    await asyncio.shield(pending)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            if not pending.cancelled() and pending.exception() is None:
+                self.machine_id = pending.result().id
+                await self._delete_machine()
+            raise
 
     async def _delete_machine(self) -> None:
         machine_id = self.machine_id
@@ -288,9 +336,22 @@ class BoxdSandbox:
                 )
             interpreter = "bash" if language == "bash" else "python3"
             parts = [interpreter, remote_path] + list(args)
-            return await self.run_command(parts, limits=limits, env=env)
+            try:
+                return await self.run_command(parts, limits=limits, env=env)
+            finally:
+                await self._remove_file(remote_path)
 
         return await self.execute(code, language=language, limits=limits, env=env)
+
+    async def _remove_file(self, path: str) -> None:
+        if self.machine_id is None:
+            return
+        try:
+            await asyncio.to_thread(
+                self._get_client().machines.files.delete, self.machine_id, path
+            )
+        except Exception as exc:
+            logger.debug("boxd could not remove %s: %s", path, exc)
 
     async def write_file(self, path: str, content: Union[str, bytes]) -> bool:
         """Write a file to the sandbox. Parent directories are created."""

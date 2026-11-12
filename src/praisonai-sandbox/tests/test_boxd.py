@@ -145,6 +145,100 @@ class TestBoxdSandbox:
         assert sandbox.machine_id is None
 
     @pytest.mark.asyncio
+    async def test_start_sets_a_server_side_lifetime(self):
+        async def delete_after(**kwargs):
+            sandbox = BoxdSandbox(api_key="test-key", **kwargs)
+            client = _fake_client()
+            with patch("praisonai_sandbox.boxd.BoxdSandbox.is_available", True):
+                with patch.object(sandbox, "_get_client", return_value=client):
+                    await sandbox.start()
+            return client.machines.create.call_args.kwargs.get("delete_after")
+
+        assert await delete_after() == 24 * 60 * 60
+        assert await delete_after(max_lifetime=600) == 600
+        assert await delete_after(max_lifetime=None) is None
+
+    @pytest.mark.asyncio
+    async def test_start_cancelled_during_create_deletes_the_machine(self):
+        import asyncio
+        import threading
+
+        sandbox = BoxdSandbox(api_key="test-key")
+        client = _fake_client()
+        entered = threading.Event()
+        release = threading.Event()
+
+        def slow_create(name, **kwargs):
+            entered.set()
+            release.wait(5)
+            return SimpleNamespace(id="m-late")
+
+        client.machines.create = MagicMock(side_effect=slow_create)
+        with patch("praisonai_sandbox.boxd.BoxdSandbox.is_available", True):
+            with patch.object(sandbox, "_get_client", return_value=client):
+                task = asyncio.ensure_future(sandbox.start())
+                await asyncio.to_thread(entered.wait, 5)
+                task.cancel()
+                await asyncio.sleep(0.05)
+                # The create call is still in flight; the id arrives only now.
+                release.set()
+                with pytest.raises(asyncio.CancelledError):
+                    await task
+
+        client.machines.delete.assert_called_once_with("m-late")
+        client.machines.wait_until_ready.assert_not_called()
+        assert sandbox.machine_id is None
+        assert not sandbox._is_running
+        assert not sandbox._start_lock.locked()
+
+    @pytest.mark.asyncio
+    async def test_concurrent_start_creates_one_machine(self):
+        import asyncio
+        import time
+
+        sandbox = BoxdSandbox(api_key="test-key")
+        client = _fake_client()
+
+        def slow_create(name, **kwargs):
+            time.sleep(0.2)
+            return SimpleNamespace(id="m-123")
+
+        client.machines.create = MagicMock(side_effect=slow_create)
+        with patch("praisonai_sandbox.boxd.BoxdSandbox.is_available", True):
+            with patch.object(sandbox, "_get_client", return_value=client):
+                await asyncio.gather(sandbox.start(), sandbox.start(), sandbox.run_command("true"))
+
+        assert client.machines.create.call_count == 1
+        assert sandbox._is_running
+
+    def test_concurrent_start_from_two_threads_creates_one_machine(self):
+        import asyncio
+        import threading
+        import time
+
+        sandbox = BoxdSandbox(api_key="test-key")
+        client = _fake_client()
+
+        def slow_create(name, **kwargs):
+            time.sleep(0.2)
+            return SimpleNamespace(id="m-123")
+
+        client.machines.create = MagicMock(side_effect=slow_create)
+        with patch("praisonai_sandbox.boxd.BoxdSandbox.is_available", True):
+            with patch.object(sandbox, "_get_client", return_value=client):
+                threads = [
+                    threading.Thread(target=lambda: asyncio.run(sandbox.start()))
+                    for _ in range(2)
+                ]
+                for thread in threads:
+                    thread.start()
+                for thread in threads:
+                    thread.join(10)
+
+        assert client.machines.create.call_count == 1
+        assert sandbox._is_running
+
+    @pytest.mark.asyncio
     async def test_stop_deletes_a_machine_that_never_became_ready(self):
         sandbox = BoxdSandbox(api_key="test-key")
         sandbox._client = _fake_client()
@@ -210,6 +304,19 @@ class TestBoxdSandbox:
         sandbox._client.machines.exec.side_effect = Exception("exec timed out after 2s")
         result = await sandbox.run_command("sleep 10", limits=ResourceLimits(timeout_seconds=2))
         assert result.status == SandboxStatus.TIMEOUT
+
+    @pytest.mark.asyncio
+    async def test_execute_file_with_args_removes_its_upload(self, tmp_path):
+        script = tmp_path / "job.py"
+        script.write_text("import sys; print(sys.argv[1])")
+        sandbox = _running()
+
+        result = await sandbox.execute_file(str(script), args=["x"])
+
+        assert result.status == SandboxStatus.COMPLETED
+        machine_id, remote_path = sandbox._client.machines.files.upload.call_args.args[:2]
+        assert remote_path.startswith("/tmp/") and remote_path.endswith("_job.py")
+        sandbox._client.machines.files.delete.assert_called_once_with(machine_id, remote_path)
 
     @pytest.mark.asyncio
     async def test_write_and_read_file(self):

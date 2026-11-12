@@ -46,7 +46,9 @@ Timed-out commands return exit code `124` and preserve any partial output.
 Install `praisonai-sandbox[boxd]` and set `BOXD_API_KEY` (create one with
 `boxd auth keys create <name>`). Each `BoxdSandbox` is one
 [boxd](https://boxd.sh?ref=PraisonAI) machine, a full Ubuntu VM with Python 3,
-created with `isolated=True` and deleted by `stop()`.
+created with `isolated=True` and deleted by `stop()`. If the process dies
+before `stop()` runs, boxd deletes the machine once it is `max_lifetime`
+seconds old (default 24 hours), so raise it for longer sessions.
 
 ```python
 from praisonaiagents import Agent
