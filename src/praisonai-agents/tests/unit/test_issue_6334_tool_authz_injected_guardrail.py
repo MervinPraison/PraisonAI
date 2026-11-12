@@ -211,6 +211,19 @@ def test_injected_filled_when_type_hints_unresolvable():
     assert agent.execute_tool("lookup", {"query": "q"}) == "ok:True"
 
 
+def test_postponed_injected_agentstate_resolved_when_hints_unresolvable():
+    from praisonaiagents.tools.injected import AgentState, get_injected_params
+
+    def lookup(query: str, state: "Injected[AgentState]", raw: "Injected[dict]") -> "Undefined":  # noqa: F821
+        """Lookup."""
+        return type(state).__name__ + "/" + type(raw).__name__
+
+    params = get_injected_params(lookup)
+    assert params == {"state": Injected[AgentState], "raw": Injected[dict]}
+    agent = Agent(name="p", instructions="x", tools=[lookup], model="gpt-4o-mini")
+    assert agent.execute_tool("lookup", {"query": "q"}) == "AgentState/dict"
+
+
 def test_class_tool_run_method_gets_injected_state():
     class LookupTool:
         def _run(self, query: str, state: Injected[dict]) -> str:

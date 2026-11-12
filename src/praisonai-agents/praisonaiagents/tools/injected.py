@@ -20,6 +20,7 @@ Usage:
         return f"Query: {query}, Session: {session_id}"
 """
 
+import re
 import weakref
 from dataclasses import dataclass, field
 from typing import Any, Dict, Generic, List, Optional, TypeVar, get_type_hints, get_origin, get_args
@@ -181,6 +182,12 @@ def get_injected_params(func) -> Dict[str, Any]:
         if name == 'return':
             continue
         if is_injected_type(hint):
+            if isinstance(hint, str):
+                # Unresolved postponed annotation: read the inner type by name
+                # (no evaluation) so ``Injected[AgentState]`` still gets state.
+                match = re.search(r"Injected\[\s*([\w.]+)\s*\]", hint)
+                inner = match.group(1).rsplit(".", 1)[-1] if match else None
+                hint = Injected[AgentState] if inner == "AgentState" else Injected[dict]
             injected[name] = hint
     
     return injected
