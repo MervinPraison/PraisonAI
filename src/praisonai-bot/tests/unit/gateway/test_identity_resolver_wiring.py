@@ -84,18 +84,25 @@ class _OwnerBot:
         self.config = SimpleNamespace(owner_user_id=owner)
 
 
+def _resolve(bot, platform, uid):
+    return bot._session._identity_resolver.resolve(platform, uid)
+
+
 def test_owner_handles_unify_across_channels():
-    """Each channel's declared owner resolves to one canonical ``owner`` id."""
+    """Each channel's declared owner resolves to one canonical owner id."""
     from praisonaiagents.session.identity import InMemoryIdentityResolver
 
     resolver = InMemoryIdentityResolver()
     gateway = WebSocketGateway(host="127.0.0.1", port=8903, identity_resolver=resolver)
-    gateway._stamp_identity_resolver(_OwnerBot("telegram", "12345"))
-    gateway._stamp_identity_resolver(_OwnerBot("slack", "U0999"))
-    assert resolver.resolve("telegram", "12345") == "owner"
-    assert resolver.resolve("slack", "U0999") == "owner"
+    tg, sl = _OwnerBot("telegram", "12345"), _OwnerBot("slack", "U0999")
+    gateway._stamp_identity_resolver(tg, "telegram")
+    gateway._stamp_identity_resolver(sl, "slack")
+    assert _resolve(tg, "telegram", "12345") == _resolve(sl, "slack", "U0999")
+    assert _resolve(tg, "telegram", "12345").startswith("owner")
     # Non-owner users keep the safe per-platform default.
-    assert resolver.resolve("telegram", "999") == "telegram:999"
+    assert _resolve(tg, "telegram", "999") == "telegram:999"
+    # Nothing is persisted into the shared resolver.
+    assert resolver.resolve("telegram", "12345") == "telegram:12345"
 
 
 def test_owner_link_never_overwrites_explicit_link():
@@ -104,8 +111,35 @@ def test_owner_link_never_overwrites_explicit_link():
     resolver = InMemoryIdentityResolver()
     resolver.link("telegram", "12345", "alice")
     gateway = WebSocketGateway(host="127.0.0.1", port=8904, identity_resolver=resolver)
-    gateway._stamp_identity_resolver(_OwnerBot("telegram", "12345"))
-    assert resolver.resolve("telegram", "12345") == "alice"
+    bot = _OwnerBot("telegram", "12345")
+    gateway._stamp_identity_resolver(bot, "telegram")
+    assert _resolve(bot, "telegram", "12345") == "alice"
+
+
+def test_replaced_owner_loses_owner_identity():
+    from praisonaiagents.session.identity import InMemoryIdentityResolver
+
+    resolver = InMemoryIdentityResolver()
+    gateway = WebSocketGateway(host="127.0.0.1", port=8905, identity_resolver=resolver)
+    gateway._stamp_identity_resolver(_OwnerBot("telegram", "A"), "telegram")
+    bot = _OwnerBot("telegram", "B")
+    gateway._stamp_identity_resolver(bot, "telegram")  # hot-reload: owner A -> B
+    assert _resolve(bot, "telegram", "A") == "telegram:A"
+    assert _resolve(bot, "telegram", "B").startswith("owner")
+
+
+def test_owner_id_scoped_to_identity_store(tmp_path):
+    from praisonaiagents.session.identity import FileIdentityResolver
+
+    ids = []
+    for i, port in enumerate((8906, 8907)):
+        r = FileIdentityResolver(path=tmp_path / f"id{i}.json")
+        gw = WebSocketGateway(host="127.0.0.1", port=port, identity_resolver=r)
+        bot = _OwnerBot("telegram", "12345")
+        gw._stamp_identity_resolver(bot, "telegram")
+        ids.append(_resolve(bot, "telegram", "12345"))
+    assert ids[0] != ids[1]
+    assert not (tmp_path / "id0.json").exists()  # owner mapping never persisted
 
 
 def test_owner_link_noop_without_resolver():
