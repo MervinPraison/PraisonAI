@@ -82,3 +82,28 @@ def test_new_conversation_clears_readout(collector):
     tui._handle_command("/new")
     tui._refresh_usage_status()
     assert "tok" not in tui._status_bar_text()
+
+
+def test_unknown_model_limit_hides_fallback(collector):
+    tui = AsyncTUI(config=AsyncTUIConfig(model="totally-unknown-model-xyz"))
+    tui._conversation_history = [{"role": "user", "content": "hello " * 200}]
+    tui._refresh_usage_status()
+    bar = tui._status_bar_text()
+    assert "ctx " in bar
+    assert "/128.0k" not in bar and "%" not in bar
+
+
+def test_narrow_terminal_keeps_cost_visible(collector):
+    tui = AsyncTUI(config=AsyncTUIConfig(model="gpt-4o-mini"))
+    tui._conversation_history = [{"role": "user", "content": "hello " * 600}]
+    _track(collector)
+    tui._refresh_usage_status()
+    wide = tui._status_bar_text()
+    assert len(wide) > 80  # precondition: would overflow
+    bar = tui._status_bar_text(80)
+    assert len(bar) <= 80
+    assert "tok $" in bar and "ctx " in bar
+    assert "PageUp" not in bar
+    # Wide terminals keep the full bar.
+    assert tui._status_bar_text(200) == wide
+

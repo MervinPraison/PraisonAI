@@ -1913,6 +1913,26 @@ Example: /handoff code "refactor the auth module" """
     def _fmt_tokens(n: int) -> str:
         return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
 
+    def _limit_is_known(self, limit: int) -> bool:
+        """False when ``limit`` is only the budgeter's generic fallback.
+
+        ``get_model_limit()`` returns ``MODEL_LIMITS["default"]`` for models it
+        cannot resolve; showing that as ``/128.0k (N%)`` would understate usage
+        on a smaller custom model, so the limit is shown only when resolved.
+        """
+        try:
+            from praisonaiagents.context.budgeter import MODEL_LIMITS, _litellm_model_info
+        except Exception:  # noqa: BLE001
+            return False
+        if limit != MODEL_LIMITS.get("default"):
+            return True
+        model = (self.config.model or "").lower()
+        if _litellm_model_info(model):
+            return True
+        return any(
+            k != "default" and (k in model or model.startswith(k)) for k in MODEL_LIMITS
+        )
+
     def _refresh_usage_status(self) -> None:
         """Recompute the context-window / cost readout shown in the status bar.
 
@@ -1929,11 +1949,11 @@ Example: /handoff code "refactor the auth module" """
                 mgr.track_history(history)
                 used = mgr.ledger.get_total()
                 limit = mgr.budgeter.model_limit
-                if used and limit:
-                    parts.append(
-                        f"ctx {self._fmt_tokens(used)}/{self._fmt_tokens(limit)}"
-                        f" ({used * 100 // limit}%)"
-                    )
+                if used:
+                    text = f"ctx {self._fmt_tokens(used)}"
+                    if limit and self._limit_is_known(limit):
+                        text += f"/{self._fmt_tokens(limit)} ({used * 100 // limit}%)"
+                    parts.append(text)
         except Exception as exc:  # noqa: BLE001
             logger.debug("status bar context usage unavailable: %s", exc)
         try:
@@ -1950,16 +1970,28 @@ Example: /handoff code "refactor the auth module" """
             logger.debug("status bar cost unavailable: %s", exc)
         self._usage_status = "  |  ".join(parts)
 
-    def _status_bar_text(self) -> str:
-        """Render the one-line status bar (ASCII-only apart from user data)."""
+    def _status_bar_text(self, width: Optional[int] = None) -> str:
+        """Render the one-line status bar (ASCII-only apart from user data).
+
+        When ``width`` is given and the bar would overflow it, the help hint is
+        dropped first and then the session id, so the usage readout stays
+        visible on narrow (e.g. 80-column) terminals.
+        """
         if self._processing:
             return f" {self._status_text} "
-        left = "? for help | PageUp/Down to scroll"
-        center = self.config.model
-        right = f"Session: {self.session_id}"
         plan = "[PLAN] " if self.config.plan_mode else ""
-        usage = f"  |  {self._usage_status}" if self._usage_status else ""
-        return f" {plan}{left}  |  {center}{usage}  |  {right} "
+        fields = ["? for help | PageUp/Down to scroll", self.config.model]
+        if self._usage_status:
+            fields.append(self._usage_status)
+        fields.append(f"Session: {self.session_id}")
+        bar = f" {plan}{'  |  '.join(fields)} "
+        if width and len(bar) > width and self._usage_status:
+            fields.pop(0)  # help hint
+            bar = f" {plan}{'  |  '.join(fields)} "
+            if len(bar) > width:
+                fields.pop()  # session id
+                bar = f" {plan}{'  |  '.join(fields)} "
+        return bar
 
     # ------------------------------------------------------------------
     # Context compaction
@@ -2606,6 +2638,7 @@ Example: /handoff code "refactor the auth module" """
         # fresh session rather than aborting launch.
         if self.config.resume and self.config.session_id:
             self._resume_session(self.config.session_id)
+            self._refresh_usage_status()  # show restored context before first prompt
 
         # Start runtime (ACP/LSP servers) before TUI
         try:
@@ -2878,7 +2911,12 @@ Example: /handoff code "refactor the auth module" """
         
         # Status bar
         def get_status_bar():
-            return self._status_bar_text()
+            try:
+                from prompt_toolkit.application import get_app
+                width = get_app().output.get_size().columns
+            except Exception:  # noqa: BLE001
+                width = None
+            return self._status_bar_text(width)
         
         # Layout: Output (top, scrollable) + Status bar + Input (bottom, fixed)
         # Use FloatContainer to show completion menu as floating overlay
