@@ -12,6 +12,7 @@ from typing import Optional
 
 import click
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from praisonaiagents.permissions import (
@@ -163,6 +164,60 @@ def ask(pattern: str, agent: Optional[str], description: Optional[str], priority
     manager.add_rule(rule)
     
     console.print(f"[yellow]✓ Added ASK rule for pattern: {pattern}[/yellow]")
+
+
+@permissions.command(name="test")
+@click.argument("target")
+@click.option("--agent", help="Evaluate as a specific agent")
+@click.option("--json", "as_json", is_flag=True, help="Output the decision as JSON")
+def test_target(target: str, agent: Optional[str], as_json: bool):
+    """Show the effective decision for a tool call, without running it.
+
+    TARGET is "<tool>:<argument>", the same form the live approval uses.
+    It is checked against this project's rules with PermissionManager.check().
+    Order: persistent approvals, then rules (highest priority first),
+    otherwise the default is ask. Shell commands are split into their
+    sub-commands, and a deny on any part wins.
+
+    Examples:
+        praisonai permissions test "bash:rm -rf build"
+        praisonai permissions test "read:.env" --json
+    """
+    tool, sep, arg = target.partition(":")
+    target = f"{tool.strip()}{sep}{arg.lstrip()}" if sep else target.strip()
+
+    manager = PermissionManager(storage_dir=get_project_permissions_dir())
+    result = manager.check(target, agent_name=agent)
+    rule = result.rule
+    source = (
+        "rule" if rule is not None
+        else "approval" if result.approved is not None
+        else "default"
+    )
+
+    if as_json:
+        print(json.dumps({
+            "target": target,
+            "decision": result.action.value,
+            "source": source,
+            "rule_id": rule.id if rule else None,
+            "pattern": rule.pattern if rule else None,
+            "agent": agent,
+            "reason": result.reason,
+        }, indent=2))
+        return
+
+    color = {
+        PermissionAction.ALLOW: "green",
+        PermissionAction.DENY: "red",
+        PermissionAction.ASK: "yellow",
+    }.get(result.action, "white")
+    console.print(f"Target:   {escape(target)}")
+    console.print(f"Decision: [{color}]{result.action.value}[/{color}]")
+    console.print(f"Source:   {source}")
+    if rule is not None:
+        console.print(f"Rule:     {rule.id[:8]} ({escape(rule.pattern)}, priority {rule.priority})")
+    console.print(f"Reason:   {escape(result.reason)}")
 
 
 @permissions.command()
