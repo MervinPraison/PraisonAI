@@ -12,6 +12,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'pr
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _isolate_delivery_state(tmp_path, monkeypatch):
+    """Keep the bot's durable message journal inside this test's directory."""
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+
+
 class MockAgent:
     def __init__(self, name="test-agent", llm="gpt-4o-mini"):
         self.name = name
