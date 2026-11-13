@@ -49,7 +49,24 @@ def test_allow_deny_ask_rules_are_reported(tmp_path, monkeypatch):
 def test_test_command_does_not_persist_anything(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     _run(["test", "bash:ls"])
-    assert not (tmp_path / ".praisonai" / "permissions" / "rules.json").exists()
+    assert not (tmp_path / ".praisonai").exists()
+
+
+def test_compound_allow_reports_sub_operations(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _run(["allow", "bash:git *"])
+    out = _decision(["bash:git status && git diff"])
+    assert out["decision"] == "allow"
+    assert out["source"] == "sub-operations"
+
+
+def test_file_argument_whitespace_is_preserved(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _run(["deny", "write: notes.txt"])
+    _run(["allow", "write:*"])
+    out = _decision(["write: notes.txt"])
+    assert out["target"] == "write: notes.txt"
+    assert out["decision"] == "deny"
 
 
 def test_text_output(tmp_path, monkeypatch):

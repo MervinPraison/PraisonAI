@@ -179,21 +179,45 @@ def test_target(target: str, agent: Optional[str], as_json: bool):
     otherwise the default is ask. Shell commands are split into their
     sub-commands, and a deny on any part wins.
 
+    Source is one of: rule, approval, sub-operations (every part of a
+    compound shell command allowed), default, or safety-gate (built-in
+    checks such as secret-file reads or unparseable shell).
+
     Examples:
         praisonai permissions test "bash:rm -rf build"
         praisonai permissions test "read:.env" --json
     """
     tool, sep, arg = target.partition(":")
-    target = f"{tool.strip()}{sep}{arg.lstrip()}" if sep else target.strip()
+    tool = tool.strip()
+    # Trim the space after a shell prefix only; file arguments are kept
+    # exactly as the live backend would see them.
+    if sep and f"{tool}:" in PermissionManager._SHELL_PREFIXES:
+        arg = arg.lstrip()
+    target = f"{tool}{sep}{arg}" if sep else target.strip()
 
-    manager = PermissionManager(storage_dir=get_project_permissions_dir())
-    result = manager.check(target, agent_name=agent)
+    storage_dir = get_project_permissions_dir()
+    if os.path.isdir(storage_dir):
+        result = PermissionManager(storage_dir=storage_dir).check(target, agent_name=agent)
+    else:
+        # No project store yet: evaluate against an empty one without
+        # creating .praisonai/ (PermissionManager makes its storage dir).
+        import tempfile
+        with tempfile.TemporaryDirectory() as empty_dir:
+            result = PermissionManager(storage_dir=empty_dir).check(target, agent_name=agent)
+
     rule = result.rule
-    source = (
-        "rule" if rule is not None
-        else "approval" if result.approved is not None
-        else "default"
-    )
+    if rule is not None:
+        source = "rule"
+    elif result.approved is not None:
+        source = "approval"
+    elif result.action == PermissionAction.ALLOW:
+        # Compound shell command whose sub-operations were all allowed.
+        source = "sub-operations"
+    elif "No matching rule" in result.reason:
+        source = "default"
+    else:
+        # Built-in gate: unparseable/expanding shell, secret read, etc.
+        source = "safety-gate"
 
     if as_json:
         print(json.dumps({
