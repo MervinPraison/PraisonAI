@@ -106,6 +106,7 @@ class AsyncTUIConfig:
     debug: bool = False  # Enable debug logging to file (~/.praisonai/async_tui_debug.log)
     no_rules: bool = False  # Disable auto-injection of project instruction files
     plan_mode: bool = False  # Read-only PLAN mode: deny writes/edits/shell until confirmed
+    show_cost: bool = True  # Show running session cost in the status bar (hide for shared screens)
     enable_acp: bool = True  # Load ACP tools + start the ACP runtime (disable via --no-acp)
     enable_lsp: bool = True  # Load LSP tools + start the LSP runtime (disable via --no-lsp)
     # Consolidated Agent capability params threaded from `chat`/`code` CLI flags
@@ -384,6 +385,7 @@ class AsyncTUI:
         self._interrupt_worker = None  # Tracks an in-flight/abandoned turn worker
         self._processing = False
         self._status_text = ""
+        self._usage_status = ""  # Cached context/cost readout for the status bar
         self._last_error: Optional[Exception] = None
         self._app = None
         self._output_buffer = None
@@ -1904,6 +1906,62 @@ Example: /handoff code "refactor the auth module" """
         self.messages.append(ChatMessage(role="system", content=map_str))
 
     # ------------------------------------------------------------------
+    # Status bar
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _fmt_tokens(n: int) -> str:
+        return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
+
+    def _refresh_usage_status(self) -> None:
+        """Recompute the context-window / cost readout shown in the status bar.
+
+        Called once per completed turn or slash command (not on every 100ms
+        render tick). Each field is omitted when its data is unavailable --
+        unknown context limit, no usage yet, or a model with no known price --
+        rather than raising or showing a made-up figure.
+        """
+        parts = []
+        try:
+            mgr = self._get_context_manager()
+            history, _set, _source = self._live_history()
+            if mgr is not None and history:
+                mgr.track_history(history)
+                used = mgr.ledger.get_total()
+                limit = mgr.budgeter.model_limit
+                if used and limit:
+                    parts.append(
+                        f"ctx {self._fmt_tokens(used)}/{self._fmt_tokens(limit)}"
+                        f" ({used * 100 // limit}%)"
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("status bar context usage unavailable: %s", exc)
+        try:
+            from praisonai_code.cli.features.cost_tracker import price_collected_usage
+
+            usage = price_collected_usage(self.config.model)
+            total = usage["in"] + usage["out"]
+            if total:
+                text = f"{self._fmt_tokens(total)} tok"
+                if self.config.show_cost and usage["cost"] is not None:
+                    text += f" ${usage['cost']:.4f}"
+                parts.append(text)
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("status bar cost unavailable: %s", exc)
+        self._usage_status = "  |  ".join(parts)
+
+    def _status_bar_text(self) -> str:
+        """Render the one-line status bar (ASCII-only apart from user data)."""
+        if self._processing:
+            return f" {self._status_text} "
+        left = "? for help | PageUp/Down to scroll"
+        center = self.config.model
+        right = f"Session: {self.session_id}"
+        plan = "[PLAN] " if self.config.plan_mode else ""
+        usage = f"  |  {self._usage_status}" if self._usage_status else ""
+        return f" {plan}{left}  |  {center}{usage}  |  {right} "
+
+    # ------------------------------------------------------------------
     # Context compaction
     # ------------------------------------------------------------------
 
@@ -2403,6 +2461,7 @@ Example: /handoff code "refactor the auth module" """
             # Done processing current prompt
             self._processing = False
             self._status_text = ""
+            self._refresh_usage_status()
             
             # Show tool calls summary if any were made
             if tool_calls:
@@ -2748,6 +2807,7 @@ Example: /handoff code "refactor the auth module" """
             # Handle commands (always process immediately)
             if user_input.startswith("/"):
                 self._handle_command(user_input)
+                self._refresh_usage_status()  # /new, /compact, /model change it
                 self._update_output()
                 return
             
@@ -2818,13 +2878,7 @@ Example: /handoff code "refactor the auth module" """
         
         # Status bar
         def get_status_bar():
-            if self._processing:
-                return f" {self._status_text} "
-            left = "? for help | PageUp/Down to scroll"
-            center = self.config.model
-            right = f"Session: {self.session_id}"
-            plan = "[PLAN] " if self.config.plan_mode else ""
-            return f" {plan}{left}  |  {center}  |  {right} "
+            return self._status_bar_text()
         
         # Layout: Output (top, scrollable) + Status bar + Input (bottom, fixed)
         # Use FloatContainer to show completion menu as floating overlay
