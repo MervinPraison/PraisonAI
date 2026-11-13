@@ -1772,9 +1772,11 @@ class Memory(MemoryCoreMixin):
         """
         Filter to items that have metadata 'category=entity'.
         """
-        all_hits = self.search_long_term(
-            query, limit=20, user_id=user_id or self.cfg.get("user_id")
-        )  # gather more
+        # Only pass user_id when set, so unscoped stores keep calling
+        # (possibly overridden) search_long_term with its original signature.
+        user_id = user_id or self.cfg.get("user_id")
+        scope = {"user_id": user_id} if user_id else {}
+        all_hits = self.search_long_term(query, limit=20, **scope)  # gather more
         ents = []
         for h in all_hits:
             meta = h.get("metadata") or {}

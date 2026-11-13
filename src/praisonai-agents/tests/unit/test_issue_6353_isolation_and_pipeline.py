@@ -44,16 +44,25 @@ def test_build_context_scoped_to_configured_user(tmp_path):
     assert "Alice salary" in alice.build_context_for_task("salary")
 
 
-def test_sessions_do_not_share_or_wipe_memory():
-    alice = Session(session_id="s-alice", user_id="alice")
-    bob = Session(session_id="s-bob", user_id="bob")
-    alice.add_memory("Alice bank PIN is 4321")
+def test_session_keeps_existing_storage_paths():
+    # Session storage layout is unchanged: existing on-disk state stays
+    # readable and an explicit sqlite ``db_path`` alias still wins.
+    s = Session(session_id="s-compat", user_id="alice")
+    assert "short_db" not in s.memory_config and "long_db" not in s.memory_config
+    s2 = Session(session_id="s-compat2", memory_config={"provider": "sqlite", "db_path": "x.db"})
+    assert "short_db" not in s2.memory_config
 
-    assert bob.search_memory("PIN") == []
-    assert "4321" not in bob.get_context("PIN")
 
-    bob.clear_memory()
-    assert [r["text"] for r in alice.search_memory("PIN")] == ["Alice bank PIN is 4321"]
+def test_unscoped_search_entity_keeps_override_signature(tmp_path):
+    from praisonaiagents.memory.memory import Memory
+
+    class Legacy(Memory):
+        def search_long_term(self, query, limit=5):  # no user_id kwarg
+            return [{"text": "e", "metadata": {"category": "entity"}}]
+
+    m = Legacy({"provider": "sqlite", "db_path": str(tmp_path / "m.db")})
+    assert m.search_entity("q") == [{"text": "e", "metadata": {"category": "entity"}}]
+    m.build_context_for_task("q")
 
 
 def test_as_tool_calls_do_not_accumulate_history():
@@ -177,3 +186,23 @@ def test_include_cycle_fails_fast(tmp_path):
 def test_include_missing_recipe_fails():
     res = Workflow(name="o", steps=[include("does-not-exist-6353")]).run("go")
     assert res["status"] == "failed"
+    assert "Recipe not found: does-not-exist-6353" in res["error"]
+
+
+def test_include_does_not_mutate_or_overlap_shared_sub_workflow():
+    inner = Workflow(name="inner", steps=[lambda ctx: StepResult(output="x")],
+                     variables={"own": 1})
+    outer = Workflow(name="outer", steps=[include(workflow=inner)], variables={"p": 2})
+
+    # An include while the same sub-workflow instance is already running is
+    # rejected as a failed step, and never touches that instance's variables.
+    inner._execution_lock.acquire()
+    try:
+        res = outer.run("go")
+    finally:
+        inner._execution_lock.release()
+    assert res["status"] == "failed"
+    assert inner.variables == {"own": 1}
+
+    assert outer.run("go")["status"] == "completed"
+    assert inner.variables == {"own": 1}

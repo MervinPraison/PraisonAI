@@ -4879,7 +4879,12 @@ CONCISE SUMMARY:"""
         def _fail(error_msg: str) -> Dict[str, Any]:
             logger.error(error_msg)
             return {
-                "steps": [{"step": f"include:{recipe_name}", "output": f"Error: {error_msg}"}],
+                "steps": [{
+                    "step": f"include:{recipe_name}",
+                    "output": f"Error: {error_msg}",
+                    "status": "failed",
+                    "error": error_msg,
+                }],
                 "output": error_msg,
                 "variables": all_variables,
                 "stop": True,
@@ -5057,20 +5062,21 @@ CONCISE SUMMARY:"""
     ):
         """Run an ``include(workflow=...)`` sub-workflow instance.
 
-        Parent variables are visible for this run only; the caller's instance
-        is restored afterwards so a reused sub-workflow does not keep them.
+        Parent variables are applied to a shallow copy, so the caller's
+        instance is never mutated. The copy shares the instance's run lock, so
+        an overlapping include of the same sub-workflow is rejected by ``run()``
+        (and reported as a failed include) instead of racing on its state.
         """
         recipe_input = self._include_input(include_step, previous_output, input, all_variables)
-        saved_variables = getattr(sub_workflow, "variables", None)
-        sub_workflow.variables = {
-            **(saved_variables or {}), **all_variables, "previous_output": previous_output,
+        ensure_run_lock(sub_workflow)
+        run_copy = copy.copy(sub_workflow)
+        run_copy.variables = {
+            **(getattr(sub_workflow, "variables", None) or {}),
+            **all_variables, "previous_output": previous_output,
         }
-        try:
-            result = sub_workflow.run(
-                input=recipe_input or "", llm=model, verbose=verbose, stream=stream
-            )
-        finally:
-            sub_workflow.variables = saved_variables
+        result = run_copy.run(
+            input=recipe_input or "", llm=model, verbose=verbose, stream=stream
+        )
         return self._include_result(result, recipe_name, all_variables, verbose, fail)
     
     def start(self, input: str = "", **kwargs) -> Dict[str, Any]:
