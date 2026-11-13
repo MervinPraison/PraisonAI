@@ -72,6 +72,49 @@ def test_stamp_shares_resolver_with_session():
     assert bot._session._identity_resolver is resolver
 
 
+# ── owner_user_id unification (Issue #6362) ─────────────────────────
+
+
+class _OwnerBot:
+    def __init__(self, platform, owner):
+        from types import SimpleNamespace
+
+        self._session = _FakeSession()
+        self._session._platform = platform
+        self.config = SimpleNamespace(owner_user_id=owner)
+
+
+def test_owner_handles_unify_across_channels():
+    """Each channel's declared owner resolves to one canonical ``owner`` id."""
+    from praisonaiagents.session.identity import InMemoryIdentityResolver
+
+    resolver = InMemoryIdentityResolver()
+    gateway = WebSocketGateway(host="127.0.0.1", port=8903, identity_resolver=resolver)
+    gateway._stamp_identity_resolver(_OwnerBot("telegram", "12345"))
+    gateway._stamp_identity_resolver(_OwnerBot("slack", "U0999"))
+    assert resolver.resolve("telegram", "12345") == "owner"
+    assert resolver.resolve("slack", "U0999") == "owner"
+    # Non-owner users keep the safe per-platform default.
+    assert resolver.resolve("telegram", "999") == "telegram:999"
+
+
+def test_owner_link_never_overwrites_explicit_link():
+    from praisonaiagents.session.identity import InMemoryIdentityResolver
+
+    resolver = InMemoryIdentityResolver()
+    resolver.link("telegram", "12345", "alice")
+    gateway = WebSocketGateway(host="127.0.0.1", port=8904, identity_resolver=resolver)
+    gateway._stamp_identity_resolver(_OwnerBot("telegram", "12345"))
+    assert resolver.resolve("telegram", "12345") == "alice"
+
+
+def test_owner_link_noop_without_resolver():
+    gateway = _gateway_with_agent()
+    bot = _OwnerBot("telegram", "12345")
+    gateway._stamp_identity_resolver(bot)
+    assert bot._session._identity_resolver is None
+
+
 # ── start_channels / hot-reload wiring ──────────────────────────────
 
 

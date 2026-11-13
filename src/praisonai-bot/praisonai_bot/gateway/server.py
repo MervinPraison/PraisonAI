@@ -9942,6 +9942,20 @@ class WebSocketGateway:
             sess._identity_resolver = resolver
         elif hasattr(bot, "_identity_resolver"):
             bot._identity_resolver = resolver
+        # Issue #6362: the channel's declared ``owner_user_id`` is the same
+        # human on every surface, so link it to one canonical ``owner`` id —
+        # their conversation, memory and continuable briefs then span every
+        # channel with no manual ``link()``/pairing. Only operator-declared
+        # owner handles are linked (other users keep ``platform:user_id``), and
+        # an existing explicit link or pairing label is never overwritten.
+        owner = getattr(getattr(bot, "config", None), "owner_user_id", None)
+        platform = getattr(sess, "_platform", None)
+        if owner and platform:
+            try:
+                if resolver.resolve(platform, owner) == f"{platform}:{owner}":
+                    resolver.link(platform, owner, "owner")
+            except Exception as e:  # pragma: no cover — never block startup
+                logger.warning("owner identity link failed: %s", e)
 
     def _build_turn_lock_map(self) -> Any:
         """Build the gateway's per-turn lock backend from config (Issue #4655).
