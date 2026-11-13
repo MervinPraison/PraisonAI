@@ -9942,16 +9942,20 @@ class WebSocketGateway:
             getattr(bot, "_session", None)
             or getattr(bot, "_session_mgr", None)
         )
-        if sess is not None and hasattr(sess, "_identity_resolver"):
-            sess._identity_resolver = resolver
-        elif hasattr(bot, "_identity_resolver"):
-            bot._identity_resolver = resolver
         # Issue #6362: the channel's declared ``owner_user_id`` is the same
         # human on every surface, so resolve it to one canonical owner id —
         # their conversation and memory then span every channel with no manual
-        # ``link()``/pairing. The mapping lives only in memory (re-derived from
-        # config on every stamp, so a removed/replaced owner loses access) and
-        # an explicit link or pairing label always wins.
+        # ``link()``/pairing. The owner-aware view is installed on *every*
+        # channel (the handle map is gateway-wide, so a channel that admits the
+        # owner without declaring them still resolves to the owner id); only
+        # registration is conditional. The mapping lives only in memory
+        # (re-derived from config on every stamp, so a removed/replaced owner
+        # loses access) and an explicit link or pairing label always wins.
+        view = _OwnerAwareResolver(resolver, self._owner_handles)
+        if sess is not None and hasattr(sess, "_identity_resolver"):
+            sess._identity_resolver = view
+        elif hasattr(bot, "_identity_resolver"):
+            bot._identity_resolver = view
         platform = getattr(sess, "_platform", None)
         key = channel_name or platform
         if not key:
@@ -9959,8 +9963,6 @@ class WebSocketGateway:
         owner = getattr(getattr(bot, "config", None), "owner_user_id", None)
         if owner and platform:
             self._owner_handles[key] = (platform, str(owner))
-            target = sess if sess is not None and hasattr(sess, "_identity_resolver") else bot
-            target._identity_resolver = _OwnerAwareResolver(resolver, self._owner_handles)
         else:
             self._owner_handles.pop(key, None)
 

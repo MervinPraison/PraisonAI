@@ -69,7 +69,9 @@ def test_stamp_shares_resolver_with_session():
     gateway = WebSocketGateway(host="127.0.0.1", port=8902, identity_resolver=resolver)
     bot = _FakeBot()
     gateway._stamp_identity_resolver(bot)
-    assert bot._session._identity_resolver is resolver
+    # Wrapped in the owner-aware view (Issue #6362) over the same resolver.
+    assert bot._session._identity_resolver._inner is resolver
+    assert bot._session._identity_resolver.resolve("telegram", "1") == "user:alice"
 
 
 # ── owner_user_id unification (Issue #6362) ─────────────────────────
@@ -142,6 +144,20 @@ def test_owner_id_scoped_to_identity_store(tmp_path):
     assert not (tmp_path / "id0.json").exists()  # owner mapping never persisted
 
 
+def test_channel_without_owner_still_resolves_declared_owner():
+    """A channel that admits the owner without declaring them keeps continuity."""
+    from praisonaiagents.session.identity import InMemoryIdentityResolver
+
+    resolver = InMemoryIdentityResolver()
+    gateway = WebSocketGateway(host="127.0.0.1", port=8908, identity_resolver=resolver)
+    owned, plain = _OwnerBot("telegram", "12345"), _OwnerBot("telegram", None)
+    gateway._stamp_identity_resolver(owned, "tg_main")
+    gateway._stamp_identity_resolver(plain, "tg_support")
+    assert _resolve(plain, "telegram", "12345") == _resolve(owned, "telegram", "12345")
+    assert _resolve(plain, "telegram", "12345").startswith("owner")
+    assert _resolve(plain, "telegram", "999") == "telegram:999"
+
+
 def test_owner_link_noop_without_resolver():
     gateway = _gateway_with_agent()
     bot = _OwnerBot("telegram", "12345")
@@ -169,7 +185,7 @@ async def test_start_channels_stamps_resolver_onto_created_bot():
         with patch.object(gateway, "_run_bot_safe", side_effect=lambda *a, **k: None):
             await gateway.start_channels({"telegram": {"token": "t"}})
 
-    assert created["telegram"]._session._identity_resolver is resolver
+    assert created["telegram"]._session._identity_resolver._inner is resolver
 
 
 @pytest.mark.asyncio
@@ -189,7 +205,7 @@ async def test_hot_reload_stamps_resolver():
         with patch.object(gateway, "_run_bot_safe", side_effect=lambda *a, **k: None):
             await gateway._start_single_channel("telegram", {"token": "t"})
 
-    assert created["telegram"]._session._identity_resolver is resolver
+    assert created["telegram"]._session._identity_resolver._inner is resolver
 
 
 # ── _build_identity_resolver (declarative identity: block) ──────────
