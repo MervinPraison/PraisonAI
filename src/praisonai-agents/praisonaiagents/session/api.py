@@ -121,10 +121,17 @@ class Session:
 
         # Initialize memory with sensible defaults (only for local sessions)
         if not self.is_remote:
+            # Isolate every storage tier per session (not just Chroma) and
+            # scope it to this user so sessions never share or wipe each
+            # other's memory through the SQLite fallback (#6353).
+            session_dir = self._get_session_dir()
             default_memory_config = {
                 "provider": "rag",
                 "use_embedding": False,
-                "rag_db_path": str(self._get_session_dir() / "chroma_db")
+                "rag_db_path": str(session_dir / "chroma_db"),
+                "short_db": str(session_dir / "short_term.db"),
+                "long_db": str(session_dir / "long_term.db"),
+                "user_id": self.user_id,
             }
             if memory_config:
                 default_memory_config.update(memory_config)
@@ -653,9 +660,16 @@ class Session:
         Returns:
             List of memory results
         """
-        if memory_type == "short":
-            return self.memory.search_short_term(query, limit=limit)
-        return self.memory.search_long_term(query, limit=limit)
+        search = (
+            self.memory.search_short_term if memory_type == "short"
+            else self.memory.search_long_term
+        )
+        return search(
+            query,
+            limit=limit,
+            user_id=self.user_id,
+            metadata_filter={"session_id": self.session_id},
+        )
 
     def add_knowledge(self, source: str) -> None:
         """

@@ -512,9 +512,21 @@ def _build_execution_context(agents_instance, task_id, skip_memory_init=False):
     if context_builder is not None:
         task._execution_context = context_builder(task)
         task._execution_context_builder = None
+    elif getattr(task, 'validation_feedback', None):
+        # Fresh guardrail/reviewer feedback set after the builder was consumed
+        # (any retry), or with no Process builder at all (sequential /
+        # hierarchical): fold the rejection reason into this attempt's prompt so
+        # the retry is not an identical re-ask (#6353). Kept local so it never
+        # leaks into later runs of the task.
+        fb = task.validation_feedback
+        context_text = f"Previous attempt failed validation with reason: {fb.get('validation_response')}"
+        if fb.get('rejected_output'):
+            context_text += f"\nRejected output: {fb['rejected_output']}"
+        context_text += "\nPlease try again, addressing this feedback."
+        task.validation_feedback = None
     extra_context = getattr(task, '_execution_context', None)
     if extra_context:
-        context_text = extra_context
+        context_text = f"{context_text}\n\n{extra_context}" if context_text else extra_context
         # NOTE: We intentionally do NOT clear _execution_context here. Task
         # retries (guardrail/completion failures) re-enter this helper via the
         # run_task/arun_task retry loops, and clearing would strip the upstream
@@ -577,6 +589,18 @@ def _process_task_result(agents_instance, context, agent_output):
     executor_agent = context.executor_agent
     llm = context.llm
     
+    # Agent.chat returns a model instance when output_pydantic is set; the
+    # task pipeline below (TaskOutput.raw, memory, JSON parsing) is string
+    # based, so serialise once and re-validate from JSON (#6353).
+    if agent_output is not None and not isinstance(agent_output, str):
+        if hasattr(agent_output, "model_dump_json"):
+            agent_output = agent_output.model_dump_json()
+        else:
+            try:
+                agent_output = json.dumps(agent_output)
+            except (TypeError, ValueError):
+                agent_output = str(agent_output)
+
     if agent_output:
         # Store the response in memory
         if task.memory:
@@ -616,6 +640,9 @@ def _process_task_result(agents_instance, context, agent_output):
         if task.output_json:
             try:
                 parsed = json.loads(cleaned)
+                # Enforce the schema when output_json is a Pydantic model.
+                if hasattr(task.output_json, "model_validate"):
+                    parsed = task.output_json.model_validate(parsed).model_dump()
                 task_output.json_dict = parsed
                 task_output.output_format = "JSON"
             except Exception as e:

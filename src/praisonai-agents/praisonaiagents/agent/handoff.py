@@ -549,17 +549,21 @@ class Handoff:
         the per-agent seed lock around this + the chat call + ``_restore_seed``.
         """
         existing = getattr(self.agent, 'chat_history', None)
-        if not prior_messages or not isinstance(existing, list):
+        if not isinstance(existing, list):
             return False, None
         try:
-            prior = list(prior_messages)
+            prior = list(prior_messages or [])
         except TypeError:
-            return False, None
-        original = existing
-        # Avoid re-seeding if the context is already at the head.
-        if existing[:len(prior)] != prior:
+            prior = []
+        # Always run the call on a copy and restore the original on exit, even
+        # with nothing to seed (ContextPolicy.NONE / ``as_tool()``): otherwise
+        # each caller's turn was appended to the target's persistent history
+        # and replayed to the next, unrelated caller (#6353).
+        if prior and existing[:len(prior)] != prior:
             self.agent.chat_history = prior + existing
-        return True, original
+        else:
+            self.agent.chat_history = list(existing)
+        return True, existing
 
     def _restore_seed(self, seeded: bool, original: Optional[List[Any]]) -> None:
         """Restore the target's original ``chat_history`` after a seeded call."""
