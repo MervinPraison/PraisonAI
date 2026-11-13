@@ -201,7 +201,7 @@ def _localised_time(now: Optional[datetime], tz_name: str) -> time:
     the naive time rather than raising.
     """
     if now is None:
-        now = datetime.now().astimezone()
+        now = datetime.now()
     if now.tzinfo is not None:
         try:
             from zoneinfo import ZoneInfo
