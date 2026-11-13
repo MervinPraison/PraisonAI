@@ -158,6 +158,21 @@ def test_channel_without_owner_still_resolves_declared_owner():
     assert _resolve(plain, "telegram", "999") == "telegram:999"
 
 
+@pytest.mark.asyncio
+async def test_removed_channel_drops_its_owner():
+    """Removing an owner-declaring channel on reload revokes owner identity."""
+    from praisonaiagents.session.identity import InMemoryIdentityResolver
+
+    resolver = InMemoryIdentityResolver()
+    gateway = WebSocketGateway(host="127.0.0.1", port=8909, identity_resolver=resolver)
+    owned, plain = _OwnerBot("telegram", "12345"), _OwnerBot("telegram", None)
+    gateway._stamp_identity_resolver(owned, "tg_main")
+    gateway._stamp_identity_resolver(plain, "tg_support")
+    gateway._channel_bots["tg_main"] = owned
+    await gateway._restart_channel("tg_main", {})  # channel removed from config
+    assert _resolve(plain, "telegram", "12345") == "telegram:12345"
+
+
 def test_owner_link_noop_without_resolver():
     gateway = _gateway_with_agent()
     bot = _OwnerBot("telegram", "12345")

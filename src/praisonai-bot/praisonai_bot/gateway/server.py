@@ -10859,6 +10859,8 @@ class WebSocketGateway:
         # reachable at ``/webhooks/<channel>`` and keep handling requests after
         # it has been stopped.
         self._webhook_channels.clear()
+        # Issue #6362: owners are re-registered from config as channels start.
+        self._owner_handles.clear()
         self._routing_rules.clear()
         self._routing_bindings.clear()
 
@@ -11106,7 +11108,10 @@ class WebSocketGateway:
             # Issue #5146: drop any shared-listener webhook mount so a reloaded
             # or removed channel doesn't leave a stale handler on /webhooks/.
             self._webhook_channels.pop(channel_name, None)
-            
+            # Issue #6362: a removed channel (or one that fails to restart)
+            # must not keep its declared owner resolving to the owner id.
+            self._owner_handles.pop(channel_name, None)
+
             # Clean up supervisor state
             self._channel_supervisor.cleanup(channel_name)
         
