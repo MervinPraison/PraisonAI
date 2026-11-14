@@ -26,6 +26,45 @@ def test_json_named_directory_is_skipped(tmp_path):
     assert store.get_chat_history('b')[0]['content'] == 'old b'
 
 
+def test_unreliable_isdir_result_does_not_suppress_legacy_import(tmp_path, monkeypatch):
+    make_legacy(tmp_path)
+    original_isdir = os.path.isdir
+    db_path = str(tmp_path / 'database' / 'sessions.db')
+    store = SqliteTranscriptStore(session_dir=str(tmp_path), db_path=db_path)
+    with monkeypatch.context() as patch:
+        patch.setattr(os.path, 'isdir', lambda path: False if os.fspath(path) == str(tmp_path) else original_isdir(path))
+        assert store.get_chat_history('a')[0]['content'] == 'old a'
+    assert SqliteTranscriptStore(session_dir=str(tmp_path), db_path=db_path).get_chat_history('b')[0]['content'] == 'old b'
+
+
+def test_directory_access_failure_does_not_mark_migration_complete(tmp_path, monkeypatch):
+    make_legacy(tmp_path)
+    store = SqliteTranscriptStore(session_dir=str(tmp_path))
+    original_listdir = os.listdir
+
+    def inaccessible(path):
+        if os.fspath(path) == str(tmp_path):
+            raise PermissionError('directory unavailable')
+        return original_listdir(path)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, 'listdir', inaccessible)
+        with pytest.raises(PermissionError):
+            store.get_chat_history('a')
+    assert store.get_chat_history('a')[0]['content'] == 'old a'
+    assert store.get_chat_history('b')[0]['content'] == 'old b'
+
+
+def test_oversized_json_integer_does_not_block_healthy_sessions(tmp_path):
+    make_legacy(tmp_path)
+    bad = tmp_path / '0-malformed.json'
+    bad.write_text('{"session_id":"bad","metadata":{"value":' + '9' * 5000 + '}}', encoding='utf-8')
+    store = SqliteTranscriptStore(session_dir=str(tmp_path))
+    assert store.get_chat_history('a')[0]['content'] == 'old a'
+    assert store.get_chat_history('b')[0]['content'] == 'old b'
+    assert bad.exists()
+
+
 @pytest.mark.parametrize('missing', [None, 'nonexistent'])
 def test_missing_legacy_directory_does_not_scan_cwd(tmp_path, monkeypatch, missing):
     make_legacy(tmp_path)
