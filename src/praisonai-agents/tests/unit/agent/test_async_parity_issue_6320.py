@@ -68,10 +68,10 @@ def test_cast_large_int_string_not_rounded():
     assert asyncio.run(a.execute_tool_async("lookup", {"record_id": big})) == 9007199254740993
 
 
-
-
 def test_cast_large_int_string_in_optional_not_rounded():
     from typing import Optional
     from praisonaiagents.agent.tool_execution import _coerce_value
     assert _coerce_value("9007199254740993", Optional[int]) == 9007199254740993
+    assert _coerce_value("1" * 400, Optional[int]) == int("1" * 400)  # beyond float range
+    assert _coerce_value("3.0", Optional[int]) == 3
     assert _coerce_value("1.5", Optional[int]) == "1.5"
