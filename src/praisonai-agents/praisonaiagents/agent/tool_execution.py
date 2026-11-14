@@ -7,6 +7,8 @@ for maintainability.
 """
 
 import os
+import dataclasses
+import typing
 import time
 import json
 import logging
@@ -67,6 +69,80 @@ _MAX_SPILL_TOOL_THREADS = 8
 # Lives here (agent-side, lightweight) so both chat_mixin.py and llm.py share
 # one identity — an `is` check only works against the same object.
 _TOOL_ARGUMENTS_PARSE_FAILED = object()
+
+
+def _coerce_value(value, annotation):
+    """Best-effort cast of an LLM-supplied value to ``annotation``.
+
+    Returns ``value`` unchanged when it cannot be converted.
+    """
+    import collections.abc as cabc
+    import types
+    from typing import get_origin, get_args, Union as _Union
+
+    if annotation is typing.Any:  # a class on 3.11+, so isinstance() would raise
+        return value
+    origin, args = get_origin(annotation), get_args(annotation)
+    if origin is _Union or origin is getattr(types, "UnionType", _Union):  # Optional/Union, X | Y
+        members = [a for a in args if a is not type(None)]
+        if value is None or any(isinstance(a, type) and isinstance(value, a) for a in members):
+            return value
+        for arg in members:
+            coerced = _coerce_value(value, arg)
+            # Inside a union, skip lossy scalar casts ("1.5"->1, "5"->False).
+            if arg is int and coerced is not value and float(value) != coerced:
+                continue
+            if arg is bool and str(value).lower() not in (
+                    'true', '1', 'yes', 'on', 'false', '0', 'no', 'off'):
+                continue
+            target = get_origin(arg) or arg
+            # Only accept a member's result if it actually produced that type.
+            if coerced is not value and (not isinstance(target, type) or isinstance(coerced, target)):
+                return coerced
+        return value
+    original = value  # returned whenever conversion does not succeed
+    try:
+        if annotation is int and isinstance(value, (str, float)) and not isinstance(value, bool):
+            return int(float(value))
+        if annotation is float and isinstance(value, (str, int)) and not isinstance(value, bool):
+            return float(value)
+        if annotation is bool and isinstance(value, str):
+            return value.lower() in ('true', '1', 'yes', 'on')
+        container = origin or annotation
+        if not isinstance(container, type):
+            return value
+        is_model = hasattr(container, "model_validate")
+        if isinstance(value, str) and container is not str and (
+            is_model or dataclasses.is_dataclass(container)
+            or issubclass(container, (cabc.Iterable, cabc.Mapping))
+        ):
+            stripped = value.strip()
+            if stripped[:1] in ('[', '{'):
+                value = json.loads(stripped)
+        if is_model and isinstance(value, dict):
+            return container.model_validate(value)
+        if isinstance(value, dict) and dataclasses.is_dataclass(container):
+            hints = typing.get_type_hints(container)
+            return container(**{k: _coerce_value(v, hints[k]) if k in hints else v
+                                for k, v in value.items()})
+        if isinstance(value, (list, tuple)) and not isinstance(value, str):
+            if container is tuple and args and Ellipsis not in args:
+                if len(args) != len(value):
+                    return original
+                return tuple(_coerce_value(v, a) for v, a in zip(value, args))
+            if container in (set, frozenset, tuple):
+                item_ann = args[0] if args else None
+                items = [_coerce_value(v, item_ann) for v in value] if item_ann else list(value)
+                return container(items)
+            if container is list and args:
+                return [_coerce_value(v, args[0]) for v in value]
+        # Keep parsed JSON only if it matches the container (e.g. bare ``list``).
+        return value if isinstance(value, container) else original
+    except (ValueError, TypeError):
+        return original
+    except Exception as e:  # e.g. pydantic.ValidationError, json.JSONDecodeError
+        logging.debug(f"Could not coerce tool argument to {annotation!r}: {e}")
+        return original
 
 
 class _CallableGuardrailAdapter:
@@ -882,7 +958,17 @@ class ToolExecutionMixin:
             return arguments
         
         try:
+            # ``@tool`` wraps the function in FunctionTool whose run() takes
+            # **kwargs; read parameters from the wrapped function instead.
+            from ..tools.decorator import FunctionTool
+            owner = getattr(func, "__self__", func)
+            if isinstance(owner, FunctionTool):
+                func = owner._func
             sig = inspect.signature(func)
+            try:  # resolve postponed (string) annotations
+                hints = typing.get_type_hints(func)
+            except Exception:
+                hints = {}
             valid_params = set(sig.parameters.keys()) - {'self'}
             casted_args = {}
             
@@ -907,21 +993,8 @@ class ToolExecutionMixin:
                 if param_name in sig.parameters:
                     param = sig.parameters[param_name]
                     if param.annotation != inspect.Parameter.empty:
-                        # Handle common type conversions
-                        if param.annotation == int and isinstance(arg_value, (str, float)):
-                            try:
-                                casted_args[param_name] = int(float(arg_value))
-                            except (ValueError, TypeError):
-                                casted_args[param_name] = arg_value
-                        elif param.annotation == float and isinstance(arg_value, (str, int)):
-                            try:
-                                casted_args[param_name] = float(arg_value)
-                            except (ValueError, TypeError):
-                                casted_args[param_name] = arg_value
-                        elif param.annotation == bool and isinstance(arg_value, str):
-                            casted_args[param_name] = arg_value.lower() in ('true', '1', 'yes', 'on')
-                        else:
-                            casted_args[param_name] = arg_value
+                        annotation = hints.get(param_name, param.annotation)
+                        casted_args[param_name] = _coerce_value(arg_value, annotation)
                     else:
                         casted_args[param_name] = arg_value
                 else:
