@@ -146,7 +146,9 @@ def create_agent_from_config(agent_config: Dict[str, Any]) -> Any:
     # dropped safety gates (approval/guardrails) and warn on anything else,
     # instead of silently running a differently-configured agent.
     from types import SimpleNamespace
-    from ..framework_adapters.base import warn_unsupported_fields
+    from ..framework_adapters.base import (
+        _SAFETY_FIELDS, _is_active_gate, warn_unsupported_fields,
+    )
     try:
         warn_unsupported_fields(
             SimpleNamespace(name="scheduler", SUPPORTED_YAML_FIELDS=_SCHEDULED_AGENT_FIELDS),
@@ -155,7 +157,10 @@ def create_agent_from_config(agent_config: Dict[str, Any]) -> Any:
     except ValueError:
         # The shared message suggests "framework: praisonai", which does not
         # exist on this path; give a scheduler-specific remediation hint.
-        fields = sorted(f for f in ('approval', 'guardrails') if f in agent_config)
+        fields = sorted(
+            f for f in _SAFETY_FIELDS
+            if f in agent_config and _is_active_gate(f, agent_config[f])
+        )
         raise ValueError(
             f"Scheduled agents cannot enforce {fields} yet (agent "
             f"{agent_config.get('role')!r}); remove the field(s) to run ungated, "
