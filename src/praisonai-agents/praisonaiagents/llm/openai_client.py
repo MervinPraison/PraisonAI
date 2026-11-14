@@ -1340,7 +1340,7 @@ class OpenAIClient:
                         if response_text:
                             stream_callback(StreamEvent(
                                 type=StreamEventType.FIRST_TOKEN,
-                                timestamp=now, content=response_text[:50]
+                                timestamp=now, content=response_text
                             ))
                             stream_callback(StreamEvent(
                                 type=StreamEventType.LAST_TOKEN,
@@ -1631,7 +1631,7 @@ class OpenAIClient:
                         if response_text:
                             await _emit_event(StreamEvent(
                                 type=StreamEventType.FIRST_TOKEN,
-                                timestamp=now, content=response_text[:50]
+                                timestamp=now, content=response_text
                             ))
                             await _emit_event(StreamEvent(
                                 type=StreamEventType.LAST_TOKEN,

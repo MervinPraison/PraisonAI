@@ -99,3 +99,44 @@ def test_tool_call_delta_id_survives_id_less_chunks():
     end = StreamEvent(type=StreamEventType.TOOL_CALL_END, tool_call={})
     end_out = stream_event_to_agui_events(end, "m1", buffer)
     assert [e.tool_call_id for e in end_out] == ["call-42"]
+
+
+def test_first_token_content_is_answer_text():
+    """The SDK sends the opening chunk as FIRST_TOKEN; it must not be dropped."""
+    buffer = EventBuffer()
+    first = stream_event_to_agui_events(
+        StreamEvent(type=StreamEventType.FIRST_TOKEN, content="Hello"), "m1", buffer
+    )
+    rest = stream_event_to_agui_events(
+        StreamEvent(type=StreamEventType.DELTA_TEXT, content=" world"), "m1", buffer
+    )
+    deltas = [e.delta for e in first + rest if hasattr(e, "delta")]
+    assert "".join(deltas) == "Hello world"
+    assert type(first[0]).__name__ == "TextMessageStartEvent"
+
+
+def test_streamed_tool_call_starts_before_args_and_is_not_replayed():
+    """Streamed tool deltas open the call first; execution start doesn't resend args."""
+    buffer = EventBuffer()
+    out = []
+    for tc in (
+        {"index": 0, "id": "call-7", "name": "f", "arguments": '{"x":'},
+        {"index": 0, "id": None, "name": None, "arguments": "1}"},
+    ):
+        out += stream_event_to_agui_events(
+            StreamEvent(type=StreamEventType.DELTA_TOOL_CALL, tool_call=tc), "m1", buffer
+        )
+    out += stream_event_to_agui_events(
+        StreamEvent(
+            type=StreamEventType.TOOL_CALL_START,
+            tool_call={"id": "call-7", "name": "f", "arguments": {"x": 1}},
+        ),
+        "m1",
+        buffer,
+    )
+    kinds = [type(e).__name__ for e in out]
+    assert kinds == [
+        "ToolCallStartEvent", "ToolCallArgsEvent", "ToolCallArgsEvent", "ToolCallEndEvent",
+    ]
+    assert {e.tool_call_id for e in out} == {"call-7"}
+    assert "".join(e.delta for e in out if hasattr(e, "delta")) == '{"x":1}'
