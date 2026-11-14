@@ -3946,8 +3946,12 @@ class ToolExecutionMixin:
                 from ..tools.base import BaseTool
                 if isinstance(func, BaseTool):
                     bind_target = func.run
-                    keyed_arguments = _with_durable_key(func.run, arguments)
-                    casted_arguments = self._cast_arguments(func.run, keyed_arguments)
+                    # Introspect the real parameters (e.g. the @tool-wrapped
+                    # function) so casting and durable-key injection match
+                    # plain functions instead of seeing run(**kwargs).
+                    sig_target = func._signature_target()
+                    keyed_arguments = _with_durable_key(sig_target, arguments)
+                    casted_arguments = self._cast_arguments(sig_target, keyed_arguments)
                     bind_arguments = casted_arguments
                     return _resolve_result(func.run(**casted_arguments))
                 

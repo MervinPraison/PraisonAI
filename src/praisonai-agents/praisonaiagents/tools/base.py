@@ -280,6 +280,14 @@ class BaseTool(ABC):
     def __call__(self, **kwargs) -> Any:
         """Allow tool to be called directly like a function."""
         return self.run(**kwargs)
+
+    def _signature_target(self) -> Callable:
+        """Callable whose signature describes ``run()``'s real parameters.
+
+        Used by the executor for argument casting and durable-key injection.
+        Wrappers whose ``run`` takes ``**kwargs`` override this.
+        """
+        return self.run
     
     def to_model_output(self, result: Any) -> Optional[Any]:
         """Optional hook returning a compact, model-facing view of ``result``.
