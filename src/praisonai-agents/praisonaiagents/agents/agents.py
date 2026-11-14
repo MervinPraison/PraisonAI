@@ -1536,11 +1536,16 @@ class AgentTeam(SpawnAnnounceProtocol):
         # when the async init above did not populate task.memory.
         context = _build_execution_context(self, task_id, skip_memory_init=True)
 
-        # Execute with agent using DRY helper
-        agent_output = await _execute_with_agent_async(
-            context.executor_agent, context.task_prompt, context.task, 
-            context.tools, stream=self.stream
-        )
+        # Execute with agent using DRY helper. The permit from the
+        # ConcurrencyRegistry (no-op when no limit is set) is keyed on the
+        # resolved agent, so agent_config tasks are capped too, and it covers
+        # only the agent call, so guardrails and callbacks run outside it.
+        from ..agent.concurrency import get_concurrency_registry
+        async with get_concurrency_registry().throttle(context.executor_agent.name):
+            agent_output = await _execute_with_agent_async(
+                context.executor_agent, context.task_prompt, context.task,
+                context.tools, stream=self.stream
+            )
 
         # Process result using DRY helper
         task_result = _process_task_result(self, context, agent_output)
@@ -1990,6 +1995,13 @@ class AgentTeam(SpawnAnnounceProtocol):
 
     async def arun_all_tasks(self):
         """Async version of run_all_tasks method"""
+        # Sync tasks run in executor threads that outlive a cancelled await;
+        # the stop scope tells their agent turns to exit (Issue #6266).
+        from ..agent.chat_mixin import _stop_scope
+        with _stop_scope():
+            return await self._arun_all_tasks()
+
+    async def _arun_all_tasks(self):
         process = Process(
             tasks=self.tasks,
             agents=self.agents,

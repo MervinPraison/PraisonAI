@@ -316,6 +316,27 @@ class JobWorkflowExecutor:
             ast.alias,
         )
 
+        # str.format/format_map resolve "{0.attr}" fields internally, bypassing both checks below
+        _BLOCKED_ATTRS = frozenset({"format", "format_map"})
+
+        def _is_blocked_attr(name):
+            return name.startswith("_") or name in _BLOCKED_ATTRS
+
+        def _check_attr_name(name):
+            # Exact str only: a str subclass could override startswith/__eq__ to evade the check
+            if type(name) is not str:
+                raise TypeError("attribute name must be a plain str")
+            if _is_blocked_attr(name):
+                raise AttributeError(f"access to attribute '{name}' is not allowed")
+
+        def _safe_getattr(obj, name, *default):
+            _check_attr_name(name)
+            return getattr(obj, name, *default)
+
+        def _safe_hasattr(obj, name):
+            _check_attr_name(name)
+            return hasattr(obj, name)
+
         # Safe builtins whitelist — no __import__, exec, eval, open, compile
         _SAFE_BUILTINS = {
             "True": True, "False": False, "None": None,
@@ -327,7 +348,7 @@ class JobWorkflowExecutor:
             "min": min, "max": max, "sum": sum, "abs": abs, "round": round,
             "isinstance": isinstance, "type": type,
             "print": print, "repr": repr,
-            "hasattr": hasattr, "getattr": getattr,
+            "hasattr": _safe_hasattr, "getattr": _safe_getattr,
         }
 
         # Safe namespace with whitelisted environment variables only
@@ -359,6 +380,10 @@ class JobWorkflowExecutor:
             for node in ast.walk(tree):
                 if not isinstance(node, _ALLOWED_NODES):
                     return {"ok": False, "error": f"Disallowed code node: {type(node).__name__}. Only safe expressions and limited statements are allowed."}
+
+                # Block private/dunder attribute access (sandbox escape via __class__ etc.)
+                if isinstance(node, ast.Attribute) and _is_blocked_attr(node.attr):
+                    return {"ok": False, "error": f"Access to attribute '{node.attr}' is not allowed."}
 
                 # Additional safety checks for imports
                 if isinstance(node, (ast.Import, ast.ImportFrom)):
