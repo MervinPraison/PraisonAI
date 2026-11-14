@@ -138,7 +138,9 @@ class TestAuditLogProcessSafety:
         real_flock = audit_mod.fcntl.flock
 
         def spy(fd, op):
-            calls.append(op)
+            # Record on-disk size at each lock transition: proves the entry is
+            # written while LOCK_EX is held, not before/after it.
+            calls.append((op, os.fstat(fd).st_size))
             return real_flock(fd, op)
 
         monkeypatch.setattr(audit_mod.fcntl, "flock", spy)
@@ -147,8 +149,29 @@ class TestAuditLogProcessSafety:
         hook._write({"tool_name": "x", "payload": "y" * 10000})
         hook.close()
 
-        assert calls == [audit_mod.fcntl.LOCK_EX, audit_mod.fcntl.LOCK_UN]
+        assert [op for op, _ in calls] == [audit_mod.fcntl.LOCK_EX, audit_mod.fcntl.LOCK_UN]
+        assert calls[0][1] == 0          # nothing written before locking
+        assert calls[1][1] > 10000       # full entry flushed before unlocking
         with open(log_path) as f:
             lines = f.readlines()
         assert len(lines) == 1
         assert json.loads(lines[0])["payload"] == "y" * 10000
+
+    def test_forked_process_reopens_inherited_handle(self, tmp_path, monkeypatch):
+        """flock is per open file description; a forked worker must not reuse
+        the parent's handle or the lock would not exclude the parent."""
+        from praisonai.security import audit as audit_mod
+        log_path = str(tmp_path / "audit.jsonl")
+        hook = audit_mod.AuditLogHook(log_path=log_path)
+        hook._write({"n": 1})
+        parent_fh = hook._fh
+
+        real_pid = os.getpid()
+        monkeypatch.setattr(audit_mod.os, "getpid", lambda: real_pid + 1)
+        hook._write({"n": 2})
+
+        assert hook._fh is not parent_fh
+        assert parent_fh.closed
+        hook.close()
+        with open(log_path) as f:
+            assert [json.loads(l)["n"] for l in f] == [1, 2]

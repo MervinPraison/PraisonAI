@@ -110,6 +110,7 @@ class AuditLogHook:
         self._lock = threading.Lock()
         # Single long-lived handle; reopened lazily if it gets rotated out.
         self._fh = None
+        self._fh_pid = None
 
     def _ensure_dir(self) -> None:
         """Create parent directory if it doesn't exist."""
@@ -121,6 +122,16 @@ class AuditLogHook:
         line = json.dumps(entry, default=str) + "\n"
         try:
             with self._lock:
+                # flock() locks belong to the open file description, which a
+                # forked worker (e.g. gunicorn --preload) inherits. Drop an
+                # inherited handle so each process opens its own and the file
+                # lock below actually excludes the other workers.
+                if self._fh is not None and self._fh_pid != os.getpid():
+                    try:
+                        self._fh.close()
+                    except OSError:
+                        pass
+                    self._fh = None
                 # Detect rotation: if the on-disk path is gone (rm) or now points
                 # at a different inode than our open handle (logrotate/mv), our fd
                 # refers to the unlinked/rotated file. Drop it so we reopen the
@@ -157,6 +168,7 @@ class AuditLogHook:
                     except OSError:
                         pass
                     self._fh = open(self._log_path, "a", encoding="utf-8")
+                    self._fh_pid = os.getpid()
                 # threading.Lock orders writers within this process; the file
                 # lock orders writers across processes, so a JSONL entry larger
                 # than PIPE_BUF can never be torn by a concurrent worker.
