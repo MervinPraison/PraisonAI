@@ -11,11 +11,32 @@ import json
 import logging
 import os
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
+try:  # POSIX only; on Windows we fall back to the in-process lock alone.
+    import fcntl
+except ImportError:  # pragma: no cover - platform dependent
+    fcntl = None
+
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def _file_lock(fh):
+    """Hold an exclusive advisory lock on ``fh`` so appends from multiple
+    processes (e.g. ``gunicorn -w N``) sharing one audit file never interleave.
+    """
+    if fcntl is None:
+        yield
+        return
+    fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+    try:
+        yield
+    finally:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
 
 _DEFAULT_LOG_PATH = os.path.expanduser("~/.praisonai/audit.jsonl")
 
@@ -89,6 +110,7 @@ class AuditLogHook:
         self._lock = threading.Lock()
         # Single long-lived handle; reopened lazily if it gets rotated out.
         self._fh = None
+        self._fh_pid = None
 
     def _ensure_dir(self) -> None:
         """Create parent directory if it doesn't exist."""
@@ -100,6 +122,16 @@ class AuditLogHook:
         line = json.dumps(entry, default=str) + "\n"
         try:
             with self._lock:
+                # flock() locks belong to the open file description, which a
+                # forked worker (e.g. gunicorn --preload) inherits. Drop an
+                # inherited handle so each process opens its own and the file
+                # lock below actually excludes the other workers.
+                if self._fh is not None and self._fh_pid != os.getpid():
+                    try:
+                        self._fh.close()
+                    except OSError:
+                        pass
+                    self._fh = None
                 # Detect rotation: if the on-disk path is gone (rm) or now points
                 # at a different inode than our open handle (logrotate/mv), our fd
                 # refers to the unlinked/rotated file. Drop it so we reopen the
@@ -136,9 +168,14 @@ class AuditLogHook:
                     except OSError:
                         pass
                     self._fh = open(self._log_path, "a", encoding="utf-8")
-                self._fh.write(line)
-                self._fh.flush()
-                os.fsync(self._fh.fileno())   # optional, for crash-durability
+                    self._fh_pid = os.getpid()
+                # threading.Lock orders writers within this process; the file
+                # lock orders writers across processes, so a JSONL entry larger
+                # than PIPE_BUF can never be torn by a concurrent worker.
+                with _file_lock(self._fh):
+                    self._fh.write(line)
+                    self._fh.flush()
+                    os.fsync(self._fh.fileno())   # crash-durability
         except OSError as e:
             logger.error("[praisonai.security.audit] Failed to write audit log: %s", e)
 
