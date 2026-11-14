@@ -316,6 +316,18 @@ class JobWorkflowExecutor:
             ast.alias,
         )
 
+        def _check_attr_name(name):
+            if isinstance(name, str) and name.startswith("_"):
+                raise AttributeError(f"access to private attribute '{name}' is not allowed")
+
+        def _safe_getattr(obj, name, *default):
+            _check_attr_name(name)
+            return getattr(obj, name, *default)
+
+        def _safe_hasattr(obj, name):
+            _check_attr_name(name)
+            return hasattr(obj, name)
+
         # Safe builtins whitelist — no __import__, exec, eval, open, compile
         _SAFE_BUILTINS = {
             "True": True, "False": False, "None": None,
@@ -327,7 +339,7 @@ class JobWorkflowExecutor:
             "min": min, "max": max, "sum": sum, "abs": abs, "round": round,
             "isinstance": isinstance, "type": type,
             "print": print, "repr": repr,
-            "hasattr": hasattr, "getattr": getattr,
+            "hasattr": _safe_hasattr, "getattr": _safe_getattr,
         }
 
         # Safe namespace with whitelisted environment variables only
@@ -359,6 +371,10 @@ class JobWorkflowExecutor:
             for node in ast.walk(tree):
                 if not isinstance(node, _ALLOWED_NODES):
                     return {"ok": False, "error": f"Disallowed code node: {type(node).__name__}. Only safe expressions and limited statements are allowed."}
+
+                # Block private/dunder attribute access (sandbox escape via __class__ etc.)
+                if isinstance(node, ast.Attribute) and node.attr.startswith("_"):
+                    return {"ok": False, "error": f"Access to private attribute '{node.attr}' is not allowed."}
 
                 # Additional safety checks for imports
                 if isinstance(node, (ast.Import, ast.ImportFrom)):
