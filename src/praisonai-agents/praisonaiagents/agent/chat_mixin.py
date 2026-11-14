@@ -1024,6 +1024,37 @@ Your Role: {self.role}"""
         if is_replay_unsafe_chain(error):
             raise error
 
+    @staticmethod
+    def _assistant_reply_text(reply):
+        """Text form of a guardrail-approved reply for history/DB storage."""
+        if isinstance(reply, str):
+            return reply
+        if reply is None:
+            return ""
+        if hasattr(reply, "model_dump_json"):
+            return reply.model_dump_json()
+        if isinstance(reply, (dict, list)):
+            return json.dumps(reply, default=str)
+        return str(reply)
+
+    def _commit_assistant_reply(self, reply, persist=True):
+        """Record the *approved* assistant reply in chat history (and the DB).
+
+        Called only after guardrail validation so a rejected answer never
+        reaches history, the session store or the next turn's context.
+        """
+        text = self._assistant_reply_text(reply)
+        self._append_to_chat_history({"role": "assistant", "content": text})
+        if persist:
+            self._persist_message("assistant", text)
+
+    async def _acommit_assistant_reply(self, reply, persist=True):
+        """Async twin of :meth:`_commit_assistant_reply` (DB write off-loop)."""
+        text = self._assistant_reply_text(reply)
+        self._append_to_chat_history({"role": "assistant", "content": text})
+        if persist:
+            await self._apersist_message("assistant", text)
+
     def _structured_output_from_message(self, message, schema_model, response_text: str, original_text=None):
         """Resolve a Pydantic ``output_pydantic`` from an LLM message or JSON text.
 
@@ -3875,7 +3906,11 @@ Your Role: {self.role}"""
             if self._db is not None:
                 self._init_db_session()
                 self._start_run(prompt if isinstance(prompt, str) else str(prompt))
-            result = self._chat_impl(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice, seed=seed, cancel_token=_cancel)
+            _scope_token = self._enter_turn_tool_scope(tools)
+            try:
+                result = self._chat_impl(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice, seed=seed, cancel_token=_cancel)
+            finally:
+                self._exit_turn_tool_scope(_scope_token)
             db_output = str(result) if result is not None else None
             # A guardrail-blocked turn returns a non-None refusal string; it must
             # be recorded as "error", not "completed" (the answer was rejected).
@@ -4251,10 +4286,6 @@ Your Role: {self.role}"""
 
                     response_text = self._custom_llm_get_response(llm_kwargs)
 
-                    self._add_to_chat_history("assistant", response_text)
-                    # Persist assistant message to DB
-                    self._persist_message("assistant", response_text)
-
                     # Log completion time if in debug mode
                     if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
@@ -4263,6 +4294,8 @@ Your Role: {self.role}"""
                     # Apply guardrail validation for custom LLM response
                     try:
                         validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=processed_history)
+                        # Commit only the approved reply (never the rejected one).
+                        self._commit_assistant_reply(validated_response)
                         # Coerce into the requested Pydantic model so callers
                         # get a validated instance, not a raw JSON string.
                         # Only output_pydantic changes the return type; output_json
@@ -4412,14 +4445,11 @@ Your Role: {self.role}"""
 
                         # Handle output_json or output_pydantic if specified
                         if output_json or output_pydantic:
-                            # Add to chat history and return raw response
-                            # User message already added before LLM call via _build_messages
-                            self._append_to_chat_history({"role": "assistant", "content": response_text})
-                            # Persist assistant message to DB
-                            self._persist_message("assistant", response_text)
-                            # Apply guardrail validation even for JSON output
+                            # Apply guardrail validation even for JSON output; the
+                            # reply is committed to history/DB only once approved.
                             try:
-                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages)
+                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages, response_format=response_format)
+                                self._commit_assistant_reply(validated_response)
                                 # Coerce into the requested Pydantic model so callers
                                 # get a validated instance, not a raw JSON string.
                                 # output_json intentionally stays a string (backward compat).
@@ -4437,10 +4467,8 @@ Your Role: {self.role}"""
                                 return self._guardrail_blocked_message(e)
 
                         if not self.self_reflect:
-                            # User message already added before LLM call via _build_messages
-                            self._append_to_chat_history({"role": "assistant", "content": response_text})
-                            # Persist assistant message to DB (non-reflect path)
-                            self._persist_message("assistant", response_text)
+                            # The assistant reply is committed to history/DB only
+                            # after guardrail validation (below).
                             if self.verbose:
                                 logging.debug(f"Agent {self.name} final response: {response_text}")
                             # Return only reasoning content if reasoning_steps is True
@@ -4448,6 +4476,8 @@ Your Role: {self.role}"""
                                 # Apply guardrail to reasoning content
                                 try:
                                     validated_reasoning = self._apply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages)
+                                    # Commit the approved text, not the unchecked answer.
+                                    self._commit_assistant_reply(validated_reasoning)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_reasoning, time.time() - start_time, task_name, task_description, task_id)
                                     return self._trigger_after_agent_hook(original_prompt, validated_reasoning, start_time)
@@ -4461,7 +4491,8 @@ Your Role: {self.role}"""
                                     return self._guardrail_blocked_message(e)
                             # Apply guardrail to regular response
                             try:
-                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages)
+                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages, response_format=response_format)
+                                self._commit_assistant_reply(validated_response)
                                 # Execute callback after validation
                                 self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                 return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -4523,11 +4554,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if reflection_output.satisfactory == "yes" and reflection_count >= self.min_reflect - 1:
                                 if self.verbose:
                                     _get_display_functions()['display_self_reflection']("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
-                                # User message already added before LLM call via _build_messages
-                                self._append_to_chat_history({"role": "assistant", "content": response_text})
                                 # Apply guardrail validation after satisfactory reflection
                                 try:
                                     validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages)
+                                    self._commit_assistant_reply(validated_response, persist=False)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                     return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -4541,11 +4571,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if reflection_count >= self.max_reflect - 1:
                                 if self.verbose:
                                     _get_display_functions()['display_self_reflection']("Maximum reflection count reached, returning current response", console=self.console)
-                                # User message already added before LLM call via _build_messages
-                                self._append_to_chat_history({"role": "assistant", "content": response_text})
                                 # Apply guardrail validation after max reflections
                                 try:
                                     validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages)
+                                    self._commit_assistant_reply(validated_response, persist=False)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                     return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -4579,9 +4608,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     # None) loops forever, two LLM calls at a time.
                                     if self.verbose:
                                         _get_display_functions()['display_self_reflection']("Maximum reflection count reached after repeated parse errors, returning current response", console=self.console)
-                                    self._append_to_chat_history({"role": "assistant", "content": response_text})
                                     try:
                                         validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages)
+                                        self._commit_assistant_reply(validated_response, persist=False)
                                         self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                         return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
                                     except Exception as guard_e:
@@ -4721,15 +4750,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if self._db is not None:
                 await self._ainit_db_session()
                 await self._astart_run(prompt if isinstance(prompt, str) else str(prompt))
-            result = await self._achat_impl(
-                prompt=prompt, temperature=temperature, tools=tools,
-                output_json=output_json, output_pydantic=output_pydantic,
-                reasoning_steps=reasoning_steps, stream=stream,
-                task_name=task_name, task_description=task_description, task_id=task_id,
-                config=config, force_retrieval=force_retrieval, skip_retrieval=skip_retrieval,
-                attachments=attachments, _trace_emitter=_trace_emitter, tool_choice=tool_choice,
-                seed=seed, cancel_token=_cancel
-            )
+            _scope_token = self._enter_turn_tool_scope(tools)
+            try:
+                result = await self._achat_impl(
+                    prompt=prompt, temperature=temperature, tools=tools,
+                    output_json=output_json, output_pydantic=output_pydantic,
+                    reasoning_steps=reasoning_steps, stream=stream,
+                    task_name=task_name, task_description=task_description, task_id=task_id,
+                    config=config, force_retrieval=force_retrieval, skip_retrieval=skip_retrieval,
+                    attachments=attachments, _trace_emitter=_trace_emitter, tool_choice=tool_choice,
+                    seed=seed, cancel_token=_cancel
+                )
+            finally:
+                self._exit_turn_tool_scope(_scope_token)
             db_output = str(result) if result is not None else None
             # A guardrail-blocked turn returns a non-None refusal string; record
             # it as "error", not "completed" (see sync chat()).
@@ -4994,8 +5027,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if effective_history is not self.chat_history:
                         self._replace_chat_history(effective_history)
 
-                    self._append_to_chat_history({"role": "assistant", "content": response_text})
-
                     if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
                         logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
@@ -5003,6 +5034,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Apply guardrail validation for custom LLM response
                     try:
                         validated_response = await self._aapply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id, messages=effective_history)
+                        # Commit only the approved reply (never the rejected one).
+                        self._commit_assistant_reply(validated_response, persist=False)
                         # Coerce into the requested Pydantic model so callers
                         # get a validated instance, not a raw JSON string.
                         # output_json intentionally stays a string (backward compat).
@@ -5145,16 +5178,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                         # Handle output_json or output_pydantic if specified
                         if output_json or output_pydantic:
-                            # Add to chat history and return raw response
-                            # User message already added before LLM call via _build_messages
-                            self._append_to_chat_history({"role": "assistant", "content": response_text})
-                            # Persist assistant message to DB (offloaded to a
-                            # worker thread so file-locked disk I/O doesn't
-                            # block the event loop on this async turn).
-                            await self._apersist_message("assistant", response_text)
-                            # Apply guardrail validation even for JSON output
+                            # Apply guardrail validation even for JSON output; the
+                            # reply is committed to history/DB only once approved.
                             try:
-                                validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages)
+                                validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages, response_format=response_format)
+                                await self._acommit_assistant_reply(validated_response)
                                 # Coerce into the requested Pydantic model so callers
                                 # get a validated instance, not a raw JSON string.
                                 # output_json intentionally stays a string (backward compat).
@@ -5171,11 +5199,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                         # For regular responses (no self-reflection)
                         if not self.self_reflect:
-                            # User message already added before LLM call via _build_messages
-                            self._append_to_chat_history({"role": "assistant", "content": response_text})
-                            # Persist assistant message to DB (non-reflect path,
-                            # offloaded to a worker thread to avoid blocking the loop)
-                            await self._apersist_message("assistant", response_text)
+                            # The assistant reply is committed to history/DB only
+                            # after guardrail validation (below).
                             if self.verbose:
                                 logging.debug(f"Agent {self.name} final response: {response_text}")
                             # Return only reasoning content if reasoning_steps is True
@@ -5183,6 +5208,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 # Apply guardrail to reasoning content
                                 try:
                                     validated_reasoning = await self._aapply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages)
+                                    # Commit the approved text, not the unchecked answer.
+                                    await self._acommit_assistant_reply(validated_reasoning)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_reasoning, time.time() - start_time, task_name, task_description, task_id)
                                     return await self._atrigger_after_agent_hook(original_prompt, validated_reasoning, start_time)
@@ -5194,7 +5221,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             else:
                                 # Apply guardrail to regular response content
                                 try:
-                                    validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages)
+                                    validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages, response_format=response_format)
+                                    await self._acommit_assistant_reply(validated_response)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                     return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -5230,11 +5258,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         if self.verbose:
                                             _get_display_functions()['display_self_reflection'](f"Agent {self.name}: Self-reflection with structured output is not supported for custom LLM providers. Skipping reflection.", console=self.console)
                                         # Return the original response without reflection
-                                        self._append_to_chat_history({"role": "assistant", "content": response_text})
-                                        # Persist assistant message to DB (offloaded to a worker thread)
-                                        await self._apersist_message("assistant", response_text)
                                         try:
                                             validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages)
+                                            await self._acommit_assistant_reply(validated_response)
                                             # Execute callback after validation
                                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                             return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -5264,11 +5290,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         if self.verbose:
                                             _get_display_functions()['display_self_reflection']("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
                                         # Add to chat history and return
-                                        self._append_to_chat_history({"role": "assistant", "content": response_text})
-                                        # Persist assistant message to DB (offloaded to a worker thread)
-                                        await self._apersist_message("assistant", response_text)
                                         try:
                                             validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages)
+                                            await self._acommit_assistant_reply(validated_response)
                                             # Execute callback after validation
                                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                             return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -5283,11 +5307,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         if self.verbose:
                                             _get_display_functions()['display_self_reflection']("Maximum reflection count reached, returning current response", console=self.console)
                                         # Add to chat history and return
-                                        self._append_to_chat_history({"role": "assistant", "content": response_text})
-                                        # Persist assistant message to DB (offloaded to a worker thread)
-                                        await self._apersist_message("assistant", response_text)
                                         try:
                                             validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages)
+                                            await self._acommit_assistant_reply(validated_response)
                                             # Execute callback after validation
                                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                             return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -5333,11 +5355,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     reflection_count += 1
                                     if reflection_count >= self.max_reflect:
                                         # Return original response after max reflection attempts
-                                        self._append_to_chat_history({"role": "assistant", "content": response_text})
-                                        # Persist assistant message to DB (offloaded to a worker thread)
-                                        await self._apersist_message("assistant", response_text)
                                         try:
                                             validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages)
+                                            await self._acommit_assistant_reply(validated_response)
                                             # Execute callback after validation
                                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                             return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)

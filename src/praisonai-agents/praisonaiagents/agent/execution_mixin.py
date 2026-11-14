@@ -1775,7 +1775,15 @@ Write the complete compiled report:"""
         from .tool_execution import _CALLER_ERROR_TYPES
         try:
             logging.info(f"Executing async tool: {function_name} with arguments: {arguments}")
-            
+
+            # Gate on the tool that will actually run (parity with the sync path).
+            if hasattr(self, "_canonical_tool_name"):
+                function_name = self._canonical_tool_name(function_name, tools_override)
+            if hasattr(self, "_turn_tool_denial"):
+                turn_denial = self._turn_tool_denial(function_name)
+                if turn_denial is not None:
+                    return turn_denial
+
             # Check if approval is required for this tool (protocol-driven)
             try:
                 result = await self._check_tool_approval_async(function_name, arguments)
@@ -1993,6 +2001,9 @@ Write the complete compiled report:"""
                         _inject_state = self._build_agent_state()
                     except Exception:
                         _inject_state = None
+                if not isinstance(func, BaseTool):
+                    from ..tools.injected import inject_into_plain_callable
+                    call_arguments = inject_into_plain_callable(call_target, call_arguments, _inject_state)
 
                 async def _invoke():
                     # Set the tool-progress channel BEFORE dispatch so the sink
