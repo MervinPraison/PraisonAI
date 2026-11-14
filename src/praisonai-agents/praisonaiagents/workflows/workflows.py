@@ -198,6 +198,62 @@ def _rebuild_isolated(value: Any, memo: dict) -> Any:
     return value
 
 
+# Per-branch agent clones for concurrent fan-out (Parallel / Loop(parallel=True)).
+# Maps id(shared agent) -> that branch's clone (created lazily), or None if unset.
+_BRANCH_AGENTS: "contextvars.ContextVar[Optional[dict]]" = contextvars.ContextVar(
+    "praisonai_workflow_branch_agents", default=None
+)
+
+
+def _step_agents(step: Any, _seen: Optional[set] = None) -> List[Any]:
+    """Return every Agent a step runs on, including inside nested patterns."""
+    seen = set() if _seen is None else _seen
+    if step is None or id(step) in seen:
+        return []
+    seen.add(id(step))
+    if isinstance(step, Task):
+        agent = step.agent
+        return [agent] if hasattr(agent, "_fork_history") else []
+    if hasattr(step, "_fork_history"):
+        return [step]
+    if isinstance(step, (list, tuple)):
+        children = list(step)
+    elif isinstance(step, Route):
+        children = [*step.routes.values(), step.default]
+    elif isinstance(step, If):
+        children = [step.then_steps, step.else_steps]
+    elif isinstance(step, (Parallel, Loop, Repeat)):
+        children = [getattr(step, "step", None), getattr(step, "steps", None)]
+    else:
+        return []
+    return [a for child in children for a in _step_agents(child, seen)]
+
+
+def _enter_branch(shared_agents) -> "contextvars.Token":
+    """Mark ``shared_agents`` for per-branch cloning in the current context."""
+    clones = dict(_BRANCH_AGENTS.get() or {})
+    for agent in shared_agents:
+        clones[id(agent)] = None
+    return _BRANCH_AGENTS.set(clones)
+
+
+def _branch_agent(agent: Any) -> Any:
+    """Return this branch's private clone of ``agent`` if it is shared across
+    concurrent branches, otherwise ``agent`` itself.
+
+    One Agent instance appends every call to its own ``chat_history``, so
+    running it from several threads at once leaks sibling prompts into each
+    request. The fork shares config, tools and memory but owns its history.
+    """
+    clones = _BRANCH_AGENTS.get()
+    if not clones or id(agent) not in clones or not hasattr(agent, "_fork_history"):
+        return agent
+    clone = clones[id(agent)]
+    if clone is None:
+        clone = clones[id(agent)] = agent._fork_history()
+    return clone
+
+
 def _isolate_scope(variables: dict) -> dict:
     """Give a parallel branch/iteration its own copy of the variable scope.
 
@@ -3436,16 +3492,19 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                     return result.output
                 return str(result)
             elif normalized.agent:
+                # A concurrent branch gets its own clone of a shared agent so
+                # sibling branches never see each other's chat_history.
+                agent = _branch_agent(normalized.agent)
                 # Propagate context management to existing agent if workflow has it enabled
-                if self.context and hasattr(normalized.agent, '_context_manager_initialized'):
-                    if not normalized.agent._context_manager_initialized:
-                        normalized.agent._context_param = self.context
+                if self.context and hasattr(agent, '_context_manager_initialized'):
+                    if not agent._context_manager_initialized:
+                        agent._context_param = self.context
                     # Share session deduplication cache for cross-agent deduplication
                     if self._session_dedup_cache:
-                        normalized.agent._session_dedup_cache = self._session_dedup_cache
+                        agent._session_dedup_cache = self._session_dedup_cache
                         # Also set on existing context manager if already initialized
-                        if normalized.agent._context_manager and hasattr(normalized.agent._context_manager, '_session_cache'):
-                            normalized.agent._context_manager._session_cache = self._session_dedup_cache
+                        if agent._context_manager and hasattr(agent._context_manager, '_session_cache'):
+                            agent._context_manager._session_cache = self._session_dedup_cache
 
                 action = normalized.action or input
                 # Substitute variables
@@ -3454,9 +3513,9 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                     action = f"{action}\n\nPrevious attempt feedback: {validation_feedback}"
 
                 # Check if this is a specialized agent (AudioAgent, VideoAgent, ImageAgent, OCRAgent)
-                agent_class_name = normalized.agent.__class__.__name__
+                agent_class_name = agent.__class__.__name__
                 out = self._execute_specialized_agent(
-                    normalized.agent, agent_class_name, action, normalized, all_variables, stream
+                    agent, agent_class_name, action, normalized, all_variables, stream
                 )
                 # Parse JSON output if output_json was requested
                 step_output_json = getattr(normalized, '_output_json', None)
@@ -4024,6 +4083,12 @@ CONCISE SUMMARY:"""
         # agent turn still running after timeout/fail_fast/caller exit stop at
         # its next cancel check instead of running on unseen (Issue #6266).
         from ..agent.chat_mixin import _stop_scope
+
+        # Agents used by more than one branch must not share chat_history.
+        per_branch = [{id(a): a for a in _step_agents(s)} for s in parallel_step.steps]
+        uses = collections.Counter(k for b in per_branch for k in b)
+        shared_agents = [a for b in per_branch for k, a in b.items() if uses[k] > 1]
+
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers)
         abandon_scope = _stop_scope()
         abandon_scope.__enter__()
@@ -4043,11 +4108,13 @@ CONCISE SUMMARY:"""
                 def execute_with_branch(step=step, idx=idx, opt_prev=optimized_previous, branch_vars=branch_vars):
                     emitter = get_context_emitter()
                     emitter.set_branch(f"parallel_{idx}")
+                    token = _enter_branch(shared_agents)
                     try:
                         return self._execute_single_step_internal(
                             step, opt_prev, input, branch_vars, model, False, idx, stream, depth=depth+1
                         )
                     finally:
+                        _BRANCH_AGENTS.reset(token)
                         emitter.clear_branch()
 
                 future = executor.submit(copy_context_to_callable(execute_with_branch))
@@ -4301,6 +4368,9 @@ CONCISE SUMMARY:"""
                 # Set branch context for parallel tracking
                 emitter = get_context_emitter()
                 emitter.set_branch(f"loop_{idx}")
+                # Every item runs the same steps, so each iteration needs its
+                # own clone of their agents (fresh chat_history per item).
+                token = _enter_branch(_step_agents(steps_to_run))
                 
                 try:
                     # CRITICAL: Deep copy variables to ensure thread isolation
@@ -4354,6 +4424,7 @@ CONCISE SUMMARY:"""
                     }
                     return idx, final_result
                 finally:
+                    _BRANCH_AGENTS.reset(token)
                     emitter.clear_branch()
             
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:

@@ -1968,8 +1968,11 @@ Write the complete compiled report:"""
                 if hasattr(self, "_cast_arguments"):  # sync-path parity
                     call_arguments = self._cast_arguments(call_target, arguments)
                 if durable_key:
+                    sig_target = (
+                        func._signature_target() if isinstance(func, BaseTool) else call_target
+                    )
                     try:
-                        parameters = inspect.signature(call_target).parameters.values()
+                        parameters = inspect.signature(sig_target).parameters.values()
                     except (TypeError, ValueError):
                         parameters = ()
                     if any(

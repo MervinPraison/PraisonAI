@@ -284,7 +284,6 @@ def process_stream_chunks(chunks):
     
     try:
         first_chunk = chunks[0]
-        last_chunk = chunks[-1]
         
         # Basic metadata
         id = getattr(first_chunk, "id", None) 
@@ -300,8 +299,10 @@ def process_stream_chunks(chunks):
         
         content_list = []
         reasoning_list = []
-        tool_calls = []
-        current_tool_call = None
+        # Tool-call deltas accumulated by index across the whole stream
+        tool_calls_by_index = {}
+        index_alias = {}  # provider index -> slot, when a server reuses an index
+        finish_reason = None
 
         # First pass: Get initial tool call data
         for chunk in chunks:
@@ -322,7 +323,11 @@ def process_stream_chunks(chunks):
             if not hasattr(chunk, "choices") or not chunk.choices:
                 continue
             
-            delta = getattr(chunk.choices[0], "delta", None)
+            choice0 = chunk.choices[0]
+            if getattr(choice0, "finish_reason", None):
+                finish_reason = choice0.finish_reason
+
+            delta = getattr(choice0, "delta", None)
             if not delta:
                 continue
 
@@ -332,45 +337,48 @@ def process_stream_chunks(chunks):
             if hasattr(delta, "reasoning_content") and delta.reasoning_content:
                 reasoning_list.append(delta.reasoning_content)
             
-            # Handle tool calls
-            if hasattr(delta, "tool_calls") and delta.tool_calls:
-                for tool_call_delta in delta.tool_calls:
-                    fn = getattr(tool_call_delta, "function", None)
-                    args_part = getattr(fn, "arguments", None) or ""
-                    if tool_call_delta.index is not None and tool_call_delta.id:
-                        # Found the initial tool call. Many OpenAI-compatible
-                        # servers (vLLM, Ollama, Gemini, proxies) send the
-                        # whole arguments string in this same delta, so keep
-                        # it instead of starting from "".
-                        current_tool_call = {
-                            "id": tool_call_delta.id,
-                            "type": "function",
-                            "function": {
-                                "name": getattr(fn, "name", None),
-                                "arguments": args_part
-                            }
-                        }
-                        while len(tool_calls) <= tool_call_delta.index:
-                            tool_calls.append(None)
-                        tool_calls[tool_call_delta.index] = current_tool_call
-                    elif args_part:
-                        # Continuation delta: append to the call at its index
-                        # (parallel calls interleave), else to the last one.
-                        idx = tool_call_delta.index
-                        target = (
-                            tool_calls[idx]
-                            if idx is not None and 0 <= idx < len(tool_calls) and tool_calls[idx]
-                            else current_tool_call
-                        )
-                        if target is not None:
-                            target["function"]["arguments"] += args_part
+            # Handle tool calls: providers may send a full call in a single
+            # delta (Ollama/vLLM) or stream argument fragments addressed by
+            # index (parallel calls), so accumulate per index.
+            for tool_call_delta in (getattr(delta, "tool_calls", None) or []):
+                idx = getattr(tool_call_delta, "index", None)
+                tc_id = getattr(tool_call_delta, "id", None)
+                if idx is None:
+                    # No index: a new id opens a call, otherwise continue the last one
+                    if tc_id or not tool_calls_by_index:
+                        idx = max(tool_calls_by_index, default=-1) + 1
+                    else:
+                        idx = max(tool_calls_by_index)
+                else:
+                    raw_idx = idx
+                    idx = index_alias.get(raw_idx, raw_idx)
+                    existing = tool_calls_by_index.get(idx)
+                    if tc_id and existing and existing["id"] and existing["id"] != tc_id:
+                        # Some servers reuse index 0 for every call; a new id
+                        # at a filled index is a new call, not a fragment.
+                        idx = index_alias[raw_idx] = max(tool_calls_by_index) + 1
+                slot = tool_calls_by_index.setdefault(idx, {
+                    "id": None,
+                    "type": "function",
+                    "function": {"name": "", "arguments": ""},
+                })
+                if tc_id:
+                    slot["id"] = tc_id
+                fn = getattr(tool_call_delta, "function", None)
+                if fn is not None:
+                    if getattr(fn, "name", None):
+                        slot["function"]["name"] = fn.name
+                    if getattr(fn, "arguments", None):
+                        slot["function"]["arguments"] += fn.arguments
 
-        # Remove any None values and empty tool calls
-        tool_calls = [tc for tc in tool_calls if tc and tc["id"] and tc["function"]["name"]]
+        # Drop incomplete tool calls
+        tool_calls = [
+            tool_calls_by_index[i] for i in sorted(tool_calls_by_index)
+            if tool_calls_by_index[i]["id"] and tool_calls_by_index[i]["function"]["name"]
+        ]
 
         combined_content = "".join(content_list) if content_list else ""
         combined_reasoning = "".join(reasoning_list) if reasoning_list else None
-        finish_reason = getattr(last_chunk.choices[0], "finish_reason", None) if hasattr(last_chunk, "choices") and last_chunk.choices else None
 
         # Create ToolCall objects
         processed_tool_calls = []
@@ -397,7 +405,7 @@ def process_stream_chunks(chunks):
         )
         
         choice = Choice(
-            finish_reason=finish_reason or "tool_calls" if processed_tool_calls else None,
+            finish_reason=finish_reason or ("tool_calls" if processed_tool_calls else None),
             index=0,
             message=message
         )

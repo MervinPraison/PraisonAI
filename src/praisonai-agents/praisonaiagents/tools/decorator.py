@@ -229,6 +229,10 @@ class FunctionTool(BaseTool):
             logging.warning(f"to_model_output failed for tool '{self.name}': {e}")
             return None
 
+    def _signature_target(self) -> Callable:
+        """Introspect the wrapped function, not ``run(**kwargs)``."""
+        return self._func
+
     def __call__(self, *args, **kwargs) -> Any:
         """Allow calling with positional args like the original function.
         
