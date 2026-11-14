@@ -22,6 +22,12 @@ def make_legacy(path):
     {'session_id': 'bad', 'last_compaction': 5},
     {'session_id': 'bad', 'messages': 5},
     {'session_id': 'bad', 'metadata': 5},
+    {'session_id': 'bad', 'agent_name': []},
+    {'session_id': 'bad', 'agent_id': {}},
+    {'session_id': 'bad', 'gateway_session_id': []},
+    {'session_id': 'bad', 'updated_at': {}},
+    {'session_id': [], 'agent_name': 'agent'},
+    {'session_id': 'bad', 'agent_name': 2**80},
 ])
 def test_malformed_legacy_structure_does_not_block_healthy_sessions(tmp_path, bad_data):
     make_legacy(tmp_path)

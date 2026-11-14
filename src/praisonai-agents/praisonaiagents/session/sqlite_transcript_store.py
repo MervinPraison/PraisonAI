@@ -183,6 +183,19 @@ class SqliteTranscriptStore(DefaultSessionStore):
                             session = SessionData.from_dict(data)
                         except (AttributeError, TypeError, ValueError, KeyError):
                             continue
+                        columns = (session.session_id, session.agent_name,
+                                   session.gateway_session_id, session.agent_id,
+                                   session.updated_at)
+                        # JSON arrays/objects and oversized integers cannot be
+                        # bound as SQLite values. Skip malformed legacy rows,
+                        # while treating actual database failures as fatal.
+                        if any(
+                            not isinstance(value, (str, int, float, type(None)))
+                            or (isinstance(value, int) and not -(2**63) <= value < 2**63)
+                            for value in columns
+                        ):
+                            logger.warning("Skipping malformed legacy session %s", filepath)
+                            continue
                         if not self._write_row(session, conn=conn):
                             raise OSError(f"Legacy session migration failed for {filename}")
                         imported += 1
