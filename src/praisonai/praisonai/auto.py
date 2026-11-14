@@ -757,9 +757,9 @@ class BaseAutoGenerator:
                 model_name, config=provider_config or None
             )
         except Exception as exc:
-            logger.debug(
-                "Registered provider lookup for %r failed (%s); "
-                "using built-in completion ladder.", model_name, exc
+            logger.warning(
+                "Registered provider for %r failed to construct (%s); "
+                "falling back to built-in completion ladder.", model_name, exc
             )
             return None
         generate_structured = getattr(provider, "generate_structured", None)
