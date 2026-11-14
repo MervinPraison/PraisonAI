@@ -360,7 +360,7 @@ def check_gateway_env_substitution(config: DoctorConfig) -> CheckResult:
         # Load .env file first to ensure all env vars are available
         try:
             load_env_file()
-        except:
+        except Exception:
             pass  # .env file might not exist, continue anyway
         
         with open(config_path) as f:
