@@ -10860,7 +10860,9 @@ class WebSocketGateway:
         # it has been stopped.
         self._webhook_channels.clear()
         # Issue #6362: owners are re-registered from config as channels start.
-        self._owner_handles.clear()
+        owner_handles = getattr(self, "_owner_handles", None)
+        if owner_handles is not None:
+            owner_handles.clear()
         self._routing_rules.clear()
         self._routing_bindings.clear()
 
@@ -11110,7 +11112,9 @@ class WebSocketGateway:
             self._webhook_channels.pop(channel_name, None)
             # Issue #6362: a removed channel (or one that fails to restart)
             # must not keep its declared owner resolving to the owner id.
-            self._owner_handles.pop(channel_name, None)
+            owner_handles = getattr(self, "_owner_handles", None)
+            if owner_handles is not None:
+                owner_handles.pop(channel_name, None)
 
             # Clean up supervisor state
             self._channel_supervisor.cleanup(channel_name)
