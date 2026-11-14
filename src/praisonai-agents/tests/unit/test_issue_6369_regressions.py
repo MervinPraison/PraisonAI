@@ -134,3 +134,31 @@ class TestParallelBranchHistoryIsolation:
         wf.start("go")
         assert sorted(me for me, _ in recorded) == ["X1", "X2"]
         assert all(prior == [] for _, prior in recorded), recorded
+
+    def test_nested_if_in_parallel_loop_isolated(self, recorded):
+        from praisonaiagents import Task
+        from praisonaiagents.workflows import Workflow, Loop, If
+
+        agent = self._agent()
+        body = If(condition="1 == 1",
+                  then_steps=[Task(name="t", agent=agent, action="Doc {{item}}")])
+        wf = Workflow(
+            steps=[Loop(body, over="items", parallel=True, max_workers=4)],
+            variables={"items": ["A", "B", "C"]},
+        )
+        wf.start("go")
+        assert sorted(me for me, _ in recorded) == ["Doc A", "Doc B", "Doc C"]
+        assert all(prior == [] for _, prior in recorded), recorded
+
+    def test_branch_fork_keeps_config_and_isolates_history(self):
+        agent = self._agent()
+        agent.backend = sentinel = object()
+        agent.custom_attr = "kept"
+        agent.chat_history = [{"role": "user", "content": "earlier"}]
+
+        fork = agent._fork_history()
+        assert fork.backend is sentinel and fork.custom_attr == "kept"
+        assert fork.tools is agent.tools
+        assert fork.chat_history == agent.chat_history
+        fork._append_to_chat_history({"role": "user", "content": "branch"})
+        assert len(agent.chat_history) == 1 and len(fork.chat_history) == 2

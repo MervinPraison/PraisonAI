@@ -205,13 +205,28 @@ _BRANCH_AGENTS: "contextvars.ContextVar[Optional[dict]]" = contextvars.ContextVa
 )
 
 
-def _step_agent(step: Any) -> Any:
-    """Return the Agent a leaf step runs on, or None."""
+def _step_agents(step: Any, _seen: Optional[set] = None) -> List[Any]:
+    """Return every Agent a step runs on, including inside nested patterns."""
+    seen = set() if _seen is None else _seen
+    if step is None or id(step) in seen:
+        return []
+    seen.add(id(step))
     if isinstance(step, Task):
-        return step.agent
-    if hasattr(step, "chat") and hasattr(step, "clone_for_channel"):
-        return step
-    return None
+        agent = step.agent
+        return [agent] if hasattr(agent, "_fork_history") else []
+    if hasattr(step, "_fork_history"):
+        return [step]
+    if isinstance(step, (list, tuple)):
+        children = list(step)
+    elif isinstance(step, Route):
+        children = [*step.routes.values(), step.default]
+    elif isinstance(step, If):
+        children = [step.then_steps, step.else_steps]
+    elif isinstance(step, (Parallel, Loop, Repeat)):
+        children = [getattr(step, "step", None), getattr(step, "steps", None)]
+    else:
+        return []
+    return [a for child in children for a in _step_agents(child, seen)]
 
 
 def _enter_branch(shared_agents) -> "contextvars.Token":
@@ -228,14 +243,14 @@ def _branch_agent(agent: Any) -> Any:
 
     One Agent instance appends every call to its own ``chat_history``, so
     running it from several threads at once leaks sibling prompts into each
-    request. A clone keeps config and tools but starts with a fresh history.
+    request. The fork shares config, tools and memory but owns its history.
     """
     clones = _BRANCH_AGENTS.get()
-    if not clones or id(agent) not in clones or not hasattr(agent, "clone_for_channel"):
+    if not clones or id(agent) not in clones or not hasattr(agent, "_fork_history"):
         return agent
     clone = clones[id(agent)]
     if clone is None:
-        clone = clones[id(agent)] = agent.clone_for_channel()
+        clone = clones[id(agent)] = agent._fork_history()
     return clone
 
 
@@ -4070,9 +4085,9 @@ CONCISE SUMMARY:"""
         from ..agent.chat_mixin import _stop_scope
 
         # Agents used by more than one branch must not share chat_history.
-        branch_agents = [a for a in map(_step_agent, parallel_step.steps) if a is not None]
-        uses = collections.Counter(map(id, branch_agents))
-        shared_agents = [a for a in branch_agents if uses[id(a)] > 1]
+        per_branch = [{id(a): a for a in _step_agents(s)} for s in parallel_step.steps]
+        uses = collections.Counter(k for b in per_branch for k in b)
+        shared_agents = [a for b in per_branch for k, a in b.items() if uses[k] > 1]
 
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers)
         abandon_scope = _stop_scope()
@@ -4355,7 +4370,7 @@ CONCISE SUMMARY:"""
                 emitter.set_branch(f"loop_{idx}")
                 # Every item runs the same steps, so each iteration needs its
                 # own clone of their agents (fresh chat_history per item).
-                token = _enter_branch(a for a in map(_step_agent, steps_to_run) if a is not None)
+                token = _enter_branch(_step_agents(steps_to_run))
                 
                 try:
                     # CRITICAL: Deep copy variables to ensure thread isolation
