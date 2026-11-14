@@ -582,8 +582,7 @@ class _SessionMirrorWriter:
             return
         # After close() the draining thread has exited; queuing here would leave
         # records stranded with no consumer while the local write reports
-        # success. Drop-to-log instead so the gap is observable (and `session
-        # sync` can reconcile) rather than silently lost (Issue #3646).
+        # success. Drop-to-log instead so the gap remains observable (Issue #3646).
         with self._enqueue_lock:
             if self._stop.is_set():
                 reason = "is closed"
@@ -595,7 +594,7 @@ class _SessionMirrorWriter:
                     reason = "queue full"
         logger.warning(
             "session mirror %s; dropping %d record(s) for %s "
-            "(local write unaffected; run `session sync` to reconcile)",
+            "(local write unaffected; mirror reconciliation is not automatic)",
             reason,
             len(records),
             session_id,

@@ -9,6 +9,7 @@ CLI live in the wrapper and depend on the store-unification sibling (#3645).
 import tempfile
 import threading
 import time
+import queue
 
 import pytest
 
@@ -165,7 +166,7 @@ def test_set_chat_history_reaches_mirror():
     assert all(r["session_id"] == "s1" and r["id"] for r in records)
 
 
-def test_enqueue_after_close_is_dropped_not_stranded():
+def test_enqueue_after_close_is_dropped_not_stranded(caplog):
     """Records enqueued after close_mirror() are dropped-to-log, not stranded."""
     mirror = _RecordingMirror()
     with tempfile.TemporaryDirectory() as d:
@@ -181,6 +182,22 @@ def test_enqueue_after_close_is_dropped_not_stranded():
         assert store.flush_mirror(timeout=1.0) is True
 
     assert [r["content"] for r in mirror.load("s1")] == ["before close"]
+    assert "mirror reconciliation is not automatic" in caplog.text
+    assert "session sync" not in caplog.text
+
+
+def test_full_mirror_queue_warns_without_claiming_sync_command(tmp_path, monkeypatch, caplog):
+    store = DefaultSessionStore(session_dir=str(tmp_path), mirror=_RecordingMirror())
+    def full(_item):
+        raise queue.Full
+    monkeypatch.setattr(store._mirror_writer._queue, "put_nowait", full)
+    try:
+        assert store.add_message("s1", "user", "local") is True
+        assert store.get_chat_history("s1")[0]["content"] == "local"
+        assert "mirror reconciliation is not automatic" in caplog.text
+        assert "session sync" not in caplog.text
+    finally:
+        store.close_mirror()
 
 
 def test_close_does_not_strand_an_enqueue_in_progress(tmp_path, monkeypatch):
