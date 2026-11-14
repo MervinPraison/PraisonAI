@@ -1,9 +1,11 @@
 import json
+import os
 from threading import Event, Thread, current_thread
 
 import pytest
 
 from praisonaiagents.tools.todo_tools import TodoTools
+from praisonaiagents.tools import todo_tools
 from praisonaiagents.utils import atomic_io
 from praisonai_mcp.mcp_server.adapters.cli_tools import register_cli_tools
 from praisonai_mcp.mcp_server.registry import get_tool_registry
@@ -21,8 +23,11 @@ def test_registered_mcp_mutation_preserves_concurrent_runtime_add(
     register_cli_tools()
     handler = get_tool_registry().get(f'praisonai.todo.{operation}').handler
 
-    entered, release, runtime_done = Event(), Event(), Event()
+    entered, release, runtime_entered, runtime_proceed, runtime_done = (
+        Event(), Event(), Event(), Event(), Event()
+    )
     original_write = atomic_io.atomic_write_json
+    original_update = todo_tools.update_json
     results = {}
 
     def pause_mcp_write(*args, **kwargs):
@@ -33,6 +38,14 @@ def test_registered_mcp_mutation_preserves_concurrent_runtime_add(
 
     monkeypatch.setattr(atomic_io, 'atomic_write_json', pause_mcp_write)
 
+    def observe_runtime_update(*args, **kwargs):
+        if current_thread().name == 'runtime-writer':
+            runtime_entered.set()
+            assert runtime_proceed.wait(5)
+        return original_update(*args, **kwargs)
+
+    monkeypatch.setattr(todo_tools, 'update_json', observe_runtime_update)
+
     def mcp_call():
         results['mcp'] = handler('mcp task' if operation == 'add' else '1')
 
@@ -41,13 +54,23 @@ def test_registered_mcp_mutation_preserves_concurrent_runtime_add(
         runtime_done.set()
 
     mcp_thread = Thread(target=mcp_call, name='mcp-writer')
-    runtime_thread = Thread(target=runtime_call)
+    runtime_thread = Thread(target=runtime_call, name='runtime-writer')
     try:
         mcp_thread.start()
         assert entered.wait(5)
         runtime_thread.start()
-        runtime_done.wait(0.3)
+        assert runtime_entered.wait(5)
+        # The old MCP path does not hold the shared lock: ensure the runtime
+        # finishes first so its update would be overwritten on that path.
+        mutex = atomic_io._path_mutexes[os.path.abspath(owner._get_todo_file())]
+        unlocked = mutex.acquire(blocking=False)
+        if unlocked:
+            mutex.release()
+        runtime_proceed.set()
+        if unlocked:
+            assert runtime_done.wait(5)
     finally:
+        runtime_proceed.set()
         release.set()
         mcp_thread.join(5)
         if runtime_thread.ident is not None:
