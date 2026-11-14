@@ -682,9 +682,10 @@ class Process:
 
     def _warn_workflow_iter_limit(self) -> None:
         """Make a bounded workflow exit visible instead of silently dropping tasks."""
+        # "not started" also covers tasks reset for rerun, so report them as pending.
         pending = [t.name for t in self.tasks.values() if t.status == "not started"]
         logging.warning(
-            "Max iteration limit %s reached with %d task(s) not executed: %s. "
+            "Max iteration limit %s reached with %d task(s) pending: %s. "
             "Raise AgentTeam(max_iter=...) if this workflow legitimately has more steps.",
             self._workflow_iter_limit(), len(pending), pending[:5],
         )
