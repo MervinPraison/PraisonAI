@@ -9,6 +9,7 @@ CLI live in the wrapper and depend on the store-unification sibling (#3645).
 import tempfile
 import threading
 import time
+import queue
 
 import pytest
 
@@ -135,7 +136,7 @@ def test_mirror_failure_does_not_break_local_write():
         try:
             assert store.add_message("s1", "user", "hello") is True
             # Give the background writer time to exhaust its retries + log.
-            store.flush_mirror(timeout=5.0)
+            assert store.flush_mirror(timeout=5.0) is True
             assert store.get_chat_history("s1") == [
                 {"role": "user", "content": "hello"}
             ]
@@ -165,7 +166,7 @@ def test_set_chat_history_reaches_mirror():
     assert all(r["session_id"] == "s1" and r["id"] for r in records)
 
 
-def test_enqueue_after_close_is_dropped_not_stranded():
+def test_enqueue_after_close_is_dropped_not_stranded(caplog):
     """Records enqueued after close_mirror() are dropped-to-log, not stranded."""
     mirror = _RecordingMirror()
     with tempfile.TemporaryDirectory() as d:
@@ -181,6 +182,101 @@ def test_enqueue_after_close_is_dropped_not_stranded():
         assert store.flush_mirror(timeout=1.0) is True
 
     assert [r["content"] for r in mirror.load("s1")] == ["before close"]
+    assert "mirror reconciliation is not automatic" in caplog.text
+    assert "session sync" not in caplog.text
+
+
+def test_full_mirror_queue_warns_without_claiming_sync_command(tmp_path, monkeypatch, caplog):
+    store = DefaultSessionStore(session_dir=str(tmp_path), mirror=_RecordingMirror())
+    def full(_item):
+        raise queue.Full
+    monkeypatch.setattr(store._mirror_writer._queue, "put_nowait", full)
+    try:
+        assert store.add_message("s1", "user", "local") is True
+        assert store.get_chat_history("s1")[0]["content"] == "local"
+        assert "mirror reconciliation is not automatic" in caplog.text
+        assert "session sync" not in caplog.text
+    finally:
+        store.close_mirror()
+
+
+def test_close_does_not_strand_an_enqueue_in_progress(tmp_path, monkeypatch):
+    mirror = _RecordingMirror()
+    store = DefaultSessionStore(session_dir=str(tmp_path), mirror=mirror)
+    writer = store._mirror_writer
+    entered, release, contending = threading.Event(), threading.Event(), threading.Event()
+    put_nowait = writer._queue.put_nowait
+    actual_lock = threading.Lock()
+
+    class ObservedLock:
+        def __enter__(self):
+            if threading.current_thread() is closer:
+                assert actual_lock.locked()
+                contending.set()
+            actual_lock.acquire()
+            return self
+
+        def __exit__(self, *_args):
+            actual_lock.release()
+
+    monkeypatch.setattr(writer, "_enqueue_lock", ObservedLock())
+
+    def blocked_put(item):
+        entered.set()
+        assert release.wait(5)
+        put_nowait(item)
+
+    monkeypatch.setattr(writer._queue, "put_nowait", blocked_put)
+    results = []
+    producer = threading.Thread(target=lambda: results.append(store.add_message("s1", "user", "racing")))
+    closer = threading.Thread(target=store.close_mirror)
+    try:
+        producer.start()
+        assert entered.wait(5)
+        closer.start()
+        assert contending.wait(5), "close did not contend while enqueue was paused"
+    finally:
+        release.set()
+        producer.join(5)
+        closer.join(5)
+    assert not producer.is_alive() and not closer.is_alive()
+    assert results == [True]
+    assert store.flush_mirror(timeout=1) is True
+    assert [r["content"] for r in mirror.load("s1")] == ["racing"]
+
+
+def test_close_warns_if_slow_mirror_is_still_draining(tmp_path, monkeypatch, caplog):
+    entered, release = threading.Event(), threading.Event()
+
+    class BlockingMirror(_RecordingMirror):
+        def append(self, session_id, records):
+            entered.set()
+            assert release.wait(5)
+            super().append(session_id, records)
+
+    mirror = BlockingMirror()
+    store = DefaultSessionStore(session_dir=str(tmp_path), mirror=mirror)
+    worker = store._mirror_writer._thread
+    join = worker.join
+
+    def short_join(timeout=None):
+        assert timeout == 5.0
+        join(timeout=0.05)
+
+    monkeypatch.setattr(worker, "join", short_join)
+    try:
+        assert store.add_message("s1", "user", "pending")
+        assert entered.wait(5)
+        store.close_mirror()
+        assert worker.is_alive()
+        assert store.flush_mirror(timeout=0.05) is False
+        assert "still draining" in caplog.text
+    finally:
+        release.set()
+        join(timeout=5)
+    assert not worker.is_alive()
+    assert store.flush_mirror(timeout=1) is True
+    assert mirror.load("s1")[0]["content"] == "pending"
 
 
 def test_failed_construction_leaks_no_thread():
