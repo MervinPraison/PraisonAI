@@ -1200,6 +1200,13 @@ class WebSocketGateway:
         # produced the current YAML-built resolver, so hot-reload can tell an
         # unchanged block from an enable/disable/re-point.
         self._identity_resolver_signature: Optional[Tuple[Any, ...]] = None
+        # Issue #6362: live, in-memory ``channel -> (platform, owner_user_id)``
+        # map. Never persisted, so a removed/replaced owner stops resolving to
+        # the owner identity as soon as its channel is (re)stamped.
+        self._owner_handles: Dict[str, Tuple[str, str]] = {}
+        # Opt-in via ``identity: {unify_owner: true}`` so upgrading never
+        # re-keys an existing owner's per-platform sessions (backward compat).
+        self._unify_owner: bool = False
 
         # Explicit constructor toggles win over any config-provided defaults so
         # ``WebSocketGateway(openai_api=True, mcp=True)`` works without a config.
@@ -9534,7 +9541,7 @@ class WebSocketGateway:
                 # Issue #3020: stamp the shared cross-platform identity resolver
                 # so this channel keys sessions by canonical identity (unified
                 # user) instead of a per-platform key. No-op when unconfigured.
-                self._stamp_identity_resolver(bot)
+                self._stamp_identity_resolver(bot, channel_name)
                 # Issue #3232: share one per-turn LockMap so channels that unify
                 # to the same session serialise turns on the resolved id. No-op
                 # without an identity resolver (single-channel behaviour).
@@ -9884,6 +9891,12 @@ class WebSocketGateway:
         block reuses the existing resolver so its in-memory link cache and
         store handle survive reloads that don't touch ``identity:``.
         """
+        # Issue #6362: owner unification is opt-in (``unify_owner: true``) and
+        # honoured for explicit resolvers too; absent/false keeps today's keys.
+        unify = identity_cfg.get("unify_owner", False) if isinstance(identity_cfg, dict) else False
+        if isinstance(unify, str):
+            unify = unify.strip().lower() in ("1", "true", "yes", "on")
+        self._unify_owner = bool(unify)
         if getattr(self, "_identity_resolver_explicit", False):
             return
         built = self._build_identity_resolver(identity_cfg)
@@ -9915,7 +9928,7 @@ class WebSocketGateway:
         store = os.path.expanduser(str(store)) if store else None
         return (True, store)
 
-    def _stamp_identity_resolver(self, bot: Any) -> None:
+    def _stamp_identity_resolver(self, bot: Any, channel_name: Optional[str] = None) -> None:
         """Share the gateway's identity resolver with a channel bot (Issue #3020).
 
         Mirrors ``_stamp_admission_gate`` and the post-construction splice that
@@ -9938,10 +9951,37 @@ class WebSocketGateway:
             getattr(bot, "_session", None)
             or getattr(bot, "_session_mgr", None)
         )
+        # Issue #6362: the channel's declared ``owner_user_id`` is the same
+        # human on every surface, so resolve it to one canonical owner id —
+        # their conversation and memory then span every owner-declaring
+        # channel with no manual ``link()``/pairing. Each view only honours
+        # *its own* channel's declared owner, so a channel that declares no
+        # owner (or a different tenant/workspace on the same platform type)
+        # never maps a sender to the owner's session. The mapping lives only
+        # in memory (re-derived from config on every stamp, so a removed or
+        # replaced owner loses access) and an explicit link or pairing label
+        # always wins, except that the owner id itself is reserved.
+        platform = getattr(sess, "_platform", None)
+        key = channel_name or platform
+        if not getattr(self, "_unify_owner", False):
+            # Default: share the raw resolver, exactly as before #6362.
+            view = resolver
+            key = None
+            if channel_name:
+                self._owner_handles.pop(channel_name, None)
+        else:
+            view = _OwnerAwareResolver(resolver, self._owner_handles, key)
         if sess is not None and hasattr(sess, "_identity_resolver"):
-            sess._identity_resolver = resolver
+            sess._identity_resolver = view
         elif hasattr(bot, "_identity_resolver"):
-            bot._identity_resolver = resolver
+            bot._identity_resolver = view
+        if not key:
+            return
+        owner = getattr(getattr(bot, "config", None), "owner_user_id", None)
+        if owner and platform:
+            self._owner_handles[key] = (platform, str(owner))
+        else:
+            self._owner_handles.pop(key, None)
 
     def _build_turn_lock_map(self) -> Any:
         """Build the gateway's per-turn lock backend from config (Issue #4655).
@@ -10836,6 +10876,10 @@ class WebSocketGateway:
         # reachable at ``/webhooks/<channel>`` and keep handling requests after
         # it has been stopped.
         self._webhook_channels.clear()
+        # Issue #6362: owners are re-registered from config as channels start.
+        owner_handles = getattr(self, "_owner_handles", None)
+        if owner_handles is not None:
+            owner_handles.clear()
         self._routing_rules.clear()
         self._routing_bindings.clear()
 
@@ -11083,7 +11127,12 @@ class WebSocketGateway:
             # Issue #5146: drop any shared-listener webhook mount so a reloaded
             # or removed channel doesn't leave a stale handler on /webhooks/.
             self._webhook_channels.pop(channel_name, None)
-            
+            # Issue #6362: a removed channel (or one that fails to restart)
+            # must not keep its declared owner resolving to the owner id.
+            owner_handles = getattr(self, "_owner_handles", None)
+            if owner_handles is not None:
+                owner_handles.pop(channel_name, None)
+
             # Clean up supervisor state
             self._channel_supervisor.cleanup(channel_name)
         
@@ -11245,7 +11294,7 @@ class WebSocketGateway:
             self._stamp_admission_gate(bot)
             # Issue #3020: stamp the identity resolver on the hot-reloaded
             # channel too, so a restarted channel keeps cross-platform continuity.
-            self._stamp_identity_resolver(bot)
+            self._stamp_identity_resolver(bot, channel_name)
             # Issue #3232: re-share the same per-turn LockMap on the hot-reloaded
             # channel so a restarted channel keeps serialising turns on the
             # resolved id alongside its still-running siblings.
@@ -12710,3 +12759,50 @@ class WebSocketGateway:
             finally:
                 self._cancel_shutdown_deadline()
                 self._release_locks()
+
+
+class _OwnerAwareResolver:
+    """Resolve a channel's declared owner to one owner id (Issue #6362).
+
+    Thin, non-persisting view over the gateway's identity resolver, bound to a
+    single channel: an explicit link or pairing label wins; otherwise the
+    handle currently declared as *this* channel's ``owner_user_id`` resolves to
+    the owner id; everyone else keeps the safe ``platform:user_id`` default.
+    The owner id is reserved: a link or label equal to it only resolves for
+    the declared owner. It is scoped to the identity store so gateways with
+    separate stores never share history.
+    """
+
+    def __init__(
+        self,
+        inner: Any,
+        handles: Dict[str, Tuple[str, str]],
+        channel_key: Optional[str] = None,
+    ) -> None:
+        self._inner = inner
+        self._handles = handles
+        self._channel_key = channel_key
+        path = getattr(inner, "_path", None)
+        self.owner_id = (
+            "owner:" + hashlib.sha256(str(path).encode()).hexdigest()[:12]
+            if path else "owner"
+        )
+
+    def resolve(self, platform: str, platform_user_id: str) -> str:
+        default = f"{platform}:{platform_user_id}"
+        resolved = self._inner.resolve(platform, platform_user_id)
+        is_owner = (
+            self._channel_key is not None
+            and self._handles.get(self._channel_key)
+            == (platform, str(platform_user_id))
+        )
+        if resolved == self.owner_id and not is_owner:
+            return default  # reserved: no link/label may claim the owner id
+        if resolved == default and is_owner:
+            return self.owner_id
+        return resolved
+
+    def __getattr__(self, name: str) -> Any:
+        if name == "_inner":  # avoid recursion before __init__ (copy/pickle)
+            raise AttributeError(name)
+        return getattr(self._inner, name)
