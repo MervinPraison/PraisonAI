@@ -147,10 +147,20 @@ def create_agent_from_config(agent_config: Dict[str, Any]) -> Any:
     # instead of silently running a differently-configured agent.
     from types import SimpleNamespace
     from ..framework_adapters.base import warn_unsupported_fields
-    warn_unsupported_fields(
-        SimpleNamespace(name="scheduler", SUPPORTED_YAML_FIELDS=_SCHEDULED_AGENT_FIELDS),
-        agent_config,
-    )
+    try:
+        warn_unsupported_fields(
+            SimpleNamespace(name="scheduler", SUPPORTED_YAML_FIELDS=_SCHEDULED_AGENT_FIELDS),
+            agent_config,
+        )
+    except ValueError:
+        # The shared message suggests "framework: praisonai", which does not
+        # exist on this path; give a scheduler-specific remediation hint.
+        fields = sorted(f for f in ('approval', 'guardrails') if f in agent_config)
+        raise ValueError(
+            f"Scheduled agents cannot enforce {fields} yet (agent "
+            f"{agent_config.get('role')!r}); remove the field(s) to run ungated, "
+            f"or run the agent with `praisonai run` instead."
+        ) from None
 
     # Extract agent parameters
     name = agent_config.get('name', 'Scheduled Agent')

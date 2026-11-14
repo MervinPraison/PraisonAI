@@ -6,11 +6,15 @@ from praisonai.scheduler.yaml_loader import create_agent_from_config
 
 
 def test_scheduler_fails_closed_on_dropped_approval():
-    with pytest.raises(ValueError, match="approval"):
+    with pytest.raises(ValueError, match="approval") as exc:
         create_agent_from_config({
             "name": "a", "role": "r", "instructions": "i",
             "approval": {"backend": "console"},
         })
+    msg = str(exc.value)
+    assert "Scheduled agents cannot enforce" in msg
+    assert "praisonai run" in msg
+    assert "framework: praisonai" not in msg
 
 
 def test_scheduler_forwards_llm():
