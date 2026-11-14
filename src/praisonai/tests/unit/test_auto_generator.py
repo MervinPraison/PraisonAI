@@ -1057,5 +1057,43 @@ class TestWorkflowFrameworkSupport:
             assert generator.framework == "crewai"
 
 
+
+def test_workflow_generator_strips_live_registry_dangerous_tools(tmp_path):
+    """Workflow YAML gate uses the same live-registry heuristic as AutoGenerator.
+
+    Regression for #6296: a code-exec tool not yet in the static
+    TOOL_CATEGORIES list (e.g. ``python_repl``) must be stripped here too.
+    """
+    import yaml
+    out = tmp_path / "wf.yaml"
+    gen = WorkflowAutoGenerator.__new__(WorkflowAutoGenerator)
+    gen.topic = "Research AI news"
+    gen.framework = "praisonai"
+    gen.workflow_file = str(out)
+    data = {"agents": {"a": {"name": "a", "tools": ["python_repl", "internet_search"]}}}
+    with patch.object(gen, "_available_tools", return_value=["python_repl", "internet_search"]):
+        gen._save_workflow(data, "sequential")
+    saved = yaml.safe_load(out.read_text())
+    assert saved["agents"]["a"]["tools"] == ["internet_search"]
+
+
+def test_job_generator_strips_live_registry_dangerous_tools(tmp_path):
+    """Job YAML agent steps use the same live-registry heuristic (#6296)."""
+    import yaml
+    from types import SimpleNamespace
+    from praisonai.auto import JobWorkflowAutoGenerator
+    out = tmp_path / "job.yaml"
+    gen = JobWorkflowAutoGenerator.__new__(JobWorkflowAutoGenerator)
+    gen.topic = "Summarise the changelog"
+    gen.workflow_file = str(out)
+    step = SimpleNamespace(name="s", step_type="agent",
+                           config={"role": "r", "tools": ["python_repl", "read_file"]})
+    data = SimpleNamespace(name="j", description="d", steps=[step])
+    with patch.object(gen, "_available_tools", return_value=["python_repl", "read_file"]):
+        gen._save_workflow(data)
+    saved = yaml.safe_load(out.read_text())
+    assert saved["steps"][0]["agent"]["tools"] == ["read_file"]
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
