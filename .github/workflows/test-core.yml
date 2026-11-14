@@ -160,6 +160,8 @@ jobs:
               tests/unit/test_task_execution_config.py
               tests/unit/test_agent_unknown_kwarg_guidance.py
               tests/unit/test_agent_instantiation_lazy.py tests/unit/test_agent_os_exports.py
+              tests/unit/test_paths_wiring.py
+              tests/unit/test_lazy_imports.py::TestReplayStaysLazy
             # Both tests previously deselected here now pass in combination.
             # test_lazy_litellm_import was looking the loader module up by
             # name and could get a different object than the one get_litellm()
@@ -168,7 +170,9 @@ jobs:
             # directory and asserted every discovered dir was named "skills",
             # which is false once a remote skill has ever been cached; it runs
             # against a temp HOME and asserts the paths module is used.
-            extra_ignore: ""
+            extra_ignore: >-
+              --deselect=tests/unit/test_paths_wiring.py::TestPolicyConfigWiring::test_default_rules_dir_matches_paths
+              --deselect=tests/unit/test_paths_wiring.py::TestSchedulerStoreWiring::test_default_dir_matches_paths
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents
           - shard: train
@@ -248,7 +252,7 @@ jobs:
       run: |
         cd src/praisonai
         uv pip install --system duckduckgo_search
-        uv pip install --system pytest pytest-asyncio pytest-timeout pytest-xdist
+        uv pip install --system pytest pytest-asyncio pytest-timeout pytest-xdist psutil
         uv pip install --system "praisonaiagents[knowledge]"
     - uses: ./.github/actions/install-monorepo-packages
       with:
@@ -308,6 +312,81 @@ jobs:
         else
           python -m pytest ${{ matrix.paths }} "${PYTEST_ARGS[@]}" ${{ matrix.extra_ignore }}
         fi
+
+    - name: Run isolated thread safety tests
+      if: matrix.shard == 'agents-core'
+      working-directory: src/praisonai-agents
+      run: |
+        python -m pytest \
+          tests/unit/test_thread_safety.py::TestLiteAgentThreadSafety \
+          tests/unit/test_thread_safety.py::TestAgentThreadSafety \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings --timeout=60
+    - name: Run isolated approval registration test
+      if: matrix.shard == 'agents-core'
+      working-directory: src/praisonai-agents
+      run: |
+        python -m pytest tests/unit/test_security_audit_fixes.py::test_ast_grep_rewrite_requires_approval \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings --timeout=60
+    - name: Run isolated path reload tests
+      if: matrix.shard == 'agents-core'
+      working-directory: src/praisonai-agents
+      run: |
+        python -m pytest \
+          tests/unit/test_paths_wiring.py::TestPolicyConfigWiring::test_default_rules_dir_matches_paths \
+          tests/unit/test_paths_wiring.py::TestSchedulerStoreWiring::test_default_dir_matches_paths \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings --timeout=60
+    - name: Run isolated timeout-worker tests
+      if: matrix.shard == 'agents-core'
+      working-directory: src/praisonai-agents
+      run: |
+        python -m pytest \
+          tests/unit/test_async_bridge_invariants.py::test_tool_timeout_uses_daemon_worker_and_does_not_leak \
+          tests/unit/test_async_bridge_invariants.py::test_many_concurrent_healthy_timed_calls_are_not_refused \
+          tests/unit/test_async_bridge_invariants.py::test_saturated_orphan_pool_reports_capacity_not_timeout \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings --timeout=60
+    - name: Run isolated lazy import tests
+      if: matrix.shard == 'agents-core'
+      working-directory: src/praisonai-agents
+      run: |
+        python -m pytest \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_autonomy_not_loaded_on_agent_import \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_autonomy_config_still_importable_from_feature_configs \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_autonomy_config_lazy_import_matches_tool_search_pattern \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_litellm_not_loaded_on_import \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_requests_not_loaded_on_import \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_agent_available_via_getattr \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_session_available_via_getattr \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_knowledge_available_via_getattr \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_memory_available_via_getattr \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_tools_loaded_eagerly \
+          tests/unit/test_lazy_imports.py::TestLitePackage::test_lite_agent_no_litellm \
+          tests/unit/test_lazy_imports.py::TestLitePackage::test_lite_agent_with_custom_llm \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_all_exports_accessible \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings --timeout=60
+
+    - name: Run isolated callback failure tests
+      if: matrix.shard == 'agents-core'
+      working-directory: src/praisonai-agents
+      run: |
+        python -m pytest \
+          tests/unit/test_robustness_issue_5870.py::test_raising_sync_callback_does_not_propagate \
+          tests/unit/test_robustness_issue_5870.py::test_raising_callbacks_do_not_propagate_async \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings --timeout=60
+
+    - name: Run isolated telemetry configuration tests
+      if: matrix.shard == 'agents-core'
+      working-directory: src/praisonai-agents
+      run: |
+        python -m pytest tests/unit/test_lazy_imports.py::TestTelemetryConfig \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings --timeout=60
+
 
   test-core-integration:
     name: test-core-integration
