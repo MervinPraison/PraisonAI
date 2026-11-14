@@ -160,6 +160,9 @@ jobs:
               tests/unit/test_task_execution_config.py
               tests/unit/test_agent_unknown_kwarg_guidance.py
               tests/unit/test_agent_instantiation_lazy.py tests/unit/test_agent_os_exports.py
+              tests/unit/test_api_exports.py tests/unit/test_injected_state.py
+              tests/unit/test_lazy.py tests/unit/test_parameter_naming.py
+              tests/unit/test_paths.py tests/unit/test_profiling.py tests/unit/test_rate_limiter.py
             # Both tests previously deselected here now pass in combination.
             # test_lazy_litellm_import was looking the loader module up by
             # name and could get a different object than the one get_litellm()
@@ -168,7 +171,15 @@ jobs:
             # directory and asserted every discovered dir was named "skills",
             # which is false once a remote skill has ever been cached; it runs
             # against a temp HOME and asserts the paths module is used.
-            extra_ignore: ""
+            extra_ignore: >-
+              --deselect=tests/unit/test_api_exports.py::TestImportPerformance::test_import_time_under_200ms
+              --deselect=tests/unit/test_injected_state.py::TestInjectionZeroOverhead::test_schema_generation_fast
+              --deselect=tests/unit/test_lazy.py::TestLazyImportPerformance::test_lazy_import_is_fast
+              --deselect=tests/unit/test_parameter_naming.py::TestPerformance::test_import_time_acceptable
+              --deselect=tests/unit/test_paths.py::TestImportPerformance::test_import_time_under_10ms
+              --deselect=tests/unit/test_profiling.py::TestZeroOverhead::test_phase_context_overhead
+              --deselect=tests/unit/test_profiling.py::TestZeroOverhead::test_record_timing_overhead
+              --deselect=tests/unit/test_rate_limiter.py::TestRateLimiterBasic::test_rate_limiter_acquire_sync
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents
           - shard: train
