@@ -134,12 +134,14 @@ def _advertised_tool_names(tools: List[Dict[str, Any]]) -> set:
 
 
 _FENCE_RE = re.compile(
-    r"(?P<fence>`{3,}|~{3,})"   # opening fence: >=3 backticks or tildes
-    r"[\s\S]*?"                  # body (lazy)
-    # Closing fence must sit on its own line (CommonMark): a matching
-    # delimiter quoted mid-line inside the block does not end it. Otherwise
-    # the fence runs to end-of-string (fail closed). ``\r?`` accepts CRLF.
-    r"(?:^[ \t]*(?P=fence)[`~]*[ \t]*\r?$|\Z)",
+    # Fenced block: opens at line start; closes only on a fence line of its
+    # own (CommonMark), so a delimiter quoted mid-line inside the block does
+    # not end it. Unclosed runs to end-of-string (fail closed). ``\r?``: CRLF.
+    r"^[ \t]*(?P<fence>`{3,}|~{3,})[\s\S]*?"
+    r"(?:^[ \t]*(?P=fence)[`~]*[ \t]*\r?$|\Z)"
+    # Mid-line ``` run: an inline code span, ended by the next matching run
+    # (e.g. "```xml```"), so it cannot hide a real call later in the reply.
+    r"|(?P<tick>`{3,})[\s\S]*?(?:(?P=tick)|\Z)",
     re.MULTILINE,
 )
 

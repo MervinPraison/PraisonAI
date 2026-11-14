@@ -62,6 +62,16 @@ def test_call_after_crlf_closed_fence_is_recovered(monkeypatch):
     assert _run(monkeypatch, reply) == ["x"]
 
 
+def test_call_after_inline_code_span_is_recovered(monkeypatch):
+    reply = f"The format is ```xml```.\n{CALL}"
+    assert _run(monkeypatch, reply) == ["x"]
+
+
+def test_inline_code_span_example_is_not_executed(monkeypatch):
+    reply = f"Example: ```{CALL}``` is the format."
+    assert _run(monkeypatch, reply) == []
+
+
 def test_plain_json_answer_is_not_executed(monkeypatch):
     reply = '{"name": "delete_file", "arguments": {"path": "x"}, "format": "<tool_call>"}'
     assert _run(monkeypatch, reply) == []
