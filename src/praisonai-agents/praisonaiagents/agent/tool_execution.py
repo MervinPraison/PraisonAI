@@ -89,6 +89,12 @@ def _coerce_value(value, annotation):
             return value
         for arg in members:
             coerced = _coerce_value(value, arg)
+            # Inside a union, skip lossy scalar casts ("1.5"->1, "5"->False).
+            if arg is int and coerced is not value and float(value) != coerced:
+                continue
+            if arg is bool and str(value).lower() not in (
+                    'true', '1', 'yes', 'on', 'false', '0', 'no', 'off'):
+                continue
             target = get_origin(arg) or arg
             # Only accept a member's result if it actually produced that type.
             if coerced is not value and (not isinstance(target, type) or isinstance(coerced, target)):

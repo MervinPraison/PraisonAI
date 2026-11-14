@@ -71,6 +71,11 @@ def test_union_edge_cases():
     assert _coerce_value("3", int | None) == 3
     # A member that yields the wrong type must not win over a later valid one
     assert _coerce_value('{"city": "x"}', Union[List[int], Addr]) == Addr(city="x")
+    # Lossy scalar casts must not win inside a union
+    assert _coerce_value("1.5", Union[int, float]) == 1.5
+    assert _coerce_value("2", Union[int, float]) == 2
+    assert _coerce_value("5", Union[bool, int]) == 5
+    assert _coerce_value("true", Union[bool, int]) is True
     # Dataclasses accept JSON strings, like models
     assert _coerce_value('{"x": "4"}', Point) == Point(x=4)
 
