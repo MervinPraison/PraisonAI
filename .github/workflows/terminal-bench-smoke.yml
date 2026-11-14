@@ -29,8 +29,8 @@ jobs:
       - name: Install Harbor + PraisonAI
         run: |
           python -m pip install --upgrade pip
-          pip install harbor
-          pip install -e src/praisonai-agents -e src/praisonai
+          pip install "harbor==0.22.0"
+          pip install -e src/praisonai-agents -e src/praisonai-code -e src/praisonai
 
       - name: Run Terminal-Bench 2.1 smoke subset
         env:
@@ -45,6 +45,8 @@ jobs:
         with:
           name: harbor-results
           path: |
+            jobs/
             runs/
+            **/result.json
             **/results.json
           if-no-files-found: warn
