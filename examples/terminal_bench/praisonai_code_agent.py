@@ -70,8 +70,11 @@ class PraisonAICodeAgent(BaseInstalledAgent):
         await self.exec_as_agent(
             environment,
             command=(
-                f"pip install --break-system-packages praisonai{version_spec} "
-                "praisonaiagents"
+                # TB images ship apt-installed Python libs without pip RECORD files;
+                # upgrading deps (typing_extensions) fails with uninstall-no-record-file
+                # unless we ignore the distro copies (#3932-class install failures).
+                f"pip install --break-system-packages --ignore-installed "
+                f"praisonai{version_spec} praisonaiagents"
             ),
         )
 
@@ -87,9 +90,12 @@ class PraisonAICodeAgent(BaseInstalledAgent):
         command = (
             "log_file=$(mktemp /tmp/praisonai_code.XXXXXX); "
             "chmod 600 \"$log_file\"; "
-            f"praisonai code -p --output json {shlex.quote(instruction)} "
+            # Options must precede the prompt; Typer treats trailing tokens as
+            # subcommands (e.g. "No such command '--dangerously-skip-approval'").
+            f"praisonai code -p --output json "
             f"--dangerously-skip-approval "
             f"--model {shlex.quote(model)} "
+            f"{shlex.quote(instruction)} "
             "> \"$log_file\" 2>&1; "
             # Capture the real exit status so install/auth/startup failures still
             # surface instead of being silently masked (Harbor otherwise records a
