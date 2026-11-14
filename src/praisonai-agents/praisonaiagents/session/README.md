@@ -41,7 +41,20 @@ When you configure a `session_id` on an Agent:
 
 ### Default Storage Location
 
-Sessions are stored in: `~/.praisonai/sessions/{session_id}.json`
+JSON sessions are commonly stored under `~/.praisonai/sessions/`. To find the
+resolved directory for the current configuration, use:
+
+```python
+from praisonaiagents.paths import get_sessions_dir
+
+print(get_sessions_dir())
+```
+
+`PRAISONAI_HOME` selects a different root. Existing `~/.praison` installations
+use their legacy root; on a fresh installation, an absolute `XDG_DATA_HOME` can
+also select the data root. A store constructed with `session_dir` uses that
+directory instead. Session filenames are filesystem-safe and may differ from
+the session ID, so do not assume every file is named `{session_id}.json`.
 
 ### Session metadata contract (Issue #48)
 
@@ -121,9 +134,14 @@ from praisonaiagents.session import DefaultSessionStore
 store = DefaultSessionStore(
     session_dir="/custom/path/sessions",
     max_messages=200,  # Default: 100
+    retention="compact",  # Archive older turns and keep a summary in the active window
     lock_timeout=10.0,  # Default: 5.0 seconds
 )
 ```
+
+With a non-default `max_messages` and no explicit `retention`, the store uses
+legacy `truncate` behavior and drops older turns. Set `retention="compact"` to
+archive overflow, or `retention="keep_all"` to keep all turns active.
 
 ### Using with DB Adapter
 
