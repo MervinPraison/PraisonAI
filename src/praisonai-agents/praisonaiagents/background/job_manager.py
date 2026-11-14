@@ -417,6 +417,19 @@ class BackgroundJobManager:
         if job is None:
             raise KeyError(f"Job {job_id} not found")
         return job
+
+    def _get_job_snapshot(self, job_id: str):
+        """Return the job and its matching future from one locked lookup."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            future = self._futures.get(job_id)
+        if job is None:
+            job = self._store.get(job_id) if self._store else None
+            if job is None:
+                raise KeyError(f"Job {job_id} not found")
+        if future is None and job.status not in self._EVICTABLE_STATES:
+            raise KeyError(f"Job {job_id} not found")
+        return job, future
     
     def get_result(self, job_id: str, timeout: Optional[float] = None) -> Any:
         """

@@ -7,7 +7,6 @@ enabling hierarchical task delegation and multi-agent coordination.
 
 import threading
 import time as _time
-from concurrent.futures import CancelledError
 from praisonaiagents._logging import get_logger
 from praisonaiagents.session.provenance import wrap_inter_agent
 from typing import Any, Callable, Dict, List, Optional
@@ -485,31 +484,17 @@ def create_subagent_tool(
 
         job_manager = get_job_manager()
         try:
-            info = job_manager.get_job_info(job_id)
             if wait:
-                try:
-                    result = job_manager.get_result(job_id)
-                except Exception as e:
-                    if isinstance(e, CancelledError) and info.status == JobStatus.CANCELLED:
-                        return {"success": True, "job_id": job_id, "status": info.status.value}
-                    if isinstance(e, KeyError) and info.status != JobStatus.FAILED:
-                        return {"success": False, "job_id": job_id,
-                                "error": f"Job '{job_id}' not found"}
-                    # A task can itself raise CancelledError or KeyError; its
-                    # recorded status distinguishes these from cancellation or
-                    # a missing job.
-                    return {
-                        "success": False,
-                        "job_id": job_id,
-                        "status": JobStatus.FAILED.value,
-                        "error": str(e),
-                    }
-                return {
-                    "success": True,
-                    "job_id": job_id,
-                    "status": JobStatus.COMPLETED.value,
-                    "result": result,
-                }
+                info, future = job_manager._get_job_snapshot(job_id)
+                if future is not None:
+                    try:
+                        future.result()
+                    except Exception:
+                        # The matching JobInfo below carries failure or
+                        # cancellation details for this exact future.
+                        pass
+            else:
+                info = job_manager.get_job_info(job_id)
         except KeyError:
             return {
                 "success": False,
