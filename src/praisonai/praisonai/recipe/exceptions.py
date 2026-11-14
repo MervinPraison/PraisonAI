@@ -4,8 +4,10 @@ Recipe Exceptions
 Custom exceptions for recipe operations.
 """
 
+from praisonai._errors import _WrapperError
 
-class RecipeError(Exception):
+
+class RecipeError(_WrapperError):
     """Base exception for recipe operations."""
     
     def __init__(self, message: str, recipe: str = None, details: dict = None):

@@ -144,9 +144,21 @@ class PraisonAIModel:
             self.api_key_var = "OPENROUTER_API_KEY"
             self.base_url = base_url or "https://openrouter.ai/api/v1"
             self.model_name = self.model.replace("openrouter/", "")
-        else: 
-            self.api_key_var = api_key_var or "OPENAI_API_KEY" 
-            self.base_url = base_url or os.environ.get("OPENAI_API_BASE") or os.environ.get("OPENAI_BASE_URL") or "https://api.openai.com/v1"
+        else:
+            custom_base = base_url or os.environ.get("OPENAI_API_BASE") or os.environ.get("OPENAI_BASE_URL")
+            # OpenAI model ids never contain "/". An unknown "provider/model"
+            # with no custom endpoint would be sent to api.openai.com and 404;
+            # fail loudly instead. Custom endpoints (gateways, vLLM, proxies)
+            # legitimately use slashed ids, so they pass through unchanged.
+            if "/" in self.model and not custom_base and not self._is_registered_provider():
+                raise ValueError(
+                    f"Unknown LLM provider prefix {self.model.split('/', 1)[0]!r} in model "
+                    f"{self.model!r}. Use one of {sorted(_BUILTIN_MODEL_PREFIXES)}, set "
+                    f"base_url/OPENAI_API_BASE for an OpenAI-compatible endpoint, or "
+                    f"register it via praisonai.llm.register_llm_provider()."
+                )
+            self.api_key_var = api_key_var or "OPENAI_API_KEY"
+            self.base_url = custom_base or "https://api.openai.com/v1"
             self.model_name = self.model
         logger.debug(f"Initialized PraisonAIModel with model {self.model_name}, api_key_var {self.api_key_var}, and base_url {self.base_url}")
 

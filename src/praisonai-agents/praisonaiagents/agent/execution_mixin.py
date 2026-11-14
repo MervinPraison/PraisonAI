@@ -22,12 +22,6 @@ logger = logging.getLogger(__name__)
 
 from typing import List, Optional, Any, Dict, Union, Generator, TYPE_CHECKING
 
-# Shared HTTP launch state — the process-wide registry is defined in
-# agent/server_registry.py and shared with PraisonAIAgents.launch() so a
-# standalone Agent and a team launched on the same port cannot double-bind it or
-# hide each other's endpoints.
-from .server_registry import _server_registry
-
 
 class _TimeoutCancelToken:
     """cancel_token for caller-mode ``start(timeout=...)``.
@@ -76,6 +70,8 @@ def cleanup_launch_registration(agent_id: str) -> None:
     ``_AgentServerRegistry.teardown_routes_for``) so cleanup cannot race a
     concurrent launch that reserves and registers a route on the same port.
     """
+    from .server_registry import _server_registry  # lazy: launch path only
+
     _server_registry.teardown_routes_for(agent_id)
 
 if TYPE_CHECKING:
@@ -2394,7 +2390,11 @@ Write the complete compiled report:"""
         host = resolve_launch_host(host)
 
         # Get or create the shared FastAPI app for this port (shared with
-        # PraisonAIAgents.launch via the same _server_registry singleton).
+        # PraisonAIAgents.launch via the same _server_registry singleton, so a
+        # standalone Agent and a team on one port cannot double-bind it).
+        # Imported lazily: only the HTTP launch path needs the registry.
+        from .server_registry import _server_registry
+
         app, is_new_app = _server_registry.get_or_create_app(
             port,
             title=f"PraisonAI Agents API (Port {port})",

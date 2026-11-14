@@ -281,18 +281,25 @@ class BaseStore(ABC):
         if not entries:
             return True
         try:
-            import json
+            from ...storage.base import FileLock
+            from ...utils.atomic_io import atomic_write_json, quarantine_corrupt_file
+
             archive_path = self._archive_path()
-            existing: List[Dict[str, Any]] = []
-            if archive_path.exists():
-                with open(archive_path, "r", encoding="utf-8") as f:
-                    existing = json.load(f)
-                if not isinstance(existing, list):
-                    existing = []
-            existing.extend(e.to_dict() for e in entries)
             archive_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(archive_path, "w", encoding="utf-8") as f:
-                json.dump(existing, f, ensure_ascii=False, indent=2)
+            with FileLock(archive_path, timeout=10):
+                existing: Any = []
+                if archive_path.exists():
+                    try:
+                        with open(archive_path, "r", encoding="utf-8") as f:
+                            existing = json.load(f)
+                    except (json.JSONDecodeError, ValueError):
+                        existing = None
+                    if not isinstance(existing, list):
+                        # Keep the bad bytes as a sidecar and keep evicting.
+                        quarantine_corrupt_file(str(archive_path))
+                        existing = []
+                existing.extend(e.to_dict() for e in entries)
+                atomic_write_json(str(archive_path), existing, ensure_ascii=False, indent=2)
             return True
         except Exception as e:
             import logging

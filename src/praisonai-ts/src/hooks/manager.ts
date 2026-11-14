@@ -231,12 +231,17 @@ export class HooksManager {
             return promise;
         }
 
-        return Promise.race([
-            promise,
-            new Promise<T>((_, reject) =>
-                setTimeout(() => reject(new Error(`Hook timeout after ${timeout}ms`)), timeout)
-            ),
-        ]);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+            return await Promise.race([
+                promise,
+                new Promise<T>((_, reject) => {
+                    timer = setTimeout(() => reject(new Error(`Hook timeout after ${timeout}ms`)), timeout);
+                }),
+            ]);
+        } finally {
+            if (timer !== undefined) clearTimeout(timer);
+        }
     }
 
     /**
@@ -251,7 +256,7 @@ export class HooksManager {
      * Get all registered hooks for an event
      */
     getHooks(event: HookEvent): readonly HookConfig[] {
-        return Object.freeze(this.hooks.get(event) ?? []);
+        return Object.freeze([...(this.hooks.get(event) ?? [])]);
     }
 
     /**

@@ -213,7 +213,8 @@ class ContextAgent(Agent):
             self.output_dir / "agent_responses",
             self.output_dir / "markdown_outputs", 
             self.output_dir / "debug_logs",
-            self.output_dir / "final_results"
+            self.output_dir / "final_results",
+            self.output_dir / "PRPs",
         ]
         
         for directory in directories:
@@ -1270,11 +1271,12 @@ Every agent interaction has been saved for full audit trail and reproducibility.
             return self._generate_combined_analysis(feature_request)
         
         # Otherwise just save and return the PRP
+        from ..utils.atomic_io import atomic_write_text, safe_join
+        prp_dir = os.path.join(self.output_dir, "PRPs")
+        os.makedirs(prp_dir, exist_ok=True)
         safe_filename = feature_request.lower().replace(' ', '_').replace('-', '_')[:50]
-        prp_path = os.path.join(self.output_dir, "PRPs", f"{safe_filename}.md")
-        
-        with open(prp_path, "w", encoding="utf-8") as f:
-            f.write(prp)
+        prp_path = safe_join(prp_dir, safe_filename, ".md")
+        atomic_write_text(prp_path, prp)
         
         print(f"📄 Comprehensive PRP following PRD template saved to: {prp_path}")
         return prp

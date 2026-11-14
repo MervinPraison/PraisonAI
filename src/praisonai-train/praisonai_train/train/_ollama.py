@@ -220,8 +220,9 @@ def create_and_push_ollama_model(
     model_parameters: str,
     modelfile_content: str,
     quantization: Optional[str] = None,
+    push: bool = True,
 ) -> None:
-    """Create and push an Ollama model with proper daemon management.
+    """Create (and by default push) an Ollama model with proper daemon management.
 
     Args:
         ollama_model: Name of the Ollama model
@@ -229,6 +230,8 @@ def create_and_push_ollama_model(
         modelfile_content: Content for the Modelfile
         quantization: Optional quantization (e.g. "q4_k_m") passed to
             ``ollama create --quantize`` so the model isn't stored as huge f16.
+        push: When False, stop after a successful ``ollama create`` and keep the
+            model local-only (nothing is uploaded to ollama.com).
 
     Raises:
         RuntimeError: If ollama create/push operations fail (with actionable guidance)
@@ -258,6 +261,10 @@ def create_and_push_ollama_model(
             f"`ollama create {tag}` failed:\n"
             f"{(create.stderr or create.stdout or '').strip()}"
         )
+
+    if not push:
+        print(f"Created local Ollama model `{tag}` (not pushed). Run it with: ollama run {tag}")
+        return
 
     # Push with captured output so a 401/403 becomes an actionable message rather
     # than a raw non-zero exit.

@@ -4362,8 +4362,13 @@ class ToolExecutionMixin:
             return "Tool search not in bridge mode"
         
         # Get deferrable tools from metadata
-        deferrable_tools = metadata.get("deferrable_tools", [])
-        
+        # Hide permission-denied tools from search/describe; the cached
+        # metadata is built before pruning, so filter locally here.
+        deferrable_tools = [
+            t for t in metadata.get("deferrable_tools", [])
+            if self._tool_name_allowed(t.get("function", {}).get("name", ""))
+        ]
+
         if function_name == "tool_search":
             # Handle tool_search bridge call
             try:

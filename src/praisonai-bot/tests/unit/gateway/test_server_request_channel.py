@@ -67,6 +67,37 @@ def test_server_reply_as_dict():
     }
 
 
+def test_server_reply_repr_hides_value():
+    reply = GatewayServerReply(request_id="r1", value="hunter2")
+    assert "hunter2" not in repr(reply)
+    assert reply.value == "hunter2"
+
+
+def test_secret_request_resolves_only_to_caller():
+    """Issue #6223: a secret reply reaches the waiting caller and nowhere else."""
+    async def go():
+        gw = WebSocketGateway()
+        sent = _connect(gw, "c1", "sess-1")
+        req = GatewayServerRequest(
+            request_id="req-s", kind="secret", prompt="sudo password?",
+            session_id="sess-1",
+        )
+        task = asyncio.create_task(gw.request_channel.request(req, timeout_s=5))
+        await asyncio.sleep(0)
+        assert sent[0]["request"]["kind"] == "secret"
+
+        await gw._handle_client_message(
+            "c1", {"type": "server_reply", "request_id": "req-s", "value": "hunter2"}
+        )
+        reply = await asyncio.wait_for(task, timeout=1)
+        assert reply.value == "hunter2"
+        # The value is never echoed back over the wire (ack carries no value).
+        assert all("hunter2" not in repr(frame) for frame in sent)
+        assert gw.request_channel.open_requests("sess-1") == []
+
+    asyncio.run(go())
+
+
 # ---------------------------------------------------------------------------
 # Test harness: a gateway with a connected, session-bound client that records
 # every frame the server sends it.

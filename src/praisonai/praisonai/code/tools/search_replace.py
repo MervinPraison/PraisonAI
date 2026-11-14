@@ -10,6 +10,7 @@ import re
 from typing import Optional, List, Dict, Any
 
 from ..utils.file_utils import (
+    atomic_write,
     file_exists,
     is_path_within_directory,
 )
@@ -191,8 +192,7 @@ def search_replace(
                 f.write(original_content)
         
         # Write the modified content
-        with open(abs_path, 'w', encoding=encoding) as f:
-            f.write(content)
+        atomic_write(abs_path, content, encoding=encoding)
         
         return {
             'success': True,

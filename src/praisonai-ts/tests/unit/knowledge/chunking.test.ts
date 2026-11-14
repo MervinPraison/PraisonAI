@@ -30,6 +30,34 @@ describe('Chunking', () => {
       expect(chunks.length).toBe(3);
     });
 
+    it.each([
+      'First sentence. Final important fact without punctuation',
+      'Echo.Echo.Echo.',
+      ' \nFirst.  Second! \nTail \t',
+      '... Leading punctuation. Tail',
+      'No punctuation here',
+      'Really?! Next.',
+      '你好。完整段落',
+    ])('preserves sentence content and its source span: %j', async text => {
+      const { Chunking } = await import('../../../src/knowledge/chunking');
+      const chunks = new Chunking({ strategy: 'sentence' }).chunk(text);
+      let cursor = 0;
+      for (const [index, chunk] of chunks.entries()) {
+        expect(chunk.index).toBe(index);
+        expect(chunk.content.length).toBeGreaterThan(0);
+        expect(chunk.startOffset).toBeGreaterThanOrEqual(cursor);
+        expect(text.slice(cursor, chunk.startOffset).trim()).toBe('');
+        expect(text.slice(chunk.startOffset, chunk.endOffset)).toBe(chunk.content);
+        cursor = chunk.endOffset;
+      }
+      expect(text.slice(cursor).trim()).toBe('');
+    });
+
+    it.each(['', ' \n\t '])('does not emit empty sentence chunks for %j', async text => {
+      const { Chunking } = await import('../../../src/knowledge/chunking');
+      expect(new Chunking({ strategy: 'sentence' }).chunk(text)).toEqual([]);
+    });
+
     it('should chunk by paragraphs', async () => {
       const { Chunking } = await import('../../../src/knowledge/chunking');
       const chunker = new Chunking({ strategy: 'paragraph' });

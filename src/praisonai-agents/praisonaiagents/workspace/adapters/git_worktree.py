@@ -9,8 +9,12 @@ repository or git is unavailable.
 """
 
 import hashlib
+import os
 import re
 from pathlib import Path
+
+# Bound every git call and never block on an interactive prompt.
+_GIT_TIMEOUT = 60
 
 
 def _slugify(name: str) -> str:
@@ -67,12 +71,16 @@ class GitWorktreeAdapter:
             cwd=str(cwd or self._root),
             capture_output=True,
             text=True,
+            timeout=_GIT_TIMEOUT,
+            env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
         )
 
     def _is_git_repo(self) -> bool:
+        import subprocess
+
         try:
             result = self._git("rev-parse", "--is-inside-work-tree")
-        except (FileNotFoundError, OSError):
+        except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
             return False
         return result.returncode == 0 and result.stdout.strip() == "true"
 

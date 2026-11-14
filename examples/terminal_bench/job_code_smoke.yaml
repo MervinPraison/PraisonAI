@@ -9,8 +9,8 @@
 # default oracle agent on zero tasks — do not use it.
 
 datasets:
-  - name: terminal-bench
-    version: "2.1"
+  # Harbor 0.22+ registry id (same as `harbor run -d terminal-bench/terminal-bench-2-1`).
+  - name: terminal-bench/terminal-bench-2-1
     # A small verified subset for a cheap smoke run. Verify against the registry
     # with `harbor datasets list` before editing.
     task_names:

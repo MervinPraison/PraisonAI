@@ -81,6 +81,111 @@ class TestExactMatchBackwardCompat:
         assert _read(p) == "x = 2\nx = 2\n"
 
 
+class TestNoMatchSelfCorrection:
+    def test_retried_edit_shows_applied_line_in_hint(self, tools, tmp_path):
+        # A retried edit is never reported as success; the hint shows the
+        # already-edited line so the agent can see the change landed.
+        p = tmp_path / "a.py"
+        _write(p, "def foo():\n    return 1\n")
+        assert "Success" in tools.edit_file(str(p), "return 1", "return 2")
+        before = _read(p)
+        result = tools.edit_file(str(p), "return 1", "return 2")
+        assert "String not found" in result and "No change needed" not in result
+        assert "    2|     return 2" in result
+        assert _read(p) == before
+
+    def test_tied_candidate_elsewhere_is_not_reported_applied(self, tools, tmp_path):
+        # Merge-gate case: g() already has `return 2` and ties with f()'s
+        # `return 3`; the edit meant for f() must not report success.
+        p = tmp_path / "a.py"
+        src = "def g():\n    return 2\n\ndef f():\n    return 3\n"
+        _write(p, src)
+        result = tools.edit_file(str(p), "return 1", "return 2")
+        assert "No change needed" not in result
+        assert "String not found" in result
+        assert _read(p) == src
+
+    def test_short_common_new_string_is_not_noop(self, tools, tmp_path):
+        # new_string occurring more than once is not evidence of a prior edit.
+        p = tmp_path / "a.py"
+        _write(p, "x = 1\ny = x\n")
+        result = tools.edit_file(str(p), "z = 1", "x")
+        assert "No change needed" not in result
+
+    def test_new_inside_old_is_not_noop(self, tools, tmp_path):
+        # new_string is a substring of old_string, so its presence proves nothing.
+        p = tmp_path / "a.py"
+        _write(p, "y = compute(a)\n")
+        result = tools.edit_file(str(p), "x = compute(a)", "compute(a)")
+        assert "Error" in result and "No change needed" not in result
+
+    def test_unrelated_new_string_elsewhere_is_not_noop(self, tools, tmp_path):
+        # new_string exists in another function, not where old_string was expected.
+        p = tmp_path / "a.py"
+        _write(p, "def f(x):\n    return x * 2\n\ndef g():\n    return 0\n")
+        result = tools.edit_file(str(p), "return x * 3", "return 0")
+        assert "No change needed" not in result
+        assert "String not found" in result
+        assert "    2|" in result
+
+    def test_hint_truncates_long_lines(self, tools, tmp_path):
+        p = tmp_path / "a.json"
+        _write(p, '{"key": "' + "a" * 1000 + '"}\n')
+        result = tools.edit_file(str(p), '{"key": "' + "a" * 900 + 'b"}', "x")
+        assert "Closest match" in result and "[truncated]" in result
+        assert len(result) < 1000
+
+    def test_hint_search_is_bounded_on_long_repetitive_lines(self, tools, tmp_path):
+        import time
+        p = tmp_path / "a.json"
+        _write(p, "\n".join('{"k": "' + "ab" * 600 + '"}' for _ in range(500)) + "\n")
+        start = time.monotonic()
+        result = tools.edit_file(str(p), '{"k": "' + "ab" * 550 + 'c"}', "x")
+        assert "String not found" in result
+        assert time.monotonic() - start < 5
+
+    def test_hint_prefilter_is_budgeted(self):
+        # Every window passes real_quick_ratio but fails quick_ratio (a
+        # pure-Python pass); that prefilter work must count against the budget
+        # (unbudgeted this took ~4s on a 20k-line file).
+        import random
+        import string
+        import time
+        rnd = random.Random(0)
+        line = lambda alpha: "".join(rnd.choice(alpha) for _ in range(20))
+        content = "\n".join(line(string.ascii_lowercase) for _ in range(19999))
+        old = "\n".join(line("abcdefghijkl") for _ in range(95))
+        start = time.monotonic()
+        EditTools._closest_region(content, old)
+        assert time.monotonic() - start < 2
+
+    def test_closest_region_hint_with_line_numbers(self, tools, tmp_path):
+        p = tmp_path / "a.py"
+        _write(p, "import os\n\ndef compute(x):\n    total = x * 2\n    return total\n")
+        result = tools.edit_file(str(p), "def compute(y):\n    total = y * 3", "x")
+        assert "String not found" in result
+        assert "Closest match" in result
+        assert "lines 3-4" in result
+        assert "    3| def compute(x):" in result
+
+    def test_no_hint_when_nothing_similar(self, tools, tmp_path):
+        p = tmp_path / "a.py"
+        _write(p, "hello world\n")
+        result = tools.edit_file(str(p), "zzzzqqqq", "x")
+        assert "String not found" in result
+        assert "Closest match" not in result
+
+    def test_apply_patch_hunk_hint(self, tools, tmp_path):
+        p = tmp_path / "a.py"
+        _write(p, "def compute(x):\n    return x * 2\n")
+        patch = (f"*** Update File: {p}\n@@\n"
+                 "def compute(y):\n    return y * 2\n===\n"
+                 "def compute(y):\n    return y * 3\n")
+        result = tools.apply_patch(patch)
+        assert "Hunk not found" in result
+        assert "    1| def compute(x):" in result
+
+
 class TestFuzzyMatching:
     def test_line_trimmed_indentation(self, tools, tmp_path):
         p = tmp_path / "a.py"

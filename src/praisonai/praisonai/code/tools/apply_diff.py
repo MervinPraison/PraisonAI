@@ -10,6 +10,7 @@ from typing import Optional, Dict, Any
 
 from ..diff.diff_strategy import apply_search_replace_diff
 from ..utils.file_utils import (
+    atomic_write,
     file_exists,
     is_path_within_directory,
 )
@@ -142,8 +143,7 @@ def apply_diff(
                 f.write(original_content)
         
         # Write the modified content
-        with open(abs_path, 'w', encoding=encoding) as f:
-            f.write(result.content)
+        atomic_write(abs_path, result.content, encoding=encoding)
         
         return {
             'success': True,

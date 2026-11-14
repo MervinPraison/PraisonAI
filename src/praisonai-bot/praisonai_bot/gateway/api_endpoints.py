@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import hashlib
+import hmac
 import json
 import time
 import uuid
@@ -373,7 +375,13 @@ class GatewayApiEndpoints:
         if gate is not None and getattr(gate, "enabled", False):
             from ..bots._admission import AdmissionRejected
             try:
-                async with gate.admit(session_id=session.session_id):
+                # Issue #6215: charge a stable caller identity, only when a
+                # budget is set (keeps duck-typed gates' signature intact).
+                rk = (
+                    {"rate_key": self._rate_key_var.get() or "ip:unknown"}
+                    if getattr(gate, "_rate_limit_enabled", False) else {}
+                )
+                async with gate.admit(session_id=session.session_id, **rk):
                     result = await self._gw._dispatch_agent_turn(
                         agent, content, on_complete=_capture, **extra
                     )
@@ -553,6 +561,41 @@ class GatewayApiEndpoints:
         """Get or create a stable session keyed by the API caller."""
         session_id = f"api:{key}:{agent_id}"
         return self._gw.create_session(agent_id=agent_id, session_id=session_id)
+
+    # Per-request stable identity for the per-user request budget (#6215);
+    # inherited by the turn's task/stream context like ``_stream_turn_var``.
+    _rate_key_var: "contextvars.ContextVar[Optional[str]]" = (
+        contextvars.ContextVar("praisonai_gw_rate_key", default=None)
+    )
+
+    @staticmethod
+    def _rate_key(request: Any, auth_token: Optional[str] = None) -> str:
+        """Stable caller identity that a client-chosen value cannot reset.
+
+        A bearer token is used only when it *is* the gateway's configured
+        ``auth_token`` (so it was validated); any other bearer value is
+        attacker-chosen and would mint a fresh budget per request, so such
+        callers are charged to their peer address. Never returns ``None``, so the
+        budget never falls back to the client-chosen session id.
+        """
+        auth = request.headers.get("authorization", "")
+        bearer = auth[7:] if auth.startswith("Bearer ") else ""
+        if bearer and auth_token and hmac.compare_digest(
+            bearer.encode("utf-8"), str(auth_token).encode("utf-8")
+        ):
+            return "token:" + hashlib.sha256(bearer.encode("utf-8")).hexdigest()[:16]
+        client = getattr(request, "client", None)
+        host = getattr(client, "host", None)
+        return f"ip:{host}" if host else "ip:unknown"
+
+    def _bind_rate_key(self, request: Any) -> None:
+        """Bind this request's per-user budget key for its turn (#6215).
+
+        Called by the auth-guarded route wrapper after auth has passed.
+        """
+        cfg = getattr(self._gw, "config", None)
+        token = getattr(cfg, "auth_token", None)
+        self._rate_key_var.set(self._rate_key(request, token))
 
     @staticmethod
     def _caller_key(request: Any) -> str:

@@ -1,4 +1,5 @@
 ollama_save: "true"
+ollama_push: "true"  # set "false" to keep the Ollama model local (no upload to ollama.com)
 huggingface_save: "true"
 train: "true"
 

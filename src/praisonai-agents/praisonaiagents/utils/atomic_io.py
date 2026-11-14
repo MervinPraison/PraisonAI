@@ -9,8 +9,10 @@ the previous good file: the old bytes stay intact and ``os.replace`` swaps in th
 new content atomically on both POSIX and Windows.
 """
 
+import hashlib
 import json
 import os
+import re
 import tempfile
 import threading
 import time
@@ -21,8 +23,51 @@ __all__ = [
     "atomic_write_json",
     "atomic_write_text",
     "quarantine_corrupt_file",
+    "safe_join",
     "update_json",
 ]
+
+# Max UTF-8 bytes for the final basename; leaves room under the common
+# 255-byte limit for ``atomic_write_text``'s ``<basename>.XXXXXXXX.tmp`` file.
+_MAX_NAME_BYTES = 200
+_HASHED = re.compile(r"(.*)%~([0-9a-f]{16})", re.DOTALL)
+_ESCAPE = re.compile(r'[%/\\:*?"<>|\x00-\x1f\x7f]')
+
+
+def _escape(name: str) -> str:
+    stem = _ESCAPE.sub(lambda m: "%%%02X" % ord(m.group()), name)
+    return "%2E" + stem[1:] if stem.startswith(".") else stem
+
+
+def safe_join(base: str, name: str, suffix: str = "") -> str:
+    """Join a caller-supplied ``name`` under ``base`` without escaping it.
+
+    Only ``%``, path separators, control and Windows-reserved characters (and
+    a leading ``.``) are percent-encoded, so ordinary names - including spaces
+    and non-ASCII - keep their pre-#6238 filename, ``..`` and separators can
+    never leave ``base``, and ``urllib.parse.unquote`` recovers the name.
+    Names whose filename would exceed ``_MAX_NAME_BYTES`` are truncated and
+    tagged ``%~<sha256[:16]>``; that listed (unquoted) form maps back to the
+    same file, while no ordinary name can produce a raw ``%~`` (Issue #6238).
+    """
+    name = str(name)
+    hashed = _HASHED.fullmatch(name)
+    if hashed:
+        stem = _escape(hashed.group(1)) + "%~" + hashed.group(2)
+    else:
+        stem = _escape(name)
+    budget = _MAX_NAME_BYTES - len(suffix.encode("utf-8"))
+    if len(stem.encode("utf-8", "surrogatepass")) > budget:
+        tag = "%~" + hashlib.sha256(name.encode("utf-8", "surrogatepass")).hexdigest()[:16]
+        kept, used = [], len(tag)
+        for tok in re.findall(r"%[0-9A-F]{2}|.", _escape(name), re.DOTALL):
+            used += len(tok.encode("utf-8", "surrogatepass"))
+            if used > budget:
+                break
+            kept.append(tok)
+        stem = "".join(kept) + tag
+    return os.path.join(base, stem + suffix)
+
 
 # Per-path in-process mutexes so threads in one process serialise before they
 # even reach the cross-process ``FileLock``. Keyed by absolute path.

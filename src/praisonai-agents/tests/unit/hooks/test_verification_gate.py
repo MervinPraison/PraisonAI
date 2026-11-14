@@ -228,7 +228,7 @@ class TestGoalLoopEvidence:
 
         with patch.object(agent, "chat",
                           side_effect=lambda p: f"step {counter.__setitem__('n', counter['n'] + 1) or counter['n']}"), \
-             patch("praisonaiagents.goal.loop.judge_goal", side_effect=fake_judge):
+             patch("praisonaiagents.goal.judge.judge_goal", side_effect=fake_judge):
             result = agent.run_goal("task", goal="g", max_turns=2)
 
         # Blocking hook fails every turn → judge never consulted, ends paused.
@@ -247,7 +247,7 @@ class TestGoalLoopEvidence:
             return ("done", "met")
 
         with patch.object(agent, "chat", side_effect=lambda pr: "did it"), \
-             patch("praisonaiagents.goal.loop.judge_goal", side_effect=fake_judge):
+             patch("praisonaiagents.goal.judge.judge_goal", side_effect=fake_judge):
             result = agent.run_goal("task", goal="g", max_turns=5)
 
         assert result.completion_reason == "goal_met"
@@ -283,7 +283,7 @@ class TestGoalLoopEvidence:
             return "trying"
 
         with patch.object(agent, "chat", side_effect=fake_chat), \
-             patch("praisonaiagents.goal.loop.judge_goal",
+             patch("praisonaiagents.goal.judge.judge_goal",
                    side_effect=lambda *a, **k: ("done", "met")):
             result = agent.run_goal("task", goal="g", max_turns=2)
 

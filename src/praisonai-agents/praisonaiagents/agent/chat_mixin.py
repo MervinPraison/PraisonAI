@@ -543,17 +543,53 @@ class ChatMixin:
             return int(getattr(execution, "max_tool_calls_per_turn", default))
         return default
 
-    def _resolve_harness_base_prompt(self):
+    _EDIT_TOOL_NAMES = frozenset({"edit_file", "apply_patch"})
+
+    def _offers_edit_tool(self, tools=None):
+        """True when ``tools`` (default: the agent's tools) include a file-edit primitive."""
+        for tool in (tools if tools is not None else getattr(self, "tools", None)) or ():
+            if isinstance(tool, list):
+                # _format_tools_for_completion flattens a nested list but keeps
+                # only its function-schema dicts, so only those can offer an edit tool.
+                if self._offers_edit_tool([
+                    t for t in tool
+                    if isinstance(t, dict) and t.get("type") == "function"
+                    and isinstance(t.get("function"), dict)
+                ]):
+                    return True
+                continue
+            if isinstance(tool, str):
+                name = tool
+            elif isinstance(tool, dict):
+                function = tool.get("function")
+                name = function.get("name") if isinstance(function, dict) else tool.get("name")
+            else:
+                # A tool's ``name`` is what the model is sent (``@tool(name=...)``
+                # keeps the function's own ``__name__``), so it wins.
+                name = getattr(tool, "name", None)
+                if not isinstance(name, str):
+                    name = getattr(tool, "__name__", None)
+            # _prune_denied_tools drops denied tools from the payload, so a
+            # denied edit tool must not earn the hint either.
+            if name in self._EDIT_TOOL_NAMES and self._tool_name_allowed(name):
+                return True
+        return False
+
+    def _resolve_harness_base_prompt(self, tools=None):
         """Resolve the model-family harness base-prompt fragment, if any.
 
         Honours an explicit ``harness_base_prompt`` override on the agent when
-        set; otherwise resolves lazily from the active model id. Returns an
-        empty string when no fragment applies (behaviour-preserving default).
-        Never raises: any resolution error collapses to no fragment.
+        set; otherwise resolves lazily from the active model id. The family
+        fragments are file-editing guidance, so they apply only when ``tools``
+        (default: the agent's tools) include ``edit_file`` or ``apply_patch``.
+        Returns an empty string when no fragment applies. Never raises: any
+        resolution error collapses to no fragment.
         """
         override = getattr(self, "harness_base_prompt", None)
         if override is not None:
             return override
+        if not self._offers_edit_tool(tools):
+            return ""
         try:
             from ..model_harness import resolve_harness
             # self.llm may be a string model id or an LLM object; resolve the
@@ -580,7 +616,10 @@ class ChatMixin:
         # Check cache first (skip cache if memory is enabled since context is dynamic)
         if not self._memory_instance:
             tools_key = self._get_tools_cache_key(tools)
-            cache_key = f"{self.role}:{self.goal}:{tools_key}"
+            # tools=None keys as "none" whatever self.tools holds, so key the
+            # edit-hint decision too; otherwise a cached prefix would keep (or
+            # miss) the hint after the agent's tools change.
+            cache_key = f"{self.role}:{self.goal}:{hash(self.backstory)}:{tools_key}:{self._offers_edit_tool(tools)}"
             
             cached_prompt = self._cache_get(self._system_prompt_cache, cache_key)
             if cached_prompt is not None:
@@ -591,13 +630,16 @@ class ChatMixin:
             cache_key = None  # Don't cache when memory is enabled
             
         system_prompt = f"""{self.backstory}\n
-Your Role: {self.role}\n
-Your Goal: {self.goal}"""
+Your Role: {self.role}"""
+        # Agent(instructions=...) sets backstory and goal to the same text;
+        # state it once.
+        if self.goal != self.backstory:
+            system_prompt += f"\n\nYour Goal: {self.goal}"
 
         # Prepend the model-family harness base prompt when one applies.
         # Resolution is lazy and falls back to a behaviour-preserving default
-        # (no fragment) for unknown models, so output is unchanged by default.
-        harness_prompt = self._resolve_harness_base_prompt()
+        # (no fragment) for unknown models or agents without edit tools.
+        harness_prompt = self._resolve_harness_base_prompt(tools)
         if harness_prompt:
             system_prompt = f"{harness_prompt}\n\n{system_prompt}"
         
@@ -1204,7 +1246,8 @@ Your Goal: {self.goal}"""
         if cached_entry is not None:
             cached_tools, cached_metadata = cached_entry
             self._tool_search_metadata = cached_metadata
-            return cached_tools
+            # Re-prune: permissions may have changed since the entry was cached.
+            return self._prune_denied_tools(cached_tools)
             
         formatted_tools = []
         # Provider-hosted tool specs have no local callable; the provider
@@ -1324,20 +1367,19 @@ Your Goal: {self.goal}"""
             return sorted(tools_list, key=sort_key)
         
         cleaned_tools = sort_formatted_tools(cleaned_tools)
-        
-        # Prune permission-denied tools from the advertised set so the model is
-        # only ever offered tools it can actually call. Mirrors the execution-time
-        # enforcement in tool_execution.py (_perm_deny / _perm_allow). No-op when
-        # no deny set and no allow set are configured (backward compatible).
-        cleaned_tools = self._prune_denied_tools(cleaned_tools)
-        
-        # Cache the formatted tools with LRU eviction, including tool search metadata
+
+        # Cache the unpruned tools with LRU eviction, including tool search
+        # metadata, so a later change to the deny/allow sets takes effect.
         self._cache_put(
             self._formatted_tools_cache,
             cache_key,
             (cleaned_tools, getattr(self, "_tool_search_metadata", None)),
         )
-        return cleaned_tools
+        # Prune permission-denied tools from the advertised set so the model is
+        # only ever offered tools it can actually call. Mirrors the execution-time
+        # enforcement in tool_execution.py (_perm_deny / _perm_allow). No-op when
+        # no deny set and no allow set are configured (backward compatible).
+        return self._prune_denied_tools(cleaned_tools)
 
     def _build_before_tool_definitions_input(self, formatted_tools):
         """Build the BEFORE_TOOL_DEFINITIONS hook input.
@@ -2041,6 +2083,21 @@ Your Goal: {self.goal}"""
                 ran.append(True)
                 return fn(*args, **kwargs)
         return {**llm_kwargs, 'execute_tool_fn': tracked}, ran
+
+    @staticmethod
+    def _history_before_turn(history, content):
+        """``history`` without the copy of this turn's user message stored before the call.
+
+        ``LLM._build_messages`` appends ``prompt`` after ``chat_history``, so
+        forwarding the stored copy as well sends the prompt twice. Only a
+        trailing match is dropped: messages a durable replay restored after
+        the turn keep their order.
+        """
+        if history:
+            last = history[-1]
+            if isinstance(last, dict) and last.get("role") == "user" and last.get("content") == content:
+                return list(history[:-1])
+        return history
 
     def _custom_llm_hook_messages(self, llm_kwargs):
         """The custom-LLM request as the message list BEFORE_LLM / AFTER_LLM hooks see."""
@@ -3018,6 +3075,23 @@ Your Goal: {self.goal}"""
         # Raise the enriched error
         raise error
 
+    def _native_reasoning_kwargs(self, model=None):
+        """Provider-native reasoning effort for the direct OpenAI client path.
+
+        An LLM instance translates ``reasoning_effort`` itself; the plain
+        OpenAI client only sees what the dispatcher forwards, so resolve the
+        unified level (Issue #4452) here, as the streaming path does. Returns
+        {} when unset/off or when the model has no native effort control.
+        """
+        effort = getattr(self, 'reasoning_effort', None)
+        if effort is None or getattr(self, '_using_custom_llm', False):
+            return {}
+        from ..thinking.effort import resolve_reasoning_params
+        native = resolve_reasoning_params(effort, model or self.llm)
+        if 'reasoning_effort' not in native:
+            return {}
+        return {'reasoning_effort': native['reasoning_effort']}
+
     def _execute_unified_chat_completion(
         self, 
         messages, 
@@ -3072,6 +3146,7 @@ Your Goal: {self.goal}"""
                     temperature=temperature,
                     max_tokens=getattr(self, 'max_tokens', None),
                     stream=True,  # Try streaming first
+                    **self._native_reasoning_kwargs(getattr(self._unified_dispatcher, 'model', None)),
                     response_format=response_format,
                     execute_tool_fn=self._durable_sync_tool_executor(
                         getattr(self, 'execute_tool', None)
@@ -3121,6 +3196,7 @@ Your Goal: {self.goal}"""
                 temperature=temperature,
                 max_tokens=getattr(self, 'max_tokens', None),
                 stream=stream,
+                **self._native_reasoning_kwargs(getattr(self._unified_dispatcher, 'model', None)),
                 response_format=response_format,
                 execute_tool_fn=self._durable_sync_tool_executor(
                     getattr(self, 'execute_tool', None)
@@ -3272,6 +3348,7 @@ Your Goal: {self.goal}"""
                 temperature=temperature,
                 max_tokens=getattr(self, 'max_tokens', None),
                 stream=stream,
+                **self._native_reasoning_kwargs(getattr(dispatcher, 'model', None)),
                 response_format=response_format,
                 execute_tool_fn=self._durable_async_tool_executor(
                     getattr(self, 'execute_tool_async', None)
@@ -4090,7 +4167,7 @@ Your Goal: {self.goal}"""
                     llm_kwargs = dict(
                         prompt=llm_prompt,
                         system_prompt=system_prompt_for_llm,
-                        chat_history=processed_history,
+                        chat_history=self._history_before_turn(processed_history, normalized_content),
                         temperature=temperature,
                         tools=tool_param,
                         output_json=output_json,
@@ -4207,6 +4284,7 @@ Your Goal: {self.goal}"""
             # Pass llm_prompt (which includes multimodal content if attachments present)
             messages, original_prompt = self._build_messages(
                 llm_prompt, temperature, output_json, output_pydantic,
+                tools=tools,
                 use_native_format=use_native_format,
                 memory_prefetch_context=memory_prefetch_context,
             )
@@ -4485,7 +4563,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     except Exception:
                         # Catch any exception from the inner try block and re-raise to outer handler
                         raise
-            except ToolExecutionError:
+            except (ToolExecutionError, BudgetExceededError):
+                # Parity with the custom-LLM and async paths: a budget stop must
+                # reach the caller, not turn into a ``None`` reply.
                 raise
             except Exception as e:
                 self._last_stop_reason = "error"
@@ -4832,7 +4912,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             tools,
                             memory_prefetch_context=memory_prefetch_context,
                         ),
-                        'chat_history': effective_history,
+                        'chat_history': self._history_before_turn(effective_history, normalized_content),
                         'temperature': temperature,
                         'tools': tools,
                         'output_json': output_json,
@@ -4926,6 +5006,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 temperature,
                 output_json,
                 output_pydantic,
+                tools=tools,
                 restore_durable=False,
                 memory_prefetch_context=memory_prefetch_context,
             )
@@ -5264,7 +5345,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             response = await self._openai_client.async_client.chat.completions.create(
                                 **tool_call_kwargs
                             )
-                            result = await self._achat_completion(response, tools)
+                            result = await self._achat_completion(response, tools, messages=messages)
                             if get_logger().getEffectiveLevel() == logging.DEBUG:
                                 total_time = time.time() - start_time
                                 logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
@@ -5444,8 +5525,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # the except blocks above already read ownership before this runs.
             self._clear_turn_tracking()
 
-    async def _achat_completion(self, response, tools, reasoning_steps=False):
-        """Async version of _chat_completion method"""
+    async def _achat_completion(self, response, tools, reasoning_steps=False, messages=None):
+        """Async version of _chat_completion method.
+
+        ``messages`` is the conversation that produced ``response``; it is kept in
+        the follow-up request so the final answer still sees the user's question.
+        """
         try:
             message = response.choices[0].message
             if not hasattr(message, 'tool_calls') or not message.tool_calls:
@@ -5531,17 +5616,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if results:
                 formatted_results = "\n".join([str(r) for r in results if r is not None])
                 if formatted_results:
-                    messages = [
-                        {"role": "system", "content": self.system_prompt},
+                    if messages:
+                        follow_up_messages = list(messages)
+                    else:
+                        follow_up_messages = [{"role": "system", "content": self.system_prompt}]
+                    follow_up_messages.extend([
                         {"role": "assistant", "content": "Here are the tool results:"},
                         {"role": "user", "content": formatted_results + "\nPlease process these results and provide a final response."}
-                    ]
+                    ])
                     try:
                         final_response = await self._openai_client.async_client.chat.completions.create(
                             model=self.llm,
-                            messages=messages,
+                            messages=follow_up_messages,
                             temperature=1.0,
-                            stream=stream
+                            stream=True
                         )
                         full_response_text = ""
                         reasoning_content = ""
@@ -5551,6 +5639,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Process stream without display_generating since streaming is active
                         async for chunk in final_response:
                             chunks.append(chunk)
+                            if not chunk.choices:
+                                # e.g. Azure content-filter annotation chunks
+                                continue
                             if chunk.choices[0].delta.content:
                                 full_response_text += chunk.choices[0].delta.content
                             
@@ -5558,9 +5649,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 rc = chunk.choices[0].delta.reasoning_content
                                 if rc:
                                     reasoning_content += rc
+
+                        if not full_response_text.strip() and not reasoning_content.strip():
+                            # No answer text (only annotation, contentless or
+                            # whitespace-only chunks): fall back to the tool results via the
+                            # except below.
+                            raise ValueError("follow-up stream returned no answer text")
                         
-                        self.console.print()
+                        console = self.console  # None unless verbose
+                        if console is not None:
+                            console.print()
                         
+                        from .agent import _get_llm_functions
                         final_response = _get_llm_functions()['process_stream_chunks'](chunks)
                         # Return only reasoning content if reasoning_steps is True
                         if reasoning_steps and hasattr(final_response.choices[0].message, 'reasoning_content') and final_response.choices[0].message.reasoning_content:
@@ -5878,7 +5978,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     for chunk in self.llm_instance.get_response_stream(
                         prompt=actual_prompt,
                         system_prompt=stream_system_prompt,
-                        chat_history=stream_history,
+                        chat_history=self._history_before_turn(stream_history, normalized_content),
                         temperature=kwargs.get('temperature', 1.0),
                         tools=tool_param,
                         output_json=kwargs.get('output_json'),
@@ -5953,6 +6053,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # Build messages using the helper method
                 messages, original_prompt = self._build_messages(actual_prompt, kwargs.get('temperature', 1.0), 
                                                                kwargs.get('output_json'), kwargs.get('output_pydantic'),
+                                                               tools=tool_param,
                                                                memory_prefetch_context=memory_prefetch_context)
                 
                 # Apply context management so the streaming path compacts long

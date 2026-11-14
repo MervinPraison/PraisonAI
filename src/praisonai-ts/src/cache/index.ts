@@ -72,7 +72,7 @@ export class MemoryCache extends BaseCache {
     if (this.maxSize && this.cache.size >= this.maxSize && !this.cache.has(key)) {
       // Remove oldest entry
       const firstKey = this.cache.keys().next().value;
-      if (firstKey) this.cache.delete(firstKey);
+      if (firstKey !== undefined) this.cache.delete(firstKey);
     }
 
     const effectiveTtl = ttl ?? this.ttl;
@@ -137,12 +137,15 @@ export class MemoryCache extends BaseCache {
  */
 export class FileCache extends BaseCache {
   private cacheDir: string;
+  private ttl?: number;
   private fs: any;
   private path: any;
+  private listQueues: Map<string, Promise<void>> = new Map();
 
   constructor(config: CacheConfig & { cacheDir?: string } = {}) {
     super(config);
     this.cacheDir = config.cacheDir || '.cache';
+    this.ttl = config.ttl;
   }
 
   private async ensureDir(): Promise<void> {
@@ -177,10 +180,11 @@ export class FileCache extends BaseCache {
 
   async set<T = any>(key: string, value: T, ttl?: number): Promise<void> {
     await this.ensureDir();
+    const effectiveTtl = ttl ?? this.ttl;
     const entry: CacheEntry<T> = {
       value,
       createdAt: Date.now(),
-      expiresAt: ttl ? Date.now() + ttl : undefined
+      expiresAt: effectiveTtl ? Date.now() + effectiveTtl : undefined
     };
     await this.fs.writeFile(this.getFilePath(key), JSON.stringify(entry));
   }
@@ -227,9 +231,20 @@ export class FileCache extends BaseCache {
   }
 
   async listPush<T = any>(key: string, value: T): Promise<void> {
-    const list = (await this.get<T[]>(`list_${key}`)) || [];
-    list.push(value);
-    await this.set(`list_${key}`, list);
+    // Serialize the full read/modify/write operation for this instance and key.
+    // A failed append must not block subsequent appends.
+    const previous = this.listQueues.get(key) ?? Promise.resolve();
+    const next = previous.catch(() => {}).then(async () => {
+      const list = (await this.get<T[]>(`list_${key}`)) || [];
+      list.push(value);
+      await this.set(`list_${key}`, list);
+    });
+    this.listQueues.set(key, next);
+    try {
+      await next;
+    } finally {
+      if (this.listQueues.get(key) === next) this.listQueues.delete(key);
+    }
   }
 
   async listLength(key: string): Promise<number> {
