@@ -273,7 +273,7 @@ def test_include_exclude_filters_applied(monkeypatch):
     assert names == {"read_file", "write_file"}
 
 
-def test_safe_env_build():
+def test_safe_env_build(tmp_path, monkeypatch):
     """Test safe environment building (B5)."""
     try:
         from praisonaiagents.mcp import MCP
@@ -288,10 +288,11 @@ def test_safe_env_build():
     assert hasattr(MCP, '_build_safe_env')
     mcp = MCP.__new__(MCP)
 
+    monkeypatch.setenv("HOME", str(tmp_path))
     safe_env = mcp._build_safe_env({"CUSTOM_VAR": "test"})
     assert isinstance(safe_env, dict)
     assert "CUSTOM_VAR" in safe_env
     assert safe_env["CUSTOM_VAR"] == "test"
     # Should have safe baseline
     assert "PATH" in safe_env
-    assert "HOME" in safe_env
+    assert safe_env["HOME"] == str(tmp_path)
