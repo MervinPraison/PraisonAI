@@ -2044,11 +2044,12 @@ class DefaultSessionStore:
             return False
     
     def list_sessions(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """List all sessions with metadata."""
+        """List sessions with metadata; directory read errors propagate."""
         sessions = []
+        filenames = os.listdir(self.session_dir)
         
         try:
-            for filename in os.listdir(self.session_dir):
+            for filename in filenames:
                 if filename.endswith(".json"):
                     filepath = os.path.join(self.session_dir, filename)
                     try:
