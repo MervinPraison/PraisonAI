@@ -50,11 +50,12 @@ from praisonaiagents.paths import get_sessions_dir
 print(get_sessions_dir())
 ```
 
-`PRAISONAI_HOME` selects a different root. Existing `~/.praison` installations
-use their legacy root; on a fresh installation, an absolute `XDG_DATA_HOME` can
-also select the data root. A store constructed with `session_dir` uses that
-directory instead. Session filenames are filesystem-safe and may differ from
-the session ID, so do not assume every file is named `{session_id}.json`.
+`PRAISONAI_HOME` selects a different root. An existing `~/.praison` installation
+uses its legacy root only when `~/.praisonai` does not exist. On a fresh
+installation, an absolute `XDG_DATA_HOME` can also select the data root. A
+store constructed with `session_dir` uses that directory instead. Session
+filenames are filesystem-safe and may differ from the session ID, so do not
+assume every file is named `{session_id}.json`.
 
 ### Session metadata contract (Issue #48)
 
