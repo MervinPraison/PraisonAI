@@ -123,3 +123,32 @@ class TestEnableAuditLog:
         from praisonai.security import enable_audit_log
         ids = enable_audit_log()
         assert ids is not None
+
+
+class TestAuditLogProcessSafety:
+    """Appends must hold an exclusive file lock so multi-worker hosts sharing
+    one audit file never interleave/tear JSONL lines (issue #6371)."""
+
+    def test_write_holds_exclusive_file_lock(self, tmp_path, monkeypatch):
+        from praisonai.security import audit as audit_mod
+        if audit_mod.fcntl is None:
+            pytest.skip("fcntl not available on this platform")
+
+        calls = []
+        real_flock = audit_mod.fcntl.flock
+
+        def spy(fd, op):
+            calls.append(op)
+            return real_flock(fd, op)
+
+        monkeypatch.setattr(audit_mod.fcntl, "flock", spy)
+        log_path = str(tmp_path / "audit.jsonl")
+        hook = audit_mod.AuditLogHook(log_path=log_path)
+        hook._write({"tool_name": "x", "payload": "y" * 10000})
+        hook.close()
+
+        assert calls == [audit_mod.fcntl.LOCK_EX, audit_mod.fcntl.LOCK_UN]
+        with open(log_path) as f:
+            lines = f.readlines()
+        assert len(lines) == 1
+        assert json.loads(lines[0])["payload"] == "y" * 10000
