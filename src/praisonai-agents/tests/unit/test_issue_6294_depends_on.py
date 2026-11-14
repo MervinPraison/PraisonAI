@@ -21,17 +21,30 @@ def test_sequential_depends_on_orders_tasks():
     assert [t.name for t in team.tasks.values()] == ["t1", "t2"]
 
 
-def test_sequential_cycle_raises():
+def test_sequential_cycle_keeps_list_order(caplog):
     t1, t2 = _make_tasks()
     t1.depends_on = [t2]
-    with pytest.raises(ValueError, match="Circular"):
-        _team([t1, t2])
+    with caplog.at_level("WARNING"):
+        team = _team([t1, t2])
+    assert [t.name for t in team.tasks.values()] == ["t1", "t2"]
+    assert "Circular" in caplog.text
 
 
-def test_sequential_dangling_raises():
+def test_sequential_dependency_outside_team_is_ignored():
     t1, t2 = _make_tasks()
-    with pytest.raises(ValueError, match="not part of"):
-        _team([t2])
+    team = _team([t2])
+    assert [t.name for t in team.tasks.values()] == ["t2"]
+
+
+def test_reuse_auto_wired_task_in_second_team():
+    # Sequential auto-wiring sets c.context=[b]; reusing c alone must still work.
+    from praisonaiagents import Agent, Task
+    ag = Agent(name="a", instructions="x", llm="gpt-4o-mini")
+    a, b, c = (Task(name=n, description="d", agent=ag, expected_output="o") for n in "abc")
+    _team([a, b, c])
+    assert b in (c.context or [])
+    team = _team([c])
+    assert [t.name for t in team.tasks.values()] == ["c"]
 
 
 def test_linear_order_unchanged():

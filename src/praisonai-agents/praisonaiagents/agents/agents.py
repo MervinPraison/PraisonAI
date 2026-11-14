@@ -1917,21 +1917,13 @@ class AgentTeam(SpawnAnnounceProtocol):
         """Return ``tasks`` in a stable topological order of ``context``/``depends_on``.
 
         A list whose dependencies already come first is returned unchanged.
-        Raises ``ValueError`` on a dependency cycle or on a dependency that is
-        neither part of ``tasks`` nor already completed.
+        Dependencies outside ``tasks`` are ignored. On a cycle a warning is
+        logged and the original list order is kept.
         """
         member_ids = {id(t) for t in tasks}
 
         def deps(t):
             return [d for d in (t.context or []) if isinstance(d, Task) and d is not t]
-
-        for t in tasks:
-            for d in deps(t):
-                if id(d) not in member_ids and getattr(d, "result", None) is None:
-                    raise ValueError(
-                        f"Task '{t.name}' depends on '{d.name}', which is not part of "
-                        "this AgentTeam and has no result"
-                    )
 
         # Iterative DFS so long dependency chains don't hit the recursion limit.
         order, done, visiting = [], set(), set()
@@ -1946,7 +1938,11 @@ class AgentTeam(SpawnAnnounceProtocol):
                     if id(d) not in member_ids or id(d) in done:
                         continue
                     if id(d) in visiting:
-                        raise ValueError(f"Circular task dependency involving '{d.name}'")
+                        logger.warning(
+                            f"Circular task dependency involving '{d.name}'; "
+                            "keeping list order"
+                        )
+                        return list(tasks)
                     visiting.add(id(d))
                     stack.append((d, iter(deps(d))))
                     break
