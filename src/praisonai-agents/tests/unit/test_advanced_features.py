@@ -589,12 +589,15 @@ class TestSafeBashExecution:
         from types import SimpleNamespace
         from praisonai.cli.features import safe_shell
 
+        calls = []
         def fake_popen(args, **kwargs):
+            calls.append(args)
             assert args == ["echo", "hello"], "unexpected command reached the process backend"
             process = Mock(returncode=0)
             process.communicate.return_value = ("hello\n", "")
             return process
 
+        # safe_execute uses only Popen, PIPE and TimeoutExpired from subprocess.
         fake_subprocess = SimpleNamespace(
             Popen=fake_popen,
             PIPE=safe_shell.subprocess.PIPE,
@@ -611,6 +614,7 @@ class TestSafeBashExecution:
         result = safe_shell.safe_execute("sudo rm -rf /")
         assert result.success == False
         assert "blocked" in result.error.lower() or "banned" in result.error.lower()
+        assert calls == [["echo", "hello"]]
 
 
 # ============================================================================
