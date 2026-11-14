@@ -273,6 +273,9 @@ def flow_export(
         praisonai flow export abc-123-def --output my_workflow.yaml
         praisonai flow export abc-123-def --format json
     """
+    if format not in ("yaml", "json"):
+        raise typer.BadParameter("must be 'yaml' or 'json'", param_hint="--format")
+
     from pathlib import Path
     from rich.console import Console
 
