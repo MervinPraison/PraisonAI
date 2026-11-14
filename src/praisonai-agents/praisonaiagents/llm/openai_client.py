@@ -301,6 +301,7 @@ def process_stream_chunks(chunks):
         reasoning_list = []
         # Tool-call deltas accumulated by index across the whole stream
         tool_calls_by_index = {}
+        index_alias = {}  # provider index -> slot, when a server reuses an index
         finish_reason = None
 
         # First pass: Get initial tool call data
@@ -348,6 +349,14 @@ def process_stream_chunks(chunks):
                         idx = max(tool_calls_by_index, default=-1) + 1
                     else:
                         idx = max(tool_calls_by_index)
+                else:
+                    raw_idx = idx
+                    idx = index_alias.get(raw_idx, raw_idx)
+                    existing = tool_calls_by_index.get(idx)
+                    if tc_id and existing and existing["id"] and existing["id"] != tc_id:
+                        # Some servers reuse index 0 for every call; a new id
+                        # at a filled index is a new call, not a fragment.
+                        idx = index_alias[raw_idx] = max(tool_calls_by_index) + 1
                 slot = tool_calls_by_index.setdefault(idx, {
                     "id": None,
                     "type": "function",

@@ -44,6 +44,17 @@ class TestStreamToolCallAccumulation:
             ("mul", '{"y": 2}'),
         ]
 
+    def test_reused_index_with_new_id_is_a_new_call(self):
+        r = process_stream_chunks([
+            _chunk([_tc(0, "c1", "add", '{"x": 1}')]),
+            _chunk([_tc(0, "c2", "mul", '{"y": 2}')], finish="tool_calls"),
+        ])
+        calls = r.choices[0].message.tool_calls
+        assert [(c.id, c.function["name"], c.function["arguments"]) for c in calls] == [
+            ("c1", "add", '{"x": 1}'),
+            ("c2", "mul", '{"y": 2}'),
+        ]
+
     def test_finish_reason_length_preserved_without_tools(self):
         r = process_stream_chunks([
             _chunk(content="partial..."),
