@@ -19,7 +19,8 @@ contains a protocol, a minimal event/roster model and a reference planner:
 * :class:`RoomTurnPlannerProtocol` — ``plan_next(roster, transcript) -> str|None``.
 * :func:`extract_mentions` — parse ``@name`` addressing between participants.
 * :class:`RoundRobinRoomPlanner` — the default bounded, deterministic planner:
-  round 0 lets every rostered agent speak once; later rounds admit **only**
+  round 0 lets the agents a human ``@``-mentioned speak (else every rostered
+  agent speaks once); later rounds admit **only**
   agents an earlier agent ``@``-mentioned, with hard caps on rounds/messages so
   a room can never loop unbounded.
 """

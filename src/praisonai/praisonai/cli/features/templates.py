@@ -562,7 +562,7 @@ class TemplatesHandler:
             if template.requires and isinstance(template.requires, dict):
                 ts = template.requires.get("tools_sources", [])
                 if ts:
-                    tools_sources.extend(ts)
+                    tools_sources.extend(_gate_template_tools_sources(ts))
             # Add CLI --tools-source overrides
             if tools_sources_override:
                 tools_sources.extend(tools_sources_override)
@@ -1392,3 +1392,28 @@ def handle_templates_command(args: List[str]) -> int:
     """Handle templates command from main CLI."""
     handler = TemplatesHandler()
     return handler.handle(args)
+
+
+def _gate_template_tools_sources(sources):
+    """Drop template-declared local ``.py`` paths unless template tools are opted in.
+
+    A remote template (e.g. ``github:...``) can point ``tools_sources`` at its
+    own cached ``.py`` files; those load with the local-tools env gate skipped.
+    Apply the same ``PRAISONAI_ALLOW_TEMPLATE_TOOLS`` gate as ``tools.py``
+    autoload. Module names and explicit CLI ``--tools-source`` are unaffected.
+    """
+    from pathlib import Path
+    from praisonai.templates.tool_override import _autoload_tools_enabled
+
+    if _autoload_tools_enabled():
+        return list(sources)
+    allowed = []
+    for source in sources:
+        if isinstance(source, str) and Path(source).expanduser().exists():
+            print(
+                f"Warning: skipping template tools_source {source!r} "
+                "(set PRAISONAI_ALLOW_TEMPLATE_TOOLS=true to load template code)"
+            )
+            continue
+        allowed.append(source)
+    return allowed
