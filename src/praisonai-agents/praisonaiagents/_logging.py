@@ -143,9 +143,15 @@ def configure_root_logger():
     
     Uses standard StreamHandler by default for performance.
     RichHandler is only used when LOGLEVEL=DEBUG for better debugging experience.
-    Does nothing if the host application already configured the root logger.
+    Does nothing if the host application already configured the root logger,
+    or when ``LOGLEVEL`` is not set explicitly.
     """
     if _host_configured_logging():
+        return
+    if 'LOGLEVEL' not in os.environ:
+        # A library must not install root handlers by default: that turns the
+        # host's later logging.basicConfig() into a no-op. Without handlers,
+        # WARNING+ records still reach stderr via logging.lastResort.
         return
 
     loglevel = os.environ.get('LOGLEVEL', 'WARNING').upper()
@@ -238,8 +244,13 @@ def configure_structured_logging():
     """
     if os.environ.get('PRAISONAI_STRUCTURED_LOGS', '').lower() == 'true':
         structured_formatter = StructuredFormatter()
+        root = logging.getLogger()
+        # Explicit opt-in: install a root handler if none exists (the SDK no
+        # longer installs one on import unless LOGLEVEL is set).
+        if not root.handlers:
+            root.addHandler(logging.StreamHandler())
         # Reconfigure the root logger handler so propagating loggers get JSON output
-        for handler in logging.getLogger().handlers:
+        for handler in root.handlers:
             handler.setFormatter(structured_formatter)
         # Also reconfigure any praisonaiagents loggers that have their own handlers
         for logger_name in logging.Logger.manager.loggerDict:

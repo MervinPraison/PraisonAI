@@ -21,12 +21,20 @@ from .._lockmap import LockMap
 
 logger = logging.getLogger(__name__)
 
+# A buffer flushes after this many debounce windows, even if messages keep arriving.
+_MAX_WAIT_FACTOR = 5
+# A buffer flushes as soon as it holds this many messages.
+_MAX_BUFFERED = 100
+
 
 class InboundDebouncer:
     """Per-user message debouncer.
 
     Buffers rapid messages from the same user and flushes them as a
-    single joined string after ``debounce_ms`` of silence.
+    single joined string after ``debounce_ms`` of silence.  A buffer is
+    also flushed ``_MAX_WAIT_FACTOR`` x ``debounce_ms`` after its first
+    message, or as soon as it holds ``_MAX_BUFFERED`` messages, so a steady
+    stream still dispatches.
 
     Args:
         debounce_ms: Debounce window in milliseconds.  0 = disabled
@@ -40,6 +48,9 @@ class InboundDebouncer:
         separator: str = "\n",
     ) -> None:
         self._debounce_s = max(0, debounce_ms) / 1000.0
+        self._max_wait_s = _MAX_WAIT_FACTOR * self._debounce_s
+        self._max_buffered = _MAX_BUFFERED
+        self._first_enqueued: Dict[str, float] = {}
         self._separator = separator
         self._buffers: Dict[str, List[str]] = {}
         self._timers: Dict[str, asyncio.TimerHandle] = {}
@@ -76,15 +87,23 @@ class InboundDebouncer:
             self._buffers[user_id].append(text)
             self._futures[user_id].append(future)
 
-            # Cancel existing timer and reschedule
+            # Cancel existing timer and reschedule, bounded by max-wait
             if user_id in self._timers:
                 self._timers[user_id].cancel()
 
-            self._timers[user_id] = loop.call_later(
-                self._debounce_s,
-                self._flush,
-                user_id,
-            )
+            now = loop.time()
+            first = self._first_enqueued.setdefault(user_id, now)
+            if self._max_buffered and len(self._buffers[user_id]) >= self._max_buffered:
+                self._flush(user_id)
+            else:
+                delay = self._debounce_s
+                if self._max_wait_s > 0:
+                    delay = max(0.0, min(delay, first + self._max_wait_s - now))
+                self._timers[user_id] = loop.call_later(
+                    delay,
+                    self._flush,
+                    user_id,
+                )
 
         # Wait for flush (outside lock so other messages can enqueue)
         return await future
@@ -94,6 +113,7 @@ class InboundDebouncer:
         messages = self._buffers.pop(user_id, [])
         futures = self._futures.pop(user_id, [])
         self._timers.pop(user_id, None)
+        self._first_enqueued.pop(user_id, None)
 
         if not messages:
             return
