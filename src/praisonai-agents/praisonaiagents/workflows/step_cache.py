@@ -307,8 +307,25 @@ class FileStepCache:
 
     def get(self, key: str) -> Optional[Dict[str, Any]]:
         with self._lock:
+            self._refresh()
             entry = self._entries.get(key)
             return copy.deepcopy(entry) if entry is not None else None
+
+    def _refresh(self) -> None:
+        # Atomic replacement makes each read a complete file, while the shared
+        # lock also serializes reads with clear on platforms that lock open files.
+        from ..session.store import FileLock
+        from ..utils.atomic_io import _path_mutexes
+
+        with _path_mutexes[self.path], FileLock(self.path, timeout=10):
+            try:
+                with open(self.path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except FileNotFoundError:
+                data = {}
+            if not isinstance(data, dict):
+                raise ValueError(f"{self.path} is not a step cache file.")
+            self._entries = data
 
     def set(self, key: str, value: Dict[str, Any]) -> None:
         # Round-trip through JSON first so an unserialisable value raises here
@@ -331,13 +348,20 @@ class FileStepCache:
             self._entries = update_json(self.path, _add)
 
     def clear(self) -> None:
+        from ..session.store import FileLock
+        from ..utils.atomic_io import _path_mutexes
+
         with self._lock:
-            self._entries = {}
-            if os.path.exists(self.path):
-                os.remove(self.path)
+            with _path_mutexes[self.path], FileLock(self.path, timeout=10):
+                try:
+                    os.remove(self.path)
+                except FileNotFoundError:
+                    pass
+                self._entries = {}
 
     def __len__(self) -> int:
         with self._lock:
+            self._refresh()
             return len(self._entries)
 
 
