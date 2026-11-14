@@ -245,6 +245,40 @@ def test_close_does_not_strand_an_enqueue_in_progress(tmp_path, monkeypatch):
     assert [r["content"] for r in mirror.load("s1")] == ["racing"]
 
 
+def test_close_warns_if_slow_mirror_is_still_draining(tmp_path, monkeypatch, caplog):
+    entered, release = threading.Event(), threading.Event()
+
+    class BlockingMirror(_RecordingMirror):
+        def append(self, session_id, records):
+            entered.set()
+            assert release.wait(5)
+            super().append(session_id, records)
+
+    mirror = BlockingMirror()
+    store = DefaultSessionStore(session_dir=str(tmp_path), mirror=mirror)
+    worker = store._mirror_writer._thread
+    join = worker.join
+
+    def short_join(timeout=None):
+        assert timeout == 5.0
+        join(timeout=0.05)
+
+    monkeypatch.setattr(worker, "join", short_join)
+    try:
+        assert store.add_message("s1", "user", "pending")
+        assert entered.wait(5)
+        store.close_mirror()
+        assert worker.is_alive()
+        assert store.flush_mirror(timeout=0.05) is False
+        assert "still draining" in caplog.text
+    finally:
+        release.set()
+        join(timeout=5)
+    assert not worker.is_alive()
+    assert store.flush_mirror(timeout=1) is True
+    assert mirror.load("s1")[0]["content"] == "pending"
+
+
 def test_failed_construction_leaks_no_thread():
     """A construction that fails after makedirs must not leak a mirror thread."""
     import os

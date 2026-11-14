@@ -651,10 +651,15 @@ class _SessionMirrorWriter:
             time.sleep(0.01)
 
     def close(self, timeout: float = 5.0) -> None:
-        """Stop the writer, draining any queued records first."""
+        """Stop the writer and wait up to timeout for queued records to drain."""
         with self._enqueue_lock:
             self._stop.set()
         self._thread.join(timeout=timeout)
+        if self._thread.is_alive():
+            logger.warning(
+                "session mirror is still draining after close timeout; "
+                "use flush_mirror to wait for processing before exiting"
+            )
 
 
 class DefaultSessionStore:
@@ -1600,7 +1605,12 @@ class DefaultSessionStore:
         return writer.flush(timeout)
 
     def close_mirror(self) -> None:
-        """Stop the background mirror writer, draining queued records first."""
+        """Stop the mirror writer and wait up to five seconds for it to drain.
+
+        A slow mirror may still be processing after this returns; use
+        ``flush_mirror(timeout=...)`` to wait for processing. Processing does
+        not guarantee delivery when the mirror fails.
+        """
         writer = self._mirror_writer
         if writer is not None:
             writer.close()
