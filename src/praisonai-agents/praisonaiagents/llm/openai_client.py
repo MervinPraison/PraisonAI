@@ -300,23 +300,35 @@ def process_stream_chunks(chunks):
             # Handle tool calls
             if hasattr(delta, "tool_calls") and delta.tool_calls:
                 for tool_call_delta in delta.tool_calls:
+                    fn = getattr(tool_call_delta, "function", None)
+                    args_part = getattr(fn, "arguments", None) or ""
                     if tool_call_delta.index is not None and tool_call_delta.id:
-                        # Found the initial tool call
+                        # Found the initial tool call. Many OpenAI-compatible
+                        # servers (vLLM, Ollama, Gemini, proxies) send the
+                        # whole arguments string in this same delta, so keep
+                        # it instead of starting from "".
                         current_tool_call = {
                             "id": tool_call_delta.id,
                             "type": "function",
                             "function": {
-                                "name": tool_call_delta.function.name,
-                                "arguments": ""
+                                "name": getattr(fn, "name", None),
+                                "arguments": args_part
                             }
                         }
                         while len(tool_calls) <= tool_call_delta.index:
                             tool_calls.append(None)
                         tool_calls[tool_call_delta.index] = current_tool_call
-                        current_tool_call = tool_calls[tool_call_delta.index]
-                    elif current_tool_call is not None and hasattr(tool_call_delta.function, "arguments"):
-                        if tool_call_delta.function.arguments:
-                            current_tool_call["function"]["arguments"] += tool_call_delta.function.arguments
+                    elif args_part:
+                        # Continuation delta: append to the call at its index
+                        # (parallel calls interleave), else to the last one.
+                        idx = tool_call_delta.index
+                        target = (
+                            tool_calls[idx]
+                            if idx is not None and 0 <= idx < len(tool_calls) and tool_calls[idx]
+                            else current_tool_call
+                        )
+                        if target is not None:
+                            target["function"]["arguments"] += args_part
 
         # Remove any None values and empty tool calls
         tool_calls = [tc for tc in tool_calls if tc and tc["id"] and tc["function"]["name"]]
