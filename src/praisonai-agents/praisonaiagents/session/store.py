@@ -659,6 +659,10 @@ class _SessionMirrorWriter:
         self._thread.join(timeout=timeout)
 
 
+class SessionResumeReadError(OSError):
+    """The durable session could not be read safely for an Agent resume."""
+
+
 class DefaultSessionStore:
     """
     JSON-based session persistence with file locking.
@@ -1967,6 +1971,22 @@ class DefaultSessionStore:
         session = self._read_session_fresh(session_id)
         limit = max_messages or self.max_messages
         return session.get_working_history(limit)
+
+    def _get_working_history_for_resume(self, session_id: str) -> List[Dict[str, str]]:
+        """Read a file-backed resume without mistaking an I/O error for empty history."""
+        if (type(self)._read_session_fresh is not DefaultSessionStore._read_session_fresh
+                or type(self).get_working_history is not DefaultSessionStore.get_working_history):
+            return self.get_working_history(session_id)
+        try:
+            filepath = self._get_session_path(session_id)
+            with FileLock(filepath, self.lock_timeout):
+                session = self._load_session_from_disk(session_id, filepath)
+                self._reingest_spill(session_id, session)
+        except OSError as exc:
+            raise SessionResumeReadError(f"Cannot resume session {session_id}: {exc}") from exc
+        with self._lock:
+            self._cache[session_id] = session
+        return session.get_working_history(self.max_messages)
 
     def update_session_metadata(self, session_id: str, **fields: Any) -> bool:
         """Merge run stats / metadata fields into a persisted session."""
