@@ -1204,6 +1204,9 @@ class WebSocketGateway:
         # map. Never persisted, so a removed/replaced owner stops resolving to
         # the owner identity as soon as its channel is (re)stamped.
         self._owner_handles: Dict[str, Tuple[str, str]] = {}
+        # Opt-in via ``identity: {unify_owner: true}`` so upgrading never
+        # re-keys an existing owner's per-platform sessions (backward compat).
+        self._unify_owner: bool = False
 
         # Explicit constructor toggles win over any config-provided defaults so
         # ``WebSocketGateway(openai_api=True, mcp=True)`` works without a config.
@@ -9888,6 +9891,12 @@ class WebSocketGateway:
         block reuses the existing resolver so its in-memory link cache and
         store handle survive reloads that don't touch ``identity:``.
         """
+        # Issue #6362: owner unification is opt-in (``unify_owner: true``) and
+        # honoured for explicit resolvers too; absent/false keeps today's keys.
+        unify = identity_cfg.get("unify_owner", False) if isinstance(identity_cfg, dict) else False
+        if isinstance(unify, str):
+            unify = unify.strip().lower() in ("1", "true", "yes", "on")
+        self._unify_owner = bool(unify)
         if getattr(self, "_identity_resolver_explicit", False):
             return
         built = self._build_identity_resolver(identity_cfg)
@@ -9954,7 +9963,14 @@ class WebSocketGateway:
         # always wins, except that the owner id itself is reserved.
         platform = getattr(sess, "_platform", None)
         key = channel_name or platform
-        view = _OwnerAwareResolver(resolver, self._owner_handles, key)
+        if not getattr(self, "_unify_owner", False):
+            # Default: share the raw resolver, exactly as before #6362.
+            view = resolver
+            key = None
+            if channel_name:
+                self._owner_handles.pop(channel_name, None)
+        else:
+            view = _OwnerAwareResolver(resolver, self._owner_handles, key)
         if sess is not None and hasattr(sess, "_identity_resolver"):
             sess._identity_resolver = view
         elif hasattr(bot, "_identity_resolver"):

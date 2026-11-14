@@ -69,9 +69,7 @@ def test_stamp_shares_resolver_with_session():
     gateway = WebSocketGateway(host="127.0.0.1", port=8902, identity_resolver=resolver)
     bot = _FakeBot()
     gateway._stamp_identity_resolver(bot)
-    # Wrapped in the owner-aware view (Issue #6362) over the same resolver.
-    assert bot._session._identity_resolver._inner is resolver
-    assert bot._session._identity_resolver.resolve("telegram", "1") == "user:alice"
+    assert bot._session._identity_resolver is resolver
 
 
 # ── owner_user_id unification (Issue #6362) ─────────────────────────
@@ -90,12 +88,47 @@ def _resolve(bot, platform, uid):
     return bot._session._identity_resolver.resolve(platform, uid)
 
 
+def _owner_gateway(port, resolver):
+    """Gateway with owner unification opted in via ``identity: {unify_owner: true}``."""
+    gw = WebSocketGateway(host="127.0.0.1", port=port, identity_resolver=resolver)
+    gw._reconcile_identity_resolver({"unify_owner": True})
+    return gw
+
+
+def test_owner_unification_off_by_default():
+    """Backward compat: without ``unify_owner`` the owner keeps platform:user_id keys."""
+    from praisonaiagents.session.identity import InMemoryIdentityResolver
+
+    resolver = InMemoryIdentityResolver()
+    gateway = WebSocketGateway(host="127.0.0.1", port=8911, identity_resolver=resolver)
+    gateway._reconcile_identity_resolver({"enabled": True})
+    bot = _OwnerBot("telegram", "12345")
+    gateway._stamp_identity_resolver(bot, "telegram")
+    assert bot._session._identity_resolver is resolver
+    assert _resolve(bot, "telegram", "12345") == "telegram:12345"
+    assert gateway._owner_handles == {}
+
+
+def test_disabling_unify_owner_reverts_to_platform_keys():
+    from praisonaiagents.session.identity import InMemoryIdentityResolver
+
+    resolver = InMemoryIdentityResolver()
+    gateway = _owner_gateway(8912, resolver)
+    gateway._stamp_identity_resolver(_OwnerBot("telegram", "12345"), "telegram")
+    assert gateway._owner_handles
+    gateway._reconcile_identity_resolver({"unify_owner": False})
+    bot = _OwnerBot("telegram", "12345")
+    gateway._stamp_identity_resolver(bot, "telegram")  # restamped on reload
+    assert _resolve(bot, "telegram", "12345") == "telegram:12345"
+    assert gateway._owner_handles == {}
+
+
 def test_owner_handles_unify_across_channels():
     """Each channel's declared owner resolves to one canonical owner id."""
     from praisonaiagents.session.identity import InMemoryIdentityResolver
 
     resolver = InMemoryIdentityResolver()
-    gateway = WebSocketGateway(host="127.0.0.1", port=8903, identity_resolver=resolver)
+    gateway = _owner_gateway(8903, resolver)
     tg, sl = _OwnerBot("telegram", "12345"), _OwnerBot("slack", "U0999")
     gateway._stamp_identity_resolver(tg, "telegram")
     gateway._stamp_identity_resolver(sl, "slack")
@@ -112,7 +145,7 @@ def test_owner_link_never_overwrites_explicit_link():
 
     resolver = InMemoryIdentityResolver()
     resolver.link("telegram", "12345", "alice")
-    gateway = WebSocketGateway(host="127.0.0.1", port=8904, identity_resolver=resolver)
+    gateway = _owner_gateway(8904, resolver)
     bot = _OwnerBot("telegram", "12345")
     gateway._stamp_identity_resolver(bot, "telegram")
     assert _resolve(bot, "telegram", "12345") == "alice"
@@ -122,7 +155,7 @@ def test_replaced_owner_loses_owner_identity():
     from praisonaiagents.session.identity import InMemoryIdentityResolver
 
     resolver = InMemoryIdentityResolver()
-    gateway = WebSocketGateway(host="127.0.0.1", port=8905, identity_resolver=resolver)
+    gateway = _owner_gateway(8905, resolver)
     gateway._stamp_identity_resolver(_OwnerBot("telegram", "A"), "telegram")
     bot = _OwnerBot("telegram", "B")
     gateway._stamp_identity_resolver(bot, "telegram")  # hot-reload: owner A -> B
@@ -136,7 +169,7 @@ def test_owner_id_scoped_to_identity_store(tmp_path):
     ids = []
     for i, port in enumerate((8906, 8907)):
         r = FileIdentityResolver(path=tmp_path / f"id{i}.json")
-        gw = WebSocketGateway(host="127.0.0.1", port=port, identity_resolver=r)
+        gw = _owner_gateway(port, r)
         bot = _OwnerBot("telegram", "12345")
         gw._stamp_identity_resolver(bot, "telegram")
         ids.append(_resolve(bot, "telegram", "12345"))
@@ -150,7 +183,7 @@ def test_channel_without_owner_never_maps_to_owner():
     from praisonaiagents.session.identity import InMemoryIdentityResolver
 
     resolver = InMemoryIdentityResolver()
-    gateway = WebSocketGateway(host="127.0.0.1", port=8908, identity_resolver=resolver)
+    gateway = _owner_gateway(8908, resolver)
     owned, plain = _OwnerBot("telegram", "12345"), _OwnerBot("telegram", None)
     gateway._stamp_identity_resolver(owned, "tg_main")
     gateway._stamp_identity_resolver(plain, "tg_support")
@@ -164,7 +197,7 @@ def test_owner_id_reserved_against_links_and_labels():
     from praisonaiagents.session.identity import InMemoryIdentityResolver
 
     resolver = InMemoryIdentityResolver()
-    gateway = WebSocketGateway(host="127.0.0.1", port=8910, identity_resolver=resolver)
+    gateway = _owner_gateway(8910, resolver)
     bot = _OwnerBot("telegram", "12345")
     gateway._stamp_identity_resolver(bot, "telegram")
     owner_id = _resolve(bot, "telegram", "12345")
@@ -182,7 +215,7 @@ async def test_removed_channel_drops_its_owner():
     from praisonaiagents.session.identity import InMemoryIdentityResolver
 
     resolver = InMemoryIdentityResolver()
-    gateway = WebSocketGateway(host="127.0.0.1", port=8909, identity_resolver=resolver)
+    gateway = _owner_gateway(8909, resolver)
     owned = _OwnerBot("telegram", "12345")
     gateway._stamp_identity_resolver(owned, "tg_main")
     assert _resolve(owned, "telegram", "12345").startswith("owner")
@@ -218,7 +251,7 @@ async def test_start_channels_stamps_resolver_onto_created_bot():
         with patch.object(gateway, "_run_bot_safe", side_effect=lambda *a, **k: None):
             await gateway.start_channels({"telegram": {"token": "t"}})
 
-    assert created["telegram"]._session._identity_resolver._inner is resolver
+    assert created["telegram"]._session._identity_resolver is resolver
 
 
 @pytest.mark.asyncio
@@ -238,7 +271,7 @@ async def test_hot_reload_stamps_resolver():
         with patch.object(gateway, "_run_bot_safe", side_effect=lambda *a, **k: None):
             await gateway._start_single_channel("telegram", {"token": "t"})
 
-    assert created["telegram"]._session._identity_resolver._inner is resolver
+    assert created["telegram"]._session._identity_resolver is resolver
 
 
 # ── _build_identity_resolver (declarative identity: block) ──────────
