@@ -144,8 +144,9 @@ def test_owner_id_scoped_to_identity_store(tmp_path):
     assert not (tmp_path / "id0.json").exists()  # owner mapping never persisted
 
 
-def test_channel_without_owner_still_resolves_declared_owner():
-    """A channel that admits the owner without declaring them keeps continuity."""
+def test_channel_without_owner_never_maps_to_owner():
+    """A channel that declares no owner keeps the per-platform default, even for
+    an id matching another channel's owner (ids may be scoped per tenant)."""
     from praisonaiagents.session.identity import InMemoryIdentityResolver
 
     resolver = InMemoryIdentityResolver()
@@ -153,9 +154,26 @@ def test_channel_without_owner_still_resolves_declared_owner():
     owned, plain = _OwnerBot("telegram", "12345"), _OwnerBot("telegram", None)
     gateway._stamp_identity_resolver(owned, "tg_main")
     gateway._stamp_identity_resolver(plain, "tg_support")
-    assert _resolve(plain, "telegram", "12345") == _resolve(owned, "telegram", "12345")
-    assert _resolve(plain, "telegram", "12345").startswith("owner")
+    assert _resolve(owned, "telegram", "12345").startswith("owner")
+    assert _resolve(plain, "telegram", "12345") == "telegram:12345"
     assert _resolve(plain, "telegram", "999") == "telegram:999"
+
+
+def test_owner_id_reserved_against_links_and_labels():
+    """A non-owner linked/paired to the literal owner id never reaches the owner's session."""
+    from praisonaiagents.session.identity import InMemoryIdentityResolver
+
+    resolver = InMemoryIdentityResolver()
+    gateway = WebSocketGateway(host="127.0.0.1", port=8910, identity_resolver=resolver)
+    bot = _OwnerBot("telegram", "12345")
+    gateway._stamp_identity_resolver(bot, "telegram")
+    owner_id = _resolve(bot, "telegram", "12345")
+    resolver.link("telegram", "666", owner_id)
+    resolver.link("slack", "U666", owner_id)
+    assert _resolve(bot, "telegram", "666") == "telegram:666"
+    assert _resolve(bot, "slack", "U666") == "slack:U666"
+    # The declared owner itself is unaffected.
+    assert _resolve(bot, "telegram", "12345") == owner_id
 
 
 @pytest.mark.asyncio
@@ -165,12 +183,12 @@ async def test_removed_channel_drops_its_owner():
 
     resolver = InMemoryIdentityResolver()
     gateway = WebSocketGateway(host="127.0.0.1", port=8909, identity_resolver=resolver)
-    owned, plain = _OwnerBot("telegram", "12345"), _OwnerBot("telegram", None)
+    owned = _OwnerBot("telegram", "12345")
     gateway._stamp_identity_resolver(owned, "tg_main")
-    gateway._stamp_identity_resolver(plain, "tg_support")
+    assert _resolve(owned, "telegram", "12345").startswith("owner")
     gateway._channel_bots["tg_main"] = owned
     await gateway._restart_channel("tg_main", {})  # channel removed from config
-    assert _resolve(plain, "telegram", "12345") == "telegram:12345"
+    assert _resolve(owned, "telegram", "12345") == "telegram:12345"
 
 
 def test_owner_link_noop_without_resolver():

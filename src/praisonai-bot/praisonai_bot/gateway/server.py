@@ -9944,20 +9944,21 @@ class WebSocketGateway:
         )
         # Issue #6362: the channel's declared ``owner_user_id`` is the same
         # human on every surface, so resolve it to one canonical owner id —
-        # their conversation and memory then span every channel with no manual
-        # ``link()``/pairing. The owner-aware view is installed on *every*
-        # channel (the handle map is gateway-wide, so a channel that admits the
-        # owner without declaring them still resolves to the owner id); only
-        # registration is conditional. The mapping lives only in memory
-        # (re-derived from config on every stamp, so a removed/replaced owner
-        # loses access) and an explicit link or pairing label always wins.
-        view = _OwnerAwareResolver(resolver, self._owner_handles)
+        # their conversation and memory then span every owner-declaring
+        # channel with no manual ``link()``/pairing. Each view only honours
+        # *its own* channel's declared owner, so a channel that declares no
+        # owner (or a different tenant/workspace on the same platform type)
+        # never maps a sender to the owner's session. The mapping lives only
+        # in memory (re-derived from config on every stamp, so a removed or
+        # replaced owner loses access) and an explicit link or pairing label
+        # always wins, except that the owner id itself is reserved.
+        platform = getattr(sess, "_platform", None)
+        key = channel_name or platform
+        view = _OwnerAwareResolver(resolver, self._owner_handles, key)
         if sess is not None and hasattr(sess, "_identity_resolver"):
             sess._identity_resolver = view
         elif hasattr(bot, "_identity_resolver"):
             bot._identity_resolver = view
-        platform = getattr(sess, "_platform", None)
-        key = channel_name or platform
         if not key:
             return
         owner = getattr(getattr(bot, "config", None), "owner_user_id", None)
@@ -12745,18 +12746,26 @@ class WebSocketGateway:
 
 
 class _OwnerAwareResolver:
-    """Resolve the gateway's declared channel owners to one owner id (Issue #6362).
+    """Resolve a channel's declared owner to one owner id (Issue #6362).
 
-    Thin, non-persisting view over the gateway's identity resolver: an explicit
-    link or pairing label wins; otherwise a handle currently declared as some
-    channel's ``owner_user_id`` resolves to the owner id; everyone else keeps
-    the safe ``platform:user_id`` default. The owner id is scoped to the
-    identity store so gateways with separate stores never share history.
+    Thin, non-persisting view over the gateway's identity resolver, bound to a
+    single channel: an explicit link or pairing label wins; otherwise the
+    handle currently declared as *this* channel's ``owner_user_id`` resolves to
+    the owner id; everyone else keeps the safe ``platform:user_id`` default.
+    The owner id is reserved: a link or label equal to it only resolves for
+    the declared owner. It is scoped to the identity store so gateways with
+    separate stores never share history.
     """
 
-    def __init__(self, inner: Any, handles: Dict[str, Tuple[str, str]]) -> None:
+    def __init__(
+        self,
+        inner: Any,
+        handles: Dict[str, Tuple[str, str]],
+        channel_key: Optional[str] = None,
+    ) -> None:
         self._inner = inner
         self._handles = handles
+        self._channel_key = channel_key
         path = getattr(inner, "_path", None)
         self.owner_id = (
             "owner:" + hashlib.sha256(str(path).encode()).hexdigest()[:12]
@@ -12764,11 +12773,16 @@ class _OwnerAwareResolver:
         )
 
     def resolve(self, platform: str, platform_user_id: str) -> str:
+        default = f"{platform}:{platform_user_id}"
         resolved = self._inner.resolve(platform, platform_user_id)
-        if (
-            resolved == f"{platform}:{platform_user_id}"
-            and (platform, str(platform_user_id)) in self._handles.values()
-        ):
+        is_owner = (
+            self._channel_key is not None
+            and self._handles.get(self._channel_key)
+            == (platform, str(platform_user_id))
+        )
+        if resolved == self.owner_id and not is_owner:
+            return default  # reserved: no link/label may claim the owner id
+        if resolved == default and is_owner:
             return self.owner_id
         return resolved
 
