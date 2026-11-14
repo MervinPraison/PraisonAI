@@ -160,6 +160,67 @@ jobs:
               tests/unit/test_task_execution_config.py
               tests/unit/test_agent_unknown_kwarg_guidance.py
               tests/unit/test_agent_instantiation_lazy.py tests/unit/test_agent_os_exports.py
+              tests/unit/test_placement.py::test_a_name_in_both_sets_is_valid_for_both_parameters
+              tests/unit/test_placement.py::test_the_two_scopes_are_reported_differently
+              tests/unit/test_placement.py::test_the_sandbox_only_backends_are_reachable
+              tests/unit/test_placement.py::test_run_on_a_tools_only_place_names_the_right_parameter
+              tests/unit/test_placement.py::test_tools_run_on_a_managed_runtime_names_the_right_parameter
+              tests/unit/test_placement.py::test_an_unknown_place_lists_both_registries
+              tests/unit/test_placement.py::test_two_places_for_the_same_work_is_a_type_error
+              tests/unit/test_placement.py::test_run_on_is_refused_on_orchestrators
+              tests/unit/test_placement.py::test_tools_run_on_is_recorded_without_provisioning_anything
+              tests/unit/test_placement.py::test_a_plain_agent_is_untouched
+              tests/unit/test_placement.py::test_the_default_path_runs_no_registry_lookups
+              tests/unit/test_placement.py::test_a_named_placement_still_runs_the_lookups
+              tests/unit/test_placement.py::test_orchestrators_take_tools_run_on
+              tests/unit/test_placement.py::test_repr_uses_the_same_word_you_typed
+              tests/unit/test_placement.py::test_explain_names_the_tools_that_do_not_move
+              tests/unit/test_placement.py::test_explain_says_nothing_about_local_tools_when_nothing_moves
+              tests/unit/test_placement.py::test_an_unknown_tools_place_fails_at_construction
+              tests/unit/test_placement.py::test_ssh_says_it_needs_more_than_a_name
+              tests/unit/test_placement.py::test_local_is_described_by_the_backend_it_actually_gets
+              tests/unit/test_placement.py::test_a_local_place_still_warns_that_it_is_not_a_boundary
+              tests/unit/test_placement.py::test_resolver_aliases_are_accepted_at_construction
+              tests/unit/test_placement.py::test_a_backend_holding_a_local_compute_object_is_not_overstated
+              tests/unit/test_placement.py::test_a_place_can_be_contributed_by_another_package
+              tests/unit/test_placement.py::test_a_broken_plugin_cannot_break_places_that_do_not_name_it
+              tests/unit/test_placement.py::test_two_concurrent_runs_of_one_team_each_get_their_own_scope
+              tests/unit/test_placement.py::test_one_teams_run_does_not_suppress_another_teams_sandbox
+              tests/unit/test_placement.py::test_a_clone_does_not_inherit_the_source_agents_sandbox
+              tests/unit/test_placement.py::test_an_agent_with_its_own_sandbox_is_left_alone_by_a_flow
+              tests/unit/test_placement.py::test_a_batch_provisions_one_sandbox_not_one_per_row
+              tests/unit/test_placement.py::test_a_flow_does_not_clobber_an_agent_that_named_its_own_place
+              tests/unit/test_placement.py::test_a_placed_agent_inside_a_team_gets_its_sandbox_tools
+              tests/unit/test_placement.py::test_every_entry_point_places_tools_before_the_first_turn
+              tests/unit/test_sandbox_adapter.py::test_sandbox_only_backends_are_selectable_as_places
+              tests/unit/test_sandbox_adapter.py::test_the_registry_is_the_union_of_both_stacks
+              tests/unit/test_sandbox_adapter.py::test_a_sandbox_only_name_resolves_to_the_adapter
+              tests/unit/test_sandbox_adapter.py::test_a_name_that_needs_connection_details_says_so
+              tests/unit/test_run_on_docker.py::test_docker_is_also_a_tool_place
+              tests/unit/test_run_on_docker.py::test_docker_is_a_managed_runtime
+              tests/unit/test_run_on_docker.py::test_run_on_docker_builds_the_self_hosted_backend
+              tests/unit/test_run_on_docker.py::test_run_on_moves_the_thinking_too
+              tests/unit/test_run_on_docker.py::test_the_two_read_differently_in_the_repr
+              tests/unit/test_run_on_docker.py::test_run_on_covers_the_cloud_places_too
+              tests/unit/test_run_on_docker.py::test_a_cloud_place_builds_its_own_backend_class
+              tests/unit/test_run_on_docker.py::test_docker_is_no_longer_a_special_case
+              tests/unit/test_run_on_docker.py::test_tools_run_on_leaves_the_thinking_here
+              tests/unit/test_run_on_docker.py::test_naming_both_is_still_a_conflict
+              tests/unit/test_run_on_docker.py::test_the_agent_is_rebuilt_from_serialisable_config_only
+              tests/unit/test_run_on_docker.py::test_hosted_config_spellings_are_translated
+              tests/unit/test_run_on_docker.py::test_an_empty_config_still_produces_a_valid_agent
+              tests/unit/test_run_on_docker.py::test_the_result_is_read_from_a_marked_line
+              tests/unit/test_run_on_docker.py::test_a_missing_daemon_says_what_to_do
+              tests/unit/test_run_on_docker.py::test_places_that_cannot_host_a_loop_are_still_refused
+              tests/unit/test_run_on_docker.py::test_the_remote_agent_is_rebuilt_without_callables
+              tests/unit/test_run_on_docker.py::test_the_generic_backend_honours_a_requested_image
+              tests/unit/test_run_on_docker.py::test_release_reclaims_even_on_an_event_loop_thread
+              tests/unit/test_run_on_docker.py::test_release_returns_before_a_slow_provider_finishes
+              tests/unit/test_run_on_docker.py::test_a_hosted_backend_reclaims_its_instance_when_collected
+              tests/unit/test_run_on_docker.py::test_an_explicit_shutdown_cancels_the_finalizer
+              tests/unit/test_placement.py::test_no_place_at_all_says_how_to_name_one
+              tests/unit/test_placement.py::test_a_hosted_agent_says_its_thinking_moved
+              tests/unit/test_placement.py::test_run_on_builds_the_same_thing_backend_would
             # Both tests previously deselected here now pass in combination.
             # test_lazy_litellm_import was looking the loader module up by
             # name and could get a different object than the one get_litellm()
@@ -308,6 +369,18 @@ jobs:
         else
           python -m pytest ${{ matrix.paths }} "${PYTEST_ARGS[@]}" ${{ matrix.extra_ignore }}
         fi
+
+    - name: Run isolated placement lifecycle tests
+      if: matrix.shard == 'agents-core'
+      working-directory: src/praisonai-agents
+      run: |
+        python -m pytest \
+          tests/unit/test_placement.py::test_a_dropped_agent_releases_its_sandbox \
+          tests/unit/test_placement.py::test_a_team_run_provisions_exactly_one_sandbox \
+          tests/unit/test_placement.py::test_an_async_team_run_provisions_its_sandbox \
+          tests/unit/test_placement.py::test_a_batch_shares_one_sandbox_across_every_row \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings --timeout=60
 
   test-core-integration:
     name: test-core-integration
