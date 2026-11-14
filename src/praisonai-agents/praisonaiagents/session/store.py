@@ -570,6 +570,7 @@ class _SessionMirrorWriter:
         self._max_retries = max_retries
         self._queue: "queue.Queue" = queue.Queue(maxsize=max_queue)
         self._stop = threading.Event()
+        self._enqueue_lock = threading.Lock()
         self._thread = threading.Thread(
             target=self._run, name="praisonai-session-mirror", daemon=True
         )
@@ -583,25 +584,22 @@ class _SessionMirrorWriter:
         # records stranded with no consumer while the local write reports
         # success. Drop-to-log instead so the gap is observable (and `session
         # sync` can reconcile) rather than silently lost (Issue #3646).
-        if self._stop.is_set():
-            logger.warning(
-                "session mirror is closed; dropping %d record(s) for %s "
-                "(local write unaffected; run `session sync` to reconcile)",
-                len(records),
-                session_id,
-            )
-            return
-        try:
-            self._queue.put_nowait((session_id, records))
-        except queue.Full:
-            # Never block the turn on a slow mirror; the local write already
-            # succeeded and `session sync` can reconcile the gap later.
-            logger.warning(
-                "session mirror queue full; dropping %d record(s) for %s "
-                "(local write unaffected; run `session sync` to reconcile)",
-                len(records),
-                session_id,
-            )
+        with self._enqueue_lock:
+            if self._stop.is_set():
+                reason = "is closed"
+            else:
+                try:
+                    self._queue.put_nowait((session_id, records))
+                    return
+                except queue.Full:
+                    reason = "queue full"
+        logger.warning(
+            "session mirror %s; dropping %d record(s) for %s "
+            "(local write unaffected; run `session sync` to reconcile)",
+            reason,
+            len(records),
+            session_id,
+        )
 
     def _run(self) -> None:
         while not self._stop.is_set() or not self._queue.empty():
@@ -655,7 +653,8 @@ class _SessionMirrorWriter:
 
     def close(self, timeout: float = 5.0) -> None:
         """Stop the writer, draining any queued records first."""
-        self._stop.set()
+        with self._enqueue_lock:
+            self._stop.set()
         self._thread.join(timeout=timeout)
 
 

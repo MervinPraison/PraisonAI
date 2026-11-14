@@ -183,6 +183,37 @@ def test_enqueue_after_close_is_dropped_not_stranded():
     assert [r["content"] for r in mirror.load("s1")] == ["before close"]
 
 
+def test_close_does_not_strand_an_enqueue_in_progress(tmp_path, monkeypatch):
+    mirror = _RecordingMirror()
+    store = DefaultSessionStore(session_dir=str(tmp_path), mirror=mirror)
+    writer = store._mirror_writer
+    entered, release, closed = threading.Event(), threading.Event(), threading.Event()
+    put_nowait = writer._queue.put_nowait
+
+    def blocked_put(item):
+        entered.set()
+        assert release.wait(5)
+        put_nowait(item)
+
+    monkeypatch.setattr(writer._queue, "put_nowait", blocked_put)
+    results = []
+    producer = threading.Thread(target=lambda: results.append(store.add_message("s1", "user", "racing")))
+    closer = threading.Thread(target=lambda: (store.close_mirror(), closed.set()))
+    try:
+        producer.start()
+        assert entered.wait(5)
+        closer.start()
+        closed.wait(1)
+    finally:
+        release.set()
+        producer.join(5)
+        closer.join(5)
+    assert not producer.is_alive() and not closer.is_alive()
+    assert results == [True]
+    assert store.flush_mirror(timeout=1) is True
+    assert [r["content"] for r in mirror.load("s1")] == ["racing"]
+
+
 def test_failed_construction_leaks_no_thread():
     """A construction that fails after makedirs must not leak a mirror thread."""
     import os
