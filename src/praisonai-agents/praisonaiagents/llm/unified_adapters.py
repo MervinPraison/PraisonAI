@@ -222,6 +222,11 @@ class OpenAIAdapter:
             verbose=kwargs.get('verbose', True),
             max_iterations=kwargs.get('max_iterations', 10),
             agent_name=kwargs.get('agent_name'),
+            # Named parameters of achat_completion_with_tools (never sent to the
+            # API): without them no StreamEvent reaches Agent.stream_emitter, so
+            # stream consumers get no deltas, tool calls or reasoning.
+            stream_callback=kwargs.get('stream_callback'),
+            emit_events=kwargs.get('emit_events', False),
             **{k: v for k, v in kwargs.items() if k not in {
                 'max_tokens', 'execute_tool_fn', 'console', 'display_fn',
                 'reasoning_steps', 'verbose', 'max_iterations',
