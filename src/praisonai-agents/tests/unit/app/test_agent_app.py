@@ -46,7 +46,7 @@ class TestAgentAppConfig:
         from praisonaiagents import AgentAppConfig
         
         config = AgentAppConfig()
-        assert config.host == "0.0.0.0"
+        assert config.host == "127.0.0.1"
         assert config.port == 8000
         assert config.reload is False
     

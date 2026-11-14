@@ -18,7 +18,7 @@ class AgentAppConfig:
     
     Attributes:
         name: Name of the application (default: "PraisonAI App")
-        host: Host address to bind to (default: "0.0.0.0")
+        host: Host address to bind to (default: "127.0.0.1")
         port: Port number to listen on (default: 8000)
         reload: Enable auto-reload for development (default: False)
         cors_origins: List of allowed CORS origins (default: [])
@@ -41,7 +41,7 @@ class AgentAppConfig:
     """
     
     name: str = "PraisonAI App"
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8000
     reload: bool = False
     cors_origins: List[str] = field(default_factory=lambda: [])
