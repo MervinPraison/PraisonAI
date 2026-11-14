@@ -47,15 +47,19 @@ def test_default_store_save_cannot_overwrite_unreadable_backend_record(tmp_path,
 
 def test_write_protection_uses_file_identity_and_clears_after_successful_read(tmp_path):
     backend = FileBackend(storage_dir=str(tmp_path))
-    path = tmp_path / "alias_key.json"
+    # Distinct keys no longer alias one file (Issue #6266); protection
+    # still follows the encoded file of the key that failed to read.
+    path = tmp_path / "alias%2Fkey.json"
     path.write_bytes(b"\xff")
     assert backend.load("alias/key") is None
+    backend.save("alias_key", {"message": "neighbor"})
     with pytest.raises(OSError, match="unreadable record"):
-        backend.save("alias_key", {"message": "new"})
+        backend.save("alias/key", {"message": "new"})
     path.write_text('{"message":"repaired"}', encoding="utf-8")
-    assert backend.load("alias_key") == {"message": "repaired"}
+    assert backend.load("alias/key") == {"message": "repaired"}
     backend.save("alias/key", {"message": "updated"})
-    assert backend.load("alias_key") == {"message": "updated"}
+    assert backend.load("alias/key") == {"message": "updated"}
+    assert backend.load("alias_key") == {"message": "neighbor"}
 
 
 def test_deleted_unreadable_record_can_be_created_again(tmp_path):
