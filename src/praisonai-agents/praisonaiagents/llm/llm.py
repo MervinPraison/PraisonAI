@@ -4350,7 +4350,36 @@ Respond with ONLY a valid JSON tool call in this format:
                         # flushed only AFTER every tool reply for this assistant
                         # turn, keeping all tool replies consecutive (provider contract).
                         _deferred_media_followups: List[Dict[str, Any]] = []
-                        for tool_call in tool_calls:
+                        # Ollama can reference an earlier result in the same batch;
+                        # keep that provider sequential so chaining remains valid.
+                        parallel_results = {}
+                        if parallel_tool_calls and not self._is_ollama_provider():
+                            batch = []
+                            batch_indices = []
+                            for index, call in enumerate(tool_calls):
+                                name, args, call_id = self._extract_tool_call_info(call, False)
+                                if self._tool_arguments_parse_failed(args):
+                                    continue
+                                batch.append(ToolCall(name, args, call_id, iteration_index=iteration_count))
+                                batch_indices.append(index)
+
+                            # Preserve the existing keyword-only tool_call_id contract
+                            # and error representation of this sync path.
+                            def _dispatch_parallel(name, args, call_id, **kwargs):
+                                try:
+                                    return execute_tool_fn(name, args, tool_call_id=call_id, **kwargs)
+                                except ToolExecutionError:
+                                    raise
+                                except Exception as error:
+                                    logging.warning(f"Tool '{name}' failed: {error}")
+                                    return {"error": str(error)}
+
+                            if getattr(execute_tool_fn, "_accepts_durable_iteration", False):
+                                _dispatch_parallel._accepts_durable_iteration = True
+                            results = create_tool_call_executor(parallel=True).execute_batch(batch, _dispatch_parallel)
+                            parallel_results = dict(zip(batch_indices, results))
+
+                        for index, tool_call in enumerate(tool_calls):
                             # Handle both object and dict access patterns
                             is_ollama = self._is_ollama_provider()
                             function_name, arguments, tool_call_id = self._extract_tool_call_info(tool_call, is_ollama)
@@ -4377,14 +4406,17 @@ Respond with ONLY a valid JSON tool call in this format:
                             # Any other unexpected failure here is reported back to
                             # the model instead of aborting the whole run.
                             try:
-                                tool_result = execute_tool_fn(
-                                    function_name,
-                                    arguments,
-                                    tool_call_id=tool_call_id,
-                                    **_durable_iteration_kwargs(
-                                        execute_tool_fn, iteration_count
-                                    ),
-                                )
+                                if index in parallel_results:
+                                    tool_result = parallel_results[index].result
+                                else:
+                                    tool_result = execute_tool_fn(
+                                        function_name,
+                                        arguments,
+                                        tool_call_id=tool_call_id,
+                                        **_durable_iteration_kwargs(
+                                            execute_tool_fn, iteration_count
+                                        ),
+                                    )
                             except ToolExecutionError:
                                 raise
                             except Exception as tool_error:
