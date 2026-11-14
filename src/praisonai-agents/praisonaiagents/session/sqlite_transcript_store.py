@@ -136,9 +136,13 @@ class SqliteTranscriptStore(DefaultSessionStore):
                 "CREATE INDEX IF NOT EXISTS idx_sessions_updated "
                 "ON sessions(updated_at)"
             )
+            try:
+                self._migrate_legacy_json(conn)
+            except BaseException:
+                conn.close()
+                raise
             self._conn = conn
             self._db_ready = True
-            self._migrate_legacy_json(conn)
             return self._conn
 
     def _migrate_legacy_json(self, conn) -> None:
@@ -155,38 +159,38 @@ class SqliteTranscriptStore(DefaultSessionStore):
         if self.db_path == ":memory:":
             return
         session_dir = self.session_dir
-        if not session_dir or not os.path.isdir(session_dir):
-            return
+        conn.execute("BEGIN IMMEDIATE")
         try:
-            filenames = sorted(
-                f for f in os.listdir(session_dir) if f.endswith(".json")
-            )
-        except OSError:
-            return
-        if not filenames:
-            return
-        try:
-            existing = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()
-            if existing and existing[0]:
-                return  # DB already populated; do not re-import
-        except Exception:  # pragma: no cover - best-effort guard
-            return
-        imported = 0
-        for filename in filenames:
-            filepath = os.path.join(session_dir, filename)
-            try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError):
-                continue
-            if not isinstance(data, dict):
-                continue
-            try:
-                session = SessionData.from_dict(data)
-            except Exception:  # pragma: no cover - tolerate malformed legacy files
-                continue
-            if self._write_row(session, conn=conn):
-                imported += 1
+            conn.execute("CREATE TABLE IF NOT EXISTS migration_state (name TEXT PRIMARY KEY)")
+            complete = conn.execute(
+                "SELECT 1 FROM migration_state WHERE name = ?", ("legacy_json",)
+            ).fetchone()
+            imported = 0
+            if not complete:
+                existing = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+                if not existing:
+                    filenames = sorted(f for f in os.listdir(session_dir) if f.endswith(".json"))
+                    for filename in filenames:
+                        filepath = os.path.join(session_dir, filename)
+                        try:
+                            with open(filepath, "r", encoding="utf-8") as f:
+                                data = json.load(f)
+                        except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
+                            continue
+                        if not isinstance(data, dict):
+                            continue
+                        try:
+                            session = SessionData.from_dict(data)
+                        except (TypeError, ValueError, KeyError):
+                            continue
+                        if not self._write_row(session, conn=conn):
+                            raise OSError(f"Legacy session migration failed for {filename}")
+                        imported += 1
+                conn.execute("INSERT INTO migration_state (name) VALUES (?)", ("legacy_json",))
+            conn.execute("COMMIT")
+        except BaseException:
+            conn.execute("ROLLBACK")
+            raise
         if imported:
             logger.info(
                 "Imported %d legacy JSON session(s) from %s into SQLite store",
