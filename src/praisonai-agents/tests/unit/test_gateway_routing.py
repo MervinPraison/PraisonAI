@@ -9,8 +9,13 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'pr
 
 @pytest.fixture(autouse=True)
 def _isolate_gateway_pairing(tmp_path, monkeypatch):
-    """Keep generated gateway credentials in this test's temporary directory."""
-    from praisonai_bot.gateway import pairing
+    """Isolate pairing state and use a test token for gateway authentication."""
+    try:
+        from praisonai_bot.gateway import pairing
+    except ModuleNotFoundError as exc:
+        if exc.name == "praisonai_bot":
+            return  # Preserve the tests' existing optional-wrapper behavior.
+        raise
 
     monkeypatch.setattr(pairing, "_DEFAULT_STORE_DIR", str(tmp_path))
     monkeypatch.setenv("GATEWAY_AUTH_TOKEN", "gateway-test-token")
