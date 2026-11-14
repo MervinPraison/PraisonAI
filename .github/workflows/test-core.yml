@@ -160,6 +160,12 @@ jobs:
               tests/unit/test_task_execution_config.py
               tests/unit/test_agent_unknown_kwarg_guidance.py
               tests/unit/test_agent_instantiation_lazy.py tests/unit/test_agent_os_exports.py
+              tests/unit/test_import_side_effects.py::test_import_leaves_host_logging_warnings_and_env_untouched
+              tests/unit/test_import_side_effects.py::test_launch_does_not_read_caller_source
+              tests/unit/test_import_side_effects.py::test_execute_tool_async_tool_inside_running_loop
+              tests/unit/test_import_side_effects.py::test_keep_alive_runs_before_executor_shutdown
+              tests/unit/test_async_bridge_invariants.py::test_no_handrolled_async_bridges_outside_helper
+              tests/unit/test_opt_in_modules_lazy.py
             # Both tests previously deselected here now pass in combination.
             # test_lazy_litellm_import was looking the loader module up by
             # name and could get a different object than the one get_litellm()
