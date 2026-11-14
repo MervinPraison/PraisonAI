@@ -58,9 +58,10 @@ class TestPraisonAICodeAgent:
         harbor_prefix = "set -o pipefail; "
         if command.startswith(harbor_prefix):
             command = command[len(harbor_prefix):]
-        assert command.startswith(f"praisonai code {shlex.quote(instruction)}")
+        assert "praisonai code -p --output json " in command
         assert "--dangerously-skip-approval" in command
         assert "--model openai/gpt-4o-mini" in command
+        assert shlex.quote(instruction) in command
 
 
 class TestPraisonAIExternalAgent:
