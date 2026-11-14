@@ -45,6 +45,9 @@ def test_missing_legacy_directory_does_not_scan_cwd(tmp_path, monkeypatch, missi
     {'session_id': 'bad', 'updated_at': {}},
     {'session_id': [], 'agent_name': 'agent'},
     {'session_id': 'bad', 'agent_name': 2**80},
+    {'session_id': 'bad', 'metadata': {'text': '\ud800'}},
+    {'session_id': 'bad', 'agent_name': '\ud800'},
+    {'session_id': 'bad', 'messages': [{'role': 'user', 'content': '\ud800'}]},
 ])
 def test_malformed_legacy_structure_does_not_block_healthy_sessions(tmp_path, bad_data):
     make_legacy(tmp_path)
@@ -54,6 +57,13 @@ def test_malformed_legacy_structure_does_not_block_healthy_sessions(tmp_path, ba
     assert store.get_chat_history('a')[0]['content'] == 'old a'
     assert store.get_chat_history('b')[0]['content'] == 'old b'
     assert bad.exists()
+
+
+def test_valid_unicode_legacy_is_preserved(tmp_path):
+    legacy = DefaultSessionStore(session_dir=str(tmp_path))
+    assert legacy.add_message('unicode', 'user', '你好 🌍')
+    store = SqliteTranscriptStore(session_dir=str(tmp_path))
+    assert store.get_chat_history('unicode')[0]['content'] == '你好 🌍'
 
 
 def test_interrupted_migration_rolls_back_and_retries(tmp_path, monkeypatch):

@@ -203,6 +203,11 @@ class SqliteTranscriptStore(DefaultSessionStore):
                         ):
                             logger.warning("Skipping malformed legacy session %s", filepath)
                             continue
+                        try:
+                            json.dumps(session.to_dict(), ensure_ascii=False).encode("utf-8")
+                        except (TypeError, ValueError, UnicodeError) as exc:
+                            logger.warning("Skipping malformed legacy session %s: %s", filepath, exc)
+                            continue
                         if not self._write_row(session, conn=conn):
                             raise OSError(f"Legacy session migration failed for {filename}")
                         imported += 1
