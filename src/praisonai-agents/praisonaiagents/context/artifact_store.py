@@ -25,6 +25,11 @@ from .artifacts import (
 )
 
 
+def _safe_segment(value: Any) -> str:
+    """Sanitise an id for use as a single path segment under the store root."""
+    return re.sub(r"[^A-Za-z0-9._-]", "_", str(value)).lstrip(".") or "_"
+
+
 class FileSystemArtifactStore:
     """
     Filesystem-based artifact storage implementation.
@@ -106,7 +111,7 @@ class FileSystemArtifactStore:
         artifact_id = f"{checksum[:12]}_{uuid.uuid4().hex[:8]}"
         
         # Create directory structure
-        artifact_dir = self.base_dir / metadata.agent_id / metadata.run_id
+        artifact_dir = self.base_dir / _safe_segment(metadata.agent_id) / _safe_segment(metadata.run_id)
         artifact_dir.mkdir(parents=True, exist_ok=True)
         
         # Write content to file
@@ -360,30 +365,19 @@ class FileSystemArtifactStore:
             List of matching ArtifactRef objects
         """
         artifacts = []
-        
-        # Determine search path based on filters
-        if agent_id and run_id:
-            search_path = self.base_dir / agent_id / run_id
-            if search_path.exists():
-                search_paths = [search_path]
-            else:
-                search_paths = []
-        elif agent_id:
-            agent_path = self.base_dir / agent_id
-            if agent_path.exists():
-                search_paths = [p for p in agent_path.iterdir() if p.is_dir()]
-            else:
-                search_paths = []
-        else:
-            # Search all - but respect run_id filter if provided
-            search_paths = []
-            for agent_dir in self.base_dir.iterdir():
-                if agent_dir.is_dir():
-                    for run_dir in agent_dir.iterdir():
-                        if run_dir.is_dir():
-                            # If run_id filter provided, only include matching runs
-                            if run_id is None or run_dir.name == run_id:
-                                search_paths.append(run_dir)
+
+        def _dirs(parents: List[Path], value: Optional[str]) -> List[Path]:
+            if not value:
+                return [d for p in parents if p.is_dir() for d in p.iterdir() if d.is_dir()]
+            names = {_safe_segment(value)}
+            raw = str(value)
+            if raw not in (".", "..") and not re.search(r"[/\\:\x00]", raw):
+                names.add(raw)  # legacy, pre-sanitisation directory name
+            return [p / n for p in parents for n in names if (p / n).is_dir()]
+
+        # Sanitised names can collide (e.g. "a/b" and "a_b"), so the stored
+        # metadata is the source of truth for the agent/run filters below.
+        search_paths = _dirs(_dirs([self.base_dir], agent_id), run_id)
         
         # Search for artifacts
         for dir_path in search_paths:
@@ -391,6 +385,10 @@ class FileSystemArtifactStore:
                 try:
                     meta_data = json.loads(meta_file.read_text())
                     
+                    if agent_id and meta_data.get("agent_id") != agent_id:
+                        continue
+                    if run_id and meta_data.get("run_id") != run_id:
+                        continue
                     # Apply tool_name filter if specified
                     if tool_name and meta_data.get("tool_name") != tool_name:
                         continue

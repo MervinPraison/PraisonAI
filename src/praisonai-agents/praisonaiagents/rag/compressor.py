@@ -137,8 +137,9 @@ class ContextCompressor:
             if not text:
                 continue
             
-            # Simple dedup by exact match
-            text_key = text[:200].lower()  # First 200 chars as key
+            # Exact dedup on whitespace-normalised full text (a prefix key
+            # would drop distinct chunks that share a running header)
+            text_key = " ".join(text.lower().split())
             if text_key in seen_texts:
                 continue
             
