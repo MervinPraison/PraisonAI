@@ -306,7 +306,7 @@ def register_cli_tools() -> None:
     #
     # All four delegate storage AND record schema to
     # ``praisonaiagents.tools.todo_tools.TodoTools`` -- the owner of the store.
-    # They use the owner's non-decorated ``_load_todos``/``_save_todos`` (the
+    # They use the owner's non-decorated ``_load_todos``/``_update_todos`` (the
     # public ``todo_add``/``todo_update`` methods carry an @require_approval
     # gate that cannot use console I/O from the MCP server's async context) and
     # write the owner's shape (``id`` int, ``task``) so MCP- and runtime-created
@@ -336,19 +336,21 @@ def register_cli_tools() -> None:
             tools = _get_todo_tools()
             if tools is None:
                 return "Error: Todo tools not available"
-            todos = tools._load_todos()
+            todo = {}
 
-            existing_ids = [t.get("id") for t in todos if isinstance(t.get("id"), int)]
-            todo = {
-                "id": (max(existing_ids) + 1) if existing_ids else 1,
-                "task": content,
-                "priority": priority,
-                "category": "general",
-                "status": "pending",
-                "created_at": tools._get_timestamp(),
-            }
-            todos.append(todo)
-            tools._save_todos(todos)
+            def add(todos):
+                existing_ids = [t.get("id") for t in todos if isinstance(t.get("id"), int)]
+                todo.update({
+                    "id": (max(existing_ids) + 1) if existing_ids else 1,
+                    "task": content,
+                    "priority": priority,
+                    "category": "general",
+                    "status": "pending",
+                    "created_at": tools._get_timestamp(),
+                })
+                todos.append(todo)
+
+            tools._update_todos(add)
             return f"Todo added: {todo['id']}"
         except Exception as e:
             return f"Error: {e}"
@@ -360,16 +362,19 @@ def register_cli_tools() -> None:
             tools = _get_todo_tools()
             if tools is None:
                 return "Error: Todo tools not available"
-            todos = tools._load_todos()
+            found = False
 
-            for todo in todos:
-                if _match_todo_id(todo, todo_id):
-                    todo["status"] = "completed"
-                    break
-            else:
+            def complete(todos):
+                nonlocal found
+                for todo in todos:
+                    if _match_todo_id(todo, todo_id):
+                        todo["status"] = "completed"
+                        found = True
+                        break
+
+            tools._update_todos(complete)
+            if not found:
                 return f"Todo not found: {todo_id}"
-
-            tools._save_todos(todos)
             return f"Todo completed: {todo_id}"
         except Exception as e:
             return f"Error: {e}"
@@ -381,13 +386,17 @@ def register_cli_tools() -> None:
             tools = _get_todo_tools()
             if tools is None:
                 return "Error: Todo tools not available"
-            todos = tools._load_todos()
+            found = False
 
-            remaining = [t for t in todos if not _match_todo_id(t, todo_id)]
-            if len(remaining) == len(todos):
+            def delete(todos):
+                nonlocal found
+                remaining = [t for t in todos if not _match_todo_id(t, todo_id)]
+                found = len(remaining) != len(todos)
+                todos[:] = remaining
+
+            tools._update_todos(delete)
+            if not found:
                 return f"Todo not found: {todo_id}"
-
-            tools._save_todos(remaining)
             return f"Todo deleted: {todo_id}"
         except Exception as e:
             return f"Error: {e}"
