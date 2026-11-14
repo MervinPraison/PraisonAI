@@ -19,6 +19,7 @@ from praisonaiagents.llm.adapters import (AnthropicAdapter, DefaultAdapter,
 pytestmark = pytest.mark.unit
 
 TOOLS = [{"type": "function", "function": {"name": "get_weather"}}]
+AB_TOOLS = [{"type": "function", "function": {"name": n}} for n in ("a", "b")]
 
 
 def rec(text, tools=TOOLS):
@@ -32,16 +33,22 @@ def test_recovers_a_single_json_tool_call():
 
 
 def test_recovers_multiple_json_tool_calls_in_order():
-    got = rec('[{"name": "a", "arguments": {}}, {"name": "b", "arguments": {}}]')
+    got = rec('[{"name": "a", "arguments": {}}, {"name": "b", "arguments": {}}]',
+              tools=AB_TOOLS)
     assert [c["function"]["name"] for c in got] == ["a", "b"]
 
 
 def test_arguments_are_a_json_string_not_a_dict():
     """_parse_tool_call_arguments expects a string; a dict would break dispatch."""
-    got = rec('{"name": "a", "arguments": {"n": 1}}')
+    got = rec('{"name": "a", "arguments": {"n": 1}}', tools=AB_TOOLS)
     args = got[0]["function"]["arguments"]
     assert isinstance(args, str)
     assert json.loads(args) == {"n": 1}
+
+
+def test_unadvertised_tool_name_is_not_recovered():
+    """Only names in the advertised tools list may be promoted to a tool call."""
+    assert not rec('{"name": "delete_file", "arguments": {"path": "/"}}')
 
 
 def test_shape_is_a_standard_tool_call():
