@@ -242,6 +242,18 @@ def _extract_tool_call_name_and_args(tool_call):
     except (json.JSONDecodeError, KeyError, AttributeError, TypeError) as e:
         return function_name, None, tool_call_id, e
 
+def _delta_reasoning(chunk):
+    """The reasoning text (``reasoning_content``) of a stream chunk, or None.
+
+    Usage-only chunks have no choices, so this never indexes an empty list.
+    """
+    choices = getattr(chunk, "choices", None)
+    if not choices:
+        return None
+    delta = getattr(choices[0], "delta", None)
+    return getattr(delta, "reasoning_content", None) or None
+
+
 def process_stream_chunks(chunks):
     """Process streaming chunks into combined response"""
     if not chunks:
@@ -1438,20 +1450,21 @@ class OpenAIClient:
                                     }
                                 ))
                         
-                        # Update live display with reasoning content if enabled
-                        if reasoning_steps and hasattr(chunk.choices[0].delta, "reasoning_content"):
-                            rc = chunk.choices[0].delta.reasoning_content
-                            if rc:
+                        # Reasoning deltas are always emitted as StreamEvents
+                        # (is_reasoning=True, as on the LiteLLM path); the live
+                        # display shows them only with reasoning_steps.
+                        rc = _delta_reasoning(chunk)
+                        if rc:
+                            if _emit:
+                                stream_callback(StreamEvent(
+                                    type=StreamEventType.DELTA_TEXT,
+                                    timestamp=time.perf_counter(),
+                                    content=rc,
+                                    is_reasoning=True
+                                ))
+                            if reasoning_steps:
                                 reasoning_content += rc
                                 live.update(display_fn(f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
-                                # Emit reasoning content as StreamEvent with is_reasoning=True
-                                if _emit:
-                                    stream_callback(StreamEvent(
-                                        type=StreamEventType.DELTA_TEXT,
-                                        timestamp=time.perf_counter(),
-                                        content=rc,
-                                        is_reasoning=True
-                                    ))
                 
                 # Clear the last generating display with a blank line
                 console.print()
@@ -1459,6 +1472,15 @@ class OpenAIClient:
                 # Just collect chunks without display, but still emit events
                 for chunk in response_stream:
                     chunks.append(chunk)
+
+                    rc = _delta_reasoning(chunk) if _emit else None
+                    if rc:
+                        stream_callback(StreamEvent(
+                            type=StreamEventType.DELTA_TEXT,
+                            timestamp=time.perf_counter(),
+                            content=rc,
+                            is_reasoning=True
+                        ))
                     
                     if chunk.choices and chunk.choices[0].delta.content:
                         content = chunk.choices[0].delta.content
@@ -1719,20 +1741,21 @@ class OpenAIClient:
                                     }
                                 ))
                         
-                        # Update live display with reasoning content if enabled
-                        if reasoning_steps and hasattr(chunk.choices[0].delta, "reasoning_content"):
-                            rc = chunk.choices[0].delta.reasoning_content
-                            if rc:
+                        # Reasoning deltas are always emitted as StreamEvents
+                        # (is_reasoning=True, as on the LiteLLM path); the live
+                        # display shows them only with reasoning_steps.
+                        rc = _delta_reasoning(chunk)
+                        if rc:
+                            if _emit:
+                                await emit_event(StreamEvent(
+                                    type=StreamEventType.DELTA_TEXT,
+                                    timestamp=time.perf_counter(),
+                                    content=rc,
+                                    is_reasoning=True
+                                ))
+                            if reasoning_steps:
                                 reasoning_content += rc
                                 live.update(display_fn(f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
-                                # Emit reasoning content as StreamEvent with is_reasoning=True
-                                if _emit:
-                                    stream_callback(StreamEvent(
-                                        type=StreamEventType.DELTA_TEXT,
-                                        timestamp=time.perf_counter(),
-                                        content=rc,
-                                        is_reasoning=True
-                                    ))
                 
                 # Clear the last generating display with a blank line
                 console.print()
@@ -1740,6 +1763,15 @@ class OpenAIClient:
                 # Just collect chunks without display
                 async for chunk in response_stream:
                     chunks.append(chunk)
+
+                    rc = _delta_reasoning(chunk) if _emit else None
+                    if rc:
+                        await emit_event(StreamEvent(
+                            type=StreamEventType.DELTA_TEXT,
+                            timestamp=time.perf_counter(),
+                            content=rc,
+                            is_reasoning=True
+                        ))
                     
                     if _emit and chunk.choices and chunk.choices[0].delta.content:
                         content = chunk.choices[0].delta.content

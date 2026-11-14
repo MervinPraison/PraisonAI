@@ -328,6 +328,9 @@ def stream_event_to_agui_events(
     """Convert a PraisonAI StreamEvent into zero or more AG-UI events."""
     from praisonaiagents.streaming.events import StreamEventType
 
+    # Reasoning deltas are not answer text (no AG-UI text message for them).
+    if event.type == StreamEventType.DELTA_TEXT and getattr(event, "is_reasoning", False):
+        return []
     if event.type == StreamEventType.DELTA_TEXT and event.content:
         if not buffer.current_text_message_id:
             buffer.start_text_message()
