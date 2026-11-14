@@ -81,3 +81,15 @@ def test_failed_conversion_returns_original_string():
     assert _coerce_value('{"a": 1}', List[int]) == '{"a": 1}'
     assert _coerce_value("[1, 2]", Tuple[int, int, int]) == "[1, 2]"
     assert _coerce_value("[1, 2]", list) == [1, 2]
+
+
+def test_any_annotation_does_not_abort_casting():
+    # typing.Any is a class on 3.11+; isinstance(x, Any) must not abort the whole call
+    from typing import Any
+
+    def f(n: int, data: Any) -> str:
+        return ""
+
+    agent = _agent_with(f)
+    assert agent._cast_arguments(f, {"n": "5", "data": [1]}) == {"n": 5, "data": [1]}
+    assert _coerce_value("[1]", Any) == "[1]"

@@ -80,6 +80,8 @@ def _coerce_value(value, annotation):
     import types
     from typing import get_origin, get_args, Union as _Union
 
+    if annotation is typing.Any:  # a class on 3.11+, so isinstance() would raise
+        return value
     origin, args = get_origin(annotation), get_args(annotation)
     if origin is _Union or origin is getattr(types, "UnionType", _Union):  # Optional/Union, X | Y
         members = [a for a in args if a is not type(None)]
@@ -128,13 +130,13 @@ def _coerce_value(value, annotation):
                 return container(items)
             if container is list and args:
                 return [_coerce_value(v, args[0]) for v in value]
+        # Keep parsed JSON only if it matches the container (e.g. bare ``list``).
+        return value if isinstance(value, container) else original
     except (ValueError, TypeError):
         return original
     except Exception as e:  # e.g. pydantic.ValidationError, json.JSONDecodeError
         logging.debug(f"Could not coerce tool argument to {annotation!r}: {e}")
         return original
-    # Keep parsed JSON only if it matches the container (e.g. bare ``list``).
-    return value if isinstance(value, container) else original
 
 
 class _CallableGuardrailAdapter:
