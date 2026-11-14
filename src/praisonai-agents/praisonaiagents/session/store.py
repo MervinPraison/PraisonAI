@@ -1593,11 +1593,12 @@ class DefaultSessionStore:
         writer.enqueue(session_id, records)
 
     def flush_mirror(self, timeout: Optional[float] = None) -> bool:
-        """Block until queued mirror records are flushed.
+        """Wait for queued mirror records to be processed.
 
-        Returns ``True`` immediately when no mirror is configured; otherwise
-        drains the background queue (bounded by ``timeout`` when given). Handy
-        for a future ``session sync`` and for deterministic tests.
+        Returns ``True`` when no mirror is configured or all queued records
+        have been processed, and ``False`` if the timeout expires first.
+        Processing includes exhausted retries: ``True`` does not guarantee
+        successful mirror delivery. Permanent sink failures are logged.
         """
         writer = self._mirror_writer
         if writer is None:

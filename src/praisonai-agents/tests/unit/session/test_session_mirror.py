@@ -136,7 +136,7 @@ def test_mirror_failure_does_not_break_local_write():
         try:
             assert store.add_message("s1", "user", "hello") is True
             # Give the background writer time to exhaust its retries + log.
-            store.flush_mirror(timeout=5.0)
+            assert store.flush_mirror(timeout=5.0) is True
             assert store.get_chat_history("s1") == [
                 {"role": "user", "content": "hello"}
             ]
