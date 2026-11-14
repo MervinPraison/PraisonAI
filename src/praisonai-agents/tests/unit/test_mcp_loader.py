@@ -10,9 +10,12 @@ from unittest.mock import Mock, MagicMock
 from praisonaiagents.memory.mcp_config import MCPConfig
 
 
-def test_mcp_config_to_mcp_instance_import_fix():
+def test_mcp_config_to_mcp_instance_import_fix(monkeypatch):
     """Test that MCPConfig.to_mcp_instance() imports MCP correctly (A1)."""
-    # Create a minimal config
+    import praisonaiagents.mcp as mcp_package
+
+    constructor = Mock()
+    monkeypatch.setattr(mcp_package, "MCP", constructor)
     config = MCPConfig(
         name="test",
         command="echo",
@@ -20,23 +23,8 @@ def test_mcp_config_to_mcp_instance_import_fix():
         enabled=True
     )
     
-    # This should not raise ImportError anymore
-    # Note: It might return None if MCP package is not installed, but the import should work.
-    # 'echo' is not a real MCP server, so with fail-closed init (issue #4375) a
-    # TimeoutError/RuntimeError here is expected and equally proves the import path is correct.
-    try:
-        result = config.to_mcp_instance()
-        # If we get here without ImportError from wrong path, the fix worked
-        assert True
-    except ImportError as e:
-        if "praisonaiagents.tools.mcp" in str(e):
-            pytest.fail("Import still using wrong path - A1 fix failed")
-        else:
-            # This is expected if mcp package is not installed
-            assert "praisonaiagents[mcp]" in str(e)
-    except (RuntimeError, TimeoutError):
-        # 'echo' initialized but is not a valid MCP server; fail-closed is correct.
-        assert True
+    assert config.to_mcp_instance() is constructor.return_value
+    constructor.assert_called_once_with(command="echo", args=["hello"], env=None)
 
 
 def test_load_mcp_tools_import():
@@ -52,27 +40,24 @@ def test_mcp_client_protocol_import():
     assert MCPClientProtocol is not None
 
 
-def test_mcp_filter_parameters():
+def test_mcp_filter_parameters(monkeypatch):
     """Test that MCP class accepts filter parameters (B3)."""
-    try:
-        from praisonaiagents.mcp import MCP
-        # This should not raise TypeError for unknown parameters
-        # Note: May raise ImportError if mcp package not installed.
-        # 'echo' is not a real MCP server; with fail-closed init (issue #4375)
-        # this raises after accepting the filter kwargs, which still proves B3.
-        mcp = MCP("echo hello", allowed_tools=["test"], disabled_tools=["bad"])
-        assert mcp.allowed_tools == ["test"]
-        assert mcp.disabled_tools == ["bad"]
-    except ImportError as e:
-        if "praisonaiagents[mcp]" in str(e):
-            # Expected if MCP package not installed
-            pytest.skip("MCP package not installed")
-        else:
-            raise
-    except (RuntimeError, TimeoutError):
-        # Filter kwargs were accepted (no TypeError); 'echo' is not a valid
-        # MCP server so fail-closed init is expected.
-        assert True
+    import importlib
+    from types import SimpleNamespace
+
+    module = importlib.import_module("praisonaiagents.mcp.mcp")
+    monkeypatch.setattr(module, "MCP_AVAILABLE", True)
+    monkeypatch.setattr(module, "StdioServerParameters", lambda **kwargs: kwargs, raising=False)
+    runner = SimpleNamespace(
+        initialized=SimpleNamespace(wait=lambda **kwargs: True),
+        tools=[object()],
+        _init_error=None,
+    )
+    monkeypatch.setattr(module, "MCPToolRunner", lambda *args: runner)
+    monkeypatch.setattr(module.MCP, "_generate_tool_functions", lambda self: [])
+    mcp = module.MCP("echo hello", allowed_tools=["test"], disabled_tools=["bad"])
+    assert mcp.allowed_tools == ["test"]
+    assert mcp.disabled_tools == ["bad"]
 
 
 def test_filter_tool_functions_exist():
