@@ -18,11 +18,20 @@ def executor():
     "getattr((), '_' + '_class__')",
     "hasattr((), '__class__')",
     "x = ().__class__",
+    # str subclass overriding startswith must not evade the runtime check
+    "getattr((), type('S', (str,), {'startswith': {}.get})('__class__'))",
+    "getattr(getattr, type('S', (str,), {'startswith': {}.get})('__globals__'))",
+    # format-string field traversal bypasses attribute checks
+    "'{0.__globals__}'.format(getattr)",
+    "'{0.__globals__}'.format_map([getattr])",
+    "str.format('{0.__globals__}', getattr)",
+    "getattr('{0.__globals__}', 'format')(getattr)",
 ])
 def test_private_attribute_access_blocked(executor, code):
     result = executor._exec_inline_python(code, {}, {})
     assert result["ok"] is False
     assert "class" not in result.get("output", "")
+    assert "environ" not in result.get("output", "")
 
 
 @pytest.mark.parametrize("code,expected", [
