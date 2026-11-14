@@ -86,18 +86,21 @@ class HostedAgent(AnthropicManagedAgent):
 
         backend_cls = registry.resolve(provider)
 
-        # Anthropic — and any AnthropicManagedAgent subclass — shares this
-        # class' constructor contract, so we build a HostedAgent instance and
-        # let __init__ run super().__init__ in-place. All inherited methods then
-        # operate on fully initialised state.
-        if issubclass(backend_cls, AnthropicManagedAgent):
+        # Builtin Anthropic backend (HostedAgent already IS one): build ``cls``
+        # and let __init__ run super().__init__ in-place.
+        if issubclass(cls, backend_cls):
             return super().__new__(cls)
 
-        # A foreign backend cannot share AnthropicManagedAgent's inherited
-        # execute()/stream()/session surface. Returning its instance DIRECTLY
-        # (Python skips __init__ when __new__ returns a non-cls instance) makes
-        # HostedAgent a true factory: callers get the real backend, so no
-        # inherited member can ever shadow it or read uninitialised state.
+        # Plugin subclassing HostedAgent: build the plugin class itself so its
+        # overrides are reachable; Python then runs the plugin's __init__.
+        if issubclass(backend_cls, cls):
+            return super().__new__(backend_cls)
+
+        # Any other backend — including AnthropicManagedAgent subclasses and
+        # foreign backends — is constructed and returned DIRECTLY (Python skips
+        # __init__ when __new__ returns a non-cls instance). Callers get the real
+        # backend class, so its own methods are used and no inherited member can
+        # shadow it or read uninitialised state.
         return backend_cls(provider=provider, config=config, **kwargs)
 
     def __init__(
@@ -106,9 +109,8 @@ class HostedAgent(AnthropicManagedAgent):
         config: Optional[Any] = None,
         **kwargs,
     ):
-        # Only runs for the Anthropic path: __new__ returns a foreign backend
-        # instance (not a HostedAgent) for other providers, so Python skips
-        # __init__ entirely in that case.
+        # Only runs when __new__ returned a HostedAgent (or HostedAgent-subclass
+        # plugin) instance; for any other backend Python skips __init__.
         super().__init__(provider=provider, config=config, **kwargs)
 
     @staticmethod
