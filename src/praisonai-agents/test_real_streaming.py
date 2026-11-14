@@ -89,7 +89,7 @@ def test_real_streaming():
     for name, model in providers:
         print(f"\n{'='*60}")
         print(f"Testing real streaming with {name}")
-        print(f"Configuration: stream=True, output="verbose"")
+        print(f"Configuration: stream=True, output='verbose'")
         print(f"{'='*60}\n")
         
         try:
@@ -123,7 +123,7 @@ if __name__ == "__main__":
     
     print("\n\nAll tests completed!")
     print("\nSummary of expected behaviors:")
-    print("- stream=True, output="verbose": Real-time streaming with content display")
-    print("- stream=True, output="silent": Real-time streaming, no display")  
-    print("- stream=False, output="verbose": 'Generating...' animation, no content")
-    print("- stream=False, output="silent": No display at all")
+    print("- stream=True, output='verbose': Real-time streaming with content display")
+    print("- stream=True, output='silent': Real-time streaming, no display")  
+    print("- stream=False, output='verbose': 'Generating...' animation, no content")
+    print("- stream=False, output='silent': No display at all")

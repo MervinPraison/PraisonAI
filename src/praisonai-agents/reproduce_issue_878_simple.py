@@ -159,7 +159,7 @@ def test_verbose_vs_non_verbose():
     global callback_invocations
     
     # Test with output="silent" (should trigger callback once via execute_sync_callback)
-    print("  🔹 Testing with output="silent":")
+    print("  🔹 Testing with output='silent':")
     callback_invocations = []
     register_display_callback('interaction', track_callback, is_async=False)
     
@@ -170,7 +170,7 @@ def test_verbose_vs_non_verbose():
             output="silent"  # This should only trigger execute_sync_callback
         )
         print(f"    Response: {response}")
-        print(f"    Callbacks with output="silent": {len(callback_invocations)}")
+        print(f"    Callbacks with output='silent': {len(callback_invocations)}")
         non_verbose_count = len(callback_invocations)
     except Exception as e:
         print(f"    ❌ Error: {e}")
@@ -179,7 +179,7 @@ def test_verbose_vs_non_verbose():
     print()
     
     # Test with output="verbose" (should trigger callback twice: execute_sync_callback + display_interaction)
-    print("  🔹 Testing with output="verbose":")
+    print("  🔹 Testing with output='verbose':")
     callback_invocations = []
     register_display_callback('interaction', track_callback, is_async=False)
     
@@ -190,7 +190,7 @@ def test_verbose_vs_non_verbose():
             output="verbose"  # This should trigger BOTH execute_sync_callback AND display_interaction
         )
         print(f"    Response: {response}")
-        print(f"    Callbacks with output="verbose": {len(callback_invocations)}")
+        print(f"    Callbacks with output='verbose': {len(callback_invocations)}")
         verbose_count = len(callback_invocations)
         
         # Show the call stack differences
@@ -204,12 +204,12 @@ def test_verbose_vs_non_verbose():
         verbose_count = -1
     
     print(f"\n  📊 RESULT:")
-    print(f"    output="silent": {non_verbose_count} callback(s)")
-    print(f"    output="verbose":  {verbose_count} callback(s)")
+    print(f"    output='silent': {non_verbose_count} callback(s)")
+    print(f"    output='verbose':  {verbose_count} callback(s)")
     
     if verbose_count > non_verbose_count and verbose_count > 1:
         print(f"    🚨 DUPLICATE ISSUE CONFIRMED!")
-        print(f"       output="verbose" triggers {verbose_count - non_verbose_count} extra callback(s)")
+        print(f"       output='verbose' triggers {verbose_count - non_verbose_count} extra callback(s)")
     
     return verbose_count
 
@@ -320,9 +320,9 @@ if __name__ == "__main__":
                 issues_detected.append(f"{test_name}: {count} > expected {expected}")
         elif test_name == 'verbose_vs_nonverbose':
             # This is the key test - output="verbose" should show the duplicate issue
-            print(f"{test_name}: {count} invocations (this test shows output="verbose" duplicates)")
+            print(f"{test_name}: {count} invocations (this test shows output='verbose' duplicates)")
             if count > 1:
-                issues_detected.append(f"{test_name}: output="verbose" triggered {count} callbacks (duplicate issue)")
+                issues_detected.append(f"{test_name}: output='verbose' triggered {count} callbacks (duplicate issue)")
         else:
             expected = 1
             print(f"{test_name}: {count} invocations (expected {expected})")
