@@ -12,6 +12,7 @@ from typing import Optional
 
 import click
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from praisonaiagents.permissions import (
@@ -163,6 +164,84 @@ def ask(pattern: str, agent: Optional[str], description: Optional[str], priority
     manager.add_rule(rule)
     
     console.print(f"[yellow]✓ Added ASK rule for pattern: {pattern}[/yellow]")
+
+
+@permissions.command(name="test")
+@click.argument("target")
+@click.option("--agent", help="Evaluate as a specific agent")
+@click.option("--json", "as_json", is_flag=True, help="Output the decision as JSON")
+def test_target(target: str, agent: Optional[str], as_json: bool):
+    """Show the effective decision for a tool call, without running it.
+
+    TARGET is "<tool>:<argument>", the same form the live approval uses.
+    It is checked against this project's rules with PermissionManager.check().
+    Order: persistent approvals, then rules (highest priority first),
+    otherwise the default is ask. Shell commands are split into their
+    sub-commands, and a deny on any part wins.
+
+    Source is one of: rule, approval, sub-operations (every part of a
+    compound shell command allowed), default, or safety-gate (built-in
+    checks such as secret-file reads or unparseable shell).
+
+    Examples:
+        praisonai permissions test "bash:rm -rf build"
+        praisonai permissions test "read:.env" --json
+    """
+    tool, sep, arg = target.partition(":")
+    tool = tool.strip()
+    # Trim the space after a shell prefix only; file arguments are kept
+    # exactly as the live backend would see them.
+    if sep and f"{tool}:" in PermissionManager._SHELL_PREFIXES:
+        arg = arg.lstrip()
+    target = f"{tool}{sep}{arg}" if sep else target.strip()
+
+    storage_dir = get_project_permissions_dir()
+    if os.path.isdir(storage_dir):
+        result = PermissionManager(storage_dir=storage_dir).check(target, agent_name=agent)
+    else:
+        # No project store yet: evaluate against an empty one without
+        # creating .praisonai/ (PermissionManager makes its storage dir).
+        import tempfile
+        with tempfile.TemporaryDirectory() as empty_dir:
+            result = PermissionManager(storage_dir=empty_dir).check(target, agent_name=agent)
+
+    rule = result.rule
+    if rule is not None:
+        source = "rule"
+    elif result.approved is not None:
+        source = "approval"
+    elif result.action == PermissionAction.ALLOW:
+        # Compound shell command whose sub-operations were all allowed.
+        source = "sub-operations"
+    elif "No matching rule" in result.reason:
+        source = "default"
+    else:
+        # Built-in gate: unparseable/expanding shell, secret read, etc.
+        source = "safety-gate"
+
+    if as_json:
+        print(json.dumps({
+            "target": target,
+            "decision": result.action.value,
+            "source": source,
+            "rule_id": rule.id if rule else None,
+            "pattern": rule.pattern if rule else None,
+            "agent": agent,
+            "reason": result.reason,
+        }, indent=2))
+        return
+
+    color = {
+        PermissionAction.ALLOW: "green",
+        PermissionAction.DENY: "red",
+        PermissionAction.ASK: "yellow",
+    }.get(result.action, "white")
+    console.print(f"Target:   {escape(target)}")
+    console.print(f"Decision: [{color}]{result.action.value}[/{color}]")
+    console.print(f"Source:   {source}")
+    if rule is not None:
+        console.print(f"Rule:     {rule.id[:8]} ({escape(rule.pattern)}, priority {rule.priority})")
+    console.print(f"Reason:   {escape(result.reason)}")
 
 
 @permissions.command()
