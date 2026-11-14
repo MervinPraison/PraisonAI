@@ -476,3 +476,40 @@ def build_tool_definition(
             "parameters": parameters
         }
     }
+
+
+def _tool_fingerprint(tool: Any) -> str:
+    """Content-based fingerprint for one tool entry (see ``tools_cache_key``)."""
+    if isinstance(tool, (dict, list)):
+        import hashlib
+        import json
+        try:
+            blob = json.dumps(tool, sort_keys=True, default=str)
+        except (TypeError, ValueError):
+            return f"o:{id(tool)}"
+        return "d:" + hashlib.sha1(blob.encode()).hexdigest()
+    if isinstance(tool, str):
+        return f"s:{tool}"
+    if callable(tool):
+        try:
+            sig = str(inspect.signature(tool))
+        except (TypeError, ValueError):
+            sig = ""
+        name = getattr(tool, "__qualname__", None) or type(tool).__qualname__
+        doc = inspect.getdoc(tool) or ""
+        return f"c:{getattr(tool, '__module__', '')}.{name}:{id(tool)}:{sig}:{hash(doc)}"
+    return f"o:{id(tool)}"
+
+
+def tools_cache_key(tools: Any) -> str:
+    """Cache key for a tools list, keyed on tool *content*, not just name.
+
+    Two different tools sharing a name (factory closures, redefined or
+    hot-reloaded functions, MCP tools whose schema changed) must not share a
+    formatted-schema cache entry, or the model is sent the wrong schema.
+    """
+    if tools is None:
+        return "none"
+    if not tools:
+        return "empty"
+    return "|".join(sorted(_tool_fingerprint(t) for t in tools))

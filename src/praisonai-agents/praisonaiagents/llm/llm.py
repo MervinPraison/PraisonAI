@@ -3034,36 +3034,9 @@ Respond with ONLY a valid JSON tool call in this format:
         return fix_array_schemas(schema)
 
     def _get_tools_cache_key(self, tools):
-        """Generate a cache key for tools list."""
-        if tools is None:
-            return "none"
-        if not tools:
-            return "empty"
-        # Create a simple hash based on tool names/content
-        tool_parts = []
-        for tool in tools:
-            # A hosted tool must contribute its FULL spec to the cache key, or
-            # two tool lists differing only by hosted config (e.g. file_search
-            # over vs_1 vs vs_2, or different MCP server_urls) would share a key
-            # and the second call would reuse the first's formatted definition.
-            if isinstance(tool, dict) and is_hosted_tool(tool):
-                try:
-                    tool_parts.append(f"hosted:{json.dumps(tool, sort_keys=True)}")
-                except (TypeError, ValueError):
-                    tool_parts.append(f"hosted:{tool.get('type')}:{id(tool)}")
-            elif isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
-                if 'function' in tool and isinstance(tool['function'], dict) and 'name' in tool['function']:
-                    tool_parts.append(f"openai:{tool['function']['name']}")
-            elif callable(tool) and hasattr(tool, '__name__'):
-                tool_parts.append(f"callable:{tool.__name__}")
-            elif isinstance(tool, str):
-                tool_parts.append(f"string:{tool}")
-            elif isinstance(tool, dict) and len(tool) == 1:
-                tool_name = next(iter(tool.keys()))
-                tool_parts.append(f"gemini:{tool_name}")
-            else:
-                tool_parts.append(f"other:{id(tool)}")
-        return "|".join(sorted(tool_parts))
+        """Generate a content-based cache key for a tools list."""
+        from ..tools.schema import tools_cache_key
+        return tools_cache_key(tools)
 
     def _format_tools_for_litellm(self, tools: Optional[List[Any]]) -> Optional[List[Dict]]:
         """Format tools for LiteLLM - handles all tool formats.
@@ -3087,7 +3060,14 @@ Respond with ONLY a valid JSON tool call in this format:
         # Check cache first
         tools_key = self._get_tools_cache_key(tools)
         if tools_key in self._formatted_tools_cache:
-            return self._formatted_tools_cache[tools_key]
+            # LRU: re-insert so the entry becomes most-recently-used.
+            # A concurrent eviction of the same key just falls through to a miss.
+            try:
+                cached = self._formatted_tools_cache.pop(tools_key)
+                self._formatted_tools_cache[tools_key] = cached
+                return cached
+            except KeyError:
+                pass
             
         formatted_tools = []
         for tool in tools:
@@ -3172,8 +3152,12 @@ Respond with ONLY a valid JSON tool call in this format:
 
         # Cache the formatted tools
         result = formatted_tools if formatted_tools else None
-        if len(self._formatted_tools_cache) < self._max_cache_size:
-            self._formatted_tools_cache[tools_key] = result
+        self._formatted_tools_cache[tools_key] = result
+        while len(self._formatted_tools_cache) > self._max_cache_size:
+            try:
+                del self._formatted_tools_cache[next(iter(self._formatted_tools_cache))]
+            except (KeyError, StopIteration, RuntimeError):
+                break
         return result
 
     def _resolve_context_window(self) -> int:
