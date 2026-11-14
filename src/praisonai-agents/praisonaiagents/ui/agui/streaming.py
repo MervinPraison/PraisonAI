@@ -417,6 +417,10 @@ def stream_event_to_agui_events(
     if event.type == StreamEventType.TOOL_CALL_END:
         tool_call = event.tool_call or {}
         tool_call_id = buffer.resolve_tool_call_id(tool_call.get("id"))
+        if tool_call_id in buffer.ended_tool_call_ids:
+            # The agent sends START -> RESULT -> END; ToolCallEnd already went out
+            # with START, so a second one after the result would break the protocol.
+            return []
         buffer.end_tool_call(tool_call_id)
         return [ToolCallEndEvent(tool_call_id=tool_call_id)]
 

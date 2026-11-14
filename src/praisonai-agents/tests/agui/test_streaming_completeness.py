@@ -140,3 +140,21 @@ def test_streamed_tool_call_starts_before_args_and_is_not_replayed():
     ]
     assert {e.tool_call_id for e in out} == {"call-7"}
     assert "".join(e.delta for e in out if hasattr(e, "delta")) == '{"x":1}'
+
+
+def test_tool_call_end_after_result_is_not_duplicated():
+    """The agent emits START -> RESULT -> END; AG-UI must close the call only once."""
+    buffer = EventBuffer()
+    tc = {"id": "call-9", "name": "f", "arguments": {"x": 1}}
+    out = []
+    for etype in (
+        StreamEventType.TOOL_CALL_START,
+        StreamEventType.TOOL_CALL_RESULT,
+        StreamEventType.TOOL_CALL_END,
+    ):
+        out += stream_event_to_agui_events(
+            StreamEvent(type=etype, tool_call={**tc, "result": "ok"}), "m1", buffer
+        )
+    kinds = [type(e).__name__ for e in out]
+    assert kinds.count("ToolCallEndEvent") == 1
+    assert kinds[-1] == "ToolCallResultEvent"
