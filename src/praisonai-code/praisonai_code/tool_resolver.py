@@ -235,8 +235,9 @@ def _yaml_role_configs(yaml_config: Dict[str, Any]) -> List[Dict[str, Any]]:
 def _yaml_tool_names(yaml_config: Dict[str, Any]) -> set:
     """Every tool name referenced in a parsed YAML config.
 
-    Single owner of which keys carry tool names (``roles[*].tools`` and
-    ``roles[*].tasks[*].tools``) so building and validating cannot drift (#5753).
+    Single owner of which keys carry tool names (``roles[*].tools``,
+    ``roles[*].planning_tools`` and ``roles[*].tasks[*].tools``) so building
+    and validating cannot drift (#5753, #6281).
     """
     names: set = set()
     for role_cfg in _yaml_role_configs(yaml_config):
@@ -244,8 +245,8 @@ def _yaml_tool_names(yaml_config: Dict[str, Any]) -> set:
         # Handle both dict and list formats for tasks
         task_list = tasks.values() if isinstance(tasks, dict) else tasks if isinstance(tasks, list) else []
         sources = [role_cfg] + [t for t in task_list if isinstance(t, dict)]
-        for cfg in sources:
-            tools = cfg.get('tools') or []
+        lists = [cfg.get('tools') for cfg in sources] + [role_cfg.get('planning_tools')]
+        for tools in lists:
             if not isinstance(tools, list):
                 continue
             names.update(t.strip() for t in tools if isinstance(t, str) and t.strip())
