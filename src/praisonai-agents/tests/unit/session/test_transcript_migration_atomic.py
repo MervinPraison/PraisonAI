@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 import builtins
 import os
+import json
 import subprocess
 import sys
 
@@ -15,6 +16,21 @@ def make_legacy(path):
     store = DefaultSessionStore(session_dir=str(path))
     assert store.add_message('a', 'user', 'old a')
     assert store.add_message('b', 'user', 'old b')
+
+
+@pytest.mark.parametrize('bad_data', [
+    {'session_id': 'bad', 'last_compaction': 5},
+    {'session_id': 'bad', 'messages': 5},
+    {'session_id': 'bad', 'metadata': 5},
+])
+def test_malformed_legacy_structure_does_not_block_healthy_sessions(tmp_path, bad_data):
+    make_legacy(tmp_path)
+    bad = tmp_path / '0-malformed.json'
+    bad.write_text(json.dumps(bad_data), encoding='utf-8')
+    store = SqliteTranscriptStore(session_dir=str(tmp_path))
+    assert store.get_chat_history('a')[0]['content'] == 'old a'
+    assert store.get_chat_history('b')[0]['content'] == 'old b'
+    assert bad.exists()
 
 
 def test_interrupted_migration_rolls_back_and_retries(tmp_path, monkeypatch):

@@ -181,7 +181,7 @@ class SqliteTranscriptStore(DefaultSessionStore):
                             continue
                         try:
                             session = SessionData.from_dict(data)
-                        except (TypeError, ValueError, KeyError):
+                        except (AttributeError, TypeError, ValueError, KeyError):
                             continue
                         if not self._write_row(session, conn=conn):
                             raise OSError(f"Legacy session migration failed for {filename}")
