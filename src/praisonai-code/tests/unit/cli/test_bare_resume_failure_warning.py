@@ -54,7 +54,7 @@ def test_failed_continue_warns(monkeypatch):
     result = CliRunner().invoke(app, ["--continue"])
 
     assert result.exit_code == 0, result.output
-    assert "could not resume session last session" in result.output
+    assert "could not resume the last session" in result.output
     assert "db locked" in result.output
     assert _FakeTUI.last_config.resume is False
 

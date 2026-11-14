@@ -1009,9 +1009,10 @@ def main_callback(
                 # Continuity is best-effort and never blocks launch, but a
                 # requested resume that fails must not silently drop the
                 # user's context (Issue #6284).
-                target = session or resume_id or "last session"
+                sid = session or resume_id
+                target = f"session {sid}" if sid else "the last session"
                 typer.echo(
-                    f"Warning: could not resume session {target} ({exc}). "
+                    f"Warning: could not resume {target} ({exc}). "
                     "Starting a new session.",
                     err=True,
                 )
