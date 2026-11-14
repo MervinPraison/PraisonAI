@@ -7,6 +7,7 @@ with doom loop detection.
 
 import fnmatch
 import json
+import re
 from praisonaiagents._logging import get_logger
 import os
 import threading
@@ -82,6 +83,7 @@ class PermissionManager:
         )
         
         self._rules: List[PermissionRule] = []
+        self._rules_unavailable = False
         self._approvals: List[PersistentApproval] = []
         self._doom_detector = DoomLoopDetector()
         self._lock = threading.RLock()
@@ -102,17 +104,80 @@ class PermissionManager:
         return os.path.join(self.storage_dir, "approvals.json")
     
     def _load_rules(self):
-        """Load rules from disk."""
+        """Load rules from disk.
+
+        A missing file is the documented first run and yields an empty policy.
+        Any other failure means the operator's rules are unknown, so the
+        manager records a fail-closed state instead of treating the policy as
+        absent.
+        """
         path = self._get_rules_path()
-        if os.path.exists(path):
-            try:
-                with open(path, "r") as f:
-                    data = json.load(f)
-                self._rules = [PermissionRule.from_dict(r) for r in data]
-            except (json.JSONDecodeError, IOError) as e:
-                logger.warning(f"Failed to load rules: {e}")
-    
-    def _save_rules(self):
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+            self._validate_rule_payload(data)
+            self._rules = [PermissionRule.from_dict(r) for r in data]
+            self._rules_unavailable = False
+        except FileNotFoundError:
+            if os.path.islink(path) and not os.path.exists(path):
+                self._rules_unavailable = True
+                logger.error(
+                    "Failed to load permission rules; rules.json is a dangling symlink"
+                )
+            else:
+                self._rules = []
+                self._rules_unavailable = False
+        except (
+            json.JSONDecodeError,
+            OSError,
+            ValueError,
+            TypeError,
+            KeyError,
+            AttributeError,
+            RecursionError,
+            OverflowError,
+        ) as e:
+            self._rules_unavailable = True
+            logger.error(
+                "Failed to load permission rules; refusing to run with an "
+                "unknown policy: %s",
+                e,
+            )
+
+    @staticmethod
+    def _validate_rule_payload(data):
+        """Reject malformed top-level data before it becomes an empty policy."""
+        if not isinstance(data, list):
+            raise ValueError("rules.json must contain a list")
+        for index, item in enumerate(data):
+            if not isinstance(item, dict):
+                raise ValueError(f"rule {index} must be an object")
+            pattern = item.get("pattern")
+            if not isinstance(pattern, str) or not pattern.strip():
+                raise ValueError(f"rule {index} has no non-empty pattern")
+            action = item.get("action", "ask")
+            if not isinstance(action, str):
+                raise ValueError(f"rule {index} has an invalid action")
+            PermissionAction(action)
+            is_regex = item.get("is_regex", False)
+            if not isinstance(is_regex, bool):
+                raise ValueError(f"rule {index} has an invalid is_regex flag")
+            if is_regex:
+                try:
+                    re.compile(pattern)
+                except (re.error, OverflowError) as e:
+                    raise ValueError(f"rule {index} has an invalid regex: {e}") from e
+            enabled = item.get("enabled", True)
+            if not isinstance(enabled, bool):
+                raise ValueError(f"rule {index} has an invalid enabled flag")
+            priority = item.get("priority", 0)
+            if not isinstance(priority, int) or isinstance(priority, bool):
+                raise ValueError(f"rule {index} has an invalid priority")
+            agent_name = item.get("agent_name")
+            if agent_name is not None and not isinstance(agent_name, str):
+                raise ValueError(f"rule {index} has an invalid agent name")
+
+    def _save_rules(self) -> bool:
         """Save rules to disk atomically.
 
         Serialises to a temp file and ``os.replace``\\ s it into place so a
@@ -124,14 +189,19 @@ class PermissionManager:
         from ..utils.atomic_io import atomic_write_json
         path = self._get_rules_path()
         try:
-            atomic_write_json(path, [r.to_dict() for r in self._rules], indent=2)
-        except (OSError, TypeError, ValueError) as e:
+            payload = [r.to_dict() for r in self._rules]
+            self._validate_rule_payload(payload)
+            atomic_write_json(path, payload, indent=2)
+            return True
+        except (OSError, TypeError, ValueError, OverflowError, RecursionError) as e:
             logger.error(f"Failed to save rules: {e}")
+            return False
     
     def save_rules(self):
         """Public method to save rules to disk."""
         with self._lock:
-            self._save_rules()
+            if self._save_rules():
+                self._rules_unavailable = False
     
     def _load_approvals(self):
         """Load approvals from disk."""
@@ -174,7 +244,8 @@ class PermissionManager:
             self._rules.append(rule)
             # Sort by priority (higher first)
             self._rules.sort(key=lambda r: r.priority, reverse=True)
-            self._save_rules()
+            if not self._rules_unavailable:
+                self._save_rules()
         return rule.id
     
     def remove_rule(self, rule_id: str) -> bool:
@@ -188,6 +259,8 @@ class PermissionManager:
             True if found and removed
         """
         with self._lock:
+            if self._rules_unavailable:
+                return False
             for i, rule in enumerate(self._rules):
                 if rule.id == rule_id:
                     self._rules.pop(i)
@@ -331,6 +404,16 @@ class PermissionManager:
             PermissionResult with the decision
         """
         agent = agent_name or self.agent_name
+
+        if self._rules_unavailable:
+            return PermissionResult(
+                action=PermissionAction.DENY,
+                target=target,
+                reason=(
+                    "permission rules could not be loaded; refusing to run "
+                    "with an unknown policy"
+                ),
+            )
 
         # Command-aware matching: shell targets are decomposed into their
         # constituent operations so deny rules fire regardless of where the
@@ -883,7 +966,8 @@ class PermissionManager:
         """Clear all rules."""
         with self._lock:
             self._rules.clear()
-            self._save_rules()
+            if self._save_rules():
+                self._rules_unavailable = False
     
     def set_approval_callback(self, callback: Callable[[str, str], bool]):
         """Set the approval callback."""
@@ -896,13 +980,26 @@ class PermissionManager:
                 "rules": [r.to_dict() for r in self._rules],
                 "approvals": [a.to_dict() for a in self._approvals],
                 "agent_name": self.agent_name,
+                "rules_unavailable": self._rules_unavailable,
             }
     
     def from_dict(self, data: Dict[str, Any]):
         """Import manager state from dictionary."""
         with self._lock:
-            self._rules = [PermissionRule.from_dict(r) for r in data.get("rules", [])]
+            raw_rules = data.get("rules", [])
+            unavailable = data.get("rules_unavailable", False)
+            if not isinstance(unavailable, bool):
+                logger.error("Refusing to import invalid rules_unavailable flag")
+                return
+            try:
+                self._validate_rule_payload(raw_rules)
+                imported = [PermissionRule.from_dict(r) for r in raw_rules]
+            except (ValueError, TypeError, KeyError, AttributeError, OverflowError, RecursionError) as e:
+                logger.error("Refusing to import invalid permission rules: %s", e)
+                return
+            self._rules = imported
             self._approvals = [PersistentApproval.from_dict(a) for a in data.get("approvals", [])]
+            self._rules_unavailable = unavailable
             if "agent_name" in data:
                 self.agent_name = data["agent_name"]
     
@@ -971,5 +1068,6 @@ class PermissionManager:
             self._rules.sort(key=lambda r: r.priority, reverse=True)
             
             # Only persist if explicitly requested (not for ephemeral CI/YAML rules)
-            if persist:
-                self._save_rules()
+            if persist and (incoming_rules or self._rules):
+                if self._save_rules():
+                    self._rules_unavailable = False
