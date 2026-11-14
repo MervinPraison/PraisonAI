@@ -128,8 +128,13 @@ from praisonaiagents.session.store import DefaultSessionStore
 
 logger = logging.getLogger(__name__)
 
+
 from .unicode_utils import safe_error_message, safe_log_message, extract_root_cause_from_error
 from .supervisor import ChannelState, ChannelSupervisor
+
+
+class _UnknownSessionAgent(ValueError):
+    """A confined client cannot resume a record without agent identity."""
 
 
 def _installed_gateway_version() -> str:
@@ -4194,12 +4199,22 @@ class WebSocketGateway:
                 )
                 await self._send_to_client(client_id, error.to_dict())
                 return
-            session, replay_events = self.resume_or_create_session(
-                session_id=session_id,
-                agent_id=agent_id,
-                client_id=client_id,
-                since_cursor=since_cursor,
-            )
+            try:
+                session, replay_events = self.resume_or_create_session(
+                    session_id=session_id,
+                    agent_id=agent_id,
+                    client_id=client_id,
+                    since_cursor=since_cursor,
+                )
+            except _UnknownSessionAgent:
+                error = HelloError(
+                    code=ConnectErrorCode.AUTH_UNAUTHORIZED,
+                    message="Session does not belong to the requested agent",
+                    next_step=ConnectRecoveryStep.REAUTHENTICATE,
+                    next_action="start_new_session",
+                )
+                await self._send_to_client(client_id, error.to_dict())
+                return
             
             # Validate session belongs to requested agent
             if hasattr(session, 'agent_id') and session.agent_id != agent_id:
@@ -4395,8 +4410,9 @@ class WebSocketGateway:
                 # Issue #6253: deny resuming another agent's live session
                 # *before* the resume call touches it.
                 existing = self.get_session(session_id) if isinstance(session_id, str) else None
-                if existing is not None and not self._client_may_reach_agent(
-                    client_id, existing.agent_id
+                if existing is not None and (
+                    existing.agent_id != agent_id
+                    or not self._client_may_reach_agent(client_id, existing.agent_id)
                 ):
                     await self._send_to_client(client_id, {
                         "type": "error",
@@ -4405,17 +4421,26 @@ class WebSocketGateway:
                     return
 
                 # Resume or create session
-                session, replay_events = self.resume_or_create_session(
-                    session_id=session_id,
-                    agent_id=agent_id,
-                    client_id=client_id,
-                    since_cursor=since_cursor,
-                )
+                try:
+                    session, replay_events = self.resume_or_create_session(
+                        session_id=session_id,
+                        agent_id=agent_id,
+                        client_id=client_id,
+                        since_cursor=since_cursor,
+                    )
+                except _UnknownSessionAgent:
+                    await self._send_to_client(client_id, {
+                        "type": "error",
+                        "message": "Session does not belong to the requested agent",
+                    })
+                    return
 
                 # Issue #6253: a resumed session_id must not smuggle a confined
                 # operator onto another agent's session (covers sessions
                 # rehydrated from the persistent store).
-                if not self._client_may_reach_agent(client_id, session.agent_id):
+                if session.agent_id != agent_id or not self._client_may_reach_agent(
+                    client_id, session.agent_id
+                ):
                     await self._send_to_client(client_id, {
                         "type": "error",
                         "message": "Session does not belong to the requested agent",
@@ -6765,10 +6790,16 @@ class WebSocketGateway:
                     session = GatewaySession.from_dict(session_data, self.config.session_config.max_messages)
                 else:
                     # Fallback: create new session but restore messages
+                    stored_agent_id = getattr(session_data_obj, "agent_id", None)
+                    if not stored_agent_id and self._client_agents.get(client_id) is not None:
+                        # Do not cache or attach an identity-less legacy record for
+                        # a confined client: its requested ID proves nothing.
+                        raise _UnknownSessionAgent("Legacy session has no agent identity")
+                    stored_agent_id = stored_agent_id or agent_id
                     session = GatewaySession(
                         _session_id=sid,
-                        _agent_id=agent_id,
-                        _client_id=client_id,
+                        _agent_id=stored_agent_id,
+                        _client_id=client_id if stored_agent_id == agent_id else None,
                         _max_messages=self.config.session_config.max_messages,
                     )
                     # Mark as resumed since we're restoring from persistence
@@ -6789,6 +6820,8 @@ class WebSocketGateway:
                 self._sessions[sid] = session
                 logger.info(f"Session resumed from persistent store: {sid} for agent {agent_id}")
                 return session
+            except _UnknownSessionAgent:
+                raise
             except Exception as e:
                 logger.warning(f"Failed to rehydrate session {sid}: {e}. Creating new session.")
         
