@@ -54,3 +54,24 @@ def test_async_recovery_backoff_stops_on_cancel_token():
     assert asyncio.run(_abackoff(a, 30.0, tok)) is False
     assert time.monotonic() - t0 < 1.0
     assert asyncio.run(_abackoff(a, 0.01, None)) is True
+
+
+def lookup(record_id: int) -> int:
+    return record_id
+
+
+def test_cast_large_int_string_not_rounded():
+    a = Agent(name="d", instructions="x", llm="gpt-4o-mini", tools=[lookup])
+    big = "9007199254740993"
+    assert a._cast_arguments(lookup, {"record_id": big}) == {"record_id": 9007199254740993}
+    assert a._cast_arguments(lookup, {"record_id": "3.0"}) == {"record_id": 3}
+    assert asyncio.run(a.execute_tool_async("lookup", {"record_id": big})) == 9007199254740993
+
+
+
+
+def test_cast_large_int_string_in_optional_not_rounded():
+    from typing import Optional
+    from praisonaiagents.agent.tool_execution import _coerce_value
+    assert _coerce_value("9007199254740993", Optional[int]) == 9007199254740993
+    assert _coerce_value("1.5", Optional[int]) == "1.5"

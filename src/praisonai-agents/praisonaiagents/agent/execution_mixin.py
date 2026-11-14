@@ -1979,11 +1979,6 @@ Write the complete compiled report:"""
                     ):
                         call_arguments = dict(call_arguments)
                         call_arguments["idempotency_key"] = durable_key
-                # Repair hallucinated kwarg names and coerce "3"/"false" to the
-                # annotated types — parity with the sync path (_cast_arguments).
-                cast = getattr(self, "_cast_arguments", None)
-                if cast is not None:
-                    call_arguments = cast(call_target, call_arguments)
 
                 # Establish the injection context (Injected[T] params, including
                 # the cooperative cancel_event) around dispatch so the async path
