@@ -4020,7 +4020,13 @@ CONCISE SUMMARY:"""
         failed = {}      # idx -> {"error": e, "delta": {...} | None, "stop": bool}
         parallel_stopped = False
 
+        # Branch threads cannot be killed: the stop scope (set on exit) makes any
+        # agent turn still running after timeout/fail_fast/caller exit stop at
+        # its next cancel check instead of running on unseen (Issue #6266).
+        from ..agent.chat_mixin import _stop_scope
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers)
+        abandon_scope = _stop_scope()
+        abandon_scope.__enter__()
         try:
             future_to_idx = {}
             for idx, step in enumerate(parallel_step.steps):
@@ -4141,6 +4147,7 @@ CONCISE SUMMARY:"""
             # Do not block the caller on branches that cannot be interrupted.
             # shutdown(wait=True) (the `with` default) is what held the fail_fast
             # raise until the slowest sibling finished.
+            abandon_scope.__exit__(None, None, None)
             executor.shutdown(wait=False)
 
         # Rebuild results/outputs/branch_deltas in declaration order so

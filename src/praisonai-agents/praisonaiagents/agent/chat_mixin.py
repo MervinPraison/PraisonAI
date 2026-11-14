@@ -128,6 +128,26 @@ def _deadline_scope(seconds):
         _run_deadline.reset(token)
 
 
+# Stop events for turns started in this context. Orchestrators (Parallel,
+# AgentTeam.astart) open a ``_stop_scope`` so abandoned branches still running
+# in worker threads observe the stop at their next cancel check. A tuple so a
+# nested scope still honours its enclosing ones.
+_run_stops = contextvars.ContextVar("praisonai_run_stops", default=())
+
+
+@contextlib.contextmanager
+def _stop_scope():
+    """Yield an Event that stops every turn started in this block; set on exit."""
+    stop = threading.Event()
+    token = _run_stops.set(_run_stops.get() + (stop,))
+    try:
+        yield stop
+    finally:
+        # Anything still running after the block has been abandoned by its caller.
+        stop.set()
+        _run_stops.reset(token)
+
+
 class _TurnCancelToken:
     """Track cancellation observed by one call without shared backend state.
 
@@ -146,11 +166,16 @@ class _TurnCancelToken:
         self._observed = False
         self._turn_id = turn_id
         self._deadline = deadline
+        self._stops = _run_stops.get()
         self.timed_out = False
+        self.stopped = False
 
     def is_set(self) -> bool:
         if self._deadline is not None and time.monotonic() >= self._deadline:
             self.timed_out = self._observed = True
+            return True
+        if any(stop.is_set() for stop in self._stops):
+            self.stopped = self._observed = True
             return True
         turn_checker = getattr(self._source, "_turn_is_cancelled", None)
         if self._turn_id is not None and callable(turn_checker):
@@ -164,6 +189,8 @@ class _TurnCancelToken:
     def reason(self):
         if self.timed_out:
             return "timeout"
+        if self.stopped:
+            return "run abandoned by caller"
         return getattr(self._source, "reason", None)
 
     def check(self) -> None:
@@ -211,7 +238,9 @@ class ChatMixin:
         if outer is not None:
             deadline = outer if deadline is None else min(deadline, outer)
         if source is None:
-            return None if deadline is None else _TurnCancelToken(None, deadline=deadline)
+            if deadline is None and not _run_stops.get():
+                return None
+            return _TurnCancelToken(None, deadline=deadline)
         begin_turn = getattr(source, "_begin_turn", None)
         if explicit or not callable(begin_turn):
             return _TurnCancelToken(source, deadline=deadline)

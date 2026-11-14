@@ -1995,6 +1995,13 @@ class AgentTeam(SpawnAnnounceProtocol):
 
     async def arun_all_tasks(self):
         """Async version of run_all_tasks method"""
+        # Sync tasks run in executor threads that outlive a cancelled await;
+        # the stop scope tells their agent turns to exit (Issue #6266).
+        from ..agent.chat_mixin import _stop_scope
+        with _stop_scope():
+            return await self._arun_all_tasks()
+
+    async def _arun_all_tasks(self):
         process = Process(
             tasks=self.tasks,
             agents=self.agents,
