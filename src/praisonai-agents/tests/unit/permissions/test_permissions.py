@@ -4,6 +4,7 @@ Tests for the Permissions module.
 TDD: Tests for pattern-based permissions, persistent approvals, and doom loop detection.
 """
 
+import json
 import os
 import shutil
 import tempfile
@@ -652,3 +653,250 @@ class TestDoomLoopGateWiring:
                 self._permission_manager = None
 
         assert _Agent()._check_permission_manager_doom_loop("bash", {}) is None
+
+
+class TestPermissionManagerRulesUnavailable:
+    """An existing but unreadable rules file must not become "no rules"."""
+
+    def test_corrupt_rules_file_fails_closed(self, tmp_path):
+        (tmp_path / "rules.json").write_text('[{"pattern": "execute_command*"')
+
+        manager = PermissionManager(storage_dir=str(tmp_path))
+
+        result = manager.check("execute_command")
+        assert result.action == PermissionAction.DENY
+        assert "could not be loaded" in result.reason
+        assert manager.is_denied("execute_command") is True
+        assert manager.resolve_tool_action("execute_command") == PermissionAction.DENY
+
+    def test_schema_invalid_rules_file_fails_closed(self, tmp_path):
+        (tmp_path / "rules.json").write_text(json.dumps([
+            {"pattern": "execute_command*", "action": "not-an-action"}
+        ]))
+
+        manager = PermissionManager(storage_dir=str(tmp_path))
+
+        assert manager.check("execute_command").action == PermissionAction.DENY
+        assert manager.is_denied("execute_command") is True
+
+    def test_missing_rules_file_keeps_the_documented_default(self, tmp_path):
+        manager = PermissionManager(storage_dir=str(tmp_path))
+
+        result = manager.check("execute_command")
+        assert result.action == PermissionAction.ASK
+        assert result.rule is None
+        assert manager.is_denied("execute_command") is False
+        assert manager.resolve_tool_action("execute_command") is None
+
+    def test_valid_deny_rule_still_works(self, tmp_path):
+        (tmp_path / "rules.json").write_text(json.dumps([
+            {"pattern": "execute_command*", "action": "deny", "enabled": True}
+        ]))
+
+        manager = PermissionManager(storage_dir=str(tmp_path))
+
+        result = manager.check("execute_command")
+        assert result.action == PermissionAction.DENY
+        assert manager.is_denied("execute_command") is True
+
+    def test_non_list_and_invalid_rule_payloads_fail_closed(self, tmp_path):
+        payloads = [
+            '{}',
+            '""',
+            '[{"pattern": null}]',
+            '[{"pattern": "execute_command*", "action": "bogus"}]',
+            '[{"pattern": "execute_command*", "enabled": "yes"}]',
+        ]
+        for payload in payloads:
+            (tmp_path / "rules.json").write_text(payload)
+            manager = PermissionManager(storage_dir=str(tmp_path))
+            assert manager.is_denied("execute_command") is True, payload
+
+    def test_clear_rules_recovers_from_unavailable_state(self, tmp_path):
+        (tmp_path / "rules.json").write_text('[')
+        manager = PermissionManager(storage_dir=str(tmp_path))
+        assert manager.is_denied("execute_command") is True
+
+        manager.clear_rules()
+
+        result = manager.check("execute_command")
+        assert result.action == PermissionAction.ASK
+        assert manager.is_denied("execute_command") is False
+
+    def test_corrupt_rules_does_not_escape_construction_on_recursion(self, tmp_path, monkeypatch):
+        import praisonaiagents.permissions.manager as manager_module
+
+        def boom(*args, **kwargs):
+            raise RecursionError("nested")
+
+        monkeypatch.setattr(manager_module.json, "load", boom)
+        (tmp_path / "rules.json").write_text('[]')
+        manager = PermissionManager(storage_dir=str(tmp_path))
+        assert manager.is_denied("execute_command") is True
+
+    def test_ordinary_add_rule_does_not_reopen_broken_policy(self, tmp_path):
+        (tmp_path / "rules.json").write_text('[')
+        manager = PermissionManager(storage_dir=str(tmp_path))
+        assert manager.is_denied("execute_command") is True
+
+        manager.add_rule(PermissionRule(pattern="read:*", action=PermissionAction.ALLOW, priority=100))
+
+        assert manager.is_denied("execute_command") is True
+
+    def test_invalid_regex_fails_closed(self, tmp_path):
+        (tmp_path / "rules.json").write_text(json.dumps([
+            {"pattern": "[", "action": "deny", "is_regex": True}
+        ]))
+        manager = PermissionManager(storage_dir=str(tmp_path))
+        assert manager.is_denied("execute_command") is True
+
+    def test_invalid_agent_name_fails_closed(self, tmp_path):
+        (tmp_path / "rules.json").write_text(json.dumps([
+            {"pattern": "execute_command*", "action": "deny", "agent_name": 42}
+        ]))
+        manager = PermissionManager(storage_dir=str(tmp_path))
+        assert manager.is_denied("execute_command") is True
+
+    def test_round_trip_preserves_unavailable_state(self, tmp_path):
+        (tmp_path / "rules.json").write_text('[')
+        manager = PermissionManager(storage_dir=str(tmp_path))
+        data = manager.to_dict()
+        assert data["rules_unavailable"] is True
+
+        restored = PermissionManager(storage_dir=str(tmp_path / "restored"))
+        restored.from_dict(data)
+        assert restored.is_denied("execute_command") is True
+
+    def test_save_rules_recovers_after_corrupt_file(self, tmp_path):
+        (tmp_path / "rules.json").write_text('[')
+        manager = PermissionManager(storage_dir=str(tmp_path))
+        assert manager.is_denied("execute_command") is True
+
+        manager.save_rules()
+
+        assert manager.is_denied("execute_command") is False
+
+    def test_load_rules_from_config_recovers_after_corrupt_file(self, tmp_path):
+        (tmp_path / "rules.json").write_text('[')
+        manager = PermissionManager(storage_dir=str(tmp_path))
+        assert manager.is_denied("execute_command") is True
+
+        manager.load_rules_from_config({"execute_command*": "deny"}, persist=True)
+
+        assert manager._rules_unavailable is False
+        assert manager.is_denied("execute_command") is True
+
+    def test_add_rule_preserves_corrupt_file_until_reset(self, tmp_path):
+        path = tmp_path / "rules.json"
+        path.write_text('[')
+        manager = PermissionManager(storage_dir=str(tmp_path))
+
+        manager.add_rule(PermissionRule(pattern="read:*", action=PermissionAction.ALLOW))
+
+        assert path.read_text() == '['
+        assert manager.is_denied("execute_command") is True
+
+    def test_agent_does_not_execute_tool_with_corrupt_policy(self, tmp_path, monkeypatch):
+        from praisonaiagents import Agent
+
+        monkeypatch.setenv("PRAISONAI_AUTO_APPROVE", "true")
+        marker = tmp_path / "agent-marker.txt"
+        (tmp_path / "rules.json").write_text('[')
+        manager = PermissionManager(storage_dir=str(tmp_path))
+
+        def write_marker():
+            marker.write_text("hit")
+            return "written"
+
+        agent = Agent(
+            name="poc",
+            model="gpt-4o-mini",
+            tools=[write_marker],
+            approval={"permissions": manager},
+        )
+        result = agent.execute_tool("write_marker", {})
+
+        assert not marker.exists()
+        assert result.get("permission_denied") is True
+
+    def test_dangling_rules_symlink_fails_closed(self, tmp_path):
+        target = tmp_path / "missing-rules.json"
+        link = tmp_path / "rules.json"
+        try:
+            link.symlink_to(target)
+        except (OSError, NotImplementedError):
+            import pytest
+            pytest.skip("symlink unavailable")
+        manager = PermissionManager(storage_dir=str(tmp_path))
+        assert manager.is_denied("execute_command") is True
+
+    def test_overflowing_regex_fails_closed(self, tmp_path, monkeypatch):
+        import praisonaiagents.permissions.manager as manager_module
+
+        (tmp_path / "rules.json").write_text(json.dumps([
+            {"pattern": "a", "action": "deny", "is_regex": True}
+        ]))
+        monkeypatch.setattr(manager_module.re, "compile", lambda pattern: (_ for _ in ()).throw(OverflowError("too large")))
+        manager = PermissionManager(storage_dir=str(tmp_path))
+        assert manager.is_denied("execute_command") is True
+
+    def test_save_rules_validation_does_not_clear_unavailable(self, tmp_path):
+        (tmp_path / "rules.json").write_text('[')
+        manager = PermissionManager(storage_dir=str(tmp_path))
+        manager._rules = [PermissionRule(pattern="[", action=PermissionAction.DENY, is_regex=True)]
+
+        manager.save_rules()
+
+        assert manager.is_denied("execute_command") is True
+        assert (tmp_path / "rules.json").read_text() == '['
+
+    def test_from_dict_rejects_invalid_rules_and_preserves_state(self, tmp_path):
+        (tmp_path / "rules.json").write_text('[')
+        manager = PermissionManager(storage_dir=str(tmp_path))
+        before = manager.to_dict()
+
+        manager.from_dict({
+            "rules": [{"pattern": "[", "action": "deny", "is_regex": True}],
+            "rules_unavailable": False,
+            "approvals": [],
+        })
+
+        assert manager.is_denied("execute_command") is True
+        assert manager.to_dict() == before
+
+    def test_recursive_regex_save_does_not_drop_manager(self, tmp_path, monkeypatch):
+        import praisonaiagents.permissions.manager as manager_module
+
+        (tmp_path / "rules.json").write_text('[')
+        manager = PermissionManager(storage_dir=str(tmp_path))
+        monkeypatch.setattr(manager_module.re, "compile", lambda pattern: (_ for _ in ()).throw(RecursionError("nested")))
+        manager.add_rule(PermissionRule(pattern="a", action=PermissionAction.DENY, is_regex=True))
+        assert manager.is_denied("execute_command") is True
+
+    def test_from_dict_rejects_missing_pattern_before_reconstruction(self, tmp_path):
+        (tmp_path / "rules.json").write_text('[')
+        manager = PermissionManager(storage_dir=str(tmp_path))
+        before = manager.to_dict()
+
+        manager.from_dict({
+            "rules": [{"action": "allow"}],
+            "rules_unavailable": False,
+            "approvals": [],
+        })
+
+        assert manager.is_denied("execute_command") is True
+        assert manager.to_dict() == before
+
+    def test_from_dict_rejects_non_bool_unavailable(self, tmp_path):
+        (tmp_path / "rules.json").write_text('[')
+        manager = PermissionManager(storage_dir=str(tmp_path))
+        before = manager.to_dict()
+
+        manager.from_dict({
+            "rules": [],
+            "rules_unavailable": "false",
+            "approvals": [],
+        })
+
+        assert manager.is_denied("execute_command") is True
+        assert manager.to_dict() == before
