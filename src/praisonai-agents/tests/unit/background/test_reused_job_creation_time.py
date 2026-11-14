@@ -1,13 +1,16 @@
-import time
-
 import pytest
 
+from praisonaiagents.background import job_manager
 from praisonaiagents.background.job_manager import BackgroundJobManager, JobInfo, JobStatus
 from praisonaiagents.background.sqlite_store import SqliteBackgroundJobStore
 
 
 @pytest.fixture
-def reopened_store_with_reused_id(tmp_path):
+def reopened_store_with_reused_id(tmp_path, monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(
+        job_manager, 'JobInfo', lambda **kwargs: JobInfo(created_at=clock[0], **kwargs)
+    )
     path = str(tmp_path / 'jobs.db')
     store = SqliteBackgroundJobStore(path)
     manager = BackgroundJobManager(store=store)
@@ -16,11 +19,11 @@ def reopened_store_with_reused_id(tmp_path):
         manager.start_job(lambda: 'first', job_id='reused', origin=origin)
         assert manager.get_result('reused', timeout=5) == 'first'
         first_created = manager.get_job_info('reused').created_at
-        time.sleep(0.02)
+        clock[0] = 101.0
         manager.start_job(lambda: 'middle', job_id='middle', origin=origin)
         assert manager.get_result('middle', timeout=5) == 'middle'
         middle_created = manager.get_job_info('middle').created_at
-        time.sleep(0.02)
+        clock[0] = 102.0
         manager.start_job(lambda: 'second', job_id='reused', origin=origin)
         assert manager.get_result('reused', timeout=5) == 'second'
         second_created = manager.get_job_info('reused').created_at
