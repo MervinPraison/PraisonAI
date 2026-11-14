@@ -168,20 +168,27 @@ class SqliteTranscriptStore(DefaultSessionStore):
             imported = 0
             if not complete:
                 existing = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-                if not existing:
+                if not existing and session_dir and os.path.isdir(session_dir):
                     filenames = sorted(f for f in os.listdir(session_dir) if f.endswith(".json"))
                     for filename in filenames:
                         filepath = os.path.join(session_dir, filename)
+                        if os.path.isdir(filepath):
+                            logger.warning("Skipping legacy session directory %s", filepath)
+                            continue
                         try:
                             with open(filepath, "r", encoding="utf-8") as f:
                                 data = json.load(f)
                         except (UnicodeDecodeError, json.JSONDecodeError, TypeError):
                             continue
+                        except OSError as exc:
+                            logger.warning("Cannot read legacy session %s: %s", filepath, exc)
+                            raise
                         if not isinstance(data, dict):
                             continue
                         try:
                             session = SessionData.from_dict(data)
-                        except (AttributeError, TypeError, ValueError, KeyError):
+                        except Exception as exc:
+                            logger.warning("Skipping malformed legacy session %s: %s", filepath, exc)
                             continue
                         columns = (session.session_id, session.agent_name,
                                    session.gateway_session_id, session.agent_id,
@@ -202,7 +209,10 @@ class SqliteTranscriptStore(DefaultSessionStore):
                 conn.execute("INSERT INTO migration_state (name) VALUES (?)", ("legacy_json",))
             conn.execute("COMMIT")
         except BaseException:
-            conn.execute("ROLLBACK")
+            try:
+                conn.execute("ROLLBACK")
+            except Exception as exc:
+                logger.warning("Could not roll back legacy session migration: %s", exc)
             raise
         if imported:
             logger.info(

@@ -18,6 +18,23 @@ def make_legacy(path):
     assert store.add_message('b', 'user', 'old b')
 
 
+def test_json_named_directory_is_skipped(tmp_path):
+    make_legacy(tmp_path)
+    (tmp_path / 'broken.json').mkdir()
+    store = SqliteTranscriptStore(session_dir=str(tmp_path))
+    assert store.get_chat_history('a')[0]['content'] == 'old a'
+    assert store.get_chat_history('b')[0]['content'] == 'old b'
+
+
+@pytest.mark.parametrize('missing', [None, 'nonexistent'])
+def test_missing_legacy_directory_does_not_scan_cwd(tmp_path, monkeypatch, missing):
+    make_legacy(tmp_path)
+    store = SqliteTranscriptStore(session_dir=str(tmp_path), db_path=str(tmp_path / 'separate.db'))
+    store.session_dir = str(tmp_path / missing) if missing else None
+    monkeypatch.chdir(tmp_path)
+    assert store.list_sessions() == []
+
+
 @pytest.mark.parametrize('bad_data', [
     {'session_id': 'bad', 'last_compaction': 5},
     {'session_id': 'bad', 'messages': 5},
