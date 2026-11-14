@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 from unittest.mock import PropertyMock, patch
 import builtins
+import importlib
+import sys
 from pathlib import Path
 
 import pytest
@@ -16,7 +18,33 @@ def isolate_spill_directory(tmp_path, monkeypatch):
     monkeypatch.setattr('praisonaiagents.paths.get_session_spill_dir', lambda: tmp_path / 'spill')
 
 
-def test_legacy_migration_read_failure_stops_resume_and_retry_recovers(tmp_path, monkeypatch):
+@pytest.fixture
+def resume_store_types():
+    # Other import-isolation tests can reload the store after collection.
+    # Match the classes resolved by Agent at the time resume runs.
+    from praisonaiagents.session.store import DefaultSessionStore, SessionResumeReadError
+    return DefaultSessionStore, SessionResumeReadError
+
+
+def test_resume_uses_current_store_after_module_reload(tmp_path, monkeypatch):
+    with monkeypatch.context() as isolated:
+        importlib.import_module('praisonaiagents.session.store')
+        parent = importlib.import_module('praisonaiagents.session')
+        isolated.setattr(parent, 'store', parent.store)
+        isolated.delitem(sys.modules, 'praisonaiagents.session.store')
+        store_module = importlib.import_module('praisonaiagents.session.store')
+        store = store_module.DefaultSessionStore(session_dir=str(tmp_path))
+        def fail(*args):
+            raise PermissionError('temporary')
+        isolated.setattr(store, '_load_session_from_disk', fail)
+        agent = Agent(name='test', memory=MemoryConfig(session_id='s'))
+        agent._session_store = store
+        with pytest.raises(store_module.SessionResumeReadError):
+            agent._init_session_store()
+
+
+def test_legacy_migration_read_failure_stops_resume_and_retry_recovers(tmp_path, monkeypatch, resume_store_types):
+    DefaultSessionStore, SessionResumeReadError = resume_store_types
     seed = DefaultSessionStore(session_dir=str(tmp_path))
     seed.add_user_message('a.b', 'old')
     current = Path(seed._session_file_path('a.b'))
@@ -45,7 +73,8 @@ def test_legacy_migration_read_failure_stops_resume_and_retry_recovers(tmp_path,
 
 
 @pytest.mark.parametrize('history', [False, True])
-def test_agent_does_not_run_before_transient_resume_succeeds(tmp_path, monkeypatch, history):
+def test_agent_does_not_run_before_transient_resume_succeeds(tmp_path, monkeypatch, history, resume_store_types):
+    DefaultSessionStore, SessionResumeReadError = resume_store_types
     seed = DefaultSessionStore(session_dir=str(tmp_path))
     seed.add_user_message('s', 'old')
     path = tmp_path / 's.json'
