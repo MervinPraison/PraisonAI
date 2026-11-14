@@ -194,3 +194,33 @@ def test_invalid_config_rejected():
         RoundRobinRoomPlanner(max_rounds=0)
     with pytest.raises(ValueError):
         RoundRobinRoomPlanner(max_messages=0)
+
+
+# ── Issue #6289: a human @mention restricts round 0 to the addressed agents
+
+
+def test_human_mention_restricts_round0_to_addressed_agents():
+    roster = ["researcher", "coder", "reviewer"]
+    planner = RoundRobinRoomPlanner()
+    transcript = [RoomEvent(speaker="user", content="@reviewer @coder how to test?")]
+    # Roster order, only the addressed agents.
+    assert planner.plan_next(roster, transcript) == "coder"
+    transcript.append(RoomEvent(speaker="coder", content="pytest", round=0))
+    assert planner.plan_next(roster, transcript) == "reviewer"
+    transcript.append(RoomEvent(speaker="reviewer", content="ok", round=0))
+    assert planner.plan_next(roster, transcript) is None
+
+
+def test_human_mention_of_non_roster_falls_back_to_full_fanout():
+    roster = ["a", "b"]
+    planner = RoundRobinRoomPlanner()
+    transcript = [RoomEvent(speaker="user", content="@nobody hi")]
+    assert planner.plan_next(roster, transcript) == "a"
+
+
+def test_sentence_final_mention_ignores_trailing_punctuation():
+    assert extract_mentions("Please help @coder.") == ["coder"]
+    assert extract_mentions("@agent.v2, thoughts?") == ["agent.v2"]
+    planner = RoundRobinRoomPlanner()
+    transcript = [RoomEvent(speaker="user", content="Please help @coder.")]
+    assert planner.plan_next(["writer", "coder"], transcript) == "coder"
