@@ -58,6 +58,9 @@ knowledge = [
     "mem0ai>=0.1.0",
     "chromadb>=1.0.0",
     "markitdown[all]>=0.1.0",
+    # markitdown[all] pulls pandas unpinned; without a floor pip 26.3 backtracks
+    # to the pandas 1.4.4 sdist, whose setup.py needs the removed pkg_resources.
+    "pandas>=2.2",
     "chonkie>=1.0.2"
 ]
 
