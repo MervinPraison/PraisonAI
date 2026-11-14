@@ -71,6 +71,16 @@ _MAX_SPILL_TOOL_THREADS = 8
 _TOOL_ARGUMENTS_PARSE_FAILED = object()
 
 
+def _int_cast_exact(value, coerced):
+    """True if ``coerced`` equals ``value`` exactly ("5", "3.0", large IDs); False for "1.5"."""
+    if isinstance(value, str):
+        try:
+            return int(value) == coerced
+        except ValueError:
+            return float(value) == coerced
+    return value == coerced
+
+
 def _coerce_value(value, annotation):
     """Best-effort cast of an LLM-supplied value to ``annotation``.
 
@@ -90,7 +100,7 @@ def _coerce_value(value, annotation):
         for arg in members:
             coerced = _coerce_value(value, arg)
             # Inside a union, skip lossy scalar casts ("1.5"->1, "5"->False).
-            if arg is int and coerced is not value and float(value) != coerced:
+            if arg is int and coerced is not value and not _int_cast_exact(value, coerced):
                 continue
             if arg is bool and str(value).lower() not in (
                     'true', '1', 'yes', 'on', 'false', '0', 'no', 'off'):
@@ -103,7 +113,10 @@ def _coerce_value(value, annotation):
     original = value  # returned whenever conversion does not succeed
     try:
         if annotation is int and isinstance(value, (str, float)) and not isinstance(value, bool):
-            return int(float(value))
+            try:  # int() first so large integer strings (IDs) are not rounded via float
+                return int(value)
+            except ValueError:
+                return int(float(value))  # "3.0"
         if annotation is float and isinstance(value, (str, int)) and not isinstance(value, bool):
             return float(value)
         if annotation is bool and isinstance(value, str):

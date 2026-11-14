@@ -828,6 +828,9 @@ class ContextTraceEmitter:
         """Emit message added event."""
         if not self._enabled:
             return
+        if self._redact and isinstance(content, str):
+            from .redact import redact_string
+            content = redact_string(content)
         # Truncate long content for storage
         truncated_content = content[:1000] + "..." if len(content) > 1000 else content
         
@@ -888,6 +891,12 @@ class ContextTraceEmitter:
         if not self._enabled:
             return
         # Smart truncate long results unless full_content is enabled
+        if self._redact:
+            from .redact import redact_string
+            if isinstance(result, str):
+                result = redact_string(result)
+            if isinstance(error, str):
+                error = redact_string(error)
         truncated_result = None
         if result:
             if self._full_content:
