@@ -909,7 +909,7 @@ class DefaultSessionStore:
             0, session.last_compaction.message_index - dropped
         )
 
-    def _get_session_path(self, session_id: str) -> str:
+    def _get_session_path(self, session_id: str, *, strict: bool = False) -> str:
         """Get the file path for a session (injective mapping, Issue #6024)."""
         path = self._session_file_path(session_id)
         legacy = os.path.join(self.session_dir, f"{_legacy_session_filename(session_id)}.json")
@@ -924,7 +924,10 @@ class DefaultSessionStore:
                             owner = json.load(f).get("session_id")
                         if owner == session_id:
                             os.replace(legacy, path)
-            except (OSError, ValueError, AttributeError):
+            except OSError:
+                if strict:
+                    raise
+            except (ValueError, AttributeError):
                 pass
         return path
 
@@ -1978,7 +1981,10 @@ class DefaultSessionStore:
                 or type(self).get_working_history is not DefaultSessionStore.get_working_history):
             return self.get_working_history(session_id)
         try:
-            filepath = self._get_session_path(session_id)
+            if type(self)._get_session_path is DefaultSessionStore._get_session_path:
+                filepath = self._get_session_path(session_id, strict=True)
+            else:
+                filepath = self._get_session_path(session_id)
             with FileLock(filepath, self.lock_timeout):
                 session = self._load_session_from_disk(session_id, filepath)
                 self._reingest_spill(session_id, session)

@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 from unittest.mock import PropertyMock, patch
+import builtins
+from pathlib import Path
 
 import pytest
 
@@ -7,6 +9,39 @@ from praisonaiagents import Agent, MemoryConfig
 from praisonaiagents.session.store import DefaultSessionStore, SessionResumeReadError
 from praisonaiagents.session.sqlite_transcript_store import SqliteTranscriptStore
 from praisonaiagents.session.sqlite_store import SqliteSessionStore
+
+
+@pytest.fixture(autouse=True)
+def isolate_spill_directory(tmp_path, monkeypatch):
+    monkeypatch.setattr('praisonaiagents.paths.get_session_spill_dir', lambda: tmp_path / 'spill')
+
+
+def test_legacy_migration_read_failure_stops_resume_and_retry_recovers(tmp_path, monkeypatch):
+    seed = DefaultSessionStore(session_dir=str(tmp_path))
+    seed.add_user_message('a.b', 'old')
+    current = Path(seed._session_file_path('a.b'))
+    legacy = tmp_path / 'a_b.json'
+    current.rename(legacy)
+    before = legacy.read_bytes()
+    store = DefaultSessionStore(session_dir=str(tmp_path))
+    real_open = builtins.open
+    failing = [True]
+
+    def transient(path, *args, **kwargs):
+        if str(path) == str(legacy) and failing[0]:
+            raise PermissionError('legacy read unavailable')
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, 'open', transient)
+    agent = Agent(name='test', memory=MemoryConfig(session_id='a.b'))
+    agent._session_store = store
+    with pytest.raises(SessionResumeReadError):
+        agent._init_session_store()
+    assert not agent._session_store_initialized and legacy.read_bytes() == before
+    assert store.get_working_history('a.b') == []
+    failing[0] = False
+    agent._init_session_store()
+    assert agent.chat_history == [{'role': 'user', 'content': 'old'}]
 
 
 @pytest.mark.parametrize('history', [False, True])
