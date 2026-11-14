@@ -206,7 +206,7 @@ def configure_host(
 
     # Register L3 dashboard pages
     try:
-        from praisonai_bot.integration.pages import workflow_runs, bot_health
+        from praisonai_bot.integration.pages import workflow_runs, bot_health  # noqa: F401 (registers the pages)
     except ImportError:
         pass  # L3 pages are optional
 
