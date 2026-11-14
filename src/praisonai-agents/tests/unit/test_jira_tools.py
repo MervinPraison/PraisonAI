@@ -1,11 +1,7 @@
 """Unit tests for JIRA tools.
 
-``jira`` is an optional dependency. Without it these failed rather than
-skipping -- four with ``ModuleNotFoundError: No module named 'jira'`` from
-``@patch('jira.JIRA')``, which cannot patch a module that is not importable,
-and two with the tools' own "JIRA library not installed" ImportError. A missing
-optional extra is not a defect, and reporting it as one trains you to ignore a
-red suite.
+``jira`` is an optional dependency. Connection tests that need it skip when it
+is missing; tests that mock the connection or validate inputs still run.
 """
 
 import importlib.util
@@ -13,7 +9,6 @@ import importlib.util
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 
-pytest.importorskip("jira", reason="the optional 'jira' extra is not installed")
 from praisonaiagents.tools.jira_tools import (
     jira_watch_issue,
     jira_watch_project, 
@@ -34,6 +29,11 @@ from praisonaiagents.tools.jira_tools import (
 )
 class TestJIRAConnection:
     """Test JIRA connection utility."""
+
+    @pytest.fixture(autouse=True)
+    def _isolate_credentials(self, monkeypatch):
+        for name in ("JIRA_USERNAME", "JIRA_API_TOKEN", "JIRA_EMAIL"):
+            monkeypatch.delenv(name, raising=False)
     
     @patch('jira.JIRA')
     def test_connection_with_email_token(self, mock_jira):

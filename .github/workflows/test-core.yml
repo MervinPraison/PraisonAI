@@ -160,6 +160,23 @@ jobs:
               tests/unit/test_task_execution_config.py
               tests/unit/test_agent_unknown_kwarg_guidance.py
               tests/unit/test_agent_instantiation_lazy.py tests/unit/test_agent_os_exports.py
+              tests/unit/test_advanced_features.py
+              tests/unit/test_computer_tools.py
+              tests/unit/test_jira_tools.py
+              tests/unit/test_allowed_tools_filter.py
+              tests/unit/test_approval_auto.py
+              tests/unit/test_approval_protocol.py
+              tests/unit/test_as_tool_in_tools_param.py
+              tests/unit/test_code_tools_bridge.py
+              tests/unit/test_interactive_authorization.py
+              tests/unit/test_guardrail_object_dispatch.py
+              tests/unit/test_tool_call_cap_transcript.py
+              tests/unit/test_tool_decorator_retry.py
+              tests/unit/test_tool_guardrails.py
+              tests/unit/test_tool_result_guardrail.py
+              tests/unit/test_tool_retry_integration.py
+              tests/unit/test_tools_reliability.py
+              tests/unit/test_toolsets.py
             # Both tests previously deselected here now pass in combination.
             # test_lazy_litellm_import was looking the loader module up by
             # name and could get a different object than the one get_litellm()
