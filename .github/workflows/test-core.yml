@@ -144,6 +144,7 @@ jobs:
               tests/unit/auth/ tests/unit/background/ tests/unit/checkpoints/
               tests/unit/cli/ tests/unit/compaction/ tests/unit/conditions/
               tests/unit/config/ tests/unit/context/ tests/unit/embedding/
+              tests/unit/decisions/ tests/unit/thinking/
               tests/unit/eval/ tests/unit/gateway/ tests/unit/goal/
               tests/unit/hooks/ tests/unit/llm/ tests/unit/lsp/ tests/unit/mcp/
               tests/unit/memory/ tests/unit/permissions/ tests/unit/policy/
@@ -160,6 +161,288 @@ jobs:
               tests/unit/test_task_execution_config.py
               tests/unit/test_agent_unknown_kwarg_guidance.py
               tests/unit/test_agent_instantiation_lazy.py tests/unit/test_agent_os_exports.py
+              tests/unit/test_agent_prefix_rename.py tests/unit/test_agent_presentation_reply.py
+              tests/unit/test_async_input_guardrail_offload.py tests/unit/test_agentteam_stream_fanin.py
+              tests/unit/test_gateway_addressing.py tests/unit/test_gateway_concurrency_policy.py
+              tests/unit/test_gateway_dead_letter_policy.py tests/unit/test_gateway_drain_policy.py
+              tests/unit/test_gateway_exit_codes.py tests/unit/test_gateway_frame_codec.py
+              tests/unit/test_gateway_hook_signature.py tests/unit/test_gateway_idle_policy.py
+              tests/unit/test_gateway_liveness_policy.py tests/unit/test_gateway_rate_limit_policy.py
+              tests/unit/test_gateway_code_skew.py tests/unit/test_gateway_degraded_state.py
+              tests/unit/test_gateway_drain_marker.py tests/unit/test_gateway_forensics.py
+              tests/unit/test_gateway_hook_coalesce.py tests/unit/test_gateway_hook_signature_schemes.py
+              tests/unit/test_gateway_ingress_attribution.py tests/unit/test_gateway_lifecycle_guard.py
+              tests/unit/test_gateway_lifecycle_hooks.py
+              tests/unit/test_gateway_lifecycle_record.py tests/unit/test_gateway_loop_watchdog.py
+              tests/unit/test_gateway_method_scopes.py tests/unit/test_gateway_pressure_eviction.py
+              tests/unit/test_gateway_restart_loop_guard.py
+              tests/unit/test_gateway_scope_lockstep.py tests/unit/test_gateway_session_observer.py
+              tests/unit/test_gateway_session_projection.py tests/unit/test_gateway_spend_budget_policy.py
+              tests/unit/test_gateway_thaw_policy.py tests/unit/test_gateway_trace_hook.py
+              tests/unit/test_gateway_ts_event_type_lockstep.py tests/unit/test_gateway_turn_executor.py
+              tests/unit/test_gateway_turn_lock.py tests/unit/test_handoff_context_policy.py
+              tests/unit/test_handoff_filters.py tests/unit/test_handoff_lazy_import.py
+              tests/unit/test_handoff_runtime_resolution.py tests/unit/test_handoff_tool_policy.py
+              tests/unit/test_middleware.py tests/unit/test_model_alias_rule.py
+              tests/unit/test_multimodal_tool_output.py tests/unit/test_namespace_guard.py
+              tests/unit/test_param_resolver_dict.py tests/unit/test_presentation_adapt.py
+              tests/unit/test_protocols.py tests/unit/test_push_protocols.py
+              tests/unit/test_quota_coordinator.py tests/unit/test_route_bindings.py
+              tests/unit/test_route_tool_policy.py tests/unit/test_run_outcome.py
+              tests/unit/test_run_status.py
+              tests/unit/test_schedule_claim.py tests/unit/test_schedule_context_from.py
+              tests/unit/test_schedule_crash_recovery.py tests/unit/test_schedule_cron_engine.py
+              tests/unit/test_schedule_history.py tests/unit/test_schedule_incidents.py
+              tests/unit/test_schedule_job_state.py tests/unit/test_schedule_misfire.py
+              tests/unit/test_schedule_principal.py tests/unit/test_schedule_quota_hold.py
+              tests/unit/test_schedule_store_persistence.py tests/unit/test_schedule_at_wall_clock.py
+              tests/unit/test_model_harness.py tests/unit/test_model_harness_guard.py
+              tests/unit/test_model_harness_scripted.py tests/unit/test_output_encoding.py
+              tests/unit/test_param_consolidation.py tests/unit/test_presentation_poll.py
+              tests/unit/test_runtime_capabilities.py tests/unit/test_runtime_doctor.py
+              tests/unit/test_task_failure_policies.py tests/unit/test_team_rerun_and_retrieval_state.py
+              tests/unit/test_a2a_stream_lifecycle.py tests/unit/test_agent_as_tool.py
+              tests/unit/test_async_offload_6152.py tests/unit/test_base_platform_adapter.py
+              tests/unit/test_bot_commands_shared.py tests/unit/test_bot_loop_guard.py
+              tests/unit/test_bot_message_hooks.py tests/unit/test_botos_protocol.py
+              tests/unit/test_callback_payload_store.py tests/unit/test_circuit_breaker.py
+              tests/unit/test_cli_backend_protocol.py tests/unit/test_context_compaction_policy.py
+              tests/unit/test_cost_utils_cache.py tests/unit/test_degraded_delivery.py
+              tests/unit/test_failure_reply.py tests/unit/test_framework_protocol.py
+              tests/unit/test_issue_5741_atomic_state.py tests/unit/test_issue_5771_hot_path_and_leaks.py
+              tests/unit/test_issue_5806_robustness.py tests/unit/test_issue_5838_shared_helpers.py
+              tests/unit/test_issue_5900_job_manager_reliability.py tests/unit/test_issue_5920_guardrail_and_rules.py
+              tests/unit/test_issue_5957.py tests/unit/test_issue_6116_workflow_team_fixes.py
+              tests/unit/test_issue_6171_hardening.py
+              tests/unit/test_glob_rules_activation.py tests/unit/test_guardrail_object_dispatch.py
+              tests/unit/test_image_agent_async.py tests/unit/test_image_agent_default_model.py
+              tests/unit/test_image_agent_response_format.py tests/unit/test_image_agent_style.py
+              tests/unit/test_ingress_admission.py tests/unit/test_injected_state.py
+              tests/unit/test_interactive_authorization.py tests/unit/test_llm_content_callback.py
+              tests/unit/test_llm_guardrail_fail_closed.py tests/unit/test_tool_call_cap_transcript.py
+              tests/unit/test_tool_guardrails.py tests/unit/test_tool_result_guardrail.py
+              tests/unit/test_architectural_fixes_unit.py tests/unit/test_as_tool_in_tools_param.py
+              tests/unit/test_async_memory.py tests/unit/test_autonomy_budget.py
+              tests/unit/test_autonomy_gaps.py tests/unit/test_autonomy_system_fixes.py
+              tests/unit/test_autonomy_unified.py tests/unit/test_compaction_wiring.py
+              tests/unit/test_chat_commands.py tests/unit/test_cli_backend_hook.py
+              tests/unit/test_configurable_model.py tests/unit/test_execution_location.py
+              tests/unit/test_failover.py tests/unit/test_gateway_emergency_stop.py
+              tests/unit/test_gateway_health_pressure.py tests/unit/test_memory_history_separation.py
+              tests/unit/test_memory_system_fixes.py tests/unit/test_messaging_mailbox.py
+              tests/unit/test_stream_preset.py tests/unit/test_tool_decorator_retry.py
+              tests/unit/test_gateway_device_auth.py tests/unit/test_gateway_relay_transport.py
+              tests/unit/test_history_parameter.py tests/unit/test_lazy.py
+              tests/unit/test_llm_consolidation.py tests/unit/test_permissions.py
+              tests/unit/test_process_timeout.py tests/unit/test_push_client.py tests/unit/test_run_lock.py
+              tests/unit/test_allowed_tools_filter.py tests/unit/test_approval_auto.py
+              tests/unit/test_approval_protocol.py tests/unit/test_toolsets.py
+              tests/unit/test_schedule_integration.py tests/unit/test_schedule_lifecycle_hooks.py
+              tests/unit/test_schedule_timezone.py tests/unit/test_schedule_tools.py
+              tests/unit/test_scheduler_provider.py tests/unit/test_autonomy_dry_refactor.py
+              tests/unit/test_heartbeat.py
+              tests/unit/test_streaming_integration.py tests/unit/test_tool_retry_integration.py
+              tests/unit/test_push_policy.py
+              tests/unit/test_profiling.py tests/unit/test_rate_limit_backoff_5755.py
+              tests/unit/test_rate_limiter.py tests/unit/test_compute_home.py
+              tests/unit/test_gap_closure.py tests/unit/test_bot_session.py tests/unit/test_skill_bridge.py
+              tests/unit/test_whatsapp_message_filtering.py
+              tests/unit/test_security_hardening.py tests/unit/test_security_hardening_round2.py
+              tests/unit/test_whatsapp_web_adapter.py tests/unit/test_whatsapp_web_mode.py
+              tests/unit/test_bots.py tests/unit/test_opt_in_modules_lazy.py
+              tests/unit/test_launch_mcp_delegation.py
+              tests/unit/test_gateway.py tests/unit/test_gateway_config.py tests/unit/test_chainlit_bot_ui.py
+              tests/unit/test_sandbox.py tests/unit/test_cost_persistence.py
+              tests/unit/test_parameter_naming.py
+              tests/unit/test_api_exports.py
+              tests/unit/test_tools_reliability.py
+              tests/unit/test_accepted_and_ignored_config.py
+              tests/unit/test_code_tools_bridge.py
+              tests/unit/test_paths.py
+              tests/unit/test_advanced_features.py
+              tests/unit/test_computer_tools.py
+              tests/unit/test_security_outstanding_ghsas.py
+              tests/unit/test_paths_wiring.py
+              tests/unit/test_managed_backend.py
+              tests/unit/test_secrets.py
+              tests/unit/test_gateway_server.py tests/unit/test_gateway_routing.py
+              tests/unit/test_whatsapp_bot.py
+              tests/unit/test_mcp_loader.py
+              tests/unit/test_import_side_effects.py::test_import_leaves_host_logging_warnings_and_env_untouched
+              tests/unit/test_import_side_effects.py::test_launch_does_not_read_caller_source
+              tests/unit/test_import_side_effects.py::test_execute_tool_async_tool_inside_running_loop
+              tests/unit/test_import_side_effects.py::test_keep_alive_runs_before_executor_shutdown
+              tests/unit/test_security_audit_fixes.py::test_spider_blocks_rebound_hostname
+              tests/unit/test_security_audit_fixes.py::test_workflow_include_skips_tools_without_opt_in
+              tests/unit/test_security_audit_fixes.py::test_web_crawl_rejects_redirect_to_loopback
+              tests/unit/test_security_audit_fixes.py::test_web_crawl_urllib_fallback_does_not_follow_redirect_to_internal
+              tests/unit/test_security_audit_fixes.py::test_searxng_may_use_loopback_but_the_crawler_may_not
+              tests/unit/test_security_audit_fixes.py::test_searxng_allowlist_cannot_reach_link_local_metadata
+              tests/unit/test_security_audit_fixes.py::test_file_memory_rejects_traversal_user_id
+              tests/unit/test_security_audit_fixes.py::test_file_memory_uses_sanitised_user_id_for_path
+              tests/unit/test_security_audit_fixes.py::test_file_memory_rejects_path_object_user_id
+              tests/unit/test_security_audit_fixes.py::test_agent_server_enforces_auth_token
+              tests/unit/test_provider_matrix.py::test_daytona_asks_for_memory_in_the_unit_the_sdk_documents
+              tests/unit/test_provider_matrix.py::test_run_on_accepts_exactly_the_places_that_host_a_loop
+              tests/unit/test_provider_matrix.py::test_daytona_uploads_content_then_destination
+              tests/unit/test_provider_matrix.py::test_both_implementations_of_a_vendor_exist_and_are_distinct
+              tests/unit/test_provider_matrix.py::test_neither_implementation_passes_megabytes_where_gib_is_wanted
+              tests/unit/test_provider_matrix.py::test_e2b_honours_a_non_default_image_as_its_template
+              tests/unit/test_provider_matrix.py::test_modal_honours_a_non_default_image_from_the_registry
+              tests/unit/test_provider_matrix.py::test_the_two_docker_implementations_agree_on_their_image
+              tests/unit/test_provider_matrix.py::test_every_install_hint_names_an_extra_that_exists
+              tests/unit/test_provider_matrix.py::test_managed_ps_polls_places_from_the_registry_not_a_literal
+              tests/unit/test_provider_matrix.py::test_a_contributed_place_would_be_polled
+              tests/unit/test_provider_matrix.py::test_a_contributed_place_can_name_itself
+              tests/unit/test_provider_matrix.py::test_an_unknown_place_still_falls_back_to_its_name
+              tests/unit/test_provider_matrix.py::test_sandbox_backends_from_plugins_are_selectable
+              tests/unit/test_provider_matrix.py::test_a_plugin_sandbox_reaches_both_parameters
+              tests/unit/test_provider_matrix.py::test_every_place_resolves_to_a_provider[local]
+              tests/unit/test_provider_matrix.py::test_every_place_resolves_to_a_provider[docker]
+              tests/unit/test_provider_matrix.py::test_every_place_resolves_to_a_provider[modal]
+              tests/unit/test_provider_matrix.py::test_every_provider_satisfies_the_protocol[local]
+              tests/unit/test_provider_matrix.py::test_every_provider_satisfies_the_protocol[docker]
+              tests/unit/test_provider_matrix.py::test_every_provider_satisfies_the_protocol[modal]
+              tests/unit/test_provider_matrix.py::test_every_protocol_method_is_awaitable[local]
+              tests/unit/test_provider_matrix.py::test_every_protocol_method_is_awaitable[docker]
+              tests/unit/test_provider_matrix.py::test_every_protocol_method_is_awaitable[modal]
+              tests/unit/test_provider_matrix.py::test_every_place_resolves_to_a_provider[daytona]
+              tests/unit/test_provider_matrix.py::test_every_place_resolves_to_a_provider[e2b]
+              tests/unit/test_provider_matrix.py::test_every_place_resolves_to_a_provider[flyio]
+              tests/unit/test_provider_matrix.py::test_every_place_resolves_to_a_provider[novita]
+              tests/unit/test_provider_matrix.py::test_every_place_resolves_to_a_provider[sandlock]
+              tests/unit/test_provider_matrix.py::test_every_place_resolves_to_a_provider[subprocess]
+              tests/unit/test_provider_matrix.py::test_every_place_resolves_to_a_provider[tenki]
+              tests/unit/test_provider_matrix.py::test_every_provider_satisfies_the_protocol[daytona]
+              tests/unit/test_provider_matrix.py::test_every_provider_satisfies_the_protocol[e2b]
+              tests/unit/test_provider_matrix.py::test_every_provider_satisfies_the_protocol[flyio]
+              tests/unit/test_provider_matrix.py::test_every_provider_satisfies_the_protocol[novita]
+              tests/unit/test_provider_matrix.py::test_every_provider_satisfies_the_protocol[sandlock]
+              tests/unit/test_provider_matrix.py::test_every_provider_satisfies_the_protocol[subprocess]
+              tests/unit/test_provider_matrix.py::test_every_provider_satisfies_the_protocol[tenki]
+              tests/unit/test_provider_matrix.py::test_every_protocol_method_is_awaitable[daytona]
+              tests/unit/test_provider_matrix.py::test_every_protocol_method_is_awaitable[e2b]
+              tests/unit/test_provider_matrix.py::test_every_protocol_method_is_awaitable[flyio]
+              tests/unit/test_provider_matrix.py::test_every_protocol_method_is_awaitable[novita]
+              tests/unit/test_provider_matrix.py::test_every_protocol_method_is_awaitable[sandlock]
+              tests/unit/test_provider_matrix.py::test_every_protocol_method_is_awaitable[subprocess]
+              tests/unit/test_provider_matrix.py::test_every_protocol_method_is_awaitable[tenki]
+              tests/unit/test_provider_matrix.py::test_tools_run_on_accepts_every_place[local]
+              tests/unit/test_provider_matrix.py::test_tools_run_on_accepts_every_place[docker]
+              tests/unit/test_provider_matrix.py::test_tools_run_on_accepts_every_place[modal]
+              tests/unit/test_provider_matrix.py::test_tools_run_on_accepts_every_place[daytona]
+              tests/unit/test_provider_matrix.py::test_tools_run_on_accepts_every_place[e2b]
+              tests/unit/test_provider_matrix.py::test_tools_run_on_accepts_every_place[flyio]
+              tests/unit/test_provider_matrix.py::test_tools_run_on_accepts_every_place[novita]
+              tests/unit/test_provider_matrix.py::test_tools_run_on_accepts_every_place[sandlock]
+              tests/unit/test_provider_matrix.py::test_tools_run_on_accepts_every_place[subprocess]
+              tests/unit/test_provider_matrix.py::test_tools_run_on_accepts_every_place[tenki]
+              tests/unit/test_provider_matrix.py::test_the_repr_names_the_place_it_was_given[local]
+              tests/unit/test_provider_matrix.py::test_the_repr_names_the_place_it_was_given[docker]
+              tests/unit/test_provider_matrix.py::test_the_repr_names_the_place_it_was_given[modal]
+              tests/unit/test_provider_matrix.py::test_the_repr_names_the_place_it_was_given[daytona]
+              tests/unit/test_provider_matrix.py::test_the_repr_names_the_place_it_was_given[e2b]
+              tests/unit/test_provider_matrix.py::test_the_repr_names_the_place_it_was_given[flyio]
+              tests/unit/test_provider_matrix.py::test_the_repr_names_the_place_it_was_given[novita]
+              tests/unit/test_provider_matrix.py::test_the_repr_names_the_place_it_was_given[sandlock]
+              tests/unit/test_provider_matrix.py::test_the_repr_names_the_place_it_was_given[subprocess]
+              tests/unit/test_provider_matrix.py::test_the_repr_names_the_place_it_was_given[tenki]
+              tests/unit/test_provider_matrix.py::test_ssh_explains_that_a_name_is_not_enough
+              tests/unit/test_provider_matrix.py::test_native_is_accepted_as_an_alias_for_sandlock
+              tests/unit/test_provider_matrix.py::test_availability_can_be_answered_without_raising[local]
+              tests/unit/test_provider_matrix.py::test_availability_can_be_answered_without_raising[daytona]
+              tests/unit/test_provider_matrix.py::test_availability_can_be_answered_without_raising[e2b]
+              tests/unit/test_provider_matrix.py::test_availability_can_be_answered_without_raising[flyio]
+              tests/unit/test_provider_matrix.py::test_availability_can_be_answered_without_raising[tenki]
+              tests/unit/test_placement.py::test_a_name_in_both_sets_is_valid_for_both_parameters
+              tests/unit/test_placement.py::test_the_two_scopes_are_reported_differently
+              tests/unit/test_placement.py::test_the_sandbox_only_backends_are_reachable
+              tests/unit/test_placement.py::test_run_on_a_tools_only_place_names_the_right_parameter
+              tests/unit/test_placement.py::test_tools_run_on_a_managed_runtime_names_the_right_parameter
+              tests/unit/test_placement.py::test_an_unknown_place_lists_both_registries
+              tests/unit/test_placement.py::test_two_places_for_the_same_work_is_a_type_error
+              tests/unit/test_placement.py::test_run_on_is_refused_on_orchestrators
+              tests/unit/test_placement.py::test_tools_run_on_is_recorded_without_provisioning_anything
+              tests/unit/test_placement.py::test_a_plain_agent_is_untouched
+              tests/unit/test_placement.py::test_the_default_path_runs_no_registry_lookups
+              tests/unit/test_placement.py::test_a_named_placement_still_runs_the_lookups
+              tests/unit/test_placement.py::test_orchestrators_take_tools_run_on
+              tests/unit/test_placement.py::test_repr_uses_the_same_word_you_typed
+              tests/unit/test_placement.py::test_explain_names_the_tools_that_do_not_move
+              tests/unit/test_placement.py::test_explain_says_nothing_about_local_tools_when_nothing_moves
+              tests/unit/test_placement.py::test_an_unknown_tools_place_fails_at_construction
+              tests/unit/test_placement.py::test_ssh_says_it_needs_more_than_a_name
+              tests/unit/test_placement.py::test_local_is_described_by_the_backend_it_actually_gets
+              tests/unit/test_placement.py::test_a_local_place_still_warns_that_it_is_not_a_boundary
+              tests/unit/test_placement.py::test_resolver_aliases_are_accepted_at_construction
+              tests/unit/test_placement.py::test_a_backend_holding_a_local_compute_object_is_not_overstated
+              tests/unit/test_placement.py::test_a_place_can_be_contributed_by_another_package
+              tests/unit/test_placement.py::test_a_broken_plugin_cannot_break_places_that_do_not_name_it
+              tests/unit/test_placement.py::test_two_concurrent_runs_of_one_team_each_get_their_own_scope
+              tests/unit/test_placement.py::test_one_teams_run_does_not_suppress_another_teams_sandbox
+              tests/unit/test_placement.py::test_a_clone_does_not_inherit_the_source_agents_sandbox
+              tests/unit/test_placement.py::test_an_agent_with_its_own_sandbox_is_left_alone_by_a_flow
+              tests/unit/test_placement.py::test_a_batch_provisions_one_sandbox_not_one_per_row
+              tests/unit/test_placement.py::test_a_flow_does_not_clobber_an_agent_that_named_its_own_place
+              tests/unit/test_placement.py::test_a_placed_agent_inside_a_team_gets_its_sandbox_tools
+              tests/unit/test_placement.py::test_every_entry_point_places_tools_before_the_first_turn
+              tests/unit/test_sandbox_adapter.py::test_sandbox_only_backends_are_selectable_as_places
+              tests/unit/test_sandbox_adapter.py::test_the_registry_is_the_union_of_both_stacks
+              tests/unit/test_sandbox_adapter.py::test_a_sandbox_only_name_resolves_to_the_adapter
+              tests/unit/test_sandbox_adapter.py::test_a_name_that_needs_connection_details_says_so
+              tests/unit/test_lazy_imports.py::TestReplayStaysLazy
+              tests/unit/test_jira_tools.py
+              tests/unit/test_run_on_docker.py::test_docker_is_also_a_tool_place
+              tests/unit/test_run_on_docker.py::test_docker_is_a_managed_runtime
+              tests/unit/test_run_on_docker.py::test_run_on_docker_builds_the_self_hosted_backend
+              tests/unit/test_run_on_docker.py::test_run_on_moves_the_thinking_too
+              tests/unit/test_run_on_docker.py::test_the_two_read_differently_in_the_repr
+              tests/unit/test_run_on_docker.py::test_run_on_covers_the_cloud_places_too
+              tests/unit/test_run_on_docker.py::test_a_cloud_place_builds_its_own_backend_class
+              tests/unit/test_run_on_docker.py::test_docker_is_no_longer_a_special_case
+              tests/unit/test_run_on_docker.py::test_tools_run_on_leaves_the_thinking_here
+              tests/unit/test_run_on_docker.py::test_naming_both_is_still_a_conflict
+              tests/unit/test_run_on_docker.py::test_the_agent_is_rebuilt_from_serialisable_config_only
+              tests/unit/test_run_on_docker.py::test_hosted_config_spellings_are_translated
+              tests/unit/test_run_on_docker.py::test_an_empty_config_still_produces_a_valid_agent
+              tests/unit/test_run_on_docker.py::test_the_result_is_read_from_a_marked_line
+              tests/unit/test_run_on_docker.py::test_a_missing_daemon_says_what_to_do
+              tests/unit/test_run_on_docker.py::test_places_that_cannot_host_a_loop_are_still_refused
+              tests/unit/test_run_on_docker.py::test_the_remote_agent_is_rebuilt_without_callables
+              tests/unit/test_run_on_docker.py::test_the_generic_backend_honours_a_requested_image
+              tests/unit/test_run_on_docker.py::test_release_reclaims_even_on_an_event_loop_thread
+              tests/unit/test_run_on_docker.py::test_release_returns_before_a_slow_provider_finishes
+              tests/unit/test_run_on_docker.py::test_a_hosted_backend_reclaims_its_instance_when_collected
+              tests/unit/test_run_on_docker.py::test_an_explicit_shutdown_cancels_the_finalizer
+              tests/unit/test_placement.py::test_no_place_at_all_says_how_to_name_one
+              tests/unit/test_placement.py::test_a_hosted_agent_says_its_thinking_moved
+              tests/unit/test_placement.py::test_run_on_builds_the_same_thing_backend_would
+              tests/unit/test_thread_safety.py::TestMCPCleanup
+              tests/unit/test_async_bridge_invariants.py::test_no_handrolled_async_bridges_outside_helper
+              tests/unit/test_robustness_issue_5870.py::test_allowlist_failed_save_keeps_previous_file
+              tests/unit/test_robustness_issue_5870.py::test_config_dump_preserves_symlink_and_mode
+              tests/unit/test_robustness_issue_5870.py::test_allowlist_load_quarantines_corrupt_file
+              tests/unit/test_robustness_issue_5870.py::test_git_fetch_timeout_without_cache_returns_empty
+              tests/unit/test_robustness_issue_5870.py::test_git_fetch_timeout_falls_back_to_cache
+              tests/unit/test_output_file_containment.py::test_task_output_file_traversal_blocked
+              tests/unit/test_output_file_containment.py::test_task_output_file_symlink_escape_blocked
+              tests/unit/test_output_file_containment.py::test_task_output_file_overwrite_preserves_permissions
+              tests/unit/test_output_file_containment.py::test_task_output_file_hardlink_does_not_write_outside
+              tests/unit/test_output_file_containment.py::test_task_output_file_hardlink_keeps_mode_under_umask
+              tests/unit/test_output_file_containment.py::test_task_output_file_hardlink_group_kept_or_bits_dropped
+              tests/unit/test_output_file_containment.py::test_task_output_file_overwrite_in_readonly_directory
+              tests/unit/test_output_file_containment.py::test_task_output_file_inside_root
+              tests/unit/test_output_file_containment.py::test_task_output_file_respects_create_directory
+              tests/unit/test_output_file_containment.py::test_task_output_file_project_root_override
+              tests/unit/test_output_file_containment.py::test_workflow_output_file_input_traversal_blocked
+              tests/unit/test_output_file_containment.py::test_workflow_async_output_file_input_traversal_blocked
+              tests/unit/test_handoff_unified.py tests/unit/test_identity_canonicalizer_protocol.py
+              tests/unit/test_idle_timeout_breaker.py tests/unit/test_json_fence_cleanup.py
+              tests/unit/test_kanban_protocol.py tests/unit/test_loop_detection.py
+              tests/unit/test_loop_guard_no_progress.py tests/unit/test_delivery_target_parse.py
+              tests/unit/test_delivery_target_preview.py tests/unit/test_doom_loop_no_progress_boundary.py
+              tests/unit/test_editor_output.py tests/unit/test_error_classification.py
+              tests/unit/test_error_classifier_jitter.py tests/unit/test_execution_benchmark_rules.py
             # Both tests previously deselected here now pass in combination.
             # test_lazy_litellm_import was looking the loader module up by
             # name and could get a different object than the one get_litellm()
@@ -168,7 +451,19 @@ jobs:
             # directory and asserted every discovered dir was named "skills",
             # which is false once a remote skill has ever been cached; it runs
             # against a temp HOME and asserts the paths module is used.
-            extra_ignore: ""
+            # Skip strict timings and probes requiring process or service isolation.
+            extra_ignore: >-
+              --deselect=tests/unit/decisions/test_system_one.py::test_system_one_live_ollama
+              --deselect=tests/unit/test_profiling.py::TestZeroOverhead::test_record_timing_overhead
+              --deselect=tests/unit/test_profiling.py::TestZeroOverhead::test_phase_context_overhead
+              --deselect=tests/unit/test_rate_limiter.py::TestRateLimiterBasic::test_rate_limiter_acquire_sync
+              --deselect=tests/unit/test_lazy.py::TestLazyImportPerformance::test_lazy_import_is_fast
+              --deselect=tests/unit/test_injected_state.py::TestInjectionZeroOverhead::test_schema_generation_fast
+              --deselect=tests/unit/test_parameter_naming.py::TestPerformance::test_import_time_acceptable
+              --deselect=tests/unit/test_api_exports.py::TestImportPerformance::test_import_time_under_200ms
+              --deselect=tests/unit/test_paths.py::TestImportPerformance::test_import_time_under_10ms
+              --deselect=tests/unit/test_paths_wiring.py::TestPolicyConfigWiring::test_default_rules_dir_matches_paths
+              --deselect=tests/unit/test_paths_wiring.py::TestSchedulerStoreWiring::test_default_dir_matches_paths
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents
           - shard: train
@@ -248,7 +543,7 @@ jobs:
       run: |
         cd src/praisonai
         uv pip install --system duckduckgo_search
-        uv pip install --system pytest pytest-asyncio pytest-timeout pytest-xdist
+        uv pip install --system pytest pytest-asyncio pytest-timeout pytest-xdist psutil
         uv pip install --system "praisonaiagents[knowledge]"
     - uses: ./.github/actions/install-monorepo-packages
       with:
@@ -308,6 +603,90 @@ jobs:
         else
           python -m pytest ${{ matrix.paths }} "${PYTEST_ARGS[@]}" ${{ matrix.extra_ignore }}
         fi
+    - name: Run isolated thread safety tests
+      if: matrix.shard == 'agents-core'
+      working-directory: src/praisonai-agents
+      run: |
+        python -m pytest \
+          tests/unit/test_thread_safety.py::TestLiteAgentThreadSafety \
+          tests/unit/test_thread_safety.py::TestAgentThreadSafety \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings --timeout=60
+    - name: Run isolated approval registration test
+      if: matrix.shard == 'agents-core'
+      working-directory: src/praisonai-agents
+      run: |
+        python -m pytest tests/unit/test_security_audit_fixes.py::test_ast_grep_rewrite_requires_approval \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings --timeout=60
+    - name: Run isolated path reload tests
+      if: matrix.shard == 'agents-core'
+      working-directory: src/praisonai-agents
+      run: |
+        python -m pytest \
+          tests/unit/test_paths_wiring.py::TestPolicyConfigWiring::test_default_rules_dir_matches_paths \
+          tests/unit/test_paths_wiring.py::TestSchedulerStoreWiring::test_default_dir_matches_paths \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings --timeout=60
+    - name: Run isolated timeout-worker tests
+      if: matrix.shard == 'agents-core'
+      working-directory: src/praisonai-agents
+      run: |
+        python -m pytest \
+          tests/unit/test_async_bridge_invariants.py::test_tool_timeout_uses_daemon_worker_and_does_not_leak \
+          tests/unit/test_async_bridge_invariants.py::test_many_concurrent_healthy_timed_calls_are_not_refused \
+          tests/unit/test_async_bridge_invariants.py::test_saturated_orphan_pool_reports_capacity_not_timeout \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings --timeout=60
+    - name: Run isolated placement lifecycle tests
+      if: matrix.shard == 'agents-core'
+      working-directory: src/praisonai-agents
+      run: |
+        python -m pytest \
+          tests/unit/test_placement.py::test_a_dropped_agent_releases_its_sandbox \
+          tests/unit/test_placement.py::test_a_team_run_provisions_exactly_one_sandbox \
+          tests/unit/test_placement.py::test_an_async_team_run_provisions_its_sandbox \
+          tests/unit/test_placement.py::test_a_batch_shares_one_sandbox_across_every_row \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings --timeout=60
+    - name: Run isolated lazy import tests
+      if: matrix.shard == 'agents-core'
+      working-directory: src/praisonai-agents
+      run: |
+        python -m pytest \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_autonomy_not_loaded_on_agent_import \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_autonomy_config_still_importable_from_feature_configs \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_autonomy_config_lazy_import_matches_tool_search_pattern \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_litellm_not_loaded_on_import \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_requests_not_loaded_on_import \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_agent_available_via_getattr \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_session_available_via_getattr \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_knowledge_available_via_getattr \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_memory_available_via_getattr \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_tools_loaded_eagerly \
+          tests/unit/test_lazy_imports.py::TestLitePackage::test_lite_agent_no_litellm \
+          tests/unit/test_lazy_imports.py::TestLitePackage::test_lite_agent_with_custom_llm \
+          tests/unit/test_lazy_imports.py::TestLazyImports::test_all_exports_accessible \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings --timeout=60
+
+    - name: Run isolated callback failure tests
+      if: matrix.shard == 'agents-core'
+      working-directory: src/praisonai-agents
+      run: |
+        python -m pytest \
+          tests/unit/test_robustness_issue_5870.py::test_raising_sync_callback_does_not_propagate \
+          tests/unit/test_robustness_issue_5870.py::test_raising_callbacks_do_not_propagate_async \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings --timeout=60
+
+    - name: Run isolated telemetry configuration tests
+      if: matrix.shard == 'agents-core'
+      working-directory: src/praisonai-agents
+      run: |
+        python -m pytest tests/unit/test_lazy_imports.py::TestTelemetryConfig \
+          -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+          -q --tb=line --disable-warnings --timeout=60
 
   test-core-integration:
     name: test-core-integration

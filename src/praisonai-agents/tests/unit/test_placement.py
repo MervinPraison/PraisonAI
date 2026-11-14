@@ -320,7 +320,7 @@ def test_every_agent_in_a_flow_shares_one_sandbox():
     assert writer.tools == [] and reader.tools == []
 
 
-def test_an_agent_with_its_own_sandbox_is_left_alone_by_a_flow():
+def test_an_agent_with_its_own_sandbox_is_left_alone_by_a_flow(monkeypatch):
     """Attaching twice appended the capability prompt twice and, on non-LIFO
     teardown, left the agent holding tools bound to a dead instance."""
     from praisonaiagents.agent.tools_placement import (
@@ -328,6 +328,13 @@ def test_an_agent_with_its_own_sandbox_is_left_alone_by_a_flow():
         ensure_tools_placed,
     )
     from praisonaiagents.managed.shared_compute import SharedCompute
+    from praisonaiagents.managed import shared_compute
+
+    monkeypatch.setattr(shared_compute, "resolve_compute", lambda _: object())
+    monkeypatch.setattr(
+        SharedCompute, "ensure_provisioned",
+        lambda self: pytest.fail("attachment must not provision a sandbox"),
+    )
 
     own = _agent("own", tools_run_on="subprocess")
     ensure_tools_placed(own)
@@ -344,9 +351,16 @@ def test_an_agent_with_its_own_sandbox_is_left_alone_by_a_flow():
     assert own.tools == []
 
 
-def test_a_batch_provisions_one_sandbox_not_one_per_row():
+def test_a_batch_provisions_one_sandbox_not_one_per_row(monkeypatch):
     """start_for_each() calls start() per input; each used to provision and
     destroy its own sandbox, so a 50-row batch paid for 50 of them."""
+    from praisonaiagents.managed import shared_compute
+
+    monkeypatch.setattr(shared_compute, "resolve_compute", lambda _: object())
+    monkeypatch.setattr(
+        shared_compute.SharedCompute, "ensure_provisioned",
+        lambda self: pytest.fail("scope inspection must not provision a sandbox"),
+    )
     team = _team(tools_run_on="subprocess")
     assert team._needs_tools_scope()
     with team._shared_tools_scope():
@@ -356,7 +370,19 @@ def test_a_batch_provisions_one_sandbox_not_one_per_row():
 
 
 # ── run_on= moves the thinking too ───────────────────────────────────────────
-def test_a_hosted_agent_says_its_thinking_moved():
+@pytest.fixture
+def _no_hosted_credentials(monkeypatch):
+    for name in ("ANTHROPIC_API_KEY", "CLAUDE_API_KEY"):
+        monkeypatch.delenv(name, raising=False)
+
+    def no_network(*args, **kwargs):
+        pytest.fail("unexpected network connection")
+
+    monkeypatch.setattr("socket.socket.connect", no_network)
+    monkeypatch.setattr("socket.socket.connect_ex", no_network)
+
+
+def test_a_hosted_agent_says_its_thinking_moved(_no_hosted_credentials):
     """describe() used to report thinks_on='this machine' for a hosted agent --
     the diagnostic lying about the one thing it exists to answer."""
     from praisonaiagents.agent.execution_location import describe
@@ -368,14 +394,14 @@ def test_a_hosted_agent_says_its_thinking_moved():
     assert "Anthropic" in places["thinks_on"]
 
 
-def test_run_on_builds_the_same_thing_backend_would():
+def test_run_on_builds_the_same_thing_backend_would(_no_hosted_credentials):
     pytest.importorskip("praisonai.integrations")
     from praisonai.integrations import HostedAgent
 
     assert isinstance(_agent("t", run_on="anthropic").backend, HostedAgent)
 
 
-def test_a_flow_does_not_clobber_an_agent_that_named_its_own_place():
+def test_a_flow_does_not_clobber_an_agent_that_named_its_own_place(monkeypatch):
     """Ordering matters: a flow attaches at the start of the run, before the
     agent's first turn. Checking only for a *live* sandbox would let the flow
     attach first and the agent attach again on its first chat() -- two sandboxes
@@ -386,6 +412,13 @@ def test_a_flow_does_not_clobber_an_agent_that_named_its_own_place():
         ensure_tools_placed,
     )
     from praisonaiagents.managed.shared_compute import SharedCompute
+    from praisonaiagents.managed import shared_compute
+
+    monkeypatch.setattr(shared_compute, "resolve_compute", lambda _: object())
+    monkeypatch.setattr(
+        SharedCompute, "ensure_provisioned",
+        lambda self: pytest.fail("attachment must not provision a sandbox"),
+    )
 
     own = _agent("own", tools_run_on="subprocess")
     plain = _agent("plain")
@@ -410,7 +443,7 @@ def test_a_flow_does_not_clobber_an_agent_that_named_its_own_place():
 
 
 # ── regressions found by adversarial validation ──────────────────────────────
-def test_a_placed_agent_inside_a_team_gets_its_sandbox_tools():
+def test_a_placed_agent_inside_a_team_gets_its_sandbox_tools(monkeypatch):
     """The sandbox was provisioned and the model never saw it.
 
     AgentTeam snapshots agent.tools and passes it to chat() as an explicit
@@ -418,6 +451,16 @@ def test_a_placed_agent_inside_a_team_gets_its_sandbox_tools():
     every tool ran on the host while a real sandbox sat unused.
     """
     from praisonaiagents.agent.agent import Agent as _A
+    from praisonaiagents.managed import shared_compute
+
+    monkeypatch.setattr(shared_compute, "resolve_compute", lambda _: object())
+    monkeypatch.setattr(
+        shared_compute.SharedCompute, "ensure_provisioned",
+        lambda self: pytest.fail("tool inspection must not provision a sandbox"),
+    )
+    monkeypatch.setattr("socket.socket.connect", lambda *a, **k: pytest.fail("unexpected network connection"))
+    monkeypatch.setattr("socket.socket.connect_ex", lambda *a, **k: pytest.fail("unexpected network connection"))
+    monkeypatch.setattr(Task, "execute_callback_sync", lambda *a, **k: None)
 
     def mytool(x: str) -> str:
         """A local tool."""
@@ -445,10 +488,18 @@ def test_a_placed_agent_inside_a_team_gets_its_sandbox_tools():
         assert bridged in seen[0], f"{bridged} never reached the model"
 
 
-def test_one_teams_run_does_not_suppress_another_teams_sandbox():
+def test_one_teams_run_does_not_suppress_another_teams_sandbox(monkeypatch):
     """The scope depth was a single class-level integer, so any team started
     while another team's run was on the stack saw depth==1 and silently skipped
     its own sandbox."""
+    from praisonaiagents.managed import shared_compute
+
+    # This case only inspects scope nesting, never sandbox operations.
+    monkeypatch.setattr(shared_compute, "resolve_compute", lambda _: object())
+    monkeypatch.setattr(
+        shared_compute.SharedCompute, "ensure_provisioned",
+        lambda self: pytest.fail("scope inspection must not provision a sandbox"),
+    )
     outer = _team(tools_run_on="subprocess")
     inner = _team(tools_run_on="subprocess")
 
@@ -497,7 +548,7 @@ def test_two_concurrent_runs_of_one_team_each_get_their_own_scope():
     assert dict(team._tools_scope_depths.get()).get(id(team), 0) == 0
 
 
-def test_a_dropped_agent_releases_its_sandbox():
+def test_a_dropped_agent_releases_its_sandbox(monkeypatch):
     """Gateways clone an agent per request. An agent and its SharedCompute
     referenced each other, so a dropped agent was collected as a cycle and its
     sandbox was never shut down -- one orphaned container per request."""
@@ -505,6 +556,7 @@ def test_a_dropped_agent_releases_its_sandbox():
 
     from praisonaiagents.agent.tools_placement import ensure_tools_placed
 
+    provisioned, shut = _counting_provider(monkeypatch)
     agent = _agent("throwaway", tools_run_on="subprocess")
     ensure_tools_placed(agent)
     shared = agent._tools_sandbox
@@ -514,6 +566,7 @@ def test_a_dropped_agent_releases_its_sandbox():
     del agent
     gc.collect()
     assert shared.instance_id is None, "the sandbox outlived the agent that owned it"
+    assert shut == provisioned and len(shut) == 1
 
 
 @pytest.mark.parametrize("bad", ["dokcer", "sandbox", "ec2"])
@@ -600,20 +653,50 @@ def _counting_provider(monkeypatch):
     return provisioned, shut
 
 
+def _exercise_fake_team_tool(monkeypatch):
+    """Make each model turn call a tool backed by the counting fake."""
+    from praisonaiagents.agent.agent import Agent as _A
+
+    def chat(self, prompt, *args, **kwargs):
+        tools = kwargs.get("tools") or self.tools
+        next(tool for tool in tools if tool.__name__ == "execute_command")("true")
+        return "done"
+
+    async def achat(self, prompt, *args, **kwargs):
+        return chat(self, prompt, *args, **kwargs)
+
+    async def callback(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(_A, "chat", chat)
+    monkeypatch.setattr(_A, "achat", achat)
+    monkeypatch.setattr(Task, "execute_callback_sync", lambda *a, **k: None)
+    monkeypatch.setattr(Task, "execute_callback", callback)
+
+
 @pytest.mark.parametrize("drive", [
     pytest.param(lambda a: a.chat("hi"), id="chat"),
     pytest.param(lambda a: asyncio.run(a.achat("hi")), id="achat"),
     pytest.param(lambda a: next(iter(a._start_stream("hi")), None), id="_start_stream"),
 ])
-def test_every_entry_point_places_tools_before_the_first_turn(drive):
+def test_every_entry_point_places_tools_before_the_first_turn(drive, monkeypatch):
     """Deleting the ensure_tools_placed() call sites left the suite green.
 
     Whatever happens downstream -- no API key, a stubbed model, an outright
     error -- the hook runs at the top, so the sandbox must exist afterwards.
     """
     from praisonaiagents.agent.tools_placement import close_tools_sandbox
+    from praisonaiagents.managed import shared_compute
 
+    monkeypatch.setattr(shared_compute, "resolve_compute", lambda _: object())
+    monkeypatch.setattr(
+        shared_compute.SharedCompute, "ensure_provisioned",
+        lambda self: pytest.fail("entry point inspection must not provision a sandbox"),
+    )
     agent = _agent("driver", tools_run_on="subprocess")
+    monkeypatch.setattr(agent, "_resolve_skill_invocation", lambda prompt: prompt)
+    monkeypatch.setattr(agent, "_validate_input_with_guardrail", lambda prompt: (False, prompt, "test stop"))
+    monkeypatch.setattr(agent, "_guardrail_blocked_message", lambda error: "blocked")
     try:
         try:
             drive(agent)
@@ -629,43 +712,49 @@ def test_a_team_run_provisions_exactly_one_sandbox(monkeypatch):
     """Reverting the AgentTeam.start() provisioning changed nothing in the
     suite, because the old test only poked the private _needs_tools_scope()."""
     provisioned, shut = _counting_provider(monkeypatch)
+    _exercise_fake_team_tool(monkeypatch)
     team = _team(tools_run_on="subprocess")
     team.start()
-    # At most one, not exactly one. SharedCompute provisions LAZILY, so a run
-    # that never touches a tool correctly provisions nothing -- an exact count
-    # asserts a timing detail rather than the guarantee. The regression this
-    # guards (a sandbox per call) shows up as more than one.
-    assert len(provisioned) <= 1, f"expected one sandbox at most, got {provisioned}"
+    assert len(provisioned) == 1, f"expected one sandbox, got {provisioned}"
     assert shut == provisioned, "the sandbox must be torn down with the run"
 
 
 def test_an_async_team_run_provisions_its_sandbox(monkeypatch):
     """astart() used to provision nothing at all -- every tool ran on the host
     and nothing said so."""
-    provisioned, _ = _counting_provider(monkeypatch)
+    provisioned, shut = _counting_provider(monkeypatch)
+    _exercise_fake_team_tool(monkeypatch)
     team = _team(tools_run_on="subprocess")
     asyncio.run(team.astart())
-    assert len(provisioned) <= 1, f"astart() provisioned {provisioned}"
+    assert len(provisioned) == 1, f"astart() provisioned {provisioned}"
+    assert shut == provisioned
 
 
 def test_a_batch_shares_one_sandbox_across_every_row(monkeypatch):
     """start_for_each() provisioned one per row: a 50-row batch paid for 50,
     and no row could see what an earlier row wrote."""
-    provisioned, _ = _counting_provider(monkeypatch)
+    provisioned, shut = _counting_provider(monkeypatch)
+    _exercise_fake_team_tool(monkeypatch)
     team = _team(tools_run_on="subprocess")
     team.start_for_each([{"i": 1}, {"i": 2}, {"i": 3}])
-    # Three rows must not mean three sandboxes. Lazily, it may mean none --
-    # what must never happen is one per row, which is what this caught.
-    assert len(provisioned) <= 1, (
+    assert len(provisioned) == 1, (
         f"a 3-row batch provisioned {len(provisioned)} sandboxes: {provisioned}"
     )
+    assert shut == provisioned
 
 
-def test_a_clone_does_not_inherit_the_source_agents_sandbox():
+def test_a_clone_does_not_inherit_the_source_agents_sandbox(monkeypatch):
     """The clone got tools bound to the ORIGINAL's instance and then attached
     its own, ending up with two copies of the capability prompt and its work
     split across two machines."""
     from praisonaiagents.agent.tools_placement import close_tools_sandbox, ensure_tools_placed
+    from praisonaiagents.managed import shared_compute
+
+    monkeypatch.setattr(shared_compute, "resolve_compute", lambda _: object())
+    monkeypatch.setattr(
+        shared_compute.SharedCompute, "ensure_provisioned",
+        lambda self: pytest.fail("cloning must not provision a sandbox"),
+    )
 
     source = _agent("source", tools_run_on="subprocess")
     ensure_tools_placed(source)
