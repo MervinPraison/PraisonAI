@@ -1458,7 +1458,7 @@ class ScheduledAgentExecutor:
         """
         if self._run_policy is None or not self._run_policy.deliver_on_failure:
             return
-        delivery = getattr(job, "delivery", None)
+        delivery = self._ops_target(job)
         if not delivery or not self._can_deliver(delivery):
             return
         # A hold is a distinct operational state (the job is now silenced for a
@@ -1596,6 +1596,19 @@ class ScheduledAgentExecutor:
             logger.info("Persisted run audit for job '%s' to %s", job.id, path)
         except Exception as e:  # pragma: no cover - defensive
             logger.warning("Failed to write run audit for job '%s': %s", job.id, e)
+
+    @staticmethod
+    def _ops_target(job: "ScheduleJob") -> Optional["DeliveryTarget"]:
+        """Target for operational notices (failure / recovery / hold).
+
+        An explicit ``failure_delivery`` wins; a ``"none"`` target suppresses
+        the notice from every channel. Unset falls back to the result lane.
+        """
+        target = getattr(job, "failure_delivery", None)
+        if target is None:
+            return getattr(job, "delivery", None)
+        token = (target.deliver or target.channel or "").strip().lower()
+        return None if token == "none" else target
 
     def _can_deliver(self, delivery: "DeliveryTarget") -> bool:
         """Whether a configured ``delivery`` target should be dispatched.
@@ -1792,7 +1805,7 @@ class ScheduledAgentExecutor:
             # ``consecutive`` counter (delivery-independent) and stop.
             self._commit_incident(job, pending)
             return
-        delivery = getattr(job, "delivery", None)
+        delivery = self._ops_target(job)
         if not delivery or not self._can_deliver(delivery):
             # No channel to notify: still commit the resolution so the incident
             # does not stay latched forever with no way to close it.
@@ -1838,7 +1851,7 @@ class ScheduledAgentExecutor:
         """
         if self._run_policy is None or not self._run_policy.deliver_on_failure:
             return
-        delivery = getattr(job, "delivery", None)
+        delivery = self._ops_target(job)
         if not delivery or not self._can_deliver(delivery):
             return
         # Latch through the incident brain when durable state is available;
