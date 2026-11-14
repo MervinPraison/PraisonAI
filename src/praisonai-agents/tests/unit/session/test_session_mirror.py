@@ -204,8 +204,22 @@ def test_close_does_not_strand_an_enqueue_in_progress(tmp_path, monkeypatch):
     mirror = _RecordingMirror()
     store = DefaultSessionStore(session_dir=str(tmp_path), mirror=mirror)
     writer = store._mirror_writer
-    entered, release, closed = threading.Event(), threading.Event(), threading.Event()
+    entered, release, contending = threading.Event(), threading.Event(), threading.Event()
     put_nowait = writer._queue.put_nowait
+    actual_lock = threading.Lock()
+
+    class ObservedLock:
+        def __enter__(self):
+            if threading.current_thread() is closer:
+                assert actual_lock.locked()
+                contending.set()
+            actual_lock.acquire()
+            return self
+
+        def __exit__(self, *_args):
+            actual_lock.release()
+
+    monkeypatch.setattr(writer, "_enqueue_lock", ObservedLock())
 
     def blocked_put(item):
         entered.set()
@@ -215,12 +229,12 @@ def test_close_does_not_strand_an_enqueue_in_progress(tmp_path, monkeypatch):
     monkeypatch.setattr(writer._queue, "put_nowait", blocked_put)
     results = []
     producer = threading.Thread(target=lambda: results.append(store.add_message("s1", "user", "racing")))
-    closer = threading.Thread(target=lambda: (store.close_mirror(), closed.set()))
+    closer = threading.Thread(target=store.close_mirror)
     try:
         producer.start()
         assert entered.wait(5)
         closer.start()
-        closed.wait(1)
+        assert contending.wait(5), "close did not contend while enqueue was paused"
     finally:
         release.set()
         producer.join(5)
