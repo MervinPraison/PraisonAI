@@ -165,3 +165,33 @@ def test_room_custom_planner_gets_current_round_not_roundrobin_labels():
 
     assert [e.speaker for e in produced] == ["a"]
     assert all(e.round == 0 for e in produced)
+
+
+# ── Issue #6289: human @mention routing through the runtime ───────────────
+
+
+def test_room_human_mention_routes_only_to_addressed_agent():
+    import asyncio as _asyncio
+
+    calls = []
+
+    def agent(aid, text):
+        async def reply(_prompt):
+            calls.append(aid)
+            return text
+        return reply
+
+    room = Room(
+        RoomConfig(name="s", roster=["writer", "coder", "reviewer"]),
+        {
+            "writer": agent("writer", "words"),
+            "coder": agent("coder", "done @reviewer"),
+            "reviewer": agent("reviewer", "lgtm"),
+        },
+    )
+    turns = _asyncio.run(
+        room.on_message(RoomEvent(speaker="user", content="Please fix it @coder."))
+    )
+    # No fan-out: only the addressed agent opens, then its own handoff.
+    assert calls == ["coder", "reviewer"]
+    assert [(t.speaker, t.round) for t in turns] == [("coder", 0), ("reviewer", 1)]

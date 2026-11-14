@@ -134,9 +134,14 @@ def _advertised_tool_names(tools: List[Dict[str, Any]]) -> set:
 
 
 _FENCE_RE = re.compile(
-    r"(?P<fence>`{3,}|~{3,})"   # opening fence: >=3 backticks or tildes
-    r"[\s\S]*?"                  # body (lazy)
-    r"(?:(?P=fence)|\Z)",       # matching closing fence OR end-of-string
+    # Fenced block: opens at line start; closes only on a fence line of its
+    # own (CommonMark), so a delimiter quoted mid-line inside the block does
+    # not end it. Unclosed runs to end-of-string (fail closed). ``\r?``: CRLF.
+    r"^[ \t]*(?P<fence>`{3,}|~{3,})[\s\S]*?"
+    r"(?:^[ \t]*(?P=fence)[`~]*[ \t]*\r?$|\Z)"
+    # Mid-line ``` run: an inline code span, ended by the next matching run
+    # (e.g. "```xml```"), so it cannot hide a real call later in the reply.
+    r"|(?P<tick>`{3,})[\s\S]*?(?:(?P=tick)|\Z)",
     re.MULTILINE,
 )
 
@@ -210,6 +215,24 @@ def _name_and_args(data: Any, allowed: set) -> Optional[tuple]:
     return None
 
 
+def _recover_tool_call_tags(response_text: str, tools: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
+    """Only ``<tool_call>{...}</tool_call>`` blocks, outside fenced code, with
+    advertised names. The narrow fallback for any provider: plain JSON answers
+    and other dialects are never promoted to calls here."""
+    allowed = _advertised_tool_names(tools)
+    if not response_text or not allowed:
+        return None
+    calls = []
+    for match in _TOOL_CALL_TAG_RE.finditer(_mask_protected_ranges(response_text)):
+        try:
+            found = _name_and_args(json.loads(match.group(1)), allowed)
+        except (json.JSONDecodeError, TypeError):
+            found = None
+        if found:
+            calls.append(_make_tool_call(*found, response_text, len(calls)))
+    return calls or None
+
+
 def _recover_json_tool_calls(response_text: str, tools: List[Dict[str, Any]]) -> Optional[List[Dict[str, Any]]]:
     """Salvage a tool call a local model emitted as text instead of natively.
 
@@ -247,7 +270,7 @@ def _recover_json_tool_calls(response_text: str, tools: List[Dict[str, Any]]) ->
             tool_calls: List[Dict[str, Any]] = []
             for idx, tool_json in enumerate(response_json):
                 name = tool_json.get("name") if isinstance(tool_json, dict) else None
-                if name:
+                if isinstance(name, str) and name in allowed:
                     tool_calls.append(_make_tool_call(
                         name, tool_json.get("arguments", {}), response_text, idx))
             if tool_calls:

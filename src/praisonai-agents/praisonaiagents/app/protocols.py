@@ -42,7 +42,7 @@ class AgentOSProtocol(Protocol):
             ):
                 ...
             
-            def serve(self, host: str = "0.0.0.0", port: int = 8000):
+            def serve(self, host: str = "127.0.0.1", port: int = 8000):
                 '''Start the FastAPI server.'''
                 ...
             
@@ -66,7 +66,7 @@ class AgentOSProtocol(Protocol):
         Start the AgentApp server.
         
         Args:
-            host: Host address to bind to (default: "0.0.0.0")
+            host: Host address to bind to (default: "127.0.0.1")
             port: Port number to listen on (default: 8000)
             reload: Enable auto-reload for development (default: False)
             **kwargs: Additional server configuration
