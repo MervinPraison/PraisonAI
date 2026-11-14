@@ -463,6 +463,7 @@ class SqliteTranscriptStore(DefaultSessionStore):
                 "session_id": sid,
                 "id": sid,
                 "agent_name": data.get("agent_name"),
+                "title": meta.get("title"),
                 "agent_id": data.get("agent_id") or meta.get("agent_id"),
                 "source": data.get("source") or meta.get("source"),
                 "parent_id": data.get("parent_id") or meta.get("parent_id"),
