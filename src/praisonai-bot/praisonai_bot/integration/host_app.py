@@ -68,6 +68,20 @@ class _ConfiguredShim:
 _CONFIGURED = _ConfiguredShim()
 
 
+# aiui's Theme page (the built-in ``theme-picker`` record). It is how a viewer
+# picks light/dark/preset in the dashboard and how the command palette reaches
+# that choice, so a ``pages=`` whitelist never hides it.
+THEME_PAGE_ID = "theme-picker"
+
+
+def _whitelist_with_theme_page(pages: Sequence[str]) -> List[str]:
+    """``pages`` as a list, with aiui's Theme page kept visible."""
+    out = list(pages)
+    if THEME_PAGE_ID not in out:
+        out.append(THEME_PAGE_ID)
+    return out
+
+
 def is_legacy_host() -> bool:
     """True when callback-only ``@aiui.reply`` mode is requested."""
     return os.environ.get("PRAISONAI_HOST_LEGACY", "").strip().lower() in (
@@ -112,7 +126,9 @@ def configure_host(
     aiui.set_branding(title=title, logo=logo)
 
     if pages is not None:
-        aiui.set_pages(list(pages))
+        # The whitelist picks which feature pages show; it must not take away
+        # the viewer's light/dark choice (aiui's Theme page).
+        aiui.set_pages(_whitelist_with_theme_page(pages))
 
     dashboard_opts: Dict[str, Any] = {"sidebar": sidebar, "page_header": page_header}
     if modules:
