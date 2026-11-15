@@ -2068,10 +2068,36 @@ Your Role: {self.role}"""
         primary = str(params.get('model') or self.llm or '')
         # Bare names (no "provider/" prefix) share the configured server.
         prefix = lambda name: name.split('/', 1)[0] if '/' in name else ''
-        if prefix(primary) != prefix(model):
+        same_provider = prefix(primary) == prefix(model)
+        if not same_provider:
             for key in ('base_url', 'api_key', 'auth'):
                 params.pop(key, None)
         params['model'] = model
+        # No failover_manager here: LLM applies a profile's model over its
+        # own, so a fallback built with the manager would call the profile's
+        # model instead of ``model``. A same-provider fallback still takes the
+        # profile's key and endpoint, applied exactly as LLM applies them to
+        # the primary (each overrides when the profile sets it), so the key
+        # and the server it belongs to stay paired.
+        failover_manager = getattr(self, "_failover_manager", None)
+        if same_provider and failover_manager is not None:
+            profile = failover_manager.get_next_profile()
+            # get_next_profile picks by priority, not provider: a prefixed
+            # fallback only takes a profile for that same provider. Bare names
+            # have no prefix to check and keep the profile.
+            # The same alias pairs LLM._detect_provider treats as one provider.
+            aliases = {"claude": "anthropic", "google": "gemini", "ollama_chat": "ollama"}
+            canonical = lambda name: aliases.get(name, name)
+            fallback_provider = canonical(prefix(model).lower())
+            profile_provider = canonical((getattr(profile, 'provider', '') or '').lower())
+            if (profile is not None and fallback_provider and profile_provider
+                    and profile_provider != fallback_provider):
+                profile = None
+            if profile is not None:
+                if profile.api_key:
+                    params['api_key'] = profile.api_key
+                if profile.base_url:
+                    params['base_url'] = profile.base_url
         return LLM(**params)
 
     def _classify_custom_llm_fallback(self, error, failed_model, fallback_index):
@@ -2812,9 +2838,10 @@ Your Role: {self.role}"""
                     logging.error(f"[{self.name}] Context compression failed: {compression_error}")
             
             if classification.should_rotate_credential:
-                # TODO: Implement credential rotation when available
-                logging.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
-                # Don't retry without actual credential rotation
+                if not self._credential_failover_active():
+                    # TODO: Implement credential rotation when available
+                    logging.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
+                    # Don't retry without actual credential rotation
                 
             elif classification.should_fallback_model:
                 # Try next model in the fallback chain
@@ -2886,7 +2913,7 @@ Your Role: {self.role}"""
             
             # Include remediation hints for unimplemented recovery actions
             user_message = classification.user_message
-            if classification.should_rotate_credential:
+            if classification.should_rotate_credential and not self._credential_failover_active():
                 user_message += " Credential rotation is not yet implemented."
             if classification.should_fallback_model:
                 if not self.fallback_models:
@@ -2997,9 +3024,10 @@ Your Role: {self.role}"""
                 logging.error(f"[{self.name}] Context compression failed: {compression_error}")
         
         if classification.should_rotate_credential:
-            # TODO: Implement credential rotation when available
-            logging.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
-            # Don't retry without actual credential rotation
+            if not self._credential_failover_active():
+                # TODO: Implement credential rotation when available
+                logging.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
+                # Don't retry without actual credential rotation
             
         elif classification.should_fallback_model:
             # Try next model in the fallback chain
@@ -3071,7 +3099,7 @@ Your Role: {self.role}"""
         
         # Include remediation hints for unimplemented recovery actions
         user_message = classification.user_message
-        if classification.should_rotate_credential:
+        if classification.should_rotate_credential and not self._credential_failover_active():
             user_message += " Credential rotation is not yet implemented."
         if classification.should_fallback_model:
             if not self.fallback_models:

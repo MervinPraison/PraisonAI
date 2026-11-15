@@ -440,7 +440,13 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         if self._llm_init_params:
             try:
                 from ..llm.llm import LLM
-                self._llm_instance = LLM(**self._llm_init_params)
+                # Copy so the stored dict stays free of the manager. FailoverManager
+                # holds an RLock, and __deepcopy__ walks _llm_init_params.
+                params = dict(self._llm_init_params)
+                failover_manager = getattr(self, "_failover_manager", None)
+                if failover_manager is not None:
+                    params["failover_manager"] = failover_manager
+                self._llm_instance = LLM(**params)
             except ImportError as e:
                 raise ImportError(
                     "LLM features requested but dependencies not installed. "
@@ -448,6 +454,17 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 ) from e
         self._wire_deferred_history_callback()
         return self._llm_instance
+
+    def _credential_failover_active(self) -> bool:
+        """True when a FailoverManager already rotates credentials.
+
+        Rotation runs inside LLM. Chat error handling uses this to skip the
+        "not yet implemented" notice instead of rotating a second time.
+        """
+        if getattr(self, "_failover_manager", None) is not None:
+            return True
+        llm = getattr(self, "_llm_instance", None)
+        return llm is not None and getattr(llm, "_failover_manager", None) is not None
 
     @property
     def llm_instance(self):
@@ -876,6 +893,10 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # LLMConfig(fallback_models=[...])), so accept it here without exposing
         # it in the signature and seed the local below.
         _cloned_fallback_models = legacy_kwargs.pop("fallback_models", None)
+        # Same internal-only channel as fallback_models: clone_for_channel()
+        # forwards the shared FailoverManager so per-channel clones in one
+        # process share benches. Not a public Agent(failover_manager=) param.
+        _cloned_failover_manager = legacy_kwargs.pop("failover_manager", None)
         # `thinking_budget` is a backward-compatible alias for `reasoning_effort`
         # (Issue #4452); accept it here (like fallback_models) without exposing
         # it in the signature so the unknown-kwarg guard below does not reject it.
@@ -2149,6 +2170,12 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Seed from clone_for_channel()'s forwarded list (if any); an explicit
         # LLMConfig(fallback_models=[...]) on llm=/model= still takes precedence.
         fallback_models = _cloned_fallback_models  # Initialize for internal use
+        # Explicit LLMConfig.auth_profiles wins over a forwarded manager, the
+        # same precedence fallback_models already uses. None means "not set".
+        _auth_profiles = None
+        _auth_profiles_explicit = False
+        _quota_coordinator = None
+        _failover_settings = None
 
         # One rule for the alias pair: passing both is refused, everywhere.
         from ..utils.model_alias import resolve_model_alias
@@ -2166,6 +2193,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 api_key = llm_config_obj.api_key
             if auth is None:
                 auth = llm_config_obj.auth
+            if llm_config_obj.auth_profiles is not None:
+                _auth_profiles = llm_config_obj.auth_profiles
+                _auth_profiles_explicit = True
+            _quota_coordinator = llm_config_obj.quota_coordinator
+            _failover_settings = llm_config_obj.failover
         elif llm is not None and model is None:
             warn_deprecated_param(
                 "llm",
@@ -2189,8 +2221,29 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                     api_key = model.api_key
                 if auth is None:
                     auth = model.auth
+                if not _auth_profiles_explicit and model.auth_profiles is not None:
+                    _auth_profiles = model.auth_profiles
+                    _auth_profiles_explicit = True
+                if _quota_coordinator is None:
+                    _quota_coordinator = model.quota_coordinator
+                if _failover_settings is None:
+                    _failover_settings = model.failover
             else:
                 llm = model  # model= takes precedence
+
+        if _auth_profiles_explicit:
+            _resolved_failover_manager = None
+            if _auth_profiles:
+                from ..llm.failover import manager_from_auth_profiles
+                _resolved_failover_manager = manager_from_auth_profiles(
+                    _auth_profiles,
+                    quota_coordinator=_quota_coordinator,
+                    failover=_failover_settings,
+                )
+        else:
+            _resolved_failover_manager = _cloned_failover_manager
+        if _resolved_failover_manager is not None:
+            self._failover_manager = _resolved_failover_manager
         
         # Resolve the subscription auth provider eagerly. `auth=` is opt-in, so
         # this costs nothing for everyone else, and a user who asked to be
@@ -2509,7 +2562,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             # client holding a model name OpenAI has never heard of. Re-check
             # the *resolved* name so `llm="ollama/x"` and OLLAMA_HOST agree.
             _has_provider_prefix = isinstance(model_name, str) and "/" in model_name
-            if auth or _has_provider_prefix:
+            # A bare name such as gpt-4o-mini never builds an LLM unless a
+            # provider prefix, base_url, or auth is set. Profiles still have to
+            # reach LLM, so a manager forces the custom-LLM path. The manager
+            # itself stays off _llm_init_params (see _ensure_llm_instance).
+            if auth or _has_provider_prefix or getattr(self, "_failover_manager", None) is not None:
                 # A subscription auth provider only takes effect inside LLM
                 # (which injects the resolved OAuth credentials), so a bare
                 # model name plus auth= must still build an LLM instance rather
@@ -3285,12 +3342,28 @@ Your Role: {self.role}
         versions, while copying an asyncio.Lock can preserve its locked/waiter
         state. This hook replaces the Agent-owned locks directly, while
         lock-bearing state wrappers provide their own deepcopy hooks, so the
-        clone receives independent state and fresh locks.
+        clone receives independent state and fresh locks. The credential
+        FailoverManager is the exception: it is one shared pool and holds an
+        RLock. ``_llm_instance`` is inserted before ``_failover_manager`` and,
+        once built, stores that same manager, so the pool and its profiles are
+        registered in ``memo`` before the attribute walk. Otherwise
+        ``LLM.__deepcopy__`` tries to copy the lock.
         """
         import copy
         cls = self.__class__
         result = cls.__new__(cls)
         memo[id(self)] = result
+        # Share the pool before copying _llm_instance. Dict order puts the LLM
+        # first, and LLM.__deepcopy__ deep-copies the manager it holds.
+        manager = self.__dict__.get("_failover_manager")
+        if manager is not None and id(manager) not in memo:
+            memo[id(manager)] = manager
+            # Profiles stay the objects mark_failure updates. A private copy of
+            # LLM._current_profile would bench a profile the manager never reads.
+            list_profiles = getattr(manager, "list_profiles", None)
+            if callable(list_profiles):
+                for profile in list_profiles():
+                    memo.setdefault(id(profile), profile)
         for k, v in self.__dict__.items():
             if k in ("_db_run_context", "_db_session_init_lock"):
                 # A clone starts outside the source agent's active DB turn.
@@ -3307,6 +3380,10 @@ Your Role: {self.role}
                 object.__setattr__(result, k, threading.Lock())
             elif k == "_approvals_lock":
                 object.__setattr__(result, k, asyncio.Lock())
+            elif k == "_failover_manager":
+                # Shared credential pool. FailoverManager holds an RLock, so a
+                # deepcopy would raise; clones in one process share benches.
+                object.__setattr__(result, k, v)
             else:
                 object.__setattr__(result, k, copy.deepcopy(v, memo))
         return result
@@ -3391,6 +3468,7 @@ Your Role: {self.role}
             # LLM configuration 
             'llm': self.llm,
             'fallback_models': list(self.fallback_models) if hasattr(self, 'fallback_models') and self.fallback_models else None,
+            'failover_manager': getattr(self, '_failover_manager', None),
             'base_url': getattr(self, 'base_url', None),
             'api_key': getattr(self, 'api_key', None),
             'auth': getattr(self, 'auth', None),

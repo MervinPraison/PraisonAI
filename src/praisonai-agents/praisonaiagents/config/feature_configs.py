@@ -1165,6 +1165,29 @@ class ExecutionConfig:
         )
 
 
+def _declared_auth_profile(item: Any) -> Dict[str, Any]:
+    """Serialize one auth profile with its declared api_key.
+
+    ``AuthProfile.to_dict`` masks keys as ``***`` plus the last four characters.
+    Persisting that mask would break the next load, so the config round-trip
+    keeps the value the caller declared.
+    """
+    if isinstance(item, dict):
+        return dict(item)
+    metadata = getattr(item, "metadata", None) or {}
+    return {
+        "name": getattr(item, "name", None),
+        "provider": getattr(item, "provider", None),
+        "api_key": getattr(item, "api_key", None),
+        "base_url": getattr(item, "base_url", None),
+        "model": getattr(item, "model", None),
+        "priority": getattr(item, "priority", 0),
+        "rate_limit_rpm": getattr(item, "rate_limit_rpm", None),
+        "rate_limit_tpm": getattr(item, "rate_limit_tpm", None),
+        "metadata": dict(metadata),
+    }
+
+
 @dataclass
 class LLMConfig:
     """
@@ -1205,6 +1228,17 @@ class LLMConfig:
     
     # Additional auth headers (optional)
     auth: Optional[Dict[str, str]] = None
+
+    # Credential failover profiles. Each entry is a dict or an AuthProfile.
+    # api_key is stored as declared (plaintext, ${ENV}, or a secret ref).
+    auth_profiles: Optional[List[Any]] = None
+
+    # Quota backend name. None or "local" stays in-process. Any other string,
+    # including "redis" and "redis://...", fail-opens to local in core.
+    quota_coordinator: Optional[str] = None
+
+    # FailoverConfig fields. Unknown keys raise TypeError at construction.
+    failover: Optional[Dict[str, Any]] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -1214,17 +1248,33 @@ class LLMConfig:
             "base_url": self.base_url,
             "api_key": self.api_key,
             "auth": dict(self.auth) if self.auth else None,
+            "auth_profiles": (
+                [_declared_auth_profile(item) for item in self.auth_profiles]
+                if self.auth_profiles is not None else None
+            ),
+            "quota_coordinator": self.quota_coordinator,
+            "failover": dict(self.failover) if self.failover else None,
         }
     
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "LLMConfig":
         """Create LLMConfig from dictionary."""
+        auth_profiles = data.get("auth_profiles")
+        if auth_profiles is not None:
+            auth_profiles = [
+                dict(item) if isinstance(item, dict) else item
+                for item in auth_profiles
+            ]
+        failover = data.get("failover")
         return cls(
             model=data["model"],
             fallback_models=list(data["fallback_models"]) if data.get("fallback_models") else None,
             base_url=data.get("base_url"),
             api_key=data.get("api_key"),
             auth=dict(data["auth"]) if data.get("auth") else None,
+            auth_profiles=auth_profiles,
+            quota_coordinator=data.get("quota_coordinator"),
+            failover=dict(failover) if failover else None,
         )
 
 

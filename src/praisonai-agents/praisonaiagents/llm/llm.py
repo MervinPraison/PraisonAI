@@ -833,6 +833,14 @@ Respond with ONLY a valid JSON tool call in this format:
         # Failover management
         self._failover_manager = failover_manager
         self._current_profile = None  # Track current auth profile for failover
+        failover_config = getattr(failover_manager, "config", None)
+        if failover_config is not None and 'max_retries' not in extra_settings:
+            # LLMConfig(failover={"max_retries": N}) bounds how many profiles a
+            # request can reach; an explicit max_retries= still wins.
+            self._max_retries = failover_config.max_retries
+        # The base_url the caller configured, before any profile overrides it.
+        # Rotation falls back to it when the next profile names no server.
+        self._base_url_without_profile = self.base_url
         if self._failover_manager:
             self._current_profile = self._failover_manager.get_next_profile()
             if self._current_profile:
@@ -1276,6 +1284,18 @@ Respond with ONLY a valid JSON tool call in this format:
         attempt = attempt_state.get("attempt", 1)
         max_retries = attempt_state.get("max_retries", self._max_retries)
         
+        # A rejected key or an exhausted billing account belongs to one
+        # credential, so with auth profiles the next profile can still answer.
+        # _handle_retry_exception surfaces the error once no other profile is left.
+        if (error_kind in ("auth_permanent", "billing") and self._failover_manager
+                and attempt <= max_retries):
+            return FailoverDecision(
+                action="rotate_profile",
+                reason=error_kind,
+                backoff_ms=0,
+                is_retryable=True
+            )
+
         # Non-retryable errors (includes billing errors)
         if error_kind in ["auth_permanent", "model_not_found", "format_error", "billing"]:
             return FailoverDecision(
@@ -1328,10 +1348,17 @@ Respond with ONLY a valid JSON tool call in this format:
         # so blind retry cannot succeed — surface the auth failure immediately.
         if error_kind == "auth":
             if self._failover_manager:
+                get_delay = getattr(self._failover_manager, "get_retry_delay", None)
+                # FailoverConfig's retry_delay / exponential_backoff /
+                # max_retry_delay; get_retry_delay counts attempts from 0.
+                delay = get_delay(max(attempt - 1, 0)) if callable(get_delay) else None
+                if isinstance(delay, bool) or not isinstance(delay, (int, float)):
+                    # FailoverProtocol does not require get_retry_delay.
+                    delay = 1.0
                 return FailoverDecision(
                     action="rotate_profile",
                     reason=error_kind,
-                    backoff_ms=1000,  # Brief delay before trying new profile
+                    backoff_ms=int(delay * 1000),
                     is_retryable=True
                 )
             return FailoverDecision(
@@ -1439,11 +1466,12 @@ Respond with ONLY a valid JSON tool call in this format:
         except Exception:  # pragma: no cover - defensive
             return profile, kwargs
         if rotated and rotated != profile:
+            kwargs = self._apply_profile_to_kwargs(rotated, kwargs, previous=profile)
             profile = rotated
-            kwargs = self._apply_profile_to_kwargs(rotated, kwargs)
         return profile, kwargs
 
-    def _apply_profile_to_kwargs(self, profile: "AuthProfile", kwargs: dict) -> dict:
+    def _apply_profile_to_kwargs(self, profile: "AuthProfile", kwargs: dict,
+                                 previous: Optional["AuthProfile"] = None) -> dict:
         """Return a new kwargs dict with profile overrides applied.
 
         Never mutates ``self``: the active profile is a per-call concern, so
@@ -1466,6 +1494,15 @@ Respond with ONLY a valid JSON tool call in this format:
             kwargs["api_key"] = profile.api_key
         if profile.base_url:
             kwargs["base_url"] = profile.base_url
+        elif (previous is not None and previous.base_url
+              and kwargs.get("base_url") == previous.base_url):
+            # The server came from the profile being left, not from the
+            # caller: never send this profile's key there. Go back to the
+            # configured base_url, or to the provider default when none was set.
+            if getattr(self, "_base_url_without_profile", None):
+                kwargs["base_url"] = self._base_url_without_profile
+            else:
+                kwargs.pop("base_url", None)
         self._apply_nvidia_nim_credentials(kwargs)
         return kwargs
 
@@ -1644,10 +1681,12 @@ Respond with ONLY a valid JSON tool call in this format:
                 )
             next_profile = self._failover_manager.get_next_profile()
             if next_profile and next_profile != active_profile:
-                active_profile = next_profile
                 # Thread the active profile through the per-call kwargs so the
                 # shared instance state is never mutated (issue #3613 gap 2).
-                kwargs = self._apply_profile_to_kwargs(next_profile, kwargs)
+                kwargs = self._apply_profile_to_kwargs(
+                    next_profile, kwargs, previous=active_profile
+                )
+                active_profile = next_profile
                 logging.info(f"Failover: switched to profile '{next_profile.name}'")
             else:
                 # No alternate profile available - retrying would just hit the
@@ -1661,10 +1700,12 @@ Respond with ONLY a valid JSON tool call in this format:
             )
             next_profile = self._failover_manager.get_next_profile()
             if next_profile and next_profile != active_profile:
-                active_profile = next_profile
                 # Thread the active profile through the per-call kwargs so the
                 # shared instance state is never mutated (issue #3613 gap 2).
-                kwargs = self._apply_profile_to_kwargs(next_profile, kwargs)
+                kwargs = self._apply_profile_to_kwargs(
+                    next_profile, kwargs, previous=active_profile
+                )
+                active_profile = next_profile
                 # Enable retry for profile switch even if originally non-retryable
                 can_retry = True
                 retry_delay = 0.0
