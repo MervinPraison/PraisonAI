@@ -103,7 +103,8 @@ def configure_host(
     agent_kwargs: Optional[Dict[str, Any]] = None,
     gateway: Any = None,
     modules: Optional[Sequence[str]] = None,
-    style: str = "dashboard",
+    style: str = "app",
+    layout: Optional[str] = "chat-canvas",
     context_paths: Optional[Sequence[str]] = None,
     no_context: bool = False,
     context_cwd: Optional[str] = None,
@@ -123,6 +124,11 @@ def configure_host(
     datastore_mod = import_wrapper_module("praisonai.ui._aiui_datastore")
     aiui.set_datastore(datastore_mod.PraisonAISessionDataStore())
     aiui.set_style(style)
+    # The React app shell opens in Chat + Canvas by default (aiui >= 0.3.159).
+    # Pass style="dashboard" for the classic dashboard, or another layout:
+    # workbench, command, guided, mission.
+    if style == "app" and layout and hasattr(aiui, "set_layout"):
+        aiui.set_layout(layout)
     aiui.set_branding(title=title, logo=logo)
 
     if pages is not None:
