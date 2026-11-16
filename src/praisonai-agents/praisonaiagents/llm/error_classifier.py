@@ -132,6 +132,8 @@ def _is_connection_refused(exc: BaseException, _depth: int = 0) -> bool:
     """
     seen = 0
     while exc is not None and seen < 8 and _depth < 4:
+        if getattr(exc, "status_code", None) is not None:
+            return False  # a server answered (e.g. a proxy's 502 "connection refused"): keep it retryable
         if isinstance(exc, ConnectionRefusedError) or "connection refused" in str(exc).lower():
             return True
         group = getattr(exc, "exceptions", None)

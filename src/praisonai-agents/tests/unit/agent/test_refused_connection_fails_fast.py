@@ -121,3 +121,11 @@ def test_classifier_refused_is_not_retryable_but_timeouts_still_are():
     assert c_timeout.is_retryable
     c_503 = classify_llm_error(RuntimeError("503 Service Unavailable"), provider="openai", model="m")
     assert c_503.is_retryable
+    # A proxy that answered with an HTTP error mentioning "connection refused"
+    # upstream is a server response, not a refused connect: still retryable.
+    proxy = openai.InternalServerError(
+        "upstream connect error: connection refused",
+        response=httpx.Response(502, request=httpx.Request("POST", "http://proxy/v1")),
+        body=None,
+    )
+    assert classify_llm_error(proxy, provider="openai", model="m").is_retryable
