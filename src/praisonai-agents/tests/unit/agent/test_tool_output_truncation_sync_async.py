@@ -104,3 +104,32 @@ def test_agent_deepcopies_after_tool_use(monkeypatch, mode):
     assert clone.context_manager is not None
     assert clone.context_manager is not agent.context_manager
     assert run(clone, 2) == 2
+
+
+def test_oversized_error_dict_stays_an_error_dict(monkeypatch):
+    # Many medium fields push the dict over the total budget; the capped
+    # result must still carry ``error`` (and its flags) so retry, loop-guard
+    # and circuit-breaker checks still see a failure.
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-local-fake")
+    agent = Agent(name="e", instructions="x", llm="gpt-4o-mini", context=False)
+    big = {"error": "rate limit", "approval_denied": False,
+           **{f"f{i}": "y" * 4_000 for i in range(50)}}
+    capped = agent._truncate_tool_result("t", big, "call_1")
+    assert isinstance(capped, dict)
+    assert capped["error"] and capped["approval_denied"] is False
+    assert len(str(capped)) < 50_000
+
+
+def test_deepcopy_keeps_assigned_context_manager(monkeypatch):
+    # A manager assigned via the public setter is the user's, not lazily
+    # built: the clone gets a copy of it, not a fresh default or None.
+    import copy
+
+    class _Mgr:
+        marker = "custom"
+
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-local-fake")
+    agent = Agent(name="m", instructions="x", llm="gpt-4o-mini", context=False)
+    agent.context_manager = _Mgr()
+    clone = copy.deepcopy(agent)
+    assert isinstance(clone.context_manager, _Mgr)

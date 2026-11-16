@@ -2252,7 +2252,14 @@ Write the complete compiled report:"""
                 # the loop guard). Multimodal results pass through untouched.
                 from .tool_execution import _normalize_multimodal_result
                 if result and _normalize_multimodal_result(result) is None:
-                    result = self._truncate_tool_result(function_name, result, tool_call_id)
+                    if isinstance(result, dict) or getattr(self, "_artifact_store", None) is not None:
+                        # Spilling to the artifact store / tool-output store
+                        # (large dict fields) is file I/O; keep it off the loop.
+                        result = await asyncio.to_thread(
+                            self._truncate_tool_result, function_name, result, tool_call_id
+                        )
+                    else:
+                        result = self._truncate_tool_result(function_name, result, tool_call_id)
 
                 # Loop guard (post-execution) — record the outcome and surface a
                 # block/halt decision back to the model on this same turn, mirroring

@@ -3951,6 +3951,9 @@ Your Role: {self.role}
     def context_manager(self, value):
         """Set context manager directly."""
         self._context_manager = value
+        # Record it as the user's own manager so ``__deepcopy__`` copies it
+        # rather than treating it as lazily built (and rebuilding).
+        self._context_param = value
         self._context_manager_initialized = True
 
     def _manager_config_from_context_config(self, cc: Any) -> Any:

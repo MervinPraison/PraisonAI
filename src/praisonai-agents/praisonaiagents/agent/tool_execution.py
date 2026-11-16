@@ -1457,7 +1457,15 @@ class ToolExecutionMixin:
                     # back to the already-computed head/tail string (which
                     # carries the artifact reference for full retrieval).
                     if len(str(result)) > limit:
-                        result = truncated
+                        if result.get("error"):
+                            # Keep an error dict a dict: retry, loop-guard and
+                            # breaker checks key off ``error`` and the flags.
+                            result = {
+                                **{k: v for k, v in result.items() if v is None or isinstance(v, (bool, int, float))},
+                                "error": truncated,
+                            }
+                        else:
+                            result = truncated
                     elif artifact_ref:
                         # Add artifact reference to dict result if available
                         result["_artifact_ref"] = artifact_ref.to_dict()
