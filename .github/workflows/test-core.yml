@@ -160,6 +160,59 @@ jobs:
               tests/unit/test_task_execution_config.py
               tests/unit/test_agent_unknown_kwarg_guidance.py
               tests/unit/test_agent_instantiation_lazy.py tests/unit/test_agent_os_exports.py
+              tests/unit/test_gateway_addressing.py
+              tests/unit/test_gateway_concurrency_policy.py
+              tests/unit/test_gateway_dead_letter_policy.py
+              tests/unit/test_gateway_drain_policy.py
+              tests/unit/test_gateway_exit_codes.py
+              tests/unit/test_gateway_frame_codec.py
+              tests/unit/test_gateway_hook_signature.py
+              tests/unit/test_gateway_idle_policy.py
+              tests/unit/test_gateway_liveness_policy.py
+              tests/unit/test_gateway_rate_limit_policy.py
+              tests/unit/test_gateway_code_skew.py
+              tests/unit/test_gateway_degraded_state.py
+              tests/unit/test_gateway_drain_marker.py
+              tests/unit/test_gateway_forensics.py
+              tests/unit/test_gateway_hook_coalesce.py
+              tests/unit/test_gateway_hook_signature_schemes.py
+              tests/unit/test_gateway_ingress_attribution.py
+              tests/unit/test_gateway_lifecycle_guard.py
+              tests/unit/test_gateway_lifecycle_hooks.py
+              tests/unit/test_gateway_lifecycle_record.py
+              tests/unit/test_gateway_loop_watchdog.py
+              tests/unit/test_gateway_method_scopes.py
+              tests/unit/test_gateway_pressure_eviction.py
+              tests/unit/test_gateway_restart_loop_guard.py
+              tests/unit/test_gateway_scope_lockstep.py
+              tests/unit/test_gateway_session_observer.py
+              tests/unit/test_gateway_session_projection.py
+              tests/unit/test_gateway_spend_budget_policy.py
+              tests/unit/test_gateway_thaw_policy.py
+              tests/unit/test_gateway_trace_hook.py
+              tests/unit/test_gateway_ts_event_type_lockstep.py
+              tests/unit/test_gateway_turn_executor.py
+              tests/unit/test_gateway_turn_lock.py
+              tests/unit/test_base_platform_adapter.py
+              tests/unit/test_bot_commands_shared.py
+              tests/unit/test_bot_loop_guard.py
+              tests/unit/test_bot_message_hooks.py
+              tests/unit/test_botos_protocol.py
+              tests/unit/test_gateway_emergency_stop.py
+              tests/unit/test_gateway_health_pressure.py
+              tests/unit/test_gateway_device_auth.py
+              tests/unit/test_gateway_relay_transport.py
+              tests/unit/test_bot_session.py
+              tests/unit/test_whatsapp_message_filtering.py
+              tests/unit/test_whatsapp_web_adapter.py
+              tests/unit/test_whatsapp_web_mode.py
+              tests/unit/test_bots.py
+              tests/unit/test_gateway.py
+              tests/unit/test_gateway_config.py
+              tests/unit/test_chainlit_bot_ui.py
+              tests/unit/test_gateway_server.py
+              tests/unit/test_gateway_routing.py
+              tests/unit/test_whatsapp_bot.py
             # Both tests previously deselected here now pass in combination.
             # test_lazy_litellm_import was looking the loader module up by
             # name and could get a different object than the one get_litellm()
