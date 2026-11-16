@@ -169,11 +169,16 @@ class LoopGuard:
         self._tool_counts: Dict[str, int] = {}
         self._last_progress_count = 0
         self._last_progress_action_index = 0
-        # Parallel tool calls share this guard: an allowed pre-execution check
-        # reserves its call until record() lands, so a batch can't all pass on
-        # the same count. Sequential use never sees a reservation at check time.
+        # Parallel calls share this guard: an allowed check reserves its call until record().
         self._lock = threading.RLock()
         self._in_flight: Dict[str, int] = {}
+
+    def __getstate__(self):  # deepcopy/pickle (Agent clone): locks can't be copied
+        return {k: v for k, v in self.__dict__.items() if k != "_lock"}
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._lock = threading.RLock()
         
     def reset_turn(self) -> None:
         """Reset tracking for a new chat turn."""
@@ -284,9 +289,7 @@ class LoopGuard:
             current_count += 1
         
         # Check for no-progress patterns first
-        # A parallel call to the tool already on a stuck streak extends it once
-        # it finishes; count those still running so a batch stops where a
-        # sequential run would.
+        # In-flight calls to the tool on a stuck streak will extend it: count them.
         actions = self.detector._actions
         pending = 0
         if is_pre_execution and actions and actions[-1].action_type == tool_name:
