@@ -1,50 +1,60 @@
 """
 Version utilities for praisonaiagents package.
 
-This module provides version information by reading from pyproject.toml
-to avoid duplication and ensure the single source of truth.
+In a source checkout the version is read from this project's pyproject.toml
+(single source of truth). For installed wheels, the distribution metadata is
+used instead, since the parent directory is site-packages and any
+pyproject.toml found there belongs to an unrelated project.
 """
 
 import re
 from pathlib import Path
 
+_DIST_NAME = "praisonaiagents"
+
+
+def _version_from_source_tree():
+    """Return the version from the sibling pyproject.toml if it is ours."""
+    pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    try:
+        content = pyproject_path.read_text(encoding="utf-8")
+    except (OSError, ValueError):  # ValueError covers UnicodeDecodeError
+        return None
+    # Only look inside the [project] table so [tool.*] or other tables
+    # cannot supply the name or version.
+    section = re.search(r"^\[project\][ \t]*$(.*?)(?=^\[|\Z)", content, re.MULTILINE | re.DOTALL)
+    if not section:
+        return None
+    body = section.group(1)
+    # Only trust the file if it declares this distribution's name.
+    if not re.search(r'^\s*name\s*=\s*["\']' + _DIST_NAME + r'["\']\s*$', body, re.MULTILINE):
+        return None
+    match = re.search(r'^\s*version\s*=\s*["\']([^"\']+)["\']', body, re.MULTILINE)
+    return match.group(1) if match else None
+
 
 def get_version() -> str:
     """
-    Get the version string from pyproject.toml.
-    
+    Get the praisonaiagents version string.
+
     Returns:
-        str: Version string (e.g., "1.6.52")
-        
-    Raises:
-        RuntimeError: If version cannot be found or parsed
+        str: Version string (e.g., "1.6.52"), or "unknown" if undeterminable.
     """
+    version = _version_from_source_tree()
+    if version:
+        return version
     try:
-        # Get the package root (praisonaiagents directory)
-        package_root = Path(__file__).parent
-        # Go up to src/praisonai-agents directory
-        pyproject_path = package_root.parent / "pyproject.toml"
-        
-        if not pyproject_path.exists():
-            raise RuntimeError(f"pyproject.toml not found at {pyproject_path}")
-            
-        content = pyproject_path.read_text()
-        
-        # Look for version = "X.Y.Z" pattern
-        match = re.search(r'version\s*=\s*["\']([^"\']+)["\']', content)
-        if not match:
-            raise RuntimeError("Version not found in pyproject.toml")
-            
-        return match.group(1)
-        
-    except Exception as e:
-        # Fallback to "unknown" to avoid breaking imports
-        import warnings
-        warnings.warn(
-            f"Failed to read version from pyproject.toml: {e}. Using 'unknown'.",
-            RuntimeWarning
-        )
-        return "unknown"
+        from importlib.metadata import version as dist_version
+        return dist_version(_DIST_NAME)
+    except Exception:  # PackageNotFoundError or broken metadata
+        pass
+    import warnings
+    warnings.warn(
+        "Could not determine praisonaiagents version from pyproject.toml or "
+        "installed distribution metadata. Using 'unknown'.",
+        RuntimeWarning,
+    )
+    return "unknown"
 
 
 # Cache the version to avoid reading the file multiple times
