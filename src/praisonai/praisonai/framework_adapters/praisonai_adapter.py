@@ -485,8 +485,9 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         if isinstance(execution, dict):
             base = dict(execution)
         elif isinstance(execution, str):
+            from praisonaiagents.config.parse_utils import canonical_preset_key
             from praisonaiagents.config.presets import EXECUTION_PRESETS
-            base = dict(EXECUTION_PRESETS.get(execution.lower(), {}))
+            base = dict(EXECUTION_PRESETS.get(canonical_preset_key(execution), {}))
         else:
             base = {}
         agent_kwargs['execution'] = ExecutionConfig(**{**base, **limits})

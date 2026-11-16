@@ -62,3 +62,21 @@ def test_no_limits_forwards_execution_as_is():
     kwargs = {}
     PraisonAIAdapter._translate_execution({}, kwargs)
     assert "execution" not in kwargs
+
+
+def test_preset_name_matched_like_core():
+    kwargs = {}
+    PraisonAIAdapter._translate_execution(
+        {"max_execution_time": 30, "execution": " Thorough "}, kwargs
+    )
+    from praisonaiagents.config.presets import EXECUTION_PRESETS
+    assert kwargs["execution"].max_iter == EXECUTION_PRESETS["thorough"]["max_iter"]
+    assert kwargs["execution"].max_execution_time == 30
+
+
+def test_strict_validation_accepts_execution_fields():
+    from praisonai.config.validator import ConfigValidator
+    config = {"roles": {"a": {"role": "A", "goal": "g", "backstory": "b",
+                              "max_retry_limit": 3, "execution": "fast"}}}
+    result = ConfigValidator().validate_config(config, strict=True)
+    assert result.valid, result.errors

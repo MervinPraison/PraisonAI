@@ -106,6 +106,8 @@ class AgentConfig(BaseModel):
     max_iter: Optional[int] = Field(default=10, ge=1, description="Maximum iterations")
     max_rpm: Optional[int] = Field(default=60, ge=1, description="Maximum requests per minute")
     max_execution_time: Optional[float] = Field(default=None, ge=0, description="Maximum execution time")
+    max_retry_limit: Optional[int] = Field(default=None, ge=0, description="Maximum retries")
+    execution: Optional[Union[str, Dict[str, Any]]] = Field(default=None, description="Execution preset name or ExecutionConfig fields")
     verbose: Optional[bool] = Field(default=False, description="Verbose output")
     cache: Optional[bool] = Field(default=True, description="Enable caching")
     streaming: Optional[bool] = Field(default=False, description="Enable streaming")
