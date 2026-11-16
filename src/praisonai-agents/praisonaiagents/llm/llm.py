@@ -25,7 +25,6 @@ class FailoverManagerProtocol(Protocol):
 from pydantic import BaseModel
 import time
 import json
-import xml.etree.ElementTree as ET
 from ..errors import AgentErrorKind, BudgetExceededError, FailoverDecision, IdleTimeoutBreaker, ToolExecutionError
 from ..model_harness.guard import check_model_request
 # Gap 2: Tool call execution imports
@@ -784,6 +783,7 @@ Respond with ONLY a valid JSON tool call in this format:
         self._keep_recent_tool_results = extra_settings.get('keep_recent_tool_results', 6)
         self._loop_compactor = None  # Lazily created on first in-loop management call
         self._loop_compactor_model = None  # Model the cached compactor was built for
+        self._loop_managed_tokens = {}  # Per-conversation token count after the last in-loop clear/compact pass
         
         # Tool calling reliability settings (for weak models like Ollama)
         # These are auto-configured for Ollama providers if not explicitly set
@@ -3188,6 +3188,15 @@ Respond with ONLY a valid JSON tool call in this format:
         except Exception:
             return 8000
 
+    #: Share of the context window the conversation must grow by, since the
+    #: last in-loop clear pass, before another clear pass rewrites the prefix.
+    _LOOP_CLEAR_RESERVE_PCT = 0.1
+
+    @staticmethod
+    def _loop_conversation_key(messages: list) -> int:
+        """Identify a conversation by its first two messages (system + task)."""
+        return hash(repr([(m.get("role"), m.get("content")) for m in messages[:2] if isinstance(m, dict)]))
+
     def _manage_context_in_loop(self, messages: list) -> list:
         """
         Clear-then-compact between tool iterations. No-op when under threshold.
@@ -3234,12 +3243,27 @@ Respond with ONLY a valid JSON tool call in this format:
                 )
                 self._loop_compactor = compactor
                 self._loop_compactor_model = self.model
+                self._loop_managed_tokens = {}
 
             clear_at = int(budget * compactor.config.clear_threshold_pct)
             compact_at = int(budget * compactor.config.compact_threshold_pct)
 
             tokens = compactor.count_total_tokens(messages)
             if tokens < clear_at:
+                return messages
+
+            # Hysteresis: every pass rewrites the message prefix and so busts the
+            # provider prompt cache. Below the summarise threshold, wait until the
+            # context has grown by a reserve band since the last pass, so old tool
+            # results are cleared in batches instead of one per iteration.
+            # The baseline is kept per conversation (keyed by its stable head) so
+            # interleaved tool loops sharing this LLM don't reset each other's band.
+            managed = getattr(self, "_loop_managed_tokens", None)
+            if not isinstance(managed, dict):
+                managed = self._loop_managed_tokens = {}
+            last = managed.get(self._loop_conversation_key(messages))
+            reserve = int(budget * self._LOOP_CLEAR_RESERVE_PCT)
+            if tokens < compact_at and last is not None and last <= tokens < last + reserve:
                 return messages
 
             # Tier 1: clear re-fetchable tool results
@@ -3252,6 +3276,9 @@ Respond with ONLY a valid JSON tool call in this format:
             if compactor.count_total_tokens(messages) >= compact_at:
                 messages, _ = compactor.compact(messages)
 
+            if len(managed) >= 64:  # bound memory for long-lived shared LLMs
+                managed.clear()
+            managed[self._loop_conversation_key(messages)] = compactor.count_total_tokens(messages)
             return messages
         except Exception as e:
             logging.debug(f"In-loop context management skipped: {e}")
@@ -4218,64 +4245,17 @@ Respond with ONLY a valid JSON tool call in this format:
                             tool_calls = recovered
                             logging.debug(f"Recovered tool calls from response text: {tool_calls}")
                     
-                    # Parse tool calls from XML format in response text 
-                    # Try for known XML models first, or fallback for any model that might output XML
-                    if not tool_calls and response_text and formatted_tools:
-                        # Check if this model is known to use XML format, or try as fallback
-                        should_try_xml = (self._supports_xml_tool_format() or 
-                                        # Fallback: try XML if response contains XML-like tool call tags
-                                        '<tool_call>' in response_text)
-                        
-                        if should_try_xml:
-                            tool_calls = []
-                            
-                            # Try proper XML parsing first
-                            try:
-                                # Wrap in root element if multiple tool_call tags exist
-                                xml_content = f"<root>{response_text}</root>"
-                                root = ET.fromstring(xml_content)
-                                tool_call_elements = root.findall('.//tool_call')
-                                
-                                for idx, element in enumerate(tool_call_elements):
-                                    if element.text:
-                                        try:
-                                            tool_json = json.loads(element.text.strip())
-                                            if isinstance(tool_json, dict) and "name" in tool_json:
-                                                tool_calls.append({
-                                                    "id": f"tool_{iteration_count}_{idx}",
-                                                    "type": "function",
-                                                    "function": {
-                                                        "name": tool_json["name"],
-                                                        "arguments": json.dumps(tool_json.get("arguments", {}))
-                                                    }
-                                                })
-                                        except (json.JSONDecodeError, KeyError) as e:
-                                            logging.debug(f"Could not parse tool call JSON: {e}")
-                                            continue
-                            except ET.ParseError:
-                                # Fallback to regex if XML parsing fails
-                                tool_call_pattern = r'<tool_call>\s*(\{(?:[^{}]|{[^{}]*})*\})\s*</tool_call>'
-                                matches = re.findall(tool_call_pattern, response_text, re.DOTALL)
-                                
-                                for idx, match in enumerate(matches):
-                                    try:
-                                        tool_json = json.loads(match.strip())
-                                        if isinstance(tool_json, dict) and "name" in tool_json:
-                                            tool_calls.append({
-                                                "id": f"tool_{iteration_count}_{idx}",
-                                                "type": "function",
-                                                "function": {
-                                                    "name": tool_json["name"],
-                                                    "arguments": json.dumps(tool_json.get("arguments", {}))
-                                                }
-                                            })
-                                    except (json.JSONDecodeError, KeyError) as e:
-                                        logging.debug(f"Could not parse XML tool call: {e}")
-                                        continue
-                            
-                            if tool_calls:
-                                logging.debug(f"Parsed {len(tool_calls)} tool call(s) from XML format")
-                    
+                    # XML-format models (Qwen, or xml_tool_format=True), or any reply
+                    # carrying a <tool_call> tag: recover only <tool_call> blocks
+                    # outside fenced code (an example call is never executed) whose
+                    # name is advertised. Plain JSON answers are never promoted.
+                    if not tool_calls and response_text and formatted_tools and (
+                            self._supports_xml_tool_format() or '<tool_call>' in response_text):
+                        from .adapters import _recover_tool_call_tags
+                        tool_calls = _recover_tool_call_tags(response_text, formatted_tools)
+                        if tool_calls:
+                            logging.debug(f"Parsed {len(tool_calls)} tool call(s) from XML format")
+
                     # Force tool usage logic: if model ignores tools but should use them
                     _force = self._force_tool_usage_message(response_text, tool_calls, formatted_tools, iteration_count)
                     if _force is not None:
