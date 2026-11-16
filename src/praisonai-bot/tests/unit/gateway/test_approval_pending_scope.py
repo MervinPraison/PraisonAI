@@ -83,21 +83,33 @@ def test_denied_polling_does_not_exhaust_approval_budget(monkeypatch, tmp_path):
 
 
 def test_pending_queue_hides_requests_bound_to_other_reviewers(monkeypatch, tmp_path):
+    # Identity comes from the credential, not from a caller-supplied
+    # X-Operator-Id (#6428): claiming "alice" does not reveal alice's request,
+    # while a request bound to the token's own identity stays visible.
+    import hashlib
+
+    token_id = "operator:" + hashlib.sha256(TOKEN.encode("utf-8")).hexdigest()[:12]
+
     async def scenario():
         app, manager, _ = await build_app(monkeypatch, tmp_path, ["approvals"])
-        request_id, future = await manager.register(
+        alice_req, alice_fut = await manager.register(
             tool_name="send_report", arguments={"report": "team-a secret"},
             authorized_reviewers=["operator:alice"],
         )
+        own_req, own_fut = await manager.register(
+            tool_name="send_digest", arguments={"report": "own"},
+            authorized_reviewers=[token_id],
+        )
         auth = {"Authorization": f"Bearer {TOKEN}"}
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://gateway") as client:
-            bob = await client.get("/api/approval/pending", headers={**auth, "X-Operator-Id": "bob"})
-            alice = await client.get("/api/approval/pending", headers={**auth, "X-Operator-Id": "alice"})
-        assert bob.status_code == 200 and bob.json()["pending"] == []
-        assert "team-a secret" not in bob.text
-        assert alice.json()["pending"][0]["request_id"] == request_id
-        manager.resolve(request_id, Resolution(approved=False, reason="cleanup", resolver="operator:alice"))
-        await future
+            spoof = await client.get("/api/approval/pending", headers={**auth, "X-Operator-Id": "alice"})
+        assert spoof.status_code == 200
+        assert [p["request_id"] for p in spoof.json()["pending"]] == [own_req]
+        assert "team-a secret" not in spoof.text
+        manager.resolve(alice_req, Resolution(approved=False, reason="cleanup", resolver="operator:alice"))
+        manager.resolve(own_req, Resolution(approved=False, reason="cleanup", resolver=token_id))
+        await alice_fut
+        await own_fut
 
     asyncio.run(scenario())
 
