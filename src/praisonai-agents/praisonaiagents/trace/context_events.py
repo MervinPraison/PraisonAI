@@ -761,9 +761,9 @@ class ContextTraceEmitter:
 
     def _redact_dict(self, data: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """Redact sensitive data from dictionary if enabled."""
-        if data is None or not self._redact:
+        if data is None or not self._redact or type(self._sink) is ContextNoOpSink:
             return data
-        
+
         from .redact import redact_dict
         return redact_dict(data)
     
