@@ -15,6 +15,7 @@ import time
 import json
 import threading
 import logging
+import warnings
 from praisonaiagents._logging import get_logger
 from ..errors import BudgetExceededError, ToolExecutionError
 from .tool_execution import _active_turn_cancel
@@ -226,6 +227,28 @@ class _TurnCancelToken:
 
 class ChatMixin:
     """Mixin providing chat methods for the Agent class."""
+
+    # The exception behind the last turn that returned None (G-02); reset to
+    # None at the start of every chat()/achat() turn.
+    _last_error = None
+
+    def _none_after_failed_turn(self, exc):
+        """Return None for a failed turn (1.x contract), but say so and keep the error.
+
+        ``chat()``/``achat()``/``start()`` return None when the LLM call fails;
+        the cause used to be visible only in a printed panel. The exception is
+        kept on ``agent._last_error`` and a FutureWarning names the change, so
+        callers can detect the failure today. Raising instead is a 2.0 decision.
+        """
+        self._last_error = exc
+        warnings.warn(
+            f"Agent {getattr(self, 'name', None)!r}: the LLM call failed "
+            f"({type(exc).__name__}: {str(exc)[:200]}); returning None. The exception "
+            "is kept on agent._last_error. A future major release may raise instead.",
+            FutureWarning,
+            stacklevel=3,
+        )
+        return None
 
     @property
     def last_durable_run_id(self) -> Optional[str]:
@@ -3998,6 +4021,7 @@ Your Role: {self.role}"""
         # across turns of a long-lived agent.
         _reset_loop_guard_for_turn(self)
         self._last_stop_reason = "completed"
+        self._last_error = None
         # Apply rate limiter if configured (before any LLM call)
         if self._rate_limiter is not None:
             self._rate_limiter.acquire()
@@ -4351,7 +4375,7 @@ Your Role: {self.role}"""
                     _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
                     if _is_fatal_model_error(e):
                         raise
-                    return None
+                    return self._none_after_failed_turn(e)
             except (ToolExecutionError, BudgetExceededError):
                 raise
             except Exception as e:
@@ -4359,7 +4383,7 @@ Your Role: {self.role}"""
                 _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
                 if _is_fatal_model_error(e):
                     raise
-                return None
+                return self._none_after_failed_turn(e)
             finally:
                 self._end_turn_tracking(_turn_token)
         else:
@@ -4666,7 +4690,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 self._rollback_chat_history_to(chat_history_length)
                 if _is_fatal_model_error(e):
                     raise
-                return None
+                return self._none_after_failed_turn(e)
             finally:
                 # End per-turn tracking after any rollback has run (rollback
                 # reads the ownership list, so this must come last).
@@ -4860,6 +4884,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # across turns of a long-lived agent.
         _reset_loop_guard_for_turn(self)
         self._last_stop_reason = "completed"
+        self._last_error = None
         # Apply rate limiter if configured (before any LLM call) - async parity
         # with the sync path in _chat_impl; without this, async bursts (astart,
         # async_execution=True) would fire with zero throttling.
@@ -5096,7 +5121,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
                     if _is_fatal_model_error(e):
                         raise
-                    return None
+                    return self._none_after_failed_turn(e)
 
             # For OpenAI client
             # Use the new _build_messages helper method
@@ -5588,7 +5613,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     self._rollback_chat_history_to(chat_history_length)
                     if _is_fatal_model_error(e):
                         raise
-                    return None
+                    return self._none_after_failed_turn(e)
         except ToolExecutionError:
             raise
         except Exception as e:
@@ -5605,7 +5630,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             self._rollback_chat_history_to(chat_history_length)
             if _is_fatal_model_error(e):
                 raise
-            return None
+            return self._none_after_failed_turn(e)
         finally:
             # Unregister this turn's ownership list from the process-wide
             # live-turn registry once the turn finishes (success or failure).
