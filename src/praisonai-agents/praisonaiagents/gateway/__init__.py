@@ -82,6 +82,7 @@ _LAZY_IMPORTS = {
     "ScheduleTargetError": ("praisonaiagents.gateway.protocols", "ScheduleTargetError"),
     # Remote-sandbox outbound media bridge (Issue #4951)
     "RemoteMediaResolver": ("praisonaiagents.gateway.protocols", "RemoteMediaResolver"),
+    "RemoteMediaResolverProtocol": ("praisonaiagents.gateway.protocols", "RemoteMediaResolverProtocol"),
     # Agent-facing outbound messaging
     "OutboundMessengerProtocol": ("praisonaiagents.gateway.protocols", "OutboundMessengerProtocol"),
     "DeliveryResult": ("praisonaiagents.gateway.protocols", "DeliveryResult"),
@@ -196,9 +197,11 @@ _LAZY_IMPORTS = {
     # Out-of-process platform-connector relay (Issue #2485)
     "CapabilityDescriptor": ("praisonaiagents.gateway.protocols", "CapabilityDescriptor"),
     "RelayTransport": ("praisonaiagents.gateway.protocols", "RelayTransport"),
+    "RelayTransportProtocol": ("praisonaiagents.gateway.protocols", "RelayTransportProtocol"),
     # Gateway pipeline span-tracing seam (Issue #2716)
     "GATEWAY_TRACE_STAGES": ("praisonaiagents.gateway.protocols", "GATEWAY_TRACE_STAGES"),
     "GatewayTraceHook": ("praisonaiagents.gateway.protocols", "GatewayTraceHook"),
+    "GatewayTraceHookProtocol": ("praisonaiagents.gateway.protocols", "GatewayTraceHookProtocol"),
     "NullGatewayTraceHook": ("praisonaiagents.gateway.protocols", "NullGatewayTraceHook"),
     "NULL_GATEWAY_TRACE_HOOK": ("praisonaiagents.gateway.protocols", "NULL_GATEWAY_TRACE_HOOK"),
     "resolve_trace_hook": ("praisonaiagents.gateway.protocols", "resolve_trace_hook"),
@@ -311,6 +314,7 @@ _LAZY_IMPORTS = {
     # Hot-reload registry (Issue #3378)
     "HOT_APPLIABLE_KEYS": ("praisonaiagents.gateway.config", "HOT_APPLIABLE_KEYS"),
     "SupportsHotReload": ("praisonaiagents.gateway.config", "SupportsHotReload"),
+    "SupportsHotReloadProtocol": ("praisonaiagents.gateway.config", "SupportsHotReloadProtocol"),
     "is_hot_appliable": ("praisonaiagents.gateway.config", "is_hot_appliable"),
     # Reload scope classification (Issue #3440)
     "ReloadScope": ("praisonaiagents.gateway.config", "ReloadScope"),
@@ -453,6 +457,7 @@ __all__ = [
     "DeliveryResolverProtocol",
     "DeliveryPreflightProtocol",
     "RemoteMediaResolver",
+    "RemoteMediaResolverProtocol",
     "DeliveryValidation",
     "ScheduleTargetError",
     # Agent-facing outbound messaging
@@ -564,9 +569,11 @@ __all__ = [
     # Out-of-process platform-connector relay (Issue #2485)
     "CapabilityDescriptor",
     "RelayTransport",
+    "RelayTransportProtocol",
     # Gateway pipeline span-tracing seam (Issue #2716)
     "GATEWAY_TRACE_STAGES",
     "GatewayTraceHook",
+    "GatewayTraceHookProtocol",
     "NullGatewayTraceHook",
     "NULL_GATEWAY_TRACE_HOOK",
     "resolve_trace_hook",
@@ -674,6 +681,7 @@ __all__ = [
     # Hot-reload registry (Issue #3378)
     "HOT_APPLIABLE_KEYS",
     "SupportsHotReload",
+    "SupportsHotReloadProtocol",
     "is_hot_appliable",
     "ReloadScope",
     "classify_reload",

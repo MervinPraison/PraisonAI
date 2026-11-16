@@ -8309,3 +8309,10 @@ class StopResult:
             "turn_aborted": self.turn_aborted,
             "pending_cancelled": self.pending_cancelled,
         }
+
+
+# ``Protocol``-suffixed names (G-26, the project naming rule). The original
+# names stay and are the same class, so existing imports keep working.
+RemoteMediaResolverProtocol = RemoteMediaResolver
+RelayTransportProtocol = RelayTransport
+GatewayTraceHookProtocol = GatewayTraceHook

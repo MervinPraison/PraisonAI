@@ -1664,3 +1664,10 @@ class InMemoryCallbackPayloadStore:
             self._entries.pop(ref, None)
             return None
         return value
+
+
+# ``Protocol``-suffixed names (G-26, the project naming rule). The original
+# names stay and are the same class, so existing imports keep working.
+ChannelDescriptorProtocol = ChannelDescriptor
+SupportsGatewayRuntimeProtocol = SupportsGatewayRuntime
+SupportsPresentationProtocol = SupportsPresentation
