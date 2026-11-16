@@ -107,3 +107,11 @@ def test_narrow_terminal_keeps_cost_visible(collector):
     # Wide terminals keep the full bar.
     assert tui._status_bar_text(200) == wide
 
+
+
+def test_unset_model_uses_context_manager_default_limit(collector):
+    # _get_context_manager falls back to gpt-4o-mini; its limit is known.
+    tui = AsyncTUI(config=AsyncTUIConfig(model=None))
+    tui._conversation_history = [{"role": "user", "content": "hello " * 200}]
+    tui._refresh_usage_status()
+    assert "/128.0k (" in tui._usage_status

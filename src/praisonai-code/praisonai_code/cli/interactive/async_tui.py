@@ -1926,7 +1926,8 @@ Example: /handoff code "refactor the auth module" """
             return False
         if limit != MODEL_LIMITS.get("default"):
             return True
-        model = (self.config.model or "").lower()
+        # Same default ``_get_context_manager`` builds the budgeter with.
+        model = (self.config.model or "gpt-4o-mini").lower()
         if _litellm_model_info(model):
             return True
         return any(
@@ -2493,7 +2494,6 @@ Example: /handoff code "refactor the auth module" """
             # Done processing current prompt
             self._processing = False
             self._status_text = ""
-            self._refresh_usage_status()
             
             # Show tool calls summary if any were made
             if tool_calls:
@@ -2523,6 +2523,8 @@ Example: /handoff code "refactor the auth module" """
             # Persist the completed turn so /sessions, /continue and the
             # --session/--continue flags have something to find.
             self._persist_turn(prompt, assistant_text)
+            # After the reply is in the history, so the readout counts it.
+            self._refresh_usage_status()
             
             self._update_output()
             
