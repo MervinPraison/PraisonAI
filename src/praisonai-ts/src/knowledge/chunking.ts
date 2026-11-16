@@ -5,7 +5,9 @@
 export type ChunkStrategy = 'size' | 'sentence' | 'paragraph' | 'semantic';
 
 export interface ChunkingConfig {
+  /** Positive integer character count. */
   chunkSize?: number;
+  /** Non-negative integer below chunkSize; default 50, or floor(10% of sizes <= 50). */
   overlap?: number;
   strategy?: ChunkStrategy;
   separator?: string;
@@ -30,9 +32,23 @@ export class Chunking {
 
   constructor(config: ChunkingConfig = {}) {
     this.chunkSize = config.chunkSize ?? 500;
-    this.overlap = config.overlap ?? 50;
+    this.overlap = config.overlap ?? (this.chunkSize > 50 ? 50 : Math.floor(this.chunkSize / 10));
     this.strategy = config.strategy ?? 'size';
     this.separator = config.separator ?? ' ';
+    // Only the fixed-size path uses overlap, so only it can loop forever.
+    // Sentence, paragraph and semantic configs that worked before still do.
+    if (!['sentence', 'paragraph', 'semantic'].includes(this.strategy)) {
+      this.validateSizeConfig();
+    }
+  }
+
+  private validateSizeConfig(): void {
+    if (!Number.isInteger(this.chunkSize) || this.chunkSize <= 0) {
+      throw new RangeError('chunkSize must be a positive integer');
+    }
+    if (!Number.isInteger(this.overlap) || this.overlap < 0 || this.overlap >= this.chunkSize) {
+      throw new RangeError('overlap must be a non-negative integer smaller than chunkSize');
+    }
   }
 
   /**
@@ -55,6 +71,7 @@ export class Chunking {
    * Chunk by fixed size with overlap
    */
   chunkBySize(text: string): Chunk[] {
+    this.validateSizeConfig();
     const chunks: Chunk[] = [];
     let startOffset = 0;
     let index = 0;

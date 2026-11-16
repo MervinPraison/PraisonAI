@@ -9,7 +9,7 @@ authors = [
     { name = "Mervin Praison" }
 ]
 dependencies = [
-    "praisonaiagents>=1.6.126",
+    "praisonaiagents>=1.7.11",
     "mcp>=1.20.0,<2",
     "rich>=13.7",
     "typer>=0.12.0",

@@ -889,6 +889,22 @@
           "minimum": 0,
           "title": "Max Delay",
           "type": "number"
+        },
+        "retry_on": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Error types to retry on",
+          "title": "Retry On"
         }
       },
       "title": "ToolRetryPolicy",
