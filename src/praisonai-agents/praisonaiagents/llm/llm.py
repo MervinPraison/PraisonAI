@@ -1278,6 +1278,11 @@ Respond with ONLY a valid JSON tool call in this format:
         attempt = attempt_state.get("attempt", 1)
         max_retries = attempt_state.get("max_retries", self._max_retries)
         
+        # A rejected key or exhausted billing belongs to one credential: with auth
+        # profiles rotate; _handle_retry_exception surfaces it when none is left.
+        if error_kind in ("auth_permanent", "billing") and self._failover_manager and attempt <= max_retries:
+            return FailoverDecision(action="rotate_profile", reason=error_kind, backoff_ms=0, is_retryable=True)
+
         # Non-retryable errors (includes billing errors)
         if error_kind in ["auth_permanent", "model_not_found", "format_error", "billing"]:
             return FailoverDecision(

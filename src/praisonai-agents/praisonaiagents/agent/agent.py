@@ -440,7 +440,13 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         if self._llm_init_params:
             try:
                 from ..llm.llm import LLM
-                self._llm_instance = LLM(**self._llm_init_params)
+                # The manager stays off _llm_init_params: _fallback_llm_for()
+                # reuses them, and a profile's model would override the fallback's.
+                params = dict(self._llm_init_params)
+                failover_manager = getattr(self, "_failover_manager", None)
+                if failover_manager is not None:
+                    params["failover_manager"] = failover_manager
+                self._llm_instance = LLM(**params)
             except ImportError as e:
                 raise ImportError(
                     "LLM features requested but dependencies not installed. "
@@ -448,6 +454,13 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 ) from e
         self._wire_deferred_history_callback()
         return self._llm_instance
+
+    def _credential_failover_active(self) -> bool:
+        """True when credential rotation runs; the built LLM (e.g. after switch_model) is the truth."""
+        llm = getattr(self, "_llm_instance", None)
+        if llm is not None:
+            return getattr(llm, "_failover_manager", None) is not None
+        return getattr(self, "_failover_manager", None) is not None
 
     @property
     def llm_instance(self):
@@ -876,6 +889,9 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # LLMConfig(fallback_models=[...])), so accept it here without exposing
         # it in the signature and seed the local below.
         _cloned_fallback_models = legacy_kwargs.pop("fallback_models", None)
+        # Internal like fallback_models: clone_for_channel() forwards the shared
+        # FailoverManager. Not a public Agent(failover_manager=) param.
+        _cloned_failover_manager = legacy_kwargs.pop("failover_manager", None)
         # `thinking_budget` is a backward-compatible alias for `reasoning_effort`
         # (Issue #4452); accept it here (like fallback_models) without exposing
         # it in the signature so the unknown-kwarg guard below does not reject it.
@@ -2149,6 +2165,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Seed from clone_for_channel()'s forwarded list (if any); an explicit
         # LLMConfig(fallback_models=[...]) on llm=/model= still takes precedence.
         fallback_models = _cloned_fallback_models  # Initialize for internal use
+        # LLMConfig.auth_profiles wins over a manager forwarded by a clone.
+        _auth_profiles = None
 
         # One rule for the alias pair: passing both is refused, everywhere.
         from ..utils.model_alias import resolve_model_alias
@@ -2166,6 +2184,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 api_key = llm_config_obj.api_key
             if auth is None:
                 auth = llm_config_obj.auth
+            _auth_profiles = llm_config_obj.auth_profiles
         elif llm is not None and model is None:
             warn_deprecated_param(
                 "llm",
@@ -2189,8 +2208,16 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                     api_key = model.api_key
                 if auth is None:
                     auth = model.auth
+                if _auth_profiles is None:
+                    _auth_profiles = model.auth_profiles
             else:
                 llm = model  # model= takes precedence
+
+        if _auth_profiles is not None:
+            from ..llm.failover import manager_from_auth_profiles
+            _cloned_failover_manager = manager_from_auth_profiles(_auth_profiles)
+        if _cloned_failover_manager is not None:
+            self._failover_manager = _cloned_failover_manager
         
         # Resolve the subscription auth provider eagerly. `auth=` is opt-in, so
         # this costs nothing for everyone else, and a user who asked to be
@@ -2509,7 +2536,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             # client holding a model name OpenAI has never heard of. Re-check
             # the *resolved* name so `llm="ollama/x"` and OLLAMA_HOST agree.
             _has_provider_prefix = isinstance(model_name, str) and "/" in model_name
-            if auth or _has_provider_prefix:
+            # Auth profiles rotate inside LLM, so they force the custom-LLM path.
+            if auth or _has_provider_prefix or getattr(self, "_failover_manager", None) is not None:
                 # A subscription auth provider only takes effect inside LLM
                 # (which injects the resolved OAuth credentials), so a bare
                 # model name plus auth= must still build an LLM instance rather
@@ -3404,6 +3432,7 @@ Your Role: {self.role}
             # LLM configuration 
             'llm': self.llm,
             'fallback_models': list(self.fallback_models) if hasattr(self, 'fallback_models') and self.fallback_models else None,
+            'failover_manager': getattr(self, '_failover_manager', None),
             'base_url': getattr(self, 'base_url', None),
             'api_key': getattr(self, 'api_key', None),
             'auth': getattr(self, 'auth', None),
