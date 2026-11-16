@@ -721,8 +721,9 @@ class ContextCompactor:
         # the head of the kept window is never orphaned from its assistant
         # tool_calls message (strict providers 400 on an orphaned tool result).
         if other_msgs and len(other_msgs) > self.preserve_recent:
+            # Keep at least the newest message even when preserve_recent=0.
             cut = self._snap_to_pair_boundary(
-                other_msgs, len(other_msgs) - self.preserve_recent
+                other_msgs, len(other_msgs) - max(self.preserve_recent, 1)
             )
         else:
             cut = 0
@@ -759,6 +760,9 @@ class ContextCompactor:
                 and result[end].get("tool_call_id") in drop_ids
             ):
                 end += 1
+            if end >= len(result):
+                # Never evict the newest message (the current user turn).
+                break
             del result[start:end]
         
         return result
@@ -784,6 +788,8 @@ class ContextCompactor:
                 kept += 1
             else:
                 break
+        if non_system and kept == 0:
+            kept = 1  # Always keep the newest message, even if over budget.
         
         # Snap the boundary outward so a tool result kept at the window head is
         # not orphaned from its assistant tool_calls left outside the window.

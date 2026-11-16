@@ -137,11 +137,15 @@ class BackgroundTask:
         
         try:
             result = await asyncio.wait_for(self._future, timeout=timeout)
-            return result
         except asyncio.TimeoutError:
             raise
         except Exception as e:
             raise RuntimeError(str(e))
+        # The runner records failures on the task and resolves the future
+        # to None, so surface the documented RuntimeError here.
+        if self.status == TaskStatus.FAILED:
+            raise RuntimeError(self.error)
+        return result
     
     def should_cancel(self) -> bool:
         """Check if cancellation was requested."""

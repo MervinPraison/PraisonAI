@@ -479,7 +479,7 @@ def serve_ui_gateway(
     host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host to bind to"),
     port: int = typer.Option(8765, "--port", "-p", help="Port to bind to"),
     title: str = typer.Option("PraisonAI", "--title", "-t", help="Application title"),
-    style: str = typer.Option("dashboard", "--style", "-s", help="UI style: dashboard, chat"),
+    style: str = typer.Option("app", "--style", "-s", help="UI style: app (default; Chat + Canvas), dashboard, chat"),
     agents_file: Optional[str] = typer.Option(None, "--agents", "-a", help="Agents YAML file"),
 ):
     """Start integrated UI-Gateway (Pattern C) - aiui with backend bridges.

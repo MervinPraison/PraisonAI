@@ -28,7 +28,12 @@ class ApprovalRequest:
         risk_level:  Risk classification (critical / high / medium / low).
         agent_name:  Name of the agent that triggered the call (optional).
         session_id:  Session identifier for tracking (optional).
-        context:     Arbitrary context dict for backend-specific data.
+        context:     Arbitrary context dict for backend-specific data. For
+                     file-mutating tools (``edit_file``, ``write_file``,
+                     ``apply_patch`` …) the agent populates ``context["diff"]``
+                     with a pre-apply unified diff so any frontend (CLI,
+                     gateway, Python callback) can show the reviewer the
+                     concrete change before approving.
         approval_id: Stable correlation id that survives a process restart
                      and can be matched to an inbound channel callback.
                      Auto-generated when not supplied.

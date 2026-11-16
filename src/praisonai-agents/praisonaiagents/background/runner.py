@@ -179,7 +179,7 @@ class BackgroundRunner:
                     return result
 
             except asyncio.TimeoutError:
-                task.fail(f"Task timed out after {timeout}s")
+                task.fail(f"Task timed out after {timeout or self.config.default_timeout}s")
                 logger.warning(f"Background task timed out: {task.name}")
 
                 _safe_on_complete(on_complete, task)

@@ -4,6 +4,7 @@ Unit tests for rate limiter concurrency fixes.
 Tests the timeline advancement bug fix implemented for issue #1869.
 """
 import asyncio
+import os
 import time
 import pytest
 
@@ -189,6 +190,9 @@ class TestRateLimiterAgentic:
     """Real agentic test for rate limiter - agent must call LLM end-to-end."""
     
     @pytest.mark.integration
+    # Opt-in like the other bot real-LLM tests: run in the unit shard on every PR,
+    # it billed the OpenAI key and, once credits ran out, hit pytest's 60s timeout.
+    @pytest.mark.skipif(os.getenv("PRAISONAI_LIVE_TESTS") != "1", reason="Opt-in real LLM test")
     def test_agent_with_rate_limited_bot(self):
         """REAL AGENTIC TEST: Agent communicates through rate-limited bot."""
         try:
