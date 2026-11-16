@@ -61,8 +61,13 @@ _REDACT_PATTERN = re.compile(
 )
 
 # Compiled regex for key=value pattern matching in strings (case-insensitive for raw text)
+# An auth scheme (``Authorization: Bearer <tok>``) is consumed with the value so
+# the secret after it is redacted, not the scheme word.
 _REDACT_KV_PATTERN = re.compile(
-    r'(["\']?)(' + '|'.join(re.escape(k) for k in REDACT_KEYS) + r')(["\']?\s*[:=]\s*["\']?)([^"\'\s,}\]]+)',
+    r'(["\']?)(' + '|'.join(re.escape(k) for k in sorted(REDACT_KEYS, key=len, reverse=True)) + r')'
+    r'(["\']?\s*[:=]\s*["\']?)'
+    r'(?:(?:Bearer|Basic|Token|Digest)\s+)?'
+    r'([^"\'\s,}\]]+)',
     re.IGNORECASE
 )
 
@@ -113,6 +118,10 @@ def _redact_value(value: Any) -> Any:
         return {k: _redact_key_value(k, v) for k, v in value.items()}
     elif isinstance(value, list):
         return [_redact_value(item) for item in value]
+    elif isinstance(value, tuple):
+        return tuple(_redact_value(item) for item in value)
+    elif isinstance(value, str):
+        return redact_string(value)
     else:
         return value
 
