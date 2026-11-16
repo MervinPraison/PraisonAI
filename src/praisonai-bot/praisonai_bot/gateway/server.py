@@ -1834,20 +1834,7 @@ class WebSocketGateway:
             configured, this returns the raw socket peer — today's behaviour.
             """
             peer = peer_ip or "unknown"
-            trusted = _trusted_proxy_list()
-            if resolve_ingress_attribution is None or not trusted:
-                return peer
-            attr = resolve_ingress_attribution(
-                peer_ip=peer,
-                forwarded_for=parse_forwarded_for(
-                    headers.get("x-forwarded-for")
-                ),
-                real_ip=headers.get("x-real-ip"),
-                trusted_proxies=trusted,
-            )
-            if attr.fail_closed:
-                return f"proxy:{peer}"
-            return attr.client_ip
+            return _attribute(peer, headers, _trusted_proxy_list())
 
         def _trusted_proxy_list() -> list:
             """Return the live declared trusted-proxy set (IPs / CIDRs)."""
@@ -1875,6 +1862,21 @@ class WebSocketGateway:
                         if str(p).strip()
                     ]
             return trusted
+
+        def _attribute(peer, headers, trusted) -> str:
+            if resolve_ingress_attribution is None or not trusted:
+                return peer
+            attr = resolve_ingress_attribution(
+                peer_ip=peer,
+                forwarded_for=parse_forwarded_for(
+                    headers.get("x-forwarded-for")
+                ),
+                real_ip=headers.get("x-real-ip"),
+                trusted_proxies=trusted,
+            )
+            if attr.fail_closed:
+                return f"proxy:{peer}"
+            return attr.client_ip
 
         def _trust_operator_header(request) -> bool:
             """Whether ``X-Operator-Id`` may be trusted for this request.
