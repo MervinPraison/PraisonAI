@@ -5136,7 +5136,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # unatomic read of chat_history[-1] followed by a separate append
             # lets a concurrent turn's user message be mistaken for this turn's
             # own duplicate, silently dropping this user turn from the record.
-            self._add_to_chat_history_if_not_duplicate("user", normalized_content)
+            if self._add_to_chat_history_if_not_duplicate("user", normalized_content):
+                # Persist user message to DB (matches sync chat())
+                await self._apersist_message("user", normalized_content)
 
             # --- Proactive Context Budget Management (async standard OpenAI path) ---
             try:
