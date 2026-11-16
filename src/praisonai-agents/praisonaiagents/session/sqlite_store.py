@@ -301,7 +301,7 @@ class SqliteSessionStore(DefaultSessionStore):
                             conn.execute("RELEASE praisonai_index_refresh")
                     raise
         except Exception as exc:  # never let indexing break a write
-            logger.debug("Session index update failed for %s: %s", sid, exc)
+            logger.warning("Session index update failed for %s: %s", sid, exc)
             return False
         return True
 
@@ -606,7 +606,7 @@ class SqliteSessionStore(DefaultSessionStore):
                             conn.execute("RELEASE praisonai_import_cleanup")
                     raise
         except Exception as exc:
-            logger.debug("Post-import index invalidation failed for %s: %s", session.session_id, exc)
+            logger.warning("Post-import index invalidation failed for %s: %s", session.session_id, exc)
 
     def _modify_session_locked(self, session_id, mutator, **kwargs) -> bool:
         """Refresh the index after any locked read-modify-write.
@@ -622,7 +622,7 @@ class SqliteSessionStore(DefaultSessionStore):
             try:
                 self._index_session(self._read_session_fresh(session_id))
             except Exception as exc:
-                logger.debug("Post-modify index refresh failed for %s: %s", session_id, exc)
+                logger.warning("Post-modify index refresh failed for %s: %s", session_id, exc)
         return ok
 
     def add_message(
@@ -646,7 +646,7 @@ class SqliteSessionStore(DefaultSessionStore):
             try:
                 self._index_session(self._read_session_fresh(session_id))
             except Exception as exc:
-                logger.debug("Post-add index refresh failed for %s: %s", session_id, exc)
+                logger.warning("Post-add index refresh failed for %s: %s", session_id, exc)
         return ok
 
     def delete_session(self, session_id: str) -> bool:
