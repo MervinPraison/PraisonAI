@@ -7,6 +7,7 @@ Zero dependencies beyond stdlib.
 
 import copy
 import hashlib
+import itertools
 import json
 from praisonaiagents._logging import get_logger
 import os
@@ -54,6 +55,10 @@ def _safe_session_filename(session_id: str) -> str:
 
 # Module-level sentinel to track if we've warned about degraded locking
 _WARNED_NO_FCNTL = False
+
+# Orders spill files written by this process within the same millisecond;
+# ``next()`` on a count is atomic under the GIL.
+_SPILL_SEQ = itertools.count()
 
 # Default session directory (uses centralized paths - DRY).
 #
@@ -1202,13 +1207,14 @@ class DefaultSessionStore:
             spill_dir = self._spill_dir()
             os.makedirs(spill_dir, exist_ok=True)
             safe_id = _safe_session_filename(session_id)
-            # A monotonic ms timestamp keeps files sortable/attributable, but a
-            # short random token guarantees uniqueness so consecutive failures
-            # within the same PID+millisecond never overwrite an earlier spill
-            # (each unpersisted turn keeps its own recoverable file).
+            # A ms timestamp keeps files sortable/attributable; the per-process
+            # sequence keeps spills from the same PID+millisecond in write
+            # order (re-ingest sorts by name), and a short random token
+            # guarantees uniqueness so no spill overwrites an earlier one.
             unique = os.urandom(4).hex()
             filename = (
-                f"{safe_id}.{int(time.time() * 1000)}.{os.getpid()}.{unique}.json"
+                f"{safe_id}.{int(time.time() * 1000)}.{os.getpid()}."
+                f"{next(_SPILL_SEQ):010d}.{unique}.json"
             )
             filepath = os.path.join(spill_dir, filename)
             payload = {
