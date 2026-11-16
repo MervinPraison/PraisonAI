@@ -788,7 +788,9 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
                 allow_origins=origins,
                 allow_methods=config.get("cors_methods", ["*"]),
                 allow_headers=config.get("cors_headers", ["*"]),
-                allow_credentials=config.get("cors_credentials", False),
+                # Never pair credentials with a wildcard origin (matches
+                # agentos/jobs servers): "*" always disables credentials.
+                allow_credentials=bool(config.get("cors_credentials", False)) and "*" not in origins,
                 max_age=config.get("cors_max_age", 600),
             )
         )

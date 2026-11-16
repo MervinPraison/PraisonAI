@@ -68,6 +68,20 @@ class _ConfiguredShim:
 _CONFIGURED = _ConfiguredShim()
 
 
+# aiui's Theme page (the built-in ``theme-picker`` record). It is how a viewer
+# picks light/dark/preset in the dashboard and how the command palette reaches
+# that choice, so a ``pages=`` whitelist never hides it.
+THEME_PAGE_ID = "theme-picker"
+
+
+def _whitelist_with_theme_page(pages: Sequence[str]) -> List[str]:
+    """``pages`` as a list, with aiui's Theme page kept visible."""
+    out = list(pages)
+    if THEME_PAGE_ID not in out:
+        out.append(THEME_PAGE_ID)
+    return out
+
+
 def is_legacy_host() -> bool:
     """True when callback-only ``@aiui.reply`` mode is requested."""
     return os.environ.get("PRAISONAI_HOST_LEGACY", "").strip().lower() in (
@@ -89,7 +103,8 @@ def configure_host(
     agent_kwargs: Optional[Dict[str, Any]] = None,
     gateway: Any = None,
     modules: Optional[Sequence[str]] = None,
-    style: str = "dashboard",
+    style: str = "app",
+    layout: Optional[str] = None,
     context_paths: Optional[Sequence[str]] = None,
     no_context: bool = False,
     context_cwd: Optional[str] = None,
@@ -109,10 +124,18 @@ def configure_host(
     datastore_mod = import_wrapper_module("praisonai.ui._aiui_datastore")
     aiui.set_datastore(datastore_mod.PraisonAISessionDataStore())
     aiui.set_style(style)
+    # style="app" opens in Chat + Canvas (aiui's own default for the app shell,
+    # >= 0.3.159). Only call set_layout for an explicit layout: it overrides the
+    # YAML ``layout:`` key, so calling it with the default would hide the user's
+    # choice. Other layouts: workbench, command, guided, mission.
+    if style == "app" and layout and hasattr(aiui, "set_layout"):
+        aiui.set_layout(layout)
     aiui.set_branding(title=title, logo=logo)
 
     if pages is not None:
-        aiui.set_pages(list(pages))
+        # The whitelist picks which feature pages show; it must not take away
+        # the viewer's light/dark choice (aiui's Theme page).
+        aiui.set_pages(_whitelist_with_theme_page(pages))
 
     dashboard_opts: Dict[str, Any] = {"sidebar": sidebar, "page_header": page_header}
     if modules:
@@ -190,7 +213,7 @@ def configure_host(
 
     # Register L3 dashboard pages
     try:
-        from praisonai_bot.integration.pages import workflow_runs, bot_health
+        from praisonai_bot.integration.pages import workflow_runs, bot_health  # noqa: F401 (registers the pages)
     except ImportError:
         pass  # L3 pages are optional
 

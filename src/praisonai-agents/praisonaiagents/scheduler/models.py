@@ -298,6 +298,11 @@ class ScheduleJob:
                   to a channel bot (e.g. Telegram chat).
         origin: Optional original delivery target where the job was created
                 (for "origin" token resolution).
+        failure_delivery: Optional separate target for operational notices
+                (failure summaries, recovery notes, quota holds). ``None``
+                (default) falls back to ``delivery``; a ``"none"`` target
+                suppresses them from every channel (run history still records
+                the failure).
         pre_run: Optional cheap, deterministic pre-run gate evaluated before
                  the (expensive) model turn — a shell/python command or a
                  registered gate name. When it reports "nothing to do" the
@@ -436,6 +441,7 @@ class ScheduleJob:
     last_run_at: Optional[float] = None
     delivery: Optional[DeliveryTarget] = None
     origin: Optional[DeliveryTarget] = None
+    failure_delivery: Optional[DeliveryTarget] = None
     pre_run: Optional[str] = None
     condition: Optional[str] = None
     principal: Optional[str] = None
@@ -531,6 +537,8 @@ class ScheduleJob:
             d["delivery"] = self.delivery.to_dict()
         if self.origin is not None:
             d["origin"] = self.origin.to_dict()
+        if self.failure_delivery is not None:
+            d["failure_delivery"] = self.failure_delivery.to_dict()
         if self.pre_run is not None:
             d["pre_run"] = self.pre_run
         if self.condition is not None:
@@ -602,6 +610,7 @@ class ScheduleJob:
         sched_data = d.get("schedule", {})
         delivery_data = d.get("delivery")
         origin_data = d.get("origin")
+        failure_data = d.get("failure_delivery")
         # Accept a bare string for a single upstream (YAML/CLI ergonomics) and
         # normalise to a list; drop empties. ``None`` stays ``None`` (stateless).
         context_from = d.get("context_from")
@@ -627,6 +636,10 @@ class ScheduleJob:
             last_run_at=d.get("last_run_at"),
             delivery=DeliveryTarget.from_dict(delivery_data) if isinstance(delivery_data, dict) else None,
             origin=DeliveryTarget.from_dict(origin_data) if isinstance(origin_data, dict) else None,
+            failure_delivery=(
+                DeliveryTarget.from_dict(failure_data)
+                if isinstance(failure_data, dict) else None
+            ),
             pre_run=d.get("pre_run"),
             condition=d.get("condition"),
             principal=d.get("principal"),
