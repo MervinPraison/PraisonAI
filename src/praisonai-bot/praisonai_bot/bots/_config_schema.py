@@ -413,6 +413,9 @@ class ScheduleConfigSchema(BaseModel):
     every: Optional[str] = None
     at: Optional[str] = None
     deliver: Optional[DeliveryTargetSchema] = None
+    # Separate lane for failure / recovery / hold notices; ``channel: none``
+    # suppresses them. Unset falls back to ``deliver``.
+    failure_deliver: Optional[DeliveryTargetSchema] = None
     # Optional cheap go/no-go gate run before the (expensive) model turn — an
     # existing core capability (a shell/python command). "nothing to do" skips
     # the run with no tokens spent and no delivery.

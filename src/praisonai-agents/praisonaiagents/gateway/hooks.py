@@ -401,6 +401,12 @@ class HookConfig:
         coalesce: Optional :class:`CoalesceConfig` (or mapping) that collapses
             a burst of deliveries for the same entity into one run. ``None``
             (default) runs once per delivery.
+        signature_only: Opt-in (default ``False``): let a valid provider
+            signature authenticate on its own, without the gateway
+            ``auth_token``. Requires ``secret``, a replay-bounded scheme
+            (``hmac_timestamped``/``structured``) and
+            ``signature_tolerance_seconds > 0``; any other combination is
+            rejected. An explicit ``auth`` is still required when set.
     """
 
     path: str
@@ -428,6 +434,8 @@ class HookConfig:
     deliver_only: bool = False
     # Burst coalescing (#5867).
     coalesce: Optional[CoalesceConfig] = None
+    # Signature as the sole credential (#6034); explicit opt-in only.
+    signature_only: bool = False
 
     def __post_init__(self) -> None:
         self.path = (self.path or "").strip().strip("/")
@@ -481,6 +489,30 @@ class HookConfig:
         # its own is a working, verifying configuration rather than a 401 trap.
         if self.secret and not self.signature_header:
             self.signature_header = "X-Hub-Signature-256"
+        # ``${VAR}`` substitution leaves strings: parse strictly so "false"
+        # never disables token auth, and reject anything unrecognised.
+        flag = self.signature_only
+        if isinstance(flag, str):
+            flag = {"true": True, "1": True, "yes": True, "on": True,
+                    "false": False, "0": False, "no": False, "off": False,
+                    "": False}.get(flag.strip().lower(), flag)
+        if not isinstance(flag, bool):
+            raise ValueError(
+                f"HookConfig.signature_only must be a boolean, got {flag!r}"
+            )
+        self.signature_only = flag
+        # A body-only HMAC signs no timestamp, so a captured delivery could be
+        # replayed forever: it must never stand in for the gateway token.
+        if self.signature_only and not (
+            self.secret
+            and self.signature_scheme in ("hmac_timestamped", "structured")
+            and self.signature_tolerance_seconds > 0
+        ):
+            raise ValueError(
+                "HookConfig.signature_only requires secret, signature_scheme "
+                "'hmac_timestamped' or 'structured', and "
+                "signature_tolerance_seconds > 0 (replay-bounded signature)"
+            )
 
     def verify_signature(
         self, raw_body: bytes, headers: Dict[str, str]
@@ -642,6 +674,7 @@ class HookConfig:
             "event_header": self.event_header,
             "deliver_only": self.deliver_only,
             "coalesce": self.coalesce.to_dict() if self.coalesce else None,
+            "signature_only": self.signature_only,
         }
 
     @classmethod
@@ -669,6 +702,7 @@ class HookConfig:
             "event_header",
             "deliver_only",
             "coalesce",
+            "signature_only",
         }
         return cls(
             path=data.get("path", ""),
@@ -691,6 +725,7 @@ class HookConfig:
             event_header=data.get("event_header"),
             deliver_only=data.get("deliver_only", False),
             coalesce=data.get("coalesce"),
+            signature_only=data.get("signature_only", False),
             metadata={
                 **(data.get("metadata") or {}),
                 **{k: v for k, v in data.items() if k not in known},
