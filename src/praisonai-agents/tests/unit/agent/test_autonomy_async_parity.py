@@ -45,7 +45,9 @@ def stub(monkeypatch, tmp_path):
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     monkeypatch.setenv("OPENAI_API_KEY", "sk-local-fake")
-    monkeypatch.setenv("OPENAI_BASE_URL", f"http://127.0.0.1:{server.server_address[1]}/v1")
+    base = f"http://127.0.0.1:{server.server_address[1]}/v1"
+    monkeypatch.setenv("OPENAI_API_BASE", base)
+    monkeypatch.setenv("OPENAI_BASE_URL", base)
     monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
     saved = {k: sync_display_callbacks.get(k) for k in EVENTS}
     yield
@@ -69,7 +71,7 @@ class _FakeSnapshot:
 def _run(mode):
     events = []
     for name in EVENTS:
-        register_display_callback(name, (lambda n: lambda **kw: events.append((n, kw.get("completion_reason"))))(name))
+        register_display_callback(name, (lambda n: lambda **kw: events.append((n, {k: v for k, v in kw.items() if k != "duration_seconds"})))(name))
     agent = Agent(name="g", instructions="hi", llm="gpt-4o-mini", output="silent",
                   autonomy={"snapshot": True, "max_iterations": 3})
     snapshot = _FakeSnapshot()
@@ -87,8 +89,34 @@ def test_snapshot_and_callbacks(stub, mode):
     assert result.completion_reason == "max_iterations"
     assert snapshots == 1 and stack == ["c1"]
     assert [e for e, _ in events].count("autonomy_iteration") == 3
-    assert events[-1] == ("autonomy_complete", "max_iterations")
+    assert events[-1] == ("autonomy_complete", {"completion_reason": "max_iterations", "iterations": 3})
 
 
 def test_sync_and_async_emit_the_same_events(stub):
     assert _run("sync")[3] == _run("async")[3]
+
+
+def test_async_cancel_during_snapshot_returns_cancelled(stub):
+    """Cancelling while track() blocks must still return a cancelled result."""
+    gate = threading.Event()
+
+    class _Blocking(_FakeSnapshot):
+        def track(self, message=None):
+            gate.wait(5)
+            return super().track(message)
+
+    async def main():
+        agent = Agent(name="g", instructions="hi", llm="gpt-4o-mini", output="silent",
+                      autonomy={"snapshot": True, "max_iterations": 3})
+        agent._file_snapshot = _Blocking()
+        task = asyncio.create_task(agent.run_autonomous_async("keep going", completion_promise="DONE"))
+        await asyncio.sleep(0.2)
+        task.cancel()
+        try:
+            return await task
+        finally:
+            gate.set()
+
+    result = asyncio.run(main())
+    assert result.completion_reason == "cancelled"
+    assert result.iterations == 0

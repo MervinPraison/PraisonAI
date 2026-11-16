@@ -5341,8 +5341,6 @@ Summary:"""
                 "Create agent with autonomy=True or autonomy={...}"
             )
         
-        await asyncio.to_thread(self._take_pre_autonomous_snapshot)
-
         start_time = time_module.time()
         started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         iterations = 0
@@ -5386,6 +5384,10 @@ Summary:"""
                                    iterations=iterations, duration_seconds=time_module.time() - start_time)
 
         try:
+            # Inside the try so cancelling during track() still returns
+            # AutonomyResult(completion_reason="cancelled").
+            await asyncio.to_thread(self._take_pre_autonomous_snapshot)
+
             # Execute the autonomous loop
             while iterations < effective_max_iter:
                 iterations += 1
