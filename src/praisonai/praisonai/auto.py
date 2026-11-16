@@ -558,6 +558,35 @@ class BaseAutoGenerator:
         except Exception:  # pragma: no cover - defensive
             return False
 
+    # Name-shape heuristics for code-execution tools that ship in core (or a
+    # plugin) but are not yet listed in ``TOOL_CATEGORIES['code_execution']``.
+    # Used to close the drift gap where a new dangerous tool (e.g.
+    # ``execute_code_with_tools``, ``python_repl``, ``shell_exec``) would
+    # otherwise slip past the static allowlist.
+    _DANGEROUS_TOOL_NAME_HINTS = (
+        "execute_", "exec_", "shell_", "_shell", "_repl", "sandbox_", "_exec",
+    )
+
+    def _dangerous_tool_names(self) -> set:
+        """Return the set of code-execution tool names to strip by default.
+
+        Unions the static ``TOOL_CATEGORIES['code_execution']`` floor with any
+        code-execution tool discovered in the *live* registry (matched by name
+        shape), so a new dangerous tool shipped in core is stripped even though
+        the static list has not been updated. Falls back to the static list
+        alone when the resolver is unavailable.
+        """
+        dangerous = set(TOOL_CATEGORIES.get("code_execution", []))
+        try:
+            live = self._available_tools()
+        except Exception:  # pragma: no cover - defensive
+            live = []
+        for name in live:
+            lowered = name.lower()
+            if any(hint in lowered for hint in self._DANGEROUS_TOOL_NAME_HINTS):
+                dangerous.add(name)
+        return dangerous
+
     def _resolve_framework(self, requested: Optional[str], registry,
                            require_workflow: bool = False):
         """Resolve and validate a framework via the shared adapter registry.
@@ -728,9 +757,9 @@ class BaseAutoGenerator:
                 model_name, config=provider_config or None
             )
         except Exception as exc:
-            logger.debug(
-                "Registered provider lookup for %r failed (%s); "
-                "using built-in completion ladder.", model_name, exc
+            logger.warning(
+                "Registered provider for %r failed to construct (%s); "
+                "falling back to built-in completion ladder.", model_name, exc
             )
             return None
         generate_structured = getattr(provider, "generate_structured", None)
@@ -1232,35 +1261,6 @@ class AutoGenerator(BaseAutoGenerator):
         full_path = os.path.abspath(self.agent_file)
         return full_path
 
-    # Name-shape heuristics for code-execution tools that ship in core (or a
-    # plugin) but are not yet listed in ``TOOL_CATEGORIES['code_execution']``.
-    # Used to close the drift gap where a new dangerous tool (e.g.
-    # ``execute_code_with_tools``, ``python_repl``, ``shell_exec``) would
-    # otherwise slip past the static allowlist.
-    _DANGEROUS_TOOL_NAME_HINTS = (
-        "execute_", "exec_", "shell_", "_shell", "_repl", "sandbox_", "_exec",
-    )
-
-    def _dangerous_tool_names(self) -> set:
-        """Return the set of code-execution tool names to strip by default.
-
-        Unions the static ``TOOL_CATEGORIES['code_execution']`` floor with any
-        code-execution tool discovered in the *live* registry (matched by name
-        shape), so a new dangerous tool shipped in core is stripped even though
-        the static list has not been updated. Falls back to the static list
-        alone when the resolver is unavailable.
-        """
-        dangerous = set(TOOL_CATEGORIES.get("code_execution", []))
-        try:
-            live = self._available_tools()
-        except Exception:  # pragma: no cover - defensive
-            live = []
-        for name in live:
-            lowered = name.lower()
-            if any(hint in lowered for hint in self._DANGEROUS_TOOL_NAME_HINTS):
-                dangerous.add(name)
-        return dangerous
-
     def _enforce_tool_allowlist(self, role_details: Dict[str, Any]) -> Dict[str, Any]:
         """Strip dangerous shell/exec tools unless the task asked for code execution.
 
@@ -1296,16 +1296,7 @@ class AutoGenerator(BaseAutoGenerator):
                 role_details["tools"] = requested
 
         dangerous = self._dangerous_tool_names()
-        # Opt-in signal: did the topic ask for code execution?
-        try:
-            code_exec_requested = "code_execution" in {
-                TASK_KEYWORD_TO_TOOLS[k]
-                for k in TASK_KEYWORD_TO_TOOLS
-                if k in str(self.topic).lower()
-            }
-        except Exception:
-            code_exec_requested = False
-        if code_exec_requested:
+        if self._topic_requests_code_execution():
             return role_details  # shell/exec tools are legitimately in scope
 
         filtered = [t for t in requested if t not in dangerous]
@@ -2159,7 +2150,7 @@ Example structure:
         # Authoritative server-side gate: strip shell/exec tools the model may
         # have emitted from a poisoned topic unless the topic actually asked for
         # code execution. The prompt fence above is advisory; this is not.
-        dangerous_tools = set(TOOL_CATEGORIES.get("code_execution", []))
+        dangerous_tools = self._dangerous_tool_names()
         code_exec_ok = self._topic_requests_code_execution()
 
         # Convert agents
@@ -2385,7 +2376,7 @@ Generate a workflow for the task inside <TOPIC>:
         # code execution. Job agent steps resolve their tools for execution just
         # like `run` steps, so they must pass the same gate — the prompt fence is
         # advisory; this is not.
-        dangerous_tools = set(TOOL_CATEGORIES.get("code_execution", []))
+        dangerous_tools = self._dangerous_tool_names()
         code_exec_ok = self._topic_requests_code_execution()
 
         # Convert steps

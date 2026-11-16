@@ -545,6 +545,10 @@ class DraftStreamer:
         # Import here to avoid circular imports
         from praisonaiagents.streaming.events import StreamEventType
         
+        # Reasoning deltas are not answer text: never post them to the chat.
+        if event.type == StreamEventType.DELTA_TEXT and getattr(event, "is_reasoning", False):
+            return
+
         if event.type == StreamEventType.DELTA_TEXT and event.content:
             self._content_buffer += event.content
             await self._schedule_update()
