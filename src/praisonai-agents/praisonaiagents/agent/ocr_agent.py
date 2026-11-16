@@ -8,8 +8,7 @@ Follows the Agent() class patterns:
 - Async-safe with both sync and async methods
 """
 import os
-import logging
-from praisonaiagents._logging import get_logger
+from ._media_agent_helpers import _MediaAgentHelpers
 import warnings
 from dataclasses import dataclass
 from typing import Optional, Any, Dict, Union, List
@@ -38,7 +37,7 @@ class OCRConfig:
             "api_key": self.api_key,
         }
 
-class OCRAgent:
+class OCRAgent(_MediaAgentHelpers):
     """
     A specialized agent for OCR (Optical Character Recognition).
     
@@ -116,14 +115,6 @@ class OCRAgent:
         return OCRConfig()
     
     @property
-    def console(self):
-        """Lazily initialize Rich Console."""
-        if self._console is None:
-            from rich.console import Console
-            self._console = Console()
-        return self._console
-    
-    @property
     def litellm(self):
         """Lazy load litellm module when needed."""
         if self._litellm is None:
@@ -138,23 +129,6 @@ class OCRAgent:
                     "Please install with: pip install litellm"
                 )
         return self._litellm
-    
-    def _configure_logging(self, verbose: Union[bool, int]) -> None:
-        """Configure logging levels."""
-        if isinstance(verbose, int) and verbose >= 10:
-            get_logger("litellm").setLevel(logging.DEBUG)
-        else:
-            get_logger("litellm").setLevel(logging.WARNING)
-            get_logger("httpx").setLevel(logging.WARNING)
-    
-    def _get_model_params(self, model: Optional[str] = None) -> Dict[str, Any]:
-        """Build parameters for LiteLLM calls."""
-        params = {"model": model or self.llm}
-        if self.api_key:
-            params["api_key"] = self.api_key
-        if self.base_url:
-            params["api_base"] = self.base_url
-        return params
     
     def _build_document(self, source: str) -> Dict[str, str]:
         """Build document dict from source URL or path."""
