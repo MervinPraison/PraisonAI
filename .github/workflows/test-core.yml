@@ -144,6 +144,7 @@ jobs:
               tests/unit/auth/ tests/unit/background/ tests/unit/checkpoints/
               tests/unit/cli/ tests/unit/compaction/ tests/unit/conditions/
               tests/unit/config/ tests/unit/context/ tests/unit/embedding/
+              tests/unit/decisions/ tests/unit/thinking/
               tests/unit/eval/ tests/unit/gateway/ tests/unit/goal/
               tests/unit/hooks/ tests/unit/llm/ tests/unit/lsp/ tests/unit/mcp/
               tests/unit/memory/ tests/unit/permissions/ tests/unit/policy/
@@ -443,6 +444,7 @@ jobs:
             extra_ignore: >-
               --deselect=tests/unit/test_paths_wiring.py::TestPolicyConfigWiring::test_default_rules_dir_matches_paths
               --deselect=tests/unit/test_paths_wiring.py::TestSchedulerStoreWiring::test_default_dir_matches_paths
+              --deselect=tests/unit/decisions/test_system_one.py::test_system_one_live_ollama
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents
           - shard: train
