@@ -180,7 +180,7 @@ class Room:
         """Round the planner scheduled ``speaker`` into for the current activity.
 
         Only :class:`RoundRobinRoomPlanner` defines round semantics (round 0
-        fan-out, later rounds admitted by ``@``-mentions). For any other custom
+        opening, later rounds admitted by ``@``-mentions). For any other custom
         planner the round taxonomy is unknown, so we simply tag turns with the
         activity's current round rather than inventing round-robin admission —
         imposing round-robin rules on a custom planner would mislabel its turns
@@ -189,9 +189,8 @@ class Room:
         if not isinstance(self.planner, RoundRobinRoomPlanner):
             return self._current_round()
 
-        from .protocols import extract_mentions
-
-        roster_set = set(self.config.roster)
+        roster_list = list(self.config.roster)
+        roster_set = set(roster_list)
         last_human = -1
         for idx, ev in enumerate(self.transcript):
             if ev.speaker not in roster_set:
@@ -202,16 +201,7 @@ class Room:
 
         for rnd in range(current_round, max_rounds):
             spoken = {ev.speaker for ev in activity if ev.round == rnd}
-            if rnd == 0:
-                admitted = set(roster_set)
-            else:
-                admitted = set()
-                for ev in activity:
-                    if ev.round != rnd - 1 or ev.speaker not in roster_set:
-                        continue
-                    for name in extract_mentions(ev.content):
-                        if name in roster_set:
-                            admitted.add(name)
+            admitted = self.planner.admitted(roster_list, roster_set, activity, rnd)
             if speaker in admitted and speaker not in spoken:
                 return rnd
         return current_round

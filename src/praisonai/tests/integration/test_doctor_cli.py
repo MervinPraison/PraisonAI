@@ -10,10 +10,14 @@ def run_doctor(*args, timeout=60):
     env = os.environ.copy()
     # Propagate sys.path to PYTHONPATH so the subprocess can find praisonai package
     env["PYTHONPATH"] = os.pathsep.join(sys.path)
+    # Force UTF-8 on both sides so Rich/Unicode output decodes on Windows (cp1252)
+    env.setdefault("PYTHONIOENCODING", "utf-8")
     return subprocess.run(
         [sys.executable, "-m", "praisonai", "doctor", *args],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         timeout=timeout,
         env=env
     )

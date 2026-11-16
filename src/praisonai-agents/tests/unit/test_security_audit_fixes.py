@@ -9,6 +9,8 @@ import pytest
 
 
 def test_workflow_include_skips_tools_without_opt_in(tmp_path, monkeypatch):
+    monkeypatch.setattr("socket.socket.connect", lambda *a, **k: pytest.fail("unexpected network connection"))
+    monkeypatch.setattr("socket.socket.connect_ex", lambda *a, **k: pytest.fail("unexpected network connection"))
     monkeypatch.delenv("PRAISONAI_ALLOW_LOCAL_TOOLS", raising=False)
     monkeypatch.delenv("PRAISONAI_ALLOW_TEMPLATE_TOOLS", raising=False)
     monkeypatch.chdir(tmp_path)
@@ -25,9 +27,17 @@ def test_workflow_include_skips_tools_without_opt_in(tmp_path, monkeypatch):
     assert not marker.exists()
 
 
-def test_web_crawl_rejects_redirect_to_loopback():
+def test_web_crawl_rejects_redirect_to_loopback(monkeypatch):
     pytest.importorskip("httpx")
     from praisonaiagents.tools.web_crawl_tools import _is_safe_crawl_url
+
+    monkeypatch.delenv("ALLOW_LOCAL_CRAWL", raising=False)
+
+    def resolve(host, *args, **kwargs):
+        address = "127.0.0.1" if host == "127.0.0.1" else "93.184.216.34"
+        return [(2, 1, 6, "", (address, 0))]
+
+    monkeypatch.setattr("socket.getaddrinfo", resolve)
 
     assert _is_safe_crawl_url("http://127.0.0.1/secret") is False
     assert _is_safe_crawl_url("http://example.com/") is True
@@ -40,6 +50,7 @@ def test_web_crawl_urllib_fallback_does_not_follow_redirect_to_internal(monkeypa
 
     from praisonaiagents.tools import web_crawl_tools as w
 
+    monkeypatch.delenv("ALLOW_LOCAL_CRAWL", raising=False)
     monkeypatch.setitem(sys.modules, "httpx", None)  # force the urllib fallback
     hits = []
 
@@ -65,8 +76,11 @@ def test_web_crawl_urllib_fallback_does_not_follow_redirect_to_internal(monkeypa
             pass
 
     redir = http.server.HTTPServer(("127.0.0.1", 0), Redir)
+    threads = []
     for server in (internal, redir):
-        threading.Thread(target=server.serve_forever, daemon=True).start()
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        threads.append(thread)
     start = f"http://127.0.0.1:{redir.server_port}/"
     real = w._is_safe_crawl_url
     monkeypatch.setattr(w, "_is_safe_crawl_url", lambda u: u == start or real(u))
@@ -75,14 +89,24 @@ def test_web_crawl_urllib_fallback_does_not_follow_redirect_to_internal(monkeypa
     finally:
         internal.shutdown()
         redir.shutdown()
+        internal.server_close()
+        redir.server_close()
+        for thread in threads:
+            thread.join()
 
     assert hits == []
     assert "internal-metadata" not in result[0]["content"]
     assert "SSRF" in result[0]["error"]
 
 
-def test_searxng_may_use_loopback_but_the_crawler_may_not():
+def test_searxng_may_use_loopback_but_the_crawler_may_not(monkeypatch):
     """One predicate, two callers, opposite requirements. Pin both."""
+    monkeypatch.delenv("ALLOW_LOCAL_CRAWL", raising=False)
+    monkeypatch.delenv("SEARXNG_URL_ALLOWLIST", raising=False)
+    monkeypatch.setattr(
+        "socket.getaddrinfo",
+        lambda *args, **kwargs: [(2, 1, 6, "", ("127.0.0.1", 0))],
+    )
     from praisonaiagents.tools.url_safety import validate_searxng_url
     from praisonaiagents.tools.web_crawl_tools import _is_safe_crawl_url
 
@@ -92,11 +116,14 @@ def test_searxng_may_use_loopback_but_the_crawler_may_not():
 
 def test_searxng_allowlist_cannot_reach_link_local_metadata(monkeypatch):
     """An allowlist entry may only exempt loopback, never link-local/private."""
+    monkeypatch.delenv("ALLOW_LOCAL_CRAWL", raising=False)
     monkeypatch.setenv("SEARXNG_URL_ALLOWLIST", "169.254.169.254")
-    from importlib import reload
+    monkeypatch.setattr(
+        "socket.getaddrinfo",
+        lambda *args, **kwargs: [(2, 1, 6, "", ("169.254.169.254", 0))],
+    )
     from praisonaiagents.tools import url_safety
 
-    reload(url_safety)
     assert url_safety.validate_searxng_url("http://169.254.169.254/latest/meta-data/") is None
 
 
