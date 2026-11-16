@@ -1655,8 +1655,8 @@ Write the complete compiled report:"""
         _tool_start_time = time.time()
         try:
             result = await self._execute_tool_async_retry_loop(function_name, arguments, tool_call_id, tools_override)
-        except Exception as e:
-            _trace_emitter.tool_call_end(self.name, function_name, None, (time.time() - _tool_start_time) * 1000, str(e))
+        except BaseException as e:  # incl. asyncio.CancelledError, so the START is always closed
+            _trace_emitter.tool_call_end(self.name, function_name, None, (time.time() - _tool_start_time) * 1000, str(e) or type(e).__name__)
             raise
         if _trace_emitter.enabled:
             _trace_emitter.tool_call_end(self.name, function_name, str(result) if result else None, (time.time() - _tool_start_time) * 1000)

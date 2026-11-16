@@ -77,3 +77,20 @@ def test_tool_call_emits_start_and_end(stub, mode):
                    if e.event_type in (ContextEventType.TOOL_CALL_START, ContextEventType.TOOL_CALL_END)]
     assert [e.event_type for e in tool_events] == [ContextEventType.TOOL_CALL_START, ContextEventType.TOOL_CALL_END]
     assert "found it" in str(tool_events[1].data)
+
+
+def test_cancelled_async_tool_still_emits_end(monkeypatch):
+    sink = ContextListSink()
+    agent = Agent(name="t", instructions="hi", llm="gpt-4o-mini", output="silent")
+
+    async def _cancelled(*args, **kwargs):
+        raise asyncio.CancelledError()
+
+    monkeypatch.setattr(agent, "_execute_tool_async_retry_loop", _cancelled)
+    with trace_context(ContextTraceEmitter(sink=sink, session_id="s", enabled=True)):
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(agent._execute_tool_async_with_retry("lookup", {}))
+    tool_events = [e for e in sink.get_events()
+                   if e.event_type in (ContextEventType.TOOL_CALL_START, ContextEventType.TOOL_CALL_END)]
+    assert [e.event_type for e in tool_events] == [ContextEventType.TOOL_CALL_START, ContextEventType.TOOL_CALL_END]
+    assert "CancelledError" in str(tool_events[1].data)
