@@ -431,15 +431,21 @@ def test_bare_invocation_standalone_runs_gate_and_launches_tui(clean_env, monkey
 
     def _gate(*, model=None, interactive=True):
         gated["ran"] = True
-        return model
+        return "ollama/qwen-local"
 
     monkeypatch.setattr(creds, "ensure_configured_or_onboard", _gate)
 
-    launched = {"tui": False}
+    from praisonai_code.cli.configuration import model_resolver as mr_mod
+
+    monkeypatch.setattr(
+        mr_mod, "resolve_default_model", lambda explicit=None: "gpt-remembered"
+    )
+
+    launched = {"tui": False, "model": None}
 
     class _StubTUI:
-        def __init__(self, *a, **k):
-            pass
+        def __init__(self, *a, config=None, **k):
+            launched["model"] = getattr(config, "model", None)
 
         def run(self):
             launched["tui"] = True
@@ -454,3 +460,5 @@ def test_bare_invocation_standalone_runs_gate_and_launches_tui(clean_env, monkey
     assert exc.value.code in (0, None)
     assert gated["ran"] is True
     assert launched["tui"] is True
+    # The gate's detected local model must reach the TUI, not the remembered default.
+    assert launched["model"] == "ollama/qwen-local"

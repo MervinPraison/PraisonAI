@@ -929,7 +929,11 @@ def main_callback(
         # The interactive TUI is resident in praisonai-code, so the gate runs on
         # the lean install too — no `praisonai` wrapper required (Issue #6271).
         _headless = (not sys.stdin.isatty()) or quiet
-        ensure_configured_or_onboard(model=None, interactive=not _headless)
+        # Keep the gate's result: on the keyless local-first path it is the
+        # detected local model and must win over a remembered cloud default.
+        gated_model = ensure_configured_or_onboard(
+            model=None, interactive=not _headless
+        )
 
         from .interactive.async_tui import AsyncTUI, AsyncTUIConfig
 
@@ -1024,7 +1028,7 @@ def main_callback(
             resolved_model = _DEFAULT_MODEL
 
         tui_config = AsyncTUIConfig(
-            model=restored_model or resolved_model,
+            model=restored_model or gated_model or resolved_model,
             show_logo=True,
             show_status_bar=state.output_format != OutputFormat.json,
             session_id=resume_id,
