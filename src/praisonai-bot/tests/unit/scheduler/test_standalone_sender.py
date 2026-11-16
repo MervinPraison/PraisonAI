@@ -430,6 +430,18 @@ def test_failure_delivery_none_suppresses_notice():
     assert sent == []
 
 
+def test_failure_delivery_origin_resolves_to_job_origin():
+    """An ``origin`` failure lane resolves to the job's origin instead of
+    dispatching an unresolved routing token (#6255)."""
+    sent: list = []
+    job = _job(deliver="slack:metrics")
+    job.origin = DeliveryTarget.parse("telegram:42")
+    job.failure_delivery = DeliveryTarget.parse("origin")
+    _run(_boom_executor(sent)._execute_one(job))
+
+    assert [(c, cid) for c, cid, _ in sent] == [("telegram", "42")]
+
+
 def test_failure_delivery_round_trips_and_defaults_absent():
     job = _job(deliver="slack:metrics")
     assert "failure_delivery" not in job.to_dict()

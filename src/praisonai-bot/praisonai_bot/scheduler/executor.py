@@ -1602,13 +1602,18 @@ class ScheduledAgentExecutor:
         """Target for operational notices (failure / recovery / hold).
 
         An explicit ``failure_delivery`` wins; a ``"none"`` target suppresses
-        the notice from every channel. Unset falls back to the result lane.
+        the notice from every channel; ``"origin"`` resolves to the job's
+        origin. Unset falls back to the result lane.
         """
         target = getattr(job, "failure_delivery", None)
         if target is None:
             return getattr(job, "delivery", None)
         token = (target.deliver or target.channel or "").strip().lower()
-        return None if token == "none" else target
+        if token == "none":
+            return None
+        if token == "origin":
+            return getattr(job, "origin", None) or getattr(job, "delivery", None)
+        return target
 
     def _can_deliver(self, delivery: "DeliveryTarget") -> bool:
         """Whether a configured ``delivery`` target should be dispatched.
