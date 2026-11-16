@@ -18,7 +18,7 @@ from praisonai_bot.gateway.server import WebSocketGateway
 TOKEN = "test-operator-identity-token"
 
 
-def _resolve_as_alice(monkeypatch, tmp_path, gateway_yaml):
+def _resolve_as_alice(monkeypatch, tmp_path, gateway_yaml, extra_headers=None):
     """POST a resolve claiming ``X-Operator-Id: alice``; return (status, resolved)."""
     monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
     monkeypatch.setenv("ALLOW_LOOPBACK_BYPASS", "false")
@@ -31,7 +31,8 @@ def _resolve_as_alice(monkeypatch, tmp_path, gateway_yaml):
     server = SimpleNamespace(serve=AsyncMock(), should_exit=False)
 
     def capture_server(config):
-        server.app = config.app
+        config.load()  # the app as uvicorn serves it, middleware included
+        server.app = config.loaded_app
         return server
 
     monkeypatch.setattr("uvicorn.Server", capture_server)
@@ -45,6 +46,7 @@ def _resolve_as_alice(monkeypatch, tmp_path, gateway_yaml):
             agent_name="planner", authorized_reviewers={"operator:alice"},
         )
         headers = {"Authorization": f"Bearer {TOKEN}", "X-Operator-Id": "alice"}
+        headers.update(extra_headers or {})
         async with httpx.AsyncClient(
             transport=httpx.ASGITransport(app=server.app), base_url="http://gateway",
         ) as client:
@@ -84,6 +86,13 @@ def test_opt_in_header_honoured_from_trusted_proxy(monkeypatch, tmp_path):
     # httpx's ASGI transport presents the socket peer as 127.0.0.1.
     cfg = {"trust_operator_header": True, "trusted_proxies": ["127.0.0.1"]}
     assert _resolve_as_alice(monkeypatch, tmp_path, cfg) == (200, True)
+
+
+def test_forged_forwarded_for_cannot_impersonate_trusted_proxy(monkeypatch, tmp_path):
+    # A loopback caller claims to be the trusted proxy via X-Forwarded-For.
+    cfg = {"trust_operator_header": True, "trusted_proxies": ["10.0.0.1"]}
+    forged = {"X-Forwarded-For": "10.0.0.1"}
+    assert _resolve_as_alice(monkeypatch, tmp_path, cfg, forged) == (404, False)
 
 
 def test_yaml_with_trust_keys_validates_and_drives_resolver(monkeypatch, tmp_path):

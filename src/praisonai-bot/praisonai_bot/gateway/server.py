@@ -2806,6 +2806,10 @@ class WebSocketGateway:
             host=self._host,
             port=self._port,
             log_level="warning",
+            # Keep ``request.client`` the raw socket peer. Forwarded headers are
+            # handled by the gateway's own ``trusted_proxies`` attribution;
+            # uvicorn's rewrite would let a caller forge the peer (#6428).
+            proxy_headers=False,
         )
         self._server = uvicorn.Server(config)
         
