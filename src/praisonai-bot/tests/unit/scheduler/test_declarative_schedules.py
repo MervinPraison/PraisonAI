@@ -116,6 +116,35 @@ def test_job_from_config_delivery():
     assert job.delivery.channel_id == "12345"
 
 
+def test_job_from_config_failure_deliver():
+    from praisonai_bot.scheduler import schedule_job_from_config
+    from praisonai_bot.scheduler.executor import ScheduledAgentExecutor
+
+    # Omitted → unset, notices fall back to the result lane.
+    job = schedule_job_from_config("m", _spec())
+    assert job.failure_delivery is None
+    assert ScheduledAgentExecutor._ops_target(job) is job.delivery
+
+    # Concrete target → its own lane.
+    job = schedule_job_from_config(
+        "m", _spec(failure_deliver={"channel": "slack", "channel_id": "C999"})
+    )
+    assert job.failure_delivery.channel == "slack"
+    assert job.failure_delivery.channel_id == "C999"
+    assert ScheduledAgentExecutor._ops_target(job) is job.failure_delivery
+
+    # ``none`` → notices suppressed.
+    job = schedule_job_from_config("m", _spec(failure_deliver={"channel": "none"}))
+    assert ScheduledAgentExecutor._ops_target(job) is None
+
+
+def test_schedule_schema_accepts_failure_deliver():
+    from praisonai_bot.bots._config_schema import ScheduleConfigSchema
+
+    s = ScheduleConfigSchema(**_spec(failure_deliver={"channel": "none"}))
+    assert s.failure_deliver.channel == "none"
+
+
 def test_job_from_config_every_interval():
     from praisonai_bot.scheduler import schedule_job_from_config
 

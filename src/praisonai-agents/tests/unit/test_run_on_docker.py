@@ -49,9 +49,13 @@ def _docker_running() -> bool:
         return False
 
 
-needs_docker = pytest.mark.skipif(
-    not _docker_running(), reason="needs a Docker daemon the runtime agrees is available"
-)
+@pytest.fixture
+def _require_docker():
+    if not _docker_running():
+        pytest.skip("needs a Docker daemon the runtime agrees is available")
+
+
+needs_docker = pytest.mark.usefixtures("_require_docker")
 
 
 def _agent(**kw):
@@ -149,12 +153,12 @@ def test_the_result_is_read_from_a_marked_line():
 # ── failure is reported, not swallowed ───────────────────────────────────────
 def test_a_missing_daemon_says_what_to_do():
     import asyncio
+    from types import SimpleNamespace
 
     from praisonai.integrations.compute_managed_agent import ComputeManagedAgent
 
     backend = ComputeManagedAgent("docker")
-    if backend.is_available:
-        pytest.skip("Docker is running, so this path cannot be exercised")
+    backend._provider = SimpleNamespace(is_available=False)
     with pytest.raises(RuntimeError) as exc:
         asyncio.run(backend._ensure())
     message = str(exc.value)
@@ -300,7 +304,7 @@ def test_docker_is_no_longer_a_special_case():
         assert isinstance(_agent(run_on=place).backend, ComputeManagedAgent)
 
 
-def test_a_hosted_backend_reclaims_its_instance_when_collected():
+def test_a_hosted_backend_reclaims_its_instance_when_collected(monkeypatch):
     """run_on= keeps its instance alive across calls on purpose -- keep_alive
     defaults to True -- but it should not outlive the process. There was no
     finalizer at all, so a docker container survived every script and a cloud
@@ -309,7 +313,10 @@ def test_a_hosted_backend_reclaims_its_instance_when_collected():
     import gc
     import threading
 
-    from praisonai.integrations.compute_managed_agent import ComputeManagedAgent
+    from praisonai.integrations.compute_managed_agent import ComputeManagedAgent, _KEY_VARS
+
+    for name in _KEY_VARS:
+        monkeypatch.delenv(name, raising=False)
 
     released = []
     release_done = threading.Event()

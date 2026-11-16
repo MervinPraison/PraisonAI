@@ -963,6 +963,7 @@ class AgentsGenerator:
                         "delay": policy.initial_delay_ms / 1000.0,
                         "backoff_factor": policy.backoff_factor,
                         "max_delay": policy.max_delay_ms / 1000.0,
+                        "retry_on": sorted(policy.retry_on),
                     }
             except ImportError as exc:
                 # The optional retry backend is missing. The CLI accepted

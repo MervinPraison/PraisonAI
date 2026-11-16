@@ -836,12 +836,10 @@ class TestImplementedLegacyVerbRouting(unittest.TestCase):
     def setUp(self):
         self._saved_argv = sys.argv
         dispatcher._typer_commands_cache = None
-        dispatcher._legacy_verbs_cache = None
 
     def tearDown(self):
         sys.argv = self._saved_argv
         dispatcher._typer_commands_cache = None
-        dispatcher._legacy_verbs_cache = None
 
     def test_is_implemented_legacy_verb(self):
         with mock.patch.object(
@@ -898,10 +896,9 @@ class TestImplementedLegacyVerbRouting(unittest.TestCase):
         for verb in ("thinking", "install", "persistence", "audio", "files"):
             self.assertIn(verb, verbs)
 
-    def test_get_legacy_verbs_fails_closed_on_import_error(self):
-        # If the authoritative oracle import raises, discovery must NOT return an
-        # empty set (which would let an implemented verb be billed to an LLM).
-        # It falls back to the static mirror so verbs are still recognised.
+    def test_get_legacy_verbs_does_not_depend_on_argparse_builder(self):
+        # The verb registry lives in an import-free module, so a failure to
+        # import the (heavier) argparse builder cannot drop implemented verbs.
         import builtins
 
         real_import = builtins.__import__
@@ -915,12 +912,8 @@ class TestImplementedLegacyVerbRouting(unittest.TestCase):
             verbs = dispatcher._get_legacy_verbs()
         self.assertIn("thinking", verbs)
         self.assertIn("install", verbs)
-        # Fallback must not be cached, so recovery is possible on the next call.
-        self.assertIsNone(dispatcher._legacy_verbs_cache)
 
-    def test_thinking_status_not_billed_when_discovery_fails(self):
-        # End-to-end: with discovery failing, ``praisonai thinking status`` must
-        # still route to the legacy handler, never to the modern ``run`` (LLM).
+    def test_thinking_status_not_billed_when_builder_import_fails(self):
         import builtins
 
         real_import = builtins.__import__
@@ -940,17 +933,13 @@ class TestImplementedLegacyVerbRouting(unittest.TestCase):
         run_legacy.assert_called_once_with(["thinking", "status"])
         run_typer.assert_not_called()
 
-    def test_fallback_registry_stays_in_sync_with_oracle(self):
-        # The static fail-closed mirror must remain a faithful copy of the
-        # authoritative oracle, so a newly added legacy verb cannot silently
-        # become billable during a discovery failure. Catches drift in CI.
-        from praisonai.cli.legacy.dispatch.argparse_builder import (
-            LEGACY_SPECIAL_COMMANDS,
-        )
+    def test_builder_and_dispatcher_share_one_registry(self):
+        from praisonai.cli.legacy.dispatch import _verbs, argparse_builder
 
+        self.assertIs(argparse_builder.LEGACY_SPECIAL_COMMANDS, _verbs.LEGACY_SPECIAL_COMMANDS)
         self.assertEqual(
-            dispatcher._LEGACY_VERBS_FALLBACK,
-            frozenset(LEGACY_SPECIAL_COMMANDS),
+            dispatcher._get_legacy_verbs(),
+            frozenset(_verbs.LEGACY_SPECIAL_COMMANDS),
         )
 
 

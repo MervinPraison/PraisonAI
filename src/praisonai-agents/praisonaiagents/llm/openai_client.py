@@ -242,6 +242,41 @@ def _extract_tool_call_name_and_args(tool_call):
     except (json.JSONDecodeError, KeyError, AttributeError, TypeError) as e:
         return function_name, None, tool_call_id, e
 
+def _delta_reasoning(chunk):
+    """The reasoning text (``reasoning_content``) of a stream chunk, or None.
+
+    Usage-only chunks have no choices, so this never indexes an empty list.
+    """
+    choices = getattr(chunk, "choices", None)
+    if not choices:
+        return None
+    delta = getattr(choices[0], "delta", None)
+    return getattr(delta, "reasoning_content", None) or None
+
+
+# Same bound as ParallelToolCallExecutor's default worker count.
+_NATIVE_PARALLEL_TOOL_WORKERS = 5
+
+
+def _native_batch_parallel_ok(parallel: bool, specs) -> bool:
+    """Whether a batch of parsed ``(name, args, tool_call_id)`` may run concurrently.
+
+    Opt-in via ``ExecutionConfig.parallel_tool_calls``; a single call, or any
+    pair touching overlapping write paths, stays sequential (same guard as
+    ``ParallelToolCallExecutor``).
+    """
+    if not parallel or len(specs) < 2:
+        return False
+    if any(not isinstance(args, dict) for _, args, _ in specs):
+        return False
+    from ..tools.call_executor import ToolCall as _BatchCall
+    from ..tools.path_overlap import has_write_conflicts
+    return not has_write_conflicts([
+        _BatchCall(function_name=name, arguments=args, tool_call_id=tcid)
+        for name, args, tcid in specs
+    ])
+
+
 def process_stream_chunks(chunks):
     """Process streaming chunks into combined response"""
     if not chunks:
@@ -249,7 +284,6 @@ def process_stream_chunks(chunks):
     
     try:
         first_chunk = chunks[0]
-        last_chunk = chunks[-1]
         
         # Basic metadata
         id = getattr(first_chunk, "id", None) 
@@ -265,8 +299,10 @@ def process_stream_chunks(chunks):
         
         content_list = []
         reasoning_list = []
-        tool_calls = []
-        current_tool_call = None
+        # Tool-call deltas accumulated by index across the whole stream
+        tool_calls_by_index = {}
+        index_alias = {}  # provider index -> slot, when a server reuses an index
+        finish_reason = None
 
         # First pass: Get initial tool call data
         for chunk in chunks:
@@ -287,7 +323,11 @@ def process_stream_chunks(chunks):
             if not hasattr(chunk, "choices") or not chunk.choices:
                 continue
             
-            delta = getattr(chunk.choices[0], "delta", None)
+            choice0 = chunk.choices[0]
+            if getattr(choice0, "finish_reason", None):
+                finish_reason = choice0.finish_reason
+
+            delta = getattr(choice0, "delta", None)
             if not delta:
                 continue
 
@@ -297,33 +337,48 @@ def process_stream_chunks(chunks):
             if hasattr(delta, "reasoning_content") and delta.reasoning_content:
                 reasoning_list.append(delta.reasoning_content)
             
-            # Handle tool calls
-            if hasattr(delta, "tool_calls") and delta.tool_calls:
-                for tool_call_delta in delta.tool_calls:
-                    if tool_call_delta.index is not None and tool_call_delta.id:
-                        # Found the initial tool call
-                        current_tool_call = {
-                            "id": tool_call_delta.id,
-                            "type": "function",
-                            "function": {
-                                "name": tool_call_delta.function.name,
-                                "arguments": ""
-                            }
-                        }
-                        while len(tool_calls) <= tool_call_delta.index:
-                            tool_calls.append(None)
-                        tool_calls[tool_call_delta.index] = current_tool_call
-                        current_tool_call = tool_calls[tool_call_delta.index]
-                    elif current_tool_call is not None and hasattr(tool_call_delta.function, "arguments"):
-                        if tool_call_delta.function.arguments:
-                            current_tool_call["function"]["arguments"] += tool_call_delta.function.arguments
+            # Handle tool calls: providers may send a full call in a single
+            # delta (Ollama/vLLM) or stream argument fragments addressed by
+            # index (parallel calls), so accumulate per index.
+            for tool_call_delta in (getattr(delta, "tool_calls", None) or []):
+                idx = getattr(tool_call_delta, "index", None)
+                tc_id = getattr(tool_call_delta, "id", None)
+                if idx is None:
+                    # No index: a new id opens a call, otherwise continue the last one
+                    if tc_id or not tool_calls_by_index:
+                        idx = max(tool_calls_by_index, default=-1) + 1
+                    else:
+                        idx = max(tool_calls_by_index)
+                else:
+                    raw_idx = idx
+                    idx = index_alias.get(raw_idx, raw_idx)
+                    existing = tool_calls_by_index.get(idx)
+                    if tc_id and existing and existing["id"] and existing["id"] != tc_id:
+                        # Some servers reuse index 0 for every call; a new id
+                        # at a filled index is a new call, not a fragment.
+                        idx = index_alias[raw_idx] = max(tool_calls_by_index) + 1
+                slot = tool_calls_by_index.setdefault(idx, {
+                    "id": None,
+                    "type": "function",
+                    "function": {"name": "", "arguments": ""},
+                })
+                if tc_id:
+                    slot["id"] = tc_id
+                fn = getattr(tool_call_delta, "function", None)
+                if fn is not None:
+                    if getattr(fn, "name", None):
+                        slot["function"]["name"] = fn.name
+                    if getattr(fn, "arguments", None):
+                        slot["function"]["arguments"] += fn.arguments
 
-        # Remove any None values and empty tool calls
-        tool_calls = [tc for tc in tool_calls if tc and tc["id"] and tc["function"]["name"]]
+        # Drop incomplete tool calls
+        tool_calls = [
+            tool_calls_by_index[i] for i in sorted(tool_calls_by_index)
+            if tool_calls_by_index[i]["id"] and tool_calls_by_index[i]["function"]["name"]
+        ]
 
         combined_content = "".join(content_list) if content_list else ""
         combined_reasoning = "".join(reasoning_list) if reasoning_list else None
-        finish_reason = getattr(last_chunk.choices[0], "finish_reason", None) if hasattr(last_chunk, "choices") and last_chunk.choices else None
 
         # Create ToolCall objects
         processed_tool_calls = []
@@ -350,7 +405,7 @@ def process_stream_chunks(chunks):
         )
         
         choice = Choice(
-            finish_reason=finish_reason or "tool_calls" if processed_tool_calls else None,
+            finish_reason=finish_reason or ("tool_calls" if processed_tool_calls else None),
             index=0,
             message=message
         )
@@ -648,33 +703,9 @@ class OpenAIClient:
         return fix_array_schemas(schema)
     
     def _get_tools_cache_key(self, tools: List[Any]) -> str:
-        """Generate a cache key for tools."""
-        parts = []
-        for tool in tools:
-            if isinstance(tool, dict):
-                # For dict tools, use sorted JSON representation
-                parts.append(json.dumps(tool, sort_keys=True))
-            elif callable(tool):
-                # For functions, use module.name
-                parts.append(f"{tool.__module__}.{tool.__name__}")
-            elif isinstance(tool, str):
-                # For string tools, use as-is
-                parts.append(tool)
-            elif isinstance(tool, list):
-                # For lists, recursively process
-                subparts = []
-                for subtool in tool:
-                    if isinstance(subtool, dict):
-                        subparts.append(json.dumps(subtool, sort_keys=True))
-                    elif callable(subtool):
-                        subparts.append(f"{subtool.__module__}.{subtool.__name__}")
-                    else:
-                        subparts.append(str(subtool))
-                parts.append(f"[{','.join(subparts)}]")
-            else:
-                # For other types, use string representation
-                parts.append(str(tool))
-        return "|".join(parts)
+        """Generate a content-based cache key for tools."""
+        from ..tools.schema import tools_cache_key
+        return tools_cache_key(tools)
     
     def format_tools(self, tools: Optional[List[Any]]) -> Optional[List[Dict]]:
         """
@@ -700,7 +731,14 @@ class OpenAIClient:
         # Check cache first
         cache_key = self._get_tools_cache_key(tools)
         if cache_key in self._formatted_tools_cache:
-            return self._formatted_tools_cache[cache_key]
+            # LRU: re-insert so the entry becomes most-recently-used.
+            # A concurrent eviction of the same key just falls through to a miss.
+            try:
+                cached = self._formatted_tools_cache.pop(cache_key)
+                self._formatted_tools_cache[cache_key] = cached
+                return cached
+            except KeyError:
+                pass
             
         from ..tools.hosted import is_hosted_tool
         formatted_tools = []
@@ -769,8 +807,13 @@ class OpenAIClient:
         
         # Cache the result
         result = formatted_tools if formatted_tools else None
-        if result is not None and len(self._formatted_tools_cache) < self._max_cache_size:
+        if result is not None:
             self._formatted_tools_cache[cache_key] = result
+            while len(self._formatted_tools_cache) > self._max_cache_size:
+                try:
+                    del self._formatted_tools_cache[next(iter(self._formatted_tools_cache))]
+                except (KeyError, StopIteration, RuntimeError):
+                    break
                 
         return result
     
@@ -1316,7 +1359,7 @@ class OpenAIClient:
                         if response_text:
                             stream_callback(StreamEvent(
                                 type=StreamEventType.FIRST_TOKEN,
-                                timestamp=now, content=response_text[:50]
+                                timestamp=now, content=response_text
                             ))
                             stream_callback(StreamEvent(
                                 type=StreamEventType.LAST_TOKEN,
@@ -1426,20 +1469,21 @@ class OpenAIClient:
                                     }
                                 ))
                         
-                        # Update live display with reasoning content if enabled
-                        if reasoning_steps and hasattr(chunk.choices[0].delta, "reasoning_content"):
-                            rc = chunk.choices[0].delta.reasoning_content
-                            if rc:
+                        # Reasoning deltas are always emitted as StreamEvents
+                        # (is_reasoning=True, as on the LiteLLM path); the live
+                        # display shows them only with reasoning_steps.
+                        rc = _delta_reasoning(chunk)
+                        if rc:
+                            if _emit:
+                                stream_callback(StreamEvent(
+                                    type=StreamEventType.DELTA_TEXT,
+                                    timestamp=time.perf_counter(),
+                                    content=rc,
+                                    is_reasoning=True
+                                ))
+                            if reasoning_steps:
                                 reasoning_content += rc
                                 live.update(display_fn(f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
-                                # Emit reasoning content as StreamEvent with is_reasoning=True
-                                if _emit:
-                                    stream_callback(StreamEvent(
-                                        type=StreamEventType.DELTA_TEXT,
-                                        timestamp=time.perf_counter(),
-                                        content=rc,
-                                        is_reasoning=True
-                                    ))
                 
                 # Clear the last generating display with a blank line
                 console.print()
@@ -1447,6 +1491,15 @@ class OpenAIClient:
                 # Just collect chunks without display, but still emit events
                 for chunk in response_stream:
                     chunks.append(chunk)
+
+                    rc = _delta_reasoning(chunk) if _emit else None
+                    if rc:
+                        stream_callback(StreamEvent(
+                            type=StreamEventType.DELTA_TEXT,
+                            timestamp=time.perf_counter(),
+                            content=rc,
+                            is_reasoning=True
+                        ))
                     
                     if chunk.choices and chunk.choices[0].delta.content:
                         content = chunk.choices[0].delta.content
@@ -1597,7 +1650,7 @@ class OpenAIClient:
                         if response_text:
                             await _emit_event(StreamEvent(
                                 type=StreamEventType.FIRST_TOKEN,
-                                timestamp=now, content=response_text[:50]
+                                timestamp=now, content=response_text
                             ))
                             await _emit_event(StreamEvent(
                                 type=StreamEventType.LAST_TOKEN,
@@ -1707,20 +1760,21 @@ class OpenAIClient:
                                     }
                                 ))
                         
-                        # Update live display with reasoning content if enabled
-                        if reasoning_steps and hasattr(chunk.choices[0].delta, "reasoning_content"):
-                            rc = chunk.choices[0].delta.reasoning_content
-                            if rc:
+                        # Reasoning deltas are always emitted as StreamEvents
+                        # (is_reasoning=True, as on the LiteLLM path); the live
+                        # display shows them only with reasoning_steps.
+                        rc = _delta_reasoning(chunk)
+                        if rc:
+                            if _emit:
+                                await emit_event(StreamEvent(
+                                    type=StreamEventType.DELTA_TEXT,
+                                    timestamp=time.perf_counter(),
+                                    content=rc,
+                                    is_reasoning=True
+                                ))
+                            if reasoning_steps:
                                 reasoning_content += rc
                                 live.update(display_fn(f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
-                                # Emit reasoning content as StreamEvent with is_reasoning=True
-                                if _emit:
-                                    stream_callback(StreamEvent(
-                                        type=StreamEventType.DELTA_TEXT,
-                                        timestamp=time.perf_counter(),
-                                        content=rc,
-                                        is_reasoning=True
-                                    ))
                 
                 # Clear the last generating display with a blank line
                 console.print()
@@ -1728,6 +1782,15 @@ class OpenAIClient:
                 # Just collect chunks without display
                 async for chunk in response_stream:
                     chunks.append(chunk)
+
+                    rc = _delta_reasoning(chunk) if _emit else None
+                    if rc:
+                        await emit_event(StreamEvent(
+                            type=StreamEventType.DELTA_TEXT,
+                            timestamp=time.perf_counter(),
+                            content=rc,
+                            is_reasoning=True
+                        ))
                     
                     if _emit and chunk.choices and chunk.choices[0].delta.content:
                         content = chunk.choices[0].delta.content
@@ -2417,6 +2480,9 @@ class OpenAIClient:
         output_continuation = kwargs.pop("output_continuation", True)
         # Durable sink for deferred tool re-injection (see sync counterpart).
         deferred_history_sink = kwargs.pop("deferred_history_sink", None)
+        # Opt-in concurrent execution of a batch of tool calls
+        # (ExecutionConfig.parallel_tool_calls); a loop setting, not an API param.
+        parallel_tool_calls = bool(kwargs.pop("parallel_tool_calls", False))
 
         def _is_cancelled() -> bool:
             return cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()
@@ -2638,12 +2704,60 @@ class OpenAIClient:
                 # Collect media-bearing follow-ups to flush after all tool
                 # replies for this turn (keeps tool replies consecutive).
                 _deferred_media_followups = []
-                for tool_call in tool_calls:
-                    # Handle both ToolCall dataclass and OpenAI object.
-                    # Guard the parse itself so malformed/truncated argument
-                    # JSON is reported back to the model instead of aborting
-                    # the whole run (matches chat_completion_with_tools_stream).
-                    function_name, arguments, _tool_call_id, err = _extract_tool_call_name_and_args(tool_call)
+                # Handle both ToolCall dataclass and OpenAI object.
+                # Guard the parse itself so malformed/truncated argument
+                # JSON is reported back to the model instead of aborting
+                # the whole run (matches chat_completion_with_tools_stream).
+                _parsed = [(tc, *_extract_tool_call_name_and_args(tc)) for tc in tool_calls]
+                _specs = [(n, a, t) for _, n, a, t, e in _parsed if e is None]
+
+                async def _arun_tool(name, args, tcid, _iteration=iteration_count):
+                    # Always trigger callback for tool call tracking (even when verbose=False)
+                    _get_display_tool_call()(f"Calling function: {name}", console=console if verbose else None)
+                    if verbose and console:
+                        console.print(f"[dim]Arguments:[/dim] {args}")
+                    # Execute the tool (async) - pass tool_call_id for event correlation.
+                    # Capture failures and report them back to the model instead of
+                    # aborting the whole run (safe-by-default, matching the streaming
+                    # path chat_completion_with_tools_stream).
+                    _kw = _durable_iteration_kwargs(execute_tool_fn, _iteration)
+                    try:
+                        if asyncio.iscoroutinefunction(execute_tool_fn):
+                            return await execute_tool_fn(name, args, tool_call_id=tcid, **_kw)
+                        # Run sync function in executor (preserve ContextVars e.g. SessionContext)
+                        from ..trace.context_events import copy_context_to_callable
+                        return await asyncio.get_running_loop().run_in_executor(
+                            None,
+                            copy_context_to_callable(
+                                lambda: execute_tool_fn(name, args, tool_call_id=tcid, **_kw)
+                            ),
+                        )
+                    except ToolExecutionError:
+                        raise
+                    except Exception as tool_error:
+                        logging.warning(f"Tool '{name}' failed: {tool_error}")
+                        return {"error": str(tool_error)}
+
+                if _native_batch_parallel_ok(parallel_tool_calls, _specs):
+                    _sem = asyncio.Semaphore(_NATIVE_PARALLEL_TOOL_WORKERS)
+
+                    async def _bounded(spec):
+                        # Hold ToolExecutionError so every sibling finishes and
+                        # its (deferred) result is registered before re-raising.
+                        async with _sem:
+                            try:
+                                return await _arun_tool(*spec)
+                            except ToolExecutionError as exc:
+                                return exc
+
+                    _results = iter(await asyncio.gather(*(_bounded(s) for s in _specs)))
+                else:
+                    # Sequential: run each call in the loop below so it registers
+                    # any deferred result before the next one starts.
+                    _results = None
+                _batch_error = None
+
+                for tool_call, function_name, arguments, _tool_call_id, err in _parsed:
                     if err is not None:
                         logging.warning(f"Failed to parse tool call arguments: {err}")
                         messages.append({
@@ -2655,47 +2769,13 @@ class OpenAIClient:
                     
                     # Always trigger callback for tool call tracking (even when verbose=False)
                     display_tool_call_fn = _get_display_tool_call()
-                    display_tool_call_fn(f"Calling function: {function_name}", console=console if verbose else None)
-                    
-                    if verbose and console:
-                        console.print(f"[dim]Arguments:[/dim] {arguments}")
-                    
-                    # Execute the tool (async) - pass tool_call_id for event correlation.
-                    # Capture failures and report them back to the model instead of
-                    # aborting the whole run (safe-by-default, matching the streaming
-                    # path chat_completion_with_tools_stream).
-                    try:
-                        if asyncio.iscoroutinefunction(execute_tool_fn):
-                            tool_result = await execute_tool_fn(
-                                function_name,
-                                arguments,
-                                tool_call_id=_tool_call_id,
-                                **_durable_iteration_kwargs(
-                                    execute_tool_fn, iteration_count
-                                ),
-                            )
-                        else:
-                            # Run sync function in executor (preserve ContextVars e.g. SessionContext)
-                            loop = asyncio.get_running_loop()
-                            from ..trace.context_events import copy_context_to_callable
-                            tool_result = await loop.run_in_executor(
-                                None,
-                                copy_context_to_callable(
-                                    lambda fn=function_name, args=arguments, tcid=_tool_call_id: execute_tool_fn(
-                                        fn,
-                                        args,
-                                        tool_call_id=tcid,
-                                        **_durable_iteration_kwargs(
-                                            execute_tool_fn, iteration_count
-                                        ),
-                                    )
-                                ),
-                            )
-                    except ToolExecutionError:
-                        raise
-                    except Exception as tool_error:
-                        logging.warning(f"Tool '{function_name}' failed: {tool_error}")
-                        tool_result = {"error": str(tool_error)}
+                    tool_result = (
+                        next(_results) if _results is not None
+                        else await _arun_tool(function_name, arguments, _tool_call_id)
+                    )
+                    if isinstance(tool_result, ToolExecutionError):
+                        _batch_error = _batch_error or tool_result
+                        continue
 
                     # Parity with the LiteLLM loop: register a deferred handle so
                     # its eventual background value is re-injected, not lost.
@@ -2724,6 +2804,8 @@ class OpenAIClient:
                             "content": results_str
                         })
 
+                if _batch_error is not None:
+                    raise _batch_error
                 if _deferred_media_followups:
                     messages.extend(_deferred_media_followups)
                 

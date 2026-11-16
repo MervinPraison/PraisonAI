@@ -18,8 +18,10 @@ const PUSH_AFTER_FINAL_DEBOUNCE_MS = 15 * 60 * 1000;
 const PUSH_SETTLE_MS = 30 * 60 * 1000;
 const ALLOWED_MERGE_STATES = new Set(['CLEAN', 'UNSTABLE']);
 const AGENT_PY_MAX_AUTO_LINES = 100;
-const PR_MAX_AUTO_ADDITIONS = 800;
-const PR_MAX_AUTO_FILES = 30;
+// Maintainer merge rule (#6429): auto-merge only at most 5 non-test files and
+// fewer than 100 non-test lines (additions + deletions). Test files don't count.
+const PR_MAX_AUTO_NONTEST_FILES = 5;
+const PR_MAX_AUTO_NONTEST_LINES = 100;
 const MANUAL_ONLY_LABELS = new Set(['security', 'breaking-change', 'needs-manual-review', 'release']);
 const WORKFLOW_ONLY_LABEL = 'merge-gate-ci-only';
 const EXTERNAL_EXAMPLE_PATH_PREFIX = 'examples/tools/external/';
@@ -158,10 +160,16 @@ function isClaudeTriggerNoise(c) {
 // "Claude finished" tracking comment; the local action used since 2026-10-09
 // posts the review itself, which always carries the mandatory Phase 1 table
 // (see FINAL_CLAUDE_REVIEW_BODY) and usually a "Final architecture review" title.
+// On fork PRs claude.yml always answers in its own format: a first line
+// "Security review: PASS|FAIL", then a normal review with no Phase 1 table.
+// Re-asking cannot change that, so without this marker every fork PR got the
+// FINAL re-posted FINAL_RETRIES_PER_HEAD times per HEAD. Not the gate's own
+// "SECURITY_REVIEW:" comment, which is uppercase with an underscore.
 const FINAL_REPLY_MARKERS = [
   /Claude finished/,
   /^#{1,4}\s*Final architecture review\b/im,
   /^#{1,4}\s*Phase 1 — AGENTS\.md review/m,
+  /^\s*Security review: (PASS|FAIL)\b/,
 ];
 
 // Exact logins: a substring match would trust any account whose name merely
@@ -994,14 +1002,24 @@ function sensitivePathReasons(files, labels = []) {
   return reasons;
 }
 
+function isTestPath(filename) {
+  return (
+    /(^|\/)tests?\//.test(filename) ||
+    /(^|\/)test_[^/]*$/.test(filename) ||
+    /_test\.py$/.test(filename) ||
+    /\.(test|spec)\.[jt]sx?$/.test(filename)
+  );
+}
+
 function prSizeReasons(files) {
   const reasons = [];
-  const totalAdditions = files.reduce((sum, f) => sum + (f.additions || 0), 0);
-  if (totalAdditions > PR_MAX_AUTO_ADDITIONS) {
-    reasons.push(`PR +${totalAdditions} lines (>${PR_MAX_AUTO_ADDITIONS}) requires manual review`);
+  const nonTest = files.filter((f) => !isTestPath(f.filename || ''));
+  const lines = nonTest.reduce((sum, f) => sum + (f.additions || 0) + (f.deletions || 0), 0);
+  if (lines >= PR_MAX_AUTO_NONTEST_LINES) {
+    reasons.push(`PR ${lines} non-test lines (limit <${PR_MAX_AUTO_NONTEST_LINES}) requires manual review`);
   }
-  if (files.length > PR_MAX_AUTO_FILES) {
-    reasons.push(`${files.length} files changed (>${PR_MAX_AUTO_FILES}) requires manual review`);
+  if (nonTest.length > PR_MAX_AUTO_NONTEST_FILES) {
+    reasons.push(`PR ${nonTest.length} non-test files (>${PR_MAX_AUTO_NONTEST_FILES}) requires manual review`);
   }
   return reasons;
 }
@@ -1628,6 +1646,7 @@ module.exports = {
   hasManualOnlyLabel,
   sensitivePathReasons,
   prSizeReasons,
+  isTestPath,
   missingTestsReason,
   secretScanReasons,
   sdkTestChecksReason,

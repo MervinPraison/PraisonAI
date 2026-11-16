@@ -259,6 +259,11 @@ _TURN_ERROR_MESSAGES = {
 }
 _RETRYABLE_TURN_ERRORS = frozenset({"rate_limit", "overloaded", "transient", "idle_timeout"})
 
+# Upper bound on a ``/hooks/<path>`` request body. A signed hook reads the body
+# before any credential is proven, so it must be bounded (GitHub caps webhook
+# payloads at 25 MB).
+_HOOK_MAX_BODY_BYTES = 25 * 1024 * 1024
+
 
 def _turn_error_payload(exc: BaseException) -> Dict[str, Any]:
     """Project a failed turn's exception onto a stable wire error envelope.
@@ -2056,9 +2061,13 @@ class WebSocketGateway:
                 except ImportError:
                     pass
                 
-                # Fall back to query param token authentication
+                # Then ``Authorization: Bearer`` (bundled client, Issue #6307),
+                # falling back to the legacy ``?token=`` query param.
                 if not authenticated:
-                    ws_token = websocket.query_params.get("token", "")
+                    auth_header = websocket.headers.get("authorization", "")
+                    ws_token = (
+                        auth_header[7:] if auth_header.startswith("Bearer ") else ""
+                    ) or websocket.query_params.get("token", "")
                     if ws_token and secrets.compare_digest(ws_token, self.config.auth_token):
                         authenticated = True
                         operator_token = ws_token
@@ -2524,26 +2533,49 @@ class WebSocketGateway:
             if hook is None or not getattr(hook, "enabled", True):
                 return JSONResponse({"error": "hook not found"}, status_code=404)
 
-            auth_err = _check_hook_auth(request, hook)
-            if auth_err:
-                return auth_err
+            # Token auth (gateway ``auth_token`` or hook ``auth``) is required
+            # unless the hook explicitly opted into ``signature_only`` (#6034);
+            # ``HookConfig`` only allows that with a secret and a replay-bounded
+            # scheme. It runs before the body is read so unauthenticated
+            # requests fail early.
+            verify = getattr(hook, "verify_signature", None)
+            signed = callable(verify) and bool(getattr(hook, "secret", None))
+            signature_only = signed and getattr(hook, "signature_only", False) is True
+            if not signature_only or getattr(hook, "auth", None):
+                auth_err = _check_hook_auth(request, hook)
+                if auth_err:
+                    return auth_err
+            elif not request.headers.get(getattr(hook, "signature_header", None) or ""):
+                # Signature is the only credential: with no signature header the
+                # request cannot authenticate, so reject it before buffering.
+                return JSONResponse({"error": "invalid signature"}, status_code=401)
 
             import json
 
             # Read the raw body once so an HMAC signature can be verified over
-            # the exact bytes the provider signed, then parse it as JSON.
-            raw_body = await request.body()
+            # the exact bytes the provider signed, then parse it as JSON. The
+            # read is capped so an unauthenticated sender cannot exhaust memory.
+            too_large = JSONResponse({"error": "payload too large"}, status_code=413)
+            try:
+                if int(request.headers.get("content-length") or 0) > _HOOK_MAX_BODY_BYTES:
+                    return too_large
+            except ValueError:
+                return JSONResponse({"error": "invalid content-length"}, status_code=400)
+            chunks, size = [], 0
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > _HOOK_MAX_BODY_BYTES:
+                    return too_large
+                chunks.append(chunk)
+            raw_body = b"".join(chunks)
 
             # Provider signature verification (#3165). Fail-closed: when a
             # ``secret`` is configured, a missing/invalid signature is rejected
-            # with 401 before any agent runs. A hook without ``secret`` is
-            # unaffected (backward compatible).
-            verify = getattr(hook, "verify_signature", None)
-            if callable(verify) and getattr(hook, "secret", None):
-                if not verify(raw_body, dict(request.headers)):
-                    return JSONResponse(
-                        {"error": "invalid signature"}, status_code=401,
-                    )
+            # with 401 before any agent runs.
+            if signed and not verify(raw_body, dict(request.headers)):
+                return JSONResponse(
+                    {"error": "invalid signature"}, status_code=401,
+                )
 
             try:
                 payload = json.loads(raw_body) if raw_body else {}
