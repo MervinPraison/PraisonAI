@@ -9,6 +9,43 @@ import time
 from unittest.mock import Mock, patch
 
 
+class _FakeClock:
+    """A frozen clock that only moves when the limiter sleeps.
+
+    ``install`` swaps the limiter's clock and both sleeps, then calls
+    ``reset()`` so the bucket's last-refill time is read from THIS clock.
+    Swapping ``_get_time`` alone leaves ``_last_update`` on the host's
+    ``time.monotonic()``: the first refill then sees a huge negative elapsed
+    time, and for some host clock values float rounding leaves the bucket at
+    0.9999999999998 tokens with a wait too small to move the fake clock, so
+    ``acquire()`` loops forever (the 120 s pytest-timeout seen in CI).
+    """
+
+    def __init__(self, max_sleeps=1000):
+        self.now = 0.0
+        self.sleeps = []
+        self._max_sleeps = max_sleeps
+
+    def time(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.sleeps.append(seconds)
+        if len(self.sleeps) > self._max_sleeps:
+            raise AssertionError(f"limiter slept {len(self.sleeps)} times; it is spinning")
+        self.now += seconds
+
+    async def async_sleep(self, seconds):
+        self.sleep(seconds)
+
+    def install(self, limiter):
+        limiter._get_time = self.time
+        limiter._sleep = self.sleep
+        limiter._async_sleep = self.async_sleep
+        limiter.reset()
+        return self
+
+
 class TestRateLimiterBasic:
     """Test basic rate limiter functionality."""
     
@@ -46,21 +83,39 @@ class TestRateLimiterBasic:
         # Very low rate: 6 per minute = 1 per 10 seconds
         # But we'll use a mock clock to test without waiting
         limiter = RateLimiter(requests_per_minute=6)
-        
-        # Inject a mock clock for testing
-        mock_time = [0.0]
-        limiter._get_time = lambda: mock_time[0]
-        limiter._sleep = lambda s: mock_time.__setitem__(0, mock_time[0] + s)
-        
+        clock = _FakeClock().install(limiter)
+
         # First request should pass
         limiter.acquire()
-        
+        assert clock.sleeps == []
+
         # Second request should need to wait ~10 seconds
         # (but our mock sleep just advances time)
         limiter.acquire()
-        
+
         # Time should have advanced
-        assert mock_time[0] >= 10.0
+        assert clock.now == pytest.approx(10.0)
+
+    @pytest.mark.parametrize(
+        "host_monotonic",
+        # Host clock values at construction that made the old test spin forever
+        # (found by scanning 20,000 values; the CI runner hit one like them).
+        [509.6111436902584, 16378.070019835244, 65528.75702329455],
+    )
+    def test_blocks_when_exceeded_whatever_the_host_clock(self, host_monotonic):
+        """The fake-clock test must not depend on time.monotonic() at construction."""
+        from praisonaiagents.llm import RateLimiter
+        from praisonaiagents.llm import rate_limiter as rate_limiter_module
+
+        with patch.object(rate_limiter_module.time, "monotonic", return_value=host_monotonic):
+            limiter = RateLimiter(requests_per_minute=6)
+        clock = _FakeClock().install(limiter)
+
+        limiter.acquire()
+        limiter.acquire()
+
+        assert clock.now == pytest.approx(10.0)
+        assert len(clock.sleeps) <= 2
     
     def test_rate_limiter_token_bucket(self):
         """RateLimiter should use token bucket algorithm."""
@@ -102,20 +157,18 @@ class TestRateLimiterAsync:
         import asyncio
         
         limiter = RateLimiter(requests_per_minute=6)
-        
-        # Mock async sleep
-        sleep_times = []
-        original_sleep = asyncio.sleep
-        
-        async def mock_sleep(s):
-            sleep_times.append(s)
-            # Don't actually sleep in tests
-        
-        with patch('asyncio.sleep', mock_sleep):
-            await limiter.acquire_async()
-            await limiter.acquire_async()
-        
-        # Should have tried to sleep
+        # The limiter binds asyncio.sleep when it is built, so patching
+        # asyncio.sleep afterwards never reached it: this test used to really
+        # sleep 10 s. Inject the sleep (and clock) instead.
+        clock = _FakeClock().install(limiter)
+
+        started = time.monotonic()
+        await limiter.acquire_async()
+        await limiter.acquire_async()
+
+        # Should have tried to sleep ~10 s (6 per minute), without really sleeping
+        assert clock.sleeps == [pytest.approx(10.0)]
+        assert time.monotonic() - started < 1.0
 
 
 class TestRateLimiterAgentIntegration:
