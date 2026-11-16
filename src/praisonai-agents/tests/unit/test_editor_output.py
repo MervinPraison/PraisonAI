@@ -379,3 +379,31 @@ class TestLlmContentCallback:
         blocks = editor.get_blocks()
         narrative_blocks = [b for b in blocks if b.type == BlockType.NARRATIVE]
         assert len(narrative_blocks) == 0
+
+
+class TestFormatActionStreamedArgs:
+    """A streamed tool call's arguments arrive as a JSON string (DELTA_TOOL_CALL).
+
+    PraisonAIUI formats every tool_call_started through _format_action; a
+    string used to pass ``'command' in args`` and raise TypeError on
+    ``args['command']``, so the whole chat run ended with "string indices
+    must be integers, not 'str'".
+    """
+
+    def test_json_string_args_are_parsed(self):
+        from praisonaiagents.output.editor import EditorOutput
+
+        out = EditorOutput._format_action("", "⚡", "Running", '{"command": "python3 --version"}')
+        assert out == "⚡ Running: python3 --version"
+
+    def test_partial_or_non_mapping_args_fall_back_to_the_label(self):
+        from praisonaiagents.output.editor import EditorOutput
+
+        assert EditorOutput._format_action("", "⚡", "Running", '{"comm') == "⚡ Running"
+        assert EditorOutput._format_action("", "⚡", "Running", "command") == "⚡ Running"
+        assert EditorOutput._format_action("", "⚡", "Running", '["command"]') == "⚡ Running"
+
+    def test_dict_args_unchanged(self):
+        from praisonaiagents.output.editor import EditorOutput
+
+        assert EditorOutput._format_action("", "🔍", "Searching", {"query": "x"}) == '🔍 Searching for "x"'

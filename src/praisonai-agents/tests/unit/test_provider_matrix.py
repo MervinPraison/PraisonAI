@@ -44,19 +44,29 @@ def _agent(**kw):
     return Agent(name="p", instructions="x", **kw)
 
 
+@pytest.fixture
+def no_provider_credentials(monkeypatch):
+    for name in (
+        "DAYTONA_API_KEY", "DAYTONA_API_URL", "DAYTONA_TARGET", "E2B_API_KEY",
+        "FLY_API_TOKEN", "FLY_APP_NAME", "TENKI_AUTH_TOKEN", "TENKI_API_KEY",
+        "TENKI_WORKSPACE_ID",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
 # ── the registry ─────────────────────────────────────────────────────────────
-def test_every_place_resolves_to_a_provider(place):
+def test_every_place_resolves_to_a_provider(place, no_provider_credentials):
     assert resolve_compute(place) is not None
 
 
-def test_every_provider_satisfies_the_protocol(place):
+def test_every_provider_satisfies_the_protocol(place, no_provider_credentials):
     """Everything downstream assumes these three exist."""
     provider = resolve_compute(place)
     for method in ("provision", "execute", "shutdown"):
         assert hasattr(provider, method), f"{place} has no {method}()"
 
 
-def test_every_protocol_method_is_awaitable(place):
+def test_every_protocol_method_is_awaitable(place, no_provider_credentials):
     """A sync method here does not raise -- it returns a coroutine nobody
     awaits, so the call silently does nothing."""
     provider = resolve_compute(place)
@@ -65,7 +75,7 @@ def test_every_protocol_method_is_awaitable(place):
         assert inspect.iscoroutinefunction(fn), f"{place}.{method}() is not async"
 
 
-def test_availability_can_be_answered_without_raising(place):
+def test_availability_can_be_answered_without_raising(place, no_provider_credentials):
     """`is_available` is consulted before anything is provisioned, so it has to
     survive a machine with no credentials and no daemon."""
     provider = resolve_compute(place)

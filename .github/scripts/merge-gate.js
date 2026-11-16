@@ -158,10 +158,16 @@ function isClaudeTriggerNoise(c) {
 // "Claude finished" tracking comment; the local action used since 2026-10-09
 // posts the review itself, which always carries the mandatory Phase 1 table
 // (see FINAL_CLAUDE_REVIEW_BODY) and usually a "Final architecture review" title.
+// On fork PRs claude.yml always answers in its own format: a first line
+// "Security review: PASS|FAIL", then a normal review with no Phase 1 table.
+// Re-asking cannot change that, so without this marker every fork PR got the
+// FINAL re-posted FINAL_RETRIES_PER_HEAD times per HEAD. Not the gate's own
+// "SECURITY_REVIEW:" comment, which is uppercase with an underscore.
 const FINAL_REPLY_MARKERS = [
   /Claude finished/,
   /^#{1,4}\s*Final architecture review\b/im,
   /^#{1,4}\s*Phase 1 — AGENTS\.md review/m,
+  /^\s*Security review: (PASS|FAIL)\b/,
 ];
 
 // Exact logins: a substring match would trust any account whose name merely

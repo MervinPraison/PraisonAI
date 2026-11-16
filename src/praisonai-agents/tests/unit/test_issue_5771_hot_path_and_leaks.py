@@ -190,6 +190,7 @@ def test_mcp_timed_out_call_is_not_executed_later():
 
         async def call_tool(self, name, arguments):
             called.append(name)
+            runner.queue.put(None)
             return "ok"
 
     @contextlib.asynccontextmanager
@@ -199,7 +200,6 @@ def test_mcp_timed_out_call_is_not_executed_later():
     probe_response = queue.Queue(maxsize=1)
     runner.queue.put(abandoned)
     runner.queue.put((probe_response, "tool", "probe", {}, threading.Event()))
-    runner.queue.put(None)
     with patch("praisonaiagents.mcp.mcp.stdio_client", fake_stdio_client), \
             patch("praisonaiagents.mcp.mcp.ClientSession", FakeSession), \
             patch.object(MCPToolRunner, "_discover_resources_and_prompts", AsyncMock()):

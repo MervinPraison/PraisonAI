@@ -507,13 +507,15 @@ def test_startup_batched_progress_does_not_waste_budget():
     deadline.
     """
     sw = StartupWatchdog(on_expire="dump_only", max_extensions=6)
-    sw.arm(deadline_s=0.08)
+    # 150ms slack per step: an 80ms deadline with 50ms steps left 30ms and
+    # failed on loaded machines. The 1s span is still 2.5x the base deadline.
+    sw.arm(deadline_s=0.4)
     # Fire a burst of reports (likely batched) then keep reporting across a
     # span far longer than the base deadline; must not expire while affordable.
     sw.report_startup_progress("burst-1")
     sw.report_startup_progress("burst-2")
     for _ in range(4):
-        time.sleep(0.05)
+        time.sleep(0.25)
         sw.report_startup_progress("phase")
     assert sw.expired is False
     assert sw.armed is True
