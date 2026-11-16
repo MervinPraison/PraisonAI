@@ -3362,6 +3362,19 @@ Your Role: {self.role}
                     return original_backstory
         return self.backstory
 
+    def _fork_history(self) -> "Agent":
+        """Shallow copy that shares all config, tools and memory but has its
+        own ``chat_history`` (seeded with the current one).
+
+        Used by concurrent workflow branches so one shared agent does not
+        leak sibling prompts between threads, without the config loss of
+        rebuilding it through the constructor.
+        """
+        import copy
+        fork = copy.copy(self)
+        fork.__chat_history_state = AsyncSafeState(list(self.chat_history))
+        return fork
+
     def clone_for_channel(self) -> "Agent":
         """Return a fully independent copy of this agent for a gateway channel.
         
