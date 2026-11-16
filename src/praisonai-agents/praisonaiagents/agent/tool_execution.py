@@ -1336,6 +1336,145 @@ class ToolExecutionMixin:
             self._turn_tools_used = []
         return tools_used
 
+    def _truncate_tool_result(self, function_name, result, tool_call_id=None):
+        """Cap a tool result before it re-enters the model context.
+
+        Applies ``ToolConfig.output_max_lines``, the ``tool_output_limit`` char
+        limit (spilling the full output to the artifact store when one is
+        set) and context-aware ``_truncate_tool_output``. Shared by the sync
+        and async tool paths so both send the model the same bounded result.
+        Never raises: on any failure the result is returned unchanged.
+        """
+        try:
+            result_str = str(result)
+            
+            # Get configured limit
+            limit = getattr(self, 'tool_output_limit', DEFAULT_TOOL_OUTPUT_LIMIT)
+            
+            # Initialize artifact reference before limit check so downstream
+            # `if artifact_ref:` guards remain valid on short-result paths.
+            artifact_ref = None
+
+            # ToolConfig.output_max_lines caps lines first, then the
+            # char limit below applies; output_direction picks the end(s) kept.
+            _tool_cfg = getattr(self, '_tool_config', None)
+            direction = getattr(_tool_cfg, 'output_direction', 'both')
+            max_lines = getattr(_tool_cfg, 'output_max_lines', None)
+            capped_str = result_str
+            if max_lines:
+                lines = result_str.split("\n")
+                if len(lines) > max_lines:
+                    if direction == "head":
+                        kept_head, kept_tail = lines[:max_lines], []
+                    elif direction == "tail":
+                        kept_head, kept_tail = [], lines[-max_lines:]
+                    else:
+                        n_tail = max_lines // 2
+                        kept_head = lines[:max_lines - n_tail]
+                        kept_tail = lines[-n_tail:] if n_tail else []
+                    marker = f"...[{len(lines):,} lines total, showing {max_lines:,}]..."
+                    capped_str = "\n".join(kept_head + [marker] + kept_tail)
+
+            # Check if we need to spill to artifact store
+            if len(capped_str) > limit or capped_str is not result_str:
+                # Try to use artifact store if available
+                if hasattr(self, '_artifact_store') and self._artifact_store is not None:
+                    try:
+                        from ..context.artifacts import ArtifactMetadata
+                        
+                        # Create metadata for this artifact
+                        metadata = ArtifactMetadata(
+                            agent_id=self.name,
+                            run_id=getattr(self, '_current_run_id', 'unknown'),
+                            tool_name=function_name,
+                            turn_id=getattr(self, '_turn_counter', 0),
+                        )
+                        
+                        # Store the full output
+                        artifact_ref = self._artifact_store.store(result_str, metadata)
+                        logging.debug(f"Stored {function_name} output ({len(result_str)} bytes) as artifact {artifact_ref.artifact_id}")
+                        
+                        # Register artifact retrieval tools if not already registered
+                        if not hasattr(self, '_artifact_tools_registered'):
+                            self._register_artifact_tools()
+                            self._artifact_tools_registered = True
+                    except Exception as e:
+                        logging.debug(f"Failed to store artifact: {e}")
+                
+                if len(capped_str) <= limit:
+                    # Only the line cap applied
+                    truncated = capped_str
+                else:
+                    # Generate truncated preview
+                    if direction == "head":
+                        head, tail = capped_str[:limit], ""
+                    elif direction == "tail":
+                        head, tail = "", capped_str[-limit:]
+                    else:
+                        tail_size = min(limit // 5, 2000)
+                        head = capped_str[:limit - tail_size]
+                        tail = capped_str[-tail_size:] if tail_size > 0 else ""
+                    total = "chars total" if artifact_ref else "chars"
+                    truncated = f"{head}\n...[{len(result_str):,} {total}, showing first/last portions]...\n{tail}"
+
+                # If we stored an artifact, include reference in the output
+                if artifact_ref:
+                    truncated = f"{truncated}\n\n{artifact_ref.to_inline()}"
+            else:
+                truncated = result_str
+            
+            if self.context_manager and hasattr(self, '_truncate_tool_output'):
+                # Use context-aware truncation if available, but preserve artifact reference
+                if artifact_ref:
+                    # Extract the artifact reference from the truncated string
+                    artifact_inline = artifact_ref.to_inline()
+                    # Remove the artifact reference before context truncation
+                    truncated_without_ref = truncated.replace(artifact_inline, "").rstrip()
+                    # Apply context truncation
+                    truncated_without_ref = self._truncate_tool_output(function_name, truncated_without_ref, tool_call_id)
+                    # Re-append the artifact reference
+                    truncated = f"{truncated_without_ref}\n\n{artifact_inline}"
+                else:
+                    truncated = self._truncate_tool_output(function_name, truncated, tool_call_id)
+            
+            # A triggered line cap applies even when its marker makes the
+            # preview no shorter than the original (many short lines).
+            line_capped = capped_str is not result_str
+            if line_capped or len(truncated) < len(result_str):
+                logging.debug(f"Truncated {function_name} output from {len(result_str)} to {len(truncated)} chars")
+                # For dicts, truncate large string fields (e.g., raw_content from search).
+                # Field truncation keeps both ends, so a line cap or a head/tail
+                # direction uses the string preview instead.
+                if isinstance(result, dict) and direction == "both" and not line_capped:
+                    max_field_chars = getattr(self, 'tool_output_limit', DEFAULT_TOOL_OUTPUT_LIMIT) if not self.context_manager else None
+                    result = self._truncate_dict_fields(result, function_name, max_field_chars, tool_call_id)
+                    # Per-field truncation only shortens individual fields
+                    # that each exceed the field limit; a dict of many
+                    # medium-sized fields (e.g. 50 search snippets each
+                    # just under the limit) stays unbounded and can still
+                    # overflow the context. Enforce a total-size budget:
+                    # if the serialised dict is still over the limit, fall
+                    # back to the already-computed head/tail string (which
+                    # carries the artifact reference for full retrieval).
+                    if len(str(result)) > limit:
+                        if result.get("error"):
+                            # Keep an error dict a dict: retry, loop-guard and
+                            # breaker checks key off ``error`` and the flags.
+                            result = {
+                                **{k: v for k, v in result.items() if v is None or isinstance(v, (bool, int, float))},
+                                "error": truncated,
+                            }
+                        else:
+                            result = truncated
+                    elif artifact_ref:
+                        # Add artifact reference to dict result if available
+                        result["_artifact_ref"] = artifact_ref.to_dict()
+                else:
+                    result = truncated
+        except Exception as e:
+            logging.debug(f"Tool truncation skipped: {e}")
+        return result
+
     def _execute_tool_with_context(self, function_name, arguments, state, tool_call_id=None):
         """Execute tool within injection context, with optional output truncation.
         
@@ -1833,126 +1972,7 @@ class ToolExecutionMixin:
             # Apply tool output truncation to prevent context overflow
             # Uses context manager budget if enabled, otherwise applies default limit
             if result and not _is_multimodal_result:
-                try:
-                    result_str = str(result)
-                    
-                    # Get configured limit
-                    limit = getattr(self, 'tool_output_limit', DEFAULT_TOOL_OUTPUT_LIMIT)
-                    
-                    # Initialize artifact reference before limit check so downstream
-                    # `if artifact_ref:` guards remain valid on short-result paths.
-                    artifact_ref = None
-
-                    # ToolConfig.output_max_lines caps lines first, then the
-                    # char limit below applies; output_direction picks the end(s) kept.
-                    _tool_cfg = getattr(self, '_tool_config', None)
-                    direction = getattr(_tool_cfg, 'output_direction', 'both')
-                    max_lines = getattr(_tool_cfg, 'output_max_lines', None)
-                    capped_str = result_str
-                    if max_lines:
-                        lines = result_str.split("\n")
-                        if len(lines) > max_lines:
-                            if direction == "head":
-                                kept_head, kept_tail = lines[:max_lines], []
-                            elif direction == "tail":
-                                kept_head, kept_tail = [], lines[-max_lines:]
-                            else:
-                                n_tail = max_lines // 2
-                                kept_head = lines[:max_lines - n_tail]
-                                kept_tail = lines[-n_tail:] if n_tail else []
-                            marker = f"...[{len(lines):,} lines total, showing {max_lines:,}]..."
-                            capped_str = "\n".join(kept_head + [marker] + kept_tail)
-
-                    # Check if we need to spill to artifact store
-                    if len(capped_str) > limit or capped_str is not result_str:
-                        # Try to use artifact store if available
-                        if hasattr(self, '_artifact_store') and self._artifact_store is not None:
-                            try:
-                                from ..context.artifacts import ArtifactMetadata
-                                
-                                # Create metadata for this artifact
-                                metadata = ArtifactMetadata(
-                                    agent_id=self.name,
-                                    run_id=getattr(self, '_current_run_id', 'unknown'),
-                                    tool_name=function_name,
-                                    turn_id=getattr(self, '_turn_counter', 0),
-                                )
-                                
-                                # Store the full output
-                                artifact_ref = self._artifact_store.store(result_str, metadata)
-                                logging.debug(f"Stored {function_name} output ({len(result_str)} bytes) as artifact {artifact_ref.artifact_id}")
-                                
-                                # Register artifact retrieval tools if not already registered
-                                if not hasattr(self, '_artifact_tools_registered'):
-                                    self._register_artifact_tools()
-                                    self._artifact_tools_registered = True
-                            except Exception as e:
-                                logging.debug(f"Failed to store artifact: {e}")
-                        
-                        if len(capped_str) <= limit:
-                            # Only the line cap applied
-                            truncated = capped_str
-                        else:
-                            # Generate truncated preview
-                            if direction == "head":
-                                head, tail = capped_str[:limit], ""
-                            elif direction == "tail":
-                                head, tail = "", capped_str[-limit:]
-                            else:
-                                tail_size = min(limit // 5, 2000)
-                                head = capped_str[:limit - tail_size]
-                                tail = capped_str[-tail_size:] if tail_size > 0 else ""
-                            total = "chars total" if artifact_ref else "chars"
-                            truncated = f"{head}\n...[{len(result_str):,} {total}, showing first/last portions]...\n{tail}"
-
-                        # If we stored an artifact, include reference in the output
-                        if artifact_ref:
-                            truncated = f"{truncated}\n\n{artifact_ref.to_inline()}"
-                    else:
-                        truncated = result_str
-                    
-                    if self.context_manager and hasattr(self, '_truncate_tool_output'):
-                        # Use context-aware truncation if available, but preserve artifact reference
-                        if artifact_ref:
-                            # Extract the artifact reference from the truncated string
-                            artifact_inline = artifact_ref.to_inline()
-                            # Remove the artifact reference before context truncation
-                            truncated_without_ref = truncated.replace(artifact_inline, "").rstrip()
-                            # Apply context truncation
-                            truncated_without_ref = self._truncate_tool_output(function_name, truncated_without_ref, tool_call_id)
-                            # Re-append the artifact reference
-                            truncated = f"{truncated_without_ref}\n\n{artifact_inline}"
-                        else:
-                            truncated = self._truncate_tool_output(function_name, truncated, tool_call_id)
-                    
-                    # A triggered line cap applies even when its marker makes the
-                    # preview no shorter than the original (many short lines).
-                    line_capped = capped_str is not result_str
-                    if line_capped or len(truncated) < len(result_str):
-                        logging.debug(f"Truncated {function_name} output from {len(result_str)} to {len(truncated)} chars")
-                        # For dicts, truncate large string fields (e.g., raw_content from search).
-                        # Field truncation keeps both ends, so a line cap or a head/tail
-                        # direction uses the string preview instead.
-                        if isinstance(result, dict) and direction == "both" and not line_capped:
-                            max_field_chars = getattr(self, 'tool_output_limit', DEFAULT_TOOL_OUTPUT_LIMIT) if not self.context_manager else None
-                            result = self._truncate_dict_fields(result, function_name, max_field_chars, tool_call_id)
-                            # Per-field truncation only shortens individual fields
-                            # that each exceed the field limit; a dict of many
-                            # medium-sized fields (e.g. 50 search snippets each
-                            # just under the limit) stays unbounded and can still
-                            # overflow the context. Enforce a total-size budget:
-                            # if the serialised dict is still over the limit, fall
-                            # back to the already-computed head/tail string (which
-                            # carries the artifact reference for full retrieval).
-                            if len(str(result)) > limit:
-                                result = truncated
-                            elif artifact_ref:
-                                # Add artifact reference to dict result if available
-                                result["_artifact_ref"] = artifact_ref.to_dict()
-                        else:
-                            result = truncated
-                except Exception as e:
-                    logging.debug(f"Tool truncation skipped: {e}")
+                result = self._truncate_tool_result(function_name, result, tool_call_id)
             
             # Emit tool call end event (truncation handled by context_events.py)
             # Only stringify the result if the emitter is actually enabled; the

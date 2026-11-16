@@ -3319,8 +3319,14 @@ Your Role: {self.role}
         cls = self.__class__
         result = cls.__new__(cls)
         memo[id(self)] = result
+        rebuild_context_manager = False
         for k, v in self.__dict__.items():
-            if k in ("_db_run_context", "_db_session_init_lock"):
+            if k == "_context_manager" and v is not None and v is not self.__dict__.get("_context_param"):
+                # Built lazily from config on first tool call; holds locks. The
+                # clone rebuilds its own (a user-supplied manager is copied as before).
+                object.__setattr__(result, k, None)
+                rebuild_context_manager = True
+            elif k in ("_db_run_context", "_db_session_init_lock"):
                 # A clone starts outside the source agent's active DB turn.
                 continue
             elif k == "_tool_executor":
@@ -3337,6 +3343,8 @@ Your Role: {self.role}
                 object.__setattr__(result, k, asyncio.Lock())
             else:
                 object.__setattr__(result, k, copy.deepcopy(v, memo))
+        if rebuild_context_manager:
+            object.__setattr__(result, "_context_manager_initialized", False)
         return result
 
     def _isolated_memory_for_clone(self):
@@ -3943,6 +3951,9 @@ Your Role: {self.role}
     def context_manager(self, value):
         """Set context manager directly."""
         self._context_manager = value
+        # Record it as the user's own manager so ``__deepcopy__`` copies it
+        # rather than treating it as lazily built (and rebuilding).
+        self._context_param = value
         self._context_manager_initialized = True
 
     def _manager_config_from_context_config(self, cc: Any) -> Any:

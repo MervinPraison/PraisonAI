@@ -2267,6 +2267,21 @@ Write the complete compiled report:"""
                         apply_result_guardrails, function_name, result, tools_override
                     )
 
+                # Cap the result before it re-enters the context — the same
+                # helper and order as the sync path (after guardrails, before
+                # the loop guard). Multimodal results pass through untouched.
+                from .tool_execution import _normalize_multimodal_result
+                truncate_result = getattr(self, "_truncate_tool_result", None)
+                if truncate_result is not None and result and _normalize_multimodal_result(result) is None:
+                    if isinstance(result, dict) or getattr(self, "_artifact_store", None) is not None:
+                        # Spilling to the artifact store / tool-output store
+                        # (large dict fields) is file I/O; keep it off the loop.
+                        result = await asyncio.to_thread(
+                            truncate_result, function_name, result, tool_call_id
+                        )
+                    else:
+                        result = truncate_result(function_name, result, tool_call_id)
+
                 # Loop guard (post-execution) — record the outcome and surface a
                 # block/halt decision back to the model on this same turn, mirroring
                 # the sync path in tool_execution.py so repeated failures accumulate
