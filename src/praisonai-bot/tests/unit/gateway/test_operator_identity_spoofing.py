@@ -162,8 +162,14 @@ def test_magic_link_redirect_is_relative_behind_https_proxy(monkeypatch, tmp_pat
     assert "Secure" in response.headers["set-cookie"]
 
 
-def test_loopback_proxy_does_not_exempt_remote_ws_client_from_preauth_budget(monkeypatch, tmp_path):
-    """A remote client forwarded by a local trusted proxy is not a loopback client."""
+@pytest.mark.parametrize("trusted, expected", [
+    (["127.0.0.1"], "203.0.113.9"),  # declared proxy: bucket on the real client
+    ([], "127.0.0.1"),  # undeclared proxy: still limited, bucketed on the peer
+])
+def test_loopback_proxy_does_not_exempt_remote_ws_client_from_preauth_budget(
+    monkeypatch, tmp_path, trusted, expected,
+):
+    """A remote client forwarded by a local proxy is not a loopback client."""
     seen = []
 
     class _Budget:
@@ -180,7 +186,7 @@ def test_loopback_proxy_does_not_exempt_remote_ws_client_from_preauth_budget(mon
     monkeypatch.setattr("praisonai_bot.gateway.rate_limiter.PreauthConnectionBudget", _Budget)
     app = _start_app(
         monkeypatch, tmp_path, GatewayConfig(auth_token=TOKEN, host="0.0.0.0", allowed_origins=["https://ui.example"]),
-        {"trusted_proxies": ["127.0.0.1"]},
+        {"trusted_proxies": trusted},
     )
     scope = {
         "type": "websocket", "path": "/ws", "raw_path": b"/ws", "query_string": b"",
@@ -201,4 +207,4 @@ def test_loopback_proxy_does_not_exempt_remote_ws_client_from_preauth_budget(mon
         sent.append(message)
 
     asyncio.run(asyncio.wait_for(app(scope, receive, send), 5))
-    assert seen == ["203.0.113.9"]
+    assert seen == [expected]
