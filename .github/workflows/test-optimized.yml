@@ -38,11 +38,13 @@ env:
 jobs:
   # ============================================
   # SMOKE TESTS - Fast unit tests, no network
-  # Target: <= 2 minutes
+  # Measured 16 Nov 2026 over 28 passing runs: 10-15.5 min (install ~3-5,
+  # smoke tests ~4-7, standalone package smokes ~2.5-3.5). At 16 min the job
+  # was cancelled at its own limit on main and PRs alike; 25 leaves headroom.
   # ============================================
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 16
+    timeout-minutes: 25
     steps:
     - uses: actions/checkout@v4
       with:
