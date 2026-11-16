@@ -435,6 +435,9 @@ def build_tool_definition(
         "required": []
     }
 
+    from .injected import is_injected_type
+    injected_names = getattr(func, "injected_params", None) or {}
+
     for name, param in sig.parameters.items():
         if name == "self":
             continue
@@ -445,6 +448,9 @@ def build_tool_definition(
             name,
             param.annotation if param.annotation != inspect.Parameter.empty else str
         )
+        # Framework-injected state is filled at runtime; never expose it to the model.
+        if name in injected_names or is_injected_type(annotation):
+            continue
         try:
             prop_schema = annotation_to_json_schema(annotation)
         except Exception as e:
