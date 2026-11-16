@@ -2506,6 +2506,34 @@ Your Role: {self.role}"""
             return max_retries
         return 2
 
+    def _retry_delay(self, exc, classification, retry_depth):
+        """The sync path's one retry layer (P-2/G-12): seconds to wait before
+        retrying ``exc``, or None.
+
+        The same rule as the async ``RetryBackoffConfig`` loop: an error the
+        classifier marks retryable, and no other recovery handled, is retried
+        ``retry.max_retries`` times with the configured jittered backoff, raised
+        to a server ``Retry-After``. ``retry=False`` turns retries off.
+        """
+        cfg = getattr(self, '_retry_config', None)
+        if cfg is None or not classification.is_retryable or retry_depth >= cfg.max_retries:
+            return None
+        from .retry_utils import jittered_backoff
+        from ..llm.error_classifier import extract_retry_after
+        delay = jittered_backoff(retry_depth, base_delay=cfg.base_delay, max_delay=cfg.max_delay,
+                                 jitter_ratio=cfg.jitter_ratio)
+        return max(delay, extract_retry_after(exc, cap_seconds=cfg.max_delay) or 0.0)
+
+    def _retry_hook_input(self, exc, retry_depth, delay, operation):
+        """``ON_RETRY`` hook input for a retry chosen by ``_retry_delay``."""
+        from ..hooks import HookEvent, OnRetryInput
+        return OnRetryInput(
+            session_id=getattr(self, '_session_id', 'default'), cwd=os.getcwd(),
+            event_name=HookEvent.ON_RETRY, timestamp=str(time.time()), agent_name=self.name,
+            retry_count=retry_depth + 1, max_retries=self._retry_config.max_retries,
+            error_message=str(exc), operation=operation, delay_seconds=delay, attempt=retry_depth,
+        )
+
     def _extract_llm_usage(self, response, model=None):
         """Return ``(prompt_tokens, completion_tokens, cost_usd)`` for one LLM response priced as ``model``."""
         usage = getattr(response, 'usage', None) if response else None
@@ -2944,20 +2972,27 @@ Your Role: {self.role}"""
                     logging.warning(f"[{self.name}] {classification.user_message} (no more fallback models available)")
                     # Continue to error handling without retry
                 
-            elif classification.is_retryable and classification.backoff_seconds > 0:
-                if _retry_depth < self._max_retry_depth():  # Bounded by configured RetryBackoffConfig.max_retries
-                    logging.info(f"[{self.name}] {classification.user_message} (waiting {classification.backoff_seconds:.1f}s)")
-                    _sleep_unless_cancelled(
-                        classification.backoff_seconds,
-                        cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None),
-                    )
-                    return self._chat_completion(
-                        messages, temperature, tools, stream, 
-                        reasoning_steps, task_name, task_description, task_id, response_format, 
-                        _retry_depth=_retry_depth + 1,
-                        _fallback_index=_fallback_index,
-                        cancel_token=cancel_token
-                    )
+
+            # The one retry layer (P-2): also reached by a transient error whose
+            # fallback chain is empty, which used to give up without a retry.
+            _delay = self._retry_delay(e, classification, _retry_depth)
+            if _delay is not None:
+                from ..hooks import HookEvent
+                logging.info(f"[{self.name}] {type(e).__name__}: retrying in {_delay:.1f}s ({_retry_depth + 1}/{self._retry_config.max_retries})")
+                self._hook_runner.execute_sync(HookEvent.ON_RETRY, self._retry_hook_input(e, _retry_depth, _delay, "llm_request"))
+                self._emit_retry_stream_event(attempt=_retry_depth + 1, max_attempts=self._retry_config.max_retries + 1,
+                                              delay=_delay, reason=str(e))
+                _sleep_unless_cancelled(
+                    _delay,
+                    cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None),
+                )
+                return self._chat_completion(
+                    messages, temperature, tools, stream, 
+                    reasoning_steps, task_name, task_description, task_id, response_format, 
+                    _retry_depth=_retry_depth + 1,
+                    _fallback_index=_fallback_index,
+                    cancel_token=cancel_token
+                )
             
             # Include remediation hints for unimplemented recovery actions
             user_message = classification.user_message
@@ -3132,26 +3167,11 @@ Your Role: {self.role}"""
                 logging.warning(f"[{self.name}] {classification.user_message} (no more fallback models available)")
                 # Continue to error handling without retry
             
-        elif classification.is_retryable and classification.backoff_seconds > 0:
-            if _retry_depth < self._max_retry_depth():  # Bounded by configured RetryBackoffConfig.max_retries
-                logging.info(f"[{self.name}] {classification.user_message} (waiting {classification.backoff_seconds:.1f}s)")
-                if not await _abackoff(self, classification.backoff_seconds, cancel_token):
-                    raise exc
-                # Need to call the full async method that includes error handling
-                try:
-                    return await self._execute_unified_achat_completion(
-                        messages, temperature, tools, stream, 
-                        reasoning_steps, task_name, task_description, task_id, response_format,
-                        stream_callback, emit_events, cancel_token=cancel_token,
-                    )
-                except Exception as retry_error:
-                    return await self._handle_async_llm_error(
-                        retry_error, messages, temperature, tools, stream,
-                        reasoning_steps, task_name, task_description, task_id, response_format,
-                        stream_callback, emit_events, _retry_depth + 1, _fallback_index,
-                        cancel_token=cancel_token,
-                    )
-        
+
+        # No retry here: the RetryBackoffConfig loop around this call is the one
+        # retry layer on the async path (P-2). Re-driving the call from here
+        # re-entered this handler at depth 0, so retries never ended.
+
         # Include remediation hints for unimplemented recovery actions
         user_message = classification.user_message
         if classification.should_rotate_credential and not self._credential_failover_active():
@@ -7395,6 +7415,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     max_delay=retry_config.max_delay,
                     jitter_ratio=retry_config.jitter_ratio,
                 )
+                # Never sooner than the server asked (Retry-After), as on the sync path.
+                from ..llm.error_classifier import extract_retry_after
+                delay = max(delay, extract_retry_after(e.__cause__ or e, cap_seconds=retry_config.max_delay) or 0.0)
                 
                 # Fire OnRetry hook with delay information
                 retry_input = OnRetryInput(

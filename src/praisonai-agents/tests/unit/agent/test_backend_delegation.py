@@ -83,7 +83,9 @@ def test_backend_delegation():
     
     # Test 4: Test that Agent WITHOUT backend still works locally
     print("\n4. Testing Agent without backend (fallback to local)...")
-    local_agent = Agent(name="local", instructions="You are a local agent")
+    # retry=False: this step only checks the call runs locally; it fails on purpose
+    # and needs no backoff (sync now honours retry= like async, P-2).
+    local_agent = Agent(name="local", instructions="You are a local agent", retry=False)
     
     # This should fail with a real LLM call since we don't have API keys
     # But it should at least try to execute locally (not delegate)
