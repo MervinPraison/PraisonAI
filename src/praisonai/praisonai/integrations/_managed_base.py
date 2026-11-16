@@ -24,6 +24,7 @@ whole streaming loop.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import functools
 import logging
 import queue
@@ -71,10 +72,14 @@ class ManagedBackendBase:
         the worker thread itself cannot be killed.
         """
         loop = asyncio.get_running_loop()
+        # Carry the caller's contextvars (trace emitter, OTEL span, tenant)
+        # onto the worker thread; run_in_executor does not do this itself.
+        ctx = contextvars.copy_context()
         fut = loop.run_in_executor(
             None,
             functools.partial(
-                sync_fn, prompt, stream_live=bool(kwargs.get("stream_live", False)),
+                ctx.run, sync_fn, prompt,
+                stream_live=bool(kwargs.get("stream_live", False)),
             ),
         )
         timeout = kwargs.get("timeout")
@@ -128,7 +133,10 @@ class ManagedBackendBase:
                     logger.error("[managed] post-stream hook error: %s", e)
                 q.put(None)  # sentinel
 
-        thread = threading.Thread(target=_producer, daemon=True)
+        # Run the producer inside a copy of the caller's context so
+        # request-scoped contextvars survive the thread hop.
+        ctx = contextvars.copy_context()
+        thread = threading.Thread(target=ctx.run, args=(_producer,), daemon=True)
         thread.start()
 
         try:
