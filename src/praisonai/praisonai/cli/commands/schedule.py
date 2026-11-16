@@ -177,6 +177,8 @@ def schedule_add_cmd(
                     if failure_deliver:
                         from praisonaiagents.scheduler.models import DeliveryTarget
                         job.failure_delivery = DeliveryTarget.parse(failure_deliver)
+                        if job.failure_delivery is not None and not continuable:
+                            job.failure_delivery.continuable = False
                     job.pre_run = pre_run or None
                     job.condition = condition or None
                     if monitor_command:
