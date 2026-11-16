@@ -5402,8 +5402,9 @@ Summary:"""
                                    iterations=iterations, duration_seconds=time_module.time() - start_time)
 
         try:
-            # Inside the try so cancelling during track() still returns
-            # AutonomyResult(completion_reason="cancelled").
+            # Inside the try so cancelling during track() is handled like any
+            # other cancellation: the partial result is kept on the agent and
+            # CancelledError propagates.
             await asyncio.to_thread(self._take_pre_autonomous_snapshot)
 
             # Execute the autonomous loop

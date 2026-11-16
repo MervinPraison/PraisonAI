@@ -96,9 +96,11 @@ def test_sync_and_async_emit_the_same_events(stub):
     assert _run("sync")[3] == _run("async")[3]
 
 
-def test_async_cancel_during_snapshot_returns_cancelled(stub):
-    """Cancelling while track() blocks must still return a cancelled result."""
+def test_async_cancel_during_snapshot_propagates_and_keeps_partial_result(stub):
+    """Cancelling while track() blocks raises CancelledError (G-07) and the
+    cancelled partial result stays reachable on the agent."""
     gate = threading.Event()
+    holder = {}
 
     class _Blocking(_FakeSnapshot):
         def track(self, message=None):
@@ -106,8 +108,8 @@ def test_async_cancel_during_snapshot_returns_cancelled(stub):
             return super().track(message)
 
     async def main():
-        agent = Agent(name="g", instructions="hi", llm="gpt-4o-mini", output="silent",
-                      autonomy={"snapshot": True, "max_iterations": 3})
+        agent = holder["agent"] = Agent(name="g", instructions="hi", llm="gpt-4o-mini", output="silent",
+                                        autonomy={"snapshot": True, "max_iterations": 3})
         agent._file_snapshot = _Blocking()
         task = asyncio.create_task(agent.run_autonomous_async("keep going", completion_promise="DONE"))
         await asyncio.sleep(0.2)
@@ -117,6 +119,8 @@ def test_async_cancel_during_snapshot_returns_cancelled(stub):
         finally:
             gate.set()
 
-    result = asyncio.run(main())
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(main())
+    result = holder["agent"]._last_autonomy_result
     assert result.completion_reason == "cancelled"
     assert result.iterations == 0
