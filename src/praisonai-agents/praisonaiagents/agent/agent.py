@@ -251,6 +251,8 @@ _LOCAL_ENDPOINT_DEFAULT_MODEL_WARNED = False
 class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin, AsyncMemoryMixin):
     # Class-level counter for generating unique display names for nameless agents
     _agent_counter = 0
+    # Partial result of the last cancelled run_autonomous_async(); None otherwise.
+    _last_autonomy_result = None
     _agent_counter_lock = threading.Lock()
     # Class-level cache for environment variables (avoid repeated os.environ.get)
     # Protected by _env_cache_lock for thread safety
@@ -5325,10 +5327,13 @@ Summary:"""
             
         Raises:
             ValueError: If autonomy is not enabled
-            
+            asyncio.CancelledError: If the task is cancelled (``task.cancel()``,
+                ``asyncio.wait_for`` timeout, TaskGroup). The partial result is
+                kept on ``agent._last_autonomy_result``.
+
         Example:
             import asyncio
-            
+
             async def main():
                 agent = Agent(instructions="...", autonomy=True)
                 result = await agent.run_autonomous_async(
@@ -5351,7 +5356,9 @@ Summary:"""
                 "Autonomy must be enabled to use run_autonomous_async(). "
                 "Create agent with autonomy=True or autonomy={...}"
             )
-        
+
+        # Drop a previous run's cancelled partial result so it can't go stale.
+        self._last_autonomy_result = None
         start_time = time_module.time()
         started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         iterations = 0
@@ -5735,8 +5742,8 @@ Summary:"""
                 started_at=started_at,
             )
         
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            return AutonomyResult(
+        except (KeyboardInterrupt, asyncio.CancelledError) as e:
+            result = AutonomyResult(
                 success=False,
                 output="Task cancelled",
                 completion_reason="cancelled",
@@ -5746,6 +5753,12 @@ Summary:"""
                 duration_seconds=time_module.time() - start_time,
                 started_at=started_at,
             )
+            if isinstance(e, asyncio.CancelledError):
+                # Re-raise so wait_for/TaskGroup/task.cancel() see the
+                # cancellation; keep the partial result reachable on the agent.
+                self._last_autonomy_result = result
+                raise
+            return result
         except Exception as e:
             return AutonomyResult(
                 success=False,

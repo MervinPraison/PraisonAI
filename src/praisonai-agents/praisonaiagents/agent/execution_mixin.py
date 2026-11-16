@@ -1082,7 +1082,9 @@ Write the complete compiled report:"""
                                         del sync_display_callbacks['tool_call']
                     
                     # Start chat in background thread
-                    chat_thread = threading.Thread(target=run_chat)
+                    # daemon: a Ctrl-C in the display loop must not leave the
+                    # process waiting on an in-flight LLM call to exit.
+                    chat_thread = threading.Thread(target=run_chat, daemon=True)
                     chat_thread.start()
                     
                     from rich.panel import Panel
