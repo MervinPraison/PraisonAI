@@ -39,6 +39,28 @@ assert('stale when head after final', mg.isStaleFinalAfterPush(finals, '2026-06-
   assert('re-asking stops after the per-HEAD cap', !mg.isStaleFinalAfterPush([...retries, { ...securityOnly, created_at: '2026-10-27T23:30:00Z' }], head));
 }
 
+// PR #6164 shape (fork): claude.yml answers every fork FINAL with "Security review:
+// PASS|FAIL" then a "## Code review", never the Phase 1 table. That reply is the
+// completed FINAL; treating it as unanswered re-posted the FINAL 3x per HEAD
+// (187 FINAL posts across 53 open fork PRs, none ever recognised).
+{
+  const head = '2026-11-14T07:38:22Z';
+  const trigger = { user: { login: 'MervinPraison' }, body: mg.FINAL_CLAUDE_REVIEW_BODY, created_at: '2026-11-14T07:38:39Z' };
+  const forkReply = (verdict) => ({ user: { login: 'praisonai-triage-agent[bot]' }, body: `Security review: ${verdict}  This is advisory only. A maintainer merges fork PRs.\n\n## Code review\n**Verdict:** looks good.`, created_at: '2026-11-14T07:42:42Z' });
+  assert('fork reply (PASS) is a completed FINAL reply', mg.isClaudeFinalReplyComment(forkReply('PASS')));
+  assert('fork reply (FAIL) is a completed FINAL reply', mg.isClaudeFinalReplyComment(forkReply('FAIL')));
+  assert('fork FINAL answered: not stale, no re-ask', !mg.isStaleFinalAfterPush([trigger, forkReply('PASS')], head));
+  assert('fork FINAL answered: completed on SHA', mg.finalClaudeCompletedOnSha([trigger, forkReply('PASS')], head));
+  assert('fork FINAL answered: stale-recovery skips', mg.shouldSkipStaleFinalRecovery([trigger, forkReply('PASS')], head).skip);
+  assert('a new push after the fork reply still asks again', mg.isStaleFinalAfterPush([trigger, forkReply('PASS')], '2026-11-14T09:00:00Z'));
+  const quoted = { ...forkReply('PASS'), body: 'Thanks.\n\nSecurity review: PASS was quoted here.' };
+  assert('"Security review:" mid-comment is not a FINAL reply', !mg.isClaudeFinalReplyComment(quoted));
+  const outsiderForged = { ...forkReply('PASS'), user: { login: 'some-outsider' } };
+  assert('only automation accounts can post a FINAL reply', !mg.isClaudeFinalReplyComment(outsiderForged));
+  const gateSecurity = { user: { login: 'praisonai-triage-agent[bot]' }, body: 'SECURITY_REVIEW: PASS\n| file | category |', created_at: '2026-11-14T07:42:42Z' };
+  assert('the gate SECURITY_REVIEW comment is still not a FINAL reply', !mg.isClaudeFinalReplyComment(gateSecurity));
+}
+
 const withRecovery = [
   ...finals,
   { user: { login: 'github-actions[bot]' }, body: '@claude FINAL architecture reviewer', created_at: '2026-06-12T09:30:00Z' },

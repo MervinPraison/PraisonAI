@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "praisonaiagents"
-version = "1.7.22"
+version = "1.7.23"
 description = "Open-source Python AI agent framework that runs on your own computers, even fully offline."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -58,6 +58,9 @@ knowledge = [
     "mem0ai>=0.1.0",
     "chromadb>=1.0.0",
     "markitdown[all]>=0.1.0",
+    # markitdown[all] pulls pandas unpinned; without a floor pip 26.3 backtracks
+    # to the pandas 1.4.4 sdist, whose setup.py needs the removed pkg_resources.
+    "pandas>=2.2",
     "chonkie>=1.0.2"
 ]
 
