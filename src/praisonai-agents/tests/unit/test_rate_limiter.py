@@ -154,21 +154,20 @@ class TestRateLimiterAsync:
     async def test_rate_limiter_async_blocks(self):
         """Async acquire should also respect rate limits."""
         from praisonaiagents.llm import RateLimiter
-        import asyncio
-        
+
         limiter = RateLimiter(requests_per_minute=6)
         # The limiter binds asyncio.sleep when it is built, so patching
         # asyncio.sleep afterwards never reached it: this test used to really
         # sleep 10 s. Inject the sleep (and clock) instead.
         clock = _FakeClock().install(limiter)
 
-        started = time.monotonic()
         await limiter.acquire_async()
         await limiter.acquire_async()
 
-        # Should have tried to sleep ~10 s (6 per minute), without really sleeping
+        # Should have requested a ~10 s wait (6 per minute) via the fake sleep;
+        # no wall-clock assertion, so a slow CI runner cannot fail it.
         assert clock.sleeps == [pytest.approx(10.0)]
-        assert time.monotonic() - started < 1.0
+        assert clock.now == pytest.approx(10.0)
 
 
 class TestRateLimiterAgentIntegration:
