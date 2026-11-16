@@ -360,6 +360,10 @@ def tool(
     Returns:
         FunctionTool instance that wraps the function
     """
+    # ``@tool("name")``: a positional string is the tool's name, not the function.
+    if isinstance(func, str):
+        name, func = func if name is None else name, None
+
     def decorator(fn: Callable) -> FunctionTool:
         # Resolve once here so the deprecation warning (if any) fires a single
         # time and points at the caller's @tool site.
