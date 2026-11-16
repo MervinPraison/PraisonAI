@@ -4,10 +4,33 @@ import threading
 
 import pytest
 
-litellm = pytest.importorskip("litellm")
+
+@pytest.fixture
+def litellm(monkeypatch):
+    """The litellm module that ``LLM`` will import when the test RUNS.
+
+    A module-level ``litellm = pytest.importorskip("litellm")`` binds the module
+    at collection time. Other unit tests (embedding/test_embedding.py,
+    llm/test_cost.py, test_lazy_imports.py) delete ``litellm`` from
+    ``sys.modules`` to check lazy loading, so by the time these tests run,
+    ``LLM._completion_with_retry``'s ``import litellm`` gets a fresh module and
+    the patched ``completion`` on the stale one is never called: the test makes
+    a real model request (CI: "Missing Anthropic API Key"; with a key set, a
+    real paid call). Resolve it per test instead, and make any request that
+    still slips past the fake fail loudly rather than reach the network.
+    """
+    module = pytest.importorskip("litellm")
+
+    def _no_network(*args, **kwargs):
+        raise AssertionError("litellm.completion was not replaced by the test's fake")
+
+    monkeypatch.setattr(module, "completion", _no_network)
+    for key in ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"):
+        monkeypatch.delenv(key, raising=False)
+    return module
 
 
-def test_sync_parallel_dispatch_keeps_order_and_budget(monkeypatch):
+def test_sync_parallel_dispatch_keeps_order_and_budget(monkeypatch, litellm):
     from praisonaiagents.llm.llm import LLM
 
     requests = []
@@ -45,7 +68,7 @@ def test_sync_parallel_dispatch_keeps_order_and_budget(monkeypatch):
     assert declared == replies == ["c0", "c1"]
 
 
-def test_sync_parallel_preserves_errors_and_durable_iteration(monkeypatch):
+def test_sync_parallel_preserves_errors_and_durable_iteration(monkeypatch, litellm):
     from praisonaiagents.llm.llm import LLM
 
     requests = []
@@ -79,7 +102,7 @@ def test_sync_parallel_preserves_errors_and_durable_iteration(monkeypatch):
     assert "expected error" in replies[1]["content"]
 
 
-def test_sync_parallel_propagates_tool_execution_error(monkeypatch):
+def test_sync_parallel_propagates_tool_execution_error(monkeypatch, litellm):
     from praisonaiagents.errors import ToolExecutionError
     from praisonaiagents.llm.llm import LLM
 
@@ -103,7 +126,7 @@ def test_sync_parallel_propagates_tool_execution_error(monkeypatch):
                          parallel_tool_calls=True, stream=False, verbose=False)
 
 
-def test_sync_parallel_error_content_matches_sequential(monkeypatch):
+def test_sync_parallel_error_content_matches_sequential(monkeypatch, litellm):
     from praisonaiagents.llm.llm import LLM
 
     messages_by_mode = []
