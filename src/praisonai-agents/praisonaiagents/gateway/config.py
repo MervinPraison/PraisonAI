@@ -1219,6 +1219,9 @@ class GatewayConfig:
     # across trusted hops (see ``resolve_ingress_attribution``); anything
     # proxy-shaped but unattributable fails closed to the socket peer.
     trusted_proxies: List[str] = field(default_factory=list)
+    # Issue #6428: honour a caller-supplied ``X-Operator-Id`` as the approval
+    # identity only when this is on *and* the peer is a trusted proxy.
+    trust_operator_header: bool = False
     cors_origins: List[str] = field(default_factory=lambda: [])
     allowed_origins: List[str] = field(default_factory=lambda: [])
     auth_token: Optional[str] = None
@@ -1430,6 +1433,7 @@ class GatewayConfig:
             "host": self.host,
             "port": self.port,
             "trusted_proxies": list(self.trusted_proxies),
+            "trust_operator_header": self.trust_operator_header,
             "cors_origins": self.cors_origins,
             "allowed_origins": self.allowed_origins,
             "auth_token": "***" if self.auth_token else None,
@@ -1564,7 +1568,7 @@ class MultiChannelGatewayConfig:
     # surfaces (YAML, CLI, Python) — ``gateway doctor`` reuses the same sets.
     _KNOWN_TOP_KEYS = frozenset({"gateway", "agents", "channels", "hooks", "config_version"})
     _KNOWN_GATEWAY_KEYS = frozenset({
-        "host", "port", "trusted_proxies", "cors_origins", "allowed_origins",
+        "host", "port", "trusted_proxies", "trust_operator_header", "cors_origins", "allowed_origins",
         "auth_token", "auth", "auth_scopes", "max_connections",
         "max_sessions_per_agent", "session_config", "heartbeat_interval",
         "reconnect_timeout", "per_turn_timeout", "ssl_cert", "ssl_key",
@@ -1670,6 +1674,7 @@ class MultiChannelGatewayConfig:
             host=gw_data.get("host", "127.0.0.1"),
             port=gw_data.get("port", 8765),
             trusted_proxies=trusted_proxies,
+            trust_operator_header=gw_data.get("trust_operator_header") is True,
             cors_origins=gw_data.get("cors_origins", []),
             allowed_origins=gw_data.get("allowed_origins", []),
             auth_token=gw_data.get("auth_token"),

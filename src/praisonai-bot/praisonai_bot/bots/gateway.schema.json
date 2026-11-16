@@ -1530,6 +1530,33 @@
           "default": null,
           "title": "Bind Host"
         },
+        "trusted_proxies": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trusted Proxies"
+        },
+        "trust_operator_header": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trust Operator Header"
+        },
         "cors_origins": {
           "anyOf": [
             {

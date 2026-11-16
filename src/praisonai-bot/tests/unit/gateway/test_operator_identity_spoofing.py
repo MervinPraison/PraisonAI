@@ -10,7 +10,7 @@ import pytest
 pytest.importorskip("starlette")
 pytest.importorskip("uvicorn")
 
-from praisonaiagents.gateway.config import GatewayConfig
+from praisonaiagents.gateway.config import GatewayConfig, MultiChannelGatewayConfig
 from praisonai_bot.gateway.exec_approval import ExecApprovalManager, Resolution
 from praisonai_bot.gateway.server import WebSocketGateway
 
@@ -84,3 +84,28 @@ def test_opt_in_header_honoured_from_trusted_proxy(monkeypatch, tmp_path):
     # httpx's ASGI transport presents the socket peer as 127.0.0.1.
     cfg = {"trust_operator_header": True, "trusted_proxies": ["127.0.0.1"]}
     assert _resolve_as_alice(monkeypatch, tmp_path, cfg) == (200, True)
+
+
+def test_yaml_with_trust_keys_validates_and_drives_resolver(monkeypatch, tmp_path):
+    """Both keys load through the real loader and gate the header end to end."""
+    cfg_path = tmp_path / "gateway.yaml"
+    cfg_path.write_text(
+        "gateway:\n"
+        "  trust_operator_header: true\n"
+        "  trusted_proxies: ['127.0.0.1']\n"
+        "agents:\n  a: {instructions: hi}\n"
+        "channels:\n  telegram: {token: t}\n"
+    )
+    loaded = WebSocketGateway.load_gateway_config(str(cfg_path))
+    gw = loaded["gateway"]
+    assert gw["trust_operator_header"] is True
+    assert gw["trusted_proxies"] == ["127.0.0.1"]
+
+    core = MultiChannelGatewayConfig.from_dict(loaded, strict=True).gateway
+    assert core.trust_operator_header is True
+    assert core.to_dict()["trust_operator_header"] is True
+    assert GatewayConfig().trust_operator_header is False
+
+    assert _resolve_as_alice(monkeypatch, tmp_path, gw) == (200, True)
+    untrusted = dict(gw, trusted_proxies=["10.0.0.1"])
+    assert _resolve_as_alice(monkeypatch, tmp_path, untrusted) == (404, False)

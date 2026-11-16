@@ -901,6 +901,10 @@ class GatewayServerSchema(BaseModel):
     host: Optional[str] = None
     port: Optional[int] = Field(None, ge=1, le=65535)
     bind_host: Optional[str] = None
+    # Issue #5312 / #6428: declared upstream proxies, and the opt-in to trust
+    # their ``X-Operator-Id`` as the approval identity (default off).
+    trusted_proxies: Optional[List[str]] = None
+    trust_operator_header: Optional[bool] = None
     cors_origins: Optional[List[str]] = None
     allowed_origins: Optional[List[str]] = None
     auth_token: Optional[str] = None
