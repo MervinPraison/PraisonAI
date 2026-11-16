@@ -430,6 +430,7 @@ def tool_progress_channel(sink: Optional[StreamCallback]):
     finally:
         _tool_progress_sink.reset(token)
 
+
 # ``Protocol``-suffixed names (G-26, the project naming rule). The original
 # names stay and are the same class, so existing imports keep working.
 StreamCallbackProtocol = StreamCallback
