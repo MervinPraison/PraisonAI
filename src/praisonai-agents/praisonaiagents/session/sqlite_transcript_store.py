@@ -136,9 +136,13 @@ class SqliteTranscriptStore(DefaultSessionStore):
                 "CREATE INDEX IF NOT EXISTS idx_sessions_updated "
                 "ON sessions(updated_at)"
             )
+            try:
+                self._migrate_legacy_json(conn)
+            except BaseException:
+                conn.close()
+                raise
             self._conn = conn
             self._db_ready = True
-            self._migrate_legacy_json(conn)
             return self._conn
 
     def _migrate_legacy_json(self, conn) -> None:
@@ -154,39 +158,68 @@ class SqliteTranscriptStore(DefaultSessionStore):
         """
         if self.db_path == ":memory:":
             return
+        import sqlite3
+
         session_dir = self.session_dir
-        if not session_dir or not os.path.isdir(session_dir):
-            return
+        conn.execute("BEGIN IMMEDIATE")
         try:
-            filenames = sorted(
-                f for f in os.listdir(session_dir) if f.endswith(".json")
-            )
-        except OSError:
-            return
-        if not filenames:
-            return
-        try:
-            existing = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()
-            if existing and existing[0]:
-                return  # DB already populated; do not re-import
-        except Exception:  # pragma: no cover - best-effort guard
-            return
-        imported = 0
-        for filename in filenames:
-            filepath = os.path.join(session_dir, filename)
+            conn.execute("CREATE TABLE IF NOT EXISTS migration_state (name TEXT PRIMARY KEY)")
+            state = {row[0] for row in conn.execute("SELECT name FROM migration_state")}
+            pending = {n.split(":", 1)[1] for n in state if n.startswith("legacy_json_pending:")}
+            imported, skipped = 0, []
+            if "legacy_json" not in state:
+                existing = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
+                if (pending or not existing) and session_dir:  # retry only files skipped earlier
+                    try:
+                        filenames = sorted(f for f in os.listdir(session_dir) if f.endswith(".json"))
+                    except FileNotFoundError:
+                        filenames = []
+                    filenames = [f for f in filenames if f in pending] if pending else filenames
+                    for filename in filenames:
+                        filepath = os.path.join(session_dir, filename)
+                        if os.path.isdir(filepath):
+                            logger.warning("Skipping legacy session directory %s", filepath)
+                            continue
+                        try:
+                            with open(filepath, "r", encoding="utf-8") as f:
+                                data = json.load(f)
+                        except (UnicodeDecodeError, ValueError, TypeError):
+                            continue
+                        except OSError as exc:
+                            logger.warning("Skipping unreadable legacy session %s (will retry): %s", filepath, exc)
+                            skipped.append(filename)
+                            continue
+                        if not isinstance(data, dict):
+                            continue
+                        try:
+                            session = SessionData.from_dict(data)
+                            # Bind probe: skip malformed values; real DB failures stay fatal.
+                            conn.execute("SELECT ?, ?, ?, ?, ?, ?", (
+                                json.dumps(session.to_dict(), ensure_ascii=False),
+                                session.session_id, session.agent_name,
+                                session.gateway_session_id, session.agent_id, session.updated_at))
+                        except sqlite3.OperationalError:
+                            raise
+                        except Exception as exc:
+                            logger.warning("Skipping malformed legacy session %s: %s", filepath, exc)
+                            continue
+                        try:
+                            written = self._write_row(session, conn=conn, overwrite=False)
+                        except FileExistsError:
+                            continue  # a newer row with this id already exists
+                        if not written:
+                            raise OSError(f"Legacy session migration failed for {filename}")
+                        imported += 1
+                conn.execute("DELETE FROM migration_state WHERE name LIKE 'legacy_json_pending:%'")
+                conn.executemany("INSERT INTO migration_state (name) VALUES (?)", [
+                    ("legacy_json_pending:" + f,) for f in skipped] or [("legacy_json",)])
+            conn.execute("COMMIT")
+        except BaseException:
             try:
-                with open(filepath, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except (OSError, UnicodeDecodeError, json.JSONDecodeError, TypeError):
-                continue
-            if not isinstance(data, dict):
-                continue
-            try:
-                session = SessionData.from_dict(data)
-            except Exception:  # pragma: no cover - tolerate malformed legacy files
-                continue
-            if self._write_row(session, conn=conn):
-                imported += 1
+                conn.execute("ROLLBACK")
+            except Exception as exc:
+                logger.warning("Could not roll back legacy session migration: %s", exc)
+            raise
         if imported:
             logger.info(
                 "Imported %d legacy JSON session(s) from %s into SQLite store",
