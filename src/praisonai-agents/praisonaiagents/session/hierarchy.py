@@ -345,7 +345,7 @@ class HierarchicalSessionStore(DefaultSessionStore):
 
     def _dump_session_json(self, data: Any, stream) -> None:
         if isinstance(data, dict) and "snapshot_storage" in data:
-            json.dump(data, stream, ensure_ascii=False, separators=(",", ":"))
+            stream.write(json.JSONEncoder(ensure_ascii=False, separators=(",", ":")).encode(data))
         else:
             super()._dump_session_json(data, stream)
 
