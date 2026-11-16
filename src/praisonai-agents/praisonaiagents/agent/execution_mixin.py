@@ -2269,12 +2269,27 @@ Write the complete compiled report:"""
                         apply_result_guardrails, function_name, result, tools_override
                     )
 
+                # Prompt-injection fence for external tools — same place as the
+                # sync path: after the guardrails saw the raw result, before
+                # truncation. Zero-cost for trusted tools. Multimodal results
+                # pass through untouched (their text parts are fenced when the
+                # tool message is built).
+                from .tool_execution import _normalize_multimodal_result
+                _is_multimodal_result = _normalize_multimodal_result(result) is not None
+                if not _is_multimodal_result:
+                    try:
+                        from ..tools.trust import wrap_if_external
+                        result = wrap_if_external(function_name, result)
+                    except Exception:
+                        # Trust module unavailable (partial install) must not
+                        # abort tool execution; fall through with the raw result.
+                        pass
+
                 # Cap the result before it re-enters the context — the same
                 # helper and order as the sync path (after guardrails, before
                 # the loop guard). Multimodal results pass through untouched.
-                from .tool_execution import _normalize_multimodal_result
                 truncate_result = getattr(self, "_truncate_tool_result", None)
-                if truncate_result is not None and result and _normalize_multimodal_result(result) is None:
+                if truncate_result is not None and result and not _is_multimodal_result:
                     if isinstance(result, dict) or getattr(self, "_artifact_store", None) is not None:
                         # Spilling to the artifact store / tool-output store
                         # (large dict fields) is file I/O; keep it off the loop.
