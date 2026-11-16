@@ -1990,7 +1990,7 @@ class WebSocketGateway:
             client_ip = _client_subject(peer_ip, websocket.headers)
 
             # Rate limiting for WebSocket upgrades (exempt loopback per acceptance criteria)
-            if not is_loopback(peer_ip) and not is_loopback(self._host):
+            if not (is_loopback(peer_ip) and is_loopback(client_ip)) and not is_loopback(self._host):
                 if not _ws_upgrade_rate.allow("ws_upgrade", client_ip):
                     retry = _ws_upgrade_rate.time_until_allowed("ws_upgrade", client_ip)
                     await _reject_connection(
@@ -2011,7 +2011,11 @@ class WebSocketGateway:
             # once so a hostile client cannot park many half-open connections up
             # to max_connections. Loopback is exempt so local CLIs are never
             # locked out. The slot is released on auth-success or on close.
-            _ip_is_loopback = is_loopback(peer_ip) or is_loopback(self._host)
+            # A loopback *proxy* forwarding a remote client is not exempt: the
+            # resolved client must be loopback too (#6428, proxy_headers=False).
+            _ip_is_loopback = (
+                is_loopback(peer_ip) and is_loopback(client_ip)
+            ) or is_loopback(self._host)
             _released = {"done": False}
 
             def _release_budget():
@@ -2424,7 +2428,9 @@ class WebSocketGateway:
                     status_code=401
                 )
             
-            client_ip = request.client.host if request.client else "unknown"
+            client_ip = _client_subject(
+                request.client.host if request.client else None, request.headers
+            )
             if not _magic_rate.allow("magic_link", client_ip):
                 retry = _magic_rate.time_until_allowed("magic_link", client_ip)
                 return JSONResponse(
@@ -2468,8 +2474,10 @@ class WebSocketGateway:
                 
                 # Redirect to remove the nonce from URL
                 from starlette.responses import RedirectResponse
+                # Relative redirect keeps the public scheme/host behind an
+                # HTTPS proxy (uvicorn proxy_headers is off, #6428).
                 response = RedirectResponse(
-                    url=str(request.url.replace(query="")),
+                    url=request.url.path or "/",
                     status_code=302
                 )
                 response.headers["Set-Cookie"] = cookie_header

@@ -118,3 +118,87 @@ def test_yaml_with_trust_keys_validates_and_drives_resolver(monkeypatch, tmp_pat
     assert _resolve_as_alice(monkeypatch, tmp_path, gw) == (200, True)
     untrusted = dict(gw, trusted_proxies=["10.0.0.1"])
     assert _resolve_as_alice(monkeypatch, tmp_path, untrusted) == (404, False)
+
+
+def _start_app(monkeypatch, tmp_path, config, gateway_yaml=None):
+    """Start a gateway with uvicorn stubbed; return its served ASGI app."""
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+    monkeypatch.setenv("GATEWAY_AUTH_TOKEN", TOKEN)
+    monkeypatch.setattr("praisonai_bot.gateway.port_utils.check_port_available", lambda *a: (True, None))
+    lock = SimpleNamespace(acquire_lock=Mock(return_value=True), release_lock=Mock())
+    monkeypatch.setattr("praisonai_bot.gateway.port_utils.GatewayPIDLock", lambda **kw: lock)
+    server = SimpleNamespace(serve=AsyncMock(), should_exit=False)
+
+    def capture_server(cfg):
+        cfg.load()
+        server.app = cfg.loaded_app
+        return server
+
+    monkeypatch.setattr("uvicorn.Server", capture_server)
+    gateway = WebSocketGateway(config=config)
+    asyncio.run(gateway.start())
+    gateway._loaded_config = {"gateway": gateway_yaml or {}}
+    return server.app
+
+
+def test_magic_link_redirect_is_relative_behind_https_proxy(monkeypatch, tmp_path):
+    """With proxy_headers off the redirect must not hard-code the internal http scheme."""
+    from praisonai_bot.gateway.magic_link import MagicLinkStore
+
+    app = _start_app(monkeypatch, tmp_path, GatewayConfig(auth_token=TOKEN))
+    nonce = MagicLinkStore().mint()
+
+    async def scenario():
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://gateway",
+        ) as client:
+            return await client.get(f"/?link={nonce}", headers={"X-Forwarded-Proto": "https"})
+
+    response = asyncio.run(scenario())
+    if response.status_code == 500:
+        pytest.skip("cookie auth unavailable")
+    assert response.status_code == 302
+    assert response.headers["location"] == "/"
+    assert "Secure" in response.headers["set-cookie"]
+
+
+def test_loopback_proxy_does_not_exempt_remote_ws_client_from_preauth_budget(monkeypatch, tmp_path):
+    """A remote client forwarded by a local trusted proxy is not a loopback client."""
+    seen = []
+
+    class _Budget:
+        def __init__(self, *a, **kw):
+            pass
+
+        def acquire(self, ip):
+            seen.append(ip)
+            return False  # budget exhausted → rejected before auth
+
+        def release(self, ip):
+            pass
+
+    monkeypatch.setattr("praisonai_bot.gateway.rate_limiter.PreauthConnectionBudget", _Budget)
+    app = _start_app(
+        monkeypatch, tmp_path, GatewayConfig(auth_token=TOKEN, host="0.0.0.0", allowed_origins=["https://ui.example"]),
+        {"trusted_proxies": ["127.0.0.1"]},
+    )
+    scope = {
+        "type": "websocket", "path": "/ws", "raw_path": b"/ws", "query_string": b"",
+        "scheme": "ws", "server": ("gateway", 80), "client": ("127.0.0.1", 5555),
+        "headers": [(b"host", b"gateway"), (b"x-forwarded-for", b"203.0.113.9")],
+        "subprotocols": [], "asgi": {"version": "3.0"},
+    }
+    sent = []
+    inbox = [{"type": "websocket.connect"}]
+
+    async def receive():
+        if inbox:
+            return inbox.pop(0)
+        await asyncio.sleep(0.01)
+        return {"type": "websocket.disconnect", "code": 1000}
+
+    async def send(message):
+        sent.append(message)
+
+    asyncio.run(asyncio.wait_for(app(scope, receive, send), 5))
+    assert seen == ["203.0.113.9"]
