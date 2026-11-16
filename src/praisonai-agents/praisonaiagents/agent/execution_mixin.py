@@ -12,6 +12,7 @@ import inspect
 import os
 
 import asyncio
+import contextvars
 import threading
 
 
@@ -19,6 +20,28 @@ import threading
 from ._lazy_display import _get_console, _get_live, _get_display_functions
 
 logger = logging.getLogger(__name__)
+
+# A tool's compact model-facing view (ToolResult.model_output / to_model_output),
+# resolved from the raw result in _execute_tool_async_impl and swapped in by
+# execute_tool_async after tracing, AFTER_TOOL hooks and loop detection saw the
+# full result: the sync path's order. A mutable holder, so it survives the
+# context copies of the tool-middleware worker thread.
+_model_facing_holder = contextvars.ContextVar("praisonai_model_facing", default=None)
+
+
+def _swap_in_model_facing(result, holder):
+    """Return the compact view (with model-facing annotations) if one was set."""
+    override = holder.get("override") if holder else None
+    if override is None:
+        return result
+    for annotation in holder.get("annotations", ()):
+        if isinstance(override, str):
+            override = f"{override}\n\n{annotation}"
+        elif isinstance(override, dict):
+            override.setdefault("_additional_context", annotation)
+        else:
+            override = {"value": override, "_additional_context": annotation}
+    return override
 
 from typing import List, Optional, Any, Dict, Union, Generator, TYPE_CHECKING
 
@@ -1399,6 +1422,20 @@ Write the complete compiled report:"""
     async def execute_tool_async(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
         """Async version of execute_tool with retry policy support.
 
+        The model receives the tool's compact view when it declares one, after
+        every hook and trace has seen the full result (as on the sync path).
+        """
+        holder = {}
+        token = _model_facing_holder.set(holder)
+        try:
+            result = await self._execute_tool_async_hooked(function_name, arguments, tool_call_id, tools_override)
+        finally:
+            _model_facing_holder.reset(token)
+        return _swap_in_model_facing(result, holder)
+
+    async def _execute_tool_async_hooked(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
+        """Body of ``execute_tool_async``: hooks, middleware and the retry loop.
+
         Routes through the user-supplied tool middleware (``Agent(hooks=[...])``)
         when present so ``before_tool``/``after_tool``/``wrap_tool_call`` gate
         async tool calls exactly as they do sync ones (security parity). The
@@ -1530,6 +1567,7 @@ Write the complete compiled report:"""
                 if hook_runner.is_blocked(after_results):
                     reason = hook_runner.get_blocking_reason(after_results)
                     logging.warning(f"Tool {function_name} result blocked by AFTER_TOOL hook")
+                    (_model_facing_holder.get() or {}).clear()  # the block wins over the view
                     return _record_async_loop_outcome(
                         reason or f"Result of {function_name} was blocked by security policy."
                     )
@@ -1543,6 +1581,9 @@ Write the complete compiled report:"""
                         result = f"{result}\n\n{extra_context}"
                     elif isinstance(result, dict):
                         result.setdefault("_additional_context", extra_context)
+                    _holder = _model_facing_holder.get()
+                    if _holder is not None:
+                        _holder.setdefault("annotations", []).insert(0, extra_context)  # sync order: hook context first
             return _record_async_loop_outcome(result)
 
         return _record_async_loop_outcome(
@@ -1795,6 +1836,10 @@ Write the complete compiled report:"""
         """Internal async tool execution implementation"""
         from ..errors import ToolExecutionError
         from .tool_execution import _CALLER_ERROR_TYPES
+        _holder = _model_facing_holder.get()
+        if _holder is not None:
+            _holder.clear()  # a retried attempt must not inherit an earlier view
+        _model_facing_override, _model_facing_annotations = None, []
         try:
             logging.info(f"Executing async tool: {function_name} with arguments: {arguments}")
 
@@ -2276,10 +2321,15 @@ Write the complete compiled report:"""
                 # tool message is built).
                 from .tool_execution import _normalize_multimodal_result
                 _is_multimodal_result = _normalize_multimodal_result(result) is not None
+                _resolve_view = getattr(self, "_resolve_model_facing_result", None)
+                if not _is_multimodal_result and _resolve_view is not None:
+                    _model_facing_override = _resolve_view(function_name, result)
                 if not _is_multimodal_result:
                     try:
                         from ..tools.trust import wrap_if_external
                         result = wrap_if_external(function_name, result)
+                        if _model_facing_override is not None:  # untrusted too: fence it
+                            _model_facing_override = wrap_if_external(function_name, _model_facing_override)
                     except Exception:
                         # Trust module unavailable (partial install) must not
                         # abort tool execution; fall through with the raw result.
@@ -2314,6 +2364,17 @@ Write the complete compiled report:"""
                             result["_loop_guard"] = {"message": decision.message, "action": decision.action.value}
                         else:
                             result = {"value": result, "_loop_guard": {"message": decision.message, "action": decision.action.value}}
+                        _model_facing_annotations.append(f"[loop-guard] {decision.message}")
+
+                # Hand the compact view to execute_tool_async, which swaps it in
+                # once hooks and tracing have seen the full result; direct
+                # callers of this method get it now.
+                if _model_facing_override is not None:
+                    if _holder is not None:
+                        _holder.update(override=_model_facing_override, annotations=_model_facing_annotations)
+                    else:
+                        return _swap_in_model_facing(
+                            result, {"override": _model_facing_override, "annotations": _model_facing_annotations})
 
                 # Ensure result is JSON serializable
                 logging.debug("Raw result from tool: %s", result)
