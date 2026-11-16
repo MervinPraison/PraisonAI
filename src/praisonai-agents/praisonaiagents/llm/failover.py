@@ -264,6 +264,13 @@ class FailoverManager:
         # be synchronized. RLock allows methods like mark_failure to call
         # get_next_profile while already holding the lock.
         self._lock = threading.RLock()
+
+    def __deepcopy__(self, memo):
+        """One shared pool: copies of an Agent or LLM keep this manager and its profiles."""
+        memo[id(self)] = self
+        for profile in self.list_profiles():
+            memo[id(profile)] = profile
+        return self
     
     def add_profile(self, profile: AuthProfile) -> None:
         """Add an auth profile.
@@ -563,102 +570,28 @@ class FailoverManager:
                         )
 
 
-def _coordinator_for_spec(quota_coordinator: Optional[str]):
-    """Resolve a coordinator spec without opening a shared-backend socket.
+def manager_from_auth_profiles(profiles: Optional[List[Dict[str, Any]]]) -> Optional[FailoverManager]:
+    """Build a FailoverManager from ``LLMConfig.auth_profiles`` dicts.
 
-    ``None`` and ``"local"`` leave construction to ``FailoverManager``, which
-    builds its own ``LocalQuotaCoordinator``. Any other string, including
-    ``"redis"`` and ``"redis://..."``, goes through ``build_quota_coordinator``.
-    Core cannot construct a shared backend, so that helper fail-opens to local.
-    """
-    if quota_coordinator is None or quota_coordinator == "local":
-        return None
-    if not isinstance(quota_coordinator, str):
-        raise TypeError(
-            "quota_coordinator must be a string such as 'local' or 'redis', "
-            f"got {type(quota_coordinator).__name__}"
-        )
-    from .quota import QuotaCoordinatorConfig, build_quota_coordinator
-
-    if "://" in quota_coordinator:
-        backend = quota_coordinator.split("://", 1)[0] or "redis"
-        spec = QuotaCoordinatorConfig(backend=backend, url=quota_coordinator)
-    else:
-        spec = QuotaCoordinatorConfig(backend=quota_coordinator)
-    return build_quota_coordinator(spec)
-
-
-def _auth_profile_from_entry(entry: Any, index: int) -> AuthProfile:
-    """Resolve one declared profile. An unavailable key is never stored."""
-    if isinstance(entry, AuthProfile):
-        data: Dict[str, Any] = {
-            "name": entry.name,
-            "provider": entry.provider,
-            "api_key": entry.api_key,
-            "base_url": entry.base_url,
-            "model": entry.model,
-            "priority": entry.priority,
-            "rate_limit_rpm": entry.rate_limit_rpm,
-            "rate_limit_tpm": entry.rate_limit_tpm,
-            "status": entry.status.value,
-            "metadata": dict(entry.metadata) if entry.metadata else {},
-        }
-    elif isinstance(entry, dict):
-        data = dict(entry)
-    else:
-        raise TypeError(
-            "auth profile must be a dict or AuthProfile, "
-            f"got {type(entry).__name__}"
-        )
-
-    provider = data.get("provider") or "openai"
-    name = data.get("name") or f"{provider}-{index}"
-    raw_key = data.get("api_key", "")
-    if raw_key is None:
-        raw_key = ""
-
-    from ..secrets import resolve_secret
-
-    resolution = resolve_secret(raw_key)
-    if not resolution.available or not resolution.value:
-        locator = resolution.detail or f"profile {index}"
-        raise ValueError(f"Cannot resolve auth profile api_key ({locator})")
-
-    data["provider"] = provider
-    data["name"] = name
-    data["api_key"] = resolution.value
-    return AuthProfile.from_dict(data)
-
-
-def manager_from_auth_profiles(
-    profiles: Optional[List[Any]],
-    *,
-    quota_coordinator: Optional[str] = None,
-    failover: Optional[Dict[str, Any]] = None,
-) -> Optional[FailoverManager]:
-    """Build one FailoverManager from declared auth profiles.
-
-    Each entry is a dict or an ``AuthProfile``. ``api_key`` is resolved with
-    ``resolve_secret`` (plaintext, a ``${ENV}`` reference, or a secret ref) and
-    the resolved value is registered for redaction. A missing or empty key
-    raises ``ValueError`` carrying ``SecretResolution.detail`` (the env var or
-    file name) and does not add a profile. Omitted names become
-    ``"{provider}-{index}"`` starting at 1; an omitted provider is ``"openai"``.
-
-    ``failover`` is passed to ``FailoverConfig``, so an unknown key raises
-    ``TypeError``. Omit it to keep the engine defaults. An empty profile list
-    builds no manager.
+    ``api_key`` goes through ``resolve_secret`` (plaintext, ``${ENV}``, secret
+    ref); a missing, empty or masked key raises ``ValueError`` without the key.
     """
     if not profiles:
         return None
+    from ..secrets import resolve_secret
 
-    config = FailoverConfig(**failover) if failover is not None else None
-    manager = FailoverManager(
-        config=config,
-        coordinator=_coordinator_for_spec(quota_coordinator),
-    )
+    manager = FailoverManager()
     for index, entry in enumerate(profiles, start=1):
-        manager.add_profile(_auth_profile_from_entry(entry, index))
+        if not isinstance(entry, dict):
+            raise TypeError(f"auth profile {index} must be a dict, got {type(entry).__name__}")
+        data = dict(entry)
+        data["provider"] = data.get("provider") or "openai"
+        data["name"] = data.get("name") or f"{data['provider']}-{index}"
+        resolution = resolve_secret(data.get("api_key") or "")
+        if not resolution.available or not resolution.value or resolution.value.startswith("***"):
+            raise ValueError(f"Cannot resolve auth profile api_key ({resolution.detail or f'profile {index}'})")
+        data["api_key"] = resolution.value
+        manager.add_profile(AuthProfile.from_dict(data))
     return manager
 
 

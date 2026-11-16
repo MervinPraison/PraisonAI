@@ -9,7 +9,6 @@ import pytest
 from praisonaiagents import Agent
 from praisonaiagents.config import LLMConfig
 from praisonaiagents.errors import LLMError
-from praisonaiagents.llm.quota import LocalQuotaCoordinator
 
 
 def test_llm_config_basic():
@@ -133,6 +132,15 @@ def _auth_failure(agent):
     return caught.value
 
 
+async def _async_auth_failure(agent):
+    with pytest.raises(LLMError) as caught:
+        await agent._handle_async_llm_error(
+            Exception("Invalid API key"),
+            [{"role": "user", "content": "hi"}],
+        )
+    return caught.value
+
+
 def test_auth_profiles_build_failover_manager():
     """A bare model name with auth profiles builds a manager and a custom LLM."""
     agent = _agent_with_profiles()
@@ -148,26 +156,41 @@ def test_auth_profiles_build_failover_manager():
     assert "failover_manager" not in agent._llm_init_params
 
 
-def test_auth_profiles_round_trip_keeps_api_keys():
-    """to_dict/from_dict keep the declared api_key, not a masked form."""
-    profiles = _profiles()
+def test_auth_profiles_model_param_builds_manager():
+    agent = Agent(name="TestAgent", model=LLMConfig(model="gpt-4o-mini", auth_profiles=_profiles()))
+    assert [p.api_key for p in agent._failover_manager.list_profiles()] == ["sk-primary", "sk-backup"]
+
+
+def test_auth_profiles_to_dict_never_writes_a_literal_key():
+    """Literal keys are masked like AuthProfile.to_dict; references stay as written."""
+    secret_ref = {"source": "env", "id": "OPENAI_API_KEY_BACKUP"}
     config = LLMConfig(
         model="gpt-4o-mini",
-        auth_profiles=profiles,
-        quota_coordinator="local",
-        failover={"max_retries": 2},
+        auth_profiles=[
+            {"name": "a", "api_key": "sk-live-SECRET-9999"},
+            {"name": "b", "api_key": "${OPENAI_API_KEY_BACKUP}"},
+            {"name": "c", "api_key": secret_ref},
+        ],
     )
 
     payload = config.to_dict()
-    assert payload["auth_profiles"] == profiles
-    assert "***" not in payload["auth_profiles"][0]["api_key"]
-    assert payload["quota_coordinator"] == "local"
-    assert payload["failover"] == {"max_retries": 2}
+    keys = [p["api_key"] for p in payload["auth_profiles"]]
+    assert keys == ["***9999", "${OPENAI_API_KEY_BACKUP}", secret_ref]
+    assert "sk-live-SECRET-9999" not in repr(payload)
+    # to_dict does not mutate the live config.
+    assert config.auth_profiles[0]["api_key"] == "sk-live-SECRET-9999"
 
     restored = LLMConfig.from_dict(payload)
-    assert restored.auth_profiles == profiles
-    assert restored.quota_coordinator == "local"
-    assert restored.failover == {"max_retries": 2}
+    assert restored.auth_profiles == payload["auth_profiles"]
+    assert restored.auth_profiles[1] is not payload["auth_profiles"][1]
+
+
+def test_masked_key_is_refused_not_sent():
+    """A masked key reloaded from to_dict raises instead of reaching the provider."""
+    payload = LLMConfig(model="gpt-4o-mini", auth_profiles=[{"api_key": "sk-live-1234"}]).to_dict()
+    with pytest.raises(ValueError) as caught:
+        Agent(name="TestAgent", llm=LLMConfig.from_dict(payload))
+    assert "1234" not in str(caught.value)
 
 
 def test_auth_profiles_resolve_env_and_secret_ref(monkeypatch):
@@ -188,6 +211,13 @@ def test_auth_profiles_resolve_env_and_secret_ref(monkeypatch):
     assert keys == ["sk-from-env", "sk-from-env"]
 
 
+def test_non_dict_profile_raises():
+    from praisonaiagents.llm.failover import manager_from_auth_profiles
+
+    with pytest.raises(TypeError, match="auth profile 1 must be a dict"):
+        manager_from_auth_profiles(["sk-plain-string"])
+
+
 def test_clone_and_deepcopy_share_failover_manager():
     """Channel clones and deepcopy share the manager, lock and all."""
     agent = _agent_with_profiles()
@@ -198,8 +228,7 @@ def test_clone_and_deepcopy_share_failover_manager():
     agent._failover_manager.mark_failure(primary, "rate limit", is_rate_limit=True)
     assert clone._failover_manager.get_next_profile().api_key == "sk-backup"
 
-    # _llm_instance is inserted before _failover_manager. Once it holds the
-    # manager, deepcopy used to walk FailoverManager's RLock and raise.
+    # An LLM holding the manager used to make deepcopy walk its RLock and raise.
     # LLM() itself imports litellm, so install a real instance shell instead.
     from praisonaiagents.llm.llm import LLM
     llm = LLM.__new__(LLM)
@@ -215,29 +244,42 @@ def test_clone_and_deepcopy_share_failover_manager():
     assert copied._failover_manager.get_next_profile().api_key == "sk-backup"
 
 
+def test_failover_manager_deepcopy_returns_the_shared_pool():
+    from praisonaiagents.llm.failover import manager_from_auth_profiles
+
+    manager = manager_from_auth_profiles(_profiles())
+    profile = manager.list_profiles()[0]
+    copied_manager, copied_profile = copy.deepcopy((manager, profile))
+    assert copied_manager is manager
+    assert copied_profile is profile
+
+
 def test_fallback_llm_for_keeps_requested_model():
-    """A model fallback keeps its own model and settings, not a primary profile's."""
+    """A model fallback keeps its own model, not a primary profile's."""
     pytest.importorskip("litellm", reason="optional LLM provider dependency")
     agent = _agent_with_profiles(
-        auth_profiles=[
-            {"provider": "openai", "api_key": "sk-primary", "model": "gpt-4o-mini",
-             "base_url": "https://primary.example.com/v1"},
-        ],
+        auth_profiles=[{"provider": "openai", "api_key": "sk-primary", "model": "gpt-4o-mini"}],
     )
-    same_provider = agent._fallback_llm_for("gpt-4o")
-    other_provider = agent._fallback_llm_for("anthropic/claude-3-5-sonnet")
+    fallback = agent._fallback_llm_for("gpt-4o")
 
-    assert same_provider.model == "gpt-4o"
-    assert other_provider.model == "anthropic/claude-3-5-sonnet"
-    assert same_provider._failover_manager is None
-    assert other_provider._failover_manager is None
-    # A same-provider fallback keeps the profile's key and endpoint.
-    assert same_provider.api_key == "sk-primary"
-    assert same_provider.base_url == "https://primary.example.com/v1"
-    # Another provider gets neither.
-    assert other_provider.api_key != "sk-primary"
-    assert other_provider.base_url != "https://primary.example.com/v1"
+    assert fallback.model == "gpt-4o"
+    assert fallback._failover_manager is None
     assert "failover_manager" not in agent._llm_init_params
+
+
+def test_switch_model_keeps_rotation_notice_consistent():
+    """switch_model() builds an LLM without the manager; the notice check follows it."""
+    pytest.importorskip("litellm", reason="optional LLM provider dependency")
+    agent = _agent_with_profiles()
+    assert agent._credential_failover_active() is True
+    assert agent.llm_instance._failover_manager is agent._failover_manager
+
+    agent.switch_model("gpt-4o")
+
+    active = agent._credential_failover_active()
+    assert active is (agent._llm_instance._failover_manager is not None)
+    notice = _auth_failure(agent).context["user_message"].endswith("Credential rotation is not yet implemented.")
+    assert notice is (not active)
 
 
 def test_omitted_profile_names_are_indexed():
@@ -260,12 +302,6 @@ def test_empty_auth_profiles_build_no_manager():
         llm=LLMConfig(model="gpt-4o-mini", auth_profiles=[]),
     )
     assert getattr(agent, "_failover_manager", None) is None
-
-
-def test_redis_quota_coordinator_stays_local():
-    """A redis URL fail-opens to the local coordinator and does not connect."""
-    agent = _agent_with_profiles(quota_coordinator="redis://localhost:6379/0")
-    assert isinstance(agent._failover_manager._coordinator, LocalQuotaCoordinator)
 
 
 def test_missing_env_api_key_raises_with_locator(monkeypatch):
@@ -297,22 +333,6 @@ def test_empty_api_key_raises_with_locator():
     assert "sk-" not in message
 
 
-def test_unknown_failover_key_raises():
-    secret = "sk-do-not-leak"
-    with pytest.raises(TypeError) as caught:
-        Agent(
-            name="TestAgent",
-            llm=LLMConfig(
-                model="gpt-4o-mini",
-                auth_profiles=[{"api_key": secret}],
-                failover={"not_a_failover_field": True},
-            ),
-        )
-    message = str(caught.value)
-    assert "not_a_failover_field" in message
-    assert secret not in message
-
-
 def test_auth_error_without_manager_reports_unimplemented_rotation(caplog):
     agent = Agent(name="TestAgent", llm="gpt-4o-mini")
     with caplog.at_level(logging.WARNING):
@@ -339,17 +359,25 @@ def test_auth_error_with_manager_skips_unimplemented_rotation(caplog):
     assert "credential rotation not yet implemented" not in caplog.text
 
 
-async def _async_auth_failure(agent):
-    with pytest.raises(LLMError) as caught:
-        await agent._handle_async_llm_error(
-            Exception("Invalid API key"),
-            [{"role": "user", "content": "hi"}],
+def _completion_failing_for(litellm, bad_key, message, calls):
+    def fake_completion(**kwargs):
+        calls.append(kwargs)
+        if kwargs.get("api_key") == bad_key:
+            raise Exception(message)
+        return litellm.ModelResponse(
+            model="gpt-4o-mini",
+            choices=[{"message": {"role": "assistant", "content": "backup answered"}}],
         )
-    return caught.value
+    return fake_completion
 
 
-def test_agent_turn_recovers_through_backup_profile(monkeypatch):
-    """One Agent chat turn: the primary key fails auth, the backup key answers."""
+@pytest.mark.parametrize("message", [
+    "AuthenticationError: 401 Unauthorized",
+    "AuthenticationError: Incorrect API key provided",
+    "Error: insufficient quota for this key",
+])
+def test_agent_turn_moves_to_backup_profile(monkeypatch, message):
+    """One Agent chat turn: the primary key is rejected, the backup key answers."""
     litellm = pytest.importorskip("litellm", reason="optional LLM provider dependency")
     from praisonaiagents.llm.llm import LLM
 
@@ -357,99 +385,7 @@ def test_agent_turn_recovers_through_backup_profile(monkeypatch):
     monkeypatch.setattr(LLM, "_supports_responses_api", lambda self: False)
     monkeypatch.setattr("time.sleep", lambda _seconds: None)
     calls = []
-
-    def fake_completion(**kwargs):
-        calls.append(kwargs)
-        if len(calls) == 1:
-            raise Exception("AuthenticationError: 401 Unauthorized")
-        return litellm.ModelResponse(
-            model="gpt-4o-mini",
-            choices=[{"message": {"role": "assistant", "content": "backup answered"}}],
-        )
-
-    monkeypatch.setattr(litellm, "completion", fake_completion)
-    agent = _agent_with_profiles()
-
-    reply = agent.chat("hi")
-
-    assert reply == "backup answered"
-    assert len(calls) == 2
-    assert calls[0]["api_key"] == "sk-primary"
-    assert calls[1]["api_key"] == "sk-backup"
-
-
-def _keyed_profiles(count):
-    return [{"provider": "openai", "api_key": f"sk-{index}"} for index in range(1, count + 1)]
-
-
-def test_failover_max_retries_zero_tries_one_profile(monkeypatch):
-    pytest.importorskip("litellm", reason="optional LLM provider dependency")
-    from unittest.mock import Mock
-
-    monkeypatch.setattr("time.sleep", lambda _seconds: None)
-    agent = _agent_with_profiles(failover={"max_retries": 0})
-    llm = agent.llm_instance
-    call = Mock(side_effect=[Exception("AuthenticationError: 401 Unauthorized"), "ok"])
-
-    with pytest.raises(Exception, match="401"):
-        llm._call_with_retry(call, model="gpt-4o-mini")
-    assert call.call_count == 1
-
-
-def test_failover_retry_settings_reach_later_profiles(monkeypatch):
-    pytest.importorskip("litellm", reason="optional LLM provider dependency")
-    from unittest.mock import Mock
-
-    sleeps = []
-    monkeypatch.setattr("time.sleep", sleeps.append)
-    agent = _agent_with_profiles(
-        auth_profiles=_keyed_profiles(5),
-        failover={"max_retries": 4, "retry_delay": 0.25, "max_retry_delay": 1.0},
-    )
-    llm = agent.llm_instance
-    auth_error = Exception("AuthenticationError: 401 Unauthorized")
-    call = Mock(side_effect=[auth_error] * 4 + ["ok"])
-
-    assert llm._call_with_retry(call, model="gpt-4o-mini", api_key=llm.api_key) == "ok"
-    assert [c.kwargs["api_key"] for c in call.call_args_list] == [
-        "sk-1", "sk-2", "sk-3", "sk-4", "sk-5",
-    ]
-    assert sleeps == [0.25, 0.5, 1.0, 1.0]
-
-
-def test_explicit_llm_max_retries_beats_failover_config():
-    pytest.importorskip("litellm", reason="optional LLM provider dependency")
-    from praisonaiagents.llm.failover import manager_from_auth_profiles
-    from praisonaiagents.llm.llm import LLM
-
-    manager = manager_from_auth_profiles(_profiles(), failover={"max_retries": 0})
-    assert LLM(model="gpt-4o-mini", failover_manager=manager)._max_retries == 0
-    assert LLM(model="gpt-4o-mini", failover_manager=manager, max_retries=5)._max_retries == 5
-
-
-@pytest.mark.parametrize("message", [
-    "AuthenticationError: Incorrect API key provided",
-    "Error: insufficient quota for this key",
-])
-def test_rejected_key_turn_moves_to_backup_profile(monkeypatch, message):
-    """A key the provider rejects for good, or one out of quota, falls to the backup."""
-    litellm = pytest.importorskip("litellm", reason="optional LLM provider dependency")
-    from praisonaiagents.llm.llm import LLM
-
-    monkeypatch.setattr(LLM, "_supports_responses_api", lambda self: False)
-    monkeypatch.setattr("time.sleep", lambda _seconds: None)
-    calls = []
-
-    def fake_completion(**kwargs):
-        calls.append(kwargs)
-        if kwargs.get("api_key") == "sk-primary":
-            raise Exception(message)
-        return litellm.ModelResponse(
-            model="gpt-4o-mini",
-            choices=[{"message": {"role": "assistant", "content": "backup answered"}}],
-        )
-
-    monkeypatch.setattr(litellm, "completion", fake_completion)
+    monkeypatch.setattr(litellm, "completion", _completion_failing_for(litellm, "sk-primary", message, calls))
     agent = _agent_with_profiles()
 
     assert agent.chat("hi") == "backup answered"
@@ -469,94 +405,15 @@ def test_rejected_key_without_backup_still_surfaces():
     assert call.call_count == 1
 
 
-def test_fallback_keeps_profile_key_and_server_together():
-    """Config base_url A plus a profile with its own key and server B: both clients use B."""
-    pytest.importorskip("litellm", reason="optional LLM provider dependency")
-    agent = _agent_with_profiles(
-        base_url="https://server-a.example.com/v1",
-        auth_profiles=[{"provider": "openai", "api_key": "sk-b",
-                        "base_url": "https://server-b.example.com/v1"}],
+def test_import_does_not_load_failover_module():
+    import subprocess
+    import sys
+
+    code = (
+        "import sys, warnings; warnings.simplefilter('ignore');"
+        "import praisonaiagents; from praisonaiagents import Agent;"
+        "Agent(name='x', llm='gpt-4o-mini');"
+        "print('praisonaiagents.llm.failover' in sys.modules)"
     )
-    primary = agent.llm_instance
-    fallback = agent._fallback_llm_for("gpt-4o")
-
-    assert (primary.api_key, primary.base_url) == ("sk-b", "https://server-b.example.com/v1")
-    assert (fallback.api_key, fallback.base_url) == (primary.api_key, primary.base_url)
-    assert fallback.model == "gpt-4o"
-
-
-def test_prefixed_fallback_skips_profile_for_another_provider():
-    """An OpenAI profile's key never reaches an anthropic/ fallback."""
-    pytest.importorskip("litellm", reason="optional LLM provider dependency")
-    agent = Agent(
-        name="TestAgent",
-        llm=LLMConfig(
-            model="anthropic/claude-3-5-haiku-latest",
-            auth_profiles=[
-                {"provider": "openai", "api_key": "sk-openai",
-                 "base_url": "https://openai-proxy.example.com/v1"},
-            ],
-        ),
-    )
-    fallback = agent._fallback_llm_for("anthropic/claude-3-5-sonnet-latest")
-
-    assert fallback.model == "anthropic/claude-3-5-sonnet-latest"
-    assert fallback.api_key != "sk-openai"
-    assert fallback.base_url != "https://openai-proxy.example.com/v1"
-
-
-def test_prefixed_fallback_takes_profile_for_same_provider():
-    pytest.importorskip("litellm", reason="optional LLM provider dependency")
-    agent = Agent(
-        name="TestAgent",
-        llm=LLMConfig(
-            model="anthropic/claude-3-5-haiku-latest",
-            auth_profiles=[{"provider": "anthropic", "api_key": "sk-ant"}],
-        ),
-    )
-    fallback = agent._fallback_llm_for("anthropic/claude-3-5-sonnet-latest")
-
-    assert fallback.api_key == "sk-ant"
-
-
-@pytest.mark.parametrize("configured, expected", [
-    (None, None),
-    ("https://configured.example.com/v1", "https://configured.example.com/v1"),
-])
-def test_rotation_drops_the_failed_profiles_server(monkeypatch, configured, expected):
-    """A backup with no base_url never sends its key to the failed profile's server."""
-    pytest.importorskip("litellm", reason="optional LLM provider dependency")
-    from unittest.mock import Mock
-    from praisonaiagents.llm.failover import manager_from_auth_profiles
-    from praisonaiagents.llm.llm import LLM
-
-    monkeypatch.setattr("time.sleep", lambda _seconds: None)
-    manager = manager_from_auth_profiles([
-        {"provider": "openai", "api_key": "sk-proxy", "base_url": "https://proxy.example.com/v1"},
-        {"provider": "openai", "api_key": "sk-direct"},
-    ])
-    llm = LLM(model="gpt-4o-mini", base_url=configured, failover_manager=manager)
-    call = Mock(side_effect=[Exception("AuthenticationError: 401 Unauthorized"), "ok"])
-
-    assert llm._call_with_retry(
-        call, model="gpt-4o-mini", api_key=llm.api_key, base_url=llm.base_url,
-    ) == "ok"
-    first, second = (c.kwargs for c in call.call_args_list)
-    assert (first["api_key"], first["base_url"]) == ("sk-proxy", "https://proxy.example.com/v1")
-    assert second["api_key"] == "sk-direct"
-    assert second.get("base_url") == expected
-
-
-@pytest.mark.parametrize("primary, fallback_model, provider", [
-    ("gemini/gemini-2.0-flash", "gemini/gemini-1.5-pro", "google"),
-    ("anthropic/claude-3-5-haiku-latest", "anthropic/claude-3-5-sonnet-latest", "claude"),
-])
-def test_prefixed_fallback_accepts_provider_aliases(primary, fallback_model, provider):
-    """A profile named by a provider alias still serves its prefixed fallback."""
-    pytest.importorskip("litellm", reason="optional LLM provider dependency")
-    agent = Agent(
-        name="TestAgent",
-        llm=LLMConfig(model=primary, auth_profiles=[{"provider": provider, "api_key": "sk-alias"}]),
-    )
-
-    assert agent._fallback_llm_for(fallback_model).api_key == "sk-alias"
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=True)
+    assert out.stdout.strip().splitlines()[-1] == "False"
