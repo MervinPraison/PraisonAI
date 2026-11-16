@@ -80,6 +80,31 @@ class Process:
                     self._state_lock = asyncio.Lock()
         return self._state_lock
 
+    def _trace_delegate(self, task_id, tasks_summary):
+        """Record the manager's choice as a ``delegate`` hand-off (tracing on only)."""
+        from ..trace.context_events import get_context_emitter
+        emitter = get_context_emitter()
+        if not emitter._enabled:
+            return
+        from ..workflows.diagram import task_node_id
+        task = self.tasks[task_id]
+        agent = getattr(getattr(task, "agent", None), "name", None)
+        emitter.agent_handoff(
+            "Manager",
+            agent,
+            reason=f"Manager delegated task {getattr(task, 'name', None) or task_id}",
+            context_passed={
+                "task_id": task_id,
+                "task_status": [
+                    {"task_id": t.get("task_id"), "name": t.get("name"),
+                     "status": t.get("status"), "agent": t.get("agent")}
+                    for t in tasks_summary
+                ],
+            },
+            kind="delegate",
+            node_id=task_node_id(self.tasks, task),
+        )
+
     def _task_by_name(self, name):
         """Return the task whose name matches, or None. First-match, mirrors prior inline lookup."""
         return next((t for t in self.tasks.values() if t.name == name), None)
@@ -646,6 +671,25 @@ class Process:
         with self._state_lock_init:
             self.workflow_finished = value
 
+    def _workflow_iter_limit(self) -> int:
+        """Iteration ceiling for workflow()/aworkflow().
+
+        ``max_iter`` guards decision/loop cycles; it must not also cap the number
+        of distinct tasks in a plain linear workflow, so the task count is added
+        on top of it.
+        """
+        return self.max_iter + len(self.tasks)
+
+    def _warn_workflow_iter_limit(self) -> None:
+        """Make a bounded workflow exit visible instead of silently dropping tasks."""
+        # "not started" also covers tasks reset for rerun, so report them as pending.
+        pending = [t.name for t in self.tasks.values() if t.status == "not started"]
+        logging.warning(
+            "Max iteration limit %s reached with %d task(s) pending: %s. "
+            "Raise AgentTeam(max_iter=...) if this workflow legitimately has more steps.",
+            self._workflow_iter_limit(), len(pending), pending[:5],
+        )
+
     async def aworkflow(self) -> AsyncGenerator[str, None]:
         """Async version of workflow method"""
         logging.debug("=== Starting Async Workflow ===")
@@ -657,7 +701,9 @@ class Process:
             if task.next_tasks:
                 for next_task_name in task.next_tasks:
                     next_task = self._task_by_name(next_task_name)
-                    if next_task:
+                    # Skip AgentTeam's inferred navigation-only link between
+                    # independent async tasks so they stay parallel.
+                    if next_task and getattr(next_task, "_navigation_only_prev", None) != task.name:
                         next_task.previous_tasks.append(task.name)
                         logging.debug(f"Added {task.name} as previous task for {next_task_name}")
 
@@ -703,8 +749,8 @@ class Process:
 
         while current_task:
             current_iter += 1
-            if current_iter > self.max_iter:
-                logging.info(f"Max iteration limit {self.max_iter} reached, ending workflow.")
+            if current_iter > self._workflow_iter_limit():
+                self._warn_workflow_iter_limit()
                 break
 
             # Enforce workflow timeout if set
@@ -1256,6 +1302,7 @@ Provide a JSON with the structure:
 
             if self.tasks[selected_task_id].status != "completed":
                 logging.info(f"Starting execution of task {selected_task_id}")
+                self._trace_delegate(selected_task_id, tasks_summary)
                 yield selected_task_id
                 logging.info(f"Finished execution of task {selected_task_id}, status: {self.tasks[selected_task_id].status}")
                 # Count a task toward completion only the first time it actually
@@ -1327,7 +1374,9 @@ Provide a JSON with the structure:
             if task.next_tasks:
                 for next_task_name in task.next_tasks:
                     next_task = self._task_by_name(next_task_name)
-                    if next_task:
+                    # Skip AgentTeam's inferred navigation-only link between
+                    # independent async tasks so they stay parallel.
+                    if next_task and getattr(next_task, "_navigation_only_prev", None) != task.name:
                         next_task.previous_tasks.append(task.name)
 
         # Find start task
@@ -1371,8 +1420,8 @@ Provide a JSON with the structure:
 
         while current_task:
             current_iter += 1
-            if current_iter > self.max_iter:
-                logging.info(f"Max iteration limit {self.max_iter} reached, ending workflow.")
+            if current_iter > self._workflow_iter_limit():
+                self._warn_workflow_iter_limit()
                 break
 
             # Enforce workflow timeout if set
@@ -1916,6 +1965,7 @@ Provide a JSON with the structure:
 
             if self.tasks[selected_task_id].status != "completed":
                 logging.info(f"Starting execution of task {selected_task_id}")
+                self._trace_delegate(selected_task_id, tasks_summary)
                 yield selected_task_id
                 logging.info(f"Finished execution of task {selected_task_id}, status: {self.tasks[selected_task_id].status}")
                 # Count a task toward completion only the first time it actually

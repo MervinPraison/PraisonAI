@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 from ..context.budgeter import MODEL_LIMITS as _CANONICAL_LIMITS
+from ..context.tokens import estimate_tokens_heuristic
 
 
 # RAG-specific context windows not present in the canonical budgeter table
@@ -285,11 +286,28 @@ def estimate_tokens(text: str) -> int:
     Returns:
         Estimated token count
     """
-    if not text:
-        return 0
-    # Average of 4 characters per token for English
-    # This is a conservative estimate
-    return len(text) // 4 + 1
+    # Delegate to the canonical estimator so dense (CJK/non-ASCII) text is not
+    # under-counted ~5x and over-filled past the budget.
+    return estimate_tokens_heuristic(text)
+
+
+def _truncate_to_tokens(text: str, max_tokens: int, estimator=None) -> str:
+    """Return the longest prefix of ``text`` whose estimate fits ``max_tokens``.
+
+    Binary-searches on the (monotonic) estimator instead of assuming
+    ~4 chars/token, which overshoots the budget for dense (CJK) text.
+    """
+    estimator = estimator or estimate_tokens
+    if max_tokens <= 0 or not text:
+        return ""
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if estimator(text[:mid]) <= max_tokens:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo]
 
 
 class DefaultBudgetEnforcer:
@@ -340,9 +358,12 @@ class DefaultBudgetEnforcer:
                 # Try to fit partial chunk if there's remaining space
                 remaining = available - used_tokens
                 if remaining > 100:  # Only if meaningful space remains
-                    # Truncate text to fit
-                    chars_to_keep = remaining * 4  # Approximate
-                    truncated_text = text[:chars_to_keep]
+                    # Truncate text to fit, leaving room for the "..." suffix
+                    truncated_text = _truncate_to_tokens(
+                        text,
+                        remaining - self._token_estimator("..."),
+                        self._token_estimator,
+                    )
                     if truncated_text:
                         truncated_chunk = {
                             **chunk,

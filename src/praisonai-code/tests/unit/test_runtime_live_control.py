@@ -143,6 +143,17 @@ def live_server(tmp_path, monkeypatch):
     import praisonaiagents
 
     monkeypatch.setattr(praisonaiagents, "Agent", _LiveAgent, raising=False)
+
+    # Capture the server so teardown can stop serve_forever(); removing the
+    # lockfile alone leaves a listening server thread behind (Issue #5938).
+    servers = []
+
+    class _TrackedServer(server_mod.ThreadingHTTPServer):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            servers.append(self)
+
+    monkeypatch.setattr(server_mod, "ThreadingHTTPServer", _TrackedServer)
     t = threading.Thread(
         target=server_mod.serve_runtime,
         kwargs={"host": "127.0.0.1", "port": 0, "idle_timeout": 0},
@@ -157,6 +168,10 @@ def live_server(tmp_path, monkeypatch):
         time.sleep(0.05)
     assert descriptor is not None, "runtime did not start"
     yield descriptor
+    for httpd in servers:
+        httpd.shutdown()
+    t.join(5)
+    assert not t.is_alive(), "runtime server did not shut down"
     RuntimeDescriptor.remove()
 
 

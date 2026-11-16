@@ -5,7 +5,6 @@ FastContext provides rapid code search capabilities.
 Use it directly from the context module for code search.
 
 FastContext provides:
-- 10-20x faster code search than traditional methods
 - Parallel execution (8 concurrent searches)
 - Automatic caching for repeated queries
 

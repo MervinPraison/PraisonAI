@@ -420,7 +420,21 @@ export class FunctionTool<TParams = any, TResult = any> {
         }
         const delay = retryDelayMs(policy, attempt - 1);
         if (delay > 0) {
-          await new Promise<void>(resolve => setTimeout(resolve, delay));
+          const signal = context?.signal;
+          const completed = await new Promise<boolean>(resolve => {
+            let timer: ReturnType<typeof setTimeout> | undefined;
+            const finish = (value: boolean) => {
+              if (timer !== undefined) clearTimeout(timer);
+              signal?.removeEventListener('abort', onAbort);
+              resolve(value);
+            };
+            const onAbort = () => finish(false);
+            timer = setTimeout(() => finish(true), delay);
+            signal?.addEventListener('abort', onAbort, { once: true });
+            if (signal?.aborted) finish(false);
+          });
+          // Preserve the existing last-error behavior when cancellation stops retries.
+          if (!completed || signal?.aborted) throw error;
         }
       }
     }

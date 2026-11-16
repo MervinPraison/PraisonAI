@@ -2,7 +2,7 @@
 Example 1: Basic Fast Context Usage
 
 This example demonstrates the basic usage of Fast Context for rapid code search.
-Fast Context is 10-20x faster than traditional sequential search because it:
+Fast Context speeds up code search because it:
 - Executes up to 8 tool calls in parallel
 - Limits search to 4 turns maximum
 - Uses a lightweight model optimized for search

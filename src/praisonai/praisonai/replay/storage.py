@@ -15,6 +15,29 @@ from praisonaiagents.storage.base import list_json_sessions, cleanup_old_session
 
 DEFAULT_TRACES_DIR = "~/.praison/traces"
 
+#: Overrides the traces directory outright (shared with the aiui replay view).
+TRACES_DIR_ENV = "PRAISONAI_TRACES_DIR"
+#: State root shared with ``praisonaiagents.trace.last_run`` (``$PRAISON_HOME/traces``).
+PRAISON_HOME_ENV = "PRAISON_HOME"
+
+
+def resolve_traces_dir() -> Path:
+    """Where traces live, without creating anything.
+
+    Precedence (read live on every call so tests and sandboxes can redirect it):
+
+    1. ``PRAISONAI_TRACES_DIR``
+    2. ``$PRAISON_HOME/traces`` (the same root ``trace/last_run.py`` uses)
+    3. ``~/.praison/traces``
+    """
+    override = os.environ.get(TRACES_DIR_ENV)
+    if override:
+        return Path(os.path.expanduser(override))
+    home = os.environ.get(PRAISON_HOME_ENV)
+    if home:
+        return Path(os.path.expanduser(home)) / "traces"
+    return Path(os.path.expanduser(DEFAULT_TRACES_DIR))
+
 
 def get_traces_dir() -> Path:
     """
@@ -23,7 +46,7 @@ def get_traces_dir() -> Path:
     Returns:
         Path to traces directory (creates if not exists)
     """
-    traces_dir = Path(os.path.expanduser(DEFAULT_TRACES_DIR))
+    traces_dir = resolve_traces_dir()
     traces_dir.mkdir(parents=True, exist_ok=True)
     return traces_dir
 

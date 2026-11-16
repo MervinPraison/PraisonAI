@@ -105,6 +105,12 @@ waivers:
       `transfer_to_<lowercased, spaces-to-underscores name>` exactly (it previously said `handoff_to_<raw
       name>`, which could contain a space and be rejected by the provider). Only the moment of derivation
       differs.
+  LLM.__init__.timeout:
+    owner: praisonai-ts
+    reason: Same effective bound, applied by a different layer. Python's sentinel resolves an unset timeout
+      to 600s in the body (litellm would otherwise wait 6000s); TS leaves `timeout` undefined and the OpenAI
+      Node SDK applies its own 600s (10 minute) default. An explicit value is forwarded on both sides.
+    issue: '#5968'
   PraisonAIError.__init__.run_id:
     owner: praisonai-ts
     reason: 'Both sides mint a UUID at construction -- Python''s `self.run_id = run_id or str(uuid.uuid4())`

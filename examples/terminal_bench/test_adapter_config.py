@@ -28,7 +28,11 @@ def test_smoke_yaml_uses_terminal_bench_21_registry_ids():
     job = yaml.safe_load(
         (EXAMPLES / "job_code_smoke.yaml").read_text(encoding="utf-8")
     )
-    names = job["datasets"][0]["task_names"]
+    dataset = job["datasets"][0]
+    names = dataset["task_names"]
+
+    assert dataset["name"] == "terminal-bench/terminal-bench-2-1"
+    assert "version" not in dataset
 
     assert names
     assert all(name.startswith("terminal-bench/") for name in names)
@@ -37,3 +41,16 @@ def test_smoke_yaml_uses_terminal_bench_21_registry_ids():
         "terminal-bench/bn-fit-modify",
         "terminal-bench/break-filter-js-from-html",
     ]
+
+
+def test_example_job_yamls_use_harbor_022_dataset_id():
+    for name in ("job.yaml", "job_test_5.yaml", "job_test_5_wrapper.yaml"):
+        job = yaml.safe_load((EXAMPLES / name).read_text(encoding="utf-8"))
+        dataset = job["datasets"][0]
+
+        assert dataset["name"] == "terminal-bench/terminal-bench-2-1", name
+        assert "version" not in dataset, name
+        assert all(
+            task.startswith("terminal-bench/")
+            for task in dataset.get("task_names", [])
+        ), name

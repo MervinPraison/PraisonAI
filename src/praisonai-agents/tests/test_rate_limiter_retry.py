@@ -50,13 +50,13 @@ class TestRetryDelayParsing:
         msg = 'Retry-After: 120'
         assert llm._parse_retry_delay(msg) == 120.0
 
-    def test_parse_returns_default_on_no_match(self):
-        """Test that default is returned when no pattern matches"""
+    def test_parse_returns_none_on_no_match(self):
+        """An absent provider delay leaves backoff selection to the resolver."""
         from praisonaiagents.llm.llm import LLM
         llm = LLM(model="gpt-4o-mini")
         
         msg = 'Some random error without delay info'
-        assert llm._parse_retry_delay(msg) == 60.0  # Default retry_delay
+        assert llm._parse_retry_delay(msg) is None
 
     def test_parse_clamps_huge_delay(self):
         """Test that huge delays are clamped to max_retry_delay"""

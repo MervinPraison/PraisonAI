@@ -1,0 +1,126 @@
+{
+  "edges": [
+    {
+      "id": "agent:Researcher->tool:Researcher/search_web:uses",
+      "kind": "uses",
+      "label": null,
+      "source": "agent:Researcher",
+      "target": "tool:Researcher/search_web"
+    },
+    {
+      "id": "task:research->agent:Researcher:assigned",
+      "kind": "assigned",
+      "label": null,
+      "source": "task:research",
+      "target": "agent:Researcher"
+    },
+    {
+      "id": "task:write->agent:Writer:assigned",
+      "kind": "assigned",
+      "label": null,
+      "source": "task:write",
+      "target": "agent:Writer"
+    },
+    {
+      "id": "task:write#2->agent:Writer:assigned",
+      "kind": "assigned",
+      "label": null,
+      "source": "task:write#2",
+      "target": "agent:Writer"
+    },
+    {
+      "id": "start:begin->task:research:next",
+      "kind": "next",
+      "label": null,
+      "source": "start:begin",
+      "target": "task:research"
+    },
+    {
+      "id": "task:research->task:write:next",
+      "kind": "next",
+      "label": null,
+      "source": "task:research",
+      "target": "task:write"
+    },
+    {
+      "id": "task:write->task:write#2:next",
+      "kind": "next",
+      "label": null,
+      "source": "task:write",
+      "target": "task:write#2"
+    },
+    {
+      "id": "task:write#2->end:done:next",
+      "kind": "next",
+      "label": null,
+      "source": "task:write#2",
+      "target": "end:done"
+    }
+  ],
+  "kind": "team",
+  "name": "pair",
+  "nodes": [
+    {
+      "id": "start:begin",
+      "kind": "start",
+      "label": "Brief",
+      "meta": {},
+      "parent": null
+    },
+    {
+      "id": "agent:Researcher",
+      "kind": "agent",
+      "label": "Researcher",
+      "meta": {
+        "role": "Assistant"
+      },
+      "parent": null
+    },
+    {
+      "id": "tool:Researcher/search_web",
+      "kind": "tool",
+      "label": "search_web",
+      "meta": {},
+      "parent": null
+    },
+    {
+      "id": "agent:Writer",
+      "kind": "agent",
+      "label": "Writer",
+      "meta": {
+        "role": "Assistant"
+      },
+      "parent": null
+    },
+    {
+      "id": "task:research",
+      "kind": "task",
+      "label": "research",
+      "meta": {},
+      "parent": null
+    },
+    {
+      "id": "task:write",
+      "kind": "task",
+      "label": "write",
+      "meta": {},
+      "parent": null
+    },
+    {
+      "id": "task:write#2",
+      "kind": "task",
+      "label": "write",
+      "meta": {},
+      "parent": null
+    },
+    {
+      "id": "end:done",
+      "kind": "end",
+      "label": "Delivered",
+      "meta": {},
+      "parent": null
+    }
+  ],
+  "process": "sequential",
+  "schema": "praisonai.graph/1"
+}

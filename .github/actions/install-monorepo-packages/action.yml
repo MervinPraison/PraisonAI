@@ -94,3 +94,17 @@ runs:
           cd "$WRAPPER_PKG"
           pip install -e "${WRAPPER_SUFFIX}"
         fi
+
+        # crawl4ai depends on unclecode-litellm, a fork that writes into the same
+        # litellm/ directory. Installed together, the two overwrite each other's
+        # files in whatever order they land, so imports of litellm fail at random.
+        # Reinstall the resolved litellm last so its own files win.
+        if python -m pip show unclecode-litellm >/dev/null 2>&1; then
+          LITELLM_VERSION="$(python -m pip show litellm | awk '/^Version:/{print $2}')"
+          if [ "${{ inputs.use-uv }}" = "true" ]; then
+            uv pip install --system --reinstall --no-deps "litellm==${LITELLM_VERSION}"
+          else
+            pip install --force-reinstall --no-deps "litellm==${LITELLM_VERSION}"
+          fi
+          python -c "import litellm"
+        fi

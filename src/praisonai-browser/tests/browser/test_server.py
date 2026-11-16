@@ -303,7 +303,7 @@ class TestStartSession:
         server = BrowserServer()
         conn = ClientConnection(websocket=Mock(), is_cli=True)
         ext_ws = Mock()
-        ext_ws.send_text = AsyncMock()
+        ext_ws.send_json = AsyncMock()
         ext = ClientConnection(websocket=ext_ws, is_extension=True)
         server._connections["cli"] = conn
         server._connections["ext"] = ext
@@ -314,7 +314,7 @@ class TestStartSession:
         )
         
         assert response["start_automation_sent"] is True
-        ext_ws.send_text.assert_awaited()
+        ext_ws.send_json.assert_awaited()
         
         if server._sessions:
             server._sessions.close()
@@ -339,7 +339,32 @@ class TestStartSession:
         assert response.get("start_automation_sent") is True
         # The delivery loop claims the extension connection.
         assert ext.session_id is not None
-        ext.websocket.send_text.assert_awaited()
+        ext.websocket.send_json.assert_awaited()
+        
+        if server._sessions:
+            server._sessions.close()
+    
+    @pytest.mark.asyncio
+    async def test_extension_start_session_skips_start_automation_echo(self):
+        """Extension-originated start_session must not echo start_automation."""
+        from praisonai_browser.server import BrowserServer, ClientConnection
+        
+        server = BrowserServer()
+        ext = ClientConnection(websocket=AsyncMock(), is_extension=True)
+        server._connections["ext"] = ext
+        
+        response = await server._handle_start_session(
+            {"type": "start_session", "goal": "Test"},
+            ext
+        )
+        
+        assert response["type"] == "status"
+        assert response["status"] == "running"
+        assert response["start_automation_sent"] is False
+        assert ext.session_id == response["session_id"]
+        assert ext.session_id in server._agents
+        ext.websocket.send_json.assert_not_awaited()
+        ext.websocket.send_text.assert_not_awaited()
         
         if server._sessions:
             server._sessions.close()
@@ -358,7 +383,7 @@ class TestStartSession:
         peer_ws.send_json = AsyncMock()
         peer = ClientConnection(websocket=peer_ws, is_extension=False, is_cli=True)
         ext_ws = Mock()
-        ext_ws.send_text = AsyncMock()
+        ext_ws.send_json = AsyncMock()
         ext = ClientConnection(websocket=ext_ws, is_extension=True)
         server._connections["cli"] = conn
         server._connections["peer"] = peer
@@ -370,7 +395,7 @@ class TestStartSession:
         )
         
         assert response["start_automation_sent"] is True
-        ext_ws.send_text.assert_awaited()
+        ext_ws.send_json.assert_awaited()
         peer_ws.send_text.assert_not_awaited()
         peer_ws.send_json.assert_not_awaited()
         
@@ -528,7 +553,7 @@ class TestRegisterRole:
             {"type": "start_session", "goal": "Test"}, conn
         )
         assert response["code"] == "NO_EXTENSION"
-        conn.websocket.send_text.assert_not_awaited()
+        conn.websocket.send_json.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_ws_no_origin_cli_start_session(self):
@@ -546,8 +571,8 @@ class TestRegisterRole:
             {"type": "start_session", "goal": "Test"}, cli
         )
         assert response["status"] == "running"
-        ext.websocket.send_text.assert_awaited_once()
-        cli.websocket.send_text.assert_not_awaited()
+        ext.websocket.send_json.assert_awaited_once()
+        cli.websocket.send_json.assert_not_awaited()
         if server._sessions:
             server._sessions.close()
 

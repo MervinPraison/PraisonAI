@@ -1094,7 +1094,8 @@ class SQLiteKanbanStore:
 
         with self._get_connection() as conn:
             cursor = conn.execute("""
-                SELECT id, claim_lock, claim_expires, worker_pid, last_heartbeat_at, version
+                SELECT id, claim_lock, claim_expires, worker_pid, last_heartbeat_at, version,
+                       current_run_id
                 FROM tasks
                 WHERE status = 'running' AND claim_lock IS NOT NULL AND claim_lock != ''
             """)
@@ -1127,7 +1128,7 @@ class SQLiteKanbanStore:
                 result = conn.execute("""
                     UPDATE tasks
                     SET claim_lock = NULL, claim_expires = NULL, worker_pid = NULL,
-                        last_heartbeat_at = NULL,
+                        last_heartbeat_at = NULL, current_run_id = NULL,
                         updated_at = ?, status = 'ready', version = version + 1
                     WHERE id = ? AND status = 'running' AND claim_lock = ?
                           AND version = ?
@@ -1136,6 +1137,20 @@ class SQLiteKanbanStore:
                 if result.rowcount > 0:
                     reclaimed.append(row['id'])
                     reason = 'dead' if not worker_alive else 'stale_heartbeat'
+                    # Close the abandoned attempt in the same transaction, so a
+                    # dispatcher that claims the task next can never have its
+                    # own fresh run mistaken for this one.
+                    if row.get('current_run_id') is not None and conn.execute(
+                            "UPDATE task_runs SET outcome = ?, error = ?, ended_at = ? "
+                            "WHERE id = ? AND ended_at IS NULL",
+                            (RunOutcome.CRASHED.value,
+                             f'Worker {reason}; claim reclaimed',
+                             now.isoformat(), row['current_run_id']),
+                    ).rowcount:
+                        self._log_event(conn, row['id'], 'run_closed', {
+                            'run_id': row['current_run_id'],
+                            'outcome': RunOutcome.CRASHED.value,
+                        })
                     reclaim_details[row['id']] = {
                         'worker_id': row['claim_lock'],
                         'worker_pid': pid,

@@ -19,9 +19,10 @@ from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlsplit
 
-# Total time budget for a probe so the credential/first-run hot path is never
-# stalled when nothing is listening. Kept small deliberately.
-_PROBE_TIMEOUT_S = 0.15
+# Per-request probe timeout. Only paid on the keyless path; a closed port is
+# refused instantly, while a running Ollama can take ~0.35 s on its first call,
+# so a tighter budget made detection flaky (issue #6228).
+_PROBE_TIMEOUT_S = 1.0
 
 # How long a negative probe is remembered so repeated invocations in the same
 # process (e.g. bare TUI then run) don't re-pay the connection latency.
@@ -185,6 +186,11 @@ def _probe_ollama_tags(host: str) -> Optional[str]:
                 return f"openai/{model_id}"
 
     return None
+
+
+def ollama_reachable(host: str) -> bool:
+    """Return ``True`` if an Ollama server answers ``/api/tags`` at ``host``."""
+    return _get_json(_root_host(_with_scheme(host)) + "/api/tags") is not None
 
 
 def detect_local_model(*, use_cache: bool = True) -> Optional[LocalModel]:

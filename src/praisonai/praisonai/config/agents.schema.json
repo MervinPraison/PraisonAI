@@ -889,6 +889,22 @@
           "minimum": 0,
           "title": "Max Delay",
           "type": "number"
+        },
+        "retry_on": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Error types to retry on",
+          "title": "Retry On"
         }
       },
       "title": "ToolRetryPolicy",
@@ -1384,11 +1400,15 @@
           "type": "string"
         },
         {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
           "type": "null"
         }
       ],
       "default": null,
-      "description": "Default LLM",
+      "description": "Default LLM (string or dict with 'model' key)",
       "title": "Llm"
     },
     "models": {
@@ -1443,6 +1463,19 @@
       "default": null,
       "description": "Task dependency declarations",
       "title": "Dependencies"
+    },
+    "save_replay": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "description": "Record a replay trace for each run (praisonai replay)",
+      "title": "Save Replay"
     }
   },
   "title": "PraisonAI Agents Configuration",

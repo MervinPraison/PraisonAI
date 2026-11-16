@@ -11,6 +11,8 @@ The ``praisonai`` wrapper provides backward-compatible shims.
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import math
 import time
 import uuid
@@ -347,10 +349,88 @@ class SessionObserverProtocol(Protocol):
         ...
 
 
+# ---------------------------------------------------------------------------
+# Device identity (Issue #5998)
+#
+# A per-device keypair signs a server-issued challenge nonce so the gateway can
+# derive a stable ``device_id`` and approve/revoke devices individually instead
+# of sharing one gateway-wide secret. Core only fixes the wire shape, the
+# fingerprint and the exact bytes that are signed; signature verification,
+# device storage and per-device tokens live in the wrapper gateway.
+# ---------------------------------------------------------------------------
+
+def device_id_from_public_key(public_key: str) -> str:
+    """Return the stable device id: hex SHA-256 of the raw public-key bytes.
+
+    ``public_key`` must be standard base64 (RFC 4648, padded, no whitespace) of
+    the raw key bytes. Hashing the decoded bytes keeps the id independent of
+    how a client spells the encoding. Raises ``ValueError`` on invalid base64.
+    """
+    return hashlib.sha256(base64.b64decode(public_key, validate=True)).hexdigest()
+
+
+@dataclass
+class DeviceAuth:
+    """Device-identity proof carried in a ``hello`` frame.
+
+    Attributes:
+        device_id: Fingerprint of ``public_key`` (see :func:`device_id_from_public_key`).
+        public_key: Standard base64 (padded) of the device's raw public key.
+        signature: Standard base64 (padded) signature over :meth:`signing_payload`.
+        signed_at: Integer Unix seconds at which the device signed the challenge
+            (an integer so every client language renders identical signed bytes).
+        nonce: The server-issued challenge nonce being answered.
+    """
+    device_id: str
+    public_key: str
+    signature: str
+    signed_at: int
+    nonce: str
+
+    def signing_payload(self, agent_id: str) -> bytes:
+        """Canonical bytes the device signs and the gateway verifies.
+
+        Binds the nonce to this device, the signing time and the target agent so
+        a captured proof cannot be replayed for another device or agent.
+        """
+        return "\n".join((
+            "praisonai-device-v1",
+            self.device_id,
+            self.nonce,
+            str(int(self.signed_at)),
+            agent_id,
+        )).encode("utf-8")
+
+
+@runtime_checkable
+class DeviceIdentityProtocol(Protocol):
+    """Seam for per-device challenge/response auth (implemented in the wrapper).
+
+    Implementations must approve only on an exact device-key match — never on
+    network reachability alone — and record how each device was approved.
+    """
+
+    def issue_challenge(self) -> str:
+        """Return a fresh single-use challenge nonce for a connecting client."""
+        ...
+
+    def verify(self, device: DeviceAuth, *, agent_id: str) -> Optional[str]:
+        """Verify ``device`` against an issued nonce; return its role, or ``None`` if rejected."""
+        ...
+
+    def list_devices(self) -> List[Dict[str, Any]]:
+        """List known devices (id, role, approval path, last seen)."""
+        ...
+
+    def revoke(self, device_id: str) -> bool:
+        """Revoke one device; return ``False`` if it was unknown."""
+        ...
+
+
 @dataclass
 class HelloParams:
     """Parameters for initiating a versioned handshake.
-    
+
     Attributes:
         agent_id: The agent to connect to
         protocol_min: Minimum protocol version the client supports
@@ -358,6 +438,7 @@ class HelloParams:
         capabilities: Optional list of capability tokens the client supports
         session_id: Optional session to resume
         since: Optional cursor for event replay
+        device: Optional device-identity proof (Issue #5998)
     """
     agent_id: str
     protocol_min: int
@@ -365,6 +446,7 @@ class HelloParams:
     capabilities: List[str] = field(default_factory=list)
     session_id: Optional[str] = None
     since: Optional[int] = None
+    device: Optional[DeviceAuth] = None
 
     type: str = field(default="hello", init=False)
 
@@ -897,6 +979,9 @@ def _decode_hello(data: Dict[str, Any]) -> "HelloParams":
     if since is not None:
         since = _coerce_int(since, field_name="since")
 
+    device_data = data.get("device")
+    device = _decode_device(device_data) if device_data is not None else None
+
     return HelloParams(
         agent_id=agent_id,
         protocol_min=client_min,
@@ -904,6 +989,60 @@ def _decode_hello(data: Dict[str, Any]) -> "HelloParams":
         capabilities=capabilities,
         session_id=_as_opt_str(data.get("session_id")),
         since=since,
+        device=device,
+    )
+
+
+def _decode_device(data: Any) -> DeviceAuth:
+    """Validate a ``hello.device`` block into :class:`DeviceAuth`.
+
+    Shape errors are configuration errors; a ``device_id`` that is not the
+    fingerprint of ``public_key`` is rejected as unauthorized so a client can
+    never claim another device's id.
+    """
+    if not isinstance(data, dict):
+        raise FrameDecodeError(
+            HelloError(
+                code=ConnectErrorCode.CONFIGURATION_ERROR,
+                message="Field 'device' must be an object",
+                next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+            )
+        )
+    public_key = _require_str(data.get("public_key"), field_name="device.public_key")
+    device_id = _require_str(data.get("device_id"), field_name="device.device_id")
+    signed_at = data.get("signed_at")
+    if isinstance(signed_at, bool) or not isinstance(signed_at, int):
+        raise FrameDecodeError(
+            HelloError(
+                code=ConnectErrorCode.CONFIGURATION_ERROR,
+                message="Field 'device.signed_at' must be an integer (Unix seconds)",
+                next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+            )
+        )
+    try:
+        fingerprint = device_id_from_public_key(public_key)
+    except ValueError:
+        raise FrameDecodeError(
+            HelloError(
+                code=ConnectErrorCode.CONFIGURATION_ERROR,
+                message="Field 'device.public_key' must be padded standard base64",
+                next_step=ConnectRecoveryStep.DO_NOT_RETRY,
+            )
+        ) from None
+    if device_id != fingerprint:
+        raise FrameDecodeError(
+            HelloError(
+                code=ConnectErrorCode.AUTH_UNAUTHORIZED,
+                message="device.device_id does not match the public key fingerprint",
+                next_step=ConnectRecoveryStep.REAUTHENTICATE,
+            )
+        )
+    return DeviceAuth(
+        device_id=device_id,
+        public_key=public_key,
+        signature=_require_str(data.get("signature"), field_name="device.signature"),
+        signed_at=signed_at,
+        nonce=_require_str(data.get("nonce"), field_name="device.nonce"),
     )
 
 
@@ -2555,6 +2694,83 @@ def resolve_auth_mode(bind_host: str, configured: Optional[AuthMode] = None) -> 
     return "local" if is_loopback(bind_host) else "token"
 
 
+class InsecureGatewayTransportError(ValueError):
+    """Raised when a gateway URL would send traffic in cleartext to a public host."""
+
+
+def _parse_ip_host(host: str):
+    """Return the IP for an IP-literal host (incl. legacy IPv4 spellings), else None."""
+    import ipaddress
+    import socket
+
+    try:
+        return ipaddress.ip_address(host)
+    except ValueError:
+        pass
+    try:
+        # Legacy IPv4 spellings the resolver accepts but ipaddress rejects
+        # ("134744072", "0x08080808", "127.1") — normalise them so they
+        # can't pass as hostnames.
+        return ipaddress.IPv4Address(socket.inet_aton(host))
+    except (OSError, ValueError):
+        return None
+
+
+def assert_secure_gateway_transport(url: str) -> None:
+    """Guard plaintext ``ws://`` / ``http://`` gateway URLs.
+
+    ``wss://`` / ``https://``, loopback, private/link-local/CGNAT IPs and
+    single-label names are always allowed. A plaintext URL to a *public IP
+    literal* raises; a plaintext URL to a multi-label DNS name only logs a
+    warning, because names such as ``gw.default.svc.cluster.local`` or
+    Tailscale MagicDNS hosts are commonly private and cannot be classified
+    without a (blocking) DNS lookup. ``PRAISONAI_ALLOW_INSECURE_WS=1``
+    disables the check.
+
+    Raises:
+        InsecureGatewayTransportError: On plaintext transport to a public IP.
+
+    Examples:
+        >>> assert_secure_gateway_transport("ws://localhost:8765")
+        >>> assert_secure_gateway_transport("wss://gateway.example.com")
+    """
+    import ipaddress
+    import logging
+    import os
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(url)
+    if parts.scheme.lower() not in ("ws", "http"):
+        return
+    if os.environ.get("PRAISONAI_ALLOW_INSECURE_WS", "").strip().lower() in ("1", "true", "yes"):
+        return
+    host = (parts.hostname or "").strip("[]").rstrip(".").lower()
+    if not host or is_loopback(host) or host.endswith(".localhost"):
+        return
+    fix = (
+        "Fix:  use wss:// (start the gateway with ssl_cert/ssl_key or behind a TLS proxy)\n"
+        "Or:   tunnel it, e.g. ssh -L 8765:localhost:8765 <host> and use ws://localhost:8765\n"
+        "Break-glass: export PRAISONAI_ALLOW_INSECURE_WS=1"
+    )
+    ip = _parse_ip_host(host)
+    if ip is None:
+        if "." in host:
+            logging.getLogger(__name__).warning(
+                "Plaintext gateway connection to %r: the auth token and session "
+                "stream are unencrypted unless this host is on a private network.\n%s",
+                host, fix,
+            )
+        return
+    # Python < 3.13 reports every IPv4-mapped IPv6 (::ffff:8.8.8.8) as private.
+    ip = getattr(ip, "ipv4_mapped", None) or ip
+    if ip.is_private or ip.is_link_local or ip in ipaddress.ip_network("100.64.0.0/10"):
+        return
+    raise InsecureGatewayTransportError(
+        f"Refusing plaintext connection to public gateway host {host!r}: the "
+        f"auth token and session stream would be sent unencrypted.\n{fix}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Ingress attribution / trusted-proxy real-client-IP resolution (Issue #5312)
 # ---------------------------------------------------------------------------
@@ -3702,12 +3918,19 @@ class ConversationRequestProtocol(Protocol):
 # import lives in core.
 # ---------------------------------------------------------------------------
 
-GatewayRequestKind = Literal["approval", "choice", "input"]
+GatewayRequestKind = Literal["approval", "choice", "input", "secret"]
 """Closed set of server→client interactive request kinds.
 
 * ``approval`` — allow/deny; the reply ``value`` is ``"allow"`` or ``"deny"``.
 * ``choice`` — select one of ``options``; the reply ``value`` is the option.
 * ``input`` — free text; the reply ``value`` is the entered text.
+* ``secret`` — a credential (password, API key, one-time code) captured
+  mid-turn (Issue #6223). Clients MUST render a masked input. Isolation
+  contract: the reply ``value`` is returned *only* to the caller of
+  :meth:`GatewayRequestChannelProtocol.request`; implementations MUST NOT log,
+  journal, echo, or persist it, and the caller (a tool/callback) MUST NOT
+  return it to the model or append it to history. A tool obtains one via
+  ``get_request_channel().request(GatewayServerRequest(kind="secret", ...))``.
 """
 
 
@@ -3754,11 +3977,13 @@ class GatewayServerReply:
     Attributes:
         request_id: The id of the request being answered.
         value: ``"allow"``/``"deny"`` for approval, the chosen option for
-            choice, or the entered text for input.
+            choice, the entered text for input, or the credential for secret.
+            Excluded from ``repr`` so a logged/traced reply never leaks a
+            secret.
     """
 
     request_id: str
-    value: str
+    value: str = field(repr=False)
 
     def as_dict(self) -> Dict[str, Any]:
         """Convert to a serializable dictionary."""

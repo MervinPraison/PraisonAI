@@ -34,7 +34,14 @@ class CrewAIAdapter(BaseFrameworkAdapter):
         """Check if CrewAI is available for import."""
         from .._framework_availability import is_available
         return is_available("crewai")
-    
+
+    def _crewai_llm(self, spec: Any, llm_config: Optional[List[Dict]]):
+        """Build a ``crewai.LLM`` so the configured model name reaches CrewAI."""
+        from crewai import LLM
+
+        model, base, key = self._llm_settings(spec, llm_config)
+        return LLM(model=model, base_url=base or None, api_key=key or None)
+
     def run(
         self,
         config: Dict[str, Any],
@@ -135,11 +142,13 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                     # Surface any extended YAML fields this backend silently drops
                     warn_unsupported_fields(self, details)
 
-                    # Configure LLM using shared resolver
-                    llm = self._resolve_llm(details.get('llm'), llm_config)
-
-                    # Configure function calling LLM using shared resolver
-                    function_calling_llm = self._resolve_llm(details.get('function_calling_llm'), llm_config)
+                    # crewai.LLM keeps the model name; a bare SDK client would be
+                    # ignored and CrewAI would fall back to its default model.
+                    llm = self._crewai_llm(details.get('llm'), llm_config)
+                    fc_spec = details.get('function_calling_llm')
+                    function_calling_llm = (
+                        self._crewai_llm(fc_spec, llm_config) if fc_spec else None
+                    )
 
                     # Create CrewAI agent with full feature set
                     agent = Agent(
@@ -209,11 +218,20 @@ class CrewAIAdapter(BaseFrameworkAdapter):
 
                 # Create the crew (kickoff is driven by run/arun so the same
                 # crew can be executed synchronously or asynchronously).
-                crew = Crew(
-                    agents=list(agents.values()),
-                    tasks=tasks,
-                    verbose=True
-                )
+                # Honour the top-level memory/process/manager_llm/verbose keys
+                # CrewAI supports natively instead of silently dropping them.
+                crew_kwargs = {
+                    "agents": list(agents.values()),
+                    "tasks": tasks,
+                    "verbose": config.get('verbose', True),
+                }
+                if config.get('memory'):
+                    crew_kwargs["memory"] = True
+                if config.get('process') == 'hierarchical':
+                    from crewai import Process
+                    crew_kwargs["process"] = Process.hierarchical
+                    crew_kwargs["manager_llm"] = self._crewai_llm(config.get('manager_llm'), llm_config)
+                crew = Crew(**crew_kwargs)
 
                 logger.debug("Final Crew Configuration:")
                 logger.debug(f"Agents: {crew.agents}")

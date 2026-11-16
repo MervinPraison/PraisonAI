@@ -132,17 +132,17 @@ Methods:
 * <code title="class DeepResearchAgent">DeepResearchAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/deep_research_agent.py">openai_client</a>()</code>
 * <code title="class DeepResearchAgent">DeepResearchAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/deep_research_agent.py">research</a>(query: str, instructions: Optional[str] = None, model: Optional[str] = None, summary_mode: Optional[Literal['auto', 'detailed', 'concise']] = None, web_search: Optional[bool] = None, code_interpreter: Optional[bool] = None, mcp_servers: Optional[List[Dict[str, Any]]] = None, file_ids: Optional[List[str]] = None, file_search: Optional[bool] = None, file_search_stores: Optional[List[str]] = None, stream: bool = True) -> DeepResearchResponse</code>
 * <code title="class DeepResearchAgent">DeepResearchAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/deep_research_agent.py">rewrite_query</a>(query: str, model: Optional[str] = None) -> str</code>
-* <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">achat</a>(prompt: str, temperature: float = 0.2, tools: Optional[List[Any]] = None, output_json: Optional[str] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, **kwargs) -> Union[str, Dict[str, Any]]</code>
-* <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">aedit</a>(image: str, prompt: str, mask: Optional[str] = None, n: int = 1, size: Optional[str] = None, **kwargs) -> Dict[str, Any]</code>
-* <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">agenerate</a>(prompt: str, **kwargs) -> Dict[str, Any]</code>
-* <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">agenerate_image</a>(prompt: str, **kwargs) -> Dict[str, Any]</code>
-* <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">avariation</a>(image: str, n: int = 1, size: Optional[str] = None, **kwargs) -> Dict[str, Any]</code>
-* <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">chat</a>(prompt: str, **kwargs) -> Dict[str, Any]</code>
-* <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">edit</a>(image: str, prompt: str, mask: Optional[str] = None, n: int = 1, size: Optional[str] = None, **kwargs) -> Dict[str, Any]</code>
-* <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">generate</a>(prompt: str, **kwargs) -> Dict[str, Any]</code>
-* <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">generate_image</a>(prompt: str, **kwargs) -> Dict[str, Any]</code>
+* <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">achat</a>(prompt: str, temperature: float = 0.2, tools: Optional[List[Any]] = None, output_json: Optional[str] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, **kwargs) -> Union[ImageResult, Dict[str, Any]]</code>
+* <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">aedit</a>(image: str, prompt: str, mask: Optional[str] = None, n: int = 1, size: Optional[str] = None, **kwargs) -> ImageResult</code>
+* <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">agenerate</a>(prompt: str, **kwargs) -> ImageResult</code>
+* <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">agenerate_image</a>(prompt: str, **kwargs) -> ImageResult</code>
+* <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">avariation</a>(image: str, n: int = 1, size: Optional[str] = None, **kwargs) -> ImageResult</code>
+* <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">chat</a>(prompt: str, **kwargs) -> Union[ImageResult, Dict[str, Any]]</code>
+* <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">edit</a>(image: str, prompt: str, mask: Optional[str] = None, n: int = 1, size: Optional[str] = None, **kwargs) -> ImageResult</code>
+* <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">generate</a>(prompt: str, **kwargs) -> ImageResult</code>
+* <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">generate_image</a>(prompt: str, **kwargs) -> ImageResult</code>
 * <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">litellm</a>()</code>
-* <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">variation</a>(image: str, n: int = 1, size: Optional[str] = None, **kwargs) -> Dict[str, Any]</code>
+* <code title="class ImageAgent">ImageAgent.<a href="./src/praisonai-agents/praisonaiagents/agent/image_agent.py">variation</a>(image: str, n: int = 1, size: Optional[str] = None, **kwargs) -> ImageResult</code>
 * <code title="class PlanningAgent">PlanningAgent.<a href="./src/praisonai-agents/praisonaiagents/planning/planner.py">analyze_context</a>(context: str) -> str</code>
 * <code title="class PlanningAgent">PlanningAgent.<a href="./src/praisonai-agents/praisonaiagents/planning/planner.py">analyze_context_sync</a>(context: str) -> str</code>
 * <code title="class PlanningAgent">PlanningAgent.<a href="./src/praisonai-agents/praisonaiagents/planning/planner.py">create_plan</a>(request: str, agents: List['Agent'], tasks: Optional[List['Task']] = None, context: Optional[str] = None) -> Plan</code>
@@ -271,7 +271,7 @@ Methods:
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">reset_short_term</a>()</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">reset_user_memory</a>()</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">search</a>(query: str, user_id: Optional[str] = None, agent_id: Optional[str] = None, run_id: Optional[str] = None, limit: int = 5, rerank: bool = False, **kwargs) -> List[Dict[str, Any]]</code>
-* <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">search_entity</a>(query: str, limit: int = 5) -> List[Dict[str, Any]]</code>
+* <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">search_entity</a>(query: str, limit: int = 5, user_id: Optional[str] = None) -> List[Dict[str, Any]]</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">search_long_term</a>(query: str, limit: int = 5, relevance_cutoff: float = 0.0, min_quality: float = 0.0, rerank: bool = False, metadata_filter: Optional[Dict[str, Any]] = None, user_id: Optional[str] = None, min_trust = None, **kwargs) -> List[Dict[str, Any]]</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">search_short_term</a>(query: str, limit: int = 5, min_quality: float = 0.0, relevance_cutoff: float = 0.0, rerank: bool = False, metadata_filter: Optional[Dict[str, Any]] = None, user_id: Optional[str] = None, min_trust = None, **kwargs) -> List[Dict[str, Any]]</code>
 * <code title="class Memory">Memory.<a href="./src/praisonai-agents/praisonaiagents/memory/memory.py">search_user_memory</a>(user_id: str, query: str, limit: int = 5, rerank: bool = False, **kwargs) -> List[Dict[str, Any]]</code>
@@ -717,6 +717,7 @@ Methods:
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">state</a>()</code>
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">stream</a>() -> bool</code>
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">to_dict</a>() -> Dict[str, Any]</code>
+* <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">to_graph</a>() -> Dict[str, Any]</code>
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">to_mermaid</a>() -> str</code>
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">validate_variables</a>() -> None</code>
 * <code title="class AgentFlow">AgentFlow.<a href="./src/praisonai-agents/praisonaiagents/workflows/workflows.py">verbose</a>() -> bool</code>
@@ -770,6 +771,8 @@ Methods:
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">start</a>(content = None, return_dict = False, output = None, **kwargs)</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">start_for_each</a>(inputs, **kwargs)</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">stream_emitter</a>()</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">to_graph</a>() -> Dict[str, Any]</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">to_mermaid</a>() -> str</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">todo_list</a>()</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">update_plan_step_status</a>(step_id: str, status: str) -> bool</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">update_state</a>(updates: Dict) -> None</code>
@@ -898,9 +901,13 @@ Methods:
 * <code title="cli">praisonai replay context <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
 * <code title="cli">praisonai replay dashboard <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
 * <code title="cli">praisonai replay delete <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
+* <code title="cli">praisonai replay export <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
 * <code title="cli">praisonai replay flow <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
 * <code title="cli">praisonai replay list <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
+* <code title="cli">praisonai replay rerun <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
 * <code title="cli">praisonai replay show <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
+* <code title="cli">praisonai replay view <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
+* <code title="cli">praisonai replay watch <a href="./src/praisonai/praisonai/cli/commands/replay.py">--help</a></code>
 * <code title="cli">praisonai run <a href="./src/praisonai/praisonai/cli/main.py">--help</a></code>
 * <code title="cli">praisonai schedule add <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>
 * <code title="cli">praisonai schedule blueprint <a href="./src/praisonai/praisonai/cli/commands/schedule.py">--help</a></code>

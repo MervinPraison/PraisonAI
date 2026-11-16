@@ -156,6 +156,7 @@ def _get_default_adapter_registry():
 
 # Framework availability detection (lazy via __getattr__)
 from ._framework_availability import is_available
+from praisonai._errors import _WrapperError
 
 # Lazy constants mapping for backward compatibility
 _AVAIL = {
@@ -192,7 +193,7 @@ def __dir__():
 _DEFAULT_TOOL_TIMEOUT_WORKERS = 32
 
 
-class ToolTimeoutError(TimeoutError):
+class ToolTimeoutError(_WrapperError, TimeoutError):
     """Raised when a wrapped tool exceeds its per-call timeout.
 
     Preserves the tool's declared return-type contract: instead of silently
@@ -962,6 +963,7 @@ class AgentsGenerator:
                         "delay": policy.initial_delay_ms / 1000.0,
                         "backoff_factor": policy.backoff_factor,
                         "max_delay": policy.max_delay_ms / 1000.0,
+                        "retry_on": sorted(policy.retry_on),
                     }
             except ImportError as exc:
                 # The optional retry backend is missing. The CLI accepted
@@ -1119,6 +1121,26 @@ class AgentsGenerator:
             # tool-timeout wrap/resolvers.
             'run_ctx': run_ctx,
         }
+
+    def _run_config_list(self, config):
+        """Return the ``config_list`` for this run with YAML top-level ``llm`` applied.
+
+        Precedence for agents without their own ``llm``/``model``: explicit CLI
+        ``--model`` (``cli_config['model']``) > top-level YAML ``llm`` >
+        credential/catalogue-resolved ``config_list``. Returns a copy so the
+        caller-owned ``self.config_list`` is never mutated.
+        """
+        config_list = self.config_list
+        if (self.cli_config or {}).get('model'):
+            return config_list
+        yaml_llm = config.get('llm')
+        if isinstance(yaml_llm, dict):
+            yaml_llm = yaml_llm.get('model')
+        if not isinstance(yaml_llm, str) or not yaml_llm.strip():
+            return config_list
+        if config_list:
+            return [{**config_list[0], 'model': yaml_llm.strip()}, *config_list[1:]]
+        return [{'model': yaml_llm.strip()}]
 
     def _run_adapter_setup(self, adapter):
         """Run an adapter's setup hooks.
@@ -1696,7 +1718,7 @@ class AgentsGenerator:
                 f"Framework {adapter.name!r} does not support building agents "
                 "without running them; use generate_crew_and_kickoff()."
             )
-        model_name = adapter._pick_model(self.config_list)
+        model_name = adapter._pick_model(self._run_config_list(prep['config']))
         # Thread the per-agent tool_timeout wrap resolver (carried in prep by
         # _prepare_for_run) exactly as the real run paths do, so agents built for
         # evaluation carry the same heterogeneous per-agent timeout guards a
@@ -1775,7 +1797,7 @@ class AgentsGenerator:
             with scoped_bridge():
                 return prep['adapter'].run(
                     prep['config'],
-                    self.config_list,
+                    self._run_config_list(prep['config']),
                     prep['topic'],
                     tools_dict=prep['tools_dict'],
                     agent_callback=getattr(self, 'agent_callback', None),
@@ -1844,7 +1866,7 @@ class AgentsGenerator:
                 await asyncio.to_thread(self._run_adapter_setup, prep['adapter'])
                 return await prep['adapter'].arun(
                     prep['config'],
-                    self.config_list,
+                    self._run_config_list(prep['config']),
                     prep['topic'],
                     tools_dict=prep['tools_dict'],
                     agent_callback=getattr(self, 'agent_callback', None),
@@ -1979,6 +2001,10 @@ class AgentsGenerator:
 
         parser = YAMLWorkflowParser()
         workflow = parser.parse_string(yaml_content)
+
+        # ``praisonai replay rerun``: reuse recorded step outputs (no-op otherwise).
+        from .replay._hook import apply_rerun_seed
+        apply_rerun_seed(workflow)
 
         # Get input: 'input' is canonical, 'topic' is alias for backward compatibility
         input_data = config.get('input', config.get('topic', ''))

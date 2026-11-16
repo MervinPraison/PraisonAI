@@ -388,7 +388,8 @@ def test_cancellation_during_final_save_finishes_record_and_cleanup(recorded_age
     assert db.starts[0]["run_id"] == db.ends[0]["run_id"]
     assert db.ends[0]["status"] == "completed"
     assert agent._active_turn_token is None
-    emitter.agent_end.assert_called_once_with(agent.name)
+    # The answer came back; only the final save was cancelled.
+    emitter.agent_end.assert_called_once_with(agent.name, {"status": "completed"})
     token.close.assert_called_once()
 
 

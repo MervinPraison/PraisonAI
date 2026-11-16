@@ -696,6 +696,7 @@ class Memory(MemoryCoreMixin):
             accuracy, weights, evaluator_quality
         )
         metadata = self._stamp_provenance(metadata, trust, origin)
+        metadata = self._stamp_user_id(metadata)
         logger.info(f"Processed metadata: {metadata}")
         
         # Generate unique ID and timestamp once
@@ -802,6 +803,18 @@ class Memory(MemoryCoreMixin):
         if origin is not None:
             metadata["origin"] = origin
         return metadata
+
+    def _stamp_user_id(self, metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Default ``metadata["user_id"]`` to this store's configured user_id.
+
+        User-scoped search post-filters on ``metadata.user_id``; without the
+        stamp, facts saved via ``agent.store_memory()`` were invisible to the
+        same user's recall (#6040). An explicit metadata user_id still wins.
+        """
+        user_id = self.cfg.get("user_id")
+        if not user_id:
+            return metadata or {}
+        return {"user_id": user_id, **(metadata or {})}
 
     @staticmethod
     def _filter_by_trust(
@@ -1074,6 +1087,7 @@ class Memory(MemoryCoreMixin):
             accuracy, weights, evaluator_quality
         )
         metadata = self._stamp_provenance(metadata, trust, origin)
+        metadata = self._stamp_user_id(metadata)
         logger.info(f"Processed metadata: {metadata}")
         
         # Generate unique ID
@@ -1754,11 +1768,15 @@ class Memory(MemoryCoreMixin):
         data = f"Entity {name}({type_}): {desc} | relationships: {relations}"
         self.store_long_term(data, metadata={"category": "entity"})
 
-    def search_entity(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
+    def search_entity(self, query: str, limit: int = 5, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Filter to items that have metadata 'category=entity'.
         """
-        all_hits = self.search_long_term(query, limit=20)  # gather more
+        # Only pass user_id when set, so unscoped stores keep calling
+        # (possibly overridden) search_long_term with its original signature.
+        user_id = user_id or self.cfg.get("user_id")
+        scope = {"user_id": user_id} if user_id else {}
+        all_hits = self.search_long_term(query, limit=20, **scope)  # gather more
         ents = []
         for h in all_hits:
             meta = h.get("metadata") or {}
@@ -2051,9 +2069,15 @@ class Memory(MemoryCoreMixin):
 
         # Add each section
         # First get all results
-        short_term = self.search_short_term(q, limit=max_items)
-        long_term = self.search_long_term(q, limit=max_items)
-        entities = self.search_entity(q, limit=max_items)
+        # Scope every tier to the effective user so a shared store never
+        # injects another user's memories into this prompt (#6353).
+        # Only pass user_id when one is set, so unscoped stores keep calling
+        # (possibly overridden) search methods with the original signature.
+        user_id = user_id or self.cfg.get("user_id")
+        scope = {"user_id": user_id} if user_id else {}
+        short_term = self.search_short_term(q, limit=max_items, **scope)
+        long_term = self.search_long_term(q, limit=max_items, **scope)
+        entities = self.search_entity(q, limit=max_items, **scope)
         user_mem = self.search_user_memory(user_id, q, limit=max_items) if user_id else []
 
         # Apply stable sorting to ensure deterministic order for prompt caching

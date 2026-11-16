@@ -95,7 +95,7 @@ def moderate(
 
 async def amoderate(
     input: Union[str, List[str]],
-    model: str = "text-moderation-latest",
+    model: str = "omni-moderation-latest",
     timeout: float = 600.0,
     api_key: Optional[str] = None,
     api_base: Optional[str] = None,

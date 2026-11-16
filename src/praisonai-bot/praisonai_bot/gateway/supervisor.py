@@ -237,6 +237,7 @@ class ChannelSupervisor:
                            (f" (attempt {monitor.attempt + 1})" if recovering else ""))
                 
                 # Start the bot in a task so it can be cancelled
+                run_started = time.monotonic()
                 bot_task = asyncio.create_task(start_fn(name, bot))
                 abort_task = asyncio.create_task(abort_signal.wait())
                 
@@ -346,7 +347,11 @@ class ChannelSupervisor:
                     break
                     
                 else:
-                    # Recoverable error - retry with backoff
+                    # A sustained healthy run is a new outage, not the next
+                    # failure in an old startup crash loop. Short runs retain
+                    # their accumulated backoff.
+                    if time.monotonic() - run_started >= 2 * self._policy.max_ms / 1000:
+                        monitor.record_success()
                     delay = monitor.record_error(e)
                     status.last_error = str(e)
                     status.last_error_time = time.time()

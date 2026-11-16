@@ -463,6 +463,7 @@ class SqliteTranscriptStore(DefaultSessionStore):
                 "session_id": sid,
                 "id": sid,
                 "agent_name": data.get("agent_name"),
+                "title": meta.get("title"),
                 "agent_id": data.get("agent_id") or meta.get("agent_id"),
                 "source": data.get("source") or meta.get("source"),
                 "parent_id": data.get("parent_id") or meta.get("parent_id"),
@@ -474,6 +475,7 @@ class SqliteTranscriptStore(DefaultSessionStore):
                 "model": data.get("model") or data.get("llm") or meta.get("model"),
                 "total_tokens": data.get("total_tokens") or data.get("token_count") or meta.get("total_tokens"),
                 "cost": data.get("cost") or meta.get("cost"),
+                "tool_stats": meta.get("tool_stats"),
             })
             if len(sessions) >= limit:
                 break

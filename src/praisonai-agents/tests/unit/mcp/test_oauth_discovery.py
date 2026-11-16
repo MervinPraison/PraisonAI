@@ -7,6 +7,14 @@ do not require live network access or a browser.
 import pytest
 
 
+@pytest.fixture
+def public_dns(monkeypatch):
+    """Treat example.com hosts as public without needing live DNS."""
+    monkeypatch.setattr(
+        "praisonaiagents.tools.url_safety.is_safe_http_url", lambda url: True
+    )
+
+
 class TestParseWWWAuthenticate:
     def test_none_returns_empty(self):
         from praisonaiagents.mcp.oauth_discovery import parse_www_authenticate
@@ -31,7 +39,7 @@ class TestHttpsGuard:
         with pytest.raises(ValueError):
             _require_https("http://evil.example.com/.well-known/x")
 
-    def test_allows_https(self):
+    def test_allows_https(self, public_dns):
         from praisonaiagents.mcp.oauth_discovery import _require_https
         _require_https("https://api.example.com/.well-known/x")
 
@@ -50,7 +58,7 @@ class TestWellKnownCandidates:
 
 
 class TestEndpointHttpsValidation:
-    def test_rejects_plaintext_advertised_endpoints(self, monkeypatch):
+    def test_rejects_plaintext_advertised_endpoints(self, monkeypatch, public_dns):
         from praisonaiagents.mcp import oauth_discovery
 
         monkeypatch.setattr(
@@ -64,10 +72,10 @@ class TestEndpointHttpsValidation:
                 "token_endpoint": "http://auth.example.com/token",
             },
         )
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="insecure transport"):
             oauth_discovery.discover_oauth_metadata("https://api.example.com/mcp")
 
-    def test_accepts_all_https_endpoints(self, monkeypatch):
+    def test_accepts_all_https_endpoints(self, monkeypatch, public_dns):
         from praisonaiagents.mcp import oauth_discovery
 
         monkeypatch.setattr(
@@ -87,32 +95,52 @@ class TestEndpointHttpsValidation:
 
 
 class TestRedirectRevalidation:
-    def test_rejects_redirect_to_plaintext(self, monkeypatch):
+    def test_rejects_redirect_before_requesting_it(self, monkeypatch):
         from praisonaiagents.mcp import oauth_discovery
 
-        class _Hop:
-            url = "http://internal.local/.well-known/x"
+        requested = []
 
         class _Resp:
-            url = "http://internal.local/.well-known/x"
-            history = [_Hop()]
-
-            def raise_for_status(self):
-                pass
-
-            def json(self):
-                return {}
+            status_code = 302
+            headers = {"Location": "http://internal.local/.well-known/x"}
 
         class _Requests:
             @staticmethod
-            def get(*a, **k):
+            def get(url, **k):
+                requested.append(url)
+                assert k["allow_redirects"] is False
                 return _Resp()
 
         monkeypatch.setitem(
             __import__("sys").modules, "requests", _Requests()
         )
         with pytest.raises(ValueError):
-            oauth_discovery._get_json("https://api.example.com/.well-known/x")
+            oauth_discovery._get_json("http://127.0.0.1:8080/.well-known/x")
+        # The redirect target was refused without ever being fetched.
+        assert requested == ["http://127.0.0.1:8080/.well-known/x"]
+
+
+class TestPrivateHostGuard:
+    @pytest.mark.parametrize("url", [
+        "https://169.254.169.254/latest/meta-data/",
+        "https://10.0.0.5/admin",
+        "https://[::ffff:169.254.169.254]/",
+        "https://0177.0.0.1/",
+    ])
+    def test_rejects_internal_https_hosts(self, url, monkeypatch):
+        from praisonaiagents.mcp.oauth_discovery import _require_https
+        monkeypatch.delenv("ALLOW_LOCAL_CRAWL", raising=False)
+        with pytest.raises(ValueError):
+            _require_https(url)
+
+    def test_registration_rejects_internal_endpoint(self, monkeypatch):
+        from praisonaiagents.mcp.oauth_registration import register_client
+        monkeypatch.delenv("ALLOW_LOCAL_CRAWL", raising=False)
+        with pytest.raises(ValueError):
+            register_client(
+                "https://10.0.0.5/register",
+                redirect_uris=["http://127.0.0.1:19876/mcp/oauth/callback"],
+            )
 
 
 class TestRegistrationGuard:
@@ -144,6 +172,29 @@ class TestProviderTokenReuse:
         provider = MCPOAuthProvider("example", url, storage=storage)
         assert provider.get_valid_token() == "tok123"
         assert provider.ensure_authenticated() == "tok123"
+
+    def test_refresh_redirect_keeps_saved_tokens(self, storage, monkeypatch, public_dns):
+        import requests
+        from praisonaiagents.mcp.oauth_provider import MCPOAuthProvider
+
+        url = "https://api.example.com/mcp"
+        tokens = {
+            "access_token": "old",
+            "refresh_token": "r1",
+            "token_endpoint": "https://auth.example.com/token",
+        }
+        storage.set_tokens("example", tokens, server_url=url)
+        storage.set_client_info("example", {"client_id": "c1"}, server_url=url)
+
+        resp = requests.Response()
+        resp.status_code = 307
+        resp.url = tokens["token_endpoint"]
+        resp._content = b'{"detail": "redirect"}'
+        monkeypatch.setattr(requests, "post", lambda *a, **k: resp)
+
+        provider = MCPOAuthProvider("example", url, storage=storage)
+        assert provider._try_refresh(storage.get_for_url("example", url)) is False
+        assert storage.get_for_url("example", url)["tokens"]["access_token"] == "old"
 
     def test_expired_token_without_refresh_returns_none(self, storage):
         import time

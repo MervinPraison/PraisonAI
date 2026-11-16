@@ -52,10 +52,19 @@ class _MockOpenAI(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
+@pytest.fixture(autouse=True)
+def _project_root(tmp_path, monkeypatch):
+    # Task output_file writes are contained to the project root (#5770); these
+    # runs write under tmp_path, so make it the root.
+    monkeypatch.setenv("PRAISONAI_PROJECT_ROOT", str(tmp_path))
+
+
 @pytest.fixture
-def mock_endpoint(monkeypatch):
+def mock_endpoint(monkeypatch, tmp_path):
     server = HTTPServer(("127.0.0.1", 0), _MockOpenAI)
     threading.Thread(target=server.serve_forever, daemon=True).start()
+    # output_file writes are contained to the project root (#5770).
+    monkeypatch.setenv("PRAISONAI_PROJECT_ROOT", str(tmp_path))
     monkeypatch.setenv("OPENAI_API_KEY", "placeholder")
     monkeypatch.setenv("OPENAI_BASE_URL", f"http://127.0.0.1:{server.server_port}/v1")
     monkeypatch.setenv("PRAISONAI_TELEMETRY_DISABLED", "true")
@@ -103,7 +112,9 @@ def test_yaml_cli_config_forwards_metrics_flags():
     assert "metrics" not in config and "metrics_json" not in config
 
 
-def test_output_file_and_metrics_json(mock_endpoint, tmp_path, capsys):
+def test_output_file_and_metrics_json(mock_endpoint, tmp_path, capsys, monkeypatch):
+    # output_file writes are contained in the project root (#5770).
+    monkeypatch.setenv("PRAISONAI_PROJECT_ROOT", str(tmp_path))
     result = _run(_config(tmp_path), {"metrics_json": True, "trust": True})
 
     assert "FINAL TEXT" in result

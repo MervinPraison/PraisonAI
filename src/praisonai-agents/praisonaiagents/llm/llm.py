@@ -25,12 +25,13 @@ class FailoverManagerProtocol(Protocol):
 from pydantic import BaseModel
 import time
 import json
-import xml.etree.ElementTree as ET
-from ..errors import AgentErrorKind, FailoverDecision, IdleTimeoutBreaker, ToolExecutionError
+from ..errors import AgentErrorKind, BudgetExceededError, FailoverDecision, IdleTimeoutBreaker, ToolExecutionError
 from ..model_harness.guard import check_model_request
 # Gap 2: Tool call execution imports
 from ..tools.call_executor import ToolCall, create_tool_call_executor
 from ..tools.schema import build_tool_definition
+
+logger = get_logger(__name__)
 
 
 # Sentinel returned as the "arguments" value when a tool call's argument string
@@ -42,6 +43,173 @@ _TOOL_ARGUMENTS_PARSE_FAILED = object()
 
 # Bounded shrink-and-retry steps after a provider context-overflow rejection.
 _CONTEXT_OVERFLOW_SHRINK_STEPS = 3
+
+
+# ---------------------------------------------------------------------------
+# Replay llm_request / llm_response for the LiteLLM path. The agent's
+# OpenAI-client path records its own pair around the whole dispatch (which can
+# reach this class through the LiteLLM adapter); ``_llm_call_open`` makes sure
+# that call is not counted twice. A no-op returning None when tracing is off.
+# ---------------------------------------------------------------------------
+
+def _replay_llm_begin(llm: Any, params: Dict[str, Any]):
+    from ..trace.context_events import get_context_emitter
+    emitter = get_context_emitter()
+    if not emitter._enabled or emitter._llm_call_open():
+        return None
+    agent = getattr(llm, "current_agent_name", None) or emitter._current_agent()
+    model = params.get("model") or getattr(llm, "model", None)
+    # Chat Completions sends ``messages``; the Responses API sends ``input``.
+    messages = params.get("messages", params.get("input"))
+    # Copy: the caller keeps appending turns to (and shrinking) the live list.
+    messages = list(messages) if isinstance(messages, list) else None
+    emitter._emit(emitter._llm_request_event(
+        agent, len(messages) if messages else 0, 0, model=model, messages=messages,
+    ))
+    return {"emitter": emitter, "agent": agent, "model": model,
+            "started": time.perf_counter(), "content": [], "usage": None, "finish": None}
+
+
+def _replay_usage_tokens(usage: Any) -> tuple:
+    if not usage:
+        return 0, 0
+    get = usage.get if isinstance(usage, dict) else (lambda k, d=None: getattr(usage, k, d))
+    # Chat Completions names, then the Responses API names.
+    prompt = get("prompt_tokens", None) or get("input_tokens", 0)
+    completion = get("completion_tokens", None) or get("output_tokens", 0)
+    return int(prompt or 0), int(completion or 0)
+
+
+def _replay_observe(span: Dict[str, Any], response: Any, chunk: bool) -> None:
+    """Collect content / finish reason / usage from a response or a stream chunk."""
+    try:
+        get = response.get if isinstance(response, dict) else (lambda k, d=None: getattr(response, k, d))
+        usage = get("usage", None)
+        if usage:
+            span["usage"] = usage
+        # The model that actually served the call (a failover profile may
+        # differ from the requested one), so name and price match it.
+        served = get("model", None)
+        if isinstance(served, str) and served:
+            span["model"] = served
+        choices = get("choices", None) or []
+        if not choices:
+            return
+        first = choices[0]
+        fget = first.get if isinstance(first, dict) else (lambda k, d=None: getattr(first, k, d))
+        if fget("finish_reason", None):
+            span["finish"] = fget("finish_reason", None)
+        body = fget("delta" if chunk else "message", None)
+        if body is not None:
+            content = body.get("content") if isinstance(body, dict) else getattr(body, "content", None)
+            if isinstance(content, str) and content:
+                span["content"].append(content)
+    except Exception:
+        pass  # Tracing must never break a model call.
+
+
+def _replay_llm_end(span: Optional[Dict[str, Any]], error: Optional[BaseException] = None) -> None:
+    if span is None or span.get("done"):
+        return
+    span["done"] = True
+    emitter = span["emitter"]
+    prompt_tokens, completion_tokens = _replay_usage_tokens(span.get("usage"))
+    cost = 0.0
+    if prompt_tokens or completion_tokens:
+        try:
+            import litellm
+            prompt_cost, completion_cost = litellm.cost_per_token(
+                model=span["model"], prompt_tokens=prompt_tokens,
+                completion_tokens=completion_tokens,
+            )
+            cost = float(prompt_cost or 0) + float(completion_cost or 0)
+        except Exception:
+            cost = 0.0  # Unknown price: leave it unknown rather than guess.
+    emitter._emit(emitter._llm_response_event(
+        span["agent"],
+        duration_ms=(time.perf_counter() - span["started"]) * 1000,
+        finish_reason="error" if error is not None else span.get("finish"),
+        response_content=str(error) if error is not None else "".join(span["content"]),
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        cost_usd=cost,
+        model=span["model"],
+    ))
+
+
+def _replay_stream_result(span: Dict[str, Any], result: Any) -> None:
+    """Finish a span from a streamed Responses API ``(text, tools, final)`` tuple."""
+    try:
+        text, final = result[0], result[2] if len(result) > 2 else None
+        if isinstance(text, str) and text:
+            span["content"].append(text)
+        if final is not None:
+            span["usage"] = getattr(final, "usage", None)
+    except Exception:
+        pass
+    _replay_llm_end(span)
+
+
+class _ReplayStream:
+    """Pass-through for a LiteLLM stream that records ``llm_response`` when it ends."""
+
+    __slots__ = ("_stream", "_iter", "_span")
+
+    def __init__(self, stream: Any, span: Dict[str, Any]) -> None:
+        self._stream = stream
+        self._iter = None
+        self._span = span
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        if self._iter is None:
+            self._iter = iter(self._stream)
+        try:
+            chunk = next(self._iter)
+        except StopIteration:
+            _replay_llm_end(self._span)
+            raise
+        except BaseException as exc:
+            _replay_llm_end(self._span, exc)
+            raise
+        _replay_observe(self._span, chunk, chunk=True)
+        return chunk
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._iter is None:
+            self._iter = self._stream.__aiter__()
+        try:
+            chunk = await self._iter.__anext__()
+        except StopAsyncIteration:
+            _replay_llm_end(self._span)
+            raise
+        except BaseException as exc:
+            _replay_llm_end(self._span, exc)
+            raise
+        _replay_observe(self._span, chunk, chunk=True)
+        return chunk
+
+    def close(self):
+        _replay_llm_end(self._span)
+        close = getattr(self._stream, "close", None)
+        if callable(close):
+            return close()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._stream, name)
+
+# Default per-request timeout (seconds) when ``timeout`` is not passed. Without
+# it litellm falls back to its 6000s ceiling, so a provider that accepts the
+# connection but never answers blocks the turn for ~100 minutes per attempt.
+# 600s matches the OpenAI SDK default used by the bare-model-name path and is
+# a read-gap bound for streams. Pass ``timeout=None`` (or 0) to opt out.
+_DEFAULT_LLM_TIMEOUT_S = 600
+_TIMEOUT_UNSET = object()
 
 
 # ``litellm.success_callback``/``_async_success_callback``/``callbacks`` are
@@ -177,6 +345,11 @@ except ImportError:
 # API calls per request. This is a DRY/maintenance concern, not a billing issue.
 from ..tools.hosted import is_hosted_tool  # noqa: E402
 
+# ``(llm, callback)`` bound by the owning Agent for one custom-LLM turn. Every
+# tracked call made by that ``llm`` reports its response to ``callback`` so the
+# Agent's cost/token counters and ``max_budget`` cover the whole tool loop.
+_usage_sink = contextvars.ContextVar("praisonai_llm_usage_sink", default=None)
+
 
 class LLMResponseError(Exception):
     """Raised when the LLM tool-calling loop fails and cannot produce a response.
@@ -233,6 +406,19 @@ class TokenUsage:
             'audio_input_tokens': self.audio_input_tokens,
             'audio_output_tokens': self.audio_output_tokens,
         }
+
+# error_classifier category -> (text-derived kinds that may refine it, default kind).
+_CATEGORY_KINDS = {
+    "rate_limit": ({"rate_limit", "billing"}, "rate_limit"),
+    "auth": ({"auth", "auth_permanent"}, "auth"),
+    "context_limit": ({"context_overflow"}, "context_overflow"),
+    "invalid_request": (
+        {"context_overflow", "model_not_found", "auth", "auth_permanent", "billing", "format_error"},
+        "format_error",
+    ),
+    "transient": ({"overloaded", "idle_timeout"}, "overloaded"),
+    "permanent": ({"billing"}, "billing"),
+}
 
 class LLM:
     """
@@ -493,7 +679,7 @@ Respond with ONLY a valid JSON tool call in this format:
     def __init__(
         self,
         model: str,
-        timeout: Optional[int] = None,
+        timeout: Optional[int] = _TIMEOUT_UNSET,
         temperature: Optional[float] = None,
         top_p: Optional[float] = None,
         n: Optional[int] = None,
@@ -535,7 +721,7 @@ Respond with ONLY a valid JSON tool call in this format:
                 )
 
         self.model = model
-        self.timeout = timeout
+        self.timeout = _DEFAULT_LLM_TIMEOUT_S if timeout is _TIMEOUT_UNSET else timeout
         self.temperature = temperature
         self.top_p = top_p
         self.n = n
@@ -599,6 +785,7 @@ Respond with ONLY a valid JSON tool call in this format:
         self._keep_recent_tool_results = extra_settings.get('keep_recent_tool_results', 6)
         self._loop_compactor = None  # Lazily created on first in-loop management call
         self._loop_compactor_model = None  # Model the cached compactor was built for
+        self._loop_managed_tokens = {}  # Per-conversation token count after the last in-loop clear/compact pass
         
         # Tool calling reliability settings (for weak models like Ollama)
         # These are auto-configured for Ollama providers if not explicitly set
@@ -637,7 +824,9 @@ Respond with ONLY a valid JSON tool call in this format:
         # Rate limiting and retry settings
         self._rate_limiter = extra_settings.get('rate_limiter', None)
         self._max_retries = extra_settings.get('max_retries', 3)
-        self._retry_delay = extra_settings.get('retry_delay', 60)  # Default 60 seconds
+        # Fixed delay applies only when explicitly configured; otherwise use jitter.
+        self._retry_delay = extra_settings.get('retry_delay', 60)
+        self._retry_delay_explicit = 'retry_delay' in extra_settings
         
         # Subscription auth
         self._auth_provider_id = auth
@@ -886,14 +1075,15 @@ Respond with ONLY a valid JSON tool call in this format:
         else:
             return False
 
-    def _parse_retry_delay(self, error_message: str) -> float:
-        """Parse retry delay from rate limit error message.
+    def _parse_retry_delay(self, error_message: Union[Exception, str]) -> Optional[float]:
+        """Parse retry delay from a rate limit error.
 
         Args:
-            error_message: The error message from the API
+            error_message: The provider exception (preferred, so the structured
+                ``Retry-After`` response header is honoured) or its message
 
         Returns:
-            Retry delay in seconds, or default if not found
+            Provider delay in seconds, explicit fixed delay, or None if unspecified
         """
         # Max delay cap to prevent unbounded sleep (5 minutes default)
         max_delay = 300
@@ -902,8 +1092,11 @@ Respond with ONLY a valid JSON tool call in this format:
 
         from .error_classifier import extract_retry_after
 
-        delay = extract_retry_after(Exception(error_message), cap_seconds=max_delay)
-        return self._retry_delay if delay is None else delay
+        error = error_message if isinstance(error_message, BaseException) else Exception(error_message)
+        delay = extract_retry_after(error, cap_seconds=max_delay)
+        if delay is None and self._retry_delay_explicit:
+            return self._retry_delay
+        return delay
 
     def _is_rate_limit_error(self, error: Exception) -> bool:
         """Check if an exception is a rate limit error.
@@ -939,15 +1132,35 @@ Respond with ONLY a valid JSON tool call in this format:
     def classify_error_kind(self, error: Exception) -> AgentErrorKind:
         """
         Classify error into typed AgentErrorKind instead of freeform strings.
-        
-        Replaces scattered regex checks with systematic classification.
-        
+
+        The HTTP status code / exception type (via ``error_classifier``) is
+        authoritative; message text only refines the kind within that category,
+        so e.g. a 400 whose body happens to contain "500" is never retried as
+        an overload.
+
         Args:
             error: Exception to classify
-            
+
         Returns:
             AgentErrorKind: Typed error classification
         """
+        text_kind = self._classify_error_kind_from_text(error)
+        from .error_classifier import _classify_by_type_and_code, _extract_status_code
+        category = _classify_by_type_and_code(error)
+        if category is None:
+            return text_kind
+        allowed, default = _CATEGORY_KINDS[category.value]
+        if text_kind in allowed:
+            return text_kind
+        # A 404 from a completion endpoint means the model/deployment is missing.
+        if _extract_status_code(error) == 404 or type(error).__name__ == "NotFoundError":
+            return "model_not_found"
+        if default == "overloaded" and "timeout" in type(error).__name__.lower():
+            return "idle_timeout"
+        return default
+
+    def _classify_error_kind_from_text(self, error: Exception) -> AgentErrorKind:
+        """Message-substring fallback used when no status code / type is known."""
         error_str = str(error).lower()
         error_type = type(error).__name__.lower()
         
@@ -969,7 +1182,7 @@ Respond with ONLY a valid JSON tool call in this format:
         
         # Billing/quota issues (must be checked before generic 429/rate-limit)
         if any(indicator in error_str for indicator in [
-            "insufficient quota", "quota exceeded", "billing", "credit",
+            "insufficient quota", "quota exceeded", "billing", "credit balance", "insufficient credit",
             "payment required", "subscription required", "subscription expired",
             "plan limit"
         ]):
@@ -1101,9 +1314,10 @@ Respond with ONLY a valid JSON tool call in this format:
 
         # Rate limiting - extract retry delay
         if error_kind == "rate_limit":
-            backoff = self._parse_retry_delay(str(error))  # Returns seconds
-            if backoff == 0:  # No specific delay found, use exponential backoff
-                backoff = min(2 ** (attempt - 1), 60)  # 1s, 2s, 4s, ... cap at 60s
+            backoff = self._parse_retry_delay(error)
+            if backoff is None:
+                from .error_classifier import ErrorCategory, get_retry_delay
+                backoff = get_retry_delay(ErrorCategory.RATE_LIMIT, attempt)
             return FailoverDecision(
                 action="retry",
                 reason=error_kind, 
@@ -1693,15 +1907,25 @@ Respond with ONLY a valid JSON tool call in this format:
         # entirely, so scripted turns never reach (or trip) the guard.
         check_model_request(self.model, "litellm.completion")
         import litellm
-        for step in range(_CONTEXT_OVERFLOW_SHRINK_STEPS + 1):
-            try:
-                response = self._call_with_retry(litellm.completion, **completion_params)
-                break
-            except Exception as e:
-                if not self._shrink_on_context_overflow(e, completion_params, step):
-                    raise
+        _replay = _replay_llm_begin(self, completion_params)
+        try:
+            for step in range(_CONTEXT_OVERFLOW_SHRINK_STEPS + 1):
+                try:
+                    response = self._call_with_retry(litellm.completion, **completion_params)
+                    break
+                except Exception as e:
+                    if not self._shrink_on_context_overflow(e, completion_params, step):
+                        raise
+        except BaseException as exc:
+            _replay_llm_end(_replay, exc)
+            raise
         if not completion_params.get("stream"):
             self._track_token_usage(response, self._response_model_for_tracking(response))
+            if _replay is not None:
+                _replay_observe(_replay, response, chunk=False)
+                _replay_llm_end(_replay)
+        elif _replay is not None:
+            response = _ReplayStream(response, _replay)
         return response
 
     async def _acompletion_with_retry(self, **completion_params):
@@ -1722,18 +1946,28 @@ Respond with ONLY a valid JSON tool call in this format:
         """
         check_model_request(self.model, "litellm.acompletion")
         import litellm
-        for step in range(_CONTEXT_OVERFLOW_SHRINK_STEPS + 1):
-            try:
-                response = await self._call_with_retry_async(
-                    litellm.acompletion,
-                    **completion_params,
-                )
-                break
-            except Exception as e:
-                if not self._shrink_on_context_overflow(e, completion_params, step):
-                    raise
+        _replay = _replay_llm_begin(self, completion_params)
+        try:
+            for step in range(_CONTEXT_OVERFLOW_SHRINK_STEPS + 1):
+                try:
+                    response = await self._call_with_retry_async(
+                        litellm.acompletion,
+                        **completion_params,
+                    )
+                    break
+                except Exception as e:
+                    if not self._shrink_on_context_overflow(e, completion_params, step):
+                        raise
+        except BaseException as exc:
+            _replay_llm_end(_replay, exc)
+            raise
         if not completion_params.get("stream"):
             self._track_token_usage(response, self._response_model_for_tracking(response))
+            if _replay is not None:
+                _replay_observe(_replay, response, chunk=False)
+                _replay_llm_end(_replay)
+        elif _replay is not None:
+            response = _ReplayStream(response, _replay)
         return response
 
     def _supports_web_search(self) -> bool:
@@ -1794,10 +2028,10 @@ Respond with ONLY a valid JSON tool call in this format:
             return None
         
         if self._claude_memory_tool is None:
-            from ..tools.claude_memory_tool import ClaudeMemoryTool
-            
             if isinstance(self.claude_memory, bool):
-                # Create default memory tool
+                # Only the default implementation needs this dependency.
+                from ..tools.claude_memory_tool import ClaudeMemoryTool
+
                 self._claude_memory_tool = ClaudeMemoryTool()
             else:
                 # Use provided memory tool instance
@@ -2802,36 +3036,9 @@ Respond with ONLY a valid JSON tool call in this format:
         return fix_array_schemas(schema)
 
     def _get_tools_cache_key(self, tools):
-        """Generate a cache key for tools list."""
-        if tools is None:
-            return "none"
-        if not tools:
-            return "empty"
-        # Create a simple hash based on tool names/content
-        tool_parts = []
-        for tool in tools:
-            # A hosted tool must contribute its FULL spec to the cache key, or
-            # two tool lists differing only by hosted config (e.g. file_search
-            # over vs_1 vs vs_2, or different MCP server_urls) would share a key
-            # and the second call would reuse the first's formatted definition.
-            if isinstance(tool, dict) and is_hosted_tool(tool):
-                try:
-                    tool_parts.append(f"hosted:{json.dumps(tool, sort_keys=True)}")
-                except (TypeError, ValueError):
-                    tool_parts.append(f"hosted:{tool.get('type')}:{id(tool)}")
-            elif isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
-                if 'function' in tool and isinstance(tool['function'], dict) and 'name' in tool['function']:
-                    tool_parts.append(f"openai:{tool['function']['name']}")
-            elif callable(tool) and hasattr(tool, '__name__'):
-                tool_parts.append(f"callable:{tool.__name__}")
-            elif isinstance(tool, str):
-                tool_parts.append(f"string:{tool}")
-            elif isinstance(tool, dict) and len(tool) == 1:
-                tool_name = next(iter(tool.keys()))
-                tool_parts.append(f"gemini:{tool_name}")
-            else:
-                tool_parts.append(f"other:{id(tool)}")
-        return "|".join(sorted(tool_parts))
+        """Generate a content-based cache key for a tools list."""
+        from ..tools.schema import tools_cache_key
+        return tools_cache_key(tools)
 
     def _format_tools_for_litellm(self, tools: Optional[List[Any]]) -> Optional[List[Dict]]:
         """Format tools for LiteLLM - handles all tool formats.
@@ -2855,7 +3062,14 @@ Respond with ONLY a valid JSON tool call in this format:
         # Check cache first
         tools_key = self._get_tools_cache_key(tools)
         if tools_key in self._formatted_tools_cache:
-            return self._formatted_tools_cache[tools_key]
+            # LRU: re-insert so the entry becomes most-recently-used.
+            # A concurrent eviction of the same key just falls through to a miss.
+            try:
+                cached = self._formatted_tools_cache.pop(tools_key)
+                self._formatted_tools_cache[tools_key] = cached
+                return cached
+            except KeyError:
+                pass
             
         formatted_tools = []
         for tool in tools:
@@ -2940,8 +3154,12 @@ Respond with ONLY a valid JSON tool call in this format:
 
         # Cache the formatted tools
         result = formatted_tools if formatted_tools else None
-        if len(self._formatted_tools_cache) < self._max_cache_size:
-            self._formatted_tools_cache[tools_key] = result
+        self._formatted_tools_cache[tools_key] = result
+        while len(self._formatted_tools_cache) > self._max_cache_size:
+            try:
+                del self._formatted_tools_cache[next(iter(self._formatted_tools_cache))]
+            except (KeyError, StopIteration, RuntimeError):
+                break
         return result
 
     def _resolve_context_window(self) -> int:
@@ -2955,6 +3173,15 @@ Respond with ONLY a valid JSON tool call in this format:
             return get_model_limit(self.model or "")
         except Exception:
             return 8000
+
+    #: Share of the context window the conversation must grow by, since the
+    #: last in-loop clear pass, before another clear pass rewrites the prefix.
+    _LOOP_CLEAR_RESERVE_PCT = 0.1
+
+    @staticmethod
+    def _loop_conversation_key(messages: list) -> int:
+        """Identify a conversation by its first two messages (system + task)."""
+        return hash(repr([(m.get("role"), m.get("content")) for m in messages[:2] if isinstance(m, dict)]))
 
     def _manage_context_in_loop(self, messages: list) -> list:
         """
@@ -3002,12 +3229,27 @@ Respond with ONLY a valid JSON tool call in this format:
                 )
                 self._loop_compactor = compactor
                 self._loop_compactor_model = self.model
+                self._loop_managed_tokens = {}
 
             clear_at = int(budget * compactor.config.clear_threshold_pct)
             compact_at = int(budget * compactor.config.compact_threshold_pct)
 
             tokens = compactor.count_total_tokens(messages)
             if tokens < clear_at:
+                return messages
+
+            # Hysteresis: every pass rewrites the message prefix and so busts the
+            # provider prompt cache. Below the summarise threshold, wait until the
+            # context has grown by a reserve band since the last pass, so old tool
+            # results are cleared in batches instead of one per iteration.
+            # The baseline is kept per conversation (keyed by its stable head) so
+            # interleaved tool loops sharing this LLM don't reset each other's band.
+            managed = getattr(self, "_loop_managed_tokens", None)
+            if not isinstance(managed, dict):
+                managed = self._loop_managed_tokens = {}
+            last = managed.get(self._loop_conversation_key(messages))
+            reserve = int(budget * self._LOOP_CLEAR_RESERVE_PCT)
+            if tokens < compact_at and last is not None and last <= tokens < last + reserve:
                 return messages
 
             # Tier 1: clear re-fetchable tool results
@@ -3020,6 +3262,9 @@ Respond with ONLY a valid JSON tool call in this format:
             if compactor.count_total_tokens(messages) >= compact_at:
                 messages, _ = compactor.compact(messages)
 
+            if len(managed) >= 64:  # bound memory for long-lived shared LLMs
+                managed.clear()
+            managed[self._loop_conversation_key(messages)] = compactor.count_total_tokens(messages)
             return messages
         except Exception as e:
             logging.debug(f"In-loop context management skipped: {e}")
@@ -3366,6 +3611,19 @@ Respond with ONLY a valid JSON tool call in this format:
                                 reason = _cancel_reason()
                                 logging.debug(f"LLM tool loop cancelled before tool dispatch: {reason}")
                                 return _prepare_return_value(f"Task interrupted: {reason}")
+                            # Same per-turn cap as the chat-completions loop, applied
+                            # before recording the assistant turn so every declared
+                            # tool_call_id gets exactly one tool reply.
+                            if tool_call_count >= max_tool_calls_per_turn:
+                                logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
+                                self._last_stop_reason = "max_steps"
+                                if not (final_response_text and final_response_text.strip()):
+                                    final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
+                                break
+                            if tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
+                                tool_calls = tool_calls[:max_tool_calls_per_turn - tool_call_count]
+                                logging.warning(f"Limiting batch to {len(tool_calls)} tool calls to stay within limit of {max_tool_calls_per_turn}.")
+                            tool_call_count += len(tool_calls)
                             serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                             messages.append({
                                 "role": "assistant",
@@ -3448,7 +3706,7 @@ Respond with ONLY a valid JSON tool call in this format:
 
                                 # Append tool result as standard tool message
                                 messages.append(self._create_tool_message(
-                                    function_name, tool_result,
+                                    tool_result_obj.function_name, tool_result,
                                     tool_result_obj.tool_call_id, is_ollama=False))
 
                             # Report any unparseable tool-call arguments so the
@@ -3766,7 +4024,9 @@ Respond with ONLY a valid JSON tool call in this format:
                                         # Mark that fallback completed successfully
                                         fallback_completed = True
                                         streaming_success = False
-                                        
+
+                                    except BudgetExceededError:
+                                        raise
                                     except Exception as fallback_error:
                                         # If non-streaming also fails, create a graceful fallback with partial streaming data
                                         logging.warning(f"Non-streaming fallback also failed: {fallback_error}")
@@ -3971,64 +4231,17 @@ Respond with ONLY a valid JSON tool call in this format:
                             tool_calls = recovered
                             logging.debug(f"Recovered tool calls from response text: {tool_calls}")
                     
-                    # Parse tool calls from XML format in response text 
-                    # Try for known XML models first, or fallback for any model that might output XML
-                    if not tool_calls and response_text and formatted_tools:
-                        # Check if this model is known to use XML format, or try as fallback
-                        should_try_xml = (self._supports_xml_tool_format() or 
-                                        # Fallback: try XML if response contains XML-like tool call tags
-                                        '<tool_call>' in response_text)
-                        
-                        if should_try_xml:
-                            tool_calls = []
-                            
-                            # Try proper XML parsing first
-                            try:
-                                # Wrap in root element if multiple tool_call tags exist
-                                xml_content = f"<root>{response_text}</root>"
-                                root = ET.fromstring(xml_content)
-                                tool_call_elements = root.findall('.//tool_call')
-                                
-                                for idx, element in enumerate(tool_call_elements):
-                                    if element.text:
-                                        try:
-                                            tool_json = json.loads(element.text.strip())
-                                            if isinstance(tool_json, dict) and "name" in tool_json:
-                                                tool_calls.append({
-                                                    "id": f"tool_{iteration_count}_{idx}",
-                                                    "type": "function",
-                                                    "function": {
-                                                        "name": tool_json["name"],
-                                                        "arguments": json.dumps(tool_json.get("arguments", {}))
-                                                    }
-                                                })
-                                        except (json.JSONDecodeError, KeyError) as e:
-                                            logging.debug(f"Could not parse tool call JSON: {e}")
-                                            continue
-                            except ET.ParseError:
-                                # Fallback to regex if XML parsing fails
-                                tool_call_pattern = r'<tool_call>\s*(\{(?:[^{}]|{[^{}]*})*\})\s*</tool_call>'
-                                matches = re.findall(tool_call_pattern, response_text, re.DOTALL)
-                                
-                                for idx, match in enumerate(matches):
-                                    try:
-                                        tool_json = json.loads(match.strip())
-                                        if isinstance(tool_json, dict) and "name" in tool_json:
-                                            tool_calls.append({
-                                                "id": f"tool_{iteration_count}_{idx}",
-                                                "type": "function",
-                                                "function": {
-                                                    "name": tool_json["name"],
-                                                    "arguments": json.dumps(tool_json.get("arguments", {}))
-                                                }
-                                            })
-                                    except (json.JSONDecodeError, KeyError) as e:
-                                        logging.debug(f"Could not parse XML tool call: {e}")
-                                        continue
-                            
-                            if tool_calls:
-                                logging.debug(f"Parsed {len(tool_calls)} tool call(s) from XML format")
-                    
+                    # XML-format models (Qwen, or xml_tool_format=True), or any reply
+                    # carrying a <tool_call> tag: recover only <tool_call> blocks
+                    # outside fenced code (an example call is never executed) whose
+                    # name is advertised. Plain JSON answers are never promoted.
+                    if not tool_calls and response_text and formatted_tools and (
+                            self._supports_xml_tool_format() or '<tool_call>' in response_text):
+                        from .adapters import _recover_tool_call_tags
+                        tool_calls = _recover_tool_call_tags(response_text, formatted_tools)
+                        if tool_calls:
+                            logging.debug(f"Parsed {len(tool_calls)} tool call(s) from XML format")
+
                     # Force tool usage logic: if model ignores tools but should use them
                     _force = self._force_tool_usage_message(response_text, tool_calls, formatted_tools, iteration_count)
                     if _force is not None:
@@ -4082,6 +4295,22 @@ Respond with ONLY a valid JSON tool call in this format:
                             reason = _cancel_reason()
                             logging.debug(f"LLM tool loop cancelled before tool dispatch: {reason}")
                             return _prepare_return_value(f"Task interrupted: {reason}")
+                        # Apply the cap BEFORE recording the assistant turn so every
+                        # declared tool_call_id gets exactly one tool reply.
+                        # Guardrail: Check tool call limit to prevent infinite loops
+                        # Allow execution if we haven't reached the limit yet, but limit the batch size
+                        if tool_call_count >= max_tool_calls_per_turn:
+                            logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
+                            self._last_stop_reason = "max_steps"
+                            if not (final_response_text and final_response_text.strip()):
+                                final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
+                            break
+                        elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
+                            # Limit the batch to stay within the total limit
+                            remaining_calls = max_tool_calls_per_turn - tool_call_count
+                            tool_calls = tool_calls[:remaining_calls]
+                            logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
+                        
                         # Convert tool_calls to a serializable format for all providers
                         serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                         # Check if this is Ollama provider
@@ -4102,20 +4331,6 @@ Respond with ONLY a valid JSON tool call in this format:
                         should_continue = False
                         tool_results = []  # Store current iteration tool results
                         tool_result_mapping = {}  # Store function results by name for Ollama chaining
-                        
-                        # Guardrail: Check tool call limit to prevent infinite loops
-                        # Allow execution if we haven't reached the limit yet, but limit the batch size
-                        if tool_call_count >= max_tool_calls_per_turn:
-                            logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
-                            self._last_stop_reason = "max_steps"
-                            if not (final_response_text and final_response_text.strip()):
-                                final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
-                            break
-                        elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
-                            # Limit the batch to stay within the total limit
-                            remaining_calls = max_tool_calls_per_turn - tool_call_count
-                            tool_calls = tool_calls[:remaining_calls]
-                            logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
                         
                         # Collect media-bearing follow-up messages so they are
                         # flushed only AFTER every tool reply for this assistant
@@ -4142,9 +4357,11 @@ Respond with ONLY a valid JSON tool call in this format:
                                 arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, tools)
 
                             logging.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
-                            # Capture tool failures and report them back to the model
-                            # instead of aborting the whole run (safe-by-default,
-                            # matching the async path in execution_mixin.py).
+                            # A ToolExecutionError (a tool that raised, or a terminal
+                            # framework decision such as a loop-guard HALT) ends the
+                            # turn, same as the async path in execution_mixin.py.
+                            # Any other unexpected failure here is reported back to
+                            # the model instead of aborting the whole run.
                             try:
                                 tool_result = execute_tool_fn(
                                     function_name,
@@ -4292,7 +4509,7 @@ Respond with ONLY a valid JSON tool call in this format:
                         final_response_text = response_text.strip() if response_text else ""
                         break
                         
-                except (LLMResponseError, ToolExecutionError):
+                except (LLMResponseError, ToolExecutionError, BudgetExceededError):
                     raise
                 except Exception as e:
                     logging.error(f"Error in LLM iteration {iteration_count}: {e}")
@@ -4639,6 +4856,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             interaction_displayed = True
                         return _prepare_return_value(response_text)
                     continue
+                except BudgetExceededError:
+                    raise
                 except Exception as e:
                     _get_display_functions()['display_error'](f"Error in LLM response: {str(e)}")
                     return None
@@ -5310,24 +5529,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             break
                         last_tool_call_fingerprint = fingerprint
 
-                        # Record the assistant turn before the tool replies, so
-                        # the follow-up request is a valid conversation.
-                        if is_ollama:
-                            messages.append({"role": "assistant", "content": content or ""})
-                        else:
-                            messages.append({
-                                "role": "assistant",
-                                "content": content or "",
-                                "tool_calls": self._serialize_tool_calls(tool_calls),
-                            })
-
                         # Any prose the model emitted alongside the calls is
-                        # still part of the answer.
+                        # still part of the answer -- yield it before the cap
+                        # check so it is not lost when the limit is reached.
                         if content:
                             yield content
 
                         # Enforce the same per-turn guardrail the streaming and
-                        # non-streaming loops apply, so the fallback cannot run
+                        # non-streaming loops apply (before recording the assistant turn, so no
+                        # declared tool_call_id is left without a reply), so the fallback cannot run
                         # tools past the caller's configured limit.
                         if tool_call_count >= max_tool_calls_per_turn:
                             logging.warning(
@@ -5341,6 +5551,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             logging.warning(
                                 f"Limiting batch to {remaining_calls} tool calls to stay "
                                 f"within limit of {max_tool_calls_per_turn}.")
+
+                        # Record the assistant turn before the tool replies, so
+                        # the follow-up request is a valid conversation.
+                        if is_ollama:
+                            messages.append({"role": "assistant", "content": content or ""})
+                        else:
+                            messages.append({
+                                "role": "assistant",
+                                "content": content or "",
+                                "tool_calls": self._serialize_tool_calls(tool_calls),
+                            })
 
                         for tool_call in tool_calls:
                             tool_call_count += 1
@@ -5733,13 +5954,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             reason = _cancel_reason()
                             logging.debug(f"Async LLM tool loop cancelled before tool dispatch: {reason}")
                             return _prepare_return_value(f"Task interrupted: {reason}")
-                        serializable_tool_calls = self._serialize_tool_calls(tool_calls)
-                        messages.append({
-                            "role": "assistant",
-                            "content": response_text,
-                            "tool_calls": serializable_tool_calls,
-                        })
-
+                        # Apply the cap BEFORE recording the assistant turn so every
+                        # declared tool_call_id gets exactly one tool reply.
                         # Guardrail: Check tool call limit to prevent infinite loops
                         # Allow execution if we haven't reached the limit yet, but limit the batch size
                         if tool_call_count >= max_tool_calls_per_turn:
@@ -5754,6 +5970,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             tool_calls = tool_calls[:remaining_calls]
                             logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
                         
+                        serializable_tool_calls = self._serialize_tool_calls(tool_calls)
+                        messages.append({
+                            "role": "assistant",
+                            "content": response_text,
+                            "tool_calls": serializable_tool_calls,
+                        })
+
                         # Pre-resolve each tool call, then dispatch the valid ones
                         # as a batch (concurrently when parallel_tool_calls is set).
                         _parsed_calls = []
@@ -6015,6 +6238,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         reason = _cancel_reason()
                         logging.debug(f"Async LLM tool loop cancelled before tool dispatch: {reason}")
                         return _prepare_return_value(f"Task interrupted: {reason}")
+                    # Apply the cap BEFORE recording the assistant turn so every
+                    # declared tool_call_id gets exactly one tool reply.
+                    # Guardrail: Check tool call limit to prevent infinite loops
+                    # Allow execution if we haven't reached the limit yet, but limit the batch size
+                    if tool_call_count >= max_tool_calls_per_turn:
+                        logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
+                        self._last_stop_reason = "max_steps"
+                        if not (final_response_text and final_response_text.strip()):
+                            final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
+                        break
+                    elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
+                        # Limit the batch to stay within the total limit
+                        remaining_calls = max_tool_calls_per_turn - tool_call_count
+                        tool_calls = tool_calls[:remaining_calls]
+                        logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
+                    
                     # Convert tool_calls to a serializable format for all providers
                     serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                     # Check if it's Ollama provider
@@ -6031,20 +6270,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             "content": response_text,
                             "tool_calls": serializable_tool_calls
                         })
-                    
-                    # Guardrail: Check tool call limit to prevent infinite loops
-                    # Allow execution if we haven't reached the limit yet, but limit the batch size
-                    if tool_call_count >= max_tool_calls_per_turn:
-                        logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
-                        self._last_stop_reason = "max_steps"
-                        if not (final_response_text and final_response_text.strip()):
-                            final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
-                        break
-                    elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
-                        # Limit the batch to stay within the total limit
-                        remaining_calls = max_tool_calls_per_turn - tool_call_count
-                        tool_calls = tool_calls[:remaining_calls]
-                        logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
                     
                     tool_results = []  # Store current iteration tool results
                     # Collect media-bearing follow-up messages so they are
@@ -6646,6 +6871,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
     def _track_token_usage(self, response: Any, model: str) -> Optional[TokenMetrics]:
         """Extract and track token usage from LLM response."""
+        try:
+            return self._collect_token_metrics(response, model)
+        finally:
+            # Outside the collector's error swallowing so the Agent's budget
+            # check can raise BudgetExceededError and stop the tool loop.
+            sink = _usage_sink.get()
+            if sink is not None and sink[0] is self:
+                sink[1](response)
+
+    def _collect_token_metrics(self, response: Any, model: str) -> Optional[TokenMetrics]:
         if not TokenMetrics or not get_token_collector:
             return None
 
@@ -7589,10 +7824,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             'task_name', 'task_description', 'task_id',
             'execute_tool_fn', 'stream_callback', 'emit_events',
             'console', 'reasoning_steps',
+            'reasoning_effort', 'thinking_budget',  # translated below
         }
         for k, v in kwargs.items():
             if k not in _internal and v is not None:
                 params[k] = v
+
+        # ── Reasoning effort ────────────────────────────────────────────
+        # Translate the unified level (Issue #4452) like
+        # _build_completion_params does, but in the Responses API shape
+        # ``reasoning: {"effort": ...}``. A per-call value wins over the
+        # instance setting; an explicit ``reasoning`` object is kept as is.
+        effort = kwargs.get('reasoning_effort', getattr(self, 'reasoning_effort', None))
+        if effort is not None and 'reasoning' not in params:
+            from ..thinking.effort import resolve_reasoning_params
+            native = resolve_reasoning_params(effort, params['model'])
+            if 'reasoning_effort' in native:
+                params['reasoning'] = {'effort': native['reasoning_effort']}
 
         # Match Chat Completions after merging overrides: reasoning models
         # must not regain unsupported sampling parameters through either path.
@@ -7605,6 +7853,32 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         return params
 
     def _call_responses_api(self, **params) -> Any:
+        """``litellm.responses()`` with retry, recorded on the replay trace."""
+        span = _replay_llm_begin(self, params)
+        if span is None:
+            return self._call_responses_api_impl(**params)
+        try:
+            response = self._call_responses_api_impl(**params)
+        except BaseException as exc:
+            _replay_llm_end(span, exc)
+            raise
+        self._replay_observe_responses(span, response)
+        _replay_llm_end(span)
+        return response
+
+    def _replay_observe_responses(self, span: Dict[str, Any], response: Any) -> None:
+        """Usage and text of a Responses API result, for the replay trace."""
+        try:
+            span["usage"] = getattr(response, "usage", None) or (
+                response.get("usage") if isinstance(response, dict) else None
+            )
+            text = self._extract_from_responses_output(response)[0]
+            if isinstance(text, str) and text:
+                span["content"].append(text)
+        except Exception:
+            pass  # Tracing must never break a model call.
+
+    def _call_responses_api_impl(self, **params) -> Any:
         """
         Call ``litellm.responses()`` synchronously with retry support.
         Returns a ``ResponsesAPIResponse`` object.
@@ -7618,6 +7892,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         return self._call_with_retry(litellm.responses, **params)
 
     async def _call_responses_api_async(self, **params) -> Any:
+        """``litellm.aresponses()`` with retry, recorded on the replay trace."""
+        span = _replay_llm_begin(self, params)
+        if span is None:
+            return await self._call_responses_api_async_impl(**params)
+        try:
+            response = await self._call_responses_api_async_impl(**params)
+        except BaseException as exc:
+            _replay_llm_end(span, exc)
+            raise
+        self._replay_observe_responses(span, response)
+        _replay_llm_end(span)
+        return response
+
+    async def _call_responses_api_async_impl(self, **params) -> Any:
         """
         Call ``litellm.aresponses()`` asynchronously with retry support.
         Returns a ``ResponsesAPIResponse`` object.
@@ -7747,7 +8035,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except Exception:
             logging.debug("Responses stream cleanup failed", exc_info=True)
 
-    def _stream_responses_api(
+    def _stream_responses_api(self, params: Dict[str, Any], *args: Any, **kwargs: Any) -> tuple:
+        """Streamed ``litellm.responses()``, recorded on the replay trace."""
+        span = _replay_llm_begin(self, params)
+        if span is None:
+            return self._stream_responses_api_impl(params, *args, **kwargs)
+        try:
+            result = self._stream_responses_api_impl(params, *args, **kwargs)
+        except BaseException as exc:
+            _replay_llm_end(span, exc)
+            raise
+        _replay_stream_result(span, result)
+        return result
+
+    def _stream_responses_api_impl(
         self,
         params: Dict[str, Any],
         verbose: bool = True,
@@ -7900,7 +8201,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
         return response_text, tool_calls if tool_calls else None, _final_response
 
-    async def _stream_responses_api_async(
+    async def _stream_responses_api_async(self, params: Dict[str, Any], *args: Any, **kwargs: Any) -> tuple:
+        """Async streamed ``litellm.aresponses()``, recorded on the replay trace."""
+        span = _replay_llm_begin(self, params)
+        if span is None:
+            return await self._stream_responses_api_async_impl(params, *args, **kwargs)
+        try:
+            result = await self._stream_responses_api_async_impl(params, *args, **kwargs)
+        except BaseException as exc:
+            _replay_llm_end(span, exc)
+            raise
+        _replay_stream_result(span, result)
+        return result
+
+    async def _stream_responses_api_async_impl(
         self,
         params: Dict[str, Any],
         stream_callback: Optional[Callable] = None,

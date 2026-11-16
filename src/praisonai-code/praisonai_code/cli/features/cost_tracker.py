@@ -34,7 +34,8 @@ class ModelPricing:
     input_price_per_1m: float  # Price per 1M input tokens
     output_price_per_1m: float  # Price per 1M output tokens
     context_window: int = 128000
-    
+    priced: bool = True  # False when no real price is known for the model
+
     def calculate_cost(self, input_tokens: int, output_tokens: int) -> float:
         """Calculate cost for given token counts."""
         input_cost = (input_tokens / 1_000_000) * self.input_price_per_1m
@@ -67,26 +68,123 @@ DEFAULT_PRICING: Dict[str, ModelPricing] = {
     "gemini-1.5-pro": ModelPricing("gemini-1.5-pro", 1.25, 5.00, 2000000),
     "gemini-1.5-flash": ModelPricing("gemini-1.5-flash", 0.075, 0.30, 1000000),
     
-    # Default fallback
-    "default": ModelPricing("default", 1.00, 3.00, 128000),
+    # Default fallback: a rough guess, flagged as unpriced so callers can tell.
+    "default": ModelPricing("default", 1.00, 3.00, 128000, priced=False),
 }
 
 
+def _litellm_pricing(name: str) -> Optional[ModelPricing]:
+    """Look up ``name`` in litellm's bundled price map (lazy import)."""
+    try:
+        import litellm
+
+        entry = litellm.model_cost.get(name)
+    except Exception:
+        return None
+    if not isinstance(entry, dict):
+        return None
+    in_cost = entry.get("input_cost_per_token")
+    out_cost = entry.get("output_cost_per_token")
+    if in_cost is None or out_cost is None:
+        return None
+    return ModelPricing(
+        name,
+        round(in_cost * 1_000_000, 6),
+        round(out_cost * 1_000_000, 6),
+        entry.get("max_input_tokens") or 128000,
+    )
+
+
 def get_pricing(model_name: str) -> ModelPricing:
-    """Get pricing for a model, with fallback to default."""
-    # Try exact match
-    if model_name in DEFAULT_PRICING:
-        return DEFAULT_PRICING[model_name]
-    
-    # Try partial match
-    model_lower = model_name.lower()
-    for key, pricing in DEFAULT_PRICING.items():
-        if key in model_lower or model_lower in key:
-            return pricing
-    
-    # Return default
+    """Get pricing for a model, with fallback to default.
+
+    Order: exact static entry (with or without a ``provider/`` prefix),
+    litellm's price map, then the longest static key the model name starts
+    with (``gpt-4o-mini-2024-07-18`` -> ``gpt-4o-mini``, but ``gpt-4.1-mini``
+    never -> ``gpt-4``). Unknown models get the ``default`` entry, whose
+    ``priced`` flag is False.
+    """
+    model_lower = (model_name or "").strip().lower()
+    base = model_lower.rsplit("/", 1)[-1]
+
+    for name in (model_lower, base):
+        if name and name != "default" and name in DEFAULT_PRICING:
+            return DEFAULT_PRICING[name]
+
+    for name in (model_lower, base):
+        if name and name != "default":
+            pricing = _litellm_pricing(name)
+            if pricing is not None:
+                return pricing
+
+    matches = [
+        key for key in DEFAULT_PRICING
+        if key != "default" and base.startswith(key + "-")
+    ]
+    if matches:
+        return DEFAULT_PRICING[max(matches, key=len)]
+
     logger.debug(f"No pricing found for model '{model_name}', using default")
     return DEFAULT_PRICING["default"]
+
+
+def price_collected_usage(model: Optional[str] = None) -> Dict[str, Any]:
+    """Return ``{in, out, cost}`` for usage in the global token collector.
+
+    Shared by headless ``code -p`` and the interactive ``/cost`` command so the
+    two can't drift. Each collector model key is priced separately; ``cost`` is
+    ``None`` when tokens were spent on a model with no known price rather than
+    a made-up figure.
+    """
+    usage: Dict[str, Any] = {"in": 0, "out": 0, "cost": 0.0}
+    try:
+        from praisonaiagents.telemetry.token_collector import get_token_collector
+
+        summary = get_token_collector().get_session_summary() or {}
+    except Exception:
+        return usage
+
+    totals = summary.get("total_metrics") or {}
+    usage["in"] = int(totals.get("input_tokens", 0) or 0)
+    usage["out"] = int(totals.get("output_tokens", 0) or 0)
+
+    by_model = summary.get("by_model") or {}
+    if not by_model:
+        by_model = {model or "": {"input_tokens": usage["in"], "output_tokens": usage["out"]}}
+    try:
+        cost = 0.0
+        for model_name, metrics in by_model.items():
+            in_tok = int((metrics or {}).get("input_tokens", 0) or 0)
+            out_tok = int((metrics or {}).get("output_tokens", 0) or 0)
+            if not (in_tok or out_tok):
+                continue
+            pricing = get_pricing(model_name or model or "")
+            if not pricing.priced:
+                usage["cost"] = None
+                return usage
+            cost += pricing.calculate_cost(in_tok, out_tok)
+        usage["cost"] = cost
+    except Exception:
+        usage["cost"] = 0.0
+    return usage
+
+
+def reset_collected_usage() -> None:
+    """Clear the token collector so a new conversation starts ``/cost`` at zero."""
+    try:
+        from praisonaiagents.telemetry.token_collector import get_token_collector
+
+        get_token_collector().reset()
+    except Exception:
+        pass
+
+
+def collected_usage_line(model: Optional[str] = None) -> tuple:
+    """Return ``(total_tokens, cost_text)`` for interactive ``/cost`` output."""
+    usage = price_collected_usage(model)
+    cost = usage["cost"]
+    cost_text = "unknown (no price for this model)" if cost is None else f"${cost:.4f}"
+    return usage["in"] + usage["out"], cost_text
 
 
 # ============================================================================

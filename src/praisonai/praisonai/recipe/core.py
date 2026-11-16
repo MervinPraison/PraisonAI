@@ -222,19 +222,19 @@ def _run_impl(
         "session_id": session_id,
     }
     
-    # Initialize replay trace writer if --save flag is set
-    trace_writer = None
+    # Replay trace (--save): praisonai.replay.record() owns writer + emitter
+    # setup and always closes it, including on the early-return paths below.
+    import contextlib
+    replay_stack = contextlib.ExitStack()
+    recording = None
     trace_emitter = None
-    trace_emitter_token = None  # Token for resetting global emitter
     if options.get("save_replay", False):
         try:
-            from praisonai.replay import ContextTraceWriter
-            from praisonaiagents.trace.context_events import ContextTraceEmitter, set_context_emitter
-            trace_writer = ContextTraceWriter(session_id=run_id)
-            trace_emitter = ContextTraceEmitter(sink=trace_writer, session_id=run_id, full_content=True)
-            # Set as global emitter so agents can access it
-            trace_emitter_token = set_context_emitter(trace_emitter)
-            trace_emitter.session_start({"recipe": name, "run_id": run_id})
+            from praisonai.replay.recorder import record
+            recording = replay_stack.enter_context(
+                record(run_id, meta={"recipe": name, "run_id": run_id}, full_content=True)
+            )
+            trace_emitter = recording.emitter
             print(f"📝 Replay trace enabled: {run_id}")
         except ImportError as e:
             import logging
@@ -242,12 +242,17 @@ def _run_impl(
         except Exception as e:
             import logging
             logging.warning(f"Failed to initialize trace writer: {e}")
-    
+
+    def _replay_failed() -> None:
+        if recording is not None:
+            recording.status = "failed"
+
     try:
         # Load template
         recipe_config = _load_recipe(name, offline=options.get("offline", False))
         
         if recipe_config is None:
+            _replay_failed()
             return RecipeResult(
                 run_id=run_id,
                 recipe=name,
@@ -263,6 +268,7 @@ def _run_impl(
             dep_result = _check_dependencies(recipe_config)
             if not dep_result["all_satisfied"]:
                 missing = _format_missing_deps(dep_result)
+                _replay_failed()
                 return RecipeResult(
                     run_id=run_id,
                     recipe=recipe_config.name,
@@ -277,6 +283,7 @@ def _run_impl(
         if not options.get("allow_dangerous_tools", False):
             policy_error = _check_tool_policy(recipe_config, options)
             if policy_error:
+                _replay_failed()
                 return RecipeResult(
                     run_id=run_id,
                     recipe=recipe_config.name,
@@ -289,11 +296,6 @@ def _run_impl(
         
         # Dry run mode
         if options.get("dry_run", False):
-            # Close trace writer for dry-run
-            if trace_emitter:
-                trace_emitter.session_end()
-            if trace_writer:
-                trace_writer.close()
             return RecipeResult(
                 run_id=run_id,
                 recipe=recipe_config.name,
@@ -335,16 +337,10 @@ def _run_impl(
         
         duration = time.time() - start_time
         
-        # Close trace writer on success
-        if trace_emitter:
-            trace_emitter.session_end()
-        if trace_writer:
-            trace_writer.close()
+        # Close the replay trace on success
+        replay_stack.close()
+        if recording is not None:
             print(f"📝 Replay trace saved: {run_id}")
-        # Reset global emitter
-        if trace_emitter_token:
-            from praisonaiagents.trace.context_events import reset_context_emitter
-            reset_context_emitter(trace_emitter_token)
         
         return RecipeResult(
             run_id=run_id,
@@ -357,13 +353,7 @@ def _run_impl(
         )
         
     except RecipeNotFoundError as e:
-        if trace_emitter:
-            trace_emitter.session_end()
-        if trace_writer:
-            trace_writer.close()
-        if trace_emitter_token:
-            from praisonaiagents.trace.context_events import reset_context_emitter
-            reset_context_emitter(trace_emitter_token)
+        _replay_failed()
         return RecipeResult(
             run_id=run_id,
             recipe=name,
@@ -374,13 +364,7 @@ def _run_impl(
             trace=trace,
         )
     except RecipeDependencyError as e:
-        if trace_emitter:
-            trace_emitter.session_end()
-        if trace_writer:
-            trace_writer.close()
-        if trace_emitter_token:
-            from praisonaiagents.trace.context_events import reset_context_emitter
-            reset_context_emitter(trace_emitter_token)
+        _replay_failed()
         return RecipeResult(
             run_id=run_id,
             recipe=e.recipe or name,
@@ -391,13 +375,7 @@ def _run_impl(
             trace=trace,
         )
     except RecipePolicyError as e:
-        if trace_emitter:
-            trace_emitter.session_end()
-        if trace_writer:
-            trace_writer.close()
-        if trace_emitter_token:
-            from praisonaiagents.trace.context_events import reset_context_emitter
-            reset_context_emitter(trace_emitter_token)
+        _replay_failed()
         return RecipeResult(
             run_id=run_id,
             recipe=e.recipe or name,
@@ -408,13 +386,7 @@ def _run_impl(
             trace=trace,
         )
     except RecipeTimeoutError as e:
-        if trace_emitter:
-            trace_emitter.session_end()
-        if trace_writer:
-            trace_writer.close()
-        if trace_emitter_token:
-            from praisonaiagents.trace.context_events import reset_context_emitter
-            reset_context_emitter(trace_emitter_token)
+        _replay_failed()
         return RecipeResult(
             run_id=run_id,
             recipe=name,
@@ -425,13 +397,7 @@ def _run_impl(
             trace=trace,
         )
     except Exception as e:
-        if trace_emitter:
-            trace_emitter.session_end()
-        if trace_writer:
-            trace_writer.close()
-        if trace_emitter_token:
-            from praisonaiagents.trace.context_events import reset_context_emitter
-            reset_context_emitter(trace_emitter_token)
+        _replay_failed()
         return RecipeResult(
             run_id=run_id,
             recipe=name,
@@ -441,6 +407,8 @@ def _run_impl(
             metrics={"duration_sec": time.time() - start_time},
             trace=trace,
         )
+    finally:
+        replay_stack.close()
 
 
 def run_stream(

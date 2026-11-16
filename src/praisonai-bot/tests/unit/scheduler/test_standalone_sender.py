@@ -76,6 +76,52 @@ def test_resolver_known_and_unknown():
     assert ss.resolve_standalone_sender(None) is None  # type: ignore[arg-type]
 
 
+def test_plugin_descriptor_sender_used_when_no_live_handler(monkeypatch):
+    """A ``praisonai.channels`` plugin's declared sender works gateway-less (#6099)."""
+    from praisonai_bot.bots import _registry
+
+    sent: list = []
+
+    class _MatrixDescriptor:
+        config_fields: list = []
+        system_prompt_hint = ""
+
+        async def standalone_sender(self, target, text):
+            sent.append((target.channel_id, text))
+
+    monkeypatch.setattr(
+        _registry, "get_platform_descriptor",
+        lambda name: _MatrixDescriptor() if name == "matrix" else None,
+    )
+    assert ss.resolve_standalone_sender("irc") is None
+
+    ex = _agent_executor(delivery_handler=None)
+    result = _run(ex._execute_one(_job(deliver="matrix:#room")))
+
+    assert result.delivered is True
+    assert result.delivery_error is None
+    assert sent == [("#room", "echo:hello")]
+
+
+def test_plugin_descriptor_sync_sender_supported(monkeypatch):
+    """A plugin may declare a plain (non-async) sender."""
+    from praisonai_bot.bots import _registry
+
+    sent: list = []
+
+    class _SyncDescriptor:
+        def standalone_sender(self, target, text):
+            sent.append(text)
+
+    monkeypatch.setattr(_registry, "get_platform_descriptor", lambda name: _SyncDescriptor())
+
+    ex = _agent_executor(delivery_handler=None)
+    result = _run(ex._execute_one(_job(deliver="matrix:#room")))
+
+    assert result.delivered is True
+    assert sent == ["echo:hello"]
+
+
 # ── executor fallback ────────────────────────────────────────────────
 
 
@@ -346,6 +392,62 @@ def test_failed_failure_summary_is_not_recorded_as_delivered():
     assert result.status == "failed"
     assert result.delivered is False
     assert "telegram:42" in (result.delivery_error or "")
+
+
+def _boom_executor(sent):
+    async def deliver(target, text):
+        sent.append((target.channel, target.channel_id, text))
+
+    return ScheduledAgentExecutor(
+        runner=FakeRunner(),
+        agent_resolver=lambda aid: _BoomAgent(),
+        delivery_handler=deliver,
+        run_policy=_DeliverOnFailurePolicy(),
+    )
+
+
+def test_failure_summary_routes_to_failure_delivery():
+    """A set ``failure_delivery`` receives the failure notice instead of the
+    result lane (#6255)."""
+    sent: list = []
+    job = _job(deliver="slack:metrics")
+    job.failure_delivery = DeliveryTarget.parse("slack:ops")
+    result = _run(_boom_executor(sent)._execute_one(job))
+
+    assert result.status == "failed"
+    assert [(c, cid) for c, cid, _ in sent] == [("slack", "ops")]
+
+
+def test_failure_delivery_none_suppresses_notice():
+    """``failure_delivery`` of ``none`` keeps failure noise out of every
+    channel while the run is still recorded as failed (#6255)."""
+    sent: list = []
+    job = _job(deliver="slack:metrics")
+    job.failure_delivery = DeliveryTarget.parse("none")
+    result = _run(_boom_executor(sent)._execute_one(job))
+
+    assert result.status == "failed"
+    assert sent == []
+
+
+def test_failure_delivery_origin_resolves_to_job_origin():
+    """An ``origin`` failure lane resolves to the job's origin instead of
+    dispatching an unresolved routing token (#6255)."""
+    sent: list = []
+    job = _job(deliver="slack:metrics")
+    job.origin = DeliveryTarget.parse("telegram:42")
+    job.failure_delivery = DeliveryTarget.parse("origin")
+    _run(_boom_executor(sent)._execute_one(job))
+
+    assert [(c, cid) for c, cid, _ in sent] == [("telegram", "42")]
+
+
+def test_failure_delivery_round_trips_and_defaults_absent():
+    job = _job(deliver="slack:metrics")
+    assert "failure_delivery" not in job.to_dict()
+    job.failure_delivery = DeliveryTarget.parse("slack:ops")
+    restored = ScheduleJob.from_dict(job.to_dict())
+    assert restored.failure_delivery.channel_id == "ops"
 
 
 # ── new-platform standalone senders (#4050) ──────────────────────────

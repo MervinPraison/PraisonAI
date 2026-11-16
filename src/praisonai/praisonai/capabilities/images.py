@@ -24,11 +24,54 @@ class ImageResult:
             with open(path, 'wb') as f:
                 f.write(base64.b64decode(self.b64_json))
         elif self.url:
-            import urllib.request
-            urllib.request.urlretrieve(self.url, path)
+            _download_image(self.url, path)
         else:
             raise ValueError("No image data available")
         return path
+
+
+_IMAGE_DOWNLOAD_TIMEOUT = 30.0
+_IMAGE_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024
+
+
+def _download_image(url: str, path: str) -> None:
+    """Download a provider-returned image URL safely.
+
+    The URL is untrusted: only http(s) is allowed (no ``file://``), the host is
+    screened against loopback/private/metadata addresses, redirects are
+    refused (they would bypass the screen), and the read is bounded by a
+    timeout and a size cap.
+    """
+    import urllib.request
+    from ..jobs.models import _resolve_and_screen_webhook_host
+
+    _resolve_and_screen_webhook_host(url, label="Image URL")
+
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, *args, **kwargs):
+            return None
+
+    opener = urllib.request.build_opener(_NoRedirect)
+    with opener.open(url, timeout=_IMAGE_DOWNLOAD_TIMEOUT) as resp:
+        data = resp.read(_IMAGE_DOWNLOAD_MAX_BYTES + 1)
+    if len(data) > _IMAGE_DOWNLOAD_MAX_BYTES:
+        raise ValueError("Image exceeds maximum download size")
+    with open(path, 'wb') as f:
+        f.write(data)
+
+
+# dall-e-2/dall-e-3 were retired by OpenAI on 2026-05-12; gpt-image-1 on 2026-10-23.
+DEFAULT_IMAGE_MODEL = "gpt-image-2.5-flare"
+
+
+def _reject_markup(kwargs: Dict[str, Any]) -> None:
+    """Fail loudly: LiteLLM uploads only ``image``/``mask`` as files, so ``markup``
+    would be dropped or sent as plain text and silently ignored by the edit."""
+    if kwargs.get('markup') is not None:
+        raise ValueError(
+            "'markup' is not supported through LiteLLM's image_edit yet (it is not "
+            "uploaded as a file). Use 'mask' or call the OpenAI SDK's images.edit directly."
+        )
 
 
 def _model_rejects_response_format(model: str) -> bool:
@@ -65,10 +108,10 @@ def _finalize_image_kwargs(call_kwargs: Dict[str, Any], model: str) -> None:
 
 def image_generate(
     prompt: str,
-    model: str = "dall-e-3",
+    model: str = DEFAULT_IMAGE_MODEL,
     n: int = 1,
     size: str = "1024x1024",
-    quality: str = "standard",
+    quality: Optional[str] = None,
     style: Optional[str] = None,
     response_format: str = "url",
     timeout: float = 600.0,
@@ -82,11 +125,12 @@ def image_generate(
     
     Args:
         prompt: Text description of the image to generate
-        model: Model name (e.g., "dall-e-3", "dall-e-2", "stability/...")
+        model: Model name (e.g., "gpt-image-2.5-flare", "gpt-image-2.6-flare", "stability/...")
         n: Number of images to generate
         size: Image size (e.g., "1024x1024", "1792x1024", "1024x1792")
-        quality: Image quality ("standard" or "hd")
-        style: Image style ("vivid" or "natural")
+        quality: Image quality, sent only when set (gpt-image: "low", "medium",
+            "high", "xhigh", "max", "auto")
+        style: Image style ("vivid" or "natural"; dall-e-3 only)
         response_format: "url" or "b64_json"
         timeout: Request timeout in seconds
         api_key: Optional API key override
@@ -111,11 +155,11 @@ def image_generate(
         'timeout': timeout,
     }
     
-    # Only add quality/style for dall-e-3 (not supported by dall-e-2)
-    if 'dall-e-3' in model.lower():
+    if quality is not None:
         call_kwargs['quality'] = quality
-        if style:
-            call_kwargs['style'] = style
+    # Only dall-e-3 accepts style
+    if style and 'dall-e-3' in model.lower():
+        call_kwargs['style'] = style
     if api_key:
         call_kwargs['api_key'] = api_key
     if api_base:
@@ -145,10 +189,10 @@ def image_generate(
 
 async def aimage_generate(
     prompt: str,
-    model: str = "dall-e-3",
+    model: str = DEFAULT_IMAGE_MODEL,
     n: int = 1,
     size: str = "1024x1024",
-    quality: str = "standard",
+    quality: Optional[str] = None,
     style: Optional[str] = None,
     response_format: str = "url",
     timeout: float = 600.0,
@@ -173,11 +217,11 @@ async def aimage_generate(
         'timeout': timeout,
     }
     
-    # Only add quality/style for dall-e-3 (not supported by dall-e-2)
-    if 'dall-e-3' in model.lower():
+    if quality is not None:
         call_kwargs['quality'] = quality
-        if style:
-            call_kwargs['style'] = style
+    # Only dall-e-3 accepts style
+    if style and 'dall-e-3' in model.lower():
+        call_kwargs['style'] = style
     if api_key:
         call_kwargs['api_key'] = api_key
     if api_base:
@@ -208,7 +252,7 @@ async def aimage_generate(
 def image_edit(
     image: Union[str, bytes],
     prompt: str,
-    model: str = "dall-e-2",
+    model: str = DEFAULT_IMAGE_MODEL,
     mask: Optional[Union[str, bytes]] = None,
     n: int = 1,
     size: str = "1024x1024",
@@ -238,6 +282,7 @@ def image_edit(
     Returns:
         List of ImageResult objects
     """
+    _reject_markup(kwargs)
     import litellm
     
     # Handle file paths
@@ -296,7 +341,7 @@ def image_edit(
 async def aimage_edit(
     image: Union[str, bytes],
     prompt: str,
-    model: str = "dall-e-2",
+    model: str = DEFAULT_IMAGE_MODEL,
     mask: Optional[Union[str, bytes]] = None,
     n: int = 1,
     size: str = "1024x1024",
@@ -312,6 +357,7 @@ async def aimage_edit(
     
     See image_edit() for full documentation.
     """
+    _reject_markup(kwargs)
     import litellm
     
     image_file = image

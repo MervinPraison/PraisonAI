@@ -8,6 +8,7 @@ import os
 from typing import Optional, Dict, Any
 
 from ..utils.file_utils import (
+    atomic_write,
     file_exists,
     create_directories_for_file,
     is_path_within_directory,
@@ -131,8 +132,7 @@ def write_file(
                 pass  # If we can't read, just use the content as-is
         
         # Write the file
-        with open(abs_path, 'w', encoding=encoding) as f:
-            f.write(processed_content)
+        atomic_write(abs_path, processed_content, encoding=encoding)
         
         return {
             'success': True,

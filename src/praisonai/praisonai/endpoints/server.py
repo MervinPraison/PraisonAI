@@ -30,20 +30,22 @@ def add_discovery_routes(
         path: Path for discovery endpoint
     """
     try:
+        from starlette.requests import Request
         from starlette.responses import JSONResponse
         from starlette.routing import Route
     except ImportError:
         # Try FastAPI
         try:
+            from fastapi import Request
             from fastapi.responses import JSONResponse
         except ImportError:
             raise ImportError("Starlette or FastAPI required for discovery routes")
     
-    async def discovery_handler(request):
+    async def discovery_handler(request: Request):
         """Return discovery document."""
         return JSONResponse(discovery.to_dict())
     
-    async def health_handler(request):
+    async def health_handler(request: Request):
         """Return health status with discovery info."""
         return JSONResponse({
             "status": "healthy",

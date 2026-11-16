@@ -501,6 +501,54 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
 
         return f"Approval {approval_id} {'resolved' if handled else 'unresolved'}"
 
+    async def _handle_callback_query(self, update: Any, context: Any) -> None:
+        """Dispatch an inline-button tap (interactive registry, then ``pair:``).
+
+        Shared by standalone :meth:`start` and the gateway's polling path so
+        both modes resolve pairing and tool-approval taps (Issue #6032).
+        """
+        query = update.callback_query
+        if not query or not query.data:
+            return
+
+        # Answer the callback query to stop loading spinner
+        await query.answer()
+
+        # Create interactive context
+        from praisonaiagents.bots import InteractiveContext
+        ctx = InteractiveContext(
+            callback_data=query.data,
+            user_id=str(query.from_user.id),
+            message_id=str(query.message.message_id) if query.message else None,
+            chat_id=str(query.message.chat_id) if query.message else None,
+            bot_adapter=self,
+            platform_data={
+                "update": update,
+                "context": context,
+                "query": query
+            }
+        )
+
+        # Try to dispatch through the interactive registry
+        handled = await self._interactive_registry.dispatch(ctx)
+
+        if not handled:
+            # Fallback: handle legacy pairing callbacks
+            if query.data.startswith("pair:"):
+                result = await self._pairing_callback_handler.handle_approval_callback(
+                    callback_data=query.data,
+                    owner_user_id=str(query.from_user.id),
+                    bot_adapter=self
+                )
+
+                # Update the message with result
+                await query.edit_message_text(
+                    text=f"{query.message.text}\n\n{result.message}",
+                    parse_mode="Markdown"
+                )
+            else:
+                logger.debug(f"Unhandled callback: {query.data}")
+
     def register_approval_backend(self, backend, target: Optional[str] = None) -> None:
         """Wire a durable :class:`PresentationApprovalBackend` to this channel.
 
@@ -1411,50 +1459,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         )
         
         # Add callback query handler for all interactive buttons
-        async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-            query = update.callback_query
-            if not query or not query.data:
-                return
-            
-            # Answer the callback query to stop loading spinner
-            await query.answer()
-            
-            # Create interactive context
-            from praisonaiagents.bots import InteractiveContext
-            ctx = InteractiveContext(
-                callback_data=query.data,
-                user_id=str(query.from_user.id),
-                message_id=str(query.message.message_id) if query.message else None,
-                chat_id=str(query.message.chat_id) if query.message else None,
-                bot_adapter=self,
-                platform_data={
-                    "update": update,
-                    "context": context,
-                    "query": query
-                }
-            )
-            
-            # Try to dispatch through the interactive registry
-            handled = await self._interactive_registry.dispatch(ctx)
-            
-            if not handled:
-                # Fallback: handle legacy pairing callbacks
-                if query.data.startswith("pair:"):
-                    result = await self._pairing_callback_handler.handle_approval_callback(
-                        callback_data=query.data,
-                        owner_user_id=str(query.from_user.id),
-                        bot_adapter=self
-                    )
-                    
-                    # Update the message with result
-                    await query.edit_message_text(
-                        text=f"{query.message.text}\n\n{result.message}",
-                        parse_mode="Markdown"
-                    )
-                else:
-                    logger.debug(f"Unhandled callback: {query.data}")
-        
-        self._application.add_handler(CallbackQueryHandler(handle_callback_query))
+        self._application.add_handler(CallbackQueryHandler(self._handle_callback_query))
         
         # Add voice/audio handlers
         self._application.add_handler(
@@ -1526,6 +1531,7 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                         poll_interval=self.config.polling_interval,
                     )
                     self._monitor.record_success()
+                    self._is_running = True
                     
                     # Block until stop() is called
                     await self._stop_event.wait()
@@ -1547,27 +1553,21 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                         completed = await sleep_with_abort(delay, self._stop_event)
                         if not completed:
                             break  # Abort signaled during sleep
-                        # Attempt reconnect
-                        try:
-                            await self._application.updater.stop()
-                            await self._application.stop()
-                            await self._application.shutdown()
-                        except Exception:
-                            pass
-                        # Rebuild application for clean reconnect
-                        from telegram.ext import Application
-                        self._application = Application.builder().token(self._token).build()
+                        # Reinitialize the same application after finally cleans it
+                        # up, retaining every registered command/message handler.
                         continue
                     else:
                         logger.error(f"[telegram] Unrecoverable error: {e}")
-                        break
+                        raise
                 finally:
-                    try:
-                        await self._application.updater.stop()
-                        await self._application.stop()
-                        await self._application.shutdown()
-                    except Exception:
-                        pass
+                    # A partial startup may leave the updater stopped while the
+                    # application is running. Always attempt each cleanup step.
+                    for cleanup in (self._application.updater.stop,
+                                    self._application.stop, self._application.shutdown):
+                        try:
+                            await cleanup()
+                        except Exception as cleanup_error:
+                            logger.debug("Telegram cleanup: %s", cleanup_error)
                     self._is_running = False
 
             # Fail fast on a confirmed single-instance conflict so supervisors
@@ -1582,7 +1582,9 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                 )
     
     async def stop(self) -> None:
-        """Stop the Telegram bot."""
+        """Stop the Telegram bot, including a reconnect still in progress."""
+        if self._stop_event is not None:
+            self._stop_event.set()
         if not self._is_running:
             return
         

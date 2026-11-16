@@ -21,6 +21,46 @@ const finals = [
 ];
 assert('stale when head after final', mg.isStaleFinalAfterPush(finals, '2026-06-12T09:00:00Z'));
 
+// PR #6056 shape: FINAL requested after HEAD; Claude answered with a security-only
+// comment (no Phase 1 table). That FINAL never completes, so recovery must re-ask.
+{
+  const head = '2026-10-27T20:40:21Z';
+  const trigger = { user: { login: 'MervinPraison' }, body: mg.FINAL_CLAUDE_REVIEW_BODY, created_at: '2026-10-27T20:42:06Z' };
+  const securityOnly = { user: { login: 'praisonai-triage-agent[bot]' }, body: '## Security and architecture review at `fec9380dd`. Origin: outsider\n\n**Verdict:** PASS', created_at: '2026-10-27T20:50:17Z' };
+  const realFinal = { user: { login: 'praisonai-triage-agent[bot]' }, body: '#### Phase 1 — AGENTS.md review\n| Check | Result |', created_at: '2026-10-27T20:55:00Z' };
+  const gateSecurity = { user: { login: 'praisonai-triage-agent[bot]' }, body: 'SECURITY_REVIEW: PASS\n| file | category |', created_at: '2026-10-27T20:50:17Z' };
+  assert('FINAL answered without the review is stale (re-ask)', mg.isStaleFinalAfterPush([trigger, securityOnly], head));
+  assert('FINAL answered without the review is not complete', !mg.finalClaudeCompletedOnSha([trigger, securityOnly], head));
+  assert('a real FINAL reply after a security-only one completes it', !mg.isStaleFinalAfterPush([trigger, securityOnly, realFinal], head)
+    && mg.finalClaudeCompletedOnSha([trigger, securityOnly, realFinal], head));
+  assert('the gate security review comment is not a FINAL answer', !mg.isStaleFinalAfterPush([trigger, gateSecurity], head));
+  assert('no reply yet: FINAL in progress, not stale', !mg.isStaleFinalAfterPush([trigger], head));
+  const retries = [0, 1, 2].map((i) => ({ ...trigger, created_at: `2026-10-27T2${i + 1}:00:00Z` }));
+  assert('re-asking stops after the per-HEAD cap', !mg.isStaleFinalAfterPush([...retries, { ...securityOnly, created_at: '2026-10-27T23:30:00Z' }], head));
+}
+
+// PR #6164 shape (fork): claude.yml answers every fork FINAL with "Security review:
+// PASS|FAIL" then a "## Code review", never the Phase 1 table. That reply is the
+// completed FINAL; treating it as unanswered re-posted the FINAL 3x per HEAD
+// (187 FINAL posts across 53 open fork PRs, none ever recognised).
+{
+  const head = '2026-11-14T07:38:22Z';
+  const trigger = { user: { login: 'MervinPraison' }, body: mg.FINAL_CLAUDE_REVIEW_BODY, created_at: '2026-11-14T07:38:39Z' };
+  const forkReply = (verdict) => ({ user: { login: 'praisonai-triage-agent[bot]' }, body: `Security review: ${verdict}  This is advisory only. A maintainer merges fork PRs.\n\n## Code review\n**Verdict:** looks good.`, created_at: '2026-11-14T07:42:42Z' });
+  assert('fork reply (PASS) is a completed FINAL reply', mg.isClaudeFinalReplyComment(forkReply('PASS')));
+  assert('fork reply (FAIL) is a completed FINAL reply', mg.isClaudeFinalReplyComment(forkReply('FAIL')));
+  assert('fork FINAL answered: not stale, no re-ask', !mg.isStaleFinalAfterPush([trigger, forkReply('PASS')], head));
+  assert('fork FINAL answered: completed on SHA', mg.finalClaudeCompletedOnSha([trigger, forkReply('PASS')], head));
+  assert('fork FINAL answered: stale-recovery skips', mg.shouldSkipStaleFinalRecovery([trigger, forkReply('PASS')], head).skip);
+  assert('a new push after the fork reply still asks again', mg.isStaleFinalAfterPush([trigger, forkReply('PASS')], '2026-11-14T09:00:00Z'));
+  const quoted = { ...forkReply('PASS'), body: 'Thanks.\n\nSecurity review: PASS was quoted here.' };
+  assert('"Security review:" mid-comment is not a FINAL reply', !mg.isClaudeFinalReplyComment(quoted));
+  const outsiderForged = { ...forkReply('PASS'), user: { login: 'some-outsider' } };
+  assert('only automation accounts can post a FINAL reply', !mg.isClaudeFinalReplyComment(outsiderForged));
+  const gateSecurity = { user: { login: 'praisonai-triage-agent[bot]' }, body: 'SECURITY_REVIEW: PASS\n| file | category |', created_at: '2026-11-14T07:42:42Z' };
+  assert('the gate SECURITY_REVIEW comment is still not a FINAL reply', !mg.isClaudeFinalReplyComment(gateSecurity));
+}
+
 const withRecovery = [
   ...finals,
   { user: { login: 'github-actions[bot]' }, body: '@claude FINAL architecture reviewer', created_at: '2026-06-12T09:30:00Z' },
@@ -622,6 +662,22 @@ assert('final body requires ts agents md', mg.FINAL_CLAUDE_REVIEW_BODY.includes(
 
 // PR size
 assert('large PR blocked', mg.prSizeReasons([{ additions: 900 }]).length > 0);
+const srcFile = (n, add, del = 0) => ({ filename: `src/praisonai-agents/praisonaiagents/m${n}.py`, additions: add, deletions: del });
+assert('size: 5 non-test files ok', mg.prSizeReasons([1, 2, 3, 4, 5].map((n) => srcFile(n, 10))).length === 0);
+assert('size: 6 non-test files blocked', mg.prSizeReasons([1, 2, 3, 4, 5, 6].map((n) => srcFile(n, 10))).length === 1);
+assert('size: 99 non-test lines ok', mg.prSizeReasons([srcFile(1, 60, 39)]).length === 0);
+assert('size: 100 non-test lines blocked', mg.prSizeReasons([srcFile(1, 60, 40)]).length === 1);
+assert('size: deletions count', mg.prSizeReasons([srcFile(1, 0, 150)]).length === 1);
+assert('size: large test-only change ok', mg.prSizeReasons([
+  { filename: 'src/praisonai-agents/tests/unit/test_big.py', additions: 900 },
+  { filename: 'src/praisonai-ts/tests/unit/a.test.ts', additions: 400 },
+  { filename: 'src/praisonai-ts/src/x.spec.ts', additions: 300 },
+  srcFile(1, 20),
+]).length === 0);
+assert('size: test path detection', mg.isTestPath('src/praisonai-bot/tests/unit/x.py') &&
+  mg.isTestPath('test_thing.py') && mg.isTestPath('pkg/foo_test.py') &&
+  !mg.isTestPath('src/praisonai-agents/praisonaiagents/testing_utils.py') &&
+  !mg.isTestPath('src/praisonai-agents/praisonaiagents/latest.py'));
 
 assert('internal PR link accepted', mg.isInternalPullRequestLink(
   { base: { repo: { full_name: 'MervinPraison/PraisonAI' } } },

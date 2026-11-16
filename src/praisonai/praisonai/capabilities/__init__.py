@@ -19,7 +19,7 @@ Capabilities:
 - fine_tuning: Model fine-tuning
 - responses: Response management
 - passthrough: Generic API passthrough
-- containers: Container management (no backend yet; raises NotImplementedError)
+- containers: Container management (no backend yet; not exported in __all__)
 - search: Search capabilities
 - a2a: Agent-to-agent gateway
 """
@@ -100,9 +100,9 @@ __all__ = [
     # Passthrough
     'passthrough',
     'apassthrough',
-    # Containers
-    'container_create',
-    'acontainer_create',
+    # Containers / Container Files: intentionally NOT in __all__ — they have no
+    # backend yet and raise NotImplementedError. Still resolvable via the lazy
+    # loader below for existing callers.
     # Search
     'search',
     'asearch',
@@ -147,13 +147,6 @@ __all__ = [
     'avector_store_file_list',
     'vector_store_file_delete',
     'avector_store_file_delete',
-    # Container Files
-    'container_file_read',
-    'acontainer_file_read',
-    'container_file_write',
-    'acontainer_file_write',
-    'container_file_list',
-    'acontainer_file_list',
     # Result types
     'TranscriptionResult',
     'SpeechResult',

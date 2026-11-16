@@ -173,7 +173,7 @@ class TestGoalLoopGate:
         verdicts = iter([("continue", "not yet"), ("done", "goal met")])
 
         with patch.object(agent, "chat", side_effect=_unique_chat()), \
-             patch("praisonaiagents.goal.loop.judge_goal",
+             patch("praisonaiagents.goal.judge.judge_goal",
                    side_effect=lambda *a, **k: next(verdicts)):
             result = agent.run_goal("do the task", goal="finish it", max_turns=10)
 
@@ -193,7 +193,7 @@ class TestGoalLoopGate:
             return f"still working {counter['n']}"
 
         with patch.object(agent, "chat", side_effect=fake_chat), \
-             patch("praisonaiagents.goal.loop.judge_goal",
+             patch("praisonaiagents.goal.judge.judge_goal",
                    side_effect=lambda *a, **k: next(verdicts)):
             result = agent.run_goal("task", goal="g", max_turns=10)
 
@@ -205,7 +205,7 @@ class TestGoalLoopGate:
     def test_budget_exhaust_pauses_recoverably(self):
         agent = _make_agent()
         with patch.object(agent, "chat", side_effect=_unique_chat()), \
-             patch("praisonaiagents.goal.loop.judge_goal",
+             patch("praisonaiagents.goal.judge.judge_goal",
                    return_value=("continue", "never done")):
             result = agent.run_goal("task", goal="g", max_turns=3)
 
@@ -218,7 +218,7 @@ class TestGoalLoopGate:
         agent = _make_agent()
         # judge_goal itself fails open to ("continue", "judge unavailable")
         with patch.object(agent, "chat", side_effect=_unique_chat()), \
-             patch("praisonaiagents.goal.loop.judge_goal",
+             patch("praisonaiagents.goal.judge.judge_goal",
                    return_value=("continue", "judge unavailable")):
             result = agent.run_goal("task", goal="g", max_turns=2)
         assert result.completion_reason == "budget_paused"
@@ -226,7 +226,7 @@ class TestGoalLoopGate:
     def test_consecutive_parse_failures_autopause(self):
         agent = _make_agent()
         with patch.object(agent, "chat", side_effect=_unique_chat()), \
-             patch("praisonaiagents.goal.loop.judge_goal",
+             patch("praisonaiagents.goal.judge.judge_goal",
                    return_value=("continue", "judge response unparseable")):
             result = agent.run_goal("task", goal="g", max_turns=20)
         # auto-pause after 3 consecutive parse failures, well before max_turns
@@ -259,7 +259,7 @@ class TestConstraintViolation:
         )
         # Simulate a judge that respects constraints: constraint violated → continue
         with patch.object(agent, "chat", side_effect=_unique_chat()), \
-             patch("praisonaiagents.goal.loop.judge_goal",
+             patch("praisonaiagents.goal.judge.judge_goal",
                    return_value=("continue", "constraint violated")):
             result = agent.run_goal("task", goal="g", criteria=criteria, max_turns=2)
         assert result.completion_reason == "budget_paused"
@@ -282,7 +282,7 @@ class TestAsyncGoalGate:
         state = GoalState(goal="g", max_turns=5)
         state.status = "active"
         agent._goal_state = state
-        with patch("praisonaiagents.goal.loop.judge_goal",
+        with patch("praisonaiagents.goal.judge.judge_goal",
                    return_value=("done", "goal met")):
             outcome = asyncio.run(agent._goal_gate_async("final response"))
         assert outcome == ("done", "goal met")
@@ -314,7 +314,7 @@ class TestAsyncGoalGate:
             return ("done", "eventually met")
 
         async def scenario():
-            with patch("praisonaiagents.goal.loop.judge_goal",
+            with patch("praisonaiagents.goal.judge.judge_goal",
                        side_effect=slow_judge):
                 task = asyncio.ensure_future(agent._goal_gate_async("resp"))
                 await asyncio.to_thread(started.wait, 2.0)
@@ -330,7 +330,7 @@ class TestAsyncGoalGate:
     def test_run_until_with_goal_delegates(self):
         agent = _make_agent()
         with patch.object(agent, "chat", side_effect=_unique_chat()), \
-             patch("praisonaiagents.goal.loop.judge_goal",
+             patch("praisonaiagents.goal.judge.judge_goal",
                    return_value=("done", "met")):
             result = agent.run_until("task", goal="reach the goal", max_iterations=5)
         assert result.completion_reason == "goal_met"

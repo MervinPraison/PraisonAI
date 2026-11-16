@@ -122,6 +122,8 @@
     "AgentTeam.set_state",
     "AgentTeam.spawn_sub_agent",
     "AgentTeam.start_for_each",
+    "AgentTeam.to_graph",
+    "AgentTeam.to_mermaid",
     "AgentTeam.update_plan_step_status",
     "AgentTeam.update_state",
     "AgentTeam.wait_for_completions",

@@ -6,7 +6,7 @@ In-memory storage for A2A Task lifecycle management.
 
 import uuid
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from praisonaiagents.ui.a2a.types import (
     Task,
@@ -15,6 +15,12 @@ from praisonaiagents.ui.a2a.types import (
     Message,
     Artifact,
 )
+
+# Terminal states are final: once reached, status can no longer change.
+TERMINAL_STATES = frozenset({TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED})
+
+# Upper bound on stored tasks; oldest terminal tasks are evicted beyond this.
+_MAX_TASKS = 10_000
 
 
 class TaskStore:
@@ -28,6 +34,8 @@ class TaskStore:
     def __init__(self):
         """Initialize empty task store."""
         self._tasks: Dict[str, Task] = {}
+        # Ids of tasks a request is still waiting on; never evicted.
+        self._pinned: Set[str] = set()
     
     def create_task(self, message: Message, context_id: Optional[str] = None) -> Task:
         """
@@ -59,7 +67,21 @@ class TaskStore:
         )
         
         self._tasks[task_id] = task
+        self._evict()
         return task
+    
+    def _evict(self, keep: Optional[str] = None):
+        """Drop the oldest terminal tasks (except *keep*) once over the cap."""
+        excess = len(self._tasks) - _MAX_TASKS
+        if excess <= 0:
+            return
+        old = [
+            t.id for t in self._tasks.values()
+            if t.status.state in TERMINAL_STATES
+            and t.id != keep and t.id not in self._pinned
+        ]
+        for tid in old[:excess]:
+            del self._tasks[tid]
     
     def get_task(self, task_id: str) -> Optional[Task]:
         """
@@ -88,11 +110,14 @@ class TaskStore:
             message: Optional status message
             
         Returns:
-            Updated Task if found, None otherwise
+            Updated Task if found, None otherwise. A task already in a
+            terminal state is returned unchanged.
         """
         task = self._tasks.get(task_id)
         if not task:
             return None
+        if task.status.state in TERMINAL_STATES:
+            return task
         
         # Create new status
         new_status = TaskStatus(
@@ -112,6 +137,8 @@ class TaskStore:
         )
         
         self._tasks[task_id] = updated
+        if state in TERMINAL_STATES:
+            self._evict(keep=task_id)
         return updated
     
     def add_artifact(self, task_id: str, artifact: Artifact) -> Optional[Task]:
@@ -123,11 +150,14 @@ class TaskStore:
             artifact: Artifact to add
             
         Returns:
-            Updated Task if found, None otherwise
+            Updated Task if found, None otherwise. A task in a terminal
+            state is returned unchanged.
         """
         task = self._tasks.get(task_id)
         if not task:
             return None
+        if task.status.state in TERMINAL_STATES:
+            return task
         
         # Get existing artifacts or create new list
         artifacts = list(task.artifacts) if task.artifacts else []
@@ -155,11 +185,14 @@ class TaskStore:
             message: Message to add to history
             
         Returns:
-            Updated Task if found, None otherwise
+            Updated Task if found, None otherwise. A task in a terminal
+            state is returned unchanged.
         """
         task = self._tasks.get(task_id)
         if not task:
             return None
+        if task.status.state in TERMINAL_STATES:
+            return task
         
         # Get existing history or create new list
         history = list(task.history) if task.history else []

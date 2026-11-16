@@ -388,7 +388,7 @@ class TestA2AJsonRpc:
         assert data["error"]["code"] == -32000
     
     def test_post_a2a_tasks_cancel(self):
-        """tasks/cancel → cancels existing task."""
+        """tasks/cancel on a completed task → -32002 TaskNotCancelable."""
         from fastapi.testclient import TestClient
         
         app, a2a = _make_app()
@@ -421,8 +421,14 @@ class TestA2AJsonRpc:
         
         assert cancel_resp.status_code == 200
         data = cancel_resp.json()
-        assert "result" in data
-        assert data["result"]["status"]["state"] == "cancelled"
+        assert data["error"]["code"] == -32002
+        
+        # The completed task keeps its terminal state
+        get_resp = client.post("/a2a", json={
+            "jsonrpc": "2.0", "method": "tasks/get", "id": "3",
+            "params": {"id": task_id},
+        })
+        assert get_resp.json()["result"]["status"]["state"] == "completed"
     
     def test_post_a2a_message_stream(self):
         """message/stream → returns SSE streaming response."""

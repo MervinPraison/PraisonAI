@@ -208,12 +208,17 @@ def test_stats_available_all_repls():
     """Every interactive surface should expose a ``/stats`` command."""
     # Async TUI: /stats is a first-class command and a help/builtin entry.
     from praisonai.cli.interactive.async_tui import AsyncTUI
+    from praisonaiagents.telemetry.token_collector import TokenMetrics, get_token_collector
 
-    tui = AsyncTUI()
-    tui._total_tokens = 123
-    tui._total_cost = 0.0042
-    assert tui._handle_command("/stats") is True
-    assert "123" in tui.messages[0].content
+    collector = get_token_collector()
+    collector.reset()
+    try:
+        collector.track_tokens("gpt-4o-mini", "a", TokenMetrics(input_tokens=100, output_tokens=23))
+        tui = AsyncTUI()
+        assert tui._handle_command("/stats") is True
+        assert "123" in tui.messages[0].content
+    finally:
+        collector.reset()
     assert "stats" in tui._BUILTIN_COMMANDS
 
     # Legacy REPL: dedicated stats renderer exists.

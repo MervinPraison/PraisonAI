@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from .gateway_approval import GatewayApprovalBackend
     from .home_channels import HomeChannelRegistry, DeliveryResolver
     from .memory_pressure import CgroupMemoryPressure
+    from .relay_transport import WebSocketRelayTransport
 
 def __getattr__(name: str):
     """Lazy loading of gateway components."""
@@ -62,6 +63,9 @@ def __getattr__(name: str):
     if name == "CgroupMemoryPressure":
         from .memory_pressure import CgroupMemoryPressure
         return CgroupMemoryPressure
+    if name == "WebSocketRelayTransport":
+        from .relay_transport import WebSocketRelayTransport
+        return WebSocketRelayTransport
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
@@ -79,4 +83,5 @@ __all__ = [
     "HomeChannelRegistry",
     "DeliveryResolver",
     "CgroupMemoryPressure",
+    "WebSocketRelayTransport",
 ]

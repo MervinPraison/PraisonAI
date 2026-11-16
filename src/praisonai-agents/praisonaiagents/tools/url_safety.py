@@ -89,7 +89,10 @@ def is_safe_http_url(
                     continue
                 return False
             if (
-                ip.is_private
+                # is_global also catches shared/CGNAT space (100.64.0.0/10,
+                # e.g. Alibaba Cloud metadata), which is_private misses.
+                not ip.is_global
+                or ip.is_private
                 or ip.is_link_local
                 or ip.is_multicast
                 or ip.is_unspecified

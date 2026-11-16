@@ -154,10 +154,19 @@ def register_approval_callback(callback_fn):
 add_display_callback = register_display_callback
 add_approval_callback = register_approval_callback
 
+def _filter_callback_kwargs(callback, kwargs):
+    """Filter kwargs to what the callback accepts to maintain backward compatibility."""
+    import inspect
+    sig = inspect.signature(callback)
+    if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+        return kwargs
+    return {k: v for k, v in kwargs.items() if k in sig.parameters}
+
 def execute_sync_callback(display_type: str, **kwargs):
     """Execute synchronous callback for a given display type without displaying anything.
     
     This function is used to trigger callbacks even when verbose=False.
+    Callback errors are logged and suppressed so observers cannot abort the run.
     
     Args:
         display_type (str): Type of display event
@@ -167,61 +176,37 @@ def execute_sync_callback(display_type: str, **kwargs):
         callback = sync_display_callbacks.get(display_type)
     
     if callback:
-        import inspect
-        sig = inspect.signature(callback)
-        
-        # Filter kwargs to what the callback accepts to maintain backward compatibility
-        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-            # Callback accepts **kwargs, so pass all arguments
-            supported_kwargs = kwargs
-        else:
-            # Only pass arguments that the callback signature supports
-            supported_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
-        
-        callback(**supported_kwargs)
+        try:
+            callback(**_filter_callback_kwargs(callback, kwargs))
+        except Exception:
+            logging.exception("Display callback for %r failed; ignored", display_type)
 
 async def execute_callback(display_type: str, **kwargs):
     """Execute both sync and async callbacks for a given display type.
+    
+    Callback errors are logged and suppressed so observers cannot abort the run.
     
     Args:
         display_type (str): Type of display event
         **kwargs: Arguments to pass to the callback functions
     """
-    import inspect
-    
-    # Execute synchronous callback if registered
     with _callbacks_lock:
         sync_callback = sync_display_callbacks.get(display_type)
         async_callback = async_display_callbacks.get(display_type)
     
     if sync_callback:
-        sig = inspect.signature(sync_callback)
-        
-        # Filter kwargs to what the callback accepts to maintain backward compatibility
-        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-            # Callback accepts **kwargs, so pass all arguments
-            supported_kwargs = kwargs
-        else:
-            # Only pass arguments that the callback signature supports
-            supported_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
-        
-        loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, lambda: sync_callback(**supported_kwargs))
+        try:
+            supported_kwargs = _filter_callback_kwargs(sync_callback, kwargs)
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, lambda: sync_callback(**supported_kwargs))
+        except Exception:
+            logging.exception("Display callback for %r failed; ignored", display_type)
     
-    # Execute asynchronous callback if registered
     if async_callback:
-        callback = async_callback
-        sig = inspect.signature(callback)
-        
-        # Filter kwargs to what the callback accepts to maintain backward compatibility
-        if any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
-            # Callback accepts **kwargs, so pass all arguments
-            supported_kwargs = kwargs
-        else:
-            # Only pass arguments that the callback signature supports
-            supported_kwargs = {k: v for k, v in kwargs.items() if k in sig.parameters}
-        
-        await callback(**supported_kwargs)
+        try:
+            await async_callback(**_filter_callback_kwargs(async_callback, kwargs))
+        except Exception:
+            logging.exception("Async display callback for %r failed; ignored", display_type)
 
 def _clean_display_content(content: str, max_length: int = 20000) -> str:
     """Helper function to clean and truncate content for display."""

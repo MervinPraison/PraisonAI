@@ -417,3 +417,50 @@ def test_discord_media_transient_error_propagates_for_retry(tmp_path):
     ok = asyncio.run(_run())
     assert ok is True
     assert channel.calls == 2
+
+
+def test_discord_media_thread_is_scoped_to_parent_channel(tmp_path):
+    # #6084: the thread segment of "discord:A:B" must not redirect the upload
+    # to an arbitrary channel B by global id — only a thread under the
+    # (attested) parent A may receive it, otherwise the file lands in A.
+    pytest.importorskip("discord")
+
+    f = tmp_path / "report.pdf"
+    f.write_bytes(b"%PDF-1.4 data")
+
+    class _Channel:
+        def __init__(self, threads=None):
+            self.sent = 0
+            self._threads = threads or {}
+
+        async def send(self, *args, **kwargs):
+            self.sent += 1
+
+        def get_thread(self, tid):
+            return self._threads.get(tid)
+
+    real_thread = _Channel()
+    parent = _Channel(threads={555: real_thread})
+    unrelated = _Channel()
+    channels = {42: parent, 999: unrelated}
+
+    class Adapter:
+        platform = "discord"
+
+        class _client:
+            @staticmethod
+            def get_channel(cid):
+                return channels.get(cid)
+
+    def _run(thread_id):
+        return asyncio.run(
+            deliver_media_to_adapter(Adapter(), "42", str(f), thread_id=thread_id)
+        )
+
+    assert _run("999") is True
+    assert unrelated.sent == 0
+    assert parent.sent == 1
+
+    assert _run("555") is True
+    assert real_thread.sent == 1
+    assert parent.sent == 1

@@ -1475,6 +1475,7 @@ def handle_tasks_command(
     user_id: str,
     args: Optional[str] = None,
     runner: Optional[Any] = None,
+    job_manager: Optional[Any] = None,
 ) -> str:
     """Handle /tasks to inspect background tasks from inside a chat session.
 
@@ -1492,6 +1493,9 @@ def handle_tasks_command(
         user_id: The requesting user's identifier (owner scope).
         args: Optional argument string (an id, or ``cancel <id>``).
         runner: Optional ``BackgroundRunner`` (defaults to the shared one).
+        job_manager: Optional ``BackgroundJobManager`` holding background
+            subagents (defaults to the shared one). Jobs are owned through
+            ``origin["user_id"]``, captured when they were spawned.
 
     Returns:
         A compact, chat-friendly text response.
@@ -1503,6 +1507,28 @@ def handle_tasks_command(
             runner = get_background_runner()
         except Exception as e:  # noqa: BLE001
             return f"❌ Background tasks unavailable: {e}"
+
+    if job_manager is None:
+        try:
+            from praisonaiagents.background.job_manager import get_job_manager
+
+            job_manager = get_job_manager()
+        except Exception:  # noqa: BLE001
+            job_manager = None
+
+    def _mine(info: Any) -> bool:
+        # Same fail-closed rule as ``_owned``: jobs without an owner are hidden.
+        owner = (info.origin or {}).get("user_id")
+        return bool(owner) and str(owner) == str(user_id)
+
+    def _owned_job(job_id: str) -> Optional[Any]:
+        if job_manager is None:
+            return None
+        try:
+            info = job_manager.get_job_info(job_id)
+        except Exception:  # noqa: BLE001
+            return None
+        return info if _mine(info) else None
 
     def _owned(task: Dict[str, Any]) -> bool:
         # Fail closed: a task is only visible/actionable to the requesting user
@@ -1525,7 +1551,11 @@ def handle_tasks_command(
         except Exception:  # noqa: BLE001
             task = None
         if task is None or not _owned(task.to_dict()):
-            return f"❌ Task not found: {task_id}"
+            if _owned_job(task_id) is None:
+                return f"❌ Task not found: {task_id}"
+            if not job_manager.cancel_job(task_id):
+                return f"❌ Could not cancel task {task_id} (already finished?)."
+            return f"✅ Cancelled task {task_id}."
         try:
             # Cancel through the runner so the underlying future is actually
             # stopped (not just the record marked cancelled). cancel_task_sync
@@ -1549,7 +1579,21 @@ def handle_tasks_command(
         except Exception:  # noqa: BLE001
             task = None
         if task is None or not _owned(task.to_dict()):
-            return f"❌ Task not found: {arg}"
+            info = _owned_job(arg)
+            if info is None:
+                return f"❌ Task not found: {arg}"
+            lines = [
+                f"🧩 Task {info.job_id} — {info.origin.get('task') or 'subagent'}",
+                f"Status: {info.status.value}",
+            ]
+            if info.error:
+                lines.append(f"Error: {str(info.error)[:200]}")
+            elif info.result is not None:
+                result = info.result
+                if isinstance(result, dict):
+                    result = result.get("output") or result.get("error")
+                lines.append(f"Result: {str(result)[:200]}")
+            return "\n".join(lines)
         t = task.to_dict()
         lines = [
             f"🧩 Task {t.get('id')} — {t.get('name') or 'unnamed'}",
@@ -1566,8 +1610,19 @@ def handle_tasks_command(
         tasks = [t for t in runner.list_tasks() if _owned(t)]
     except Exception as e:  # noqa: BLE001
         return f"❌ Could not list tasks: {e}"
+    try:
+        jobs = sorted(
+            (
+                j for j in (job_manager.list_jobs().values() if job_manager else ())
+                if _mine(j)
+            ),
+            key=lambda j: j.created_at,
+            reverse=True,
+        )
+    except Exception:  # noqa: BLE001
+        jobs = []
 
-    if not tasks:
+    if not tasks and not jobs:
         return "💤 No background tasks."
 
     lines = ["🧩 Background tasks:"]
@@ -1577,6 +1632,9 @@ def handle_tasks_command(
             f"• {t.get('id')} {t.get('name') or 'unnamed'} — "
             f"{t.get('status')} ({progress})"
         )
+    for j in jobs[: max(0, 20 - len(tasks))]:
+        name = str(j.origin.get("task") or "subagent")[:60]
+        lines.append(f"• {j.job_id} {name} — {j.status.value}")
     lines.append("\nUse /tasks <id> for detail or /tasks cancel <id>.")
     return "\n".join(lines)
 

@@ -1,6 +1,6 @@
 [project]
 name = "praisonai-mcp"
-version = "0.1.16"
+version = "0.1.24"
 description = "MCP server hosting for PraisonAI — expose agents and tools to Cursor, Claude Desktop, and other MCP clients."
 readme = "README.md"
 license = {text = "MIT"}
@@ -9,7 +9,7 @@ authors = [
     { name = "Mervin Praison" }
 ]
 dependencies = [
-    "praisonaiagents>=1.6.126",
+    "praisonaiagents>=1.7.11",
     "mcp>=1.20.0,<2",
     "rich>=13.7",
     "typer>=0.12.0",

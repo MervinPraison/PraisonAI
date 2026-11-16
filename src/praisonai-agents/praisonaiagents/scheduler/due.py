@@ -228,6 +228,26 @@ def quota_hold_from_failure(
     return now + float(retry_after) + max(float(slack_seconds), 0.0)
 
 
+def past_until(job: Any, now: float, default_timezone: str | None = None) -> bool:
+    """Return ``True`` when ``now`` is at or past the job's ``until`` end instant."""
+    until = getattr(job, "until", None)
+    if until is None:
+        return False
+    try:
+        until_ts = localize_wall_clock(
+            datetime.fromisoformat(until),
+            job.schedule.tz or default_timezone,
+        ).timestamp()
+    except (ValueError, TypeError):
+        # Fail safe: a stop bound that cannot be parsed must NOT let the
+        # job run past it forever. Treat it as elapsed; the claim path then
+        # retires it via ``ScheduleJob.should_retire`` (which returns True
+        # for an unparseable ``until``) rather than firing it.
+        logger.warning("Invalid 'until' timestamp for job %s: %s", job.id, until)
+        return True
+    return now >= until_ts
+
+
 def is_due(
     job: Any,
     now: float,
@@ -264,22 +284,8 @@ def is_due(
     if hold_until is not None and now < hold_until:
         return False
 
-    until = getattr(job, "until", None)
-    if until is not None:
-        try:
-            until_ts = localize_wall_clock(
-                datetime.fromisoformat(until),
-                sched.tz or default_timezone,
-            ).timestamp()
-        except (ValueError, TypeError):
-            # Fail safe: a stop bound that cannot be parsed must NOT let the
-            # job run past it forever. Treat the job as not-due; the claim path
-            # then retires it via ``ScheduleJob.should_retire`` (which returns
-            # True for an unparseable ``until``) rather than firing it.
-            logger.warning("Invalid 'until' timestamp for job %s: %s", job.id, until)
-            return False
-        if now >= until_ts:
-            return False
+    if past_until(job, now, default_timezone):
+        return False
 
     if sched.kind == "every":
         if sched.every_seconds is None:
@@ -341,3 +347,26 @@ def is_due(
         return now >= next_run
 
     return False
+
+
+def lease_state(job: Any, now: float, owner_id: str) -> str | None:
+    """Classify a job's claim lease for an atomic ``claim_due``.
+
+    Returns:
+        ``"busy"`` when another owner holds an unexpired lease, or this owner
+        still holds one on a spent (retiring) job whose run is in flight;
+        ``"abandoned"`` when a lease expired without ``complete`` — the run
+        crashed or the process died mid-run; ``"done"`` when a spent job's
+        run finished (lease released) but it was not removed yet; ``None``
+        when the job is free to be evaluated for due-ness.
+    """
+    lease_until = getattr(job, "_lease_until", 0.0) or 0.0
+    lease_owner = getattr(job, "_lease_owner", None)
+    retiring = getattr(job, "_retiring", 0)
+    if lease_owner is not None and lease_until > now:
+        if lease_owner != owner_id or retiring:
+            return "busy"
+        return None
+    if lease_owner is not None:
+        return "abandoned"
+    return "done" if retiring else None

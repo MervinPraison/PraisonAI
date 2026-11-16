@@ -708,12 +708,17 @@ def _config_write_target() -> Path:
 
 def _dump_config_file(path: Path, data: Dict[str, Any]) -> None:
     """Write ``data`` to ``path`` as YAML or TOML based on its suffix."""
+    from ..utils.atomic_io import atomic_write_text
+
+    # Write through a symlinked config so the shared target gets the update,
+    # and keep an existing file's mode (the atomic temp file is owner-only).
+    path = path.resolve()
+    mode = path.stat().st_mode & 0o7777 if path.exists() else None
     path.parent.mkdir(parents=True, exist_ok=True)
     if path.suffix.lower() in (".yaml", ".yml"):
         import yaml
 
-        with open(path, "w", encoding="utf-8") as f:
-            yaml.safe_dump(data, f, sort_keys=False, default_flow_style=False)
+        text = yaml.safe_dump(data, sort_keys=False, default_flow_style=False)
     else:
         try:
             import tomli_w
@@ -727,8 +732,10 @@ def _dump_config_file(path: Path, data: Dict[str, Any]) -> None:
                 "Install tomli-w (pip install tomli-w), or convert the config "
                 "to .praisonai/config.yaml."
             ) from None
-        with open(path, "wb") as f:
-            tomli_w.dump(data, f)
+        text = tomli_w.dumps(data)
+    atomic_write_text(str(path), text)
+    if mode is not None:
+        os.chmod(path, mode)
 
 
 def set_plugin_enabled(name: str, enabled: bool) -> Path:
@@ -950,7 +957,8 @@ def _validate_feature_config(feature: str, config: Dict[str, Any]) -> List[str]:
         "guardrails": {"enabled", "max_retries", "validator"},
         "web": {"enabled", "search", "fetch", "provider"},
         "output": {"enabled", "verbose", "markdown", "stream", "metrics", "preset"},
-        "execution": {"enabled", "max_iter", "max_rpm", "max_execution_time", "preset"},
+        "execution": {"enabled", "max_iter", "max_rpm", "max_execution_time", "preset",
+                      "max_budget", "on_budget_exceeded", "durable", "journal_path", "resume_run_id"},
         "caching": {"enabled", "prompt_caching", "ttl"},
         "autonomy": {"enabled", "max_steps", "approval_required"},
         "context": {"enabled", "max_tokens", "strategy"},

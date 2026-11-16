@@ -6,6 +6,8 @@ multiple AI agent frameworks using industry-standard methodology.
 
 Usage:
     python benchmarks/performance_benchmark.py
+    python benchmarks/performance_benchmark.py --save          # rewrite BENCHMARK_RESULTS.md
+    python benchmarks/performance_benchmark.py --only praisonai
 """
 
 import gc
@@ -134,39 +136,14 @@ def run_benchmark(func: Callable, name: str, iterations: int = 1000, warmup: int
 
 
 # ============================================================================
-# Framework Imports
+# Framework factories
+#
+# Each builder imports its framework lazily and returns a zero-arg callable
+# that creates one agent with one tool. A missing framework raises ImportError
+# and is skipped, so the script runs with only praisonaiagents installed.
 # ============================================================================
-from praisonaiagents import Agent as PraisonAgent
-from agno.agent import Agent as AgnoAgent
-from agno.models.openai import OpenAIChat
 
-# Additional frameworks for comparison
-try:
-    from pydantic_ai import Agent as PydanticAgent
-    PYDANTIC_AVAILABLE = True
-except ImportError:
-    PYDANTIC_AVAILABLE = False
-
-try:
-    from crewai.agent import Agent as CrewAgent
-    from crewai.tools import tool as crewai_tool
-    CREWAI_AVAILABLE = True
-except ImportError:
-    CREWAI_AVAILABLE = False
-
-try:
-    from langchain_core.tools import tool as langchain_tool
-    from langchain_openai import ChatOpenAI
-    from langgraph.prebuilt import create_react_agent
-    LANGGRAPH_AVAILABLE = True
-except ImportError:
-    LANGGRAPH_AVAILABLE = False
-
-try:
-    from agents import Agent as OpenAIAgent, function_tool
-    OPENAI_AGENTS_AVAILABLE = True
-except ImportError:
-    OPENAI_AGENTS_AVAILABLE = False
+INSTRUCTIONS = "Be concise, reply with one sentence."
 
 
 def get_weather(city: Literal["nyc", "sf"]):
@@ -180,195 +157,181 @@ def get_weather(city: Literal["nyc", "sf"]):
 tools = [get_weather]
 
 
-def instantiate_praisonai_agent():
-    """Instantiate a PraisonAI agent with one tool."""
-    return PraisonAgent(
-        name="Test Agent",
-        instructions="Be concise, reply with one sentence.",
-        model="gpt-4o-mini",
-        tools=tools,
-        output="silent"
+def build_praisonai():
+    from praisonaiagents import Agent as PraisonAgent
+    return lambda: PraisonAgent(
+        name="Test Agent", instructions=INSTRUCTIONS, model="gpt-4o-mini",
+        tools=tools, output="silent",
     )
 
 
-def instantiate_praisonai_litellm_agent():
-    """Instantiate a PraisonAI agent with LiteLLM backend."""
-    return PraisonAgent(
-        name="Test Agent",
-        instructions="Be concise, reply with one sentence.",
-        model="openai/gpt-4o-mini",
-        tools=tools,
-        output="silent"
+def build_praisonai_litellm():
+    from praisonaiagents import Agent as PraisonAgent
+    return lambda: PraisonAgent(
+        name="Test Agent", instructions=INSTRUCTIONS, model="openai/gpt-4o-mini",
+        tools=tools, output="silent",
     )
 
 
-def instantiate_agno_agent():
-    """Instantiate an Agno agent with one tool."""
-    return AgnoAgent(model=OpenAIChat(id="gpt-4o-mini"), tools=tools)
+def build_agno():
+    from agno.agent import Agent as AgnoAgent
+    from agno.models.openai import OpenAIChat
+    return lambda: AgnoAgent(model=OpenAIChat(id="gpt-4o-mini"), instructions=INSTRUCTIONS, tools=tools)
 
 
-def instantiate_pydantic_agent():
-    """Instantiate a PydanticAI agent with one tool."""
-    agent = PydanticAgent("openai:gpt-4o-mini", system_prompt="Be concise, reply with one sentence.")
-    @agent.tool_plain
-    def get_weather_pydantic(city: Literal["nyc", "sf"]):
-        """Use this to get weather information."""
-        if city == "nyc":
-            return "It might be cloudy in nyc"
-        elif city == "sf":
-            return "It's always sunny in sf"
-    return agent
+def build_pydantic():
+    from pydantic_ai import Agent as PydanticAgent
+
+    def create():
+        agent = PydanticAgent("openai:gpt-4o-mini", system_prompt=INSTRUCTIONS)
+        agent.tool_plain(get_weather)
+        return agent
+    return create
 
 
-def instantiate_openai_agents():
-    """Instantiate an OpenAI Agents SDK agent with one tool."""
-    return OpenAIAgent(
-        name="Test agent",
-        instructions="Be concise, reply with one sentence.",
-        model="gpt-4o-mini",
+def build_openai_agents():
+    from agents import Agent as OpenAIAgent, function_tool
+    return lambda: OpenAIAgent(
+        name="Test agent", instructions=INSTRUCTIONS, model="gpt-4o-mini",
         tools=[function_tool(get_weather)],
     )
 
 
-def instantiate_langgraph_agent():
-    """Instantiate a LangGraph agent with one tool."""
-    @langchain_tool
-    def get_weather_lg(city: Literal["nyc", "sf"]):
-        """Use this to get weather information."""
-        if city == "nyc":
-            return "It might be cloudy in nyc"
-        elif city == "sf":
-            return "It's always sunny in sf"
-    return create_react_agent(model=ChatOpenAI(model="gpt-4o-mini"), tools=[get_weather_lg])
-
-
-def instantiate_crewai_agent():
-    """Instantiate a CrewAI agent with one tool."""
-    @crewai_tool("Weather Tool")
-    def get_weather_crew(city: Literal["nyc", "sf"]):
-        """Use this to get weather information."""
-        if city == "nyc":
-            return "It might be cloudy in nyc"
-        elif city == "sf":
-            return "It's always sunny in sf"
-    return CrewAgent(
-        llm="gpt-4o-mini",
-        role="Test Agent",
-        goal="Be concise, reply with one sentence.",
-        tools=[get_weather_crew],
-        backstory="Test",
+def build_langgraph():
+    from langchain_core.tools import tool as langchain_tool
+    from langchain_openai import ChatOpenAI
+    from langgraph.prebuilt import create_react_agent
+    return lambda: create_react_agent(
+        model=ChatOpenAI(model="gpt-4o-mini"), tools=[langchain_tool(get_weather)],
     )
 
 
-def get_package_versions():
-    """Get version numbers for all benchmarked packages."""
+def build_crewai():
+    from crewai.agent import Agent as CrewAgent
+    from crewai.tools import tool as crewai_tool
+
+    def create():
+        return CrewAgent(
+            llm="gpt-4o-mini", role="Test Agent", goal=INSTRUCTIONS,
+            tools=[crewai_tool("Weather Tool")(get_weather)], backstory="Test",
+        )
+    return create
+
+
+# key -> (display name, PyPI package, builder)
+FRAMEWORKS = {
+    'praisonai': ('PraisonAI', 'praisonaiagents', build_praisonai),
+    'praisonai_litellm': ('PraisonAI (LiteLLM)', 'praisonaiagents', build_praisonai_litellm),
+    'agno': ('Agno', 'agno', build_agno),
+    'pydantic': ('PydanticAI', 'pydantic-ai-slim', build_pydantic),
+    'openai_agents': ('OpenAI Agents SDK', 'openai-agents', build_openai_agents),
+    'langgraph': ('LangGraph', 'langgraph', build_langgraph),
+    'crewai': ('CrewAI', 'crewai', build_crewai),
+}
+
+
+def get_package_versions(keys=None):
+    """Get version numbers for benchmarked packages."""
     from importlib.metadata import version as get_version
-    
-    packages = {
-        'PraisonAI': 'praisonaiagents',
-        'Agno': 'agno',
-        'PydanticAI': 'pydantic-ai',
-        'OpenAI Agents SDK': 'openai-agents',
-        'LangGraph': 'langgraph',
-        'CrewAI': 'crewai'
-    }
-    
+
     versions = {}
-    for display_name, pkg_name in packages.items():
+    for key in keys or FRAMEWORKS:
+        display_name, pkg_name, _ = FRAMEWORKS[key]
+        if pkg_name in versions:
+            continue
         try:
-            versions[display_name] = get_version(pkg_name)
+            versions[pkg_name] = get_version(pkg_name)
         except Exception:
-            versions[display_name] = 'not installed'
-    
+            versions[pkg_name] = 'not installed'
     return versions
 
 
-def save_benchmark_results(results: dict, baseline):
-    """Save benchmark results to BENCHMARK_RESULTS.md and update README.md"""
+def get_machine_info() -> dict:
+    """Describe the machine so results are traceable."""
     import os
-    import re
-    from datetime import datetime
-    
-    benchmarks_dir = os.path.dirname(__file__)
-    filepath = os.path.join(benchmarks_dir, 'BENCHMARK_RESULTS.md')
-    
-    # Get package versions
-    versions = get_package_versions()
-    
-    display_names = {
-        'agno': 'Agno',
-        'praisonai': 'PraisonAI',
-        'praisonai_litellm': 'PraisonAI (LiteLLM)',
-        'pydantic': 'PydanticAI',
-        'openai_agents': 'OpenAI Agents SDK',
-        'langgraph': 'LangGraph',
-        'crewai': 'CrewAI'
+    import platform
+
+    load = os.getloadavg()[0] if hasattr(os, 'getloadavg') else None
+    return {
+        'Platform': platform.platform(),
+        'Processor': platform.processor() or platform.machine(),
+        'CPUs': os.cpu_count(),
+        'Python': platform.python_version(),
+        'Load avg (1 min) at start': f'{load:.2f}' if load is not None else 'n/a',
     }
-    
-    # Build table rows
-    table_rows = []
-    sorted_results = sorted(results.items(), key=lambda x: x[1].avg_run_time)
-    
-    for name, result in sorted_results:
-        display_name = display_names.get(name, name)
-        avg_us = result.avg_run_time * 1e6
-        ratio = result.avg_run_time / baseline.avg_run_time if baseline.avg_run_time > 0 else 0
-        
-        if name == 'praisonai':
-            table_rows.append(f'| **{display_name}** | **{avg_us:.2f}** | **1.00x (fastest)** |')
-        else:
-            avg_str = f'{avg_us:,.2f}' if avg_us >= 1000 else f'{avg_us:.2f}'
-            ratio_str = f'{ratio:,.0f}x' if ratio >= 100 else f'{ratio:.2f}x'
-            table_rows.append(f'| {display_name} | {avg_str} | {ratio_str} |')
-    
-    # Save to BENCHMARK_RESULTS.md
+
+
+def rank_results(results: dict) -> list:
+    """Return ``(key, result, ratio)`` sorted fastest first, ratio vs the fastest."""
+    ranked = sorted(results.items(), key=lambda x: x[1].avg_run_time)
+    fastest = ranked[0][1].avg_run_time if ranked else 0
+    return [(k, r, r.avg_run_time / fastest if fastest > 0 else 0) for k, r in ranked]
+
+
+def save_benchmark_results(results: dict, machine: dict, iterations: int, warmup: int,
+                           filename: str = 'BENCHMARK_RESULTS.md') -> str:
+    """Write every framework's results from this single run to ``BENCHMARK_RESULTS.md``."""
+    import os
+    from datetime import datetime
+
+    filepath = os.path.join(os.path.dirname(__file__), filename)
+    versions = get_package_versions(results.keys())
+
+    def us(seconds):
+        value = seconds * 1e6
+        return f'{value:,.2f}' if value >= 1000 else f'{value:.2f}'
+
+    lines = [
+        '# PraisonAI Agents - Benchmark Results', '',
+        f'**Generated:** {datetime.now().strftime("%Y-%m-%d")} (single run of `performance_benchmark.py`)',
+        f'**Methodology:** {warmup} warmup runs + {iterations} measured iterations per framework',
+        f'**Setup (every framework):** one agent, model `gpt-4o-mini`, one `get_weather` tool, '
+        'no LLM call. Tool wrapping (`function_tool`, `@tool`, ...) happens inside the timed call. '
+        'Frameworks that were not installed are omitted.',
+        '', '## Agent Instantiation Time', '',
+        '| Framework | Avg (μs) | Min (μs) | Median (μs) | Std (μs) | Avg memory (KiB) | Relative |',
+        '|-----------|----------|----------|-------------|----------|------------------|----------|',
+    ]
+    for rank, (key, r, ratio) in enumerate(rank_results(results)):
+        relative = '1.00x (fastest)' if rank == 0 else (f'{ratio:,.0f}x' if ratio >= 100 else f'{ratio:.2f}x')
+        lines.append(
+            f'| {FRAMEWORKS[key][0]} | {us(r.avg_run_time)} | {us(r.min_run_time)} | '
+            f'{us(r.median_run_time)} | {us(r.std_dev_run_time)} | '
+            f'{r.avg_memory_usage * 1024:.2f} | {relative} |'
+        )
+    lines += ['', '## Package Versions', '', '| Package | Version |', '|---------|---------|']
+    lines += [f'| {pkg} | {ver} |' for pkg, ver in versions.items()]
+    lines += ['', '## Machine', '', '| Field | Value |', '|-------|-------|']
+    lines += [f'| {k} | {v} |' for k, v in machine.items()]
+    lines += [
+        '', '## How to Reproduce', '', '```bash', 'cd src/praisonai-agents',
+        'pip install -e . agno openai-agents "pydantic-ai-slim[openai]" langgraph langchain-openai crewai',
+        "# OpenAI-backed constructors need a key to exist; no request is made",
+        "OPENAI_API_KEY=sk-dummy PYTHONWARNINGS='ignore::DeprecationWarning' "
+        f"python benchmarks/performance_benchmark.py --save --iterations {iterations} "
+        f"--warmup {warmup} --only {' '.join(results)}",
+        '```', '',
+        'Older, superseded result files live in [`archive/`](archive/).', '',
+    ]
     with open(filepath, 'w') as f:
-        f.write('# PraisonAI Agents - Benchmark Results\n\n')
-        f.write(f'**Generated:** {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}\n')
-        f.write('**Methodology:** 10 warmup runs + 1000 measured iterations\n\n')
-        f.write('## Agent Instantiation Time\n\n')
-        f.write('| Framework | Avg Time (μs) | Relative |\n')
-        f.write('|-----------|---------------|----------|\n')
-        f.write('\n'.join(table_rows) + '\n')
-        f.write('\n## Package Versions\n\n')
-        f.write('| Package | Version |\n')
-        f.write('|---------|--------|\n')
-        for pkg, ver in versions.items():
-            f.write(f'| {pkg} | {ver} |\n')
-        f.write('\n## How to Reproduce\n\n')
-        f.write('```bash\n')
-        f.write('cd praisonai-agents\n')
-        f.write('python benchmarks/performance_benchmark.py\n')
-        f.write('```\n')
-    
+        f.write('\n'.join(lines))
+
     print(f'\nResults saved to: {filepath}')
-    
-    # Update README.md
-    readme_path = os.path.join(benchmarks_dir, '..', '..', '..', 'README.md')
-    if os.path.exists(readme_path):
-        with open(readme_path, 'r') as f:
-            content = f.read()
-        
-        new_table = '''| Framework | Avg Time (μs) | Relative |
-|-----------|---------------|----------|
-''' + '\n'.join(table_rows)
-        
-        pattern = r'(\| Framework \| Avg Time \(μs\) \| Relative \|\n\|[-|]+\|\n)(\|[^\n]+\|\n)+'
-        
-        if re.search(pattern, content):
-            content = re.sub(pattern, new_table + '\n', content)
-            
-            with open(readme_path, 'w') as f:
-                f.write(content)
-            
-            print(f'README.md updated: {readme_path}')
+    return filepath
 
 
-if __name__ == "__main__":
+def main():
     parser = argparse.ArgumentParser(description='PraisonAI Agents - Comprehensive Performance Benchmark')
-    parser.add_argument('--save', action='store_true', help='Save results to file')
+    parser.add_argument('--save', action='store_true', help='Save results to BENCHMARK_RESULTS.md')
+    parser.add_argument('--iterations', type=int, default=1000, help='Measured iterations (default: 1000)')
+    parser.add_argument('--warmup', type=int, default=10, help='Warmup runs (default: 10)')
+    parser.add_argument('--only', nargs='+', choices=list(FRAMEWORKS), help='Benchmark only these frameworks')
     args = parser.parse_args()
-    
+    if args.iterations <= 0 or args.warmup < 0:
+        parser.error('--iterations must be > 0 and --warmup must be >= 0')
+
+    machine = get_machine_info()
+
     print("="*70)
     print("PraisonAI Agents - Comprehensive Performance Benchmark")
     print("="*70)
@@ -376,156 +339,48 @@ if __name__ == "__main__":
     print("  1. Agent instantiation time (how fast an agent object is created)")
     print("  2. Memory footprint (how much memory an agent uses)")
     print("\nMethodology:")
-    print("  - 10 warmup runs (not measured)")
-    print("  - 1000 measured iterations")
+    print(f"  - {args.warmup} warmup runs (not measured)")
+    print(f"  - {args.iterations} measured iterations")
     print("  - tracemalloc for memory measurement")
     print("  - Baseline subtraction for accuracy")
-    print("\nFrameworks available:")
-    print("  - PraisonAI: ✅")
-    print(f"  - Agno: ✅")
-    print(f"  - PydanticAI: {'✅' if PYDANTIC_AVAILABLE else '❌'}")
-    print(f"  - OpenAI Agents SDK: {'✅' if OPENAI_AGENTS_AVAILABLE else '❌'}")
-    print(f"  - LangGraph: {'✅' if LANGGRAPH_AVAILABLE else '❌'}")
-    print(f"  - CrewAI: {'✅' if CREWAI_AVAILABLE else '❌'}")
-    
+    print("\nMachine:")
+    for k, v in machine.items():
+        print(f"  - {k}: {v}")
+
     results = {}
-    
-    # Test PraisonAI first
-    try:
-        print("\n" + "="*70)
-        print("Testing PraisonAI Agents")
-        print("="*70)
-        results['praisonai'] = run_benchmark(
-            instantiate_praisonai_agent,
-            "PraisonAI",
-            iterations=1000,
-            warmup=10
-        )
-    except Exception as e:
-        print(f"Error testing PraisonAI: {e}")
-    
-    try:
-        print("\n" + "="*70)
-        print("Testing PraisonAI Agents (LiteLLM)")
-        print("="*70)
-        results['praisonai_litellm'] = run_benchmark(
-            instantiate_praisonai_litellm_agent,
-            "PraisonAI (LiteLLM)",
-            iterations=1000,
-            warmup=10
-        )
-    except Exception as e:
-        print(f"Error testing PraisonAI (LiteLLM): {e}")
-    
-    # Test Agno
-    try:
-        print("\n" + "="*70)
-        print("Testing Agno")
-        print("="*70)
-        results['agno'] = run_benchmark(
-            instantiate_agno_agent,
-            "Agno",
-            iterations=1000,
-            warmup=10
-        )
-    except Exception as e:
-        print(f"Error testing Agno: {e}")
-    
-    # Test PydanticAI
-    if PYDANTIC_AVAILABLE:
+    for key in args.only or FRAMEWORKS:
+        display_name, _, builder = FRAMEWORKS[key]
         try:
-            print("\n" + "="*70)
-            print("Testing PydanticAI")
-            print("="*70)
-            results['pydantic'] = run_benchmark(
-                instantiate_pydantic_agent,
-                "PydanticAI Agent Instantiation",
-                iterations=1000,
-                warmup=10
-            )
-        except Exception as e:
-            print(f"Error testing PydanticAI: {e}")
-    
-    # Test OpenAI Agents SDK
-    if OPENAI_AGENTS_AVAILABLE:
+            create = builder()
+        except ImportError:
+            print(f"\nSkipping {display_name}: not installed")
+            continue
         try:
-            print("\n" + "="*70)
-            print("Testing OpenAI Agents SDK")
-            print("="*70)
-            results['openai_agents'] = run_benchmark(
-                instantiate_openai_agents,
-                "OpenAI Agents SDK Instantiation",
-                iterations=1000,
-                warmup=10
-            )
+            results[key] = run_benchmark(create, display_name, iterations=args.iterations, warmup=args.warmup)
         except Exception as e:
-            print(f"Error testing OpenAI Agents SDK: {e}")
-    
-    # Test LangGraph
-    if LANGGRAPH_AVAILABLE:
-        try:
-            print("\n" + "="*70)
-            print("Testing LangGraph")
-            print("="*70)
-            results['langgraph'] = run_benchmark(
-                instantiate_langgraph_agent,
-                "LangGraph Agent Instantiation",
-                iterations=1000,
-                warmup=10
-            )
-        except Exception as e:
-            print(f"Error testing LangGraph: {e}")
-    
-    # Test CrewAI
-    if CREWAI_AVAILABLE:
-        try:
-            print("\n" + "="*70)
-            print("Testing CrewAI")
-            print("="*70)
-            results['crewai'] = run_benchmark(
-                instantiate_crewai_agent,
-                "CrewAI Agent Instantiation",
-                iterations=1000,
-                warmup=10
-            )
-        except Exception as e:
-            print(f"Error testing CrewAI: {e}")
-    
+            print(f"Error testing {display_name}: {e}")
+
+    if not results:
+        print("\nNo framework could be benchmarked.")
+        return 1
+
     # Final Comparison Table
     print("\n" + "="*70)
     print("RESULTS SUMMARY")
     print("="*70)
-    
-    if 'praisonai' in results:
-        baseline = results['praisonai']
-        
-        print(f"\n{'Framework':<25} {'Avg Time (μs)':<15} {'Avg Memory (KiB)':<18} {'Relative':<15}")
-        print("-" * 73)
-        
-        # Sort by time
-        sorted_results = sorted(results.items(), key=lambda x: x[1].avg_run_time)
-        
-        for name, result in sorted_results:
-            time_ratio = result.avg_run_time / baseline.avg_run_time if baseline.avg_run_time > 0 else 0
-            
-            time_str = f"{time_ratio:.2f}x"
-            
-            display_name = {
-                'agno': 'Agno',
-                'praisonai': 'PraisonAI',
-                'praisonai_litellm': 'PraisonAI (LiteLLM)',
-                'pydantic': 'PydanticAI',
-                'openai_agents': 'OpenAI Agents SDK',
-                'langgraph': 'LangGraph',
-                'crewai': 'CrewAI'
-            }.get(name, name)
-            
-            print(f"{display_name:<25} {result.avg_run_time*1e6:<15.2f} {result.avg_memory_usage*1024:<18.2f} {time_str:<15}")
-        
-        print("\n" + "="*70)
-        
-        # Save results to files
-        if args.save:
-            save_benchmark_results(results, baseline)
-        else:
-            print('\nResults not saved (use --save flag to save results to file)')
+    print(f"\n{'Framework':<25} {'Avg Time (μs)':<15} {'Median (μs)':<13} {'Avg Memory (KiB)':<18} {'Relative':<15}")
+    print("-" * 86)
+    for key, result, ratio in rank_results(results):
+        print(f"{FRAMEWORKS[key][0]:<25} {result.avg_run_time*1e6:<15.2f} {result.median_run_time*1e6:<13.2f} "
+              f"{result.avg_memory_usage*1024:<18.2f} {ratio:.2f}x")
+    print("\n" + "="*70)
+
+    if args.save:
+        save_benchmark_results(results, machine, args.iterations, args.warmup)
+    else:
+        print('\nResults not saved (use --save flag to save results to file)')
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

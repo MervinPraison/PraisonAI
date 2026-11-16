@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "praisonaiagents"
-version = "1.7.15"
-description = "Praison AI agents for completing complex tasks with Self Reflection Agents"
+version = "1.7.23"
+description = "Open-source Python AI agent framework that runs on your own computers, even fully offline."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [
@@ -18,6 +18,7 @@ dependencies = [
     "posthog>=3.0.0",
     "PyYAML>=6.0",
     "aiohttp>=3.8.0",
+    "tzdata; sys_platform == 'win32'",
     # The scheduler converts every natural-language recurring schedule
     # ("every day at 9am", "weekdays at 9am") to cron; without this engine
     # those jobs are accepted and silently never fire. Pure Python; pulls
@@ -51,13 +52,16 @@ parallel-search = [
 
 memory = [
     "chromadb>=1.0.0",
-    "litellm>=1.83.14",
+    "litellm>=1.83.14,<1.106",  # 1.106 requires mcp>=2.2; mcp is pinned <2
 ]
 
 knowledge = [
     "mem0ai>=0.1.0",
     "chromadb>=1.0.0",
     "markitdown[all]>=0.1.0",
+    # markitdown[all] pulls pandas unpinned; without a floor pip 26.3 backtracks
+    # to the pandas 1.4.4 sdist, whose setup.py needs the removed pkg_resources.
+    "pandas>=2.2",
     "chonkie>=1.0.2"
 ]
 
@@ -69,7 +73,7 @@ graph = [
 
 # Add LLM dependencies
 llm = [
-    "litellm>=1.83.14",
+    "litellm>=1.83.14,<1.106",  # 1.106 requires mcp>=2.2; mcp is pinned <2
     "pydantic>=2.10.0"
 ]
 

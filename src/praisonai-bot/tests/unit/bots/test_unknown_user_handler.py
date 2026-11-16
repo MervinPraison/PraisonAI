@@ -84,7 +84,8 @@ async def test_pairing_flow_not_paired_cli_fallback():
     result = await UnknownUserHandler.handle(make_message(), bot_ctx)
 
     assert result is False  # Dropped until approved
-    mock_store.generate_code.assert_called_once_with(channel_type="telegram")
+    # The code is bound to the requesting user (#6022).
+    mock_store.generate_code.assert_called_once_with(channel_type="telegram", channel_id="unknown_user")
     adapter.reply.assert_awaited_once()
 
     sent_text = adapter.reply.call_args[0][1]

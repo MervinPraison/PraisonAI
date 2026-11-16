@@ -34,11 +34,11 @@ def _restore_approval_state():
     from praisonaiagents.approval import get_approval_registry, clear_approval_context
 
     registry = get_approval_registry()
-    previous = registry.get_backend()
+    previous = registry._global_backend  # not get_backend(): its ConsoleBackend fallback would be installed globally on restore
     try:
         yield
     finally:
-        registry.set_backend(previous)
+        registry._global_backend = previous
         clear_approval_context()
 
 
@@ -154,7 +154,7 @@ def test_code_mode_changes_what_the_tool_can_do():
 
     _probe_tool_name = "code_mode_probe"
     get_registry().register(code_mode_probe)
-    previous = get_approval_registry().get_backend()
+    previous = get_approval_registry()._global_backend  # not get_backend(): its ConsoleBackend fallback would be installed globally on restore
     get_approval_registry().set_backend(AutoApproveBackend())
     try:
         safe = Agent(
@@ -182,7 +182,7 @@ def test_code_mode_changes_what_the_tool_can_do():
         safe_result = safe_exec(code)
         unsafe_result = unsafe_exec(code)
     finally:
-        get_approval_registry().set_backend(previous)
+        get_approval_registry()._global_backend = previous
         clear_approval_context()
         # The tool registry is process-global. Leaving these probe tools in it
         # changed what later tests saw when they enumerated or dispatched
@@ -221,7 +221,7 @@ def test_unsafe_code_mode_cannot_reach_tools_the_agent_was_not_granted():
 
     _probe_tool_name = "ungranted_global_tool"
     get_registry().register(ungranted_global_tool)
-    previous = get_approval_registry().get_backend()
+    previous = get_approval_registry()._global_backend  # not get_backend(): its ConsoleBackend fallback would be installed globally on restore
     get_approval_registry().set_backend(AutoApproveBackend())
     try:
         agent = Agent(
@@ -240,7 +240,7 @@ def test_unsafe_code_mode_cannot_reach_tools_the_agent_was_not_granted():
         )
         result = execute("print(ungranted_global_tool())")
     finally:
-        get_approval_registry().set_backend(previous)
+        get_approval_registry()._global_backend = previous
         clear_approval_context()
         # The tool registry is process-global. Leaving these probe tools in it
         # changed what later tests saw when they enumerated or dispatched
@@ -279,13 +279,13 @@ def test_code_execution_runs_a_trailing_expression_exactly_once():
     from praisonaiagents.approval import clear_approval_context
 
     registry = get_approval_registry()
-    previous = registry.get_backend()
+    previous = registry._global_backend  # not get_backend(): its ConsoleBackend fallback would be installed globally on restore
     registry.set_backend(AutoApproveBackend())
     try:
         assert execute_code("print(7)")["stdout"] == "7\n"
         assert execute_code_with_tools("print(7)")["stdout"] == "7\n"
     finally:
-        registry.set_backend(previous)
+        registry._global_backend = previous
         clear_approval_context()
 
 

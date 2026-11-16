@@ -38,11 +38,13 @@ env:
 jobs:
   # ============================================
   # SMOKE TESTS - Fast unit tests, no network
-  # Target: <= 2 minutes
+  # Measured 16 Nov 2026 over 28 passing runs: 10-15.5 min (install ~3-5,
+  # smoke tests ~4-7, standalone package smokes ~2.5-3.5). At 16 min the job
+  # was cancelled at its own limit on main and PRs alike; 25 leaves headroom.
   # ============================================
   smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 16
+    timeout-minutes: 25
     steps:
     - uses: actions/checkout@v4
       with:
@@ -148,7 +150,7 @@ jobs:
         echo "C7 hot-path import gate ok"
         bash "$GITHUB_WORKSPACE/scripts/check_c7_imports.sh"
         # Standalone actions run (no wrapper); default run renders in-process
-        # since #5644; chat still requires praisonai
+        # since #5644; chat/TUI too since #6271
         set +e
         RUN_OUT=$(timeout 90 /tmp/praisonai-code-standalone/bin/praisonai-code run --output actions "Say hello in one word" 2>&1)
         RUN_CODE=$?
@@ -180,11 +182,15 @@ jobs:
         CHAT_RUN=$(timeout 10 /tmp/praisonai-code-standalone/bin/praisonai-code chat 2>&1)
         set -e
         echo "$CHAT_RUN" | tail -10
-        if ! echo "$CHAT_RUN" | grep -qi 'install praisonai'; then
-          echo "FAIL: chat should prompt for praisonai wrapper install"
+        if echo "$CHAT_RUN" | grep -qE "No module named .praisonai'|install praisonai(\[|[[:space:]]|$)"; then
+          echo "FAIL: standalone chat still gates on the praisonai wrapper (issue #6271)"
           exit 1
         fi
-        echo "chat wrapper gate ok"
+        if ! echo "$CHAT_RUN" | grep -qi 'praisonai setup'; then
+          echo "FAIL: standalone chat should reach the in-process credential gate"
+          exit 1
+        fi
+        echo "standalone chat in-process ok"
 
     - name: Standalone praisonai-bot smoke (C9)
       run: |
@@ -256,7 +262,7 @@ jobs:
         "
         /tmp/praisonai-browser-standalone/bin/praisonai-browser --help
         bash "$GITHUB_WORKSPACE/scripts/check_c11_browser_imports.sh"
-        python -m pytest src/praisonai-browser/tests/browser/test_protocol_compliance.py -q -m "not network"
+        python -m pytest src/praisonai-browser/tests/browser/test_protocol_compliance.py src/praisonai-browser/tests/browser/test_server.py -q -m "not network"
 
     - name: Standalone praisonai-mcp smoke (C12)
       run: |

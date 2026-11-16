@@ -120,6 +120,17 @@ class CircuitBreakerException(Exception):
         super().__init__(f"Circuit breaker open for service '{service_name}', state: {state.value}")
 
 
+class _NeutralOutcome(Exception):
+    """Raised by a guarded callable whose outcome says nothing about the service's
+    health (e.g. a caller's bad input): recorded as neither success nor failure,
+    so it can neither open the circuit nor close a half-open one. Carries the
+    real outcome in ``value`` for the caller to unwrap."""
+
+    def __init__(self, value):
+        super().__init__("neutral outcome")
+        self.value = value
+
+
 class CircuitBreaker:
     """Lightweight circuit breaker implementation.
     
@@ -226,6 +237,8 @@ class CircuitBreaker:
             result = func(*args, **kwargs)
             self._on_success()
             return result
+        except _NeutralOutcome:
+            raise
         except Exception as e:
             self._on_failure()
             raise
@@ -269,6 +282,8 @@ class CircuitBreaker:
                 result = func(*args, **kwargs)
             self._on_success()
             return result
+        except _NeutralOutcome:
+            raise
         except Exception as e:
             self._on_failure()
             raise

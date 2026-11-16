@@ -154,6 +154,7 @@ class RAG:
         user_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         run_id: Optional[str] = None,
+        top_k: Optional[int] = None,
         **kwargs,
     ) -> List[Dict[str, Any]]:
         """
@@ -193,15 +194,27 @@ class RAG:
                     filtered.append(r)
             results = filtered
         
-        # Limit to top_k
-        results = results[:self.config.top_k]
+        # Limit to top_k (per-call value, never written back to shared config)
+        results = results[:self.config.top_k if top_k is None else top_k]
         
         return results
     
+    def _reranked(self, rerank: bool) -> bool:
+        """Whether a reranker actually ran: the local one, or a backend
+        reranker configured on the knowledge (e.g. mem0 with rerank_model)."""
+        if not rerank:
+            return False
+        if self.reranker:
+            return True
+        cfg = getattr(self.knowledge, "config", None)
+        backend = cfg.get("reranker") if isinstance(cfg, dict) else None
+        return bool(isinstance(backend, dict) and backend.get("default_rerank") and backend.get("provider"))
+
     def _rerank(
         self,
         query: str,
         results: List[Dict[str, Any]],
+        rerank: Optional[bool] = None,
     ) -> List[Dict[str, Any]]:
         """
         Rerank results if reranker is configured.
@@ -213,7 +226,9 @@ class RAG:
         Returns:
             Reranked results
         """
-        if not self.config.rerank or not self.reranker:
+        if rerank is None:
+            rerank = self.config.rerank
+        if not rerank or not self.reranker:
             return results
         
         try:
@@ -354,54 +369,47 @@ class RAG:
         """
         start_time = time.time()
         
-        # Apply overrides
-        original_top_k = self.config.top_k
-        original_rerank = self.config.rerank
+        # Resolve per-call overrides without mutating the shared config:
+        # aretrieve() runs this in an executor, so concurrent calls on one RAG
+        # would otherwise see (and permanently "restore") each other's values.
+        eff_top_k = self.config.top_k if top_k is None else top_k
+        eff_rerank = self.config.rerank if rerank is None else rerank
         
-        if top_k is not None:
-            self.config.top_k = top_k
-        if rerank is not None:
-            self.config.rerank = rerank
+        # 1. Retrieve
+        results = self._retrieve(
+            query=query,
+            user_id=user_id,
+            agent_id=agent_id,
+            run_id=run_id,
+            filters=filters,
+            top_k=eff_top_k,
+            **kwargs,
+        )
         
-        try:
-            # 1. Retrieve
-            results = self._retrieve(
-                query=query,
-                user_id=user_id,
-                agent_id=agent_id,
-                run_id=run_id,
-                filters=filters,
-                **kwargs,
-            )
-            
-            # 2. Rerank (optional)
-            results = self._rerank(query, results)
-            
-            # 3. Build context
-            context, used_results = self._build_context(results)
-            
-            # 4. Format citations
-            citations = self._format_citations(used_results)
-            
-            elapsed = time.time() - start_time
-            
-            return ContextPack(
-                context=context,
-                citations=citations,
-                query=query,
-                metadata={
-                    "elapsed_seconds": elapsed,
-                    "num_results": len(results),
-                    "num_citations": len(citations),
-                    "retrieval_strategy": self.config.retrieval_strategy.value,
-                    "reranked": self.config.rerank,
-                    "top_k": self.config.top_k,
-                },
-            )
-        finally:
-            # Restore original config
-            self.config.top_k = original_top_k
-            self.config.rerank = original_rerank
+        # 2. Rerank (optional)
+        results = self._rerank(query, results, rerank=eff_rerank)
+        
+        # 3. Build context
+        context, used_results = self._build_context(results)
+        
+        # 4. Format citations
+        citations = self._format_citations(used_results)
+        
+        elapsed = time.time() - start_time
+        
+        return ContextPack(
+            context=context,
+            citations=citations,
+            query=query,
+            metadata={
+                "elapsed_seconds": elapsed,
+                "num_results": len(results),
+                "num_citations": len(citations),
+                "retrieval_strategy": self.config.retrieval_strategy.value,
+                "reranked": self._reranked(eff_rerank),
+                "top_k": eff_top_k,
+            },
+        )
     
     async def aretrieve(
         self,
@@ -422,20 +430,18 @@ class RAG:
         Currently wraps sync version. Can be extended for true async.
         """
         import asyncio
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.retrieve(
-                query=query,
-                top_k=top_k,
-                hybrid=hybrid,
-                rerank=rerank,
-                filters=filters,
-                user_id=user_id,
-                agent_id=agent_id,
-                run_id=run_id,
-                **kwargs,
-            ),
+        # asyncio.to_thread copies contextvars into the worker thread
+        return await asyncio.to_thread(
+            self.retrieve,
+            query=query,
+            top_k=top_k,
+            hybrid=hybrid,
+            rerank=rerank,
+            filters=filters,
+            user_id=user_id,
+            agent_id=agent_id,
+            run_id=run_id,
+            **kwargs,
         )
     
     def query(
@@ -498,7 +504,7 @@ class RAG:
                 "num_results": len(results),
                 "num_citations": len(citations),
                 "retrieval_strategy": self.config.retrieval_strategy.value,
-                "reranked": self.config.rerank,
+                "reranked": self._reranked(self.config.rerank),
             },
         )
     
@@ -515,19 +521,15 @@ class RAG:
         
         Currently wraps sync version. Can be extended for true async.
         """
-        # For now, wrap sync version
-        # TODO: Implement true async when Knowledge supports it
         import asyncio
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
-            None,
-            lambda: self.query(
-                question=question,
-                user_id=user_id,
-                agent_id=agent_id,
-                run_id=run_id,
-                **kwargs,
-            ),
+        # asyncio.to_thread copies contextvars into the worker thread
+        return await asyncio.to_thread(
+            self.query,
+            question=question,
+            user_id=user_id,
+            agent_id=agent_id,
+            run_id=run_id,
+            **kwargs,
         )
     
     def stream(
@@ -572,6 +574,10 @@ class RAG:
         prompt = self._build_prompt(question, context)
         
         # 5. Stream generation
+        yield from self._stream_generate(prompt, **kwargs)
+    
+    def _stream_generate(self, prompt: str, **kwargs) -> Iterator[str]:
+        """Synchronously stream the LLM answer for an already-built prompt."""
         if self.llm is None:
             yield "LLM not available."
             return
@@ -607,10 +613,15 @@ class RAG:
         """
         Async streaming RAG response.
         
-        Yields tokens as they are generated.
+        Yields tokens as they are generated. Blocking retrieval, reranking
+        and sync LLM streaming run in worker threads so the event loop
+        stays responsive.
         """
-        # 1. Retrieve
-        results = self._retrieve(
+        import asyncio
+        
+        # 1. Retrieve (embedding + vector search are blocking)
+        results = await asyncio.to_thread(
+            self._retrieve,
             query=question,
             user_id=user_id,
             agent_id=agent_id,
@@ -619,7 +630,7 @@ class RAG:
         )
         
         # 2. Rerank
-        results = self._rerank(question, results)
+        results = await asyncio.to_thread(self._rerank, question, results)
         
         # 3. Build context
         context, used_results = self._build_context(results)
@@ -643,8 +654,14 @@ class RAG:
                 async for chunk in self.llm.astream(messages=messages, **kwargs):
                     yield chunk
             else:
-                # Fallback to sync streaming wrapped
-                for chunk in self.stream(question, user_id, agent_id, run_id, **kwargs):
+                # Fallback: pump the sync generator from a worker thread
+                # (reuses the context already retrieved above)
+                it = self._stream_generate(prompt, **kwargs)
+                sentinel = object()
+                while True:
+                    chunk = await asyncio.to_thread(next, it, sentinel)
+                    if chunk is sentinel:
+                        break
                     yield chunk
         except Exception as e:
             logger.error(f"Async streaming failed: {e}")

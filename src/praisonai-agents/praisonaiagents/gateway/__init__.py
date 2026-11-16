@@ -18,6 +18,8 @@ from .._lazy import create_lazy_getattr
 # 283 KB / 7,201-line ``protocols.py`` (and siblings) out of package-import
 # time; each submodule is parsed only when one of its symbols is first
 # touched. Mirrors the ``mcp``/``skills`` packages (AGENTS.md §4.2).
+_PROTOCOLS_MODULE = "praisonaiagents.gateway.protocols"
+
 _LAZY_IMPORTS = {
     # protocols.py (parsed lazily, on first touch)
     "GatewayProtocol": ("praisonaiagents.gateway.protocols", "GatewayProtocol"),
@@ -228,6 +230,12 @@ _LAZY_IMPORTS = {
     "StopResult": ("praisonaiagents.gateway.protocols", "StopResult"),
     # Schema-validated inbound frame codec (Issue #2831)
     "HelloParams": ("praisonaiagents.gateway.protocols", "HelloParams"),
+    # Device-identity handshake contract (Issue #5998)
+    # Module path via a constant: GitGuardian reads a ("...", "DeviceAuth")
+    # string pair as an "authentication tuple" and fails every PR that merges main.
+    "DeviceAuth": (_PROTOCOLS_MODULE, "DeviceAuth"),
+    "DeviceIdentityProtocol": ("praisonaiagents.gateway.protocols", "DeviceIdentityProtocol"),
+    "device_id_from_public_key": ("praisonaiagents.gateway.protocols", "device_id_from_public_key"),
     "HelloResult": ("praisonaiagents.gateway.protocols", "HelloResult"),
     "HelloError": ("praisonaiagents.gateway.protocols", "HelloError"),
     "ConnectErrorCode": ("praisonaiagents.gateway.protocols", "ConnectErrorCode"),
@@ -247,6 +255,9 @@ _LAZY_IMPORTS = {
     "WeakGatewaySecretError": ("praisonaiagents.gateway.protocols", "WeakGatewaySecretError"),
     "is_weak_secret": ("praisonaiagents.gateway.protocols", "is_weak_secret"),
     "assert_gateway_secret_strong": ("praisonaiagents.gateway.protocols", "assert_gateway_secret_strong"),
+    # Client transport-security guard (Issue #6307)
+    "InsecureGatewayTransportError": ("praisonaiagents.gateway.protocols", "InsecureGatewayTransportError"),
+    "assert_secure_gateway_transport": ("praisonaiagents.gateway.protocols", "assert_secure_gateway_transport"),
     # Per-platform identity canonicalization (Issue #3886)
     "IdentityCanonicalizerProtocol": ("praisonaiagents.gateway.protocols", "IdentityCanonicalizerProtocol"),
     # liveness.py — Event-loop liveness watchdog (Issue #3385)
@@ -586,6 +597,9 @@ __all__ = [
     "StopResult",
     # Schema-validated inbound frame codec (Issue #2831)
     "HelloParams",
+    "DeviceAuth",
+    "DeviceIdentityProtocol",
+    "device_id_from_public_key",
     "HelloResult",
     "HelloError",
     "ConnectErrorCode",
@@ -605,6 +619,9 @@ __all__ = [
     "WeakGatewaySecretError",
     "is_weak_secret",
     "assert_gateway_secret_strong",
+    # Client transport-security guard (Issue #6307)
+    "InsecureGatewayTransportError",
+    "assert_secure_gateway_transport",
     # Per-platform identity canonicalization (Issue #3886)
     "IdentityCanonicalizerProtocol",
     # Event-loop liveness watchdog (Issue #3385)

@@ -28,7 +28,9 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
+import math
 import sys
+import time
 from contextlib import asynccontextmanager
 from typing import Dict, Optional
 
@@ -106,9 +108,121 @@ class AdmissionRejected(Exception):
     busy acknowledgement to the user instead of an opaque error.
     """
 
-    def __init__(self, message: str = "Busy right now — please resend in a moment."):
+    def __init__(
+        self,
+        message: str = "Busy right now — please resend in a moment.",
+        retry_after: Optional[float] = None,
+    ):
         super().__init__(message)
         self.message = message
+        self.retry_after = retry_after
+
+
+class _TurnSlot:
+    """The run slot held by one admitted turn, lent back during human waits.
+
+    Issue #5912: a turn blocked on a human approval consumes no compute, so
+    while it waits its slot is released to other turns. Resuming never blocks:
+    the turn takes a free slot or, when none is free, borrows one that the next
+    released slot repays. A sync approval parked in a pool worker therefore
+    cannot deadlock against a turn waiting for that worker, and every parallel
+    approval branch returns already holding the slot. All state transitions run
+    on the gate's event loop and never suspend; a sync approval in a worker
+    thread hops onto it.
+    """
+
+    def __init__(self, gate: "AdmissionGate", sem: asyncio.Semaphore, scope: str):
+        self._gate = gate
+        self._sem = sem
+        self._scope = scope
+        self._loop = asyncio.get_running_loop()
+        self._waits = 0
+        self.held = True
+        self.closed = False
+
+    def human_wait(self) -> "_HumanWait":
+        return _HumanWait(self)
+
+    async def _suspend(self) -> None:
+        self._waits += 1
+        if self._waits == 1 and self.held and not self.closed:
+            self.held = False
+            self._gate.awaiting_human += 1
+            self._gate._give_slot(self._scope)
+            self._gate._release(self._sem)
+
+    async def _resume(self) -> None:
+        self._waits -= 1
+        if self.held or self.closed:
+            return
+        if self._sem.locked():
+            self._gate._debt += 1  # borrow; repaid by the next released slot
+        else:
+            await self._sem.acquire()  # a permit is free: returns without suspending
+        self.held = True
+        self._gate.awaiting_human -= 1
+        self._gate._take_slot(self._scope)
+
+    def close(self) -> None:
+        """End the turn: free the slot if held, else drop the human-wait count."""
+        self.closed = True
+        if self.held:
+            self.held = False
+            self._gate._give_slot(self._scope)
+            self._gate._release(self._sem)
+        else:
+            self._gate.awaiting_human -= 1
+
+    def _run_blocking(self, coro) -> bool:
+        """Run ``coro`` on the gate loop from another thread; ``False`` if unsafe."""
+        try:
+            running = asyncio.get_running_loop()
+        except RuntimeError:
+            running = None
+        if running is self._loop or self._loop.is_closed():
+            # On the gate loop itself we cannot block; leave the slot held.
+            coro.close()
+            return False
+        try:
+            asyncio.run_coroutine_threadsafe(coro, self._loop).result()
+            return True
+        except Exception as e:  # pragma: no cover — never break the approval
+            logger.debug("AdmissionGate: human-wait slot transfer failed: %s", e)
+            return False
+
+
+class _HumanWait:
+    """Sync + async context manager entered around one human approval wait."""
+
+    def __init__(self, slot: _TurnSlot):
+        self._slot = slot
+        self._entered = False
+
+    def __enter__(self) -> "_HumanWait":
+        self._entered = self._slot._run_blocking(self._slot._suspend())
+        return self
+
+    def __exit__(self, *exc) -> None:
+        if self._entered:
+            self._slot._run_blocking(self._slot._resume())
+
+    async def __aenter__(self) -> "_HumanWait":
+        slot = self._slot
+        if asyncio.get_running_loop() is slot._loop:
+            await slot._suspend()
+            self._entered = True
+        else:
+            self._entered = slot._run_blocking(slot._suspend())
+        return self
+
+    async def __aexit__(self, *exc) -> None:
+        if not self._entered:
+            return
+        slot = self._slot
+        if asyncio.get_running_loop() is slot._loop:
+            await slot._resume()
+        else:
+            slot._run_blocking(slot._resume())
 
 
 class AdmissionGate:
@@ -142,8 +256,16 @@ class AdmissionGate:
         *,
         resource_policy: Optional[object] = None,
         resource_sampler: Optional[object] = None,
+        rate_limit_policy: Optional[object] = None,
     ):
         self._policy = policy
+        # Issue #6215: optional per-identity request-rate ceiling (a core
+        # ``RateLimitPolicyProtocol``, e.g. ``SlidingWindowRateLimitPolicy``)
+        # checked before a turn is admitted, keyed by the caller's rate key
+        # (defaults to the session id).
+        self._rate_limit_policy = rate_limit_policy
+        self.rate_limited = 0
+        self._rate_prune_after = 0.0
         # Optional memory/resource-pressure policy (Issue #3445). When set, a
         # lightweight RSS sample is folded into each admit decision so the gate
         # queues under soft pressure and sheds under hard pressure before the
@@ -169,6 +291,10 @@ class AdmissionGate:
         # Live counters.
         self._in_flight = 0
         self._queued = 0
+        # Admitted turns parked on a human approval, not holding a slot (#5912).
+        self.awaiting_human = 0
+        # Slots borrowed by resumed turns when none was free; repaid first (#5912).
+        self._debt = 0
         # Live per-scope counters (only populated when the sub-limit is active),
         # keyed by the caller-supplied scope (the session_id at the call sites).
         self._scope_in_flight: "Dict[str, int]" = {}
@@ -192,6 +318,16 @@ class AdmissionGate:
         # otherwise assume active (it was explicitly supplied).
         return bool(getattr(pol, "enabled", True))
 
+    def set_rate_limit_policy(self, policy: Optional[object]) -> None:
+        """Swap the per-identity rate budget in place (config hot-reload)."""
+        self._rate_limit_policy = policy
+        self._rate_prune_after = 0.0
+
+    @property
+    def _rate_limit_enabled(self) -> bool:
+        pol = self._rate_limit_policy
+        return pol is not None and bool(getattr(pol, "enabled", True))
+
     @property
     def enabled(self) -> bool:
         """Whether the gate is active.
@@ -202,7 +338,7 @@ class AdmissionGate:
         """
         if self._policy is not None and self._max > 0:
             return True
-        return self._resource_enabled
+        return self._resource_enabled or self._rate_limit_enabled
 
     @property
     def in_flight(self) -> int:
@@ -222,9 +358,14 @@ class AdmissionGate:
             "queue_depth": self._queue_depth,
             "in_flight": self._in_flight,
             "queued": self._queued,
+            "awaiting_human": self.awaiting_human,
             "admitted": self.admitted,
             "rejected": self.rejected,
             "shed": self.shed,
+            "per_user_per_minute": int(
+                getattr(self._rate_limit_policy, "max_requests", 0) or 0
+            ),
+            "rate_limited": self.rate_limited,
             "max_rss_mb": float(
                 getattr(self._resource_policy, "hard_rss_mb", 0.0) or 0.0
             ),
@@ -250,8 +391,13 @@ class AdmissionGate:
         return self._sem
 
     @asynccontextmanager
-    async def admit(self, *, session_id: str = ""):
+    async def admit(self, *, session_id: str = "", rate_key: Optional[str] = None):
         """Admit (or shed) an inbound turn, holding a slot for its duration.
+
+        ``rate_key`` is the identity charged against the per-user request
+        budget. It defaults to ``session_id``; surfaces where the session id is
+        client-chosen (API headers, WebSocket sessions) pass a stable caller
+        identity instead so a new conversation cannot reset the budget.
 
         Yields when capacity is available (immediately or after waiting in the
         bounded queue). Raises :class:`AdmissionRejected` when the policy sheds
@@ -261,6 +407,8 @@ class AdmissionGate:
             # Disabled: preserve legacy always-admit behaviour with no overhead.
             yield
             return
+
+        self._check_rate_limit(rate_key or session_id)
 
         # Issue #5168: the scope key is the caller-supplied session_id (the
         # per-user/per-tenant storage key at the call sites). Only tracked when
@@ -339,16 +487,91 @@ class AdmissionGate:
                 if scope:
                     self._dec_scope(self._scope_queued, scope)
 
-        self._in_flight += 1
-        if scope:
-            self._scope_in_flight[scope] = self._scope_in_flight.get(scope, 0) + 1
+        self._take_slot(scope)
         self.admitted += 1
+        # Issue #5912: lend the slot back while the turn is parked on a human
+        # approval, so pending approvals cannot starve the ceiling.
+        slot = _TurnSlot(self, sem, scope)
+        token = None
+        try:
+            from praisonaiagents.approval.registry import HUMAN_WAIT_SCOPE
+        except ImportError:  # pragma: no cover — older core without the hook
+            HUMAN_WAIT_SCOPE = None
+        if HUMAN_WAIT_SCOPE is not None:
+            token = HUMAN_WAIT_SCOPE.set(slot.human_wait)
         try:
             yield
         finally:
-            self._in_flight -= 1
-            if scope:
-                self._dec_scope(self._scope_in_flight, scope)
+            if token is not None:
+                try:
+                    HUMAN_WAIT_SCOPE.reset(token)
+                except ValueError:  # pragma: no cover — exited in another context
+                    pass
+            slot.close()
+
+    def _check_rate_limit(self, session_id: str) -> None:
+        """Shed the turn if *session_id* is over its request-rate budget (#6215)."""
+        if not self._rate_limit_enabled:
+            return
+        pol = self._rate_limit_policy
+        now = time.monotonic()
+        try:
+            decision = pol.check(identity=session_id or "-", scope="ingress", now=now)
+        except Exception as e:  # pragma: no cover — never block on policy error
+            logger.warning("AdmissionGate: rate-limit policy failed (%s); admitting", e)
+            return
+        finally:
+            # Bounded cadence: a burst of distinct callers must not trigger a
+            # full scan on every request while their windows are still live.
+            if now >= self._rate_prune_after:
+                self._rate_prune_after = now + _RATE_PRUNE_INTERVAL
+                self._prune_rate_limit_state(pol, now)
+        if decision.allowed:
+            return
+        self.rate_limited += 1
+        retry = decision.retry_after_seconds
+        wait = max(1, math.ceil(retry)) if retry is not None else None
+        logger.info("AdmissionGate: rate-limited session=%s retry_after=%s", session_id or "-", wait)
+        if wait is None:
+            raise AdmissionRejected("Rate limit reached — please try again later.")
+        raise AdmissionRejected(
+            f"Rate limit reached — please try again in {wait}s.", retry_after=float(wait)
+        )
+
+    @staticmethod
+    def _prune_rate_limit_state(pol: object, now: float, cap: int = 4096) -> None:
+        """Drop expired per-identity entries so an open bot cannot grow them forever.
+
+        ``SlidingWindowRateLimitPolicy`` reclaims a key only when that key is
+        checked again and leaves reclamation of an unbounded identity space to
+        the wrapper; inbound users are such a space.
+        """
+        windows = getattr(pol, "_windows", None)
+        lockouts = getattr(pol, "_lockouts", None)
+        if not isinstance(windows, dict) or len(windows) + len(lockouts or {}) <= cap:
+            return
+        span = float(getattr(pol, "window_seconds", 0) or 0)
+        for key in [k for k, (start, _) in windows.items() if now - start >= span]:
+            windows.pop(key, None)
+        if isinstance(lockouts, dict):
+            for key in [k for k, until in lockouts.items() if now >= until]:
+                lockouts.pop(key, None)
+
+    def _take_slot(self, scope: str) -> None:
+        self._in_flight += 1
+        if scope:
+            self._scope_in_flight[scope] = self._scope_in_flight.get(scope, 0) + 1
+
+    def _give_slot(self, scope: str) -> None:
+        self._in_flight -= 1
+        if scope:
+            self._dec_scope(self._scope_in_flight, scope)
+
+    def _release(self, sem: asyncio.Semaphore) -> None:
+        """Return a slot permit, first repaying any slot borrowed on resume."""
+        if self._debt:
+            self._debt -= 1
+        else:
             sem.release()
 
     @staticmethod
@@ -457,6 +680,46 @@ def build_memory_pressure_policy(
     return MemoryPressurePolicy(soft_rss_mb=soft, hard_rss_mb=hard)
 
 
+_RATE_PRUNE_INTERVAL = 5.0
+
+
+def build_rate_limit_policy(per_user_per_minute: object) -> Optional[object]:
+    """Return a per-user request budget policy, or ``None`` when unlimited.
+
+    Accepts a non-negative whole number (``0``/``None`` = unlimited). Fractional,
+    boolean, negative or non-numeric values raise ``ValueError`` so a typo never
+    silently disables the budget the operator asked for.
+    """
+    value = per_user_per_minute
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float, str)):
+        raise ValueError(
+            f"per_user_per_minute must be a non-negative integer, got {value!r}"
+        )
+    try:
+        if isinstance(value, float):
+            if not value.is_integer():
+                raise ValueError
+            value = int(value)
+        else:
+            value = int(value)
+    except (TypeError, ValueError) as err:
+        raise ValueError(
+            f"per_user_per_minute must be a non-negative integer, "
+            f"got {per_user_per_minute!r}"
+        ) from err
+    if value < 0:
+        raise ValueError(
+            f"per_user_per_minute must be >= 0, got {per_user_per_minute!r}"
+        )
+    if value == 0:
+        return None
+    from praisonaiagents.gateway import SlidingWindowRateLimitPolicy
+
+    return SlidingWindowRateLimitPolicy(max_requests=value, window_seconds=60.0)
+
+
 def build_admission_gate(
     max_concurrent_runs: int = 0,
     queue_depth: int = 0,
@@ -464,6 +727,7 @@ def build_admission_gate(
     policy: Optional[object] = None,
     resource_policy: Optional[object] = None,
     max_concurrent_runs_per_scope: int = 0,
+    per_user_per_minute: int = 0,
 ) -> Optional[AdmissionGate]:
     """Construct an :class:`AdmissionGate` from config, or return ``None``.
 
@@ -481,7 +745,13 @@ def build_admission_gate(
     gate so it queues under soft RSS pressure and sheds under hard pressure. A
     gate is built when *either* a concurrency ceiling *or* a resource policy is
     configured, so a memory-only deployment still gets backpressure.
+
+    ``per_user_per_minute`` (Issue #6215) caps how many turns one identity may
+    start per minute; ``0`` (the default) leaves ingress unlimited. Over the cap
+    the turn is refused with a ``retry_after`` hint before any work starts.
     """
+    # Raises ValueError on a negative / non-integer value (fail fast).
+    rate_limit_policy = build_rate_limit_policy(per_user_per_minute)
     if policy is None:
         # Only an explicit ``0`` (or ``None``) disables admission control. A
         # *negative* ceiling is a misconfiguration, not "disabled": fall through
@@ -495,8 +765,12 @@ def build_admission_gate(
         if no_ceiling:
             # No concurrency ceiling: build a resource-only gate when a
             # resource policy is supplied, else no gate (legacy behaviour).
-            if resource_policy is not None:
-                return AdmissionGate(None, resource_policy=resource_policy)
+            if resource_policy is not None or rate_limit_policy is not None:
+                return AdmissionGate(
+                    None,
+                    resource_policy=resource_policy,
+                    rate_limit_policy=rate_limit_policy,
+                )
             return None
         try:
             from praisonaiagents.gateway import ConcurrencyLimitPolicy
@@ -508,4 +782,6 @@ def build_admission_gate(
             overflow_policy=overflow_policy,
             max_concurrent_runs_per_scope=max_concurrent_runs_per_scope,
         )
-    return AdmissionGate(policy, resource_policy=resource_policy)
+    return AdmissionGate(
+        policy, resource_policy=resource_policy, rate_limit_policy=rate_limit_policy
+    )

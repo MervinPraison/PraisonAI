@@ -14,8 +14,9 @@ import time
 from typing import Dict, Iterator, List, Optional
 
 from .models import ScheduleJob, RunRecord
-from .due import is_due as _is_due, is_misfire as _is_misfire
+from .due import is_due as _is_due, is_misfire as _is_misfire, lease_state as _lease_state, past_until as _past_until
 from .hook_emit import emit_schedule_add, emit_schedule_remove
+from ..utils.atomic_io import atomic_write_json
 
 logger = get_logger(__name__)
 
@@ -41,6 +42,8 @@ class FileScheduleStore:
         self._lock = threading.RLock()
         self._jobs: Dict[str, ScheduleJob] = {}
         self._history: List[RunRecord] = []
+        # Run records whose history write failed; merged into the next save.
+        self._unsaved: List[RunRecord] = []
         # In-memory record of leases we currently hold, so ``complete`` can
         # release them. Cross-process leases live in the persisted job
         # (``lease_until`` / ``lease_owner``) which is the source of truth.
@@ -60,7 +63,7 @@ class FileScheduleStore:
             if job.id in self._jobs:
                 raise ValueError(f"Job '{job.id}' already exists")
             self._jobs[job.id] = job
-            self._save()
+            self._save_or_rollback(job.id)
         # Emit SCHEDULE_ADD outside the store locks: a hook must never be able
         # to deadlock the cross-process file lock by calling back in.
         emit_schedule_add(job)
@@ -120,7 +123,7 @@ class FileScheduleStore:
                     job._lease_until = getattr(existing, "_lease_until", 0.0) or 0.0
                     job._lease_owner = getattr(existing, "_lease_owner", None)
             self._jobs[job.id] = job
-            self._save()
+            self._save_or_rollback(job.id)
 
     def remove(self, job_id: str) -> bool:
         removed = None
@@ -128,7 +131,7 @@ class FileScheduleStore:
             self._reload_locked()
             if job_id in self._jobs:
                 removed = self._jobs.pop(job_id)
-                self._save()
+                self._save_or_rollback(job_id)
         if removed is None:
             return False
         emit_schedule_remove(removed)
@@ -150,7 +153,7 @@ class FileScheduleStore:
                     if principal is not None and job.principal != principal:
                         continue
                     removed = self._jobs.pop(jid)
-                    self._save()
+                    self._save_or_rollback(jid)
                     break
         if removed is None:
             return False
@@ -172,25 +175,37 @@ class FileScheduleStore:
         job that is due and not already leased by someone else we:
 
         * advance ``last_run_at`` to ``now`` (pre-advancing the schedule so a
-          later poll no longer sees it as due — at-least-once → at-most-once),
+          later poll no longer sees it as due),
         * take a lease (``lease_until = now + lease_seconds``, ``lease_owner``),
           persisting both in the same atomic write,
-        * remove one-shot jobs (``delete_after_run``) immediately so no other
-          ticker can pick them up.
+        * mark spent jobs (one-shot, ``max_runs`` met) as retiring instead of
+          deleting them; the lease keeps competitors out and ``mark_run``
+          removes them once the run completes.
 
-        A crashed run leaves a lease that expires after ``lease_seconds``; the
-        job then becomes due again and is retried. Losers of the race simply do
-        not see the job in their returned list.
+        A lease that expires without ``complete`` is an abandoned (crashed)
+        run and is recorded as ``abandoned`` history. A retiring job is then
+        re-offered once (at-least-once across crashes) and retired if that
+        attempt is abandoned too; a recurring job is at-most-once per slot and
+        next runs at its following slot. Losers of the race simply do not see
+        the job in their returned list.
         """
         claimed: List[ScheduleJob] = []
-        # One-shots auto-deleted by this claim. Emitted after the lock below;
-        # a later ``remove(job.id)`` by the runner is then a no-op, so a spent
-        # one-shot yields exactly one SCHEDULE_REMOVE.
+        # Spent jobs retired by this claim. Emitted after the lock below.
         auto_removed: List[ScheduleJob] = []
-        # (job_id, job_name) for occurrences suppressed by the misfire policy.
-        # Logged as ``missed`` history after the lock so a dropped occurrence is
-        # observable instead of vanishing silently.
+        # (job_id, job_name, status) for occurrences suppressed by the misfire
+        # policy (``missed``) or runs whose lease expired (``abandoned``).
+        # Logged after the lock so a lost run is observable, not silent.
         missed: List[tuple] = []
+
+        def take(job: ScheduleJob) -> None:
+            job._lease_until = now + lease_seconds
+            job._lease_owner = owner_id
+            # ``run_count`` is counted at claim; flag it so ``mark_run`` does
+            # not double-count the same fire.
+            job._run_counted = True
+            self._held_leases[job.id] = owner_id
+            claimed.append(job)
+
         with self._lock, self._file_lock():
             # Re-read from disk so we observe cross-process claims/leases.
             self._reload_locked()
@@ -198,10 +213,30 @@ class FileScheduleStore:
             for job in list(self._jobs.values()):
                 if not job.enabled:
                     continue
-                lease_until = getattr(job, "_lease_until", 0.0) or 0.0
-                lease_owner = getattr(job, "_lease_owner", None)
-                # An unexpired lease held by another owner blocks the claim.
-                if lease_until > now and lease_owner != owner_id:
+                state = _lease_state(job, now, owner_id)
+                if state == "busy" or (
+                    # Our own spent-job run outlived its lease but is still in
+                    # flight: re-offering it would fire it twice.
+                    state == "abandoned"
+                    and getattr(job, "_retiring", 0)
+                    and self._held_leases.get(job.id) == owner_id
+                ):
+                    continue
+                if state == "abandoned":
+                    missed.append((job.id, job.name, "abandoned"))
+                    job._lease_until = 0.0
+                    job._lease_owner = None
+                    changed = True
+                    if getattr(job, "_retiring", 0) == 1 and not _past_until(job, now):
+                        # First attempt of a spent job crashed: retry once
+                        # (unless its ``until`` deadline has passed meanwhile).
+                        job._retiring = 2
+                        take(job)
+                        continue
+                if getattr(job, "_retiring", 0):
+                    # Run finished (or its retry was abandoned too): retire.
+                    auto_removed.append(self._jobs.pop(job.id))
+                    changed = True
                     continue
                 if not _is_due(job, now):
                     # A job past its ``until`` end instant is not due, but must
@@ -221,25 +256,17 @@ class FileScheduleStore:
                     # poll does not see it as due again) and record the miss,
                     # without claiming or firing.
                     job.last_run_at = now
-                    missed.append((job.id, job.name))
+                    missed.append((job.id, job.name, "missed"))
                     changed = True
                     continue
                 # Win the claim: pre-advance + lease atomically.
                 job.last_run_at = now
-                # Count the fire here (needed so ``should_retire()`` can drop a
-                # spent job before a competitor reclaims it) and flag it so the
-                # later ``mark_run`` does not double-count the same fire.
                 job.run_count += 1
-                job._run_counted = True
-                job._lease_until = now + lease_seconds
-                job._lease_owner = owner_id
-                self._held_leases[job.id] = owner_id
-                claimed.append(job)
-                changed = True
                 if job.should_retire(now):
-                    # Spent (one-shot, run-count met, or past ``until``): remove
-                    # now so no competitor re-claims it.
-                    auto_removed.append(self._jobs.pop(job.id))
+                    # Spent: keep it (leased) so a crash cannot lose it.
+                    job._retiring = 1
+                take(job)
+                changed = True
             if changed:
                 if not self._save():
                     # The lease/last_run_at advance was NOT persisted (full
@@ -255,11 +282,11 @@ class FileScheduleStore:
             emit_schedule_remove(job)
         # Record suppressed occurrences so a missed run is visible in history
         # rather than silently dropped. Logged outside the file lock (log_run
-        # takes only the thread lock) to keep the critical section short.
-        for job_id, job_name in missed:
+        # takes it itself; flock is not re-entrant across file handles).
+        for job_id, job_name, status in missed:
             self.log_run(
                 job_id=job_id,
-                status="missed",
+                status=status,
                 job_name=job_name,
             )
         return claimed
@@ -301,12 +328,26 @@ class FileScheduleStore:
             delivered=delivered,
             timestamp=time.time(),
         )
-        with self._lock:
-            self._history.insert(0, record)
-            # Prune to max_history
-            if len(self._history) > self._max_history:
-                self._history = self._history[:self._max_history]
-            self._save_history()
+        with self._lock, self._file_lock():
+            # Reload under the cross-process lock so concurrent writers (e.g.
+            # the scheduler daemon and a CLI process) don't drop each other's
+            # records (last-writer-wins). Records whose earlier save failed are
+            # carried forward so they are retried, not discarded.
+            pending = ([record] + self._unsaved)[:self._max_history]
+            on_disk = self._read_history()
+            if on_disk is None:
+                # Unreadable history: never overwrite saved records with a
+                # partial view. Keep the new record in memory for a retry.
+                self._history = ([record] + self._history)[:self._max_history]
+                self._unsaved = pending
+                return
+            # Retried records may be older than ones other processes wrote
+            # since; sort so history stays newest-first before trimming.
+            merged = sorted(
+                pending + on_disk, key=lambda r: r.timestamp, reverse=True
+            )
+            self._history = merged[:self._max_history]
+            self._unsaved = [] if self._save_history() else pending
 
     def get_history(
         self,
@@ -392,6 +433,17 @@ class FileScheduleStore:
         except Exception as e:
             logger.warning("Failed to load schedule store from %s: %s", self._path, e)
 
+    def _save_or_rollback(self, job_id: str) -> None:
+        """Persist jobs or restore on-disk state and raise (file lock held).
+
+        Keeps memory consistent with disk so a failed write never reports
+        success (or fires lifecycle hooks) for a change that will vanish on
+        restart.
+        """
+        if not self._save():
+            self._reload_locked()
+            raise OSError(f"Failed to persist schedule job '{job_id}'")
+
     def _save(self) -> bool:
         """Persist jobs to disk.
 
@@ -401,10 +453,7 @@ class FileScheduleStore:
         try:
             os.makedirs(self._dir, exist_ok=True)
             data = [j.to_dict() for j in self._jobs.values()]
-            tmp = self._path + ".tmp"
-            with open(tmp, "w") as f:
-                json.dump(data, f, indent=2)
-            os.replace(tmp, self._path)
+            atomic_write_json(self._path, data, indent=2)
             return True
         except Exception as e:
             logger.warning("Failed to save schedule store to %s: %s", self._path, e)
@@ -412,25 +461,27 @@ class FileScheduleStore:
 
     def _load_history(self) -> None:
         """Load execution history from history.json."""
+        self._history = self._read_history() or []
+
+    def _read_history(self) -> Optional[List[RunRecord]]:
+        """Read history.json; ``[]`` if absent, ``None`` if unreadable."""
         if not os.path.exists(self._history_path):
-            return
+            return []
         try:
             with open(self._history_path, "r") as f:
                 data = json.load(f)
-            for d in data:
-                record = RunRecord.from_dict(d)
-                self._history.append(record)
+            return [RunRecord.from_dict(d) for d in data]
         except Exception as e:
             logger.warning("Failed to load history from %s: %s", self._history_path, e)
+            return None
 
-    def _save_history(self) -> None:
-        """Save execution history to history.json."""
+    def _save_history(self) -> bool:
+        """Save execution history to history.json; ``True`` on success."""
         try:
             os.makedirs(self._dir, exist_ok=True)
             data = [r.to_dict() for r in self._history]
-            tmp = self._history_path + ".tmp"
-            with open(tmp, "w") as f:
-                json.dump(data, f, indent=2)
-            os.replace(tmp, self._history_path)
+            atomic_write_json(self._history_path, data, indent=2)
+            return True
         except Exception as e:
             logger.warning("Failed to save history to %s: %s", self._history_path, e)
+            return False

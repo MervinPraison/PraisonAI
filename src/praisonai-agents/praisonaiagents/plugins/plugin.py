@@ -177,8 +177,9 @@ class Plugin(ABC):
     
     Plugins can extend agent functionality by implementing
     hook methods that are called at various points in the
-    agent lifecycle.
-    
+    agent lifecycle. Hook methods may be ``def`` or ``async def``;
+    coroutines returned by async hooks are awaited by the dispatcher.
+
     Example:
         class MyPlugin(Plugin):
             @property
@@ -231,8 +232,18 @@ class Plugin(ABC):
         """
         return prompt
     
-    def after_agent(self, response: str, context: Dict[str, Any]) -> str:
-        """Called after agent execution. Can modify response."""
+    def after_agent(
+        self, response: str, context: Dict[str, Any]
+    ) -> Union[str, "PluginDecision", "HookResult", None]:
+        """Called after agent execution.
+
+        Return a modified ``response`` (rewrite), or a deny/block decision
+        (``PluginDecision.deny(reason)`` / a ``HookResult`` / raise
+        :class:`GuardrailBlocked`) to replace the value returned to the caller
+        (and the in-memory assistant turn) with a refusal marker, or ``None``
+        for no-op. Interaction callbacks, verbose display, streamed output and
+        session/DB persistence happen before this hook and are not gated by it.
+        """
         return response
     
     def before_tool(

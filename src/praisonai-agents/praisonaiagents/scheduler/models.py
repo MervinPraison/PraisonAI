@@ -215,7 +215,7 @@ class RunRecord:
         job_id: ID of the job that was executed.
         job_name: Human-readable name of the job.
         status: Execution status. One of ``"succeeded"``, ``"failed"``,
-                ``"skipped"``, ``"no_change"``, or ``"missed"``. ``"no_change"``
+                ``"skipped"``, ``"no_change"``, ``"missed"`` or ``"abandoned"``. ``"no_change"``
                 is the stateful "monitor mode" outcome — a watched source was
                 unchanged since the last tick, so the model turn was suppressed
                 silently (no tokens, no delivery). It is distinct from
@@ -225,6 +225,8 @@ class RunRecord:
                 the process was down and fell outside the job's
                 ``misfire_grace_seconds`` — it was not run, but is recorded
                 (not silently dropped) so an operator can see the gap.
+                ``"abandoned"`` records a claimed run whose lease expired
+                without completing (crash or restart mid-run).
         result: Agent response text (truncated if very long).
         error: Error message if status is ``"failed"``.
         duration: Wall-clock seconds for execution.
@@ -234,7 +236,7 @@ class RunRecord:
 
     job_id: str
     job_name: str = ""
-    status: Literal["succeeded", "failed", "skipped", "no_change", "missed"] = "succeeded"
+    status: Literal["succeeded", "failed", "skipped", "no_change", "missed", "abandoned"] = "succeeded"
     result: Optional[str] = None
     error: Optional[str] = None
     duration: float = 0.0
@@ -296,6 +298,11 @@ class ScheduleJob:
                   to a channel bot (e.g. Telegram chat).
         origin: Optional original delivery target where the job was created
                 (for "origin" token resolution).
+        failure_delivery: Optional separate target for operational notices
+                (failure summaries, recovery notes, quota holds). ``None``
+                (default) falls back to ``delivery``; a ``"none"`` target
+                suppresses them from every channel (run history still records
+                the failure).
         pre_run: Optional cheap, deterministic pre-run gate evaluated before
                  the (expensive) model turn — a shell/python command or a
                  registered gate name. When it reports "nothing to do" the
@@ -434,6 +441,7 @@ class ScheduleJob:
     last_run_at: Optional[float] = None
     delivery: Optional[DeliveryTarget] = None
     origin: Optional[DeliveryTarget] = None
+    failure_delivery: Optional[DeliveryTarget] = None
     pre_run: Optional[str] = None
     condition: Optional[str] = None
     principal: Optional[str] = None
@@ -460,7 +468,7 @@ class ScheduleJob:
         every claim path so the retire decision is defined once. A job retires
         when it is:
 
-        * a one-shot (``delete_after_run``),
+        * a one-shot (``delete_after_run``) that has fired,
         * at or past its ``max_runs`` budget, or
         * past its ``until`` end instant (when ``now`` is supplied).
 
@@ -478,7 +486,8 @@ class ScheduleJob:
                 ``until`` check is skipped (callers that only ran a job and
                 want the run-count/one-shot decision).
         """
-        if self.delete_after_run:
+        # A one-shot that has not fired yet is waiting, not spent.
+        if self.delete_after_run and self.run_count > 0:
             return True
         if self.max_runs is not None and self.run_count >= self.max_runs:
             return True
@@ -528,6 +537,8 @@ class ScheduleJob:
             d["delivery"] = self.delivery.to_dict()
         if self.origin is not None:
             d["origin"] = self.origin.to_dict()
+        if self.failure_delivery is not None:
+            d["failure_delivery"] = self.failure_delivery.to_dict()
         if self.pre_run is not None:
             d["pre_run"] = self.pre_run
         if self.condition is not None:
@@ -587,6 +598,11 @@ class ScheduleJob:
         if lease_until:
             d["lease_until"] = lease_until
             d["lease_owner"] = getattr(self, "_lease_owner", None)
+        # Spent job claimed for its final run: 1 = first attempt, 2 = the one
+        # retry after a crashed (abandoned) attempt. Omitted otherwise.
+        retiring = getattr(self, "_retiring", 0)
+        if retiring:
+            d["retiring"] = retiring
         return d
 
     @classmethod
@@ -594,6 +610,7 @@ class ScheduleJob:
         sched_data = d.get("schedule", {})
         delivery_data = d.get("delivery")
         origin_data = d.get("origin")
+        failure_data = d.get("failure_delivery")
         # Accept a bare string for a single upstream (YAML/CLI ergonomics) and
         # normalise to a list; drop empties. ``None`` stays ``None`` (stateless).
         context_from = d.get("context_from")
@@ -619,6 +636,10 @@ class ScheduleJob:
             last_run_at=d.get("last_run_at"),
             delivery=DeliveryTarget.from_dict(delivery_data) if isinstance(delivery_data, dict) else None,
             origin=DeliveryTarget.from_dict(origin_data) if isinstance(origin_data, dict) else None,
+            failure_delivery=(
+                DeliveryTarget.from_dict(failure_data)
+                if isinstance(failure_data, dict) else None
+            ),
             pre_run=d.get("pre_run"),
             condition=d.get("condition"),
             principal=d.get("principal"),
@@ -645,4 +666,5 @@ class ScheduleJob:
         # Restore atomic-claim lease metadata if present (see ``to_dict``).
         job._lease_until = d.get("lease_until", 0.0) or 0.0
         job._lease_owner = d.get("lease_owner")
+        job._retiring = d.get("retiring", 0) or 0
         return job

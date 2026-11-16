@@ -7,7 +7,7 @@ Tests:
 - Concurrent claims (threads) each get disjoint jobs — no double-fire
 - complete() releases the lease
 - Expired leases become claimable again (crash recovery)
-- One-shot jobs (delete_after_run) are removed on claim
+- One-shot jobs (delete_after_run) stay leased on claim, retired on completion
 - Lease metadata round-trips through to_dict/from_dict
 - ScheduleRunner.claim_due_jobs falls back to get_due_jobs without claim
 """
@@ -78,7 +78,7 @@ class TestClaimDue:
             reclaimed = store.claim_due(t1, owner_id="B", lease_seconds=5)
             assert len(reclaimed) == 1
 
-    def test_one_shot_removed_on_claim(self):
+    def test_one_shot_retired_on_completion(self):
         with tempfile.TemporaryDirectory() as d:
             store = FileScheduleStore(store_dir=d)
             job = ScheduleJob(
@@ -90,6 +90,10 @@ class TestClaimDue:
             store.add(job)
             claimed = store.claim_due(time.time(), owner_id="A")
             assert len(claimed) == 1
+            # Kept (leased, retiring) so a crash mid-run cannot lose it.
+            kept = store.get(job.id)
+            assert kept is not None and kept._retiring == 1
+            ScheduleRunner(store).mark_run(claimed[0])
             assert store.get(job.id) is None
 
     def test_concurrent_claims_no_double_fire(self):
@@ -335,7 +339,7 @@ class TestConfigYamlClaimDue:
             reclaimed = store.claim_due(t1, owner_id="B", lease_seconds=5)
             assert len(reclaimed) == 1
 
-    def test_one_shot_removed_on_claim(self):
+    def test_one_shot_retired_on_completion(self):
         with tempfile.TemporaryDirectory() as d:
             store = self._make_store(d)
             job = ScheduleJob(
@@ -347,6 +351,10 @@ class TestConfigYamlClaimDue:
             store.add(job)
             claimed = store.claim_due(time.time(), owner_id="A")
             assert len(claimed) == 1
+            # Kept (leased, retiring) so a crash mid-run cannot lose it.
+            kept = store.get(job.id)
+            assert kept is not None and kept._retiring == 1
+            ScheduleRunner(store).mark_run(claimed[0])
             assert store.get(job.id) is None
 
     def test_concurrent_claims_no_double_fire(self):

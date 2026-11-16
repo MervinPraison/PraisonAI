@@ -14,9 +14,10 @@ from praisonaiagents.llm.llm import LLM
 ])
 @pytest.mark.parametrize("token,expected", [
     (".5", .5), ("1e2", 100), ("0", 0), ("999", 300),
-    ("-.5", 60), ("-5", 60), ("1e309", 60), ("1.2.3", 60),
+    ("-.5", None), ("-5", None), ("1e309", None), ("1.2.3", None),
 ])
-def test_retry_decision_uses_complete_numeric_hint(template, token, expected):
+def test_retry_decision_uses_complete_numeric_hint(template, token, expected, monkeypatch):
+    monkeypatch.setattr("praisonaiagents.llm.error_classifier.random.uniform", lambda low, high: high)
     llm = LLM(model="fake")
     assert llm._parse_retry_delay(template.format(token)) == expected
     decision = llm.resolve_failover_decision(
@@ -24,16 +25,15 @@ def test_retry_decision_uses_complete_numeric_hint(template, token, expected):
         {"attempt": 1, "max_retries": 3, "side_effecting": False},
     )
     assert decision.reason == "rate_limit"
-    # The existing decision applies its exponential floor to a zero hint.
-    assert decision.backoff_ms == int((expected or 1) * 1000)
+    # Missing/invalid hints use jitter; an explicit zero stays zero.
+    assert decision.backoff_ms == int((3 if expected is None else expected) * 1000)
 
 
 def test_retry_parser_keeps_configured_cap_and_default():
     from types import SimpleNamespace
 
-    llm = LLM(model="fake")
+    llm = LLM(model="fake", retry_delay=7)
     llm._rate_limiter = SimpleNamespace(max_retry_delay=12)
-    llm._retry_delay = 7
     assert llm._parse_retry_delay('try again in 1e2') == 12
     assert llm._parse_retry_delay('no retry hint') == 7
 

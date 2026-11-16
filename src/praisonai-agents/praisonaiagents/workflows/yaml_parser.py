@@ -473,7 +473,10 @@ class YAMLWorkflowParser:
             
             if 'reasoning' in role_config:
                 agent['reasoning'] = role_config['reasoning']
-            
+
+            if isinstance(role_config.get('execution'), dict):
+                agent['execution'] = role_config['execution']
+
             agents[role_id] = agent
         
         return agents
@@ -591,7 +594,11 @@ class YAMLWorkflowParser:
             # so we don't override the Agent's own caching default.
             if cache is False:
                 agent_kwargs['caching'] = False
-            _execution: Dict[str, Any] = {}
+            # An agent-level `execution:` mapping passes straight through to
+            # ExecutionConfig (e.g. max_budget, on_budget_exceeded, durable,
+            # journal_path, resume_run_id); flat max_iter/max_execution_time win.
+            _yaml_execution = config.get('execution')
+            _execution: Dict[str, Any] = dict(_yaml_execution) if isinstance(_yaml_execution, dict) else {}
             if max_iter is not None:
                 _execution['max_iter'] = max_iter
             if max_execution_time is not None:
@@ -707,7 +714,7 @@ class YAMLWorkflowParser:
         from ..agent import ImageAgent
         
         # ImageAgent accepts: llm, style, and other image config
-        style = config.get('style', 'natural')
+        style = config.get('style')
         
         agent = ImageAgent(
             llm=llm,
@@ -1077,11 +1084,15 @@ class YAMLWorkflowParser:
         # Build routes dictionary with resolved agents
         routes = {}
         for route_key, agent_ids in route_config.items():
-            if isinstance(agent_ids, list):
-                routes[route_key] = [self._agents[aid] for aid in agent_ids if aid in self._agents]
-            else:
-                if agent_ids in self._agents:
-                    routes[route_key] = [self._agents[agent_ids]]
+            if not isinstance(agent_ids, list):
+                agent_ids = [agent_ids]
+            try:
+                routes[route_key] = [self._agents[aid] for aid in agent_ids]
+            except KeyError as exc:
+                raise ValueError(
+                    f"Agent '{exc.args[0]}' in route '{route_key}' "
+                    "not defined in agents section"
+                ) from exc
         
         return route(routes)
     

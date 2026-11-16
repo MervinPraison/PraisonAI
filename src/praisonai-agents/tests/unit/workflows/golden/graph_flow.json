@@ -1,0 +1,431 @@
+{
+  "edges": [
+    {
+      "id": "start:begin->step:Researcher:next",
+      "kind": "next",
+      "label": null,
+      "source": "start:begin",
+      "target": "step:Researcher"
+    },
+    {
+      "id": "agent:Researcher->tool:Researcher/search_web:uses",
+      "kind": "uses",
+      "label": null,
+      "source": "agent:Researcher",
+      "target": "tool:Researcher/search_web"
+    },
+    {
+      "id": "step:Researcher->agent:Researcher:assigned",
+      "kind": "assigned",
+      "label": null,
+      "source": "step:Researcher",
+      "target": "agent:Researcher"
+    },
+    {
+      "id": "step:Researcher->step:score:next",
+      "kind": "next",
+      "label": null,
+      "source": "step:Researcher",
+      "target": "step:score"
+    },
+    {
+      "id": "step:score->decision:route:next",
+      "kind": "next",
+      "label": null,
+      "source": "step:score",
+      "target": "decision:route"
+    },
+    {
+      "id": "decision:route->step:tidy:routes",
+      "kind": "routes",
+      "label": "approved",
+      "source": "decision:route",
+      "target": "step:tidy"
+    },
+    {
+      "id": "decision:route->step:fetch:routes",
+      "kind": "routes",
+      "label": "default",
+      "source": "decision:route",
+      "target": "step:fetch"
+    },
+    {
+      "id": "step:tidy->join:route:next",
+      "kind": "next",
+      "label": null,
+      "source": "step:tidy",
+      "target": "join:route"
+    },
+    {
+      "id": "step:fetch->join:route:next",
+      "kind": "next",
+      "label": null,
+      "source": "step:fetch",
+      "target": "join:route"
+    },
+    {
+      "id": "join:route->fork:parallel:next",
+      "kind": "next",
+      "label": null,
+      "source": "join:route",
+      "target": "fork:parallel"
+    },
+    {
+      "id": "fork:parallel->step:fetch#2:parallel",
+      "kind": "parallel",
+      "label": null,
+      "source": "fork:parallel",
+      "target": "step:fetch#2"
+    },
+    {
+      "id": "fork:parallel->step:tidy#2:parallel",
+      "kind": "parallel",
+      "label": null,
+      "source": "fork:parallel",
+      "target": "step:tidy#2"
+    },
+    {
+      "id": "step:fetch#2->join:parallel:next",
+      "kind": "next",
+      "label": null,
+      "source": "step:fetch#2",
+      "target": "join:parallel"
+    },
+    {
+      "id": "step:tidy#2->join:parallel:next",
+      "kind": "next",
+      "label": null,
+      "source": "step:tidy#2",
+      "target": "join:parallel"
+    },
+    {
+      "id": "join:parallel->step:tidy#3:next",
+      "kind": "next",
+      "label": null,
+      "source": "join:parallel",
+      "target": "step:tidy#3"
+    },
+    {
+      "id": "step:tidy#3->step:tidy#3:loop",
+      "kind": "loop",
+      "label": "over items",
+      "source": "step:tidy#3",
+      "target": "step:tidy#3"
+    },
+    {
+      "id": "step:tidy#3->decision:if:next",
+      "kind": "next",
+      "label": null,
+      "source": "step:tidy#3",
+      "target": "decision:if"
+    },
+    {
+      "id": "decision:if->step:tidy#4:routes",
+      "kind": "routes",
+      "label": "true",
+      "source": "decision:if",
+      "target": "step:tidy#4"
+    },
+    {
+      "id": "step:fetch#3->step:fetch#3:loop",
+      "kind": "loop",
+      "label": "up to 2x",
+      "source": "step:fetch#3",
+      "target": "step:fetch#3"
+    },
+    {
+      "id": "decision:if->step:fetch#3:routes",
+      "kind": "routes",
+      "label": "false",
+      "source": "decision:if",
+      "target": "step:fetch#3"
+    },
+    {
+      "id": "step:tidy#4->join:if:next",
+      "kind": "next",
+      "label": null,
+      "source": "step:tidy#4",
+      "target": "join:if"
+    },
+    {
+      "id": "step:fetch#3->join:if:next",
+      "kind": "next",
+      "label": null,
+      "source": "step:fetch#3",
+      "target": "join:if"
+    },
+    {
+      "id": "join:if->step:discussion:next",
+      "kind": "next",
+      "label": null,
+      "source": "join:if",
+      "target": "step:discussion"
+    },
+    {
+      "id": "step:discussion->agent:Researcher:assigned",
+      "kind": "assigned",
+      "label": null,
+      "source": "step:discussion",
+      "target": "agent:Researcher"
+    },
+    {
+      "id": "step:discussion->agent:Critic:assigned",
+      "kind": "assigned",
+      "label": null,
+      "source": "step:discussion",
+      "target": "agent:Critic"
+    },
+    {
+      "id": "step:discussion->step:Researcher#2:next",
+      "kind": "next",
+      "label": null,
+      "source": "step:discussion",
+      "target": "step:Researcher#2"
+    },
+    {
+      "id": "step:Researcher#2->agent:Researcher:assigned",
+      "kind": "assigned",
+      "label": null,
+      "source": "step:Researcher#2",
+      "target": "agent:Researcher"
+    },
+    {
+      "id": "step:Researcher#2->step:include:next",
+      "kind": "next",
+      "label": null,
+      "source": "step:Researcher#2",
+      "target": "step:include"
+    },
+    {
+      "id": "step:include->end:done:next",
+      "kind": "next",
+      "label": null,
+      "source": "step:include",
+      "target": "end:done"
+    }
+  ],
+  "kind": "flow",
+  "name": "pipeline",
+  "nodes": [
+    {
+      "id": "start:begin",
+      "kind": "start",
+      "label": "Brief",
+      "meta": {},
+      "parent": null
+    },
+    {
+      "id": "step:Researcher",
+      "kind": "step",
+      "label": "Researcher",
+      "meta": {},
+      "parent": null
+    },
+    {
+      "id": "agent:Researcher",
+      "kind": "agent",
+      "label": "Researcher",
+      "meta": {
+        "role": "Assistant"
+      },
+      "parent": null
+    },
+    {
+      "id": "tool:Researcher/search_web",
+      "kind": "tool",
+      "label": "search_web",
+      "meta": {},
+      "parent": null
+    },
+    {
+      "id": "step:score",
+      "kind": "step",
+      "label": "score",
+      "meta": {},
+      "parent": null
+    },
+    {
+      "id": "step:route",
+      "kind": "step",
+      "label": "route",
+      "meta": {
+        "pattern": "route"
+      },
+      "parent": null
+    },
+    {
+      "id": "decision:route",
+      "kind": "decision",
+      "label": "route",
+      "meta": {},
+      "parent": "step:route"
+    },
+    {
+      "id": "step:tidy",
+      "kind": "step",
+      "label": "tidy",
+      "meta": {},
+      "parent": "step:route"
+    },
+    {
+      "id": "step:fetch",
+      "kind": "step",
+      "label": "fetch",
+      "meta": {},
+      "parent": "step:route"
+    },
+    {
+      "id": "join:route",
+      "kind": "join",
+      "label": "join",
+      "meta": {},
+      "parent": "step:route"
+    },
+    {
+      "id": "step:parallel",
+      "kind": "step",
+      "label": "parallel",
+      "meta": {
+        "pattern": "parallel"
+      },
+      "parent": null
+    },
+    {
+      "id": "fork:parallel",
+      "kind": "fork",
+      "label": "fork",
+      "meta": {},
+      "parent": "step:parallel"
+    },
+    {
+      "id": "step:fetch#2",
+      "kind": "step",
+      "label": "fetch",
+      "meta": {},
+      "parent": "step:parallel"
+    },
+    {
+      "id": "step:tidy#2",
+      "kind": "step",
+      "label": "tidy",
+      "meta": {},
+      "parent": "step:parallel"
+    },
+    {
+      "id": "join:parallel",
+      "kind": "join",
+      "label": "join",
+      "meta": {},
+      "parent": "step:parallel"
+    },
+    {
+      "id": "step:loop",
+      "kind": "step",
+      "label": "loop",
+      "meta": {
+        "over": "items",
+        "pattern": "loop"
+      },
+      "parent": null
+    },
+    {
+      "id": "step:tidy#3",
+      "kind": "step",
+      "label": "tidy",
+      "meta": {},
+      "parent": "step:loop"
+    },
+    {
+      "id": "step:if",
+      "kind": "step",
+      "label": "if",
+      "meta": {
+        "condition": "{{score}} > 80",
+        "pattern": "if"
+      },
+      "parent": null
+    },
+    {
+      "id": "decision:if",
+      "kind": "decision",
+      "label": "{{score}} > 80",
+      "meta": {},
+      "parent": "step:if"
+    },
+    {
+      "id": "step:tidy#4",
+      "kind": "step",
+      "label": "tidy",
+      "meta": {},
+      "parent": "step:if"
+    },
+    {
+      "id": "step:repeat",
+      "kind": "step",
+      "label": "repeat",
+      "meta": {
+        "max_iterations": 2,
+        "pattern": "repeat"
+      },
+      "parent": "step:if"
+    },
+    {
+      "id": "step:fetch#3",
+      "kind": "step",
+      "label": "fetch",
+      "meta": {},
+      "parent": "step:repeat"
+    },
+    {
+      "id": "join:if",
+      "kind": "join",
+      "label": "join",
+      "meta": {},
+      "parent": "step:if"
+    },
+    {
+      "id": "step:discussion",
+      "kind": "step",
+      "label": "discussion",
+      "meta": {
+        "pattern": "discussion"
+      },
+      "parent": null
+    },
+    {
+      "id": "agent:Critic",
+      "kind": "agent",
+      "label": "Critic",
+      "meta": {
+        "role": "Assistant"
+      },
+      "parent": null
+    },
+    {
+      "id": "step:Researcher#2",
+      "kind": "step",
+      "label": "Researcher",
+      "meta": {},
+      "parent": null
+    },
+    {
+      "id": "step:include",
+      "kind": "step",
+      "label": "include",
+      "meta": {
+        "pattern": "include",
+        "recipe": "publisher"
+      },
+      "parent": null
+    },
+    {
+      "id": "end:done",
+      "kind": "end",
+      "label": "Delivered",
+      "meta": {},
+      "parent": null
+    }
+  ],
+  "process": "flow",
+  "schema": "praisonai.graph/1"
+}

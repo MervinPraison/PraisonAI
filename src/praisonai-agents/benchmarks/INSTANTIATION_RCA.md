@@ -6,7 +6,7 @@
 
 ## Summary
 
-Instantiation regressed from **~3.2 μs** (Dec 2025) to **~31 μs** (~10×). After fixes, steady-state is **~16 μs** (~2× historical). PraisonAI is competitive with Agno (~5 μs) on warmed benchmarks using `model=`.
+Instantiation regressed from **~3.2 μs** (Dec 2025) to **~31 μs** (~10×). After fixes, steady-state is **~16 μs** (~2× historical). Agno measured ~5 μs on the same machine at the time, so PraisonAI was still ~3× slower; see `BENCHMARK_RESULTS.md` for current numbers.
 
 ## Before vs After Fixes
 
@@ -53,10 +53,45 @@ Instantiation regressed from **~3.2 μs** (Dec 2025) to **~31 μs** (~10×). Aft
 
 The residual ~13 μs is primarily **`Agent.__init__` size** (~1200 lines of consolidated config resolution added since v0.1.5). Further optimisation requires a dedicated slim fast-path for `Agent(name=..., output="silent")` without full config object churn.
 
+## Re-measure (2026-10-15)
+
+Quiet machine (GitHub-hosted `ubuntu` x86_64 runner, 4 vCPU, load 0.77, Python 3.12.3). Same config as the
+June run (`performance_benchmark.py`: one tool, 10–20 warmup + 1000 iterations). Both versions were run on the
+same machine, so the two columns are directly comparable. The June numbers in `BENCHMARK_RESULTS.md` came from a
+faster machine.
+
+| Code | Avg (μs) | Min (μs) | Median (μs) |
+|------|----------|----------|-------------|
+| praisonaiagents 1.6.60 (`709a03878`) | 20.65 | 19.85 | 20.30 |
+| `main` @ `a84e42aa9` (1.7.12 dev) | 47.92 | 45.71 | 47.11 |
+
+The slowdown is real: **~2.3×** on identical hardware. Median, sampled along `main` first-parent history:
+
+| Date | Commit | Median (μs) |
+|------|--------|-------------|
+| 2026-06-17 | `709a03878` (1.6.60) | 20.3 |
+| 2026-06-24 | `bb2d35ba6` | 24.2 |
+| 2026-07-01 | `f45c49b32` | 26.7 |
+| 2026-07-15 | `b1086c275` | 30.5 |
+| 2026-08-05 | `aadb62acf` | 29.7 |
+| 2026-08-19 | `d32fe29b4` | 34.0 |
+| 2026-08-26 | `7746520df` | **3,063** (transient ms-scale regression, since fixed) |
+| 2026-09-03 | `17d8726c3` | **3,012** |
+| 2026-09-10 | `8d2b4cdbc` | 48.3 |
+| 2026-10-02 | `a2b52f669` | 60.2 |
+| 2026-10-14 | `a84e42aa9` | 47.2 |
+
+`git bisect` with a 33 μs cut-off has no single culprit: it lands on a wrapper-only commit, and neighbouring
+commits differ by less than the noise. The cost is gradual creep. cProfile on `main` puts ~43% of construction
+time in the body of `Agent.__init__`, and no callee costs more than ~10%. The fix is the slim construction path
+described above, tracked in #5835. A ~3 ms regression shipped for two weeks unnoticed; the PR gate
+in `.github/workflows/benchmark.yml` (`simple_benchmark.py --json --fail-over-threshold`, 150 μs budget) now
+catches regressions of that size.
+
 ## How to reproduce
 
 ```bash
-cd praisonai-agents
+cd src/praisonai-agents
 PYTHONWARNINGS='ignore::DeprecationWarning' python benchmarks/simple_benchmark.py
-PYTHONWARNINGS='ignore::DeprecationWarning' python benchmarks/performance_benchmark.py
+PYTHONWARNINGS='ignore::DeprecationWarning' python benchmarks/performance_benchmark.py --only praisonai
 ```

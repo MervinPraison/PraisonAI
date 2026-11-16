@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
 
 CACHE_SUBDIR = "remote-skills"
 _CURRENT_LINK = "current"
+# Deadline for git calls so a stalled remote falls back to the cached copy.
+_GIT_TIMEOUT = 120
 
 
 def get_remote_cache_root() -> Path:
@@ -89,7 +91,10 @@ class GitRemoteSkillSource:
             if self.ref:
                 cmd += ["--branch", self.ref]
             cmd += [self.url, str(clone_path)]
-            proc = subprocess.run(cmd, capture_output=True, text=True)
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=_GIT_TIMEOUT,
+                env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+            )
             if proc.returncode != 0:
                 logger.warning(
                     "Remote skill sync failed for %s: %s; using cached copy.",
@@ -123,7 +128,7 @@ class GitRemoteSkillSource:
     def _resolve_version(self, clone_path: Path) -> str:
         proc = subprocess.run(
             ["git", "-C", str(clone_path), "rev-parse", "HEAD"],
-            capture_output=True, text=True,
+            capture_output=True, text=True, timeout=_GIT_TIMEOUT,
         )
         if proc.returncode == 0 and proc.stdout.strip():
             return proc.stdout.strip()[:16]

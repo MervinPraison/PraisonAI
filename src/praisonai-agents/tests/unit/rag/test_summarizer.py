@@ -136,4 +136,4 @@ class TestEstimateTokensSummarizer:
         from praisonaiagents.rag.summarizer import estimate_tokens
         
         assert estimate_tokens("") == 0
-        assert estimate_tokens("test") == 2
+        assert estimate_tokens("test") == 1

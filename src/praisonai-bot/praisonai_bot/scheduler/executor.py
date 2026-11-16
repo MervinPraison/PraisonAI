@@ -1217,11 +1217,11 @@ class ScheduledAgentExecutor:
         prior state untouched); an empty dict likewise changes nothing. No-op
         when the store has no state support.
 
-        One-shot jobs (``delete_after_run``) are already removed from the store
-        by ``claim_due`` before the run reaches here, and their state is popped
-        with them. Persisting now would recreate an orphan ``job_state`` entry
-        that nothing ever cleans up (the schedule is gone, so ``remove`` is a
-        no-op) — and which would be injected if the same explicit id is reused.
+        One-shot jobs (``delete_after_run``) are retired from the store once
+        their run completes, and their state is popped with them. Persisting
+        would recreate an orphan ``job_state`` entry that nothing ever cleans
+        up (the schedule is gone, so ``remove`` is a no-op) — and which
+        would be injected if the same explicit id is reused.
         A single-run job has no "next run" to read a watermark, so skip it.
         """
         if getattr(job, "delete_after_run", False):
@@ -1458,7 +1458,7 @@ class ScheduledAgentExecutor:
         """
         if self._run_policy is None or not self._run_policy.deliver_on_failure:
             return
-        delivery = getattr(job, "delivery", None)
+        delivery = self._ops_target(job)
         if not delivery or not self._can_deliver(delivery):
             return
         # A hold is a distinct operational state (the job is now silenced for a
@@ -1597,6 +1597,24 @@ class ScheduledAgentExecutor:
         except Exception as e:  # pragma: no cover - defensive
             logger.warning("Failed to write run audit for job '%s': %s", job.id, e)
 
+    @staticmethod
+    def _ops_target(job: "ScheduleJob") -> Optional["DeliveryTarget"]:
+        """Target for operational notices (failure / recovery / hold).
+
+        An explicit ``failure_delivery`` wins; a ``"none"`` target suppresses
+        the notice from every channel; ``"origin"`` resolves to the job's
+        origin. Unset falls back to the result lane.
+        """
+        target = getattr(job, "failure_delivery", None)
+        if target is None:
+            return getattr(job, "delivery", None)
+        token = (target.deliver or target.channel or "").strip().lower()
+        if token == "none":
+            return None
+        if token == "origin":
+            return getattr(job, "origin", None) or getattr(job, "delivery", None)
+        return target
+
     def _can_deliver(self, delivery: "DeliveryTarget") -> bool:
         """Whether a configured ``delivery`` target should be dispatched.
 
@@ -1654,7 +1672,9 @@ class ScheduledAgentExecutor:
                 "no live adapter and no standalone sender for channel "
                 f"{getattr(delivery, 'channel', '')!r}"
             )
-        result = await sender(delivery, text)
+        result = sender(delivery, text)
+        if inspect.isawaitable(result):  # plugin senders may be sync (#6099)
+            result = await result
         return result is not False
 
     def _incident_tracker(self) -> Optional[Any]:
@@ -1790,7 +1810,7 @@ class ScheduledAgentExecutor:
             # ``consecutive`` counter (delivery-independent) and stop.
             self._commit_incident(job, pending)
             return
-        delivery = getattr(job, "delivery", None)
+        delivery = self._ops_target(job)
         if not delivery or not self._can_deliver(delivery):
             # No channel to notify: still commit the resolution so the incident
             # does not stay latched forever with no way to close it.
@@ -1836,7 +1856,7 @@ class ScheduledAgentExecutor:
         """
         if self._run_policy is None or not self._run_policy.deliver_on_failure:
             return
-        delivery = getattr(job, "delivery", None)
+        delivery = self._ops_target(job)
         if not delivery or not self._can_deliver(delivery):
             return
         # Latch through the incident brain when durable state is available;

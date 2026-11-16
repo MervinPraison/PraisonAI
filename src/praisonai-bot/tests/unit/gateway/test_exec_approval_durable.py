@@ -378,3 +378,51 @@ def test_gateway_backend_forwards_authorized_reviewers(tmp_path):
         assert decision.approved is True
 
     asyncio.run(go())
+
+
+def test_allowlist_hot_path_enforces_grant_ttl(tmp_path, monkeypatch):
+    """An allow-always grant expires in memory without a process restart."""
+    import time as _time
+
+    from praisonai_bot.gateway.exec_approval import ScopedAllowlistStore
+
+    store = ScopedAllowlistStore(path=tmp_path / "allow.sqlite", ttl_seconds=60)
+    al = PermissionAllowlist(store=store)
+    al.add_scoped(agent_id="a1", tool_name="shell_exec", arg_signature="sig")
+    assert al.allows(agent_id="a1", tool_name="shell_exec", arg_signature="sig")
+
+    now = _time.time()
+    monkeypatch.setattr(_time, "time", lambda: now + 61)
+    assert not al.allows(agent_id="a1", tool_name="shell_exec", arg_signature="sig")
+    assert al.list_scoped() == []
+
+
+def test_allowlist_in_memory_grant_ttl(monkeypatch):
+    """Non-durable grants honour the default 90-day cap too."""
+    import time as _time
+
+    al = PermissionAllowlist(durable=False)
+    al.add("shell_exec")
+    assert "shell_exec" in al
+    now = _time.time()
+    monkeypatch.setattr(_time, "time", lambda: now + 91 * 86400)
+    assert "shell_exec" not in al
+    assert al.list() == []
+
+
+def test_allowlist_rehydrate_keeps_original_grant_age(tmp_path, monkeypatch):
+    """Rehydrated grants keep their persisted created_at, not restart time."""
+    import time as _time
+
+    from praisonai_bot.gateway.exec_approval import ScopedAllowlistStore
+
+    path = tmp_path / "allow.sqlite"
+    PermissionAllowlist(store=ScopedAllowlistStore(path=path, ttl_seconds=60)).add(
+        "shell_exec"
+    )
+    now = _time.time()
+    monkeypatch.setattr(_time, "time", lambda: now + 30)
+    al = PermissionAllowlist(store=ScopedAllowlistStore(path=path, ttl_seconds=60))
+    assert "shell_exec" in al
+    monkeypatch.setattr(_time, "time", lambda: now + 61)
+    assert "shell_exec" not in al

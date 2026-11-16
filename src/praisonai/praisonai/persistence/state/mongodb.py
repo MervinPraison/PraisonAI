@@ -8,11 +8,18 @@ Install: pip install pymongo
 import json
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 from .base import StateStore
+from ...storage import MongoDBStorageAdapter
 
 logger = logging.getLogger(__name__)
+
+
+def _utcnow() -> datetime:
+    """Naive UTC now, matching the naive UTC datetimes pymongo returns."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class MongoDBStateStore(StateStore):
@@ -32,21 +39,17 @@ class MongoDBStateStore(StateStore):
         database: str = "praisonai",
         collection: str = "state",
     ):
-        try:
-            from pymongo import MongoClient
-        except ImportError:
-            raise ImportError(
-                "pymongo is required for MongoDB support. "
-                "Install with: pip install pymongo"
-            )
-        
-        self._client = MongoClient(url)
-        self._db = self._client[database]
-        self._collection = self._db[collection]
-        
+        # Use the canonical storage adapter for the pymongo client (single
+        # driver init path: pooling, timeouts, retries, import error message).
+        self._adapter = MongoDBStorageAdapter(
+            url=url, database=database, collection=collection,
+        )
+        self._collection = self._adapter._get_collection()
+        self._client = self._adapter._client
+
         # Create TTL index for automatic expiration
         self._collection.create_index("expires_at", expireAfterSeconds=0)
-        
+
         logger.info(f"Connected to MongoDB: {database}.{collection}")
     
     def get(self, key: str) -> Optional[Any]:
@@ -56,7 +59,7 @@ class MongoDBStateStore(StateStore):
             return None
         
         # Check TTL
-        if doc.get("expires_at") and doc["expires_at"] <= time.time():
+        if doc.get("expires_at") and doc["expires_at"] <= _utcnow():
             self._collection.delete_one({"_id": key})
             return None
         
@@ -72,8 +75,7 @@ class MongoDBStateStore(StateStore):
         doc = {"_id": key, "value": value, "updated_at": time.time()}
         
         if ttl:
-            from datetime import datetime, timedelta
-            doc["expires_at"] = datetime.utcnow() + timedelta(seconds=ttl)
+            doc["expires_at"] = _utcnow() + timedelta(seconds=ttl)
         
         self._collection.replace_one({"_id": key}, doc, upsert=True)
     
@@ -87,7 +89,7 @@ class MongoDBStateStore(StateStore):
         doc = self._collection.find_one({"_id": key}, {"_id": 1, "expires_at": 1})
         if not doc:
             return False
-        if doc.get("expires_at") and doc["expires_at"] <= time.time():
+        if doc.get("expires_at") and doc["expires_at"] <= _utcnow():
             return False
         return True
     
@@ -115,18 +117,16 @@ class MongoDBStateStore(StateStore):
         if not doc or "expires_at" not in doc:
             return None
         
-        remaining = doc["expires_at"].timestamp() - time.time()
+        remaining = (doc["expires_at"] - _utcnow()).total_seconds()
         if remaining <= 0:
             return None
         return int(remaining)
     
     def expire(self, key: str, ttl: int) -> bool:
         """Set TTL on existing key."""
-        from datetime import datetime, timedelta
-        
         result = self._collection.update_one(
             {"_id": key},
-            {"$set": {"expires_at": datetime.utcnow() + timedelta(seconds=ttl)}}
+            {"$set": {"expires_at": _utcnow() + timedelta(seconds=ttl)}}
         )
         return result.modified_count > 0
     
@@ -160,5 +160,5 @@ class MongoDBStateStore(StateStore):
     
     def close(self) -> None:
         """Close the store."""
-        if self._client:
-            self._client.close()
+        self._adapter.close()
+        self._client = None

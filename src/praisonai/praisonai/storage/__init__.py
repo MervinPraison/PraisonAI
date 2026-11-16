@@ -11,18 +11,16 @@ Heavy implementations that follow StorageBackendProtocol for:
 NOTE: ``praisonai.storage`` holds the canonical, low-level storage adapters.
 It is NOT dead code — ``praisonai.persistence`` builds on top of it. For
 example ``praisonai.persistence.state.redis.RedisStateStore`` is a thin wrapper
-around ``RedisStorageAdapter`` defined here, so this module is load-bearing and
-canonical for the backends that ``persistence`` wraps.
+around ``RedisStorageAdapter`` defined here, and ``MongoDBStateStore`` obtains
+its pymongo client from ``MongoDBStorageAdapter``, so this module is
+load-bearing and canonical for the backends that ``persistence`` wraps.
+Valkey shares driver init via ``persistence._valkey_client``.
 
-Note on remaining duplication: ``persistence.state.mongodb`` / ``dynamodb`` /
-``valkey`` currently keep their own driver logic instead of wrapping the
-adapters here. This is because ``StateStore`` and these adapters implement
-different contracts — ``StateStore`` adds per-key TTL, hash operations
-(``hget``/``hset``) and counters (``incr``/``decr``), and the DynamoDB store
-uses a different partition-key schema (``pk``) than the adapter (``key``).
-Collapsing them therefore requires care to avoid changing stored-data layout;
-until that is done, treat these adapters as the canonical KV/blob layer and the
-``persistence.state`` stores as the richer, TTL/hash-aware state layer.
+Note on remaining duplication: ``persistence.state.dynamodb`` keeps its own
+boto3 setup because it uses a different partition-key schema (``pk``) than the
+adapter (``key``); collapsing it would change stored-data layout. The
+``persistence.state`` stores layer per-key TTL, hash operations
+(``hget``/``hset``) and counters on top of the KV/blob adapters here.
 
 Application code that just needs a persistence layer should use
 ``create_state_store``, ``create_conversation_store``, or
