@@ -1083,8 +1083,14 @@ class ExecApprovalManager:
 
     # ── Query API ─────────────────────────────────────────────────────
 
-    def list_pending(self) -> List[Dict[str, Any]]:
-        """List all pending requests as JSON-serialisable dicts."""
+    def list_pending(self, visible_to: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List pending requests as JSON-serialisable dicts.
+
+        ``visible_to`` scopes the listing to one operator identity: a request
+        bound to ``authorized_reviewers`` is only listed for those reviewers,
+        so an operator never sees another team's tool name/arguments. Unbound
+        requests stay visible to everyone. ``None`` lists everything.
+        """
         with self._lock:
             self._prune()
             return [
@@ -1098,6 +1104,9 @@ class ExecApprovalManager:
                     "age_seconds": round(time.time() - r.created_at, 1),
                 }
                 for r in self._pending.values()
+                if visible_to is None
+                or not r.authorized_reviewers
+                or visible_to in r.authorized_reviewers
             ]
 
     def get_pending(self, request_id: str) -> Optional[PendingRequest]:
