@@ -1829,6 +1829,23 @@ class WebSocketGateway:
             configured, this returns the raw socket peer — today's behaviour.
             """
             peer = peer_ip or "unknown"
+            trusted = _trusted_proxy_list()
+            if resolve_ingress_attribution is None or not trusted:
+                return peer
+            attr = resolve_ingress_attribution(
+                peer_ip=peer,
+                forwarded_for=parse_forwarded_for(
+                    headers.get("x-forwarded-for")
+                ),
+                real_ip=headers.get("x-real-ip"),
+                trusted_proxies=trusted,
+            )
+            if attr.fail_closed:
+                return f"proxy:{peer}"
+            return attr.client_ip
+
+        def _trusted_proxy_list() -> list:
+            """Return the live declared trusted-proxy set (IPs / CIDRs)."""
             # Precedence (highest first) so a live config reload is honoured
             # and a removed proxy stops being trusted without a restart (#5312):
             #   1. CLI ``--trusted-proxy`` override — operator-pinned, wins always.
@@ -1852,19 +1869,29 @@ class WebSocketGateway:
                         for p in (getattr(self.config, "trusted_proxies", None) or [])
                         if str(p).strip()
                     ]
-            if resolve_ingress_attribution is None or not trusted:
-                return peer
-            attr = resolve_ingress_attribution(
-                peer_ip=peer,
-                forwarded_for=parse_forwarded_for(
-                    headers.get("x-forwarded-for")
-                ),
-                real_ip=headers.get("x-real-ip"),
-                trusted_proxies=trusted,
-            )
-            if attr.fail_closed:
-                return f"proxy:{peer}"
-            return attr.client_ip
+            return trusted
+
+        def _trust_operator_header(request) -> bool:
+            """Whether ``X-Operator-Id`` may be trusted for this request.
+
+            Opt-in only (``gateway.trust_operator_header: true``, default off),
+            and only when the socket peer is a declared trusted proxy — the
+            proxy is then responsible for stamping (and overwriting) the header.
+            """
+            loaded = getattr(self, "_loaded_config", None) or {}
+            gw = loaded.get("gateway", {}) if isinstance(loaded, dict) else {}
+            if isinstance(gw, dict) and "trust_operator_header" in gw:
+                enabled = gw.get("trust_operator_header") is True
+            else:
+                enabled = getattr(self.config, "trust_operator_header", False) is True
+            if not enabled:
+                return False
+            peer = request.client.host if request.client else ""
+            try:
+                from praisonaiagents.gateway.protocols import _is_trusted_hop
+            except ImportError:
+                return False
+            return bool(peer) and _is_trusted_hop(peer, _trusted_proxy_list())
 
         def _resolve_operator_identity(request) -> str:
             """Derive a stable, non-secret operator identity for the audit trail.
@@ -1873,9 +1900,12 @@ class WebSocketGateway:
             deployments can attribute decisions to an *individual* rather than
             to a shared credential:
 
-            1. An explicit ``X-Operator-Id`` header (a non-secret, caller-supplied
-               operator handle). This distinguishes operators even when they
-               share a gateway token — a proxy/SSO layer can stamp it per user.
+            This identity is used for *authorization* (approval custody), so it
+            never comes from a header the caller controls by default:
+
+            1. ``X-Operator-Id`` — only when ``gateway.trust_operator_header``
+               is enabled *and* the request arrives from a declared trusted
+               proxy that stamps it per user (SSO layer). Otherwise ignored.
             2. A short digest of the operator token. The token is a secret and
                must never be logged, so we hash it; distinct tokens yield
                distinct identities. Holders of the *same* token collapse to one
@@ -1884,7 +1914,7 @@ class WebSocketGateway:
                (e.g. loopback bypass).
             """
             explicit = request.headers.get("x-operator-id", "").strip()
-            if explicit:
+            if explicit and _trust_operator_header(request):
                 # Bound + sanitised so a header value can't bloat or corrupt the
                 # audit row; it is a handle, not a secret.
                 return f"operator:{explicit[:64]}"
