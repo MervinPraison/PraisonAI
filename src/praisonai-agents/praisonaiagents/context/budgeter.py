@@ -4,6 +4,8 @@ Context Budgeter for PraisonAI Agents.
 Allocates token budgets across context segments based on model limits.
 """
 
+import functools
+import sys
 from typing import Dict, Any, Optional
 from .models import BudgetAllocation
 
@@ -60,18 +62,47 @@ OUTPUT_RESERVES: Dict[str, int] = {
 }
 
 
+@functools.lru_cache(maxsize=1)
+def _bundled_model_cost() -> Dict[str, Any]:
+    """litellm's bundled ``model_prices_and_context_window`` data, read as JSON.
+
+    ``import litellm`` costs about 3 s and ~3,000 modules; a context-window
+    lookup only needs this one file, which litellm itself loads into
+    ``model_cost``. ``find_spec`` locates the package without importing it.
+    Returns ``{}`` when litellm is not installed.
+    """
+    try:
+        import importlib.util
+        import json
+        import os
+        spec = importlib.util.find_spec("litellm")
+        for folder in (spec.submodule_search_locations or []) if spec else []:
+            path = os.path.join(folder, "model_prices_and_context_window_backup.json")
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as fh:
+                    return json.load(fh)
+    except Exception:
+        pass
+    return {}
+
+
 def _litellm_model_info(model: str) -> Optional[Dict[str, Any]]:
     """
     Look up a model's info from litellm's ``model_cost`` registry.
 
-    Lazy-imported so there is zero overhead (and no hard dependency) when
-    litellm is not installed. Returns ``None`` when litellm is absent or the
-    model is unknown.
+    Uses the live ``litellm.model_cost`` when litellm is already imported,
+    otherwise the same data from litellm's bundled JSON, so a lookup never
+    imports litellm. Returns ``None`` when litellm is absent or the model
+    is unknown.
     """
-    try:
-        from litellm import model_cost
-    except Exception:
-        return None
+    model_cost = None
+    if "litellm" in sys.modules:
+        try:
+            from litellm import model_cost
+        except Exception:
+            model_cost = None
+    if model_cost is None:
+        model_cost = _bundled_model_cost()
 
     try:
         model_lower = model.lower()
