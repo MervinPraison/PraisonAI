@@ -3,14 +3,16 @@ Cost calculation utilities for PraisonAI Agents.
 
 Provides unified cost calculation with:
 - litellm integration (when available) for 1000+ models
-- Fallback pricing for common models when litellm not installed
+- Current list prices from llm-prices (dated, source-cited, no dependencies,
+  no network access) on the default fast path
+- Fallback pricing for common models when neither knows the model
 - Zero performance impact via lazy imports
 """
 
 from typing import Any, Dict, Optional
 
-# Fallback pricing per 1M tokens (used when litellm not available)
-# These are approximate and cover the most common models.
+# Fallback pricing per 1M tokens, used only for models llm-prices does not list
+# (retired models such as claude-3-5-sonnet, o1-mini). Approximate.
 # Optional "cache_read"/"cache_write" are multipliers of the input rate for
 # prompt-cache hits/writes; when absent they default to 1.0 (flat input rate).
 _FALLBACK_PRICING: Dict[str, Dict[str, float]] = {
@@ -243,6 +245,17 @@ def _calculate_fallback_cost(
     Returns:
         Estimated cost in USD
     """
+    # Cached/cache-write tokens are part of prompt_tokens.
+    cached = min(_usage_int(cached_tokens), prompt_tokens)
+    cache_write = min(_usage_int(cache_write_tokens), prompt_tokens - cached)
+    uncached = prompt_tokens - cached - cache_write
+
+    listed = _list_price_cost(
+        model or "gpt-4o-mini", uncached, cached, cache_write, completion_tokens
+    )
+    if listed is not None:
+        return round(listed, 6)
+
     model_name = (model or "gpt-4o-mini").lower()
     # Strip a provider prefix (e.g. "openai/gpt-4o-mini" -> "gpt-4o-mini") so
     # litellm-style names still resolve against the fallback table.
@@ -261,11 +274,8 @@ def _calculate_fallback_cost(
             pricing = _FALLBACK_PRICING[key]
             break
     
-    # Calculate cost (pricing is per 1M tokens). Cached/cache-write tokens are
-    # part of prompt_tokens; price them at their multiplier of the input rate.
-    cached = min(_usage_int(cached_tokens), prompt_tokens)
-    cache_write = min(_usage_int(cache_write_tokens), prompt_tokens - cached)
-    uncached = prompt_tokens - cached - cache_write
+    # Calculate cost (pricing is per 1M tokens). Price cached/cache-write
+    # tokens at their multiplier of the input rate.
     input_cost = (
         uncached
         + cached * pricing.get("cache_read", 1.0)
@@ -274,3 +284,40 @@ def _calculate_fallback_cost(
     output_cost = (completion_tokens / 1_000_000) * pricing["output"]
     
     return round(input_cost + output_cost, 6)
+
+
+def _list_price_cost(
+    model: str,
+    uncached: int,
+    cached: int,
+    cache_write: int,
+    completion_tokens: int,
+) -> Optional[float]:
+    """Cost at the provider's current list price, from llm-prices.
+
+    ``llm_prices.lookup`` resolves provider prefixes (``openai/``,
+    ``anthropic/``, ``groq/``, Bedrock and Vertex ids) and dated snapshots
+    (``gpt-4o-2024-05-13``), and its rows carry cache-read, 5-minute
+    cache-write and long-context prices. Returns None when the model is not
+    listed (local models, retired ids) so the caller falls back to the table.
+    """
+    try:
+        import llm_prices
+
+        price = llm_prices.lookup(model)
+        if price is None:
+            return None
+        if not price.cache_write.get("5m"):
+            # No separate cache-write price (OpenAI, Gemini): bill as input.
+            uncached, cache_write = uncached + cache_write, 0
+        cost = price.cost_usage(
+            llm_prices.Usage(
+                input=int(uncached),
+                cache_read=int(cached),
+                cache_write_5m=int(cache_write),
+                output=_usage_int(completion_tokens),
+            )
+        )
+    except Exception:
+        return None
+    return None if cost is None else cost.total
