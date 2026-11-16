@@ -31,3 +31,20 @@ def test_emitter_leaves_text_when_redact_disabled():
     em = ContextTraceEmitter(sink=sink, session_id="s", enabled=True, redact=False)
     em.tool_call_end("a", "shell", result="token=abc123")
     assert sink.get_events()[0].data["result"] == "token=abc123"
+
+
+def test_noop_sink_skips_text_redaction_but_real_sink_redacts(monkeypatch):
+    """NoOp sink stores nothing, so the redaction regex must not run on its hot path."""
+    import praisonaiagents.trace.redact as redact_mod
+    from praisonaiagents.trace.context_events import ContextNoOpSink
+
+    calls = []
+    orig = redact_mod.redact_string
+    monkeypatch.setattr(redact_mod, "redact_string", lambda t: calls.append(t) or orig(t))
+
+    ContextTraceEmitter(sink=ContextNoOpSink(), session_id="s").message_added("a", "user", "password=hunter2", 1, 1)
+    assert calls == []
+
+    sink = ContextListSink()
+    ContextTraceEmitter(sink=sink, session_id="s").message_added("a", "user", "password=hunter2", 1, 1)
+    assert calls and "hunter2" not in sink.get_events()[0].data["content"]
