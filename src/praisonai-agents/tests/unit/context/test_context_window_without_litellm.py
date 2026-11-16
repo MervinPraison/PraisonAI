@@ -6,6 +6,7 @@ window, which made the first ``start()`` of any agent with a tool cost about
 reading it gives the same limits without the import.
 """
 
+import importlib.util
 import json
 import os
 import subprocess
@@ -64,7 +65,10 @@ def test_tool_agent_turn_does_not_import_litellm(tmp_path):
 @pytest.mark.parametrize("model,expected", [("gpt-5", 272000), ("o1", 200000), ("gpt-4o-mini", 128000)])
 def test_limits_match_litellm_data_without_importing_it(monkeypatch, model, expected):
     monkeypatch.delitem(sys.modules, "litellm", raising=False)
-    if budgeter._bundled_model_cost() == {}:
+    if importlib.util.find_spec("litellm") is None:
         pytest.skip("litellm not installed; static table is the only source")
+    # litellm is installed, so its bundled data must load; an empty dict here
+    # means the file lookup broke and lookups silently fell back to the table.
+    assert budgeter._bundled_model_cost(), "litellm installed but bundled model data did not load"
     assert budgeter.get_model_limit(model) == expected
     assert "litellm" not in sys.modules
