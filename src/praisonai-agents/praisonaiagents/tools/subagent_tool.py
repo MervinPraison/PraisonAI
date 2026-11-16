@@ -485,32 +485,16 @@ def create_subagent_tool(
         job_manager = get_job_manager()
         try:
             if wait:
-                try:
-                    result = job_manager.get_result(job_id)
-                except KeyError:
-                    return {
-                        "success": False,
-                        "job_id": job_id,
-                        "error": f"Job '{job_id}' not found",
-                    }
-                except Exception as e:
-                    # The worker failed or was cancelled. Surface the same
-                    # clean failure shape the non-blocking path returns
-                    # instead of re-raising to the caller.
-                    return {
-                        "success": False,
-                        "job_id": job_id,
-                        "status": JobStatus.FAILED.value,
-                        "error": str(e),
-                    }
-                return {
-                    "success": True,
-                    "job_id": job_id,
-                    "status": JobStatus.COMPLETED.value,
-                    "result": result,
-                }
-
-            info = job_manager.get_job_info(job_id)
+                info, future = job_manager._get_job_snapshot(job_id)
+                if future is not None:
+                    try:
+                        future.result()
+                    except Exception:
+                        # The matching JobInfo below carries failure or
+                        # cancellation details for this exact future.
+                        pass
+            else:
+                info = job_manager.get_job_info(job_id)
         except KeyError:
             return {
                 "success": False,
