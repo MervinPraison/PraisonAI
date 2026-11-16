@@ -138,6 +138,7 @@ def stub(monkeypatch, tmp_path):
     monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
     yield base
     server.shutdown()
+    server.server_close()
 
 
 def _agent(route, base, **kwargs):
