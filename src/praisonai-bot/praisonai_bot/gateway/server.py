@@ -2408,20 +2408,15 @@ class WebSocketGateway:
             if hook is None or not getattr(hook, "enabled", True):
                 return JSONResponse({"error": "hook not found"}, status_code=404)
 
-            # A replay-bounded provider signature *is* the authentication
-            # (#6034): a hook with ``secret`` whose scheme signs a timestamp
-            # checked against a tolerance skips the gateway-token fallback. A
-            # body-only HMAC (e.g. GitHub's ``hmac_hex``) can be replayed from a
-            # captured delivery, so it still needs the gateway token. An
-            # explicit hook ``auth`` is always required on top. Token auth runs
-            # before the body is read so unauthenticated requests fail early.
+            # Token auth (gateway ``auth_token`` or hook ``auth``) is required
+            # unless the hook explicitly opted into ``signature_only`` (#6034);
+            # ``HookConfig`` only allows that with a secret and a replay-bounded
+            # scheme. It runs before the body is read so unauthenticated
+            # requests fail early.
             verify = getattr(hook, "verify_signature", None)
             signed = callable(verify) and bool(getattr(hook, "secret", None))
-            replay_bounded = (
-                getattr(hook, "signature_scheme", None) in ("hmac_timestamped", "structured")
-                and (getattr(hook, "signature_tolerance_seconds", 0) or 0) > 0
-            )
-            if not (signed and replay_bounded) or getattr(hook, "auth", None):
+            signature_only = signed and getattr(hook, "signature_only", False) is True
+            if not signature_only or getattr(hook, "auth", None):
                 auth_err = _check_hook_auth(request, hook)
                 if auth_err:
                     return auth_err
