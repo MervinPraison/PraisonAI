@@ -328,7 +328,7 @@ class TestMultiChannelGatewayConfig:
         from praisonaiagents.gateway.config import ChannelRouteConfig, MultiChannelGatewayConfig
         module = sys.modules["praisonaiagents.gateway.config"]
         source_file = module.__file__
-        with open(source_file, "r") as f:
+        with open(source_file, "r", encoding="utf-8") as f:
             content = f.read()
         for dep in ["chromadb", "fastapi", "uvicorn", "pydantic", "litellm"]:
             assert f"import {dep}" not in content, f"Found heavy dep '{dep}' in config.py"
@@ -376,7 +376,7 @@ class TestChatCommandInfo:
         from praisonaiagents.bots.protocols import BotProtocol
         module = sys.modules["praisonaiagents.bots.protocols"]
         source_file = module.__file__
-        with open(source_file, "r") as f:
+        with open(source_file, "r", encoding="utf-8") as f:
             content = f.read()
         for dep in ["chromadb", "fastapi", "uvicorn", "litellm"]:
             assert f"import {dep}" not in content, f"Found heavy dep '{dep}' in protocols.py"

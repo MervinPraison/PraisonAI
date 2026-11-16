@@ -26,6 +26,15 @@ import logging
 import os
 from importlib import util
 
+import warnings
+
+warnings.warn(
+    "praisonaiagents.tools.youdotcom_tools is deprecated and will be removed in a future release; "
+    "use praisonai_tools.tools.youdotcom_tool instead (pip install praisonai-tools)",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 
 def _check_youdotcom_available() -> tuple[bool, Optional[str]]:
     """Check if You.com SDK is available and API key is set.

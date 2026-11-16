@@ -873,6 +873,15 @@ class HealthMonitorSchema(BaseModel):
     breaker_cooldown_s: float = Field(120.0, ge=0)
 
 
+class OperatorGrantSchema(BaseModel):
+    """Per-token operator grant (Issue #6253). Unknown keys are rejected so a
+    typo (``agnts``) cannot silently drop an agent confinement."""
+    model_config = ConfigDict(extra="forbid")
+
+    scopes: List[str] = Field(default_factory=list)
+    agents: Optional[List[str]] = None
+
+
 class GatewayServerSchema(BaseModel):
     """Typed schema for the ``gateway:`` server block (issue #3050).
 
@@ -896,7 +905,8 @@ class GatewayServerSchema(BaseModel):
     allowed_origins: Optional[List[str]] = None
     auth_token: Optional[str] = None
     auth: Optional[Dict[str, Any]] = None
-    auth_scopes: Optional[Dict[str, List[str]]] = None
+    # Issue #6253: token -> [scopes] or {scopes: [...], agents: [...]}.
+    auth_scopes: Optional[Dict[str, Union[List[str], OperatorGrantSchema]]] = None
     max_connections: Optional[int] = Field(None, ge=0)
     max_sessions_per_agent: Optional[int] = Field(None, ge=0)
     session_config: Optional[Dict[str, Any]] = None
@@ -912,6 +922,8 @@ class GatewayServerSchema(BaseModel):
     max_concurrent_runs: Optional[int] = Field(None, ge=0)
     queue_depth: Optional[int] = Field(None, ge=0)
     overflow_policy: Optional[str] = None
+    # Per-user inbound request budget (#6215). 0 = unlimited (default).
+    per_user_per_minute: Optional[int] = Field(None, ge=0)
     preauth_max_connections_per_ip: Optional[int] = Field(None, ge=0)
     max_unauthorized_frames: Optional[int] = Field(None, ge=0)
     # Graceful-drain windows (#2375 / #2533)

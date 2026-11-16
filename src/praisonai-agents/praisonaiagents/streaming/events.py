@@ -299,7 +299,7 @@ def create_text_printer_callback(flush: bool = True) -> StreamCallback:
         A StreamCallback that prints DELTA_TEXT content
     """
     def printer(event: StreamEvent) -> None:
-        if event.type == StreamEventType.DELTA_TEXT and event.content:
+        if event.type == StreamEventType.DELTA_TEXT and event.content and not event.is_reasoning:
             print(event.content, end="", flush=flush)
         elif event.type == StreamEventType.STREAM_END:
             print()  # Newline at end

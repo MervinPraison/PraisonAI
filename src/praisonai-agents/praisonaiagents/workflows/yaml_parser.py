@@ -473,7 +473,10 @@ class YAMLWorkflowParser:
             
             if 'reasoning' in role_config:
                 agent['reasoning'] = role_config['reasoning']
-            
+
+            if isinstance(role_config.get('execution'), dict):
+                agent['execution'] = role_config['execution']
+
             agents[role_id] = agent
         
         return agents
@@ -591,7 +594,11 @@ class YAMLWorkflowParser:
             # so we don't override the Agent's own caching default.
             if cache is False:
                 agent_kwargs['caching'] = False
-            _execution: Dict[str, Any] = {}
+            # An agent-level `execution:` mapping passes straight through to
+            # ExecutionConfig (e.g. max_budget, on_budget_exceeded, durable,
+            # journal_path, resume_run_id); flat max_iter/max_execution_time win.
+            _yaml_execution = config.get('execution')
+            _execution: Dict[str, Any] = dict(_yaml_execution) if isinstance(_yaml_execution, dict) else {}
             if max_iter is not None:
                 _execution['max_iter'] = max_iter
             if max_execution_time is not None:

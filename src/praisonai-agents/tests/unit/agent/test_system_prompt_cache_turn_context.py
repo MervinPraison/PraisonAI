@@ -38,7 +38,7 @@ def test_cache_hit_refreshes_current_default_tools(agent, monkeypatch):
     builds = []
     monkeypatch.setattr(
         agent, '_resolve_harness_base_prompt',
-        lambda: builds.append('build') or 'stable prefix',
+        lambda tools=None: builds.append('build') or 'stable prefix',
     )
     first = agent._build_system_prompt(tools=None)
     assert 'sample_tool' in first
@@ -73,7 +73,7 @@ def test_cache_hit_refreshes_session_context(agent, monkeypatch):
 def test_cache_hit_retains_prefix_reuse_and_appends_suffix_once(agent, monkeypatch):
     """Reuse the stable prefix while adding the suffix exactly once."""
     calls = []
-    agent._resolve_harness_base_prompt = lambda: calls.append('build') or 'stable prefix'
+    agent._resolve_harness_base_prompt = lambda tools=None: calls.append('build') or 'stable prefix'
     monkeypatch.setenv('PRAISONAI_APPEND_SYSTEM_PROMPT', 'per-turn suffix')
     first = agent._build_system_prompt()
     second = agent._build_system_prompt()

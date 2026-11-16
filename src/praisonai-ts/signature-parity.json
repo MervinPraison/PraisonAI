@@ -1185,7 +1185,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/agent.py:631",
+        "location": "src/praisonai-agents/praisonaiagents/agent/agent.py:632",
         "resolved_class": "Agent"
       },
       "ts_only": [
@@ -1797,7 +1797,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3657",
+        "location": "src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3784",
         "resolved_class": "ChatMixin"
       },
       "ts_only": [
@@ -2852,7 +2852,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2606",
+        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2664",
         "resolved_class": "AgentTeam"
       },
       "ts_only": [
@@ -4659,7 +4659,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:678",
+        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:679",
         "resolved_class": "LLM"
       },
       "ts_only": [
@@ -5142,7 +5142,7 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/session/session.ts:132",
+        "ctor_location": "src/praisonai-ts/src/session/session.ts:133",
         "location": "src/praisonai-ts/src/session/session.ts:29",
         "options_parameters": [
           "config"

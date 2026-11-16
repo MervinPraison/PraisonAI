@@ -1630,6 +1630,7 @@ async def run_hybrid(
             model=model,
             max_steps=max_steps,
             headless=True,
+            verbose=verbose,
         )
         result = await agent.run(goal, url)
         result["engine"] = "playwright"

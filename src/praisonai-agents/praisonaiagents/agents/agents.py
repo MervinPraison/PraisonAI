@@ -512,9 +512,21 @@ def _build_execution_context(agents_instance, task_id, skip_memory_init=False):
     if context_builder is not None:
         task._execution_context = context_builder(task)
         task._execution_context_builder = None
+    elif getattr(task, 'validation_feedback', None):
+        # Fresh guardrail/reviewer feedback set after the builder was consumed
+        # (any retry), or with no Process builder at all (sequential /
+        # hierarchical): fold the rejection reason into this attempt's prompt so
+        # the retry is not an identical re-ask (#6353). Kept local so it never
+        # leaks into later runs of the task.
+        fb = task.validation_feedback
+        context_text = f"Previous attempt failed validation with reason: {fb.get('validation_response')}"
+        if fb.get('rejected_output'):
+            context_text += f"\nRejected output: {fb['rejected_output']}"
+        context_text += "\nPlease try again, addressing this feedback."
+        task.validation_feedback = None
     extra_context = getattr(task, '_execution_context', None)
     if extra_context:
-        context_text = extra_context
+        context_text = f"{context_text}\n\n{extra_context}" if context_text else extra_context
         # NOTE: We intentionally do NOT clear _execution_context here. Task
         # retries (guardrail/completion failures) re-enter this helper via the
         # run_task/arun_task retry loops, and clearing would strip the upstream
@@ -577,6 +589,18 @@ def _process_task_result(agents_instance, context, agent_output):
     executor_agent = context.executor_agent
     llm = context.llm
     
+    # Agent.chat returns a model instance when output_pydantic is set; the
+    # task pipeline below (TaskOutput.raw, memory, JSON parsing) is string
+    # based, so serialise once and re-validate from JSON (#6353).
+    if agent_output is not None and not isinstance(agent_output, str):
+        if hasattr(agent_output, "model_dump_json"):
+            agent_output = agent_output.model_dump_json()
+        else:
+            try:
+                agent_output = json.dumps(agent_output)
+            except (TypeError, ValueError):
+                agent_output = str(agent_output)
+
     if agent_output:
         # Store the response in memory
         if task.memory:
@@ -616,6 +640,9 @@ def _process_task_result(agents_instance, context, agent_output):
         if task.output_json:
             try:
                 parsed = json.loads(cleaned)
+                # Enforce the schema when output_json is a Pydantic model.
+                if hasattr(task.output_json, "model_validate"):
+                    parsed = task.output_json.model_validate(parsed).model_dump(mode="json")
                 task_output.json_dict = parsed
                 task_output.output_format = "JSON"
             except Exception as e:
@@ -1249,6 +1276,11 @@ class AgentTeam(SpawnAnnounceProtocol):
                     )
             logger.info(f"Using {len(tasks)} provided tasks")
         
+        # Sequential runs tasks in list order, so order it by depends_on/context.
+        # Workflow/hierarchical keep their order (start task, feedback loops).
+        if process == "sequential":
+            tasks = self._order_tasks_by_dependencies(tasks)
+
         # Add tasks and set their status
         for task in tasks:
             self.add_task(task)
@@ -1536,11 +1568,16 @@ class AgentTeam(SpawnAnnounceProtocol):
         # when the async init above did not populate task.memory.
         context = _build_execution_context(self, task_id, skip_memory_init=True)
 
-        # Execute with agent using DRY helper
-        agent_output = await _execute_with_agent_async(
-            context.executor_agent, context.task_prompt, context.task, 
-            context.tools, stream=self.stream
-        )
+        # Execute with agent using DRY helper. The permit from the
+        # ConcurrencyRegistry (no-op when no limit is set) is keyed on the
+        # resolved agent, so agent_config tasks are capped too, and it covers
+        # only the agent call, so guardrails and callbacks run outside it.
+        from ..agent.concurrency import get_concurrency_registry
+        async with get_concurrency_registry().throttle(context.executor_agent.name):
+            agent_output = await _execute_with_agent_async(
+                context.executor_agent, context.task_prompt, context.task,
+                context.tools, stream=self.stream
+            )
 
         # Process result using DRY helper
         task_result = _process_task_result(self, context, agent_output)
@@ -1907,6 +1944,47 @@ class AgentTeam(SpawnAnnounceProtocol):
                 raise result
         return results
 
+    @staticmethod
+    def _order_tasks_by_dependencies(tasks):
+        """Return ``tasks`` in a stable topological order of ``context``/``depends_on``.
+
+        A list whose dependencies already come first is returned unchanged.
+        Dependencies outside ``tasks`` are ignored. On a cycle a warning is
+        logged and the original list order is kept.
+        """
+        member_ids = {id(t) for t in tasks}
+
+        def deps(t):
+            return [d for d in (t.context or []) if isinstance(d, Task) and d is not t]
+
+        # Iterative DFS so long dependency chains don't hit the recursion limit.
+        order, done, visiting = [], set(), set()
+        for root in tasks:
+            if id(root) in done:
+                continue
+            visiting.add(id(root))
+            stack = [(root, iter(deps(root)))]
+            while stack:
+                t, it = stack[-1]
+                for d in it:
+                    if id(d) not in member_ids or id(d) in done:
+                        continue
+                    if id(d) in visiting:
+                        logger.warning(
+                            f"Circular task dependency involving '{d.name}'; "
+                            "keeping list order"
+                        )
+                        return list(tasks)
+                    visiting.add(id(d))
+                    stack.append((d, iter(deps(d))))
+                    break
+                else:
+                    stack.pop()
+                    visiting.discard(id(t))
+                    done.add(id(t))
+                    order.append(t)
+        return order
+
     def _depends_on_pending(self, task, pending):
         """True if ``task`` depends on a task still pending in the batch.
 
@@ -1990,6 +2068,13 @@ class AgentTeam(SpawnAnnounceProtocol):
 
     async def arun_all_tasks(self):
         """Async version of run_all_tasks method"""
+        # Sync tasks run in executor threads that outlive a cancelled await;
+        # the stop scope tells their agent turns to exit (Issue #6266).
+        from ..agent.chat_mixin import _stop_scope
+        with _stop_scope():
+            return await self._arun_all_tasks()
+
+    async def _arun_all_tasks(self):
         process = Process(
             tasks=self.tasks,
             agents=self.agents,

@@ -172,12 +172,13 @@ class TestToolErrorConsistency:
             assert len(results) == 1
             assert 'error' in results[0]
     
-    def test_search_web_error_format(self):
+    def test_search_web_error_format(self, monkeypatch):
         """search_web errors should have consistent format when all providers fail."""
         from praisonaiagents.tools.web_search import search_web
         
-        # Force all providers to fail by patching SEARCH_PROVIDERS to empty
-        with patch('praisonaiagents.tools.web_search.SEARCH_PROVIDERS', []):
+        # Patch the function's own module even if another test reloaded it.
+        monkeypatch.delenv('WEB_SEARCH_PROVIDER', raising=False)
+        with patch.dict(search_web.__globals__, {'SEARCH_PROVIDERS': []}):
             results = search_web("test")
             
             assert isinstance(results, list)

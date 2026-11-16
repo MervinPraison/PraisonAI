@@ -55,6 +55,27 @@ def _live_turn_message_ids() -> set:
         ids.update(id(m) for m in owned)
     return ids
 
+
+def _exchange_spans(history: list) -> list:
+    """Split history into ``(start, end)`` units that must stay together.
+
+    An assistant turn carrying ``tool_calls`` and the ``role="tool"`` results
+    that follow it form one unit; every other message is its own unit. History
+    mutators cut/delete on unit boundaries so they never leave an orphaned tool
+    result or a dangling ``tool_calls`` turn, which providers reject (#6217).
+    """
+    spans = []
+    i, n = 0, len(history)
+    while i < n:
+        j = i + 1
+        msg = history[i]
+        if msg.get("role") == "assistant" and msg.get("tool_calls"):
+            while j < n and history[j].get("role") == "tool":
+                j += 1
+        spans.append((i, j))
+        i = j
+    return spans
+
 # Shared lazy display helpers (cached, thread-safe; avoid circular imports)
 from ._lazy_display import _get_console, _get_live, _get_display_functions
 
@@ -178,6 +199,11 @@ class MemoryMixin:
             length: Target length for chat history
         """
         with self._history_lock:
+            # Never cut inside a tool exchange: back off to its start (#6217).
+            for start, end in _exchange_spans(self.chat_history):
+                if start < length < end:
+                    length = start
+                    break
             self.chat_history = self.chat_history[:length]
 
     def _begin_turn_tracking(self):
@@ -299,8 +325,14 @@ class MemoryMixin:
             if len(self.chat_history) <= keep_last:
                 return 0
             
-            deleted_count = len(self.chat_history) - keep_last
-            self.chat_history = self.chat_history[-keep_last:]
+            cut = len(self.chat_history) - keep_last
+            # Never start the kept tail inside a tool exchange (#6217).
+            for start, end in _exchange_spans(self.chat_history):
+                if start < cut < end:
+                    cut = end
+                    break
+            deleted_count = cut
+            self.chat_history = self.chat_history[cut:]
             # Reset auto-save index to match new history length
             self._auto_save_last_index = len(self.chat_history)
             return deleted_count
@@ -318,8 +350,17 @@ class MemoryMixin:
             True if deleted, False if index out of range
         """
         with self._history_lock:
+            n = len(self.chat_history)
+            if not -n <= index < n:
+                return False
+            index %= n
+            # Deleting part of a tool exchange removes the whole exchange so no
+            # orphaned tool result / dangling tool_calls is left (#6217).
+            for start, end in _exchange_spans(self.chat_history):
+                if start <= index < end:
+                    break
             try:
-                del self.chat_history[index]
+                del self.chat_history[start:end]
                 # Adjust auto-save index if deletion affects saved range
                 if hasattr(self, '_auto_save_last_index'):
                     self._auto_save_last_index = min(
@@ -344,10 +385,18 @@ class MemoryMixin:
         """
         with self._history_lock:
             original_len = len(self.chat_history)
-            self.chat_history = [
-                msg for msg in self.chat_history
-                if pattern.lower() not in msg.get("content", "").lower()
-            ]
+            needle = pattern.lower()
+            history = self.chat_history
+            kept = []
+            # Match per exchange so a hit inside a tool exchange drops the whole
+            # exchange; content may be None on tool-calling turns (#6217).
+            for start, end in _exchange_spans(history):
+                unit = history[start:end]
+                if not any(
+                    needle in str(m.get("content") or "").lower() for m in unit
+                ):
+                    kept.extend(unit)
+            self.chat_history = kept
             deleted_count = original_len - len(self.chat_history)
             # Adjust auto-save index if deletion affects saved range
             if deleted_count > 0 and hasattr(self, '_auto_save_last_index'):
@@ -569,11 +618,10 @@ class MemoryMixin:
             if history:
                 # Only restore if chat_history is empty (avoid duplicates)
                 if not self.chat_history:
+                    # The store returns LLM-shaped dicts (to_llm_message), so
+                    # keep tool_calls / tool_call_id intact (#6217).
                     for msg in history:
-                        self.chat_history.append({
-                            "role": msg["role"],
-                            "content": msg["content"]
-                        })
+                        self.chat_history.append(dict(msg))
                     logging.info(f"Restored session {self._session_id} with {len(history)} messages from JSON store")
             
             # Set agent info
@@ -862,7 +910,7 @@ class MemoryMixin:
         except Exception as e:
             logging.debug(f"Discard partial assistant turn skipped: {e}")
 
-    def _add_message_with_tool_fields(self, role, content, **tool_fields):
+    def _add_message_with_tool_fields(self, role, content, session_id=None, **tool_fields):
         """Add a message carrying tool fields, tolerating stores without them.
 
         The default JSON store and the SQLite store accept ``tool_calls`` /
@@ -874,11 +922,13 @@ class MemoryMixin:
         back to a plain-text turn so no exchange is silently lost.
         """
         add_message = self._session_store.add_message
-        if self._store_supports_tool_fields(add_message):
-            add_message(self._session_id, role, content, **tool_fields)
+        if session_id is None:
+            session_id = self._session_id
+        if tool_fields and self._store_supports_tool_fields(add_message):
+            add_message(session_id, role, content, **tool_fields)
             return
         # Legacy store: preserve the turn as plain text so resume still sees it.
-        add_message(self._session_id, role, content)
+        add_message(session_id, role, content)
 
     def _store_supports_tool_fields(self, add_message) -> bool:
         """Return True if ``add_message`` accepts the tool keyword fields."""
@@ -1195,10 +1245,17 @@ class MemoryMixin:
                 if self._session_store is not None:
                     # Persist only NEW messages to SessionStore
                     for msg in new_messages:
-                        self._session_store.add_message(
-                            self.auto_save,  # Use auto_save name as session_id
-                            role=msg.get("role", "user"),
-                            content=msg.get("content", ""),
+                        tool_fields = {
+                            k: msg[k]
+                            for k in ("tool_calls", "tool_call_id")
+                            if msg.get(k) is not None
+                        }
+                        # Persist tool fields so resumed tool turns stay valid (#6217)
+                        self._add_message_with_tool_fields(
+                            msg.get("role", "user"),
+                            msg.get("content") or "",
+                            session_id=self.auto_save,
+                            **tool_fields,
                         )
                     # Update last saved index
                     self._auto_save_last_index = len(clean_history)

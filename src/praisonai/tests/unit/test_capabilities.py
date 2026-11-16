@@ -178,6 +178,77 @@ class TestImagesCapabilities:
         captured = mock_image_generation.call_args.kwargs
         assert captured.get('drop_params') is False
 
+    @patch('litellm.image_generation')
+    def test_image_generate_default_model_is_not_retired(self, mock_image_generation):
+        """dall-e-2/3 were retired 2026-05-12; the default must be a GPT image model (#6259)."""
+        from praisonai.capabilities.images import image_generate
+
+        mock_image_generation.return_value = Mock(data=[])
+        image_generate("x")
+
+        captured = mock_image_generation.call_args.kwargs
+        assert captured['model'] == "gpt-image-2.5-flare"
+        assert 'quality' not in captured  # "standard" is not a valid gpt-image quality
+
+    @patch('litellm.image_generation')
+    def test_image_generate_forwards_quality_and_images_26_params(self, mock_image_generation):
+        """quality must reach gpt-image models, not only dall-e-3 (#6259)."""
+        from praisonai.capabilities.images import image_generate
+
+        mock_image_generation.return_value = Mock(data=[])
+        params = {"frame_count": 4, "frame_duration_ms": 100, "complexity": "low",
+                  "output_format": "gif"}
+        image_generate("x", model="gpt-image-2.6-flare", quality="low", **params)
+
+        captured = mock_image_generation.call_args.kwargs
+        assert captured['quality'] == "low"
+        assert params.items() <= captured.items()
+
+    def test_image_generate_images_26_params_reach_the_wire(self):
+        """Real LiteLLM, fake HTTP: params must be in the request body, not just in
+        the kwargs handed to litellm (drop_params=True could strip them silently)."""
+        import json
+        httpx = pytest.importorskip("httpx")
+        openai = pytest.importorskip("openai")
+        pytest.importorskip("litellm")
+        from praisonai.capabilities.images import image_generate
+
+        bodies = []
+
+        def handler(request):
+            bodies.append(json.loads(request.content))
+            return httpx.Response(200, json={"created": 1, "data": [{"b64_json": "AA=="}]})
+
+        client = openai.OpenAI(api_key="sk-test",
+                               http_client=httpx.Client(transport=httpx.MockTransport(handler)))
+        params = {"quality": "low", "frame_count": 4, "frame_duration_ms": 100, "complexity": "low"}
+        results = image_generate("x", model="gpt-image-2.6-flare", api_key="sk-test",
+                                 client=client, **params)
+
+        assert results[0].b64_json == "AA=="
+        assert params.items() <= bodies[0].items()
+        assert "response_format" not in bodies[0]
+
+    @patch('litellm.aimage_generation')
+    def test_aimage_generate_forwards_quality(self, mock_aimage_generation):
+        import asyncio
+        from praisonai.capabilities.images import aimage_generate
+
+        async def fake(**kw):
+            return Mock(data=[])
+        mock_aimage_generation.side_effect = fake
+        asyncio.run(aimage_generate("x", model="gpt-image-2.5-flare", quality="low"))
+        assert mock_aimage_generation.call_args.kwargs['quality'] == "low"
+
+    @patch('litellm.image_edit')
+    def test_image_edit_rejects_markup(self, mock_image_edit):
+        """markup is never uploaded as a file by LiteLLM, so fail loudly (#6259)."""
+        from praisonai.capabilities.images import image_edit
+
+        with pytest.raises(ValueError, match="markup"):
+            image_edit(b"img", "make it blue", model="gpt-image-2.5-flare", markup=b"m")
+        mock_image_edit.assert_not_called()
+
     @patch('litellm.image_edit')
     def test_image_edit_drops_response_format_for_gpt_image(self, mock_image_edit):
         """image_edit must also drop response_format for gpt-image-* and scope drop_params."""
@@ -989,3 +1060,65 @@ class TestGuardrailFailClosed:
 
         result = asyncio.run(_run())
         assert result.passed is False
+
+
+class TestVideoGenerateKwargs:
+    """video_generate must only send OpenAI Videos API field names upstream.
+
+    LiteLLM forwards unknown keys (e.g. ``duration``) verbatim to
+    OpenAI-compatible ``/v1/videos`` servers, which reject them.
+    """
+
+    @patch('litellm.video_generation')
+    def test_defaults_send_no_duration_or_aspect_ratio(self, mock_gen):
+        from praisonai.capabilities.videos import video_generate
+
+        mock_gen.return_value = SimpleNamespace(id="video_1", status="queued")
+        result = video_generate("a boat", model="openai/my-video-model")
+
+        sent = mock_gen.call_args.kwargs
+        assert "duration" not in sent
+        assert "aspect_ratio" not in sent
+        assert "seconds" not in sent
+        assert result.id == "video_1"
+        assert result.status == "queued"
+
+    @patch('litellm.video_generation')
+    def test_duration_maps_to_seconds(self, mock_gen):
+        from praisonai.capabilities.videos import video_generate
+
+        mock_gen.return_value = SimpleNamespace(id="video_1", status="queued")
+        video_generate("a boat", model="openai/my-video-model", duration=8)
+
+        sent = mock_gen.call_args.kwargs
+        assert sent["seconds"] == "8"
+        assert "duration" not in sent
+
+    @patch('litellm.video_generation')
+    def test_explicit_seconds_and_size_win(self, mock_gen):
+        from praisonai.capabilities.videos import video_generate
+
+        mock_gen.return_value = SimpleNamespace(id="video_1", status="queued")
+        video_generate(
+            "a boat", model="openai/my-video-model", duration=8, seconds="4", size="1344x768"
+        )
+
+        sent = mock_gen.call_args.kwargs
+        assert sent["seconds"] == "4"
+        assert sent["size"] == "1344x768"
+
+    def test_async_uses_same_mapping(self):
+        import asyncio
+        from praisonai.capabilities.videos import avideo_generate
+
+        async def fake(**kwargs):
+            fake.kwargs = kwargs
+            return SimpleNamespace(id="video_2", status="queued")
+
+        with patch('litellm.avideo_generation', fake):
+            asyncio.run(
+                avideo_generate("a boat", model="openai/my-video-model", aspect_ratio="9:16")
+            )
+
+        assert "duration" not in fake.kwargs
+        assert fake.kwargs["aspect_ratio"] == "9:16"

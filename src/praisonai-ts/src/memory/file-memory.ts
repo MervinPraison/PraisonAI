@@ -28,6 +28,7 @@ export class FileMemory {
   private initialized: boolean = false;
   private initPromise?: Promise<void>;
   private writeQueue: Promise<void> = Promise.resolve();
+  private appendNeedsSeparator: boolean = false;
 
   constructor(config: FileMemoryConfig) {
     this.filePath = config.filePath;
@@ -67,6 +68,8 @@ export class FileMemory {
     try {
       const fs = await import('fs/promises');
       const content = await fs.readFile(this.filePath, 'utf-8').catch(() => '');
+      // A previous instance may have left a record without its final newline.
+      this.appendNeedsSeparator = content.length > 0 && !content.endsWith('\n');
 
       if (content) {
         const lines = content.trim().split('\n').filter(Boolean);
@@ -155,6 +158,7 @@ export class FileMemory {
    */
   async getRecent(count: number): Promise<MemoryEntry[]> {
     const all = await this.getAll();
+    if (count === 0) return [];
     return all.slice(-count);
   }
 
@@ -265,7 +269,7 @@ export class FileMemory {
    * Build context string from recent memory
    */
   async buildContext(count?: number): Promise<string> {
-    const entries = count ? await this.getRecent(count) : await this.getAll();
+    const entries = count !== undefined ? await this.getRecent(count) : await this.getAll();
     return entries
       .map(e => `${e.role}: ${e.content}`)
       .join('\n');
@@ -273,11 +277,17 @@ export class FileMemory {
 
   private async appendEntry(entry: FileMemoryEntry): Promise<void> {
     // Queue writes to ensure order
-    this.writeQueue = this.writeQueue.then(async () => {
+    const write = this.writeQueue.then(async () => {
       const fs = await import('fs/promises');
-      await fs.appendFile(this.filePath, JSON.stringify(entry) + '\n');
+      // A failed append may have left an unfinished JSONL line.
+      const separator = this.appendNeedsSeparator ? '\n' : '';
+      this.appendNeedsSeparator = true;
+      await fs.appendFile(this.filePath, separator + JSON.stringify(entry) + '\n');
+      this.appendNeedsSeparator = false;
     });
-    await this.writeQueue;
+    // Report this write's error to its caller without blocking later writes.
+    this.writeQueue = write.catch(() => {});
+    await write;
   }
 
   private textSearch(query: string, limit: number): SearchResult[] {

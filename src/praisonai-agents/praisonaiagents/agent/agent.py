@@ -54,6 +54,7 @@ _lazy_import_lock = threading.Lock()
 # mode wins.
 _output_mode_lock = threading.Lock()
 _llm_module = None
+_RULES_NOTICE_SEEN: set = set()  # rule-name sets already announced (issue #6257)
 _hooks_module = None
 _stream_emitter_class = None
 
@@ -2698,6 +2699,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         self.system_prompt = f"""{self.backstory}\n
 Your Role: {self.role}\n
 Your Goal: {self.goal}
+        """ if self.goal != self.backstory else f"""{self.backstory}\n
+Your Role: {self.role}
         """
 
         # Per-invocation system-prompt append (never persisted). Sourced from the
@@ -3359,6 +3362,19 @@ Your Goal: {self.goal}
                     return original_backstory
         return self.backstory
 
+    def _fork_history(self) -> "Agent":
+        """Shallow copy that shares all config, tools and memory but has its
+        own ``chat_history`` (seeded with the current one).
+
+        Used by concurrent workflow branches so one shared agent does not
+        leak sibling prompts between threads, without the config loss of
+        rebuilding it through the constructor.
+        """
+        import copy
+        fork = copy.copy(self)
+        fork.__chat_history_state = AsyncSafeState(list(self.chat_history))
+        return fork
+
     def clone_for_channel(self) -> "Agent":
         """Return a fully independent copy of this agent for a gateway channel.
         
@@ -3571,8 +3587,26 @@ Your Goal: {self.goal}
     
     def _replace_chat_history(self, new_history: List[Dict[str, Any]]):
         """Thread-safe replacement of entire chat history using proper locking."""
-        with self._history_lock.lock():
-            self._history_lock.value[:] = new_history
+        # Share _auto_save_session's lock so a save cannot interleave with the
+        # rewrite and the cursor update below (#6217).
+        with self._auto_save_lock, self._history_lock.lock():
+            history = self._history_lock.value
+            # Re-sync the positional auto-save cursor (#6217): resume at the
+            # first unsaved survivor, or right after the last survivor so
+            # appended messages (e.g. durable replays) are saved; summaries
+            # placed before survivors are not re-persisted.
+            last = getattr(self, '_auto_save_last_index', 0)
+            old = {id(m): i >= last for i, m in enumerate(history)}
+            cursor = len(new_history)
+            survivors = [i for i, m in enumerate(new_history) if id(m) in old]
+            if survivors:
+                cursor = survivors[-1] + 1
+                for i in survivors:
+                    if old[id(new_history[i])]:
+                        cursor = i
+                        break
+            history[:] = new_history
+            self._auto_save_last_index = cursor
 
     @property
     def _cache_lock(self):
@@ -6316,7 +6350,12 @@ Summary:"""
             # matches on reload. Zero-config runs still avoid injection cost.
             stats = self._rules_manager.get_stats()
             if stats["total_rules"] > 0:
-                logging.debug(f"RulesManager: Discovered {stats['total_rules']} rules")
+                # Only rules injected without a file/@mention; warn once per set so
+                # the notice is visible under default logging without repeating per agent.
+                names = ", ".join(sorted({r.name for r in self._rules_manager.get_active_rules()}))
+                if names and names not in _RULES_NOTICE_SEEN:
+                    _RULES_NOTICE_SEEN.add(names)
+                    logging.warning(f"Applied rules: {names} (pass rules=False to turn off)")
             elif not extra_files:
                 self._rules_manager = None
         except ImportError:
@@ -7325,7 +7364,8 @@ Answer:"""
         task_output = TaskOutput(
             description="Agent response output",
             raw=response_text,
-            agent=self.name
+            # TaskOutput.agent is a required str; an Agent built without name= has name None.
+            agent=self.name or getattr(self, "role", None) or "Agent"
         )
         
         guardrail_result = self._process_guardrail(task_output)
@@ -7409,7 +7449,7 @@ Answer:"""
         # Fall back to simple backoff if no execution config
         return 1.0 * (2.0 ** (retry_count - 1))
 
-    def _apply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None, cancel_token=None, messages=None):
+    def _apply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None, cancel_token=None, messages=None, response_format=None):
         """Apply guardrail validation with retry logic (sync version).
 
         Args:
@@ -7422,6 +7462,9 @@ Answer:"""
                 run with its context intact. When omitted (providers whose
                 message list the caller does not hold), the retry falls back to
                 re-asking the original prompt with the reason appended.
+
+            response_format: Structured-output contract of the original call,
+                kept on retries so ``output_pydantic``/``output_json`` survive.
 
         Bounded by ``max_guardrail_retries``; a validator that never passes
         raises rather than looping.
@@ -7467,7 +7510,7 @@ Answer:"""
                 # stream=False: the retry reads a complete message and nothing
                 # consumes deltas, so streaming here only costs a failed
                 # sync-adapter attempt and an ERROR log before falling back.
-                response = self._chat_completion(list(retry_messages), temperature, tools, stream=False, task_name=task_name, task_description=task_description, task_id=task_id, cancel_token=cancel_token)
+                response = self._chat_completion(list(retry_messages), temperature, tools, stream=False, task_name=task_name, task_description=task_description, task_id=task_id, cancel_token=cancel_token, response_format=response_format)
                 if response and response.choices:
                     content = response.choices[0].message.content
                     current_response = content.strip() if content else ""
@@ -7479,7 +7522,7 @@ Answer:"""
 
         return current_response
 
-    async def _aapply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None, messages=None):
+    async def _aapply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None, messages=None, response_format=None):
         """Apply guardrail validation with retry logic (async version).
 
         See ``_apply_guardrail_with_retry`` for the ``messages`` contract.
@@ -7542,7 +7585,7 @@ Answer:"""
                 # helper's own default is stream=True regardless of the agent's
                 # setting, which would make the retry stream when nothing reads
                 # the deltas.
-                response = await self._execute_unified_achat_completion(list(retry_messages), temperature, tools, stream=False, task_name=task_name, task_description=task_description, task_id=task_id)
+                response = await self._execute_unified_achat_completion(list(retry_messages), temperature, tools, stream=False, task_name=task_name, task_description=task_description, task_id=task_id, response_format=response_format)
                 if response and hasattr(response, 'choices') and response.choices:
                     content = response.choices[0].message.content
                     current_response = content.strip() if content else ""
@@ -7557,36 +7600,9 @@ Answer:"""
         return current_response
 
     def _get_tools_cache_key(self, tools):
-        """Generate a cache key for tools list."""
-        if tools is None:
-            return "none"
-        if not tools:
-            return "empty"
-        # Create a simple hash based on tool names
-        tool_names = []
-        try:
-            from ..tools.hosted import is_hosted_tool
-        except ImportError:
-            is_hosted_tool = lambda _tool: False
-
-        for tool in tools:
-            if callable(tool) and hasattr(tool, '__name__'):
-                tool_names.append(tool.__name__)
-            elif isinstance(tool, dict) and is_hosted_tool(tool):
-                try:
-                    hosted_key = json.dumps(tool, sort_keys=True)
-                except (TypeError, ValueError):
-                    hosted_key = str(id(tool))
-                tool_names.append(f"hosted:{hosted_key}")
-            elif (
-                isinstance(tool, dict)
-                and isinstance(tool.get('function'), dict)
-                and tool['function'].get('name')
-            ):
-                tool_names.append(tool['function']['name'])
-            elif isinstance(tool, str):
-                tool_names.append(tool)
-        return "|".join(sorted(tool_names))
+        """Generate a content-based cache key for a tools list."""
+        from ..tools.schema import tools_cache_key
+        return tools_cache_key(tools)
     
 
     # -------------------------------------------------------------------------

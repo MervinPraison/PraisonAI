@@ -645,9 +645,8 @@ def crawl4ai_sync(
     Returns:
         Dict with crawl results
     """
-    return asyncio.run(
-        crawl4ai(url, css_selector, js_code, wait_for)
-    )
+    from ..utils.async_bridge import run_coroutine_from_any_context
+    return run_coroutine_from_any_context(crawl4ai(url, css_selector, js_code, wait_for), timeout=None)
 
 def crawl4ai_extract_sync(
     url: str,
@@ -664,9 +663,8 @@ def crawl4ai_extract_sync(
     Returns:
         Dict with extracted data
     """
-    return asyncio.run(
-        crawl4ai_extract(url, schema, js_code)
-    )
+    from ..utils.async_bridge import run_coroutine_from_any_context
+    return run_coroutine_from_any_context(crawl4ai_extract(url, schema, js_code), timeout=None)
 
 if __name__ == "__main__":
     # Example usage

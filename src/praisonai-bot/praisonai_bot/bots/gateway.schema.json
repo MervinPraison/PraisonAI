@@ -1427,6 +1427,36 @@
       "title": "HookSchema",
       "type": "object"
     },
+    "OperatorGrantSchema": {
+      "additionalProperties": false,
+      "description": "Per-token operator grant (Issue #6253). Unknown keys are rejected so a\ntypo (``agnts``) cannot silently drop an agent confinement.",
+      "properties": {
+        "scopes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Scopes",
+          "type": "array"
+        },
+        "agents": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agents"
+        }
+      },
+      "title": "OperatorGrantSchema",
+      "type": "object"
+    },
     "OutboundHookSchema": {
       "additionalProperties": false,
       "description": "``gateway.hooks_outbound[]`` \u2014 a core ``CommandHook`` on lifecycle events (#6140).",
@@ -1559,10 +1589,17 @@
           "anyOf": [
             {
               "additionalProperties": {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
+                "anyOf": [
+                  {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  {
+                    "$ref": "#/$defs/OperatorGrantSchema"
+                  }
+                ]
               },
               "type": "object"
             },
@@ -1738,6 +1775,19 @@
           ],
           "default": null,
           "title": "Overflow Policy"
+        },
+        "per_user_per_minute": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Per User Per Minute"
         },
         "preauth_max_connections_per_ip": {
           "anyOf": [

@@ -25,12 +25,13 @@ class FailoverManagerProtocol(Protocol):
 from pydantic import BaseModel
 import time
 import json
-import xml.etree.ElementTree as ET
 from ..errors import AgentErrorKind, BudgetExceededError, FailoverDecision, IdleTimeoutBreaker, ToolExecutionError
 from ..model_harness.guard import check_model_request
 # Gap 2: Tool call execution imports
 from ..tools.call_executor import ToolCall, create_tool_call_executor
 from ..tools.schema import build_tool_definition
+
+logger = get_logger(__name__)
 
 
 # Sentinel returned as the "arguments" value when a tool call's argument string
@@ -784,6 +785,7 @@ Respond with ONLY a valid JSON tool call in this format:
         self._keep_recent_tool_results = extra_settings.get('keep_recent_tool_results', 6)
         self._loop_compactor = None  # Lazily created on first in-loop management call
         self._loop_compactor_model = None  # Model the cached compactor was built for
+        self._loop_managed_tokens = {}  # Per-conversation token count after the last in-loop clear/compact pass
         
         # Tool calling reliability settings (for weak models like Ollama)
         # These are auto-configured for Ollama providers if not explicitly set
@@ -3034,36 +3036,9 @@ Respond with ONLY a valid JSON tool call in this format:
         return fix_array_schemas(schema)
 
     def _get_tools_cache_key(self, tools):
-        """Generate a cache key for tools list."""
-        if tools is None:
-            return "none"
-        if not tools:
-            return "empty"
-        # Create a simple hash based on tool names/content
-        tool_parts = []
-        for tool in tools:
-            # A hosted tool must contribute its FULL spec to the cache key, or
-            # two tool lists differing only by hosted config (e.g. file_search
-            # over vs_1 vs vs_2, or different MCP server_urls) would share a key
-            # and the second call would reuse the first's formatted definition.
-            if isinstance(tool, dict) and is_hosted_tool(tool):
-                try:
-                    tool_parts.append(f"hosted:{json.dumps(tool, sort_keys=True)}")
-                except (TypeError, ValueError):
-                    tool_parts.append(f"hosted:{tool.get('type')}:{id(tool)}")
-            elif isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
-                if 'function' in tool and isinstance(tool['function'], dict) and 'name' in tool['function']:
-                    tool_parts.append(f"openai:{tool['function']['name']}")
-            elif callable(tool) and hasattr(tool, '__name__'):
-                tool_parts.append(f"callable:{tool.__name__}")
-            elif isinstance(tool, str):
-                tool_parts.append(f"string:{tool}")
-            elif isinstance(tool, dict) and len(tool) == 1:
-                tool_name = next(iter(tool.keys()))
-                tool_parts.append(f"gemini:{tool_name}")
-            else:
-                tool_parts.append(f"other:{id(tool)}")
-        return "|".join(sorted(tool_parts))
+        """Generate a content-based cache key for a tools list."""
+        from ..tools.schema import tools_cache_key
+        return tools_cache_key(tools)
 
     def _format_tools_for_litellm(self, tools: Optional[List[Any]]) -> Optional[List[Dict]]:
         """Format tools for LiteLLM - handles all tool formats.
@@ -3087,7 +3062,14 @@ Respond with ONLY a valid JSON tool call in this format:
         # Check cache first
         tools_key = self._get_tools_cache_key(tools)
         if tools_key in self._formatted_tools_cache:
-            return self._formatted_tools_cache[tools_key]
+            # LRU: re-insert so the entry becomes most-recently-used.
+            # A concurrent eviction of the same key just falls through to a miss.
+            try:
+                cached = self._formatted_tools_cache.pop(tools_key)
+                self._formatted_tools_cache[tools_key] = cached
+                return cached
+            except KeyError:
+                pass
             
         formatted_tools = []
         for tool in tools:
@@ -3172,8 +3154,12 @@ Respond with ONLY a valid JSON tool call in this format:
 
         # Cache the formatted tools
         result = formatted_tools if formatted_tools else None
-        if len(self._formatted_tools_cache) < self._max_cache_size:
-            self._formatted_tools_cache[tools_key] = result
+        self._formatted_tools_cache[tools_key] = result
+        while len(self._formatted_tools_cache) > self._max_cache_size:
+            try:
+                del self._formatted_tools_cache[next(iter(self._formatted_tools_cache))]
+            except (KeyError, StopIteration, RuntimeError):
+                break
         return result
 
     def _resolve_context_window(self) -> int:
@@ -3187,6 +3173,15 @@ Respond with ONLY a valid JSON tool call in this format:
             return get_model_limit(self.model or "")
         except Exception:
             return 8000
+
+    #: Share of the context window the conversation must grow by, since the
+    #: last in-loop clear pass, before another clear pass rewrites the prefix.
+    _LOOP_CLEAR_RESERVE_PCT = 0.1
+
+    @staticmethod
+    def _loop_conversation_key(messages: list) -> int:
+        """Identify a conversation by its first two messages (system + task)."""
+        return hash(repr([(m.get("role"), m.get("content")) for m in messages[:2] if isinstance(m, dict)]))
 
     def _manage_context_in_loop(self, messages: list) -> list:
         """
@@ -3234,12 +3229,27 @@ Respond with ONLY a valid JSON tool call in this format:
                 )
                 self._loop_compactor = compactor
                 self._loop_compactor_model = self.model
+                self._loop_managed_tokens = {}
 
             clear_at = int(budget * compactor.config.clear_threshold_pct)
             compact_at = int(budget * compactor.config.compact_threshold_pct)
 
             tokens = compactor.count_total_tokens(messages)
             if tokens < clear_at:
+                return messages
+
+            # Hysteresis: every pass rewrites the message prefix and so busts the
+            # provider prompt cache. Below the summarise threshold, wait until the
+            # context has grown by a reserve band since the last pass, so old tool
+            # results are cleared in batches instead of one per iteration.
+            # The baseline is kept per conversation (keyed by its stable head) so
+            # interleaved tool loops sharing this LLM don't reset each other's band.
+            managed = getattr(self, "_loop_managed_tokens", None)
+            if not isinstance(managed, dict):
+                managed = self._loop_managed_tokens = {}
+            last = managed.get(self._loop_conversation_key(messages))
+            reserve = int(budget * self._LOOP_CLEAR_RESERVE_PCT)
+            if tokens < compact_at and last is not None and last <= tokens < last + reserve:
                 return messages
 
             # Tier 1: clear re-fetchable tool results
@@ -3252,6 +3262,9 @@ Respond with ONLY a valid JSON tool call in this format:
             if compactor.count_total_tokens(messages) >= compact_at:
                 messages, _ = compactor.compact(messages)
 
+            if len(managed) >= 64:  # bound memory for long-lived shared LLMs
+                managed.clear()
+            managed[self._loop_conversation_key(messages)] = compactor.count_total_tokens(messages)
             return messages
         except Exception as e:
             logging.debug(f"In-loop context management skipped: {e}")
@@ -3598,6 +3611,19 @@ Respond with ONLY a valid JSON tool call in this format:
                                 reason = _cancel_reason()
                                 logging.debug(f"LLM tool loop cancelled before tool dispatch: {reason}")
                                 return _prepare_return_value(f"Task interrupted: {reason}")
+                            # Same per-turn cap as the chat-completions loop, applied
+                            # before recording the assistant turn so every declared
+                            # tool_call_id gets exactly one tool reply.
+                            if tool_call_count >= max_tool_calls_per_turn:
+                                logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
+                                self._last_stop_reason = "max_steps"
+                                if not (final_response_text and final_response_text.strip()):
+                                    final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
+                                break
+                            if tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
+                                tool_calls = tool_calls[:max_tool_calls_per_turn - tool_call_count]
+                                logging.warning(f"Limiting batch to {len(tool_calls)} tool calls to stay within limit of {max_tool_calls_per_turn}.")
+                            tool_call_count += len(tool_calls)
                             serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                             messages.append({
                                 "role": "assistant",
@@ -3680,7 +3706,7 @@ Respond with ONLY a valid JSON tool call in this format:
 
                                 # Append tool result as standard tool message
                                 messages.append(self._create_tool_message(
-                                    function_name, tool_result,
+                                    tool_result_obj.function_name, tool_result,
                                     tool_result_obj.tool_call_id, is_ollama=False))
 
                             # Report any unparseable tool-call arguments so the
@@ -4205,64 +4231,17 @@ Respond with ONLY a valid JSON tool call in this format:
                             tool_calls = recovered
                             logging.debug(f"Recovered tool calls from response text: {tool_calls}")
                     
-                    # Parse tool calls from XML format in response text 
-                    # Try for known XML models first, or fallback for any model that might output XML
-                    if not tool_calls and response_text and formatted_tools:
-                        # Check if this model is known to use XML format, or try as fallback
-                        should_try_xml = (self._supports_xml_tool_format() or 
-                                        # Fallback: try XML if response contains XML-like tool call tags
-                                        '<tool_call>' in response_text)
-                        
-                        if should_try_xml:
-                            tool_calls = []
-                            
-                            # Try proper XML parsing first
-                            try:
-                                # Wrap in root element if multiple tool_call tags exist
-                                xml_content = f"<root>{response_text}</root>"
-                                root = ET.fromstring(xml_content)
-                                tool_call_elements = root.findall('.//tool_call')
-                                
-                                for idx, element in enumerate(tool_call_elements):
-                                    if element.text:
-                                        try:
-                                            tool_json = json.loads(element.text.strip())
-                                            if isinstance(tool_json, dict) and "name" in tool_json:
-                                                tool_calls.append({
-                                                    "id": f"tool_{iteration_count}_{idx}",
-                                                    "type": "function",
-                                                    "function": {
-                                                        "name": tool_json["name"],
-                                                        "arguments": json.dumps(tool_json.get("arguments", {}))
-                                                    }
-                                                })
-                                        except (json.JSONDecodeError, KeyError) as e:
-                                            logging.debug(f"Could not parse tool call JSON: {e}")
-                                            continue
-                            except ET.ParseError:
-                                # Fallback to regex if XML parsing fails
-                                tool_call_pattern = r'<tool_call>\s*(\{(?:[^{}]|{[^{}]*})*\})\s*</tool_call>'
-                                matches = re.findall(tool_call_pattern, response_text, re.DOTALL)
-                                
-                                for idx, match in enumerate(matches):
-                                    try:
-                                        tool_json = json.loads(match.strip())
-                                        if isinstance(tool_json, dict) and "name" in tool_json:
-                                            tool_calls.append({
-                                                "id": f"tool_{iteration_count}_{idx}",
-                                                "type": "function",
-                                                "function": {
-                                                    "name": tool_json["name"],
-                                                    "arguments": json.dumps(tool_json.get("arguments", {}))
-                                                }
-                                            })
-                                    except (json.JSONDecodeError, KeyError) as e:
-                                        logging.debug(f"Could not parse XML tool call: {e}")
-                                        continue
-                            
-                            if tool_calls:
-                                logging.debug(f"Parsed {len(tool_calls)} tool call(s) from XML format")
-                    
+                    # XML-format models (Qwen, or xml_tool_format=True), or any reply
+                    # carrying a <tool_call> tag: recover only <tool_call> blocks
+                    # outside fenced code (an example call is never executed) whose
+                    # name is advertised. Plain JSON answers are never promoted.
+                    if not tool_calls and response_text and formatted_tools and (
+                            self._supports_xml_tool_format() or '<tool_call>' in response_text):
+                        from .adapters import _recover_tool_call_tags
+                        tool_calls = _recover_tool_call_tags(response_text, formatted_tools)
+                        if tool_calls:
+                            logging.debug(f"Parsed {len(tool_calls)} tool call(s) from XML format")
+
                     # Force tool usage logic: if model ignores tools but should use them
                     _force = self._force_tool_usage_message(response_text, tool_calls, formatted_tools, iteration_count)
                     if _force is not None:
@@ -4316,6 +4295,22 @@ Respond with ONLY a valid JSON tool call in this format:
                             reason = _cancel_reason()
                             logging.debug(f"LLM tool loop cancelled before tool dispatch: {reason}")
                             return _prepare_return_value(f"Task interrupted: {reason}")
+                        # Apply the cap BEFORE recording the assistant turn so every
+                        # declared tool_call_id gets exactly one tool reply.
+                        # Guardrail: Check tool call limit to prevent infinite loops
+                        # Allow execution if we haven't reached the limit yet, but limit the batch size
+                        if tool_call_count >= max_tool_calls_per_turn:
+                            logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
+                            self._last_stop_reason = "max_steps"
+                            if not (final_response_text and final_response_text.strip()):
+                                final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
+                            break
+                        elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
+                            # Limit the batch to stay within the total limit
+                            remaining_calls = max_tool_calls_per_turn - tool_call_count
+                            tool_calls = tool_calls[:remaining_calls]
+                            logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
+                        
                         # Convert tool_calls to a serializable format for all providers
                         serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                         # Check if this is Ollama provider
@@ -4336,20 +4331,6 @@ Respond with ONLY a valid JSON tool call in this format:
                         should_continue = False
                         tool_results = []  # Store current iteration tool results
                         tool_result_mapping = {}  # Store function results by name for Ollama chaining
-                        
-                        # Guardrail: Check tool call limit to prevent infinite loops
-                        # Allow execution if we haven't reached the limit yet, but limit the batch size
-                        if tool_call_count >= max_tool_calls_per_turn:
-                            logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
-                            self._last_stop_reason = "max_steps"
-                            if not (final_response_text and final_response_text.strip()):
-                                final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
-                            break
-                        elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
-                            # Limit the batch to stay within the total limit
-                            remaining_calls = max_tool_calls_per_turn - tool_call_count
-                            tool_calls = tool_calls[:remaining_calls]
-                            logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
                         
                         # Collect media-bearing follow-up messages so they are
                         # flushed only AFTER every tool reply for this assistant
@@ -5542,24 +5523,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             break
                         last_tool_call_fingerprint = fingerprint
 
-                        # Record the assistant turn before the tool replies, so
-                        # the follow-up request is a valid conversation.
-                        if is_ollama:
-                            messages.append({"role": "assistant", "content": content or ""})
-                        else:
-                            messages.append({
-                                "role": "assistant",
-                                "content": content or "",
-                                "tool_calls": self._serialize_tool_calls(tool_calls),
-                            })
-
                         # Any prose the model emitted alongside the calls is
-                        # still part of the answer.
+                        # still part of the answer -- yield it before the cap
+                        # check so it is not lost when the limit is reached.
                         if content:
                             yield content
 
                         # Enforce the same per-turn guardrail the streaming and
-                        # non-streaming loops apply, so the fallback cannot run
+                        # non-streaming loops apply (before recording the assistant turn, so no
+                        # declared tool_call_id is left without a reply), so the fallback cannot run
                         # tools past the caller's configured limit.
                         if tool_call_count >= max_tool_calls_per_turn:
                             logging.warning(
@@ -5573,6 +5545,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             logging.warning(
                                 f"Limiting batch to {remaining_calls} tool calls to stay "
                                 f"within limit of {max_tool_calls_per_turn}.")
+
+                        # Record the assistant turn before the tool replies, so
+                        # the follow-up request is a valid conversation.
+                        if is_ollama:
+                            messages.append({"role": "assistant", "content": content or ""})
+                        else:
+                            messages.append({
+                                "role": "assistant",
+                                "content": content or "",
+                                "tool_calls": self._serialize_tool_calls(tool_calls),
+                            })
 
                         for tool_call in tool_calls:
                             tool_call_count += 1
@@ -5965,13 +5948,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             reason = _cancel_reason()
                             logging.debug(f"Async LLM tool loop cancelled before tool dispatch: {reason}")
                             return _prepare_return_value(f"Task interrupted: {reason}")
-                        serializable_tool_calls = self._serialize_tool_calls(tool_calls)
-                        messages.append({
-                            "role": "assistant",
-                            "content": response_text,
-                            "tool_calls": serializable_tool_calls,
-                        })
-
+                        # Apply the cap BEFORE recording the assistant turn so every
+                        # declared tool_call_id gets exactly one tool reply.
                         # Guardrail: Check tool call limit to prevent infinite loops
                         # Allow execution if we haven't reached the limit yet, but limit the batch size
                         if tool_call_count >= max_tool_calls_per_turn:
@@ -5986,6 +5964,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             tool_calls = tool_calls[:remaining_calls]
                             logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
                         
+                        serializable_tool_calls = self._serialize_tool_calls(tool_calls)
+                        messages.append({
+                            "role": "assistant",
+                            "content": response_text,
+                            "tool_calls": serializable_tool_calls,
+                        })
+
                         # Pre-resolve each tool call, then dispatch the valid ones
                         # as a batch (concurrently when parallel_tool_calls is set).
                         _parsed_calls = []
@@ -6247,6 +6232,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         reason = _cancel_reason()
                         logging.debug(f"Async LLM tool loop cancelled before tool dispatch: {reason}")
                         return _prepare_return_value(f"Task interrupted: {reason}")
+                    # Apply the cap BEFORE recording the assistant turn so every
+                    # declared tool_call_id gets exactly one tool reply.
+                    # Guardrail: Check tool call limit to prevent infinite loops
+                    # Allow execution if we haven't reached the limit yet, but limit the batch size
+                    if tool_call_count >= max_tool_calls_per_turn:
+                        logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
+                        self._last_stop_reason = "max_steps"
+                        if not (final_response_text and final_response_text.strip()):
+                            final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
+                        break
+                    elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
+                        # Limit the batch to stay within the total limit
+                        remaining_calls = max_tool_calls_per_turn - tool_call_count
+                        tool_calls = tool_calls[:remaining_calls]
+                        logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
+                    
                     # Convert tool_calls to a serializable format for all providers
                     serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                     # Check if it's Ollama provider
@@ -6263,20 +6264,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             "content": response_text,
                             "tool_calls": serializable_tool_calls
                         })
-                    
-                    # Guardrail: Check tool call limit to prevent infinite loops
-                    # Allow execution if we haven't reached the limit yet, but limit the batch size
-                    if tool_call_count >= max_tool_calls_per_turn:
-                        logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
-                        self._last_stop_reason = "max_steps"
-                        if not (final_response_text and final_response_text.strip()):
-                            final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
-                        break
-                    elif tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
-                        # Limit the batch to stay within the total limit
-                        remaining_calls = max_tool_calls_per_turn - tool_call_count
-                        tool_calls = tool_calls[:remaining_calls]
-                        logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
                     
                     tool_results = []  # Store current iteration tool results
                     # Collect media-bearing follow-up messages so they are
@@ -7825,10 +7812,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             'task_name', 'task_description', 'task_id',
             'execute_tool_fn', 'stream_callback', 'emit_events',
             'console', 'reasoning_steps',
+            'reasoning_effort', 'thinking_budget',  # translated below
         }
         for k, v in kwargs.items():
             if k not in _internal and v is not None:
                 params[k] = v
+
+        # ── Reasoning effort ────────────────────────────────────────────
+        # Translate the unified level (Issue #4452) like
+        # _build_completion_params does, but in the Responses API shape
+        # ``reasoning: {"effort": ...}``. A per-call value wins over the
+        # instance setting; an explicit ``reasoning`` object is kept as is.
+        effort = kwargs.get('reasoning_effort', getattr(self, 'reasoning_effort', None))
+        if effort is not None and 'reasoning' not in params:
+            from ..thinking.effort import resolve_reasoning_params
+            native = resolve_reasoning_params(effort, params['model'])
+            if 'reasoning_effort' in native:
+                params['reasoning'] = {'effort': native['reasoning_effort']}
 
         # Match Chat Completions after merging overrides: reasoning models
         # must not regain unsupported sampling parameters through either path.
