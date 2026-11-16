@@ -2104,9 +2104,10 @@ class DefaultSessionStore:
             List of session IDs belonging to the specified agent
         """
         session_ids = []
+        filenames = os.listdir(self.session_dir)
         
         try:
-            for filename in os.listdir(self.session_dir):
+            for filename in filenames:
                 if filename.endswith(".json"):
                     filepath = os.path.join(self.session_dir, filename)
                     try:
@@ -2214,8 +2215,9 @@ class DefaultSessionStore:
         Returns:
             SessionData if found, None otherwise
         """
+        filenames = os.listdir(self.session_dir)
         try:
-            for filename in os.listdir(self.session_dir):
+            for filename in filenames:
                 if filename.endswith(".json"):
                     filepath = os.path.join(self.session_dir, filename)
                     try:
@@ -2244,9 +2246,10 @@ class DefaultSessionStore:
             List of session IDs linked to the gateway agent
         """
         session_ids = []
+        filenames = os.listdir(self.session_dir)
         
         try:
-            for filename in os.listdir(self.session_dir):
+            for filename in filenames:
                 if filename.endswith(".json"):
                     filepath = os.path.join(self.session_dir, filename)
                     try:
@@ -2464,10 +2467,7 @@ class DefaultSessionStore:
         terms = [t for t in needle.split() if t]
         hits: List[tuple] = []
 
-        try:
-            filenames = os.listdir(self.session_dir)
-        except (IOError, OSError):
-            return []
+        filenames = os.listdir(self.session_dir)
 
         for filename in filenames:
             if not filename.endswith(".json"):
