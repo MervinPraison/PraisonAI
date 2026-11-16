@@ -117,6 +117,25 @@ def test_team_output_json_model_is_validated():
     assert task.result is None or task.result.json_dict != {"error": "unknown"}
 
 
+def test_team_output_json_model_result_is_json_safe():
+    import datetime
+    import json
+
+    class Event(BaseModel):
+        name: str
+        day: datetime.date
+
+    agent = Agent(name="A", instructions="x", output="silent")
+    task = Task(name="t1", description="event", expected_output="json",
+                agent=agent, output_json=Event)
+    with patch.object(Agent, "chat", lambda self, *a, **k: '{"name": "launch", "day": "2026-01-02"}'):
+        _team_run(task, agent)
+
+    assert task.status == "completed"
+    assert task.result.json_dict == {"name": "launch", "day": "2026-01-02"}
+    assert json.loads(task.result.json()) == {"name": "launch", "day": "2026-01-02"}
+
+
 def test_guardrail_reason_reaches_retry_prompt():
     agent = Agent(name="A", instructions="x", output="silent")
     prompts = []

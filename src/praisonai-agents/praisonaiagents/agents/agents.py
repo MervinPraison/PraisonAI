@@ -642,7 +642,7 @@ def _process_task_result(agents_instance, context, agent_output):
                 parsed = json.loads(cleaned)
                 # Enforce the schema when output_json is a Pydantic model.
                 if hasattr(task.output_json, "model_validate"):
-                    parsed = task.output_json.model_validate(parsed).model_dump()
+                    parsed = task.output_json.model_validate(parsed).model_dump(mode="json")
                 task_output.json_dict = parsed
                 task_output.output_format = "JSON"
             except Exception as e:
