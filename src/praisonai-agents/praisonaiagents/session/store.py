@@ -1143,8 +1143,13 @@ class DefaultSessionStore:
             self._fire_corruption_hook(session_id, str(error), None)
 
     def _dump_session_json(self, data: Any, stream) -> None:
-        """Write durable JSON; subclasses can format private storage records."""
-        json.dump(data, stream, indent=2, ensure_ascii=False)
+        """Write durable JSON; subclasses can format private storage records.
+
+        Encoded to one string first: ``json.dump`` streams one ``write()`` per
+        token, which dominated every ``add_message`` on a long session. Same
+        bytes on disk.
+        """
+        stream.write(json.JSONEncoder(indent=2, ensure_ascii=False).encode(data))
 
     def _atomic_write_json(self, filepath: str, data: Any) -> bool:
         """Atomically write JSON data to disk (temp file + os.replace)."""
