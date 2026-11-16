@@ -478,7 +478,9 @@ class TestCancellationSupport:
 
     @pytest.mark.asyncio
     async def test_async_cancelled_error_returns_cancelled(self):
-        """asyncio.CancelledError during achat should return cancelled result."""
+        """asyncio.CancelledError during achat propagates (G-07) so wait_for /
+        TaskGroup / task.cancel() see it; the partial cancelled result stays
+        reachable on the agent."""
         from praisonaiagents import Agent
         agent = Agent(instructions="Test", autonomy={"max_iterations": 5, "auto_escalate": False})
         call_count = [0]
@@ -489,7 +491,9 @@ class TestCancellationSupport:
             return "Working..."
         with patch.object(agent, 'achat', side_effect=chat_fn):
             with patch.object(agent, 'get_recommended_stage', return_value="heuristic"):
-                result = await agent.run_autonomous_async("Do something")
+                with pytest.raises(asyncio.CancelledError):
+                    await agent.run_autonomous_async("Do something")
+        result = agent._last_autonomy_result
         assert result.success is False
         assert result.completion_reason == "cancelled"
 

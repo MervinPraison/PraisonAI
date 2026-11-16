@@ -5307,10 +5307,13 @@ Summary:"""
             
         Raises:
             ValueError: If autonomy is not enabled
-            
+            asyncio.CancelledError: If the task is cancelled (``task.cancel()``,
+                ``asyncio.wait_for`` timeout, TaskGroup). The partial result is
+                kept on ``agent._last_autonomy_result``.
+
         Example:
             import asyncio
-            
+
             async def main():
                 agent = Agent(instructions="...", autonomy=True)
                 result = await agent.run_autonomous_async(
@@ -5695,8 +5698,8 @@ Summary:"""
                 started_at=started_at,
             )
         
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            return AutonomyResult(
+        except (KeyboardInterrupt, asyncio.CancelledError) as e:
+            result = AutonomyResult(
                 success=False,
                 output="Task cancelled",
                 completion_reason="cancelled",
@@ -5706,6 +5709,12 @@ Summary:"""
                 duration_seconds=time_module.time() - start_time,
                 started_at=started_at,
             )
+            if isinstance(e, asyncio.CancelledError):
+                # Re-raise so wait_for/TaskGroup/task.cancel() see the
+                # cancellation; keep the partial result reachable on the agent.
+                self._last_autonomy_result = result
+                raise
+            return result
         except Exception as e:
             return AutonomyResult(
                 success=False,
