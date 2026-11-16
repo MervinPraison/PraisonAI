@@ -3518,6 +3518,7 @@ Respond with ONLY a valid JSON tool call in this format:
                             # the public collector isn't silently zeroed.
                             if stream_response is not None:
                                 self._track_token_usage(stream_response, self.model)
+                                _final_llm_response = stream_response  # for return_token_usage
                                 if self.metrics and getattr(stream_response, 'usage', None):
                                     usage = stream_response.usage
                                     tokens_in = getattr(usage, 'input_tokens', 0) or 0
@@ -3531,6 +3532,7 @@ Respond with ONLY a valid JSON tool call in this format:
                         else:
                             resp = self._call_responses_api(**responses_params)
                             response_text, tool_calls, _reasoning = self._extract_from_responses_output(resp)
+                            _final_llm_response = resp  # for return_token_usage
 
                             # Usage accounting is independent from metrics display.
                             # Quiet/default agents must still update the public
