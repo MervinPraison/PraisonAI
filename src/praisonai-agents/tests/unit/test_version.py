@@ -54,3 +54,22 @@ def test_unknown_when_nothing_available(tmp_path):
         with warnings.catch_warnings(record=True):
             warnings.simplefilter("always")
             assert _version.get_version() == "unknown"
+
+
+def test_name_outside_project_table_not_trusted(tmp_path):
+    fake = _fake_file(
+        tmp_path,
+        '[project]\nname = "other"\nversion = "0.0.1"\n\n'
+        '[tool.something]\nname = "praisonaiagents"\nversion = "6.6.6"\n',
+    )
+    with mock.patch.object(_version, "__file__", fake), \
+            mock.patch("importlib.metadata.version", return_value="1.2.3"):
+        assert _version.get_version() == "1.2.3"
+
+
+def test_undecodable_pyproject_falls_back_to_metadata(tmp_path):
+    fake = _fake_file(tmp_path)
+    (tmp_path / "pyproject.toml").write_bytes(b"\xff\xfe\xfa not utf-8")
+    with mock.patch.object(_version, "__file__", fake), \
+            mock.patch("importlib.metadata.version", return_value="7.8.9"):
+        assert _version.get_version() == "7.8.9"
