@@ -2606,7 +2606,7 @@ class DefaultSessionStore:
         summaries = [
             SessionSummary(
                 session_id=s.get("session_id", ""),
-                title=s.get("agent_name") or s.get("session_id", ""),
+                title=s.get("title") or s.get("agent_name") or s.get("session_id", ""),
                 when=s.get("updated_at") or s.get("created_at"),
                 message_count=s.get("message_count", 0),
             )
