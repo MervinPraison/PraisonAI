@@ -753,3 +753,8 @@ def get_job_manager() -> BackgroundJobManager:
                 "(non-fatal): %s", e,
             )
     return manager
+
+
+# ``Protocol``-suffixed names (G-26, the project naming rule). The original
+# names stay and are the same class, so existing imports keep working.
+BackgroundJobStoreProtocol = BackgroundJobStore

@@ -801,3 +801,8 @@ def resolve_deferred(handle_id: str, value: Any) -> bool:
     resolve_deferred(info.job_id, info.result))``.
     """
     return get_deferred_resolver().resolve(handle_id, value)
+
+
+# ``Protocol``-suffixed names (G-26, the project naming rule). The original
+# names stay and are the same class, so existing imports keep working.
+ToolCallExecutorProtocol = ToolCallExecutor
