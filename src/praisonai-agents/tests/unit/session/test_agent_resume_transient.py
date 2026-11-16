@@ -1,14 +1,12 @@
+"""A transient session read error at first resume must not permanently start
+the Agent with empty history, and must not raise out of the turn."""
 from types import SimpleNamespace
 from unittest.mock import PropertyMock, patch
-import builtins
-import importlib
-import sys
-from pathlib import Path
 
 import pytest
 
 from praisonaiagents import Agent, MemoryConfig
-from praisonaiagents.session.store import DefaultSessionStore, SessionResumeReadError
+from praisonaiagents.session.store import DefaultSessionStore
 from praisonaiagents.session.sqlite_transcript_store import SqliteTranscriptStore
 from praisonaiagents.session.sqlite_store import SqliteSessionStore
 
@@ -18,112 +16,118 @@ def isolate_spill_directory(tmp_path, monkeypatch):
     monkeypatch.setattr('praisonaiagents.paths.get_session_spill_dir', lambda: tmp_path / 'spill')
 
 
-@pytest.fixture
-def resume_store_types():
-    # Other import-isolation tests can reload the store after collection.
-    # Match the classes resolved by Agent at the time resume runs.
-    from praisonaiagents.session.store import DefaultSessionStore, SessionResumeReadError
-    return DefaultSessionStore, SessionResumeReadError
+def _run_turns(agent, *prompts, between=None):
+    """Run chat turns against a fake LLM; return the messages each call saw."""
+    received = []
+
+    def completion(messages, *args, **kwargs):
+        received.append([(m.get('role'), m.get('content')) for m in messages])
+        message = SimpleNamespace(content='answer', tool_calls=None, role='assistant', reasoning_content=None)
+        return SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason='stop', index=0)],
+                               usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2),
+                               model='synthetic')
+
+    with patch.object(Agent, '_openai_client', new_callable=PropertyMock, return_value=None), \
+            patch.object(agent, '_chat_completion', side_effect=completion):
+        for i, prompt in enumerate(prompts):
+            if i and between:
+                between()
+            agent.chat(prompt)
+    return received
 
 
-def test_resume_uses_current_store_after_module_reload(tmp_path, monkeypatch):
-    with monkeypatch.context() as isolated:
-        importlib.import_module('praisonaiagents.session.store')
-        parent = importlib.import_module('praisonaiagents.session')
-        isolated.setattr(parent, 'store', parent.store)
-        isolated.delitem(sys.modules, 'praisonaiagents.session.store')
-        store_module = importlib.import_module('praisonaiagents.session.store')
-        store = store_module.DefaultSessionStore(session_dir=str(tmp_path))
-        def fail(*args):
-            raise PermissionError('temporary')
-        isolated.setattr(store, '_load_session_from_disk', fail)
-        agent = Agent(name='test', memory=MemoryConfig(session_id='s'))
-        agent._session_store = store
-        with pytest.raises(store_module.SessionResumeReadError):
-            agent._init_session_store()
+def _seeded_store(tmp_path):
+    DefaultSessionStore(session_dir=str(tmp_path)).add_user_message('s', 'old')
+    return DefaultSessionStore(session_dir=str(tmp_path))
 
 
-def test_legacy_migration_read_failure_stops_resume_and_retry_recovers(tmp_path, monkeypatch, resume_store_types):
-    DefaultSessionStore, SessionResumeReadError = resume_store_types
-    seed = DefaultSessionStore(session_dir=str(tmp_path))
-    seed.add_user_message('a.b', 'old')
-    current = Path(seed._session_file_path('a.b'))
-    legacy = tmp_path / 'a_b.json'
-    current.rename(legacy)
-    before = legacy.read_bytes()
-    store = DefaultSessionStore(session_dir=str(tmp_path))
-    real_open = builtins.open
-    failing = [True]
+class _FlakyStore:
+    """A store whose first history read raises OSError, then succeeds."""
 
-    def transient(path, *args, **kwargs):
-        if str(path) == str(legacy) and failing[0]:
-            raise PermissionError('legacy read unavailable')
-        return real_open(path, *args, **kwargs)
+    def __init__(self):
+        self.calls = 0
+        self.messages = [{'role': 'user', 'content': 'old'}]
 
-    monkeypatch.setattr(builtins, 'open', transient)
-    agent = Agent(name='test', memory=MemoryConfig(session_id='a.b'))
+    def get_working_history(self, session_id):
+        self.calls += 1
+        if self.calls == 1:
+            raise PermissionError('storage briefly unavailable')
+        return list(self.messages)
+
+    def set_agent_info(self, *args, **kwargs):
+        return True
+
+    def add_user_message(self, session_id, content, metadata=None):
+        self.messages.append({'role': 'user', 'content': content})
+
+    def add_assistant_message(self, session_id, content, metadata=None):
+        self.messages.append({'role': 'assistant', 'content': content})
+
+
+def test_store_raising_oserror_is_retried_next_turn():
+    store = _FlakyStore()
+    agent = Agent(name='test', memory=MemoryConfig(session_id='s'))
     agent._session_store = store
-    with pytest.raises(SessionResumeReadError):
-        agent._init_session_store()
-    assert not agent._session_store_initialized and legacy.read_bytes() == before
-    assert store.get_working_history('a.b') == []
-    failing[0] = False
-    agent._init_session_store()
-    assert agent.chat_history == [{'role': 'user', 'content': 'old'}]
+    received = _run_turns(agent, 'new', 'next')
+    assert ('user', 'old') not in received[0]
+    assert agent._session_store is store and agent._session_store_initialized
+    assert ('user', 'old') in received[1]
+    assert [c for r, c in received[1] if r != 'system'] == ['old', 'new', 'answer', 'next']
 
 
-@pytest.mark.parametrize('history', [False, True])
-def test_agent_does_not_run_before_transient_resume_succeeds(tmp_path, monkeypatch, history, resume_store_types):
-    DefaultSessionStore, SessionResumeReadError = resume_store_types
-    seed = DefaultSessionStore(session_dir=str(tmp_path))
-    seed.add_user_message('s', 'old')
-    path = tmp_path / 's.json'
-    original_bytes = path.read_bytes()
-    store = DefaultSessionStore(session_dir=str(tmp_path))
+def test_default_store_single_read_failure_still_resumes(tmp_path, monkeypatch):
+    store = _seeded_store(tmp_path)
     load = store._load_session_from_disk
-    failure = [True]
+    failures = [1]
 
     def transient(*args):
-        if failure[0]:
-            failure[0] = False
+        if failures[0]:
+            failures[0] -= 1
             raise PermissionError('temporary')
         return load(*args)
 
     monkeypatch.setattr(store, '_load_session_from_disk', transient)
-    agent = Agent(name='test', memory=MemoryConfig(session_id='s', history=history))
+    agent = Agent(name='test', memory=MemoryConfig(session_id='s'))
     agent._session_store = store
-    received = []
-
-    def completion(messages, *args, **kwargs):
-        received.append(list(messages))
-        message = SimpleNamespace(content='answer', tool_calls=None, role='assistant', reasoning_content=None)
-        return SimpleNamespace(choices=[SimpleNamespace(message=message, finish_reason='stop', index=0)],
-                               usage=SimpleNamespace(prompt_tokens=1, completion_tokens=1, total_tokens=2), model='synthetic')
-
-    with patch.object(Agent, '_openai_client', new_callable=PropertyMock, return_value=None), patch.object(agent, '_chat_completion', side_effect=completion):
-        with pytest.raises(SessionResumeReadError):
-            agent.chat('new')
-        assert not received
-        assert path.read_bytes() == original_bytes
-        assert agent._session_store is store and not agent._session_store_initialized
-        agent.chat('new')
-        agent.chat('next')
-    assert len(received) == 2
-    assert any(item.get('content') == 'old' for item in received[0])
-    messages = store.get_chat_history('s')
-    assert [(x['role'], x['content']) for x in messages] == [
-        ('user', 'old'), ('user', 'new'), ('assistant', 'answer'),
-        ('user', 'next'), ('assistant', 'answer')]
+    received = _run_turns(agent, 'new')
+    assert ('user', 'old') in received[0]
 
 
-def test_ordinary_reads_keep_existing_empty_fallback(tmp_path, monkeypatch):
-    store = DefaultSessionStore(session_dir=str(tmp_path))
-    store.add_user_message('cached', 'cached history')
-    def fail(*args):
-        raise PermissionError('temporary')
-    monkeypatch.setattr(store, '_load_session_from_disk', fail)
-    assert store.get_working_history('s') == []
-    assert store.get_working_history('cached') == [{'role': 'user', 'content': 'cached history'}]
+@pytest.mark.parametrize('outage', ['init', 'whole_turn'])
+def test_default_store_outage_retries_without_losing_or_duplicating(tmp_path, monkeypatch, outage):
+    store = _seeded_store(tmp_path)
+    path = tmp_path / 's.json'
+    load = store._load_session_from_disk
+    down = [True]
+
+    def transient(*args):
+        if down[0]:
+            raise PermissionError('storage down')
+        return load(*args)
+
+    monkeypatch.setattr(store, '_load_session_from_disk', transient)
+    agent = Agent(name='test', memory=MemoryConfig(session_id='s'))
+    agent._session_store = store
+    original = agent._init_session_store
+
+    def init_then_maybe_recover():
+        original()
+        if outage == 'init':
+            down[0] = False  # storage recovers before turn 1 is persisted
+
+    monkeypatch.setattr(agent, '_init_session_store', init_then_maybe_recover)
+    before = path.read_bytes()
+
+    def recover():
+        if outage == 'whole_turn':
+            assert path.read_bytes() == before  # nothing overwritten while down
+        down[0] = False
+
+    received = _run_turns(agent, 'new', 'next', between=recover)
+    assert ('user', 'old') not in received[0]
+    convo = [c for r, c in received[1] if r != 'system']
+    assert convo == ['old', 'new', 'answer', 'next']
+    assert agent._session_store is store and agent._session_store_initialized
 
 
 def test_custom_store_override_is_not_bypassed(tmp_path):
