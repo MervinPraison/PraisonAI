@@ -3153,8 +3153,8 @@ Your Role: {self.role}"""
             except Exception as hook_error:
                 logging.debug(f"Error in on_error hook: {hook_error}")
         
-        # Raise the enriched error
-        raise error
+        # Raise the enriched error, keeping the provider error as its cause
+        raise error from exc
 
     def _native_reasoning_kwargs(self, model=None):
         """Provider-native reasoning effort for the direct OpenAI client path.

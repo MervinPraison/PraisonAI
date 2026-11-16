@@ -27,6 +27,10 @@ class _StubAuth(Exception):
     status_code = 401
 
 
+class _StubBadRequest(Exception):
+    status_code = 400
+
+
 def _raiser(exc_type, text):
     def sync(*_a, **_k):
         raise exc_type(text)
@@ -92,4 +96,13 @@ def test_auth_error_keeps_returning_none(method):
     sync, async_ = _raiser(_StubAuth, "Error code: 401 - invalid api key")
     with mock.patch(_COMPLETIONS, sync), mock.patch(_ASYNC_COMPLETIONS, async_):
         agent = Agent(name="t", llm="no-such-model", output="silent")
+        assert _call(agent, method, False) is None
+
+
+@pytest.mark.parametrize("method", ["chat", "achat"])
+def test_other_bad_request_keeps_returning_none(method):
+    # Only a missing model is fatal here; other 400s keep today's behaviour.
+    sync, async_ = _raiser(_StubBadRequest, "Error code: 400 - invalid parameter")
+    with mock.patch(_COMPLETIONS, sync), mock.patch(_ASYNC_COMPLETIONS, async_):
+        agent = Agent(name="t", llm="gpt-4o-mini", output="silent")
         assert _call(agent, method, False) is None
