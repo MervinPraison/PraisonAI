@@ -109,6 +109,7 @@ __all__ = [
     "MiddlewareManager",
     # Verification hooks (protocols)
     "VerificationHook",
+    "VerificationHookProtocol",
     "VerificationResult",
     "BaseVerificationHook",
     "CommandVerificationHook",
@@ -194,6 +195,7 @@ _LAZY_GROUPS = {
     },
     'verification': {
         'VerificationHook': ('praisonaiagents.hooks.verification', 'VerificationHook'),
+        'VerificationHookProtocol': ('praisonaiagents.hooks.verification', 'VerificationHookProtocol'),
         'VerificationResult': ('praisonaiagents.hooks.verification', 'VerificationResult'),
         'BaseVerificationHook': ('praisonaiagents.hooks.verification', 'BaseVerificationHook'),
         'CommandVerificationHook': ('praisonaiagents.hooks.verification', 'CommandVerificationHook'),
