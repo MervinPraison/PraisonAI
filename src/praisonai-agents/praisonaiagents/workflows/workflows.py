@@ -3242,23 +3242,14 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                     "step": step.name, "output": previous_output,
                     "stop": False, "skipped": True, "variables": {},
                 }
-        cache = getattr(self, "_step_cache", None)
-        if cache is None:
+        def _run_uncached():
             _snapshot_scope(_replay, all_variables)
             return self._execute_single_step_uncached(
                 step, previous_output, input, all_variables, model, verbose, index,
                 stream=stream, depth=depth,
             )
-        from .step_cache import make_step_key
-        key = make_step_key(step, previous_output, input, all_variables)
-        try:
-            hit = copy.deepcopy(cache.get(key))
-        except Exception:
-            hit = None
-            logger.warning("Could not restore cached workflow step")
-        if hit is not None:
-            if verbose:
-                print(f"↩︎  cache hit: {getattr(step, 'name', getattr(step, '__name__', step))}")
+
+        def _on_hit():
             # A cache hit means the gated-in step is being served a prior result,
             # so its status is "completed" -- not whatever a previous run left in
             # step_statuses. Without this reset, a step that was gated OUT on an
@@ -3269,24 +3260,12 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             self.step_statuses[step.name] = "completed"
             if _replay is not None:
                 _replay["status"] = "cached"
-            # Copy: a caller mutating a returned result must not edit the cache.
-            return dict(hit)
-        _snapshot_scope(_replay, all_variables)
-        result = self._execute_single_step_uncached(
-            step, previous_output, input, all_variables, model, verbose, index,
-            stream=stream, depth=depth,
+
+        return _with_step_cache(
+            getattr(self, "_step_cache", None),
+            step, (previous_output, input, all_variables), _run_uncached,
+            verbose=verbose, on_hit=_on_hit,
         )
-        # Only cache a SUCCESSFUL result. A nested step that exhausts its
-        # retries or fails a guardrail returns a dict carrying an "error" key
-        # (see the failure branches of _execute_single_step_uncached); caching
-        # that would replay the failure on every identical re-run and never let
-        # the step retry -- turning a transient error into a permanent one.
-        if isinstance(result, dict) and not result.get("error"):
-            try:
-                cache.set(key, copy.deepcopy(result))
-            except Exception:
-                logger.warning("Could not cache workflow step")
-        return result
 
     def _execute_single_step_uncached(
         self, 
@@ -5046,6 +5025,45 @@ CONCISE SUMMARY:"""
 Workflow = AgentFlow
 Pipeline = AgentFlow
 
+
+def _with_step_cache(cache, step, key_args, run_uncached, *, verbose=False, on_hit=None):
+    """Shared step-cache envelope for both step executors.
+
+    Module-level (not a method) because the two callers live on unrelated
+    classes: ``AgentFlow._execute_leaf_step`` and
+    ``WorkflowManager._execute_single_step``.
+
+    Restores a deep-copied hit (copied out again so callers cannot mutate
+    the cache), otherwise runs ``run_uncached`` and stores a deep copy of the
+    result -- but only a SUCCESSFUL one. A step that exhausts its retries or
+    fails a guardrail returns a dict carrying an "error" key; caching that
+    would replay the failure forever instead of letting the step retry.
+    """
+    if cache is None:
+        return run_uncached()
+    from .step_cache import make_step_key
+    key = make_step_key(step, *key_args)
+    try:
+        hit = copy.deepcopy(cache.get(key))
+    except Exception:
+        hit = None
+        logger.warning("Could not restore cached workflow step")
+    if hit is not None:
+        if verbose:
+            print(f"↩︎  cache hit: {getattr(step, 'name', getattr(step, '__name__', step))}")
+        if on_hit is not None:
+            on_hit()
+        # Copy: a caller mutating a returned result must not edit the cache.
+        return dict(hit)
+    result = run_uncached()
+    if isinstance(result, dict) and not result.get("error"):
+        try:
+            cache.set(key, copy.deepcopy(result))
+        except Exception:
+            logger.warning("Could not cache workflow step")
+    return result
+
+
 class WorkflowManager:
     """
     Manages workflow discovery, loading, and execution.
@@ -6257,35 +6275,15 @@ class WorkflowManager:
         because caching only one would make the feature work or not depending on
         whether the step happened to sit inside a Parallel or an If.
         """
-        cache = getattr(self, "_step_cache", None)
-        if cache is None:
-            return self._execute_single_step_nocache(
+        return _with_step_cache(
+            getattr(self, "_step_cache", None),
+            step, (None, original_input, all_variables),
+            lambda: self._execute_single_step_nocache(
                 step, step_idx, results, all_variables, executor, default_agent,
                 default_llm, memory, planning, verbose, on_step, on_result, original_input,
-            )
-        from .step_cache import make_step_key
-        key = make_step_key(step, None, original_input, all_variables)
-        try:
-            hit = copy.deepcopy(cache.get(key))
-        except Exception:
-            hit = None
-            logger.warning("Could not restore cached workflow step")
-        if hit is not None:
-            if verbose:
-                print(f"↩︎  cache hit: {getattr(step, 'name', getattr(step, '__name__', step))}")
-            return dict(hit)
-        result = self._execute_single_step_nocache(
-            step, step_idx, results, all_variables, executor, default_agent,
-            default_llm, memory, planning, verbose, on_step, on_result, original_input,
+            ),
+            verbose=verbose,
         )
-        # Only cache a successful result -- a failed step must be free to retry
-        # on the next run rather than replay a cached failure forever.
-        if isinstance(result, dict) and not result.get("error"):
-            try:
-                cache.set(key, copy.deepcopy(result))
-            except Exception:
-                logger.warning("Could not cache workflow step")
-        return result
 
     def _execute_single_step_nocache(
         self,
