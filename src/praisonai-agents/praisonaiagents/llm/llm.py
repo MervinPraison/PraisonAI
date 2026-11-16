@@ -7787,6 +7787,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 extra_headers = dict(params.get("extra_headers") or {})
                 extra_headers.update(creds.headers)
                 params["extra_headers"] = extra_headers
+        # litellm.responses() routes on api_base and ignores base_url, which
+        # sent base_url= requests (and their key) to api.openai.com.
+        if params.get("base_url"):
+            params["api_base"] = params["base_url"]
 
         # ── Structured output ───────────────────────────────────────────
         output_json = kwargs.pop("output_json", None)
