@@ -452,8 +452,12 @@ class BackgroundJobManager:
         
         try:
             return future.result(timeout=timeout)
-        except FuturesTimeoutError:
-            # Distinct from builtin TimeoutError on Python 3.10.
+        except FuturesTimeoutError as exc:
+            # On Python 3.11+ this is also the task's builtin TimeoutError.
+            # Compare the exception object: the task may finish after the wait
+            # timed out but before we inspect the future.
+            if future.done() and not future.cancelled() and future.exception() is exc:
+                raise
             raise TimeoutError(f"Job {job_id} did not complete within {timeout} seconds")
     
     def cancel_job(self, job_id: str) -> bool:
