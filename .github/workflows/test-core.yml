@@ -155,6 +155,39 @@ jobs:
               tests/unit/plugins/ tests/unit/runtime/ tests/unit/tools/
               tests/unit/bus/ tests/unit/skills/ tests/unit/agents/
               tests/unit/rag/ tests/unit/streaming/
+              tests/unit/test_agent_prefix_rename.py
+              tests/unit/test_agent_presentation_reply.py
+              tests/unit/test_async_input_guardrail_offload.py
+              tests/unit/test_agentteam_stream_fanin.py
+              tests/unit/test_handoff_context_policy.py
+              tests/unit/test_handoff_filters.py
+              tests/unit/test_handoff_lazy_import.py
+              tests/unit/test_handoff_runtime_resolution.py
+              tests/unit/test_handoff_tool_policy.py
+              tests/unit/test_schedule_claim.py
+              tests/unit/test_schedule_context_from.py
+              tests/unit/test_schedule_crash_recovery.py
+              tests/unit/test_schedule_cron_engine.py
+              tests/unit/test_schedule_history.py
+              tests/unit/test_schedule_incidents.py
+              tests/unit/test_schedule_job_state.py
+              tests/unit/test_schedule_misfire.py
+              tests/unit/test_schedule_principal.py
+              tests/unit/test_schedule_quota_hold.py
+              tests/unit/test_schedule_store_persistence.py
+              tests/unit/test_schedule_at_wall_clock.py
+              tests/unit/test_agent_as_tool.py
+              tests/unit/test_async_offload_6152.py
+              tests/unit/test_image_agent_async.py
+              tests/unit/test_image_agent_default_model.py
+              tests/unit/test_image_agent_response_format.py
+              tests/unit/test_image_agent_style.py
+              tests/unit/test_schedule_integration.py
+              tests/unit/test_schedule_lifecycle_hooks.py
+              tests/unit/test_schedule_timezone.py
+              tests/unit/test_schedule_tools.py
+              tests/unit/test_scheduler_provider.py
+              tests/unit/test_handoff_unified.py
               tests/unit/test_adapter_registry.py tests/unit/test_token_budget.py
               tests/unit/test_streaming_events.py tests/unit/test_tool_decorator_approval.py
               tests/unit/test_task_execution_config.py
