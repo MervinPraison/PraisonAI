@@ -151,8 +151,10 @@ class TestLazyImports:
         assert hasattr(praisonaiagents, 'Tools')
         assert praisonaiagents.Tools is not None
     
-    def test_all_exports_accessible(self):
+    def test_all_exports_accessible(self, monkeypatch):
         """All items in __all__ should be accessible."""
+        monkeypatch.setattr("socket.socket.connect", lambda *a, **k: pytest.fail("unexpected network connection"))
+        monkeypatch.setattr("socket.socket.connect_ex", lambda *a, **k: pytest.fail("unexpected network connection"))
         import praisonaiagents
         
         for name in praisonaiagents.__all__:

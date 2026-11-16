@@ -77,7 +77,9 @@ def execute_command(
     Execute a shell command and return the result.
     
     This tool executes shell commands with safety checks and output capture.
-    
+    Commands run without a shell, so shell builtins (e.g. ``echo``/``set`` on
+    Windows ``cmd.exe``) are unavailable; invoke real executables instead.
+
     Args:
         command: The command to execute
         cwd: Working directory for the command
