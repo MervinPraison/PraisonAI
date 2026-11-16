@@ -663,3 +663,10 @@ def get_conversation_compactor(
 # Backward compatibility aliases (deprecated)
 ConversationAnalyzer = ConversationAnalyzerProtocol
 ConversationCompactor = ConversationCompactorProtocol
+
+
+# ``Protocol``-suffixed names (G-26, the project naming rule). The original
+# names stay and are the same class, so existing imports keep working.
+ContextViewProtocol = ContextView
+ContextMutatorProtocol = ContextMutator
+ContextStoreProtocol = ContextStore

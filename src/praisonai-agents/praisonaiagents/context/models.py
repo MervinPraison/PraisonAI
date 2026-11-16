@@ -471,3 +471,9 @@ class ContextOptimizer(Protocol):
     ) -> tuple[List[Dict[str, Any]], OptimizationResult]:
         """Optimize messages to fit within target tokens."""
         ...
+
+
+# ``Protocol``-suffixed names (G-26, the project naming rule). The original
+# names stay and are the same class, so existing imports keep working.
+TokenEstimatorProtocol = TokenEstimator
+ContextOptimizerProtocol = ContextOptimizer

@@ -405,3 +405,8 @@ def get_search_backend(
     
     else:
         raise ValueError(f"Invalid backend type: {backend_type}. Must be 'auto', 'python', or 'ripgrep'")
+
+
+# ``Protocol``-suffixed names (G-26, the project naming rule). The original
+# names stay and are the same class, so existing imports keep working.
+SearchBackendProtocol = SearchBackend
