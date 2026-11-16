@@ -103,7 +103,8 @@ def configure_host(
     agent_kwargs: Optional[Dict[str, Any]] = None,
     gateway: Any = None,
     modules: Optional[Sequence[str]] = None,
-    style: str = "dashboard",
+    style: str = "app",
+    layout: Optional[str] = None,
     context_paths: Optional[Sequence[str]] = None,
     no_context: bool = False,
     context_cwd: Optional[str] = None,
@@ -123,6 +124,12 @@ def configure_host(
     datastore_mod = import_wrapper_module("praisonai.ui._aiui_datastore")
     aiui.set_datastore(datastore_mod.PraisonAISessionDataStore())
     aiui.set_style(style)
+    # style="app" opens in Chat + Canvas (aiui's own default for the app shell,
+    # >= 0.3.159). Only call set_layout for an explicit layout: it overrides the
+    # YAML ``layout:`` key, so calling it with the default would hide the user's
+    # choice. Other layouts: workbench, command, guided, mission.
+    if style == "app" and layout and hasattr(aiui, "set_layout"):
+        aiui.set_layout(layout)
     aiui.set_branding(title=title, logo=logo)
 
     if pages is not None:
