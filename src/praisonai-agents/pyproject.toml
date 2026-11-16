@@ -23,10 +23,7 @@ dependencies = [
     # ("every day at 9am", "weekdays at 9am") to cron; without this engine
     # those jobs are accepted and silently never fire. Pure Python; pulls
     # only python-dateutil.
-    "croniter>=6.0",
-    # Current list prices for calculate_llm_cost (Agent.total_cost and
-    # max_budget). Pure Python, no dependencies, no network access.
-    "llm-prices>=1.3,<2",
+    "croniter>=6.0"
 ]
 
 [project.optional-dependencies]

@@ -3,16 +3,15 @@ Cost calculation utilities for PraisonAI Agents.
 
 Provides unified cost calculation with:
 - litellm integration (when available) for 1000+ models
-- Current list prices from llm-prices (dated, source-cited, no dependencies,
-  no network access) on the default fast path
-- Fallback pricing for common models when neither knows the model
+- Fallback pricing for common models when litellm not installed
 - Zero performance impact via lazy imports
 """
 
+import sys
 from typing import Any, Dict, Optional
 
-# Fallback pricing per 1M tokens, used only for models llm-prices does not list
-# (retired models such as claude-3-5-sonnet, o1-mini). Approximate.
+# Fallback pricing per 1M tokens (used when litellm not available)
+# These are approximate and cover the most common models.
 # Optional "cache_read"/"cache_write" are multipliers of the input rate for
 # prompt-cache hits/writes; when absent they default to 1.0 (flat input rate).
 _FALLBACK_PRICING: Dict[str, Dict[str, float]] = {
@@ -26,7 +25,36 @@ _FALLBACK_PRICING: Dict[str, Dict[str, float]] = {
     "o1-mini": {"input": 1.10, "output": 4.40, "cache_read": 0.5},
     "o1-preview": {"input": 15.00, "output": 60.00},
     "o3-mini": {"input": 1.10, "output": 4.40, "cache_read": 0.5},
-    # Anthropic models
+    "o3": {"input": 2.00, "output": 8.00, "cache_read": 0.25},
+    "o3-pro": {"input": 20.00, "output": 80.00},
+    "o4-mini": {"input": 1.10, "output": 4.40, "cache_read": 0.25},
+    "gpt-4.1": {"input": 2.00, "output": 8.00, "cache_read": 0.25},
+    "gpt-4.1-mini": {"input": 0.40, "output": 1.60, "cache_read": 0.25},
+    "gpt-4.1-nano": {"input": 0.10, "output": 0.40, "cache_read": 0.25},
+    "gpt-5": {"input": 1.25, "output": 10.00, "cache_read": 0.1},
+    "gpt-5-mini": {"input": 0.25, "output": 2.00, "cache_read": 0.1},
+    "gpt-5-nano": {"input": 0.05, "output": 0.40, "cache_read": 0.1},
+    "gpt-5-pro": {"input": 15.00, "output": 120.00},
+    "gpt-5.1": {"input": 1.25, "output": 10.00, "cache_read": 0.1},
+    "gpt-5.2": {"input": 1.75, "output": 14.00, "cache_read": 0.1},
+    "gpt-5.2-pro": {"input": 21.00, "output": 168.00},
+    "gpt-5.3": {"input": 1.75, "output": 14.00, "cache_read": 0.1},
+    "gpt-5.4": {"input": 2.50, "output": 15.00, "cache_read": 0.1},
+    "gpt-5.4-mini": {"input": 0.75, "output": 4.50, "cache_read": 0.1},
+    "gpt-5.4-nano": {"input": 0.20, "output": 1.25, "cache_read": 0.1},
+    "gpt-5.4-pro": {"input": 30.00, "output": 180.00},
+    "gpt-5.5": {"input": 5.00, "output": 30.00, "cache_read": 0.1},
+    "gpt-5.5-pro": {"input": 30.00, "output": 180.00},
+    "gpt-5.6": {"input": 4.00, "output": 20.00, "cache_read": 0.1, "cache_write": 1.25},
+    "gpt-5.6-luna": {"input": 0.20, "output": 1.20, "cache_read": 0.1, "cache_write": 1.25},
+    "gpt-5.6-terra": {"input": 2.00, "output": 12.00, "cache_read": 0.1, "cache_write": 1.25},
+    # Anthropic models ("claude-opus-4" is Opus 4.5+; Opus 4.0/4.1 kept their old price)
+    "claude-opus-4": {"input": 5.00, "output": 25.00, "cache_read": 0.1, "cache_write": 1.25},
+    "claude-opus-4-0": {"input": 15.00, "output": 75.00, "cache_read": 0.1, "cache_write": 1.25},
+    "claude-opus-4-1": {"input": 15.00, "output": 75.00, "cache_read": 0.1, "cache_write": 1.25},
+    "claude-opus-4-20250514": {"input": 15.00, "output": 75.00, "cache_read": 0.1, "cache_write": 1.25},
+    "claude-sonnet-4": {"input": 3.00, "output": 15.00, "cache_read": 0.1, "cache_write": 1.25},
+    "claude-haiku-4": {"input": 1.00, "output": 5.00, "cache_read": 0.1, "cache_write": 1.25},
     "claude-3-5-sonnet": {"input": 3.00, "output": 15.00, "cache_read": 0.1, "cache_write": 1.25},
     "claude-3-5-haiku": {"input": 0.80, "output": 4.00, "cache_read": 0.1, "cache_write": 1.25},
     "claude-3-opus": {"input": 15.00, "output": 75.00, "cache_read": 0.1, "cache_write": 1.25},
@@ -37,6 +65,9 @@ _FALLBACK_PRICING: Dict[str, Dict[str, float]] = {
     "gemini-1.5-flash": {"input": 0.075, "output": 0.30, "cache_read": 0.25},
     "gemini-2.0-flash": {"input": 0.10, "output": 0.40, "cache_read": 0.25},
     "gemini-2.0-flash-exp": {"input": 0.10, "output": 0.40},
+    "gemini-2.5-pro": {"input": 1.25, "output": 10.00, "cache_read": 0.1},
+    "gemini-2.5-flash": {"input": 0.30, "output": 2.50, "cache_read": 0.1},
+    "gemini-2.5-flash-lite": {"input": 0.10, "output": 0.40, "cache_read": 0.1},
     "gemini-pro": {"input": 0.50, "output": 1.50},
     # DeepSeek models
     "deepseek-chat": {"input": 0.14, "output": 0.28, "cache_read": 0.1},
@@ -245,17 +276,6 @@ def _calculate_fallback_cost(
     Returns:
         Estimated cost in USD
     """
-    # Cached/cache-write tokens are part of prompt_tokens.
-    cached = min(_usage_int(cached_tokens), prompt_tokens)
-    cache_write = min(_usage_int(cache_write_tokens), prompt_tokens - cached)
-    uncached = prompt_tokens - cached - cache_write
-
-    listed = _list_price_cost(
-        model or "gpt-4o-mini", uncached, cached, cache_write, completion_tokens
-    )
-    if listed is not None:
-        return round(listed, 6)
-
     model_name = (model or "gpt-4o-mini").lower()
     # Strip a provider prefix (e.g. "openai/gpt-4o-mini" -> "gpt-4o-mini") so
     # litellm-style names still resolve against the fallback table.
@@ -266,16 +286,23 @@ def _calculate_fallback_cost(
     # match or a prefix boundary ("<key>-...") so that "gpt-4o-mini" does not
     # fall through to the "gpt-4o" entry (which billed it at 16.7x the real
     # rate). "default" is excluded from matching and used only as a fallback.
-    pricing = _FALLBACK_PRICING.get("default")
+    pricing = None
     for key in sorted(
         (k for k in _FALLBACK_PRICING if k != "default"), key=len, reverse=True
     ):
         if model_name == key or model_name.startswith(key + "-"):
             pricing = _FALLBACK_PRICING[key]
             break
+    if pricing is None:
+        pricing = _loaded_litellm_pricing(
+            (model or "").lower(), model_name
+        ) or _FALLBACK_PRICING["default"]
     
-    # Calculate cost (pricing is per 1M tokens). Price cached/cache-write
-    # tokens at their multiplier of the input rate.
+    # Calculate cost (pricing is per 1M tokens). Cached/cache-write tokens are
+    # part of prompt_tokens; price them at their multiplier of the input rate.
+    cached = min(_usage_int(cached_tokens), prompt_tokens)
+    cache_write = min(_usage_int(cache_write_tokens), prompt_tokens - cached)
+    uncached = prompt_tokens - cached - cache_write
     input_cost = (
         uncached
         + cached * pricing.get("cache_read", 1.0)
@@ -286,38 +313,32 @@ def _calculate_fallback_cost(
     return round(input_cost + output_cost, 6)
 
 
-def _list_price_cost(
-    model: str,
-    uncached: int,
-    cached: int,
-    cache_write: int,
-    completion_tokens: int,
-) -> Optional[float]:
-    """Cost at the provider's current list price, from llm-prices.
+def _loaded_litellm_pricing(*names: str) -> Optional[Dict[str, float]]:
+    """Per-1M pricing from litellm's ``model_cost`` for a model the table lacks.
 
-    ``llm_prices.lookup`` resolves provider prefixes (``openai/``,
-    ``anthropic/``, ``groq/``, Bedrock and Vertex ids) and dated snapshots
-    (``gpt-4o-2024-05-13``), and its rows carry cache-read, 5-minute
-    cache-write and long-context prices. Returns None when the model is not
-    listed (local models, retired ids) so the caller falls back to the table.
+    Used only when litellm is already imported (the ``provider/model`` route
+    loads it); never imports it, so the default path stays import-free.
+    Zero-priced entries (local models) are ignored and keep the default.
     """
-    try:
-        import llm_prices
-
-        price = llm_prices.lookup(model)
-        if price is None:
-            return None
-        if not price.cache_write.get("5m"):
-            # No separate cache-write price (OpenAI, Gemini): bill as input.
-            uncached, cache_write = uncached + cache_write, 0
-        cost = price.cost_usage(
-            llm_prices.Usage(
-                input=int(uncached),
-                cache_read=int(cached),
-                cache_write_5m=int(cache_write),
-                output=_usage_int(completion_tokens),
-            )
-        )
-    except Exception:
+    model_cost = getattr(sys.modules.get("litellm"), "model_cost", None)
+    if not isinstance(model_cost, dict):
         return None
-    return None if cost is None else cost.total
+    for name in names:
+        info = model_cost.get(name)
+        if not isinstance(info, dict):
+            continue
+        rate = info.get("input_cost_per_token") or 0.0
+        out = info.get("output_cost_per_token") or 0.0
+        if not (isinstance(rate, (int, float)) and isinstance(out, (int, float))):
+            continue
+        if rate <= 0 or out < 0:
+            continue
+        read = info.get("cache_read_input_token_cost")
+        write = info.get("cache_creation_input_token_cost")
+        return {
+            "input": rate * 1_000_000,
+            "output": out * 1_000_000,
+            "cache_read": read / rate if isinstance(read, (int, float)) and read > 0 else 1.0,
+            "cache_write": write / rate if isinstance(write, (int, float)) and write > 0 else 1.0,
+        }
+    return None
