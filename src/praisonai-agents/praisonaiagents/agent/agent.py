@@ -251,6 +251,8 @@ _LOCAL_ENDPOINT_DEFAULT_MODEL_WARNED = False
 class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, UnifiedExecutionMixin, ToolExecutionMixin, ChatHandlerMixin, SessionManagerMixin, ChatMixin, ExecutionMixin, MemoryMixin, AsyncMemoryMixin):
     # Class-level counter for generating unique display names for nameless agents
     _agent_counter = 0
+    # Partial result of the last cancelled run_autonomous_async(); None otherwise.
+    _last_autonomy_result = None
     _agent_counter_lock = threading.Lock()
     # Class-level cache for environment variables (avoid repeated os.environ.get)
     # Protected by _env_cache_lock for thread safety

@@ -121,3 +121,10 @@ def test_start_status_thread_is_daemon(monkeypatch):
     chat_threads = [t for name, t in created if name == "run_chat"]
     assert chat_threads, "verbose TTY path did not start the chat thread"
     assert all(t.daemon for t in chat_threads)
+
+
+def test_last_autonomy_result_defaults_to_none_before_any_run():
+    """Reading the attribute on an agent that never ran must not raise."""
+    from praisonaiagents import Agent
+
+    assert Agent(name="fresh", instructions="hi")._last_autonomy_result is None
