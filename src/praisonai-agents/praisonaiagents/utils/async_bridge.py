@@ -6,9 +6,12 @@ ensuring no RuntimeError: "This event loop is already running" crashes.
 """
 
 import asyncio
+import atexit
 import concurrent.futures
 import contextvars
 import logging
+import os
+import sys
 import threading
 from typing import Any, Awaitable, Optional, TypeVar
 
@@ -86,6 +89,46 @@ def run_coroutine_from_any_context(coro: Awaitable[T], timeout: Optional[float] 
         raise TimeoutError(
             f"Coroutine did not complete within {timeout}s"
         ) from exc
+
+_thread_loop = threading.local()
+
+
+def _close_thread_runner() -> None:
+    """atexit: close the main thread's long-lived loop (cancels leftover tasks,
+    shuts down async generators and the default executor)."""
+    runner = getattr(_thread_loop, "runner", None)
+    if runner is not None and getattr(_thread_loop, "pid", None) == os.getpid():
+        _thread_loop.runner = None
+        try:
+            runner.close()
+        except Exception:  # noqa: BLE001 -- never fail interpreter shutdown
+            pass
+
+
+def run_coroutine_on_thread_loop(coro: Awaitable[T], timeout: Optional[float] = 300) -> T:
+    """Like :func:`run_coroutine_from_any_context`, but a thread with no running
+    loop reuses one long-lived loop across calls instead of a fresh
+    ``asyncio.run`` loop each time.
+
+    Loop-bound resources such as an ``AsyncOpenAI`` client and its HTTP
+    keep-alive pool then survive between sync turns. Each thread gets its own
+    loop (threads stay isolated, as with ``asyncio.run``); a forked child builds
+    a new one; the main thread's loop is closed at exit. Every call runs in a
+    copy of the caller's current context, as ``asyncio.run`` does. Inside a
+    running loop, and on Python < 3.11 (no ``asyncio.Runner``), this is exactly
+    :func:`run_coroutine_from_any_context`.
+    """
+    if sys.version_info < (3, 11) or is_async_context():
+        return run_coroutine_from_any_context(coro, timeout)
+    runner = getattr(_thread_loop, "runner", None)
+    if runner is None or getattr(_thread_loop, "pid", None) != os.getpid():
+        runner = asyncio.Runner()
+        _thread_loop.runner, _thread_loop.pid = runner, os.getpid()
+        if threading.current_thread() is threading.main_thread():
+            atexit.register(_close_thread_runner)
+    wrapped = asyncio.wait_for(coro, timeout) if timeout is not None else coro
+    return runner.run(wrapped, context=contextvars.copy_context())
+
 
 def is_async_context() -> bool:
     """
