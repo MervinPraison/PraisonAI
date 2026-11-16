@@ -173,11 +173,4 @@ class PerformanceEvaluator(BaseEvaluator):
         Returns:
             PerformanceResult with all performance metrics
         """
-        await self.async_before_run()
-        result = self.run(print_summary=False)
-        await self.async_after_run(result)
-        
-        if print_summary:
-            result.print_summary()
-        
-        return result
+        return await self._run_sync_with_async_hooks(print_summary)
