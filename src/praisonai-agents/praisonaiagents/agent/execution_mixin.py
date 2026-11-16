@@ -390,11 +390,6 @@ class ExecutionMixin:
         Returns:
             The agent's response as a string, or a ``RunOutcome`` when
             ``return_outcome=True``.
-
-        Raises:
-            LLMError: When the configured ``llm``/model is invalid or the LLM
-                provider returns an unrecoverable error (unless
-                ``return_outcome=True``).
             
         Example:
             ```python
@@ -404,11 +399,10 @@ class ExecutionMixin:
             ```
             
         Note:
-            Use ``run()`` in automation; ``start()`` is interactive.
             Unlike .start() which enables verbose output in TTY for interactive
             use, .run() is always silent. This makes it suitable for:
             - Production pipelines
-            - Automated scripts and CI
+            - Automated scripts
             - Background processing
             - API endpoints
         """
@@ -836,11 +830,6 @@ Write the complete compiled report:"""
         Returns:
             - If streaming: Generator yielding response chunks
             - If not streaming: The complete response as a string
-
-        Raises:
-            LLMError: When the configured ``llm``/model is invalid or the LLM
-                provider returns an unrecoverable error. Rich UI displays a
-                sanitized error before propagating the exception to callers.
             
         Example:
             ```python
@@ -854,7 +843,6 @@ Write the complete compiled report:"""
             ```
             
         Note:
-            Use ``run()`` in automation; ``start()`` is interactive.
             Unlike .run() which is always silent (production use), .start()
             enables verbose output by default when in a TTY for beginner-friendly
             interactive use. Use .run() for programmatic/scripted usage.
@@ -1060,18 +1048,20 @@ Write the complete compiled report:"""
                             current_status[0] = "Sending to LLM..."
                             
                             # Check for steering messages before starting chat
-                            steering_msg = None
                             if hasattr(self, '_check_steering_messages'):
                                 try:
                                     steering_msg = self._check_steering_messages()
+                                    if steering_msg:
+                                        # Inject steering message into prompt with clear separator
+                                        prompt_with_steering = f"{prompt}\n\n{steering_msg}"
+                                        current_status[0] = "Processing steering guidance..."
+                                        result_holder[0] = self.chat(prompt_with_steering, **kwargs)
+                                    else:
+                                        result_holder[0] = self.chat(prompt, **kwargs)
                                 except Exception as e:
                                     logger.warning(f"Steering check failed, continuing without steering: {e}")
                                     current_status[0] = "Steering failed, proceeding normally..."
-
-                            if steering_msg:
-                                prompt_with_steering = f"{prompt}\n\n{steering_msg}"
-                                current_status[0] = "Processing steering guidance..."
-                                result_holder[0] = self.chat(prompt_with_steering, **kwargs)
+                                    result_holder[0] = self.chat(prompt, **kwargs)
                             else:
                                 result_holder[0] = self.chat(prompt, **kwargs)
                                 
@@ -1156,14 +1146,12 @@ Write the complete compiled report:"""
                             if current_status[0] != last_status:
                                 last_status = current_status[0]
                             status.update(f"[bold yellow]Working...[/]  {current_status[0]}")
-
-                    chat_thread.join()
                     
                     # Calculate elapsed time
                     elapsed = time_module.time() - start_time
                     
                     # Re-raise any error from chat
-                    if error_holder[0] is not None:
+                    if error_holder[0]:
                         raise error_holder[0]
                     
                     result = result_holder[0]

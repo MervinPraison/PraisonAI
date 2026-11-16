@@ -361,6 +361,27 @@ def _extract_status_code(error: Exception) -> Optional[int]:
     return None
 
 
+def _is_fatal_model_error(error: BaseException) -> bool:
+    """True when ``error`` means the model is invalid (unknown model, bad request).
+
+    Such an error fails the same way on every call, so it must reach the caller
+    instead of being turned into a ``None`` reply (#5956). Auth, rate-limit and
+    transient errors are not fatal here.
+    """
+    from ..errors import LLMError
+    if isinstance(error, LLMError):
+        return not error.is_retryable and (
+            error.error_category == "model_not_found"
+            or error.context.get("error_category") == "model_error"
+        )
+    if _extract_status_code(error) == 404 or any(
+        cls.__name__ == "NotFoundError" for cls in type(error).__mro__
+    ):
+        return True
+    # LLM.get_response wraps provider errors (``raise LLMResponseError(...) from e``)
+    return error.__cause__ is not None and _is_fatal_model_error(error.__cause__)
+
+
 # Status codes that some providers overload to encode a more specific
 # condition (e.g. OpenAI returns ``context_length_exceeded`` as an HTTP 400).
 # For these we let the message text refine the classification before falling

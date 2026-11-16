@@ -16,13 +16,7 @@ import json
 import threading
 import logging
 from praisonaiagents._logging import get_logger
-from ..errors import (
-    AgentErrorKind,
-    BudgetExceededError,
-    LLMError,
-    ToolExecutionError,
-    sanitize_llm_error_message,
-)
+from ..errors import BudgetExceededError, ToolExecutionError
 from .tool_execution import _active_turn_cancel
 from .interrupt import protect_turn
 
@@ -90,56 +84,10 @@ def _current_turn_loop_guard(agent):
         return slot[1]
 
 
-_FATAL_LLM_ERROR_KINDS = ("model_not_found", "format_error", "auth", "auth_permanent")
-
-
-def _is_fatal_llm_configuration_error(exc: LLMError) -> bool:
-    """Return True when ``exc`` represents an invalid model, malformed request, or auth failure
-    that must propagate to callers rather than being converted into ``None`` (#5956)."""
-    return not exc.is_retryable and exc.error_category in _FATAL_LLM_ERROR_KINDS
-
-
-def _resolve_agent_error_kind(
-    exc: BaseException,
-    classification_category: str,
-) -> AgentErrorKind:
-    """Map an ``LLMErrorClassification.error_category`` + raw exception to ``AgentErrorKind``."""
-    status_code = getattr(exc, "status_code", None)
-    if status_code is None:
-        resp = getattr(exc, "response", None)
-        status_code = getattr(resp, "status_code", None) if resp is not None else None
-    exc_type = type(exc).__name__.lower()
-    exc_text = str(exc).lower()
-
-    if classification_category == "model_error":
-        if (
-            status_code == 404
-            or "notfound" in exc_type
-            or any(
-                tok in exc_text
-                for tok in (
-                    "model_not_found",
-                    "not found",
-                    "does not exist",
-                    "unknown model",
-                    "unsupported model",
-                    "invalid llm",
-                )
-            )
-        ):
-            return "model_not_found"
-        return "format_error"
-    if classification_category == "auth":
-        if status_code == 403 or "permissiondenied" in exc_type or "forbidden" in exc_text:
-            return "auth_permanent"
-        return "auth"
-    if classification_category == "rate_limit":
-        return "rate_limit"
-    if classification_category == "overloaded":
-        return "overloaded"
-    if classification_category == "context_overflow":
-        return "context_overflow"
-    return "unknown"
+def _is_fatal_model_error(exc):
+    """Invalid model / bad request: re-raise instead of returning ``None`` (#5956)."""
+    from ..llm.error_classifier import _is_fatal_model_error as _fatal
+    return _fatal(exc)
 
 
 def _reset_loop_guard_for_turn(agent):
@@ -2747,6 +2695,7 @@ Your Role: {self.role}"""
                 # a second time by the non-streaming fallback below.
                 raise
             except Exception as e:
+                from ..errors import LLMError
                 # Don't retry if it's an LLMError that has exhausted retries
                 if isinstance(e, LLMError):
                     raise  # Re-raise LLMErrors immediately to avoid double retry
@@ -2844,25 +2793,21 @@ Your Role: {self.role}"""
         except ToolExecutionError:
             raise
         except Exception as e:
+            from ..errors import LLMError
+            
             # Emit LLM response trace event on error
             _duration_ms = (time.time() - start_time) * 1000
             _trace_emitter.llm_response(
                 self.name,
                 duration_ms=_duration_ms,
                 finish_reason="error",
-                response_content=sanitize_llm_error_message(
-                    str(e),
-                    extra_secrets=(getattr(self, "api_key", None),),
-                    preserve_tokens=(self.llm if isinstance(self.llm, str) else None,),
-                ),
+                response_content=str(e),  # Include error for context replay
             )
-            if isinstance(e, LLMError):
-                raise
             
             # Use structured error classification for all error types (replaces legacy heuristic checks)
             from ..llm.error_classifier import classify_llm_error
             
-            model_name = self.llm if isinstance(self.llm, str) else repr(self.llm)
+            model_name = self.llm if isinstance(self.llm, str) else "unknown"
             session_id = getattr(self, '_session_id', 'unknown')
             
             # Determine provider from model name or use default
@@ -2999,17 +2944,12 @@ Your Role: {self.role}"""
                 str(e),
                 model_name=model_name,
                 agent_id=self.name,
-                error_category=_resolve_agent_error_kind(e, classification.error_category),
                 is_retryable=classification.is_retryable,
                 context={
                     "session_id": session_id,
                     "error_category": classification.error_category,
                     "user_message": user_message,
                 },
-                extra_secrets=(
-                    getattr(self, "api_key", None),
-                    getattr(getattr(self, "_openai_client", None), "api_key", None),
-                ),
             )
             
             # Call error hook if available for error interception
@@ -3045,11 +2985,9 @@ Your Role: {self.role}"""
         """
         import asyncio
         from ..llm.error_classifier import classify_llm_error
-
-        if isinstance(exc, LLMError):
-            raise exc
+        from ..errors import LLMError
         
-        model_name = self.llm if isinstance(self.llm, str) else repr(self.llm)
+        model_name = self.llm if isinstance(self.llm, str) else "unknown"
         session_id = getattr(self, '_session_id', 'unknown')
         
         # Determine provider from model name or use default
@@ -3198,17 +3136,12 @@ Your Role: {self.role}"""
             str(exc),
             model_name=model_name,
             agent_id=self.name,
-            error_category=_resolve_agent_error_kind(exc, classification.error_category),
             is_retryable=classification.is_retryable,
             context={
                 "session_id": session_id,
                 "error_category": classification.error_category,
                 "user_message": user_message,
             },
-            extra_secrets=(
-                getattr(self, "api_key", None),
-                getattr(getattr(self, "_openai_client", None), "api_key", None),
-            ),
         )
         
         # Call error hook if available for error interception
@@ -3221,74 +3154,7 @@ Your Role: {self.role}"""
                 logging.debug(f"Error in on_error hook: {hook_error}")
         
         # Raise the enriched error
-        raise error from exc
-
-    def _validate_default_llm_model(self) -> None:
-        """Reject non-string or blank ``self.llm`` before default-provider dispatch."""
-        if not self._using_custom_llm and (
-            not isinstance(self.llm, str) or not self.llm.strip()
-        ):
-            error = LLMError(
-                f"Invalid llm parameter {self.llm!r}: expected a non-empty model name string or compatible LLM backend.",
-                model_name=repr(self.llm),
-                agent_id=getattr(self, "name", None) or "unknown",
-                error_category="model_not_found",
-                is_retryable=False,
-                context={
-                    "session_id": getattr(self, "_session_id", "unknown"),
-                    "error_category": "model_error",
-                    "user_message": "Invalid model name or LLM backend configuration.",
-                },
-                extra_secrets=(getattr(self, "api_key", None),),
-            )
-            if hasattr(self, "on_error") and self.on_error:
-                try:
-                    self.on_error(error)
-                except Exception as hook_error:
-                    logging.debug(f"Error in on_error hook: {hook_error}")
-            raise error
-
-    def _wrap_custom_llm_error(self, exc: Exception) -> LLMError:
-        """Classify and wrap an unhandled exception from ``self.llm_instance`` into ``LLMError``."""
-        if isinstance(exc, LLMError):
-            return exc
-        from ..llm.error_classifier import classify_llm_error
-
-        raw_model = getattr(getattr(self, "llm_instance", None), "model", None)
-        if not raw_model:
-            raw_model = self.llm.get("model") if isinstance(self.llm, dict) else self.llm
-        model_name = str(raw_model) if raw_model else "unknown"
-        provider = "openai"
-        if "/" in model_name:
-            provider = model_name.split("/", 1)[0].lower() or "openai"
-        elif "claude" in model_name.lower() or "anthropic" in model_name.lower():
-            provider = "anthropic"
-        elif "azure" in model_name.lower():
-            provider = "azure"
-
-        classification = classify_llm_error(exc, provider=provider, model=model_name)
-        error = LLMError(
-            str(exc),
-            model_name=model_name,
-            agent_id=getattr(self, "name", None) or "unknown",
-            error_category=_resolve_agent_error_kind(exc, classification.error_category),
-            is_retryable=classification.is_retryable,
-            context={
-                "session_id": getattr(self, "_session_id", "unknown"),
-                "error_category": classification.error_category,
-                "user_message": classification.user_message,
-            },
-            extra_secrets=(
-                getattr(self, "api_key", None),
-                getattr(getattr(self, "llm_instance", None), "api_key", None),
-            ),
-        )
-        if hasattr(self, "on_error") and self.on_error:
-            try:
-                self.on_error(error)
-            except Exception as hook_error:
-                logging.debug(f"Error in on_error hook: {hook_error}")
-        return error
+        raise error
 
     def _native_reasoning_kwargs(self, model=None):
         """Provider-native reasoning effort for the direct OpenAI client path.
@@ -3329,8 +3195,6 @@ Your Role: {self.role}"""
         composition for safety and maintainability.
         """
         from ..llm import create_llm_dispatcher
-
-        self._validate_default_llm_model()
         
         # Get or create unified dispatcher
         if not hasattr(self, '_unified_dispatcher') or self._unified_dispatcher is None:
@@ -3490,7 +3354,6 @@ Your Role: {self.role}"""
         # concurrent turns.
         dispatcher = _dispatcher
         if dispatcher is None:
-            self._validate_default_llm_model()
             # Get or create the shared cached dispatcher
             if not hasattr(self, '_unified_dispatcher') or self._unified_dispatcher is None:
                 # Provider selection based on existing agent configuration
@@ -3634,6 +3497,7 @@ Your Role: {self.role}"""
             # it or re-drive the model without the tool result.
             raise
         except Exception as e:
+            from ..errors import LLMError
             # Apply the same structured error classification for async path
             return await self._handle_async_llm_error(
                 e, messages, temperature, tools, stream, reasoning_steps,
@@ -4089,7 +3953,7 @@ Your Role: {self.role}"""
                 durable_context.finalize(outcome)
                 self.execution.resume_run_id = None
             return result
-        except (ToolExecutionError, LLMError) as exc:
+        except ToolExecutionError as exc:
             if durable_context is not None and not exc.is_retryable:
                 durable_context.finalize("failed")
                 self.execution.resume_run_id = None
@@ -4476,31 +4340,23 @@ Your Role: {self.role}"""
                         # Rollback chat history on guardrail failure
                         self._rollback_chat_history_to(chat_history_length)
                         return self._guardrail_blocked_message(e)
-                except (ToolExecutionError, InterruptedError, BudgetExceededError):
+                except (ToolExecutionError, BudgetExceededError):
                     raise
-                except BaseException as e:
-                    if not isinstance(e, Exception):
-                        raise
+                except Exception as e:
                     self._last_stop_reason = "error"
                     # Rollback chat history if LLM call fails
                     self._rollback_chat_history_to(chat_history_length)
-                    llm_error = self._wrap_custom_llm_error(e)
-                    _get_display_functions()['display_error'](f"Error in LLM chat: {llm_error}", console=self.console)
-                    if _is_fatal_llm_configuration_error(llm_error):
-                        if llm_error is e:
-                            raise
-                        raise llm_error from e
+                    _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
+                    if _is_fatal_model_error(e):
+                        raise
                     return None
-            except (ToolExecutionError, InterruptedError, BudgetExceededError, LLMError):
+            except (ToolExecutionError, BudgetExceededError):
                 raise
             except Exception as e:
                 self._last_stop_reason = "error"
-                llm_error = self._wrap_custom_llm_error(e)
-                _get_display_functions()['display_error'](f"Error in LLM chat: {llm_error}", console=self.console)
-                if _is_fatal_llm_configuration_error(llm_error):
-                    if llm_error is e:
-                        raise
-                    raise llm_error from e
+                _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
+                if _is_fatal_model_error(e):
+                    raise
                 return None
             finally:
                 self._end_turn_tracking(_turn_token)
@@ -4771,8 +4627,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             reflection_count += 1
                             continue  # Continue the loop for more reflections
 
-                        except (LLMError, BudgetExceededError, ToolExecutionError, InterruptedError):
-                            raise
                         except Exception as e:
                                 _get_display_functions()['display_error'](f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
                                 logging.error("Reflection parsing failed.", exc_info=True)
@@ -4798,26 +4652,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     except Exception:
                         # Catch any exception from the inner try block and re-raise to outer handler
                         raise
-            except (ToolExecutionError, InterruptedError, BudgetExceededError):
+            except (ToolExecutionError, BudgetExceededError):
+                # Parity with the custom-LLM and async paths: a budget stop must
+                # reach the caller, not turn into a ``None`` reply.
                 raise
-            except LLMError as e:
-                self._last_stop_reason = "error"
-                _get_display_functions()['display_error'](f"Unexpected error in chat: {e}", console=self.console)
-                self._rollback_chat_history_to(chat_history_length)
-                if _is_fatal_llm_configuration_error(e):
-                    raise
-                return None
             except Exception as e:
                 self._last_stop_reason = "error"
-                # Catch any non-LLM internal exceptions that escape the while loop
-                _safe_err = sanitize_llm_error_message(
-                    str(e),
-                    extra_secrets=(getattr(self, "api_key", None),),
-                    preserve_tokens=(self.llm if isinstance(self.llm, str) else None,),
-                )
-                _get_display_functions()['display_error'](f"Unexpected error in chat: {_safe_err}", console=self.console)
+                # Catch any exceptions that escape the while loop
+                _get_display_functions()['display_error'](f"Unexpected error in chat: {e}", console=self.console)
                 # Rollback chat history
                 self._rollback_chat_history_to(chat_history_length)
+                if _is_fatal_model_error(e):
+                    raise
                 return None
             finally:
                 # End per-turn tracking after any rollback has run (rollback
@@ -4965,7 +4811,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 await durable_context.afinalize(outcome)
                 self.execution.resume_run_id = None
             return result
-        except (ToolExecutionError, LLMError) as exc:
+        except ToolExecutionError as exc:
             if durable_context is not None and not exc.is_retryable:
                 await durable_context.afinalize("failed")
                 self.execution.resume_run_id = None
@@ -5078,7 +4924,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         
         start_time = time.time()
         reasoning_steps = reasoning_steps or self.reasoning_steps
-        chat_history_length = len(self.chat_history)
         try:
             # Async adapters are awaited (sync adapters are offloaded by
             # AsyncMemoryMixin), so turn-start retrieval never blocks the loop.
@@ -5237,21 +5082,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Rollback chat history on guardrail failure
                         self._rollback_chat_history_to(chat_history_length)
                         return self._guardrail_blocked_message(e)
-                except (ToolExecutionError, InterruptedError, asyncio.CancelledError, BudgetExceededError):
+                except (ToolExecutionError, BudgetExceededError):
                     raise
                 except Exception as e:
                     self._last_stop_reason = "error"
                     # Rollback chat history if LLM call fails
                     self._rollback_chat_history_to(chat_history_length)
-                    llm_error = self._wrap_custom_llm_error(e)
-                    _get_display_functions()['display_error'](f"Error in LLM chat: {llm_error}", console=self.console)
+                    _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
                     if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
-                        logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {llm_error}")
-                    if _is_fatal_llm_configuration_error(llm_error):
-                        if llm_error is e:
-                            raise
-                        raise llm_error from e
+                        logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
+                    if _is_fatal_model_error(e):
+                        raise
                     return None
 
             # For OpenAI client
@@ -5730,50 +5572,37 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # Rollback chat history on guardrail failure
                             self._rollback_chat_history_to(chat_history_length)
                             return self._guardrail_blocked_message(e)
-                except (ToolExecutionError, InterruptedError, asyncio.CancelledError, LLMError, BudgetExceededError):
+                except ToolExecutionError:
                     raise
                 except Exception as e:
                     self._last_stop_reason = "error"
-                    _safe_err = sanitize_llm_error_message(
-                        str(e),
-                        extra_secrets=(getattr(self, "api_key", None),),
-                        preserve_tokens=(self.llm if isinstance(self.llm, str) else None,),
-                    )
-                    _get_display_functions()['display_error'](f"Error in chat completion: {_safe_err}")
+                    _get_display_functions()['display_error'](f"Error in chat completion: {e}")
                     if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
-                        logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {_safe_err}")
+                        logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
                     # Rollback chat history so a failed async turn does not leave
                     # a dangling, unanswered user message (mirrors the sync path
                     # and achat()'s own guardrail handler).
                     self._rollback_chat_history_to(chat_history_length)
+                    if _is_fatal_model_error(e):
+                        raise
                     return None
-        except (ToolExecutionError, InterruptedError, asyncio.CancelledError, BudgetExceededError):
+        except ToolExecutionError:
             raise
-        except LLMError as e:
-            self._last_stop_reason = "error"
-            _get_display_functions()['display_error'](f"Error in achat: {e}", console=self.console)
-            if get_logger().getEffectiveLevel() == logging.DEBUG:
-                total_time = time.time() - start_time
-                logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {e}")
-            self._rollback_chat_history_to(chat_history_length)
-            if _is_fatal_llm_configuration_error(e):
-                raise
-            return None
         except Exception as e:
+            # The custom-LLM path raises on an exhausted budget (sync parity).
+            if isinstance(e, BudgetExceededError) and self._using_custom_llm:
+                raise
             self._last_stop_reason = "error"
-            _safe_err = sanitize_llm_error_message(
-                str(e),
-                extra_secrets=(getattr(self, "api_key", None),),
-                preserve_tokens=(self.llm if isinstance(self.llm, str) else None,),
-            )
-            _get_display_functions()['display_error'](f"Error in achat: {_safe_err}")
+            _get_display_functions()['display_error'](f"Error in achat: {e}")
             if get_logger().getEffectiveLevel() == logging.DEBUG:
                 total_time = time.time() - start_time
-                logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {_safe_err}")
+                logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
             # Rollback chat history so a failed async turn does not leave a
             # dangling, unanswered user message (mirrors the sync path).
             self._rollback_chat_history_to(chat_history_length)
+            if _is_fatal_model_error(e):
+                raise
             return None
         finally:
             # Unregister this turn's ownership list from the process-wide
@@ -6068,7 +5897,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if durable_context is not None:
                 durable_context.finalize("succeeded")
                 self.execution.resume_run_id = None
-        except (ToolExecutionError, LLMError) as exc:
+        except ToolExecutionError as exc:
             if durable_context is not None and not exc.is_retryable:
                 durable_context.finalize("failed")
                 self.execution.resume_run_id = None
@@ -7300,6 +7129,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                            cancel_token=cancel_token)
             
             except Exception as e:
+                from ..errors import LLMError
+                
                 # Only retry LLMErrors that are marked as retryable
                 if not isinstance(e, LLMError) or not e.is_retryable:
                     raise  # Re-raise non-retryable errors immediately
@@ -7512,6 +7343,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 )
             
             except Exception as e:
+                from ..errors import LLMError
+                
                 # Only retry LLMErrors that are marked as retryable
                 if not isinstance(e, LLMError) or not e.is_retryable:
                     raise  # Re-raise non-retryable errors immediately

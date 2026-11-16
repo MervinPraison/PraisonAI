@@ -4870,13 +4870,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             return _prepare_return_value(response_text)
 
         except Exception as error:
-            from ..errors import sanitize_llm_error_message
-            _safe_err = sanitize_llm_error_message(
-                str(error),
-                extra_secrets=(getattr(self, "api_key", None),),
-                preserve_tokens=(getattr(self, "model", None),),
-            )
-            _get_display_functions()['display_error'](f"Error in get_response: {_safe_err}")
+            _get_display_functions()['display_error'](f"Error in get_response: {str(error)}")
             raise
 
         # Log completion time if in debug mode
@@ -6759,13 +6753,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except Exception as error:
             if LLMContextLengthExceededException(str(error))._is_context_limit_error(str(error)):
                 raise LLMContextLengthExceededException(str(error))
-            from ..errors import sanitize_llm_error_message
-            _safe_err = sanitize_llm_error_message(
-                str(error),
-                extra_secrets=(getattr(self, "api_key", None),),
-                preserve_tokens=(getattr(self, "model", None),),
-            )
-            _get_display_functions()['display_error'](f"Error in get_response_async: {_safe_err}")
+            _get_display_functions()['display_error'](f"Error in get_response_async: {str(error)}")
             raise
             
         # Log completion time if in debug mode
