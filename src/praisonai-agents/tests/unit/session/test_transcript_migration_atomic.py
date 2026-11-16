@@ -167,9 +167,15 @@ def test_completed_migration_does_not_resurrect_deleted_rows(tmp_path):
     assert (tmp_path / 'a.json').exists() and (tmp_path / 'b.json').exists()
 
 
-def test_transient_read_failure_retries_on_same_store(tmp_path, monkeypatch):
+def _migration_state(tmp_path):
+    import sqlite3
+    with sqlite3.connect(str(tmp_path / 'sessions.db')) as conn:
+        return {row[0] for row in conn.execute('SELECT name FROM migration_state')}
+
+
+def test_unreadable_file_is_skipped_then_imported_on_next_open(tmp_path, monkeypatch, caplog):
     make_legacy(tmp_path)
-    store = SqliteTranscriptStore(session_dir=str(tmp_path))
+    DefaultSessionStore(session_dir=str(tmp_path)).add_message('c', 'user', 'old c')
     original_open = builtins.open
 
     def unavailable(path, *args, **kwargs):
@@ -179,10 +185,25 @@ def test_transient_read_failure_retries_on_same_store(tmp_path, monkeypatch):
 
     with monkeypatch.context() as patch:
         patch.setattr(builtins, 'open', unavailable)
-        with pytest.raises(PermissionError, match='temporarily unavailable'):
-            store.list_sessions()
-    assert store.get_chat_history('a')[0]['content'] == 'old a'
-    assert store.get_chat_history('b')[0]['content'] == 'old b'
+        store = SqliteTranscriptStore(session_dir=str(tmp_path))
+        assert sorted(r['session_id'] for r in store.list_sessions()) == ['a', 'c']
+    assert 'b.json' in caplog.text
+    assert 'legacy_json' not in _migration_state(tmp_path)
+    assert store.add_message('a', 'user', 'new a')
+
+    reopened = SqliteTranscriptStore(session_dir=str(tmp_path))
+    assert sorted(r['session_id'] for r in reopened.list_sessions()) == ['a', 'b', 'c']
+    assert reopened.get_chat_history('b')[0]['content'] == 'old b'
+    assert [m['content'] for m in reopened.get_chat_history('a')] == ['old a', 'new a']
+    assert 'legacy_json' in _migration_state(tmp_path)
+
+
+def test_database_write_failure_still_blocks_open(tmp_path, monkeypatch):
+    make_legacy(tmp_path)
+    store = SqliteTranscriptStore(session_dir=str(tmp_path))
+    monkeypatch.setattr(store, '_write_row', lambda session, **kw: False)
+    with pytest.raises(OSError, match='migration failed'):
+        store.list_sessions()
 
 
 def test_existing_sqlite_data_is_not_overwritten_by_legacy_files(tmp_path):

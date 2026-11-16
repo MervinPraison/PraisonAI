@@ -158,17 +158,20 @@ class SqliteTranscriptStore(DefaultSessionStore):
         """
         if self.db_path == ":memory:":
             return
+        import sqlite3
+
         session_dir = self.session_dir
         conn.execute("BEGIN IMMEDIATE")
         try:
             conn.execute("CREATE TABLE IF NOT EXISTS migration_state (name TEXT PRIMARY KEY)")
-            complete = conn.execute(
-                "SELECT 1 FROM migration_state WHERE name = ?", ("legacy_json",)
-            ).fetchone()
-            imported = 0
-            if not complete:
+            state = {row[0] for row in conn.execute("SELECT name FROM migration_state")}
+            imported = skipped = 0
+            if "legacy_json" not in state:
+                # A partial run (unreadable files skipped) retries even though
+                # rows exist; otherwise a populated DB is never re-imported.
+                retry = "legacy_json_partial" in state
                 existing = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-                if not existing and session_dir:
+                if (retry or not existing) and session_dir:
                     try:
                         filenames = sorted(f for f in os.listdir(session_dir) if f.endswith(".json"))
                     except FileNotFoundError:
@@ -184,37 +187,35 @@ class SqliteTranscriptStore(DefaultSessionStore):
                         except (UnicodeDecodeError, ValueError, TypeError):
                             continue
                         except OSError as exc:
-                            logger.warning("Cannot read legacy session %s: %s", filepath, exc)
-                            raise
+                            logger.warning("Skipping unreadable legacy session %s (will retry): %s", filepath, exc)
+                            skipped += 1
+                            continue
                         if not isinstance(data, dict):
                             continue
                         try:
                             session = SessionData.from_dict(data)
+                            # Probe that SQLite can bind every value, so malformed
+                            # legacy data is skipped while real DB failures stay fatal.
+                            conn.execute("SELECT ?, ?, ?, ?, ?, ?", (
+                                json.dumps(session.to_dict(), ensure_ascii=False),
+                                session.session_id, session.agent_name,
+                                session.gateway_session_id, session.agent_id, session.updated_at))
+                        except sqlite3.OperationalError:
+                            raise
                         except Exception as exc:
                             logger.warning("Skipping malformed legacy session %s: %s", filepath, exc)
                             continue
-                        columns = (session.session_id, session.agent_name,
-                                   session.gateway_session_id, session.agent_id,
-                                   session.updated_at)
-                        # JSON arrays/objects and oversized integers cannot be
-                        # bound as SQLite values. Skip malformed legacy rows,
-                        # while treating actual database failures as fatal.
-                        if any(
-                            not isinstance(value, (str, int, float, type(None)))
-                            or (isinstance(value, int) and not -(2**63) <= value < 2**63)
-                            for value in columns
-                        ):
-                            logger.warning("Skipping malformed legacy session %s", filepath)
-                            continue
                         try:
-                            json.dumps(session.to_dict(), ensure_ascii=False).encode("utf-8")
-                        except (TypeError, ValueError, UnicodeError) as exc:
-                            logger.warning("Skipping malformed legacy session %s: %s", filepath, exc)
-                            continue
-                        if not self._write_row(session, conn=conn):
+                            written = self._write_row(session, conn=conn, overwrite=False)
+                        except FileExistsError:
+                            continue  # already imported by an earlier partial run
+                        if not written:
                             raise OSError(f"Legacy session migration failed for {filename}")
                         imported += 1
-                conn.execute("INSERT INTO migration_state (name) VALUES (?)", ("legacy_json",))
+                conn.execute(
+                    "INSERT OR IGNORE INTO migration_state (name) VALUES (?)",
+                    ("legacy_json_partial" if skipped else "legacy_json",),
+                )
             conn.execute("COMMIT")
         except BaseException:
             try:
