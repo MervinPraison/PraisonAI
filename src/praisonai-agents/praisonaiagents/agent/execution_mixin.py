@@ -2247,6 +2247,13 @@ Write the complete compiled report:"""
                         apply_result_guardrails, function_name, result, tools_override
                     )
 
+                # Cap the result before it re-enters the context — the same
+                # helper and order as the sync path (after guardrails, before
+                # the loop guard). Multimodal results pass through untouched.
+                from .tool_execution import _normalize_multimodal_result
+                if result and _normalize_multimodal_result(result) is None:
+                    result = self._truncate_tool_result(function_name, result, tool_call_id)
+
                 # Loop guard (post-execution) — record the outcome and surface a
                 # block/halt decision back to the model on this same turn, mirroring
                 # the sync path in tool_execution.py so repeated failures accumulate
