@@ -243,3 +243,45 @@ def test_stalled_handshake_times_out_and_closes_socket():
             await server.wait_closed()
 
     asyncio.run(run())
+
+
+def test_malformed_frame_closes_old_socket_before_reconnect():
+    async def run():
+        async with _Connector() as c:
+            t = WebSocketRelayTransport(c.url, token="secret")
+            await t.connect()
+            first = c.conns[0]
+            await first.send("not json")
+            await _until(lambda: len(c.conns) == 2, timeout=8)
+            await asyncio.wait_for(first.wait_closed(), 5)  # not leaked
+            await t.disconnect()
+
+    asyncio.run(run())
+
+
+def test_disconnect_resets_dormant_state():
+    async def run():
+        async with _Connector() as c:
+            t = WebSocketRelayTransport(c.url, token="secret")
+            await t.connect()
+            await t.go_dormant()
+            await t.disconnect()
+            await t.connect()  # fresh start: must not re-enter dormancy
+            await asyncio.sleep(0.2)
+            assert [f["type"] for f in c.frames] == ["dormant"]
+            await t.disconnect()
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("url", ["ws://relay.example/ws", "ws://203.0.113.5:9000"])
+def test_refuses_token_over_plaintext_to_remote_host(url):
+    with pytest.raises(ValueError, match="wss://"):
+        WebSocketRelayTransport(url, token="secret")
+
+
+@pytest.mark.parametrize(
+    "url", ["wss://relay.example/ws", "ws://127.0.0.1:9000", "ws://localhost/ws"]
+)
+def test_allows_tls_or_loopback(url):
+    WebSocketRelayTransport(url, token="secret")

@@ -39,6 +39,7 @@ import logging
 import random
 import uuid
 from typing import Any, Awaitable, Callable, Dict, Optional
+from urllib.parse import urlsplit
 
 from praisonaiagents.gateway import (
     CapabilityDescriptor,
@@ -46,6 +47,8 @@ from praisonaiagents.gateway import (
     GatewayMessage,
     TargetInfo,
 )
+
+from .origin_check import is_loopback
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +61,8 @@ class WebSocketRelayTransport:
     """``RelayTransport`` over a single outbound WebSocket to a connector.
 
     Args:
-        url: Connector WebSocket URL (``ws://`` or ``wss://``).
+        url: Connector WebSocket URL. Use ``wss://``; plaintext ``ws://``
+            with a ``token`` is only accepted for a loopback host.
         token: Shared secret sent in the ``hello`` frame.
         platform: Platform the connector is fronting (e.g. ``"telegram"``).
         reconnect: Reconnect automatically when the connection drops.
@@ -74,6 +78,12 @@ class WebSocketRelayTransport:
         reconnect: bool = True,
         send_timeout: float = 30.0,
     ):
+        parts = urlsplit(url)
+        if token and parts.scheme == "ws" and not is_loopback(parts.hostname or ""):
+            raise ValueError(
+                "Refusing to send the relay token over plaintext ws:// to a "
+                "non-loopback host; use wss:// or an SSH tunnel."
+            )
         self.url = url
         self.token = token
         self.platform = platform
@@ -166,6 +176,7 @@ class WebSocketRelayTransport:
                 task.cancel()
         self._reader = self._worker = None
         self._stalled = False
+        self._dormant = False  # a fresh start must not re-send ``dormant``
         ws, self._ws = self._ws, None
         if ws is not None:
             try:
@@ -237,7 +248,14 @@ class WebSocketRelayTransport:
             except Exception:
                 logger.warning("relay: connection to %s lost", self.url, exc_info=True)
             self._connected.clear()
-            self._ws = None
+            # A malformed frame lands here with the socket still open: close
+            # it before reconnecting so it is not leaked.
+            ws, self._ws = self._ws, None
+            if ws is not None:
+                try:
+                    await ws.close()
+                except Exception:  # pragma: no cover - defensive
+                    pass
             self._fail_pending("relay connection lost")
             if self._closing or not self.reconnect:
                 self._capabilities = None
