@@ -3005,17 +3005,16 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             result = agent.generate(prompt)
             # Extract URL from result and store in variables for next step
             if hasattr(result, 'data') and result.data:
-                image_url = result.data[0].url if hasattr(result.data[0], 'url') else None
+                image_url = getattr(result.data[0], 'url', None)
                 if image_url:
                     variables['_last_image_url'] = image_url
-                    # Save to file if output path specified
-                    if output_path:
-                        try:
-                            import urllib.request
-                            urllib.request.urlretrieve(image_url, output_path)
-                            variables['_last_image_file'] = output_path
-                        except Exception as e:
-                            logger.warning(f"Failed to save image to {output_path}: {e}")
+            # Save to file if output path specified (handles b64 and URL responses)
+            if output_path:
+                try:
+                    result.save(output_path)
+                    variables['_last_image_file'] = output_path
+                except Exception as e:
+                    logger.warning(f"Failed to save image to {output_path}: {e}")
             return result
         
         # OCRAgent - extract with retry logic for external API failures
@@ -4021,7 +4020,13 @@ CONCISE SUMMARY:"""
         failed = {}      # idx -> {"error": e, "delta": {...} | None, "stop": bool}
         parallel_stopped = False
 
+        # Branch threads cannot be killed: the stop scope (set on exit) makes any
+        # agent turn still running after timeout/fail_fast/caller exit stop at
+        # its next cancel check instead of running on unseen (Issue #6266).
+        from ..agent.chat_mixin import _stop_scope
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers)
+        abandon_scope = _stop_scope()
+        abandon_scope.__enter__()
         try:
             future_to_idx = {}
             for idx, step in enumerate(parallel_step.steps):
@@ -4142,6 +4147,7 @@ CONCISE SUMMARY:"""
             # Do not block the caller on branches that cannot be interrupted.
             # shutdown(wait=True) (the `with` default) is what held the fail_fast
             # raise until the slowest sibling finished.
+            abandon_scope.__exit__(None, None, None)
             executor.shutdown(wait=False)
 
         # Rebuild results/outputs/branch_deltas in declaration order so
