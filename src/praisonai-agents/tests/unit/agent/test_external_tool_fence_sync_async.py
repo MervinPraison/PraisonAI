@@ -100,7 +100,8 @@ def _run(mode, tool, route, base):
     if route == "openai_client":
         agent = Agent(name="f", instructions="hi", llm="gpt-4o-mini", tools=[tool], output="silent", retry=False)
     else:  # litellm-routed model
-        agent = Agent(name="f", instructions="hi", llm="openai/local-model", base_url=base, api_key="sk-local-fake",
+        pytest.importorskip("litellm")  # route needs the [llm] extra
+        agent =Agent(name="f", instructions="hi", llm="openai/local-model", base_url=base, api_key="sk-local-fake",
                       tools=[tool], output="silent", retry=False)
     if mode == "chat":
         return agent.chat("search")
