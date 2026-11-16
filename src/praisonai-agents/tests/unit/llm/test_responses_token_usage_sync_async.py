@@ -57,8 +57,11 @@ def base(monkeypatch):
     # Route via the env var so this test does not depend on the G-01 fix.
     monkeypatch.setenv("OPENAI_BASE_URL", url)
     monkeypatch.setenv("OPENAI_API_BASE", url)
-    yield url
-    server.shutdown()
+    try:
+        yield url
+    finally:
+        server.shutdown()
+        server.server_close()
 
 
 @pytest.mark.parametrize("stream", [False, True])
