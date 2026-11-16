@@ -188,14 +188,15 @@ def test_unreadable_file_is_skipped_then_imported_on_next_open(tmp_path, monkeyp
         store = SqliteTranscriptStore(session_dir=str(tmp_path))
         assert sorted(r['session_id'] for r in store.list_sessions()) == ['a', 'c']
     assert 'b.json' in caplog.text
-    assert 'legacy_json' not in _migration_state(tmp_path)
+    assert _migration_state(tmp_path) == {'legacy_json_pending:b.json'}
     assert store.add_message('a', 'user', 'new a')
+    assert store.delete_session('c')
 
     reopened = SqliteTranscriptStore(session_dir=str(tmp_path))
-    assert sorted(r['session_id'] for r in reopened.list_sessions()) == ['a', 'b', 'c']
+    assert sorted(r['session_id'] for r in reopened.list_sessions()) == ['a', 'b']
     assert reopened.get_chat_history('b')[0]['content'] == 'old b'
     assert [m['content'] for m in reopened.get_chat_history('a')] == ['old a', 'new a']
-    assert 'legacy_json' in _migration_state(tmp_path)
+    assert _migration_state(tmp_path) == {'legacy_json'}
 
 
 def test_database_write_failure_still_blocks_open(tmp_path, monkeypatch):

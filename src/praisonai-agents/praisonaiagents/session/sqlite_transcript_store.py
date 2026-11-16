@@ -165,17 +165,16 @@ class SqliteTranscriptStore(DefaultSessionStore):
         try:
             conn.execute("CREATE TABLE IF NOT EXISTS migration_state (name TEXT PRIMARY KEY)")
             state = {row[0] for row in conn.execute("SELECT name FROM migration_state")}
-            imported = skipped = 0
+            pending = {n.split(":", 1)[1] for n in state if n.startswith("legacy_json_pending:")}
+            imported, skipped = 0, []
             if "legacy_json" not in state:
-                # A partial run (unreadable files skipped) retries even though
-                # rows exist; otherwise a populated DB is never re-imported.
-                retry = "legacy_json_partial" in state
                 existing = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
-                if (retry or not existing) and session_dir:
+                if (pending or not existing) and session_dir:  # retry only files skipped earlier
                     try:
                         filenames = sorted(f for f in os.listdir(session_dir) if f.endswith(".json"))
                     except FileNotFoundError:
                         filenames = []
+                    filenames = [f for f in filenames if f in pending] if pending else filenames
                     for filename in filenames:
                         filepath = os.path.join(session_dir, filename)
                         if os.path.isdir(filepath):
@@ -188,14 +187,13 @@ class SqliteTranscriptStore(DefaultSessionStore):
                             continue
                         except OSError as exc:
                             logger.warning("Skipping unreadable legacy session %s (will retry): %s", filepath, exc)
-                            skipped += 1
+                            skipped.append(filename)
                             continue
                         if not isinstance(data, dict):
                             continue
                         try:
                             session = SessionData.from_dict(data)
-                            # Probe that SQLite can bind every value, so malformed
-                            # legacy data is skipped while real DB failures stay fatal.
+                            # Bind probe: skip malformed values; real DB failures stay fatal.
                             conn.execute("SELECT ?, ?, ?, ?, ?, ?", (
                                 json.dumps(session.to_dict(), ensure_ascii=False),
                                 session.session_id, session.agent_name,
@@ -208,14 +206,13 @@ class SqliteTranscriptStore(DefaultSessionStore):
                         try:
                             written = self._write_row(session, conn=conn, overwrite=False)
                         except FileExistsError:
-                            continue  # already imported by an earlier partial run
+                            continue  # a newer row with this id already exists
                         if not written:
                             raise OSError(f"Legacy session migration failed for {filename}")
                         imported += 1
-                conn.execute(
-                    "INSERT OR IGNORE INTO migration_state (name) VALUES (?)",
-                    ("legacy_json_partial" if skipped else "legacy_json",),
-                )
+                conn.execute("DELETE FROM migration_state WHERE name LIKE 'legacy_json_pending:%'")
+                conn.executemany("INSERT INTO migration_state (name) VALUES (?)", [
+                    ("legacy_json_pending:" + f,) for f in skipped] or [("legacy_json",)])
             conn.execute("COMMIT")
         except BaseException:
             try:
