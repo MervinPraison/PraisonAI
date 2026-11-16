@@ -8,6 +8,7 @@ got ``str(DeferredToolResult(...))``.
 """
 
 import asyncio
+import itertools
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -20,6 +21,7 @@ from praisonaiagents.tools.call_executor import defer, get_deferred_resolver
 TOOLS = [{"type": "function", "function": {
     "name": "research", "description": "long job", "parameters": {"type": "object", "properties": {}}}}]
 SEEN_TOOL_OUTPUT = []
+N_CALLS = [1]  # tool calls the stub returns per turn; >1 exercises the real parallel branches
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -42,8 +44,8 @@ class _Handler(BaseHTTPRequestHandler):
                 out = [{"type": "message", "id": "m1", "status": "completed", "role": "assistant",
                         "content": [{"type": "output_text", "text": "started", "annotations": []}]}]
             else:
-                out = [{"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": "research",
-                        "arguments": "{}", "status": "completed"}]
+                out = [{"type": "function_call", "id": f"fc_{i}", "call_id": f"call_{i}", "name": "research",
+                        "arguments": "{}", "status": "completed"} for i in range(N_CALLS[0])]
             return self._send({"id": "r1", "object": "response", "created_at": 0, "status": "completed",
                                "model": "gpt-4o-mini", "output": out,
                                "usage": {"input_tokens": 1, "output_tokens": 1, "total_tokens": 2},
@@ -53,7 +55,8 @@ class _Handler(BaseHTTPRequestHandler):
         SEEN_TOOL_OUTPUT.extend(str(m.get("content")) for m in tool_msgs)
         if req.get("tools") and not tool_msgs:
             msg = {"role": "assistant", "content": None, "tool_calls": [
-                {"id": "call_1", "type": "function", "function": {"name": "research", "arguments": "{}"}}]}
+                {"id": f"call_{i}", "type": "function", "function": {"name": "research", "arguments": "{}"}}
+                for i in range(N_CALLS[0])]}
             fin = "tool_calls"
         else:
             msg, fin = {"role": "assistant", "content": "started"}, "stop"
@@ -68,6 +71,7 @@ class _Handler(BaseHTTPRequestHandler):
 @pytest.fixture
 def base(monkeypatch):
     SEEN_TOOL_OUTPUT.clear()
+    N_CALLS[0] = 1
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     url = f"http://127.0.0.1:{server.server_address[1]}/v1"
@@ -78,25 +82,62 @@ def base(monkeypatch):
     server.shutdown()
 
 
+def _llm(route, base):
+    if route == "chat":
+        return LLM(model="openai/local-model", base_url=base, api_key="x")
+    llm = LLM(model="gpt-4o-mini", api_key="x", api_base=base)
+    assert llm._supports_responses_api()
+    return llm
+
+
+def _run(llm, mode, execute_tool, parallel):
+    kwargs = dict(prompt="go", tools=TOOLS, execute_tool_fn=execute_tool, verbose=False, stream=False,
+                  parallel_tool_calls=parallel)
+    return llm.get_response(**kwargs) if mode == "sync" else asyncio.run(llm.get_response_async(**kwargs))
+
+
 @pytest.mark.parametrize("parallel", [False, True])
 @pytest.mark.parametrize("route", ["chat", "responses"])
 @pytest.mark.parametrize("mode", ["sync", "async"])
 def test_deferred_tool_result_is_registered(base, route, mode, parallel):
-    handle = f"g06-{route}-{mode}-{parallel}"
+    N_CALLS[0] = 2 if parallel else 1
+    resolver = get_deferred_resolver()
+    handles = [f"g06-{route}-{mode}-{parallel}-{i}" for i in range(N_CALLS[0])]
+    for h in handles:
+        resolver.cancel(h)
+    counter = itertools.count()
 
     def execute_tool(name, args, *a, **k):
-        return defer(note="research started", handle_id=handle)
+        return defer(note="research started", handle_id=handles[next(counter) % len(handles)])
 
-    if route == "chat":
-        llm = LLM(model="openai/local-model", base_url=base, api_key="x")
-    else:
-        llm = LLM(model="gpt-4o-mini", api_key="x", api_base=base)
-        assert llm._supports_responses_api()
-    kwargs = dict(prompt="go", tools=TOOLS, execute_tool_fn=execute_tool, verbose=False, stream=False,
-                  parallel_tool_calls=parallel)
-    result = llm.get_response(**kwargs) if mode == "sync" else asyncio.run(llm.get_response_async(**kwargs))
+    try:
+        assert _run(_llm(route, base), mode, execute_tool, parallel) == "started"
+        assert all(resolver.is_pending(h) for h in handles)
+        assert len(SEEN_TOOL_OUTPUT) >= len(handles)
+        assert all("research started" in s and "DeferredToolResult" not in s for s in SEEN_TOOL_OUTPUT)
+    finally:
+        for h in handles:
+            resolver.cancel(h)
 
-    assert result == "started"
-    assert handle in get_deferred_resolver()._pending
-    assert SEEN_TOOL_OUTPUT and all("research started" in s and "DeferredToolResult" not in s
-                                    for s in SEEN_TOOL_OUTPUT)
+
+def test_async_parallel_failing_sibling_keeps_deferred_handle(base):
+    """A sibling that raises must not orphan another tool's deferred job."""
+    N_CALLS[0] = 2
+    resolver = get_deferred_resolver()
+    handle = "g06-async-failing-sibling"
+    resolver.cancel(handle)
+    counter = itertools.count()
+
+    def execute_tool(name, args, *a, **k):
+        if next(counter) == 0:
+            return defer(note="research started", handle_id=handle)
+        raise RuntimeError("sibling failed")
+
+    try:
+        try:
+            _run(_llm("chat", base), "async", execute_tool, True)
+        except Exception:  # noqa: BLE001 — propagation is not what this test checks
+            pass
+        assert resolver.is_pending(handle)
+    finally:
+        resolver.cancel(handle)

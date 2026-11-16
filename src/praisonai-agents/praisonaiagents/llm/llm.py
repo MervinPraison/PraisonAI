@@ -5796,11 +5796,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     _dispatch_async_tool(execute_tool_fn, fn, args, tc_id, iteration_index)
                     for (fn, args, tc_id) in dispatch_specs
                 ), return_exceptions=True)
-                for item in gathered:
+                # Register successful deferred siblings before re-raising, so a
+                # failing tool does not orphan another tool's background job.
+                results = [r if isinstance(r, BaseException) else self._unwrap_deferred_result(r, fn, tc_id)
+                           for r, (fn, _args, tc_id) in zip(gathered, dispatch_specs)]
+                for item in results:
                     if isinstance(item, BaseException):
                         raise item
-                return [self._unwrap_deferred_result(r, fn, tc_id)
-                        for r, (fn, _args, tc_id) in zip(gathered, dispatch_specs)]
+                return results
             results = []
             for (fn, args, tc_id) in dispatch_specs:
                 results.append(self._unwrap_deferred_result(await _dispatch_async_tool(
