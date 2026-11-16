@@ -142,3 +142,8 @@ class PassThroughMiddleware:
             success=True,  # Assume success for native runtime
             raw_result=result
         )
+
+
+# ``Protocol``-suffixed names (G-26, the project naming rule). The original
+# names stay and are the same class, so existing imports keep working.
+RuntimeToolResultMiddlewareProtocol = RuntimeToolResultMiddleware

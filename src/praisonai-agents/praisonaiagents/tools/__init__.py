@@ -305,7 +305,8 @@ _PROFILE_EXPORTS = frozenset({
 # Code-tools bridge exports (lazy loaded to keep import-time cost off the
 # default path; only resolved when the opt-in code mode is used).
 _TOOL_PROXY_EXPORTS = frozenset({
-    'ToolProxy', 'build_tool_namespace', 'CodeToolBridge', 'serve_tool_call',
+    'ToolProxy', 'build_tool_namespace', 'CodeToolBridge', 'CodeToolBridgeProtocol',
+    'serve_tool_call',
     'LocalProcessBridge',
 })
 
@@ -317,6 +318,7 @@ def __getattr__(name: str) -> Any:
             ToolProxy,
             build_tool_namespace,
             CodeToolBridge,
+            CodeToolBridgeProtocol,
             serve_tool_call,
             LocalProcessBridge,
         )
@@ -324,6 +326,7 @@ def __getattr__(name: str) -> Any:
             'ToolProxy': ToolProxy,
             'build_tool_namespace': build_tool_namespace,
             'CodeToolBridge': CodeToolBridge,
+            'CodeToolBridgeProtocol': CodeToolBridgeProtocol,
             'serve_tool_call': serve_tool_call,
             'LocalProcessBridge': LocalProcessBridge,
         }[name]
@@ -442,7 +445,8 @@ __all__ = list(TOOL_MAPPINGS.keys()) + [
     'get_registry', 'register_tool', 'get_tool', 'add_tool', 'has_tool', 'remove_tool', 
     'list_tools', 'list_available_tools', 'list_tools_with_allowed_filter', 'list_tools_with_hermes_filter', 'ToolRegistry',
     'resolve_tool_name', 'resolve_tool_names', 'ToolResolutionError',
-    'ToolProxy', 'build_tool_namespace', 'CodeToolBridge', 'serve_tool_call',
+    'ToolProxy', 'build_tool_namespace', 'CodeToolBridge', 'CodeToolBridgeProtocol',
+    'serve_tool_call',
     'LocalProcessBridge', 'Tools',
     # Validation and retry protocols
     'ValidationResult', 'ToolValidatorProtocol', 'AsyncToolValidatorProtocol', 'PassthroughValidator',
