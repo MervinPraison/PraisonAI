@@ -7,6 +7,7 @@ Provides unified cost calculation with:
 - Zero performance impact via lazy imports
 """
 
+import sys
 from typing import Any, Dict, Optional
 
 # Fallback pricing per 1M tokens (used when litellm not available)
@@ -24,7 +25,36 @@ _FALLBACK_PRICING: Dict[str, Dict[str, float]] = {
     "o1-mini": {"input": 1.10, "output": 4.40, "cache_read": 0.5},
     "o1-preview": {"input": 15.00, "output": 60.00},
     "o3-mini": {"input": 1.10, "output": 4.40, "cache_read": 0.5},
-    # Anthropic models
+    "o3": {"input": 2.00, "output": 8.00, "cache_read": 0.25},
+    "o3-pro": {"input": 20.00, "output": 80.00},
+    "o4-mini": {"input": 1.10, "output": 4.40, "cache_read": 0.25},
+    "gpt-4.1": {"input": 2.00, "output": 8.00, "cache_read": 0.25},
+    "gpt-4.1-mini": {"input": 0.40, "output": 1.60, "cache_read": 0.25},
+    "gpt-4.1-nano": {"input": 0.10, "output": 0.40, "cache_read": 0.25},
+    "gpt-5": {"input": 1.25, "output": 10.00, "cache_read": 0.1},
+    "gpt-5-mini": {"input": 0.25, "output": 2.00, "cache_read": 0.1},
+    "gpt-5-nano": {"input": 0.05, "output": 0.40, "cache_read": 0.1},
+    "gpt-5-pro": {"input": 15.00, "output": 120.00},
+    "gpt-5.1": {"input": 1.25, "output": 10.00, "cache_read": 0.1},
+    "gpt-5.2": {"input": 1.75, "output": 14.00, "cache_read": 0.1},
+    "gpt-5.2-pro": {"input": 21.00, "output": 168.00},
+    "gpt-5.3": {"input": 1.75, "output": 14.00, "cache_read": 0.1},
+    "gpt-5.4": {"input": 2.50, "output": 15.00, "cache_read": 0.1},
+    "gpt-5.4-mini": {"input": 0.75, "output": 4.50, "cache_read": 0.1},
+    "gpt-5.4-nano": {"input": 0.20, "output": 1.25, "cache_read": 0.1},
+    "gpt-5.4-pro": {"input": 30.00, "output": 180.00},
+    "gpt-5.5": {"input": 5.00, "output": 30.00, "cache_read": 0.1},
+    "gpt-5.5-pro": {"input": 30.00, "output": 180.00},
+    "gpt-5.6": {"input": 4.00, "output": 20.00, "cache_read": 0.1, "cache_write": 1.25},
+    "gpt-5.6-luna": {"input": 0.20, "output": 1.20, "cache_read": 0.1, "cache_write": 1.25},
+    "gpt-5.6-terra": {"input": 2.00, "output": 12.00, "cache_read": 0.1, "cache_write": 1.25},
+    # Anthropic models ("claude-opus-4" is Opus 4.5+; Opus 4.0/4.1 kept their old price)
+    "claude-opus-4": {"input": 5.00, "output": 25.00, "cache_read": 0.1, "cache_write": 1.25},
+    "claude-opus-4-0": {"input": 15.00, "output": 75.00, "cache_read": 0.1, "cache_write": 1.25},
+    "claude-opus-4-1": {"input": 15.00, "output": 75.00, "cache_read": 0.1, "cache_write": 1.25},
+    "claude-opus-4-20250514": {"input": 15.00, "output": 75.00, "cache_read": 0.1, "cache_write": 1.25},
+    "claude-sonnet-4": {"input": 3.00, "output": 15.00, "cache_read": 0.1, "cache_write": 1.25},
+    "claude-haiku-4": {"input": 1.00, "output": 5.00, "cache_read": 0.1, "cache_write": 1.25},
     "claude-3-5-sonnet": {"input": 3.00, "output": 15.00, "cache_read": 0.1, "cache_write": 1.25},
     "claude-3-5-haiku": {"input": 0.80, "output": 4.00, "cache_read": 0.1, "cache_write": 1.25},
     "claude-3-opus": {"input": 15.00, "output": 75.00, "cache_read": 0.1, "cache_write": 1.25},
@@ -35,6 +65,9 @@ _FALLBACK_PRICING: Dict[str, Dict[str, float]] = {
     "gemini-1.5-flash": {"input": 0.075, "output": 0.30, "cache_read": 0.25},
     "gemini-2.0-flash": {"input": 0.10, "output": 0.40, "cache_read": 0.25},
     "gemini-2.0-flash-exp": {"input": 0.10, "output": 0.40},
+    "gemini-2.5-pro": {"input": 1.25, "output": 10.00, "cache_read": 0.1},
+    "gemini-2.5-flash": {"input": 0.30, "output": 2.50, "cache_read": 0.1},
+    "gemini-2.5-flash-lite": {"input": 0.10, "output": 0.40, "cache_read": 0.1},
     "gemini-pro": {"input": 0.50, "output": 1.50},
     # DeepSeek models
     "deepseek-chat": {"input": 0.14, "output": 0.28, "cache_read": 0.1},
@@ -253,13 +286,17 @@ def _calculate_fallback_cost(
     # match or a prefix boundary ("<key>-...") so that "gpt-4o-mini" does not
     # fall through to the "gpt-4o" entry (which billed it at 16.7x the real
     # rate). "default" is excluded from matching and used only as a fallback.
-    pricing = _FALLBACK_PRICING.get("default")
+    pricing = None
     for key in sorted(
         (k for k in _FALLBACK_PRICING if k != "default"), key=len, reverse=True
     ):
         if model_name == key or model_name.startswith(key + "-"):
             pricing = _FALLBACK_PRICING[key]
             break
+    if pricing is None:
+        pricing = _loaded_litellm_pricing(
+            (model or "").lower(), model_name
+        ) or _FALLBACK_PRICING["default"]
     
     # Calculate cost (pricing is per 1M tokens). Cached/cache-write tokens are
     # part of prompt_tokens; price them at their multiplier of the input rate.
@@ -274,3 +311,34 @@ def _calculate_fallback_cost(
     output_cost = (completion_tokens / 1_000_000) * pricing["output"]
     
     return round(input_cost + output_cost, 6)
+
+
+def _loaded_litellm_pricing(*names: str) -> Optional[Dict[str, float]]:
+    """Per-1M pricing from litellm's ``model_cost`` for a model the table lacks.
+
+    Used only when litellm is already imported (the ``provider/model`` route
+    loads it); never imports it, so the default path stays import-free.
+    Zero-priced entries (local models) are ignored and keep the default.
+    """
+    model_cost = getattr(sys.modules.get("litellm"), "model_cost", None)
+    if not isinstance(model_cost, dict):
+        return None
+    for name in names:
+        info = model_cost.get(name)
+        if not isinstance(info, dict):
+            continue
+        rate = info.get("input_cost_per_token") or 0.0
+        out = info.get("output_cost_per_token") or 0.0
+        if not (isinstance(rate, (int, float)) and isinstance(out, (int, float))):
+            continue
+        if rate <= 0 or out < 0:
+            continue
+        read = info.get("cache_read_input_token_cost")
+        write = info.get("cache_creation_input_token_cost")
+        return {
+            "input": rate * 1_000_000,
+            "output": out * 1_000_000,
+            "cache_read": read / rate if isinstance(read, (int, float)) and read > 0 else 1.0,
+            "cache_write": write / rate if isinstance(write, (int, float)) and write > 0 else 1.0,
+        }
+    return None

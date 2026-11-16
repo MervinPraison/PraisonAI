@@ -662,6 +662,22 @@ assert('final body requires ts agents md', mg.FINAL_CLAUDE_REVIEW_BODY.includes(
 
 // PR size
 assert('large PR blocked', mg.prSizeReasons([{ additions: 900 }]).length > 0);
+const srcFile = (n, add, del = 0) => ({ filename: `src/praisonai-agents/praisonaiagents/m${n}.py`, additions: add, deletions: del });
+assert('size: 5 non-test files ok', mg.prSizeReasons([1, 2, 3, 4, 5].map((n) => srcFile(n, 10))).length === 0);
+assert('size: 6 non-test files blocked', mg.prSizeReasons([1, 2, 3, 4, 5, 6].map((n) => srcFile(n, 10))).length === 1);
+assert('size: 99 non-test lines ok', mg.prSizeReasons([srcFile(1, 60, 39)]).length === 0);
+assert('size: 100 non-test lines blocked', mg.prSizeReasons([srcFile(1, 60, 40)]).length === 1);
+assert('size: deletions count', mg.prSizeReasons([srcFile(1, 0, 150)]).length === 1);
+assert('size: large test-only change ok', mg.prSizeReasons([
+  { filename: 'src/praisonai-agents/tests/unit/test_big.py', additions: 900 },
+  { filename: 'src/praisonai-ts/tests/unit/a.test.ts', additions: 400 },
+  { filename: 'src/praisonai-ts/src/x.spec.ts', additions: 300 },
+  srcFile(1, 20),
+]).length === 0);
+assert('size: test path detection', mg.isTestPath('src/praisonai-bot/tests/unit/x.py') &&
+  mg.isTestPath('test_thing.py') && mg.isTestPath('pkg/foo_test.py') &&
+  !mg.isTestPath('src/praisonai-agents/praisonaiagents/testing_utils.py') &&
+  !mg.isTestPath('src/praisonai-agents/praisonaiagents/latest.py'));
 
 assert('internal PR link accepted', mg.isInternalPullRequestLink(
   { base: { repo: { full_name: 'MervinPraison/PraisonAI' } } },

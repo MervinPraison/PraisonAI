@@ -264,6 +264,13 @@ class FailoverManager:
         # be synchronized. RLock allows methods like mark_failure to call
         # get_next_profile while already holding the lock.
         self._lock = threading.RLock()
+
+    def __deepcopy__(self, memo):
+        """One shared pool: copies of an Agent or LLM keep this manager and its profiles."""
+        memo[id(self)] = self
+        for profile in self.list_profiles():
+            memo[id(profile)] = profile
+        return self
     
     def add_profile(self, profile: AuthProfile) -> None:
         """Add an auth profile.
@@ -561,6 +568,31 @@ class FailoverManager:
                             f"Quota coordinator clear failed for '{profile.name}': {e}; "
                             f"local reset applied but shared bench may persist"
                         )
+
+
+def manager_from_auth_profiles(profiles: Optional[List[Dict[str, Any]]]) -> Optional[FailoverManager]:
+    """Build a FailoverManager from ``LLMConfig.auth_profiles`` dicts.
+
+    ``api_key`` goes through ``resolve_secret`` (plaintext, ``${ENV}``, secret
+    ref); a missing, empty or masked key raises ``ValueError`` without the key.
+    """
+    if not profiles:
+        return None
+    from ..secrets import resolve_secret
+
+    manager = FailoverManager()
+    for index, entry in enumerate(profiles, start=1):
+        if not isinstance(entry, dict):
+            raise TypeError(f"auth profile {index} must be a dict, got {type(entry).__name__}")
+        data = dict(entry)
+        data["provider"] = data.get("provider") or "openai"
+        data["name"] = data.get("name") or f"{data['provider']}-{index}"
+        resolution = resolve_secret(data.get("api_key") or "")
+        if not resolution.available or not resolution.value or resolution.value.startswith("***"):
+            raise ValueError(f"Cannot resolve auth profile api_key ({resolution.detail or f'profile {index}'})")
+        data["api_key"] = resolution.value
+        manager.add_profile(AuthProfile.from_dict(data))
+    return manager
 
 
 @runtime_checkable

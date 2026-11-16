@@ -909,7 +909,6 @@ def main_callback(
         # (exporting OPENAI_BASE_URL) is what enables the keyless local path.
         import sys
         from praisonai_code.llm.credentials import ensure_configured_or_onboard
-        from praisonai_code._wrapper_bridge import wrapper_available
 
         # Validate the continuity flags up-front (parity with `run`) so an
         # invalid combination fails closed before any onboarding/model work
@@ -927,15 +926,14 @@ def main_callback(
             )
             raise typer.Exit(1)
 
-        # The bare invocation only launches the wrapper-resident interactive
-        # TUI. On a bare `pip install praisonai-code` the wrapper is absent and
-        # the TUI path fails fast with its own install hint. Running the
-        # credential gate first would preempt that hint with a raw "No API key
-        # configured" exit, so only gate onboarding when the TUI can actually
-        # start and let it surface the actionable install hint otherwise.
+        # The interactive TUI is resident in praisonai-code, so the gate runs on
+        # the lean install too — no `praisonai` wrapper required (Issue #6271).
         _headless = (not sys.stdin.isatty()) or quiet
-        if wrapper_available():
-            ensure_configured_or_onboard(model=None, interactive=not _headless)
+        # Keep the gate's result: on the keyless local-first path it is the
+        # detected local model and must win over a remembered cloud default.
+        gated_model = ensure_configured_or_onboard(
+            model=None, interactive=not _headless
+        )
 
         from .interactive.async_tui import AsyncTUI, AsyncTUIConfig
 
@@ -1030,7 +1028,7 @@ def main_callback(
             resolved_model = _DEFAULT_MODEL
 
         tui_config = AsyncTUIConfig(
-            model=restored_model or resolved_model,
+            model=restored_model or gated_model or resolved_model,
             show_logo=True,
             show_status_bar=state.output_format != OutputFormat.json,
             session_id=resume_id,
