@@ -5336,7 +5336,9 @@ Summary:"""
                 "Autonomy must be enabled to use run_autonomous_async(). "
                 "Create agent with autonomy=True or autonomy={...}"
             )
-        
+
+        # Drop a previous run's cancelled partial result so it can't go stale.
+        self._last_autonomy_result = None
         start_time = time_module.time()
         started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         iterations = 0
