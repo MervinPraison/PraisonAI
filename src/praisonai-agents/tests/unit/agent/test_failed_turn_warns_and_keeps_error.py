@@ -83,6 +83,29 @@ def test_failed_turn_returns_none_warns_and_keeps_error(stub, mode, route):
     assert "_last_error" in str(future[0].message)
 
 
+@pytest.mark.parametrize("route", ["openai_client", "custom_llm"])
+@pytest.mark.parametrize("mode", ["chat", "achat"])
+def test_warnings_as_errors_keeps_none_and_original_error(stub, mode, route):
+    agent = _agent(stub, route)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", FutureWarning)
+        result = agent.chat("hi") if mode == "chat" else asyncio.run(agent.achat("hi"))
+    assert result is None
+    assert agent._last_error is not None
+    assert not isinstance(agent._last_error, Warning)
+
+
+def test_warning_text_is_stable_across_failures():
+    from praisonaiagents.agent.chat_mixin import ChatMixin
+
+    m = ChatMixin()
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        m._none_after_failed_turn(RuntimeError("request id abc"))
+        m._none_after_failed_turn(RuntimeError("request id xyz"))
+    assert len({str(w.message) for w in caught}) == 1
+
+
 def test_next_successful_turn_clears_the_error(stub):
     agent = _agent(stub, "openai_client")
     with warnings.catch_warnings():

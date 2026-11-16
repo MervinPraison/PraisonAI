@@ -241,13 +241,19 @@ class ChatMixin:
         callers can detect the failure today. Raising instead is a 2.0 decision.
         """
         self._last_error = exc
-        warnings.warn(
-            f"Agent {getattr(self, 'name', None)!r}: the LLM call failed "
-            f"({type(exc).__name__}: {str(exc)[:200]}); returning None. The exception "
-            "is kept on agent._last_error. A future major release may raise instead.",
-            FutureWarning,
-            stacklevel=3,
-        )
+        # Stable text (no str(exc): request IDs/timestamps would defeat the
+        # default once-per-location filter). Under ``-W error`` the warning
+        # must not escape or replace the saved error: the contract is None.
+        try:
+            warnings.warn(
+                f"Agent {getattr(self, 'name', None)!r}: the LLM call failed "
+                f"({type(exc).__name__}); returning None. The exception is kept on "
+                "agent._last_error. A future major release may raise instead.",
+                FutureWarning,
+                stacklevel=3,
+            )
+        except FutureWarning:
+            pass
         return None
 
     @property
