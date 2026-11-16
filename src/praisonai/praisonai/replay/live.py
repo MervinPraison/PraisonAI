@@ -12,7 +12,6 @@ The page is aiui's Replay view without the dashboard around it
 
 from __future__ import annotations
 
-import asyncio
 import inspect
 import threading
 import webbrowser
@@ -60,7 +59,8 @@ def _runner(target: Any) -> Optional[Callable[[str, str], None]]:
         with record(run_id, live=True):
             out = call(text)
             if inspect.isawaitable(out):
-                asyncio.run(out)
+                from .._async_bridge import run_cli_coro
+                run_cli_coro(out)
 
     return run
 

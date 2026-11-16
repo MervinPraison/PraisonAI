@@ -91,6 +91,18 @@ class MongoDBStorageAdapter:
                 "retryReads": True,
             }
             
+            # Options set explicitly in the URI (e.g. ?retryWrites=false) win
+            # over these defaults; URI option names are case-insensitive.
+            query = self.url.split("?", 1)[1] if "?" in self.url else ""
+            uri_opts = {
+                part.split("=", 1)[0].lower()
+                for part in re.split(r"[&;]", query) if part
+            }
+            client_kwargs = {
+                k: v for k, v in client_kwargs.items()
+                if k.lower() not in uri_opts
+            }
+
             if self.username and self.password:
                 client_kwargs["username"] = self.username
                 client_kwargs["password"] = self.password

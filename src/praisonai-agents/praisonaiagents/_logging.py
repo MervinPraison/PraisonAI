@@ -59,8 +59,19 @@ def _get_all_noisy_loggers() -> List[str]:
     ]
 
 
+def _host_configured_logging() -> bool:
+    """True when the host application already installed root handlers."""
+    return bool(logging.getLogger().handlers)
+
+
 def _configure_loggers():
-    """Configure all loggers based on LOGLEVEL environment variable."""
+    """Configure all loggers based on LOGLEVEL environment variable.
+
+    Skipped when the host already configured logging, so importing the SDK
+    never silences the host's own httpx/openai/pydantic logs.
+    """
+    if _host_configured_logging():
+        return
     loglevel = os.environ.get('LOGLEVEL', 'WARNING').upper()
     
     # When DEBUG or INFO is set, allow some HTTP logging for API endpoints
@@ -132,7 +143,17 @@ def configure_root_logger():
     
     Uses standard StreamHandler by default for performance.
     RichHandler is only used when LOGLEVEL=DEBUG for better debugging experience.
+    Does nothing if the host application already configured the root logger,
+    or when ``LOGLEVEL`` is not set explicitly.
     """
+    if _host_configured_logging():
+        return
+    if 'LOGLEVEL' not in os.environ:
+        # A library must not install root handlers by default: that turns the
+        # host's later logging.basicConfig() into a no-op. Without handlers,
+        # WARNING+ records still reach stderr via logging.lastResort.
+        return
+
     loglevel = os.environ.get('LOGLEVEL', 'WARNING').upper()
     
     # Only use RichHandler for DEBUG level to avoid importing rich at startup
@@ -148,7 +169,6 @@ def configure_root_logger():
         format="%(asctime)s %(filename)s:%(lineno)d %(levelname)s %(message)s",
         datefmt="[%X]",
         handlers=handlers,
-        force=True
     )
 
 
@@ -161,7 +181,8 @@ def initialize_logging():
     Note: litellm configuration is NOT done here to avoid importing litellm
     at package import time. Call configure_litellm() when litellm is needed.
     """
-    _configure_environment()
+    # NOTE: env defaults (_configure_environment) are applied lazily by the
+    # llm package, not here, so import does not leak env into subprocesses.
     _configure_loggers()
     # NOTE: _configure_litellm() is NOT called here to avoid importing litellm
     # It will be called lazily when LLM class is instantiated
@@ -223,8 +244,13 @@ def configure_structured_logging():
     """
     if os.environ.get('PRAISONAI_STRUCTURED_LOGS', '').lower() == 'true':
         structured_formatter = StructuredFormatter()
+        root = logging.getLogger()
+        # Explicit opt-in: install a root handler if none exists (the SDK no
+        # longer installs one on import unless LOGLEVEL is set).
+        if not root.handlers:
+            root.addHandler(logging.StreamHandler())
         # Reconfigure the root logger handler so propagating loggers get JSON output
-        for handler in logging.getLogger().handlers:
+        for handler in root.handlers:
             handler.setFormatter(structured_formatter)
         # Also reconfigure any praisonaiagents loggers that have their own handlers
         for logger_name in logging.Logger.manager.loggerDict:

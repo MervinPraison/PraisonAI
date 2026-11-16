@@ -121,6 +121,12 @@ class PlatformCapabilities:
             anchoring). When False, ``create_thread`` returns a typed
             ``unsupported`` outcome and callers fall back to the parent channel
             rather than raising.
+        supports_status_text: Whether the adapter can render a short,
+            replaceable textual status line (e.g. "🔍 Searching the web...")
+            without editing a message or adding reactions. When True the
+            adapter SHOULD implement ``async set_status_text(channel_id, text)``
+            (an empty ``text`` clears the line when the turn ends); streaming ``auto``/``progress`` on a non-edit channel then routes the
+            curated activity line there instead of degrading to ``off``.
     """
     
     max_message_length: int = 4096
@@ -142,6 +148,7 @@ class PlatformCapabilities:
     # Appended after all pre-existing fields to preserve the positional
     # constructor contract for external callers (do not reorder above).
     supports_delete: bool = False
+    supports_status_text: bool = False
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -163,6 +170,7 @@ class PlatformCapabilities:
             "supports_idempotency_token": self.supports_idempotency_token,
             "supports_media": self.supports_media,
             "supports_threads": self.supports_threads,
+            "supports_status_text": self.supports_status_text,
         }
     
     @classmethod
@@ -186,6 +194,7 @@ class PlatformCapabilities:
             supports_idempotency_token=data.get("supports_idempotency_token", False),
             supports_media=data.get("supports_media", False),
             supports_threads=data.get("supports_threads", False),
+            supports_status_text=data.get("supports_status_text", False),
         )
 
 
@@ -246,7 +255,11 @@ class ChannelDescriptor(Protocol):
     secrets and plain config keys). A descriptor MAY additionally expose an
     optional ``setup(io)`` hook for bespoke, multi-step flows the field list
     cannot express; the wizard calls it when present and merges the returned
-    values. Because it is optional, a minimal descriptor (like the example
+    values. It MAY likewise expose an optional ``standalone_sender`` — a (sync or async)
+    ``(target: DeliveryTarget, text: str) -> None`` that raises on failure — so
+    scheduled ``deliver:`` targets reach the channel even when no gateway is
+    resident (``praisonai schedule tick`` from OS cron / CI / scale-to-zero).
+    Because these are optional, a minimal descriptor (like the example
     below) omits it — so this Protocol is intentionally *not* used as an
     ``isinstance`` type guard; consumers read attributes with ``getattr``
     fallbacks instead.

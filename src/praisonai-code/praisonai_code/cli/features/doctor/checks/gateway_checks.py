@@ -151,11 +151,19 @@ def check_gateway_security(config: DoctorConfig) -> CheckResult:
         warnings = []
         
         for channel_name, channel in validated_config.channels.items():
-            # Check for open allowlists (CRITICAL)
+            # Check for open allowlists. Only unknown_user_policy=allow opens
+            # the bot to everyone; the default deny drops unknown DMs (Issue #5092).
             if not channel.allowed_users and not channel.allowlist and not channel.blocklist:
-                security_issues.append(
-                    f"{channel_name}: No user restrictions - bot responds to EVERYONE!"
-                )
+                policy = (channel.unknown_user_policy or "deny").lower()
+                if policy == "allow":
+                    security_issues.append(
+                        f"{channel_name}: No user restrictions - bot responds to EVERYONE!"
+                    )
+                elif policy != "pair":  # deny (default), mirrors runtime fallback
+                    warnings.append(
+                        f"{channel_name}: No allowed_users and unknown_user_policy=deny "
+                        "- DMs from unknown users are dropped"
+                    )
                 
             # Check for overly permissive group policies (WARNING)
             if channel.group_policy == "respond_all":
@@ -352,7 +360,7 @@ def check_gateway_env_substitution(config: DoctorConfig) -> CheckResult:
         # Load .env file first to ensure all env vars are available
         try:
             load_env_file()
-        except:
+        except Exception:
             pass  # .env file might not exist, continue anyway
         
         with open(config_path) as f:

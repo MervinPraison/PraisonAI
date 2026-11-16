@@ -10,9 +10,10 @@ import threading
 from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable
 from collections import OrderedDict
 import inspect
+import uuid
 
 # Decomposed agent functionality - real implementations in mixin files
-from .chat_mixin import ChatMixin
+from .chat_mixin import ChatMixin, _deadline_scope
 from .execution_mixin import ExecutionMixin
 from .memory_mixin import MemoryMixin
 from .async_memory_mixin import AsyncMemoryMixin
@@ -53,6 +54,7 @@ _lazy_import_lock = threading.Lock()
 # mode wins.
 _output_mode_lock = threading.Lock()
 _llm_module = None
+_RULES_NOTICE_SEEN: set = set()  # rule-name sets already announced (issue #6257)
 _hooks_module = None
 _stream_emitter_class = None
 
@@ -134,7 +136,11 @@ from ..config.feature_configs import (
     PlanningConfig, ReflectionConfig, RulesConfig, GuardrailConfig, WebConfig,
     TemplateConfig, CachingConfig, HooksConfig, SkillsConfig,
     DEFAULT_TOOL_OUTPUT_LIMIT,
+    LearnConfig, LLMConfig, ToolConfig, resolve_tools,
 )
+# Already loaded by the imports above; hoisted so __init__ does not pay a
+# function-local relative import per construction (#5835).
+from ..config.parse_utils import canonical_preset_key, validate_preset_string
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
 # Single source of truth defined in config.feature_configs and imported here
@@ -188,8 +194,6 @@ def _validate_preset_params(params):
     Raises:
         ValueError: With a "Did you mean ...?" suggestion and the valid names.
     """
-    from ..config.parse_utils import validate_preset_string
-
     for name, value in params.items():
         if not isinstance(value, str):
             continue
@@ -1141,7 +1145,6 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         
         # Fast path: string preset lookup (most common case)
         if isinstance(output, str):
-            from ..config.parse_utils import canonical_preset_key
             output_lower = canonical_preset_key(output)
             preset_value = OUTPUT_PRESETS.get(output_lower)
             if preset_value is not None:
@@ -1267,7 +1270,6 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         elif isinstance(execution, ExecutionConfig):
             _exec_config = execution
         elif isinstance(execution, str):
-            from ..config.parse_utils import canonical_preset_key
             preset_value = EXECUTION_PRESETS.get(canonical_preset_key(execution))
             if preset_value is not None:
                 _exec_config = ExecutionConfig(**preset_value) if isinstance(preset_value, dict) else preset_value
@@ -1530,8 +1532,6 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Resolve LEARN param - FAST PATH (top-level, peer to memory)
         # learn= is a first-class citizen, independent of memory=
         # ─────────────────────────────────────────────────────────────────────
-        from ..config.feature_configs import LearnConfig
-        
         _learn_config = None
         
         # Top-level learn= takes precedence over memory.learn
@@ -1917,6 +1917,17 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 "Use Agent(policy=PolicyEngine(...)) for tool policy enforcement, "
                 "or pass a validator via GuardrailConfig(validator=...)."
             )
+        # GuardrailConfig.on_fail has a single implemented policy (retry, then
+        # return the blocked message); refuse "skip"/"raise" rather than
+        # silently behaving as "retry".
+        if isinstance(_guardrails_config, GuardrailConfig) and (
+            getattr(_guardrails_config.on_fail, "value", _guardrails_config.on_fail) != "retry"
+        ):
+            raise ValueError(
+                f"GuardrailConfig.on_fail={_guardrails_config.on_fail!r} is not supported; "
+                "only 'retry' is implemented. Remove on_fail, or handle a blocked "
+                "response via Agent.last_guardrail_error."
+            )
 
         # Fail loud when the value could not be turned into an enforceable
         # guardrail, instead of storing something that never runs. Silently
@@ -2083,8 +2094,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # skill grant leak onto every other unnamed agent in the same process
         # (a cross-tenant privilege escalation). This id can never collide
         # across unrelated instances.
-        import uuid as _uuid
-        self._approval_scope_id = f"{self.name}:{_uuid.uuid4().hex}"
+        self._approval_scope_id = f"{self.name}:{uuid.uuid4().hex}"
 
         # Resolve tool_config for tool execution settings
         _tool_config = Agent._resolve_tool_config(
@@ -2145,7 +2155,6 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         resolve_model_alias(llm, model, type(self).__name__)
 
         # Check if llm is an LLMConfig object
-        from ..config import LLMConfig
         if isinstance(llm, LLMConfig):
             # Extract values from LLMConfig
             llm_config_obj = llm
@@ -2690,6 +2699,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         self.system_prompt = f"""{self.backstory}\n
 Your Role: {self.role}\n
 Your Goal: {self.goal}
+        """ if self.goal != self.backstory else f"""{self.backstory}\n
+Your Role: {self.role}
         """
 
         # Per-invocation system-prompt append (never persisted). Sourced from the
@@ -3260,9 +3271,6 @@ Your Goal: {self.goal}
     @staticmethod
     def _resolve_tool_config(tool_config):
         """Resolve tool_config parameter with backward compatibility."""
-        # Import here to avoid circular imports
-        from ..config.feature_configs import ToolConfig, resolve_tools
-        
         # Handle the new consolidated parameter
         if tool_config is not None:
             resolved_config = resolve_tools(tool_config)
@@ -3287,6 +3295,12 @@ Your Goal: {self.goal}
             if k in ("_db_run_context", "_db_session_init_lock"):
                 # A clone starts outside the source agent's active DB turn.
                 continue
+            elif k == "_tool_executor":
+                # Thread pools can't be copied; the clone lazily builds its own.
+                continue
+            elif k == "_Agent__hook_runner":
+                # Holds locks; rebuilt lazily on first use.
+                object.__setattr__(result, k, None)
             elif k in ("_Agent__cache_lock",):
                 object.__setattr__(result, k, threading.RLock())
             elif k in ("_cost_lock", "_auto_save_lock"):
@@ -3560,8 +3574,26 @@ Your Goal: {self.goal}
     
     def _replace_chat_history(self, new_history: List[Dict[str, Any]]):
         """Thread-safe replacement of entire chat history using proper locking."""
-        with self._history_lock.lock():
-            self._history_lock.value[:] = new_history
+        # Share _auto_save_session's lock so a save cannot interleave with the
+        # rewrite and the cursor update below (#6217).
+        with self._auto_save_lock, self._history_lock.lock():
+            history = self._history_lock.value
+            # Re-sync the positional auto-save cursor (#6217): resume at the
+            # first unsaved survivor, or right after the last survivor so
+            # appended messages (e.g. durable replays) are saved; summaries
+            # placed before survivors are not re-persisted.
+            last = getattr(self, '_auto_save_last_index', 0)
+            old = {id(m): i >= last for i, m in enumerate(history)}
+            cursor = len(new_history)
+            survivors = [i for i, m in enumerate(new_history) if id(m) in old]
+            if survivors:
+                cursor = survivors[-1] + 1
+                for i in survivors:
+                    if old[id(new_history[i])]:
+                        cursor = i
+                        break
+            history[:] = new_history
+            self._auto_save_last_index = cursor
 
     @property
     def _cache_lock(self):
@@ -4113,7 +4145,9 @@ Summary:"""
         step budget from ``ExecutionConfig.max_steps`` was reached and the run was
         truncated), a provider block/refusal/truncation
         (``"content_filtered" | "refused" | "length_truncated"``) derived from the
-        LLM ``finish_reason``/refusal signal, or ``"error"``. Lets CLI/CI callers
+        LLM ``finish_reason``/refusal signal, ``"timeout"`` (the turn passed
+        ``ExecutionConfig.max_execution_time`` or the ``run_autonomous``
+        deadline), or ``"error"``. Lets CLI/CI callers
         branch on the terminal reason instead of parsing a magic string. Reads
         from whichever backend (OpenAI-native or LiteLLM) executed the last turn.
         """
@@ -4347,6 +4381,7 @@ Summary:"""
             "clear_context": config.clear_context,
             "track_changes": config.effective_track_changes,
             "snapshot_dir": config.snapshot_dir,
+            "snapshot": config.snapshot,
             "default_tools": config.default_tools,
             "max_budget_usd": config.max_budget_usd,
             "max_tokens": config.max_tokens,
@@ -4434,15 +4469,16 @@ Summary:"""
     def undo(self) -> bool:
         """Undo the last set of file changes.
         
-        Restores files to the state before the last autonomous iteration.
-        Requires ``autonomy=AutonomyConfig(track_changes=True)``.
+        Restores files to the state before the last autonomous run.
+        Requires ``autonomy=AutonomyConfig(track_changes=True, snapshot=True)``
+        so run_autonomous() records a pre-run snapshot.
         
         Returns:
             True if undo was successful, False if nothing to undo.
             
         Example::
         
-            agent = Agent(autonomy="full_auto")
+            agent = Agent(autonomy=AutonomyConfig(level="full_auto", snapshot=True))
             result = agent.start("Refactor utils.py")
             agent.undo()  # Restore original files
         """
@@ -4731,7 +4767,7 @@ Summary:"""
             if result.success:
                 print(result.output)
         """
-        from .autonomy import AutonomyResult
+        from .autonomy import AutonomyResult, _timeout_result
         import time as time_module
         from datetime import datetime, timezone
         
@@ -4744,7 +4780,7 @@ Summary:"""
         # Take initial snapshot before autonomous execution starts
         # NOTE: Snapshot tracking is disabled by default for performance (G12 fix)
         # FileSnapshot.track() walks entire project and is too slow for large codebases
-        # Enable with autonomy={"snapshot": True} if needed
+        # Enable with AutonomyConfig(snapshot=True) / autonomy={"snapshot": True}
         if self._file_snapshot is not None and self.autonomy_config.get("snapshot", False):
             try:
                 snap_info = self._file_snapshot.track(message="pre-autonomous")
@@ -4805,17 +4841,10 @@ Summary:"""
                 )
                 
                 # Check timeout
-                if timeout_seconds and (time_module.time() - start_time) > timeout_seconds:
-                    return AutonomyResult(
-                        success=False,
-                        output="Task timed out",
-                        completion_reason="timeout",
-                        iterations=iterations,
-                        stage=stage,
-                        actions=actions_taken,
-                        duration_seconds=time_module.time() - start_time,
-                        started_at=started_at,
-                    )
+                _timed_out = _timeout_result(
+                    timeout_seconds, iterations, stage, actions_taken, start_time, started_at)
+                if _timed_out is not None:
+                    return _timed_out
                 
                 # G2: Check for interrupt request (cooperative cancellation) - sync version
                 if self.interrupt_controller and self.interrupt_controller.is_set():
@@ -4838,9 +4867,17 @@ Summary:"""
                 # Reset the per-turn warning latch and inject any queued nudge.
                 turn_prompt = self._consume_self_correction(prompt)
                 try:
-                    response = self.chat(turn_prompt)
+                    with _deadline_scope(timeout_seconds and timeout_seconds - (time_module.time() - start_time)):
+                        response = self.chat(turn_prompt)
                 except Exception as e:
-                    return AutonomyResult(
+                    # The run deadline cancels an overrunning turn; report it as a timeout.
+                    # A budget stop keeps its typed budget_exhausted result when a cap applies.
+                    return _timeout_result(
+                        timeout_seconds, iterations, stage, actions_taken, start_time, started_at
+                    ) or (isinstance(e, BudgetExceededError) and self._autonomy_budget_result(
+                        iterations, stage, actions_taken, start_time, started_at,
+                        "", spend_baseline
+                    )) or AutonomyResult(
                         success=False,
                         output=str(e),
                         completion_reason="error",
@@ -4851,6 +4888,14 @@ Summary:"""
                         error=str(e),
                         started_at=started_at,
                     )
+                
+                # A turn that overran the run deadline or max_execution_time
+                # must not count as progress.
+                _timed_out = _timeout_result(
+                    timeout_seconds, iterations, stage, actions_taken, start_time, started_at,
+                    turn_timed_out=getattr(self, "_last_stop_reason", None) == "timeout")
+                if _timed_out is not None:
+                    return _timed_out
                 
                 response_str = str(response)
                 
@@ -5236,7 +5281,7 @@ Summary:"""
             
             asyncio.run(main())
         """
-        from .autonomy import AutonomyResult
+        from .autonomy import AutonomyResult, _timeout_result
         import time as time_module
         from datetime import datetime, timezone
         import asyncio
@@ -5288,17 +5333,10 @@ Summary:"""
                 iterations += 1
                 
                 # Check timeout
-                if timeout_seconds and (time_module.time() - start_time) > timeout_seconds:
-                    return AutonomyResult(
-                        success=False,
-                        output="Task timed out",
-                        completion_reason="timeout",
-                        iterations=iterations,
-                        stage=stage,
-                        actions=actions_taken,
-                        duration_seconds=time_module.time() - start_time,
-                        started_at=started_at,
-                    )
+                _timed_out = _timeout_result(
+                    timeout_seconds, iterations, stage, actions_taken, start_time, started_at)
+                if _timed_out is not None:
+                    return _timed_out
                 
                 # G2: Check for interrupt request (cooperative cancellation)
                 if self.interrupt_controller and self.interrupt_controller.is_set():
@@ -5322,9 +5360,17 @@ Summary:"""
                 # Reset the per-turn warning latch and inject any queued nudge.
                 turn_prompt = self._consume_self_correction(prompt)
                 try:
-                    response = await self.achat(turn_prompt)
+                    with _deadline_scope(timeout_seconds and timeout_seconds - (time_module.time() - start_time)):
+                        response = await self.achat(turn_prompt)
                 except Exception as e:
-                    return AutonomyResult(
+                    # The run deadline cancels an overrunning turn; report it as a timeout.
+                    # A budget stop keeps its typed budget_exhausted result when a cap applies.
+                    return _timeout_result(
+                        timeout_seconds, iterations, stage, actions_taken, start_time, started_at
+                    ) or (isinstance(e, BudgetExceededError) and self._autonomy_budget_result(
+                        iterations, stage, actions_taken, start_time, started_at,
+                        "", spend_baseline
+                    )) or AutonomyResult(
                         success=False,
                         output=str(e),
                         completion_reason="error",
@@ -5335,6 +5381,14 @@ Summary:"""
                         error=str(e),
                         started_at=started_at,
                     )
+                
+                # A turn that overran the run deadline or max_execution_time
+                # must not count as progress.
+                _timed_out = _timeout_result(
+                    timeout_seconds, iterations, stage, actions_taken, start_time, started_at,
+                    turn_timed_out=getattr(self, "_last_stop_reason", None) == "timeout")
+                if _timed_out is not None:
+                    return _timed_out
                 
                 response_str = str(response)
                 
@@ -6283,7 +6337,12 @@ Summary:"""
             # matches on reload. Zero-config runs still avoid injection cost.
             stats = self._rules_manager.get_stats()
             if stats["total_rules"] > 0:
-                logging.debug(f"RulesManager: Discovered {stats['total_rules']} rules")
+                # Only rules injected without a file/@mention; warn once per set so
+                # the notice is visible under default logging without repeating per agent.
+                names = ", ".join(sorted({r.name for r in self._rules_manager.get_active_rules()}))
+                if names and names not in _RULES_NOTICE_SEEN:
+                    _RULES_NOTICE_SEEN.add(names)
+                    logging.warning(f"Applied rules: {names} (pass rules=False to turn off)")
             elif not extra_files:
                 self._rules_manager = None
         except ImportError:
@@ -6678,10 +6737,19 @@ Summary:"""
                     if hasattr(self, 'llm_instance') and self.llm_instance:
                         llm = self.llm_instance
                     
+                    # rerank=True without rerank_model has no backend reranker,
+                    # so use the zero-dependency keyword reranker; with
+                    # rerank_model the vector store already reranks.
+                    reranker = None
+                    if rag_config_obj.rerank and not getattr(self._retrieval_config, "rerank_model", None):
+                        from praisonaiagents.rag.retriever import SimpleReranker
+                        reranker = SimpleReranker()
+
                     self._rag_instance = RAG(
                         knowledge=self.knowledge,
                         config=rag_config_obj,
                         llm=llm,
+                        reranker=reranker,
                     )
                 except ImportError:
                     logging.warning("RAG module not available. Install with: pip install 'praisonaiagents[rag]'")
@@ -7181,7 +7249,7 @@ Answer:"""
         return getattr(self, "_last_guardrail_error", None)
 
     def _guardrail_blocked_message(self, error=None):
-        """Fixed, user-facing string returned when an output guardrail blocks a run.
+        """Fixed, user-facing string returned when an input or output guardrail blocks a run.
 
         A blocked response must never surface the rejected (potentially unsafe)
         model text, but it must also never be ``None`` - callers expect a
@@ -7283,7 +7351,8 @@ Answer:"""
         task_output = TaskOutput(
             description="Agent response output",
             raw=response_text,
-            agent=self.name
+            # TaskOutput.agent is a required str; an Agent built without name= has name None.
+            agent=self.name or getattr(self, "role", None) or "Agent"
         )
         
         guardrail_result = self._process_guardrail(task_output)

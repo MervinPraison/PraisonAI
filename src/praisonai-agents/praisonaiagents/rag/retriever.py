@@ -332,7 +332,10 @@ class SimpleReranker:
         
         scored = []
         for result in results:
-            text = result.get('text', '').lower()
+            # Knowledge adapters may return SearchResultItem objects
+            if not isinstance(result, dict) and hasattr(result, 'to_dict'):
+                result = result.to_dict()
+            text = (result.get('text') or result.get('memory') or '').lower()
             text_words = set(text.split())
             
             # Calculate overlap score

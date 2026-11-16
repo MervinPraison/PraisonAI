@@ -30,9 +30,14 @@ Three modes, selected by ``PRAISON_SHELL`` (or the ``mode=`` argument):
     agent what to do instead.  Simple commands run exactly as before.
 
 ``sandboxed``
-    A real ``/bin/sh -c`` runs inside OS-native containment (Seatbelt on macOS,
-    bubblewrap on Linux) whose enforcement has been *measured* this process --
-    see :mod:`praisonai_code.cli.features.os_sandbox`.  If containment cannot be
+    *Every* command -- with or without shell operators -- runs as a real
+    ``/bin/sh -c`` inside OS-native containment (Seatbelt on macOS, bubblewrap
+    on Linux) whose enforcement has been *measured* this process -- see
+    :mod:`praisonai_code.cli.features.os_sandbox`.  The writable set is the
+    configured workspace (``PRAISONAI_WORKSPACE``, else the process cwd) plus
+    the temp dir, never the model-chosen ``cwd``; a ``cwd`` outside it is
+    refused.  Secret-looking environment variables (``*KEY*``, ``*TOKEN*``,
+    ``*SECRET*``, ...) are not passed into the jail.  If containment cannot be
     proven, this mode refuses to run rather than quietly degrading to an
     uncontained shell.
 
@@ -47,7 +52,9 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
+import tempfile
 from typing import Dict, Optional, Union
 
 logger = logging.getLogger(__name__)
@@ -71,6 +78,12 @@ _VALID_MODES = (MODE_OFF, MODE_SANDBOXED, MODE_UNSAFE)
 # is reported as ``&&`` rather than ``&``.
 _TWO_CHAR_OPS = ("&&", "||", ">>", "2>", "$(", "<<")
 _ONE_CHAR_OPS = ("|", ">", "<", ";", "&", "`")
+
+# Environment variables withheld from a contained shell. Network is off by
+# default, but stdout goes back to the model, so ``env | grep KEY`` would put
+# credentials in the transcript and the provider request.
+_SECRET_ENV_RE = re.compile(r"KEY|TOKEN|SECRET|PASSW|CREDENTIAL", re.IGNORECASE)
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def find_shell_syntax(command: str) -> Optional[str]:
@@ -222,6 +235,47 @@ def _kill_process_tree(proc: "subprocess.Popen") -> None:
         pass
 
 
+class _Cancelled(Exception):
+    """The agent's cooperative cancellation signal fired mid-command."""
+
+
+def _cancel_event():
+    """The running agent's ``cancel_event``, or ``None`` outside an agent."""
+    try:
+        from praisonaiagents.tools.injected import get_current_state
+        state = get_current_state()
+    except Exception:
+        return None
+    return getattr(state, "cancel_event", None) if state is not None else None
+
+
+def _communicate(proc: "subprocess.Popen", timeout: int):
+    """``proc.communicate`` that also stops when the user interrupts the agent.
+
+    Mirrors the core runner: without this a stopped agent's command keeps
+    changing workspace files until it finishes or times out.
+    """
+    import time
+
+    cancel = _cancel_event()
+    if cancel is None:
+        return proc.communicate(timeout=timeout)
+    deadline = None if timeout is None else time.monotonic() + timeout
+    while True:
+        if cancel.is_set():
+            raise _Cancelled()
+        slice_ = 0.1
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise subprocess.TimeoutExpired(proc.args, timeout)
+            slice_ = min(slice_, remaining)
+        try:
+            return proc.communicate(timeout=slice_)
+        except subprocess.TimeoutExpired:
+            continue
+
+
 def _run_real_shell(
     command: str,
     cwd: Optional[str],
@@ -238,7 +292,17 @@ def _run_real_shell(
     if contained:
         from .os_sandbox import build_wrapper
 
-        paths = list(writable_paths or [cwd or os.getcwd()])
+        if env:
+            # Apply the caller's env inside the jail only. Set on the launcher
+            # (bwrap / sandbox-exec), ``LD_PRELOAD`` and friends would load
+            # code outside the jail before containment starts.
+            bad = [k for k in env if not _ENV_NAME_RE.match(k)]
+            if bad:
+                return _refusal(command, "", f"Invalid environment variable name(s): {bad}")
+            argv = ["/usr/bin/env", *(f"{k}={v}" for k, v in env.items()), *argv]
+            env = None
+
+        paths = list(writable_paths or [_workspace()])
         wrapper = build_wrapper(writable_paths=paths, network=network)
         if wrapper is None:  # pragma: no cover - guarded by caller
             return _refusal(command, "", "No OS sandbox backend available")
@@ -246,6 +310,8 @@ def _run_real_shell(
         backend = wrapper.backend
 
     proc_env = os.environ.copy()
+    if contained:
+        proc_env = {k: v for k, v in proc_env.items() if not _SECRET_ENV_RE.search(k)}
     if env:
         proc_env.update(env)
 
@@ -257,6 +323,13 @@ def _run_real_shell(
     popen_kwargs = {}
     if os.name == "posix":
         popen_kwargs["start_new_session"] = True
+
+    # Bound every result, including interrupted and timed-out ones.
+    def _cap(text: str) -> str:
+        if max_output_size and len(text) > max_output_size:
+            half = max_output_size // 2
+            return text[:half] + "\n... [output truncated] ...\n" + text[-half:]
+        return text
 
     proc = None
     try:
@@ -270,13 +343,25 @@ def _run_real_shell(
             **popen_kwargs,
         )
         try:
-            out, err = proc.communicate(timeout=timeout)
+            out, err = _communicate(proc, timeout)
+        except _Cancelled:
+            _kill_process_tree(proc)
+            out, err = proc.communicate()
+            return {
+                "command": command,
+                "stdout": _cap(out or ""),
+                "stderr": "Command interrupted by user",
+                "exit_code": 130,
+                "success": False,
+                "error": "Command interrupted by user",
+                "sandbox": backend,
+            }
         except subprocess.TimeoutExpired:
             _kill_process_tree(proc)
             out, err = proc.communicate()
             return {
                 "command": command,
-                "stdout": out or "",
+                "stdout": _cap(out or ""),
                 "stderr": f"Command timed out after {timeout}s",
                 "exit_code": 124,
                 "success": False,
@@ -296,12 +381,6 @@ def _run_real_shell(
     completed.stdout = out
     completed.stderr = err
     completed.returncode = proc.returncode
-
-    def _cap(text: str) -> str:
-        if max_output_size and len(text) > max_output_size:
-            half = max_output_size // 2
-            return text[:half] + "\n... [output truncated] ...\n" + text[-half:]
-        return text
 
     return {
         "command": command,
@@ -358,6 +437,69 @@ def _approved_real_shell(*args, **kwargs):
 _APPROVED_REAL_SHELL = None
 
 
+def _workspace() -> str:
+    """The configured workspace: the jail's writable root."""
+    return os.environ.get("PRAISONAI_WORKSPACE") or os.getcwd()
+
+
+def _within(path: str, roots) -> bool:
+    real = os.path.realpath(path)
+    for root in roots:
+        root = os.path.realpath(root)
+        if real == root or real.startswith(root.rstrip(os.sep) + os.sep):
+            return True
+    return False
+
+
+def _run_sandboxed(
+    command: str,
+    operator: Optional[str],
+    cwd: Optional[str],
+    timeout: int,
+    env: Optional[Dict[str, str]],
+    max_output_size: int,
+    writable_paths=None,
+    network: bool = False,
+    runner=None,
+) -> Dict[str, Union[str, int, bool]]:
+    """Run ``command`` contained, or refuse. Never falls back to uncontained.
+
+    ``runner`` defaults to the approval-gated real shell; the ACP executor,
+    whose plan was already approved, passes :func:`_run_real_shell`.
+    """
+    from .os_sandbox import probe_enforcement
+
+    enforcing, _backend, detail = probe_enforcement()
+    if not enforcing:
+        reason = (
+            f"{MODE_ENV_VAR}=sandboxed was requested but containment could "
+            f"not be proven on this machine ({detail}). Refusing to run "
+            f"uncontained -- a sandbox that is assumed but not enforcing is "
+            f"worse than none. Set {MODE_ENV_VAR}=unsafe to accept an "
+            f"uncontained shell deliberately."
+        )
+        if operator:
+            return _shell_syntax_refusal(command, operator, MODE_SANDBOXED, detail=reason)
+        return _refusal(command, "", reason)
+
+    # The writable root is the configured workspace, not the model-chosen cwd:
+    # ``cwd="/"`` must not make ``/`` writable.
+    writable = list(writable_paths or [_workspace()])
+    if cwd is None:
+        cwd = writable[0]
+    elif not _within(cwd, writable + [tempfile.gettempdir()]):
+        return _refusal(
+            command, "",
+            f"Refused: cwd {cwd!r} is outside the sandbox workspace "
+            f"{writable[0]!r}. Run the command from inside the workspace.",
+        )
+
+    return (runner or _approved_real_shell)(
+        command, cwd, timeout, env, max_output_size,
+        contained=True, writable_paths=writable, network=network,
+    )
+
+
 def run_shell_command(
     command: str,
     cwd: Optional[str] = None,
@@ -377,6 +519,22 @@ def run_shell_command(
     operator = find_shell_syntax(command)
     effective = resolve_mode(mode)
 
+    # Containment is a property of the mode, not of the command's syntax:
+    # ``rm -rf build`` has no operator but must still run inside the jail.
+    if effective == MODE_SANDBOXED:
+        if kwargs.get("run_in_background"):
+            # The contained runner has no process registry; refuse rather than
+            # block until the timeout kills a server the caller expected back.
+            return _refusal(
+                command, "",
+                f"run_in_background is not supported under {MODE_ENV_VAR}="
+                f"sandboxed. Run the command in the foreground.",
+            )
+        return _run_sandboxed(
+            command, operator, cwd, timeout, env, max_output_size,
+            writable_paths=writable_paths, network=network,
+        )
+
     if operator is None:
         return _delegate(
             command,
@@ -389,28 +547,6 @@ def run_shell_command(
 
     if effective == MODE_OFF:
         return _shell_syntax_refusal(command, operator, MODE_OFF)
-
-    if effective == MODE_SANDBOXED:
-        from .os_sandbox import probe_enforcement
-
-        enforcing, backend, detail = probe_enforcement()
-        if not enforcing:
-            return _shell_syntax_refusal(
-                command,
-                operator,
-                MODE_SANDBOXED,
-                detail=(
-                    f"{MODE_ENV_VAR}=sandboxed was requested but containment could "
-                    f"not be proven on this machine ({detail}). Refusing to run a "
-                    f"real shell uncontained -- a sandbox that is assumed but not "
-                    f"enforcing is worse than none. Set {MODE_ENV_VAR}=unsafe to "
-                    f"accept an uncontained shell deliberately."
-                ),
-            )
-        return _approved_real_shell(
-            command, cwd, timeout, env, max_output_size,
-            contained=True, writable_paths=writable_paths, network=network,
-        )
 
     return _approved_real_shell(
         command, cwd, timeout, env, max_output_size, contained=False,
@@ -442,6 +578,10 @@ def execute_command(
     Returns:
         Dict with ``stdout``, ``stderr``, ``exit_code``, ``success``, ``error``.
     """
+    # The mode and the jail are operator decisions; the model's tool call must
+    # not be able to pick ``mode="unsafe"`` or ``writable_paths=["/"]``.
+    for key in ("mode", "writable_paths", "network"):
+        kwargs.pop(key, None)
     return run_shell_command(
         command,
         cwd=cwd,

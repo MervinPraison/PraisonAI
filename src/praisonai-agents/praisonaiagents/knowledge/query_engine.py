@@ -310,8 +310,9 @@ class SubQuestionEngine:
         context: Optional[List[str]] = None,
         **kwargs
     ) -> QueryResult:
-        """Async version (just calls sync)."""
-        return self.query(question, context, **kwargs)
+        """Async version; runs the sync query (which may call the LLM) in a worker thread."""
+        import asyncio
+        return await asyncio.to_thread(self.query, question, context, **kwargs)
     
     def _decompose_with_llm(self, question: str) -> List[str]:
         """Decompose question using LLM."""

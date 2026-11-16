@@ -233,8 +233,11 @@ def validate_preset_string(
     if not isinstance(value, str):
         return
 
-    normalized = canonical_preset_key(value)
     presets_list = list(presets)
+    # Exact spelling is the common case; skip normalising every preset.
+    if value in presets_list:
+        return
+    normalized = canonical_preset_key(value)
     for preset in presets_list:
         if canonical_preset_key(preset) == normalized:
             return

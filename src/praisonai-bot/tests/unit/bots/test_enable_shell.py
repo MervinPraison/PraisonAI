@@ -154,6 +154,12 @@ def test_enable_shell_slack_approval_when_not_auto(mock_execute_command):
 
 @patch("praisonaiagents.tools.execute_command", create=True)
 def test_enable_shell_telegram_approval(mock_execute_command):
+    """Telegram shell approval must not self-poll the channel's token (#6032):
+    it uses the durable backend the live adapter renders and resolves."""
+    from praisonai_bot.bots._presentation_approval_backend import (
+        PresentationApprovalBackend,
+    )
+
     mock_execute_command.name = "execute_command"
     agent = MagicMock()
     agent.tools = []
@@ -161,7 +167,6 @@ def test_enable_shell_telegram_approval(mock_execute_command):
 
     with patch("praisonaiagents.tools.execute_command", mock_execute_command):
         with patch("praisonai_bot.bots.TelegramApproval") as tg_cls:
-            tg_cls.return_value = object()
             enable_shell_tools(
                 agent,
                 config=BotConfig(token="tg-token"),
@@ -169,16 +174,17 @@ def test_enable_shell_telegram_approval(mock_execute_command):
                     "allow_shell": True,
                     "auto_approve_shell": False,
                     "approval_channel": "123456789",
+                    "approval_users": "999",
                     "token": "tg-token",
                 },
                 channel_type="telegram",
             )
 
-    tg_cls.assert_called_once_with(
-        token="tg-token",
-        chat_id="123456789",
-        allowed_approvers=None,
-    )
+    tg_cls.assert_not_called()
+    backend = agent._approval_backend
+    assert isinstance(backend, PresentationApprovalBackend)
+    assert backend._target == "123456789"
+    assert backend._allowed_actors == {"999"}
 
 
 @patch("praisonaiagents.tools.execute_command", create=True)

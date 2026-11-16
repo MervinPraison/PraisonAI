@@ -170,8 +170,10 @@ def test_async_framework_verdict_is_not_visible_to_the_model():
         raise RuntimeError("network down")
 
     agent = Agent(name="t", instructions="x", tools=[boom], tool_config=FAST)
-    result = asyncio.run(agent.execute_tool_async("boom", {}))
-    assert "_praison_retryable" not in str(result)
+    # A raised tool exception surfaces as ToolExecutionError (sync parity, #6041).
+    with pytest.raises(ToolExecutionError) as exc_info:
+        asyncio.run(agent.execute_tool_async("boom", {}))
+    assert "_praison_retryable" not in str(exc_info.value)
 
 
 def test_async_breaker_opens_after_raised_exceptions():

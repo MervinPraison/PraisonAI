@@ -8,8 +8,10 @@ Provides utilities for file operations including:
 - Line ending normalization
 """
 
+import errno
 import os
 import re
+import uuid
 from typing import Optional, Tuple
 
 
@@ -305,3 +307,68 @@ def count_file_lines(file_path: str) -> int:
         for _ in f:
             count += 1
     return count
+
+
+def atomic_write(path: str, content: str, *, encoding: Optional[str] = "utf-8") -> None:
+    """Write ``content`` to ``path`` atomically (temp file + fsync + os.replace).
+
+    ``open(path, 'w')`` truncates the target immediately, so any interrupt
+    (cancellation, SIGTERM, disk-full) between open and write leaves the file
+    zero-byte or half-written and the original content lost. The code editing
+    tools run on LLM-driven tool calls that regularly hit timeouts/cancellations,
+    so they need the same crash-safe write the wrapper already uses for configs.
+    """
+    # Resolve symlinks so we replace the link target (like open(path, 'w')
+    # writes through the link) instead of turning the symlink into a plain file.
+    path = os.path.realpath(path)
+    target_dir = os.path.dirname(path) or "."
+    # Atomic replace swaps in a fresh inode, so carry over the metadata that
+    # matters for a replaced file: permission bits and ownership (uid/gid).
+    # Hard-link identity and xattrs/ACLs cannot be preserved through an inode
+    # swap and are out of scope for this tool.
+    try:
+        existing_stat = os.stat(path)
+    except OSError:
+        existing_stat = None
+    # An inode swap would bypass a read-only target's permissions, so keep the
+    # old open(path, 'w') behaviour and refuse to replace a file we can't write.
+    if existing_stat is not None and not os.access(path, os.W_OK):
+        raise PermissionError(errno.EACCES, os.strerror(errno.EACCES), path)
+    # Create the temp file with the target's permission bits (setuid/setgid
+    # dropped) so private files (e.g. 0600 .env) are never readable by others
+    # while the new content is written. New files use 0o666 so the kernel
+    # applies the umask, like open(path, 'w'). Never call os.umask(): it is
+    # process-wide and would race with other threads.
+    mode = (existing_stat.st_mode & 0o777) if existing_stat is not None else 0o666
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0)
+    while True:
+        tmp_path = os.path.join(target_dir, f".tmp_{uuid.uuid4().hex}")
+        try:
+            fd = os.open(tmp_path, flags, mode)
+            break
+        except FileExistsError:
+            continue
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as f:
+            f.write(content)
+            f.flush()
+            os.fsync(f.fileno())  # durability before rename
+        if existing_stat is not None:
+            # Restore bits the umask may have removed; never widens beyond the
+            # target. If this fails the temp file is at most as open as the target.
+            try:
+                os.chmod(tmp_path, mode)
+            except OSError:
+                pass  # best-effort
+            if hasattr(os, "chown"):
+                try:
+                    os.chown(tmp_path, existing_stat.st_uid, existing_stat.st_gid)
+                except (OSError, AttributeError):
+                    pass  # best-effort (needs privilege; no-op on Windows)
+        os.replace(tmp_path, path)  # atomic on POSIX + Windows
+    except BaseException:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise

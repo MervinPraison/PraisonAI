@@ -23,7 +23,7 @@ wrapper's delivery stack, neither of which belong in the core SDK.
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from praisonaiagents.gateway import (
     DeliveryResult,
@@ -61,6 +61,13 @@ class BotOutboundMessenger:
         media_policy: Optional :class:`OutboundMediaPolicy` governing which
             agent-supplied file paths may be uploaded (exfiltration guard).
             Defaults to a permissive-but-denylisted policy.
+        liveness: Optional zero-arg predicate returning ``True`` while the
+            originating turn is still live (same contract as
+            ``ApprovalRequest.liveness``). When it reports stale, every
+            outbound effect (send/react/create_thread/edit/delete) is dropped
+            fail-closed, so a stopped or superseded turn — or a retained
+            handle to its messenger — cannot reach a user channel. ``None``
+            (default) keeps today's unbound behaviour.
     """
 
     def __init__(
@@ -69,10 +76,35 @@ class BotOutboundMessenger:
         *,
         origin: Optional[SessionSource] = None,
         media_policy: Optional[OutboundMediaPolicy] = None,
+        liveness: Optional[Callable[[], bool]] = None,
     ) -> None:
         self._router = router
         self._origin = origin
         self._media_policy = media_policy or OutboundMediaPolicy()
+        self._liveness = liveness
+
+    _STALE_DETAIL = "turn no longer live (stopped or superseded)"
+
+    def _is_stale(self) -> bool:
+        """Whether the originating turn was stopped/superseded (#6160).
+
+        Mirrors ``ApprovalRegistry._reject_if_stale``: ``None`` liveness means
+        always live, and a probe that raises is treated as live (fail-open on
+        the *probe*, never on the effect) so a buggy predicate cannot wedge
+        delivery.
+        """
+        live = self._liveness
+        if live is None:
+            return False
+        try:
+            stale = not live()
+        except Exception:  # noqa: BLE001 - a liveness probe must never crash
+            return False
+        if stale:
+            logger.warning(
+                "BotOutboundMessenger: dropping outbound effect from a stale turn"
+            )
+        return stale
 
     async def send(
         self,
@@ -90,6 +122,13 @@ class BotOutboundMessenger:
         platform adapter. The result truthfully reports how many attachments
         were delivered, skipped by policy, or unsupported by the transport.
         """
+        if self._is_stale():
+            return DeliveryResult(
+                ok=False,
+                target=target,
+                summary=f"Not sent to {target}: {self._STALE_DETAIL}.",
+                detail=self._STALE_DETAIL,
+            )
         try:
             platform, channel_id, _thread_id = self._router.resolve(target, self._origin)
         except ValueError as e:
@@ -101,6 +140,27 @@ class BotOutboundMessenger:
             )
 
         resolved = f"{platform}:{channel_id}"
+
+        # Destination authorization (#6084): the target is model-controlled, so
+        # an explicit "<platform>:<chat_id>" must name a chat this gateway
+        # already knows (the turn's origin, or a home/alias/observed channel)
+        # before anything — text or media — is delivered. Symbolic tokens
+        # ("origin", a platform home, an alias) resolve to known chats by
+        # construction. Operators widen the set via the alias overlay.
+        if not self._is_attested(platform, channel_id):
+            logger.warning(
+                "BotOutboundMessenger: refusing send to unattested destination %s",
+                resolved,
+            )
+            return DeliveryResult(
+                ok=False,
+                target=resolved,
+                summary=f"Refused: {resolved} is not a known destination for this gateway.",
+                detail=(
+                    "destination not attested (not the origin chat, a home "
+                    "channel, an alias, or an observed channel)"
+                ),
+            )
 
         # Idempotency covers the *whole* text+media envelope (issue #2578). A
         # duplicate proactive send must skip both the text and any media upload,
@@ -183,6 +243,21 @@ class BotOutboundMessenger:
             detail=detail,
         )
 
+    def _is_attested(self, platform: str, channel_id: str) -> bool:
+        """Whether ``platform:channel_id`` is a chat this gateway knows."""
+        origin = self._origin
+        if (
+            origin is not None
+            and (origin.platform or "").lower() == platform.lower()
+            and str(origin.channel_id) == str(channel_id)
+        ):
+            return True
+        try:
+            return bool(self._router.directory.has_channel(platform, str(channel_id)))
+        except Exception as e:  # pragma: no cover — defensive, fail closed
+            logger.warning("BotOutboundMessenger: attestation check failed: %s", e)
+            return False
+
     async def _deliver_media(
         self,
         target: str,
@@ -208,7 +283,18 @@ class BotOutboundMessenger:
         # Only the first attachment carries the caption to avoid repeating the
         # full text on every file.
         first = True
-        for path in media:
+        for index, path in enumerate(media):
+            # Re-check liveness before every upload (#6160): /stop only sets
+            # the controller flag, it does not cancel this coroutine, so a turn
+            # stopped mid-send must not keep uploading the remaining files.
+            if self._is_stale():
+                remaining = len(media) - index
+                skipped += remaining
+                notes.append(
+                    f"Stopped: {remaining} attachment(s) not sent, "
+                    f"{self._STALE_DETAIL}."
+                )
+                break
             try:
                 safe = validate_media_delivery_path(
                     path, policy=self._media_policy
@@ -258,6 +344,10 @@ class BotOutboundMessenger:
         message with a single emoji instead of a full text reply. A channel that
         cannot react returns a typed ``unsupported`` outcome rather than raising.
         """
+        if self._is_stale():
+            return ReactionResult(
+                status="failed", target=target, detail=self._STALE_DETAIL
+            )
         resolved_message_id = message_id
         if not resolved_message_id and target == "origin" and self._origin is not None:
             resolved_message_id = self._origin.message_id or ""
@@ -299,6 +389,10 @@ class BotOutboundMessenger:
             target = f"slack:C123:{res.thread_id}" if res.ok else "slack:C123"
             await messenger.send(target, subtask_output)
         """
+        if self._is_stale():
+            return ThreadResult(
+                status="failed", target=target, detail=self._STALE_DETAIL
+            )
         status, resolved, thread_id = await self._router.create_thread(
             target,
             name,
@@ -331,6 +425,10 @@ class BotOutboundMessenger:
         cannot edit returns a typed ``unsupported`` outcome rather than raising,
         so the agent can fall back to sending a follow-up.
         """
+        if self._is_stale():
+            return MessageActionResult(
+                status="failed", target=target, detail=self._STALE_DETAIL
+            )
         status, resolved = await self._router.edit(
             target, message_id, text, self._origin
         )
@@ -352,6 +450,10 @@ class BotOutboundMessenger:
         channel that cannot delete returns a typed ``unsupported`` outcome
         rather than raising.
         """
+        if self._is_stale():
+            return MessageActionResult(
+                status="failed", target=target, detail=self._STALE_DETAIL
+            )
         status, resolved = await self._router.delete(
             target, message_id, self._origin
         )

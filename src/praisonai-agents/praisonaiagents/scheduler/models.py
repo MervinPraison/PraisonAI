@@ -215,7 +215,7 @@ class RunRecord:
         job_id: ID of the job that was executed.
         job_name: Human-readable name of the job.
         status: Execution status. One of ``"succeeded"``, ``"failed"``,
-                ``"skipped"``, ``"no_change"``, or ``"missed"``. ``"no_change"``
+                ``"skipped"``, ``"no_change"``, ``"missed"`` or ``"abandoned"``. ``"no_change"``
                 is the stateful "monitor mode" outcome — a watched source was
                 unchanged since the last tick, so the model turn was suppressed
                 silently (no tokens, no delivery). It is distinct from
@@ -225,6 +225,8 @@ class RunRecord:
                 the process was down and fell outside the job's
                 ``misfire_grace_seconds`` — it was not run, but is recorded
                 (not silently dropped) so an operator can see the gap.
+                ``"abandoned"`` records a claimed run whose lease expired
+                without completing (crash or restart mid-run).
         result: Agent response text (truncated if very long).
         error: Error message if status is ``"failed"``.
         duration: Wall-clock seconds for execution.
@@ -234,7 +236,7 @@ class RunRecord:
 
     job_id: str
     job_name: str = ""
-    status: Literal["succeeded", "failed", "skipped", "no_change", "missed"] = "succeeded"
+    status: Literal["succeeded", "failed", "skipped", "no_change", "missed", "abandoned"] = "succeeded"
     result: Optional[str] = None
     error: Optional[str] = None
     duration: float = 0.0
@@ -460,7 +462,7 @@ class ScheduleJob:
         every claim path so the retire decision is defined once. A job retires
         when it is:
 
-        * a one-shot (``delete_after_run``),
+        * a one-shot (``delete_after_run``) that has fired,
         * at or past its ``max_runs`` budget, or
         * past its ``until`` end instant (when ``now`` is supplied).
 
@@ -478,7 +480,8 @@ class ScheduleJob:
                 ``until`` check is skipped (callers that only ran a job and
                 want the run-count/one-shot decision).
         """
-        if self.delete_after_run:
+        # A one-shot that has not fired yet is waiting, not spent.
+        if self.delete_after_run and self.run_count > 0:
             return True
         if self.max_runs is not None and self.run_count >= self.max_runs:
             return True
@@ -587,6 +590,11 @@ class ScheduleJob:
         if lease_until:
             d["lease_until"] = lease_until
             d["lease_owner"] = getattr(self, "_lease_owner", None)
+        # Spent job claimed for its final run: 1 = first attempt, 2 = the one
+        # retry after a crashed (abandoned) attempt. Omitted otherwise.
+        retiring = getattr(self, "_retiring", 0)
+        if retiring:
+            d["retiring"] = retiring
         return d
 
     @classmethod
@@ -645,4 +653,5 @@ class ScheduleJob:
         # Restore atomic-claim lease metadata if present (see ``to_dict``).
         job._lease_until = d.get("lease_until", 0.0) or 0.0
         job._lease_owner = d.get("lease_owner")
+        job._retiring = d.get("retiring", 0) or 0
         return job

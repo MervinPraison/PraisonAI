@@ -1977,6 +1977,10 @@ class PraisonAI:
             return {}
             
         cli_config = {}
+
+        # Extract --model so it overrides a YAML top-level ``llm``
+        if getattr(self.args, 'model', None):
+            cli_config['model'] = self.args.model
         
         # Extract --trust flag
         if getattr(self.args, 'trust', False):

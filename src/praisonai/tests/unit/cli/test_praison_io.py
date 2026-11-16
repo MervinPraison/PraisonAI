@@ -347,9 +347,7 @@ class TestInteractiveREPL:
         from praisonai.cli.interactive.repl import InteractiveREPL
         
         repl = InteractiveREPL()
-        repl._total_tokens = 100
-        repl._total_cost = 0.01
-        
+
         result = repl._handle_command("/cost")
         assert result is True
     

@@ -13,6 +13,7 @@ from collections import OrderedDict
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Callable, Dict, Generator, List, Optional
+from praisonai._errors import _WrapperError
 
 logger = logging.getLogger(__name__)
 
@@ -82,7 +83,7 @@ def _autoload_tools_enabled() -> bool:
     return val in ("1", "true", "yes", "on")
 
 
-class SecurityError(Exception):
+class SecurityError(_WrapperError):
     """Raised when a security violation is detected."""
     pass
 

@@ -6,15 +6,34 @@ including support for different image models, sizes, and quality settings.
 import asyncio
 from typing import Optional, Any, Dict, Union, List
 from ..agent.agent import Agent
+from ._image_result import ImageResult
 from pydantic import BaseModel, Field
 import logging
 from praisonaiagents._logging import get_logger
 import warnings
 # Filter out Pydantic warning about fields
 warnings.filterwarnings("ignore", "Valid config keys have changed in V2", UserWarning)
+# dall-e-2/dall-e-3 were retired by OpenAI on 2026-05-12; gpt-image-1 on 2026-10-23.
+DEFAULT_IMAGE_MODEL = "gpt-image-2.5-flare"
+
+
+def _reject_markup(kwargs: Dict[str, Any]) -> None:
+    """Fail loudly instead of sending a broken ``markup`` edit.
+
+    LiteLLM only uploads ``image``/``mask`` as file parts; any ``markup`` value is
+    either dropped or sent as a plain text field, so the edit would silently
+    ignore the user's markup.
+    """
+    if kwargs.get("markup") is not None:
+        raise ValueError(
+            "'markup' is not supported through LiteLLM's image_edit yet (it is not "
+            "uploaded as a file). Use 'mask' or call the OpenAI SDK's images.edit directly."
+        )
+
+
 class ImageGenerationConfig(BaseModel):
     """Configuration for image generation settings."""
-    style: str = Field(default="natural", description="Style of the generated image")
+    style: Optional[str] = Field(default=None, description="Style of the generated image (only sent when set)")
     response_format: str = Field(default="url", description="Format of the response (url or b64_json)")
     timeout: int = Field(default=600, description="Timeout in seconds for the API call")
     api_base: Optional[str] = Field(default=None, description="Optional API base URL")
@@ -36,7 +55,7 @@ class ImageAgent(Agent):
         backstory: Optional[str] = None,
         instructions: Optional[str] = None,
         llm: Optional[Union[str, Any]] = None,
-        style: str = "natural",
+        style: Optional[str] = None,
         response_format: str = "url",
         timeout: int = 600,
         api_base: Optional[str] = None,
@@ -135,13 +154,13 @@ class ImageAgent(Agent):
         model_info = self.llm_model
         return model_info.model if hasattr(model_info, 'model') else str(model_info)
 
-    def generate_image(self, prompt: str, **kwargs) -> Dict[str, Any]:
+    def generate_image(self, prompt: str, **kwargs) -> ImageResult:
         """Generate an image based on the provided prompt."""
         # Merge default config with any provided kwargs
         config = self.image_config.dict(exclude_none=True)
         config.update(kwargs)
         
-        model_name = self._image_model("dall-e-3")
+        model_name = self._image_model(DEFAULT_IMAGE_MODEL)
         
         # Use the model name in config
         config['model'] = model_name
@@ -163,10 +182,14 @@ class ImageAgent(Agent):
             # Gemini provider doesn't support response_format parameter
             # Apply this filter if provider is explicitly 'gemini' or as fallback for gemini models
             config.pop('response_format', None)
-        elif custom_llm_provider == "openai" and config.get('response_format') == "url":
-            # "url" is OpenAI's default for DALL-E and is rejected by models that
-            # don't accept response_format (e.g. gpt-image), so don't send it
-            config.pop('response_format', None)
+        elif custom_llm_provider == "openai":
+            if config.get('response_format') == "url":
+                # "url" is OpenAI's default for DALL-E and is rejected by models that
+                # don't accept response_format (e.g. gpt-image), so don't send it
+                config.pop('response_format', None)
+            if 'dall-e-3' not in model_name.lower():
+                # Only dall-e-3 accepts 'style'; other OpenAI image models reject it
+                config.pop('style', None)
         from rich.progress import Progress, SpinnerColumn, TextColumn
         with Progress(
             SpinnerColumn(),
@@ -186,27 +209,27 @@ class ImageAgent(Agent):
                 
                 # Mark task as complete
                 progress.update(task, completed=True)
-                return response
+                return ImageResult(response)
             except Exception as e:
                 error_msg = f"Error generating image: {str(e)}"
                 if self.verbose:
                     self.console.print(f"[red]{error_msg}[/red]")
                 logging.error(error_msg)
                 raise
-    async def agenerate_image(self, prompt: str, **kwargs) -> Dict[str, Any]:
+    async def agenerate_image(self, prompt: str, **kwargs) -> ImageResult:
         """Offload the synchronous generation path to keep the event loop responsive."""
         return await asyncio.to_thread(self.generate_image, prompt, **kwargs)
     
     # Aliases for consistency with other agents
-    def generate(self, prompt: str, **kwargs) -> Dict[str, Any]:
+    def generate(self, prompt: str, **kwargs) -> ImageResult:
         """Alias for generate_image() - for consistency with VideoAgent/AudioAgent."""
         return self.generate_image(prompt, **kwargs)
     
-    async def agenerate(self, prompt: str, **kwargs) -> Dict[str, Any]:
+    async def agenerate(self, prompt: str, **kwargs) -> ImageResult:
         """Async alias for generate_image()."""
         return await self.agenerate_image(prompt, **kwargs)
 
-    def chat(self, prompt: str, **kwargs) -> Dict[str, Any]:
+    def chat(self, prompt: str, **kwargs) -> Union[ImageResult, Dict[str, Any]]:
         """Generate an image from the prompt."""
         try:
             result = self.generate_image(prompt, **kwargs)
@@ -227,7 +250,7 @@ class ImageAgent(Agent):
         output_pydantic: Optional[Any] = None,
         reasoning_steps: bool = False,
         **kwargs
-    ) -> Union[str, Dict[str, Any]]:
+    ) -> Union[ImageResult, Dict[str, Any]]:
         """Async chat method for image generation."""
         try:
             image_result = await self.agenerate_image(prompt, **kwargs)
@@ -248,7 +271,7 @@ class ImageAgent(Agent):
         n: int = 1,
         size: Optional[str] = None,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> ImageResult:
         """
         Edit an existing image with a prompt.
         
@@ -265,15 +288,16 @@ class ImageAgent(Agent):
             
         Example:
             ```python
-            agent = ImageAgent(llm="openai/dall-e-2")
-            result = agent.edit("photo.png", "Add a sunset in the background")
+            agent = ImageAgent(llm="openai/gpt-image-2.5-flare")
+            agent.edit("photo.png", "Add a sunset in the background").save("out.png")
             ```
         """
         try:
             import litellm
             litellm.telemetry = False
             
-            model_name = self._image_model("dall-e-2")
+            _reject_markup(kwargs)
+            model_name = self._image_model(DEFAULT_IMAGE_MODEL)
             
             config = {
                 "model": model_name,
@@ -295,7 +319,7 @@ class ImageAgent(Agent):
             if self.verbose:
                 self.console.print(f"[cyan]Editing image with {model_name}...[/cyan]")
             
-            response = litellm.image_edit(**config)
+            response = ImageResult(litellm.image_edit(**config))
             
             if self.verbose:
                 self.console.print(f"[green]✓ Image edited successfully[/green]")
@@ -315,7 +339,7 @@ class ImageAgent(Agent):
         n: int = 1,
         size: Optional[str] = None,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> ImageResult:
         """Offload the synchronous editing path to keep the event loop responsive."""
         return await asyncio.to_thread(self.edit, image, prompt, mask, n, size, **kwargs)
 
@@ -325,7 +349,7 @@ class ImageAgent(Agent):
         n: int = 1,
         size: Optional[str] = None,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> ImageResult:
         """
         Generate variations of an existing image.
         
@@ -367,7 +391,7 @@ class ImageAgent(Agent):
             if self.verbose:
                 self.console.print(f"[cyan]Generating variations with {model_name}...[/cyan]")
             
-            response = litellm.image_variation(**config)
+            response = ImageResult(litellm.image_variation(**config))
             
             if self.verbose:
                 self.console.print(f"[green]✓ Variations generated successfully[/green]")
@@ -385,6 +409,6 @@ class ImageAgent(Agent):
         n: int = 1,
         size: Optional[str] = None,
         **kwargs
-    ) -> Dict[str, Any]:
+    ) -> ImageResult:
         """Offload the synchronous variation path to keep the event loop responsive."""
         return await asyncio.to_thread(self.variation, image, n, size, **kwargs)

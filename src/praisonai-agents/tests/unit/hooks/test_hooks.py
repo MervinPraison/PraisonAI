@@ -914,6 +914,37 @@ class TestCommandHooks:
         assert not results[0].success
         assert "timed out" in results[0].error
 
+    @pytest.mark.asyncio
+    @pytest.mark.skipif(os.name == "nt", reason="POSIX shell command")
+    async def test_command_hook_cancel_kills_process(self):
+        """Cancelling a running command hook must not orphan the child process."""
+        registry = HookRegistry()
+        registry.register_command(
+            event=HookEvent.BEFORE_TOOL,
+            # ``exec`` so the shell is the sleep itself (dash forks otherwise).
+            command="exec sleep 10",
+            timeout=30
+        )
+        spawned = []
+        real_spawn = asyncio.create_subprocess_shell
+
+        async def spy(*args, **kwargs):
+            proc = await real_spawn(*args, **kwargs)
+            spawned.append(proc)
+            return proc
+
+        runner = HookRunner(registry, cwd="/tmp")
+        with patch("asyncio.create_subprocess_shell", spy):
+            with pytest.raises(asyncio.TimeoutError):
+                await asyncio.wait_for(
+                    runner.execute(HookEvent.BEFORE_TOOL, self._create_sample_input()),
+                    timeout=0.3,
+                )
+
+        assert len(spawned) == 1
+        await asyncio.wait_for(spawned[0].wait(), timeout=2)
+        assert spawned[0].returncode is not None
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -22,11 +22,38 @@ logger = logging.getLogger(__name__)
 
 from typing import List, Optional, Any, Dict, Union, Generator, TYPE_CHECKING
 
-# Shared HTTP launch state — the process-wide registry is defined in
-# agent/server_registry.py and shared with PraisonAIAgents.launch() so a
-# standalone Agent and a team launched on the same port cannot double-bind it or
-# hide each other's endpoints.
-from .server_registry import _server_registry
+
+class _TimeoutCancelToken:
+    """cancel_token for caller-mode ``start(timeout=...)``.
+
+    Set when the timeout elapses or when ``inner`` (the agent's own
+    per-turn interrupt token, if any) is set.
+    """
+
+    def __init__(self, timeout, inner=None):
+        self.timed_out = threading.Event()
+        self._inner = inner
+        self._timer = threading.Timer(timeout, self.timed_out.set)
+        self._timer.daemon = True
+        self._timer.start()
+
+    def is_set(self) -> bool:
+        return self.timed_out.is_set() or (self._inner is not None and self._inner.is_set())
+
+    @property
+    def reason(self):
+        if self.timed_out.is_set():
+            return "timeout"
+        return getattr(self._inner, "reason", None)
+
+    def check(self) -> None:
+        if self.is_set():
+            raise InterruptedError(f"Operation cancelled: {self.reason or 'unknown'}")
+
+    def close(self) -> None:
+        self._timer.cancel()
+        if self._inner is not None:
+            self._inner.close()
 
 
 def cleanup_launch_registration(agent_id: str) -> None:
@@ -43,6 +70,8 @@ def cleanup_launch_registration(agent_id: str) -> None:
     ``_AgentServerRegistry.teardown_routes_for``) so cleanup cannot race a
     concurrent launch that reserves and registers a route on the same port.
     """
+    from .server_registry import _server_registry  # lazy: launch path only
+
     _server_registry.teardown_routes_for(agent_id)
 
 if TYPE_CHECKING:
@@ -196,8 +225,26 @@ class ExecutionMixin:
                 from datetime import datetime, timezone
                 start_time = time_module.time()
                 started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-                
-                response = await self.achat(prompt, **kwargs)
+
+                # achat() has no timeout param: enforce it as a run budget here
+                timeout = kwargs.pop('timeout', None)
+                if timeout is not None and timeout > 0:
+                    task = asyncio.ensure_future(self.achat(prompt, **kwargs))
+                    try:
+                        done, _ = await asyncio.wait({task}, timeout=timeout)
+                    except asyncio.CancelledError:
+                        task.cancel()
+                        raise
+                    if task not in done:
+                        task.cancel()
+                        # Let achat()'s cleanup finish and collect its outcome
+                        for exc in await asyncio.gather(task, return_exceptions=True):
+                            if isinstance(exc, Exception):
+                                logger.debug("achat() cleanup after timeout failed: %s", exc)
+                        return self._caller_mode_timeout_result(start_time, started_at)
+                    response = task.result()
+                else:
+                    response = await self.achat(prompt, **kwargs)
                 response_str = str(response) if response else ""
                 
                 # Auto-save session after chat. Offloaded to a worker thread so
@@ -230,6 +277,21 @@ class ExecutionMixin:
         
         kwargs['stream'] = stream_requested
         return await self.achat(prompt, **kwargs)
+
+    @staticmethod
+    def _caller_mode_timeout_result(start_time, started_at):
+        """AutonomyResult for a caller-mode run that exceeded ``timeout``."""
+        from .autonomy import AutonomyResult
+        return AutonomyResult(
+            success=False,
+            output="Task timed out",
+            completion_reason="timeout",
+            iterations=1,
+            stage="direct",
+            actions=[],
+            duration_seconds=time.time() - start_time,
+            started_at=started_at,
+        )
 
     async def _astart_with_outcome(self, prompt, timeout=None, **kwargs):
         """Run astart() and normalise its result/exception into a RunOutcome.
@@ -497,157 +559,111 @@ class ExecutionMixin:
             # The backend's stream method is async, so we need to handle that
             import asyncio
             
-            async def stream_wrapper():
-                async for chunk in self.backend.stream(prompt, **kwargs):
-                    yield chunk
-            
-            # Convert async generator to sync generator
+            import threading
+            import queue
+
+            def _to_text(item):
+                # Managed backends may yield event dicts; convert them to the
+                # string chunks expected by Agent and skip other event types
+                # (session.status_idle, etc.).
+                if isinstance(item, str):
+                    return item
+                if isinstance(item, dict) and item.get('type') == 'agent.message':
+                    content = item.get('content', [])
+                    if isinstance(content, str):
+                        return content
+                    if isinstance(content, list):
+                        text_parts = []
+                        for block in content:
+                            if isinstance(block, dict) and block.get('type') == 'text':
+                                text_parts.append(block.get('text', ''))
+                            elif isinstance(block, str):
+                                text_parts.append(block)
+                        if text_parts:
+                            return ''.join(text_parts)
+                return None
+
+            # Convert async generator to sync generator. The backend's async
+            # generator is always driven on a private loop in a background
+            # thread, whether or not the caller already has a running loop, so
+            # the caller receives chunks incrementally and a backend error
+            # (including RuntimeError) can never re-run the stream.
             def sync_stream():
-                try:
-                    loop = asyncio.get_running_loop()
-                    # Already in async context - need to handle differently
-                    import concurrent.futures
-                    import threading
-                    import queue
-                    
-                    result_queue = queue.Queue()
-                    exception_holder = [None]
-                    
-                    def run_in_thread():
-                        new_loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(new_loop)
+                # Bounded queue so an abandoned consumer applies back-pressure
+                # instead of letting the producer fill memory unbounded.
+                # ``cancel_event`` lets the producer stop early when the caller
+                # closes the generator.
+                bridge_queue = queue.Queue(maxsize=64)
+                cancel_event = threading.Event()
+
+                def run_in_thread():
+                    new_loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(new_loop)
+                    try:
+                        async def pump():
+                            agen = self.backend.stream(prompt, **kwargs)
+                            try:
+                                async for item in agen:
+                                    if cancel_event.is_set():
+                                        break
+                                    # Block until space is available or the
+                                    # consumer signals cancellation, so we
+                                    # never spin nor grow the queue forever.
+                                    while not cancel_event.is_set():
+                                        try:
+                                            bridge_queue.put(('item', item), timeout=0.1)
+                                            break
+                                        except queue.Full:
+                                            continue
+                                if not cancel_event.is_set():
+                                    bridge_queue.put(('done', None))
+                            except Exception as e:
+                                if not cancel_event.is_set():
+                                    bridge_queue.put(('error', e))
+                            finally:
+                                # Run the backend's own cleanup (e.g. stopping
+                                # its producer) when the consumer closes early.
+                                aclose = getattr(agen, 'aclose', None)
+                                if aclose is not None:
+                                    try:
+                                        await aclose()
+                                    except Exception as e:
+                                        logger.debug(f"Backend stream cleanup failed: {e}")
+
+                        new_loop.run_until_complete(pump())
+                    finally:
                         try:
-                            async def collect():
-                                try:
-                                    async for item in self.backend.stream(prompt, **kwargs):
-                                        result_queue.put(('item', item))
-                                    result_queue.put(('done', None))
-                                except Exception as e:
-                                    exception_holder[0] = e
-                                    result_queue.put(('error', e))
-                            
-                            new_loop.run_until_complete(collect())
+                            new_loop.run_until_complete(new_loop.shutdown_asyncgens())
                         finally:
                             new_loop.close()
-                    
-                    thread = threading.Thread(target=run_in_thread)
-                    thread.start()
-                    
+
+                # Daemon thread so a stalled/abandoned producer can never
+                # block interpreter shutdown.
+                thread = threading.Thread(target=run_in_thread, daemon=True)
+                thread.start()
+
+                try:
                     while True:
-                        msg_type, data = result_queue.get()
+                        msg_type, data = bridge_queue.get()
                         if msg_type == 'item':
-                            # For managed backends, we might get event objects
-                            # Convert to string format expected by Agent
-                            if isinstance(data, dict):
-                                if data.get('type') == 'agent.message':
-                                    content = data.get('content', [])
-                                    if isinstance(content, list):
-                                        text_parts = []
-                                        for block in content:
-                                            if isinstance(block, dict) and block.get('type') == 'text':
-                                                text_parts.append(block.get('text', ''))
-                                            elif isinstance(block, str):
-                                                text_parts.append(block)
-                                        if text_parts:
-                                            yield ''.join(text_parts)
-                                    elif isinstance(content, str):
-                                        yield content
-                                # Skip other event types (session.status_idle, etc.)
-                            elif isinstance(data, str):
-                                yield data
+                            text = _to_text(data)
+                            if text is not None:
+                                yield text
                         elif msg_type == 'done':
                             break
                         elif msg_type == 'error':
                             raise data
-                    
-                    thread.join()
-                    
-                except RuntimeError:
-                    # No event loop (the common script/CLI case). Drive the
-                    # backend's async generator from a background thread and
-                    # push each chunk through a queue as it arrives, so the
-                    # caller receives chunks incrementally instead of only
-                    # after the whole response has been buffered. Mirrors the
-                    # running-loop branch above.
-                    import threading
-                    import queue
-                    # Bounded queue so an abandoned consumer applies
-                    # back-pressure instead of letting the producer fill memory
-                    # unbounded. ``cancel_event`` lets the producer stop early
-                    # when the caller closes the generator.
-                    bridge_queue = queue.Queue(maxsize=64)
-                    cancel_event = threading.Event()
-
-                    def run_in_thread_noloop():
-                        new_loop = asyncio.new_event_loop()
-                        asyncio.set_event_loop(new_loop)
-                        try:
-                            async def pump():
-                                try:
-                                    async for item in self.backend.stream(prompt, **kwargs):
-                                        if cancel_event.is_set():
-                                            break
-                                        # Block until space is available or the
-                                        # consumer signals cancellation, so we
-                                        # never spin nor grow the queue forever.
-                                        while not cancel_event.is_set():
-                                            try:
-                                                bridge_queue.put(('item', item), timeout=0.1)
-                                                break
-                                            except queue.Full:
-                                                continue
-                                    if not cancel_event.is_set():
-                                        bridge_queue.put(('done', None))
-                                except Exception as e:
-                                    if not cancel_event.is_set():
-                                        bridge_queue.put(('error', e))
-
-                            new_loop.run_until_complete(pump())
-                        finally:
-                            new_loop.close()
-
-                    # Daemon thread so a stalled/abandoned producer can never
-                    # block interpreter shutdown.
-                    thread = threading.Thread(target=run_in_thread_noloop, daemon=True)
-                    thread.start()
-
+                finally:
+                    # Runs on normal completion AND on early generator
+                    # close/GC: signal the producer to stop, drain one slot
+                    # so a blocked put() can observe the cancel, and join.
+                    cancel_event.set()
                     try:
-                        while True:
-                            msg_type, data = bridge_queue.get()
-                            if msg_type == 'item':
-                                item = data
-                                # Same conversion logic as the running-loop branch.
-                                if isinstance(item, dict):
-                                    if item.get('type') == 'agent.message':
-                                        content = item.get('content', [])
-                                        if isinstance(content, list):
-                                            text_parts = []
-                                            for block in content:
-                                                if isinstance(block, dict) and block.get('type') == 'text':
-                                                    text_parts.append(block.get('text', ''))
-                                                elif isinstance(block, str):
-                                                    text_parts.append(block)
-                                            if text_parts:
-                                                yield ''.join(text_parts)
-                                        elif isinstance(content, str):
-                                            yield content
-                                elif isinstance(item, str):
-                                    yield item
-                            elif msg_type == 'done':
-                                break
-                            elif msg_type == 'error':
-                                raise data
-                    finally:
-                        # Runs on normal completion AND on early generator
-                        # close/GC: signal the producer to stop, drain one slot
-                        # so a blocked put() can observe the cancel, and join.
-                        cancel_event.set()
-                        try:
-                            bridge_queue.get_nowait()
-                        except queue.Empty:
-                            pass
-                        thread.join(timeout=5)
-            
+                        bridge_queue.get_nowait()
+                    except queue.Empty:
+                        pass
+                    thread.join(timeout=5)
+
             return sync_stream()
             
         except Exception as e:
@@ -889,9 +905,36 @@ Write the complete compiled report:"""
                 # Load history from past sessions
                 self._load_history_context()
                 
+                # chat() has no timeout param: enforce it via cooperative
+                # cancellation (cancel_token), unless the caller supplied one.
+                timeout = kwargs.pop('timeout', None)
+                cancel = None
+                if timeout is not None and timeout > 0 and kwargs.get('cancel_token') is None:
+                    # Still honour stop requests on the agent's own controller
+                    inner = self._turn_cancel_token(
+                        getattr(self, "interrupt_controller", None), explicit=False
+                    )
+                    cancel = kwargs['cancel_token'] = _TimeoutCancelToken(timeout, inner)
+
                 # Use chat() — all tools, approval, doom-loop per-tool work
-                response = self.chat(prompt, **kwargs)
+                try:
+                    response = self.chat(prompt, **kwargs)
+                except InterruptedError:
+                    if cancel is None or not cancel.timed_out.is_set():
+                        raise
+                    return self._caller_mode_timeout_result(start_time, started_at)
+                finally:
+                    if cancel is not None:
+                        cancel.close()
                 response_str = str(response) if response else ""
+                # The LLM tool loop returns this text instead of raising when
+                # the timeout stops it, so the run did not finish.
+                if (
+                    cancel is not None
+                    and cancel.timed_out.is_set()
+                    and response_str.startswith("Task interrupted: timeout")
+                ):
+                    return self._caller_mode_timeout_result(start_time, started_at)
                 
                 # Auto-save session after chat
                 self._auto_save_session()
@@ -966,7 +1009,6 @@ Write the complete compiled report:"""
                 # Show animated status during LLM call if verbose
                 if self.verbose and is_tty:
                     from ..main import PRAISON_COLORS, sync_display_callbacks, _callbacks_lock
-                    import threading
                     import time as time_module
                     
                     console = _get_console()()
@@ -1608,11 +1650,28 @@ Write the complete compiled report:"""
         retry_policy = self._get_tool_retry_policy(function_name)
         
         last_exception = None
-        
+
+        def _finish(result, raised, retryable_ok=True):
+            # Strip the private control-plane tag before it reaches the model. A
+            # tool that *raised* ends the turn with ToolExecutionError so the run
+            # is finalized failed — the same contract as the sync path
+            # (tool_execution.py, test_tool_failure_not_relabelled). A plain
+            # tool-returned {"error": ...} stays a recoverable model input.
+            retryable = result.pop("_praison_retryable", None) is True and retryable_ok
+            if raised:
+                raise ToolExecutionError(
+                    result.get("error", f"Tool '{function_name}' failed"),
+                    tool_name=function_name,
+                    agent_id=self.name,
+                    is_retryable=retryable,
+                )
+            return result
+
         # Retry loop with exponential backoff
         for attempt in range(retry_policy.max_attempts):
             try:
                 result = await self._execute_tool_async_impl(function_name, arguments, tool_call_id, tools_override)
+                raised = isinstance(result, dict) and bool(result.pop("_praison_raised", False))
                 
                 # Check if result is an error that should be retried
                 if isinstance(result, dict) and result.get("error"):
@@ -1627,8 +1686,7 @@ Write the complete compiled report:"""
                         result.get("circuit_open") or
                         result.get("loop_blocked") or
                         result.get("_praison_retryable") is False):
-                        result.pop("_praison_retryable", None)
-                        return result
+                        return _finish(result, raised)
 
                     # The body already ran and may have completed its side effect
                     # before failing. Honour an explicit restart_safe=False /
@@ -1638,8 +1696,9 @@ Write the complete compiled report:"""
                     # up to max_attempts times -- charging a card three times for
                     # a tool the author marked "must never be silently re-executed".
                     if self._tool_declares_not_idempotent(function_name, tools_override):
-                        result.pop("_praison_retryable", None)
-                        return result
+                        # Must not run again: report non-retryable so durable
+                        # runs are finalized failed (sync parity).
+                        return _finish(result, raised, retryable_ok=False)
 
                     # Determine error type for retry policy
                     error_type = self._classify_error_type(result, last_exception)
@@ -1657,13 +1716,11 @@ Write the complete compiled report:"""
                     # never steer our retry loop.
                     if (not retry_policy.should_retry(error_type, attempt)
                             and result.get("_praison_retryable") is not True):
-                        result.pop("_praison_retryable", None)
-                        return result
+                        return _finish(result, raised)
                     
                     # Don't retry on last attempt
                     if attempt == retry_policy.max_attempts - 1:
-                        result.pop("_praison_retryable", None)
-                        return result
+                        return _finish(result, raised)
                     
                     # Emit retry hook event  
                     delay_ms = retry_policy.get_delay_ms(attempt)
@@ -1688,7 +1745,9 @@ Write the complete compiled report:"""
                 
                 # Check if retryable and not last attempt
                 if not is_retryable or attempt == retry_policy.max_attempts - 1:
-                    # Return error dict instead of raising for consistency with sync version
+                    # A framework-internal failure escaping the impl (not a tool
+                    # body raise — those are flattened and handled above) is
+                    # returned as an error dict.
                     return {"error": f"Error in execute_tool_async: {str(e)}"}
                 
                 # Determine error type  
@@ -1713,6 +1772,7 @@ Write the complete compiled report:"""
     async def _execute_tool_async_impl(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
         """Internal async tool execution implementation"""
         from ..errors import ToolExecutionError
+        from .tool_execution import _CALLER_ERROR_TYPES
         try:
             logging.info(f"Executing async tool: {function_name} with arguments: {arguments}")
             
@@ -1905,6 +1965,8 @@ Write the complete compiled report:"""
                 except ImportError:
                     durable_key = None
                 call_arguments = arguments
+                if hasattr(self, "_cast_arguments"):  # sync-path parity
+                    call_arguments = self._cast_arguments(call_target, arguments)
                 if durable_key:
                     try:
                         parameters = inspect.signature(call_target).parameters.values()
@@ -1915,7 +1977,7 @@ Write the complete compiled report:"""
                         or parameter.kind == inspect.Parameter.VAR_KEYWORD
                         for parameter in parameters
                     ):
-                        call_arguments = dict(arguments)
+                        call_arguments = dict(call_arguments)
                         call_arguments["idempotency_key"] = durable_key
 
                 # Establish the injection context (Injected[T] params, including
@@ -1944,20 +2006,50 @@ Write the complete compiled report:"""
                         with tool_progress_channel(_progress_sink):
                             return await call_target(**call_arguments)
                     logging.debug(f"Executing sync function in executor: {function_name}")
-                    loop = asyncio.get_running_loop()
                     from ..trace.context_events import copy_context_to_callable
                     # copy_context_to_callable snapshots the CURRENT context (incl.
                     # the injection contextvar) into the executor thread, so setting
                     # it here propagates cancel_event to the sync tool body too.
                     if _inject_state is not None:
                         with with_injection_context(_inject_state), tool_progress_channel(_progress_sink):
-                            return await loop.run_in_executor(
-                                None, copy_context_to_callable(lambda: call_target(**call_arguments))
-                            )
+                            return await _run_sync(copy_context_to_callable(lambda: call_target(**call_arguments)))
                     with tool_progress_channel(_progress_sink):
-                        return await loop.run_in_executor(
-                            None, copy_context_to_callable(lambda: call_target(**call_arguments))
+                        return await _run_sync(copy_context_to_callable(lambda: call_target(**call_arguments)))
+
+                async def _run_sync(fn):
+                    # With a tool timeout, a timed-out sync tool keeps its thread
+                    # (wait_for cannot stop it). Run it on the bounded per-agent
+                    # pool (sync-path parity) instead of the shared default
+                    # executor, so hung tools cannot starve asyncio.to_thread
+                    # callers elsewhere in the process.
+                    if not (tool_timeout and tool_timeout > 0) or not hasattr(self, "_submit_to_tool_pool"):
+                        return await asyncio.get_running_loop().run_in_executor(None, fn)
+                    # spill=True: when every worker is busy the call runs at once
+                    # on a counted overflow thread (executor is None) instead of
+                    # queueing into its timeout; refused once that cap is hit.
+                    future, executor, orphaned = self._submit_to_tool_pool(fn, spill=True)
+                    if future is None:
+                        logging.warning(
+                            f"Tool worker pool exhausted; refusing to queue '{function_name}' "
+                            f"behind {orphaned} hung tool call(s)."
                         )
+                        return {
+                            "error": (
+                                f"Tool worker pool exhausted: {orphaned} earlier tool call(s) "
+                                f"are still running past their timeout. Refusing to queue "
+                                f"'{function_name}'."
+                            ),
+                            "tool_pool_exhausted": True,
+                            "_praison_retryable": False,
+                        }
+                    try:
+                        return await asyncio.wrap_future(future)
+                    except asyncio.CancelledError:
+                        # Timed out (or caller cancelled) while still running:
+                        # retire the stuck pool so the next call gets a fresh worker.
+                        if executor is not None and not future.done():
+                            self._retire_tool_executor(executor)
+                        raise
 
                 # Circuit-breaker parity with the sync path (tool_execution.py).
                 # The async tool path previously had no breaker, so a repeatedly
@@ -1977,23 +2069,12 @@ Write the complete compiled report:"""
                 _NeutralOutcome = _CircuitBreakerException
                 try:
                     from ..tools.circuit_breaker import (
-                        get_circuit_breaker,
-                        CircuitBreakerConfig,
                         CircuitBreakerException as _CircuitBreakerException,
                         _NeutralOutcome,
                     )
-                    breaker_name = f"tool_{id(self)}_{function_name}"
-                    breaker = get_circuit_breaker(
-                        breaker_name,
-                        CircuitBreakerConfig(
-                            failure_threshold=5,
-                            recovery_timeout=60.0,
-                            timeout=30.0,
-                            graceful_degradation=True,
-                        ),
-                    )
-                    if hasattr(self, "_register_breaker_finalizer"):
-                        self._register_breaker_finalizer(breaker_name)
+                    # Same per-agent breaker and policy as the sync path.
+                    if hasattr(self, "_get_tool_circuit_breaker"):
+                        breaker = self._get_tool_circuit_breaker(function_name)
                 except ImportError:
                     # Circuit breaker not available - fall back to direct invocation.
                     logging.debug("Circuit breaker not available on async path, executing directly")
@@ -2014,7 +2095,7 @@ Write the complete compiled report:"""
                     # half-open one. Unwrapped in _invoke_guarded.
                     try:
                         r = await _invoke()
-                    except (ValueError, TypeError, AttributeError) as e:
+                    except _CALLER_ERROR_TYPES as e:
                         raise _NeutralOutcome(e)
                     if isinstance(r, dict) and r.get("error") and \
                        r.get("_praison_retryable") is False:
@@ -2055,13 +2136,7 @@ Write the complete compiled report:"""
                     # _execute_tool_async_with_retry treats it as terminal.
                     if loop_guard is not None:
                         loop_guard.record(function_name, arguments, False, result=None)
-                    return {
-                        "error": f"Tool '{function_name}' circuit breaker open - too many recent failures",
-                        "circuit_open": True,
-                        "agent_name": getattr(self, "name", None),
-                        "session_id": getattr(self, "_session_id", None),
-                        "remediation": "Wait for recovery_timeout (60s) or investigate recent tool failures.",
-                    }
+                    return self._circuit_breaker_open_result(function_name)
 
                 # Apply the per-agent tool timeout (ToolConfig.timeout) so the async
                 # path matches the sync path in tool_execution.py. asyncio.wait_for
@@ -2221,13 +2296,18 @@ Write the complete compiled report:"""
                 if isinstance(e, ToolExecutionError):
                     retryable = e.is_retryable
                 else:
-                    retryable = not isinstance(e, (ValueError, TypeError, AttributeError))
+                    retryable = not isinstance(e, _CALLER_ERROR_TYPES)
                 # Private control-plane key: a tool's own result may legitimately
                 # contain "retryable" (common for HTTP-API wrappers) and must not
                 # collide with the framework's verdict nor leak to the model.
+                # ``_praison_raised`` marks the dict as a flattened *raised*
+                # exception (timeouts/pool exhaustion also carry
+                # ``_praison_retryable`` but did not raise), so the retry loop can
+                # surface it as ToolExecutionError exactly like the sync path.
                 return {
                     "error": f"Error executing {function_name}: {str(e)}",
                     "_praison_retryable": retryable,
+                    "_praison_raised": True,
                 }
 
         except ToolExecutionError:
@@ -2312,7 +2392,11 @@ Write the complete compiled report:"""
         host = resolve_launch_host(host)
 
         # Get or create the shared FastAPI app for this port (shared with
-        # PraisonAIAgents.launch via the same _server_registry singleton).
+        # PraisonAIAgents.launch via the same _server_registry singleton, so a
+        # standalone Agent and a team on one port cannot double-bind it).
+        # Imported lazily: only the HTTP launch path needs the registry.
+        from .server_registry import _server_registry
+
         app, is_new_app = _server_registry.get_or_create_app(
             port,
             title=f"PraisonAI Agents API (Port {port})",
@@ -2408,44 +2492,9 @@ Write the complete compiled report:"""
             print(f"📚 API documentation available at http://{host}:{port}/docs")
         print(f"🔌 Available endpoints on port {port}: {', '.join(endpoints)}")
 
-        # Get the stack frame to check if this is the last launch() call in the script
-        import inspect
-        stack = inspect.stack()
-
-        # If this is called from a Python script (not interactive), try to detect if it's the last launch call
-        if len(stack) > 1 and stack[1].filename.endswith('.py'):
-            caller_frame = stack[1]
-            caller_line = caller_frame.lineno
-
-            try:
-                # Read the file to check if there are more launch calls after this one
-                with open(caller_frame.filename, 'r') as f:
-                    lines = f.readlines()
-
-                # Check if there are more launch() calls after the current line
-                has_more_launches = False
-                for line_content in lines[caller_line:]: # renamed line to line_content
-                    if '.launch(' in line_content and not line_content.strip().startswith('#'):
-                        has_more_launches = True
-                        break
-
-                # If this is the last launch call, block the main thread
-                if not has_more_launches:
-                    try:
-                        print("\nAll agents registered for HTTP mode. Press Ctrl+C to stop the servers.")
-                        while True:
-                            self._safe_sleep(1)
-                    except KeyboardInterrupt:
-                        print("\nServers stopped")
-            except Exception as e:
-                # If something goes wrong with detection, block anyway to be safe
-                logging.error(f"Error in launch detection: {e}")
-                try:
-                    print("\nKeeping HTTP servers alive. Press Ctrl+C to stop.")
-                    while True:
-                        self._safe_sleep(1)
-                except KeyboardInterrupt:
-                    print("\nServers stopped")
+        # Keep the daemon server threads alive once the script finishes
+        # (no source-text inspection of the caller).
+        _server_registry.keep_alive_at_exit()
         return None
 
     def _launch_mcp_server(self, path: str, port: int, host: str, debug: bool):

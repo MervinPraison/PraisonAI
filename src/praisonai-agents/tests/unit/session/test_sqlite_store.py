@@ -332,6 +332,53 @@ class TestArchivedRecall:
         hits = reopened.search("zx-9271-alpha")
         assert [h.session_id for h in hits] == ["old"]
 
+    @pytest.mark.parametrize("store_cls", [DefaultSessionStore, SqliteSessionStore])
+    def test_compaction_summary_not_scored(self, tmp_dir, store_cls):
+        # Issue #5051: the synthetic summary paraphrases archived turns that are
+        # already scored verbatim, so compaction count must not change rank.
+        from praisonaiagents.session.store import SessionData, SessionMessage
+
+        store = store_cls(session_dir=tmp_dir)
+        turn = ("user", "deploy token zx-9271-alpha")
+        self._seed_with_archive(store, "plain", archived=[turn], active=[])
+        compacted = SessionData(session_id="compacted")
+        compacted.archived_messages.append(SessionMessage(role=turn[0], content=turn[1]))
+        compacted.messages.append(
+            SessionMessage(
+                role="system",
+                content="[Session Summary]\nuser: deploy token zx-9271-alpha",
+                metadata={"compaction": True, "compacted_count": 1},
+            )
+        )
+        store._save_session(compacted)
+
+        hits = {h.session_id: h for h in store.search("zx-9271-alpha")}
+        assert hits["plain"].score == hits["compacted"].score
+        hit = hits["compacted"]
+        anchor = next(m for m in hit.messages if m["index"] == hit.anchor_index)
+        assert anchor["archived"]
+
+    def test_summary_only_matches_do_not_exhaust_candidates(self, tmp_dir):
+        # Unscored summaries must not be indexed, or they spend the bounded
+        # candidate allowance and hide a real match (Issue #5051, Greptile P1).
+        from praisonaiagents.session.store import SessionData, SessionMessage
+
+        store = SqliteSessionStore(session_dir=tmp_dir)
+        for i in range(6):
+            data = SessionData(session_id=f"compacted-{i}")
+            data.archived_messages.append(SessionMessage(role="user", content="hello"))
+            data.messages.append(
+                SessionMessage(
+                    role="system",
+                    content="[Session Summary]\n" + "pelican " * 20,
+                    metadata={"compaction": True},
+                )
+            )
+            store._save_session(data)
+        self._seed_with_archive(store, "real", archived=[], active=[("user", "a pelican flew by")])
+
+        assert [h.session_id for h in store.search("pelican", limit=1)] == ["real"]
+
 
 class TestIndexedSessionRoute:
     """Indexed gateway/agent routing lookups (Issue #2956)."""

@@ -1384,11 +1384,15 @@
           "type": "string"
         },
         {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
           "type": "null"
         }
       ],
       "default": null,
-      "description": "Default LLM",
+      "description": "Default LLM (string or dict with 'model' key)",
       "title": "Llm"
     },
     "models": {

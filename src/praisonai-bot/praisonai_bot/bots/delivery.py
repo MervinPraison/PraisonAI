@@ -498,6 +498,7 @@ class DeliveryRouter:
         notify_on_undelivered: bool = False,
         undelivered_template: Optional[str] = None,
         idempotency_store: Optional[Any] = None,
+        notifications: Optional[Dict[str, Any]] = None,
     ):
         self._botos = botos
         self.directory = ChannelDirectory()
@@ -533,6 +534,20 @@ class DeliveryRouter:
         # per-process LRU that is empty after a restart. Unset ⇒ the bounded LRU
         # above, so existing callers are entirely unaffected.
         self._idempotency_store = idempotency_store
+        # Notification policy (issue #6138): the ``gateway.notifications`` block
+        # gates *categorised* proactive sends by recipient category opt-in,
+        # quiet hours and detail level. Unset ⇒ no gating, behaviour unchanged.
+        self._notification_gate = None
+        self.set_notifications(notifications)
+
+    def set_notifications(self, notifications: Optional[Dict[str, Any]]) -> None:
+        """(Re)build the notification gate; falsy ⇒ no gating (issue #6138)."""
+        gate = None
+        if notifications:
+            from ._notifications import NotificationGate
+
+            gate = NotificationGate(notifications)
+        self._notification_gate = gate
 
     def _rate_limiter_for(self, platform: str) -> Optional[Any]:
         """Return a rate limiter for ``platform``, reusing the adapter's own.
@@ -744,6 +759,8 @@ class DeliveryRouter:
         origin: Optional[SessionSource] = None,
         *,
         idempotency_key: Optional[str] = None,
+        category: Optional[str] = None,
+        identity: Optional[str] = None,
     ) -> bool:
         """
         Deliver a message to a target.
@@ -756,9 +773,16 @@ class DeliveryRouter:
                 supplied, a repeat proactive send with the same key is suppressed
                 in-process so a retried scheduled/background job does not
                 double-post. The adapter's own outbox remains the durable dedup.
+            category: Optional ``NotificationCategory`` value (e.g.
+                ``"agent_finished"``). When set and ``notifications`` is
+                configured, the recipient's preference decides whether and how
+                much of ``text`` is sent (issue #6138). Uncategorised sends
+                (direct replies, hook replies) are never gated.
+            identity: Agent/session label shown at the ``identified`` detail level.
             
         Returns:
-            True if delivered successfully, False otherwise
+            True if delivered successfully (or intentionally suppressed by the
+            recipient's notification policy), False otherwise
         """
         try:
             platform, channel_id, thread_id = self.resolve(target, origin)
@@ -776,6 +800,27 @@ class DeliveryRouter:
             # unchanged rather than blocking delivery. The resolved bot carries
             # any injected redactor / opt-out so one policy governs every seam.
             text = _redact_outbound_text(text, bot)
+
+            # Notification policy (issue #6138): an un-opted category or quiet
+            # hours suppress the send (reported as handled so schedulers and the
+            # outbox do not retry it); otherwise the text is redacted to the
+            # recipient's detail level. Checked before the idempotency reserve
+            # so a suppressed send never claims a durable key.
+            if category is not None and self._notification_gate is not None:
+                decision = self._notification_gate.admit(
+                    f"{platform}:{channel_id}", category, text, identity=identity
+                )
+                if not decision.send:
+                    logger.info(
+                        "DeliveryRouter: notification suppressed for %s:%s "
+                        "(category=%s, reason=%s)",
+                        platform,
+                        channel_id,
+                        category,
+                        decision.reason,
+                    )
+                    return True
+                text = decision.redacted_content
 
             # Idempotency short-circuit (issue #2578): suppress a duplicate
             # proactive send whose caller-stable key we have already delivered,

@@ -277,14 +277,7 @@ class PairingCallbackHandler:
         elif action == "deny":
             # Consume the code to prevent reuse
             try:
-                # Try to consume the code without pairing by calling verify_and_pair with dummy values
-                # This will consume the code and return False since it won't actually pair
-                self.pairing_store.verify_and_pair(
-                    code=code,
-                    channel_id="__denied__",  # Dummy value that won't be stored
-                    channel_type="__denied__",
-                    label="Denied pairing request"
-                )
+                self.pairing_store.reject(code)
             except Exception as e:
                 logger.error(f"Failed to consume denied code: {e}")
             

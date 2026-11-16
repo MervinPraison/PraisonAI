@@ -11,12 +11,15 @@ No heavy imports at module level.
 """
 
 import json
+import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 from .budget import estimate_tokens
+
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -381,10 +384,11 @@ class HierarchicalSummarizer:
                 "nodes": {k: v.to_dict() for k, v in result.nodes.items()},
             }
             
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2)
-        except Exception:
-            pass
+            # Atomic: a failed/partial write must not truncate the previous hierarchy.
+            from ..utils.atomic_io import atomic_write_json
+            atomic_write_json(filepath, data, indent=2)
+        except Exception as e:
+            logger.warning("Failed to save hierarchy %s: %s", corpus_path, e)
     
     def _load_hierarchy(self, corpus_path: str) -> Optional[HierarchyResult]:
         """Load hierarchy from disk."""

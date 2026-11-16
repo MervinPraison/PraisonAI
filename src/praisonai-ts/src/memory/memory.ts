@@ -38,6 +38,9 @@ export class Memory {
 
   constructor(config: MemoryConfig = {}) {
     this.maxEntries = config.maxEntries ?? 1000;
+    if (this.maxEntries < 0) {
+      throw new RangeError('maxEntries must be non-negative');
+    }
     this.maxTokens = config.maxTokens ?? 100000;
     this.embeddingProvider = config.embeddingProvider;
   }
@@ -84,6 +87,7 @@ export class Memory {
    * Get recent entries
    */
   getRecent(count: number): MemoryEntry[] {
+    if (count === 0) return [];
     return this.getAll().slice(-count);
   }
 
@@ -176,7 +180,7 @@ export class Memory {
    * Build context string from recent memory
    */
   buildContext(count?: number): string {
-    const entries = count ? this.getRecent(count) : this.getAll();
+    const entries = count !== undefined ? this.getRecent(count) : this.getAll();
     return entries
       .map(e => `${e.role}: ${e.content}`)
       .join('\n');

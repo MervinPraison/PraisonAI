@@ -85,6 +85,16 @@ def get_context_emitter() -> "ContextTraceEmitter":
         return _default_disabled_emitter
 
 
+def _agent_key(name: Optional[str]) -> str:
+    """The id an agent has in traces and graphs: its name, or "Agent" when unnamed.
+
+    ``Agent(instructions=...)`` has ``name=None``; without this its events had no
+    node id and its tools were recorded as ``tool:None/<tool>``, so nothing
+    matched the ``agent:Agent`` node in its graph.
+    """
+    return name or "Agent"
+
+
 def set_context_emitter(emitter: "ContextTraceEmitter") -> contextvars.Token:
     """
     Set the context trace emitter for the current async context.
@@ -742,11 +752,18 @@ class ContextTraceEmitter:
             return False
         return mark[1] == _innermost(_span_var.get(), self._uid)
     
+    def _redact_text(self, text: str) -> str:
+        """Redact free text; skipped for ContextNoOpSink (nothing is stored)."""
+        if not self._redact or type(self._sink) is ContextNoOpSink:
+            return text
+        from .redact import redact_string
+        return redact_string(text)
+
     def _redact_dict(self, data: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """Redact sensitive data from dictionary if enabled."""
-        if data is None or not self._redact:
+        if data is None or not self._redact or type(self._sink) is ContextNoOpSink:
             return data
-        
+
         from .redact import redact_dict
         return redact_dict(data)
     
@@ -786,7 +803,7 @@ class ContextTraceEmitter:
             session_id=self._session_id,
             agent_name=agent_name,
             data=metadata or {},
-            node_id=f"agent:{agent_name}" if agent_name else None,
+            node_id=f"agent:{_agent_key(agent_name)}",
         ))
     
     def agent_end(
@@ -803,7 +820,7 @@ class ContextTraceEmitter:
             session_id=self._session_id,
             agent_name=agent_name,
             data=metadata or {},
-            node_id=f"agent:{agent_name}" if agent_name else None,
+            node_id=f"agent:{_agent_key(agent_name)}",
         ))
     
     def message_added(
@@ -818,6 +835,8 @@ class ContextTraceEmitter:
         """Emit message added event."""
         if not self._enabled:
             return
+        if isinstance(content, str):
+            content = self._redact_text(content)
         # Truncate long content for storage
         truncated_content = content[:1000] + "..." if len(content) > 1000 else content
         
@@ -853,7 +872,7 @@ class ContextTraceEmitter:
                 "tool_name": tool_name,
                 "tool_args": self._redact_dict(tool_args) if tool_args else {},
             },
-            node_id=f"tool:{agent_name}/{tool_name}",
+            node_id=f"tool:{_agent_key(agent_name)}/{tool_name}",
         ))
     
     def tool_call_end(
@@ -878,6 +897,10 @@ class ContextTraceEmitter:
         if not self._enabled:
             return
         # Smart truncate long results unless full_content is enabled
+        if isinstance(result, str):
+            result = self._redact_text(result)
+        if isinstance(error, str):
+            error = self._redact_text(error)
         truncated_result = None
         if result:
             if self._full_content:
@@ -901,7 +924,7 @@ class ContextTraceEmitter:
                 "duration_ms": duration_ms,
                 "error": error,
             },
-            node_id=f"tool:{agent_name}/{tool_name}",
+            node_id=f"tool:{_agent_key(agent_name)}/{tool_name}",
         ))
     
     def _smart_truncate_result(self, result: str, tool_name: str) -> str:
@@ -1030,7 +1053,7 @@ class ContextTraceEmitter:
             tokens_used=tokens_used,
             tokens_budget=tokens_budget,
             data=data,
-            node_id=f"agent:{agent_name}" if agent_name else None,
+            node_id=f"agent:{_agent_key(agent_name)}",
         )
     
     def llm_response(
@@ -1114,7 +1137,7 @@ class ContextTraceEmitter:
             completion_tokens=actual_completion_tokens,
             cost_usd=cost_usd,
             data=data,
-            node_id=f"agent:{agent_name}" if agent_name else None,
+            node_id=f"agent:{_agent_key(agent_name)}",
         )
     
     def context_snapshot(

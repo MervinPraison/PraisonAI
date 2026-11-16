@@ -241,9 +241,9 @@ class TestFileScheduleStoreEmits:
 
 
 class TestOneShotAutoDelete:
-    """A spent ``delete_after_run`` job is deleted inside ``claim_due``,
-    bypassing ``remove()`` entirely — it must still announce itself, exactly
-    once (the runner's later ``remove(job.id)`` finds nothing)."""
+    """A spent ``delete_after_run`` job is kept (leased) by ``claim_due`` and
+    retired by the runner's ``mark_run`` once the run completes — announcing
+    itself exactly once."""
 
     def test_claim_due_auto_delete_fires_once(self, tmp_path):
         from praisonaiagents.scheduler.store import FileScheduleStore
@@ -258,12 +258,15 @@ class TestOneShotAutoDelete:
         with _Recorder(HookEvent.SCHEDULE_REMOVE) as rec:
             claimed = store.claim_due(now=time.time() + 5, owner_id="w1")
             assert [j.id for j in claimed] == [job.id]
-            # The runner's post-run cleanup must not double-announce it.
-            assert store.remove(job.id) is False
+            # Not deleted at claim: a crash mid-run must not lose it.
+            assert rec.fired == []
+            ScheduleRunner(store).mark_run(claimed[0])
+            store.complete(job.id, "w1")
+            # A later poll finds nothing left to retire.
+            assert store.claim_due(now=time.time() + 10, owner_id="w1") == []
 
         assert rec.fired == ["schedule_remove"]
         assert rec.payloads[0]["job_name"] == "one-shot"
-        assert ScheduleRunner is not None  # cleanup path lives here
 
     def test_recurring_claim_does_not_fire(self, tmp_path):
         from praisonaiagents.scheduler.store import FileScheduleStore

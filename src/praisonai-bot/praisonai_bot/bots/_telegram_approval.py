@@ -4,8 +4,10 @@ Telegram Approval Backend for PraisonAI Agents.
 Implements the ApprovalProtocol by sending messages with inline keyboard
 buttons to Telegram and polling ``getUpdates`` for callback_query responses.
 
-Uses raw aiohttp HTTP calls to the Telegram Bot API — does NOT depend on
-``python-telegram-bot`` to avoid getUpdates conflicts with a running TelegramBot.
+Uses raw aiohttp HTTP calls to the Telegram Bot API and runs its **own**
+``getUpdates`` loop, so only use it when no TelegramBot/gateway channel is
+polling the same token (Telegram allows one poller per token). With a running
+adapter, use ``PresentationApprovalBackend`` via ``register_approval_backend``.
 
 Usage::
 

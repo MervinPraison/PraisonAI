@@ -5,6 +5,7 @@ Provides utilities for streaming PraisonAI agent responses as AG-UI events.
 """
 
 import asyncio
+import contextvars
 import json
 import uuid
 from dataclasses import dataclass, field
@@ -30,6 +31,12 @@ from praisonaiagents.ui.agui.types import (
 from praisonaiagents.ui.protocols import A2UI_MIME_TYPE
 from praisonaiagents.streaming.events import StreamEventType as _SE
 
+# Identifies which AG-UI run owns the current task/thread. The agent's
+# stream_emitter is shared by every request served by one Agent, and its
+# callbacks fire synchronously in the emitting context, so each run's callback
+# only accepts events emitted while its own owner token is active.
+_RUN_OWNER: contextvars.ContextVar = contextvars.ContextVar("agui_run_owner", default=None)
+
 
 @dataclass
 class EventBuffer:
@@ -41,7 +48,11 @@ class EventBuffer:
     next_text_message_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     pending_tool_calls_parent_id: str = ""
     current_tool_call_id: str = ""
-    
+    # Tool calls already opened from streamed model deltas (DELTA_TOOL_CALL),
+    # keyed by id and by stream index (later chunks often carry only the index).
+    streamed_tool_call_ids: Set[str] = field(default_factory=set)
+    streamed_index_to_id: Dict[Any, str] = field(default_factory=dict)
+
     def start_tool_call(self, tool_call_id: str) -> None:
         """Start a new tool call."""
         self.active_tool_call_ids.add(tool_call_id)
@@ -292,7 +303,6 @@ async def async_stream_response(
 NOT_WIRE_VISIBLE = frozenset({
     _SE.REQUEST_START,
     _SE.HEADERS_RECEIVED,
-    _SE.FIRST_TOKEN,
     _SE.LAST_TOKEN,
     _SE.STREAM_END,
 })
@@ -321,7 +331,12 @@ def stream_event_to_agui_events(
     """Convert a PraisonAI StreamEvent into zero or more AG-UI events."""
     from praisonaiagents.streaming.events import StreamEventType
 
-    if event.type == StreamEventType.DELTA_TEXT and event.content:
+    # Reasoning deltas are not answer text (no AG-UI text message for them).
+    if event.type == StreamEventType.DELTA_TEXT and getattr(event, "is_reasoning", False):
+        return []
+    # The SDK sends the opening answer chunk as FIRST_TOKEN and only later chunks
+    # as DELTA_TEXT, so FIRST_TOKEN content is answer text too.
+    if event.type in (StreamEventType.DELTA_TEXT, StreamEventType.FIRST_TOKEN) and event.content:
         if not buffer.current_text_message_id:
             buffer.start_text_message()
             return [
@@ -341,6 +356,11 @@ def stream_event_to_agui_events(
         tool_name = event.tool_call.get("name", "tool")
         arguments = event.tool_call.get("arguments", {})
         args_str = json.dumps(arguments) if isinstance(arguments, dict) else str(arguments)
+        if tool_call_id in buffer.streamed_tool_call_ids:
+            # Already opened and given its arguments from the streamed deltas;
+            # replaying them would duplicate the arguments on the client.
+            buffer.start_tool_call(tool_call_id)
+            return [ToolCallEndEvent(tool_call_id=tool_call_id)]
         parent_id = buffer.get_parent_message_id_for_tool_call() or message_id
         buffer.start_tool_call(tool_call_id)
         return list(create_tool_call_events(tool_call_id, tool_name, args_str, parent_id))
@@ -368,14 +388,31 @@ def stream_event_to_agui_events(
 
     if event.type == StreamEventType.DELTA_TOOL_CALL:
         tool_call = event.tool_call or {}
-        tool_call_id = buffer.resolve_tool_call_id(tool_call.get("id"))
-        delta = tool_call.get("arguments", event.content or "")
-        return [
-            ToolCallArgsEvent(
+        index = tool_call.get("index")
+        provided_id = tool_call.get("id") or buffer.streamed_index_to_id.get(index)
+        tool_call_id = buffer.resolve_tool_call_id(provided_id)
+        out: List[BaseEvent] = []
+        if provided_id and tool_call_id not in buffer.streamed_tool_call_ids \
+                and tool_call_id not in buffer.active_tool_call_ids:
+            # First delta of a streamed call: open it before any arguments.
+            out.append(ToolCallStartEvent(
+                tool_call_id=tool_call_id,
+                tool_call_name=tool_call.get("name") or "tool",
+                parent_message_id=buffer.get_parent_message_id_for_tool_call() or message_id,
+            ))
+            buffer.streamed_tool_call_ids.add(tool_call_id)
+            if index is not None:
+                buffer.streamed_index_to_id[index] = tool_call_id
+        buffer.current_tool_call_id = tool_call_id
+        delta = tool_call.get("arguments")
+        if delta is None:
+            delta = event.content or ""
+        if delta:
+            out.append(ToolCallArgsEvent(
                 tool_call_id=tool_call_id,
                 delta=delta if isinstance(delta, str) else json.dumps(delta),
-            )
-        ]
+            ))
+        return out
 
     if event.type == StreamEventType.TOOL_CALL_END:
         tool_call = event.tool_call or {}
@@ -466,20 +503,29 @@ async def async_stream_agent_response(
     text_started = False
     text_ended = False
     original_emitter = getattr(agent, "stream_emitter", None)
+    owner = object()
 
     def on_stream_event(event: Any) -> None:
+        # Drop events emitted by another concurrent run on the same agent.
+        if _RUN_OWNER.get() is not owner:
+            return
         loop.call_soon_threadsafe(queue.put_nowait, ("stream", event))
 
     if original_emitter is not None:
         original_emitter.add_callback(on_stream_event)
 
     async def run_chat() -> Any:
+        # Tasks run in a copy of the creator's context, so this set is local
+        # to the chat task and never leaks into the caller's context.
+        _RUN_OWNER.set(owner)
         try:
             if hasattr(agent, "achat"):
                 return await agent.achat(user_input, stream=True)
             if hasattr(agent, "chat"):
+                # run_in_executor does not copy ContextVars; carry the owner.
+                ctx = contextvars.copy_context()
                 return await loop.run_in_executor(
-                    None, lambda: agent.chat(user_input, stream=True)
+                    None, lambda: ctx.run(agent.chat, user_input, stream=True)
                 )
             raise ValueError("Agent must have 'chat' or 'achat' method")
         finally:

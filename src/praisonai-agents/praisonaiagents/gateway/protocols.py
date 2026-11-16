@@ -3841,12 +3841,19 @@ class ConversationRequestProtocol(Protocol):
 # import lives in core.
 # ---------------------------------------------------------------------------
 
-GatewayRequestKind = Literal["approval", "choice", "input"]
+GatewayRequestKind = Literal["approval", "choice", "input", "secret"]
 """Closed set of server→client interactive request kinds.
 
 * ``approval`` — allow/deny; the reply ``value`` is ``"allow"`` or ``"deny"``.
 * ``choice`` — select one of ``options``; the reply ``value`` is the option.
 * ``input`` — free text; the reply ``value`` is the entered text.
+* ``secret`` — a credential (password, API key, one-time code) captured
+  mid-turn (Issue #6223). Clients MUST render a masked input. Isolation
+  contract: the reply ``value`` is returned *only* to the caller of
+  :meth:`GatewayRequestChannelProtocol.request`; implementations MUST NOT log,
+  journal, echo, or persist it, and the caller (a tool/callback) MUST NOT
+  return it to the model or append it to history. A tool obtains one via
+  ``get_request_channel().request(GatewayServerRequest(kind="secret", ...))``.
 """
 
 
@@ -3893,11 +3900,13 @@ class GatewayServerReply:
     Attributes:
         request_id: The id of the request being answered.
         value: ``"allow"``/``"deny"`` for approval, the chosen option for
-            choice, or the entered text for input.
+            choice, the entered text for input, or the credential for secret.
+            Excluded from ``repr`` so a logged/traced reply never leaks a
+            secret.
     """
 
     request_id: str
-    value: str
+    value: str = field(repr=False)
 
     def as_dict(self) -> Dict[str, Any]:
         """Convert to a serializable dictionary."""

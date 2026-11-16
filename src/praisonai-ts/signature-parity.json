@@ -1185,7 +1185,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/agent.py:628",
+        "location": "src/praisonai-agents/praisonaiagents/agent/agent.py:632",
         "resolved_class": "Agent"
       },
       "ts_only": [
@@ -1797,7 +1797,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3470",
+        "location": "src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3784",
         "resolved_class": "ChatMixin"
       },
       "ts_only": [
@@ -1876,7 +1876,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:799",
+        "location": "src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:815",
         "resolved_class": "ExecutionMixin"
       },
       "ts_only": [
@@ -2852,7 +2852,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2591",
+        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2664",
         "resolved_class": "AgentTeam"
       },
       "ts_only": [
@@ -3233,7 +3233,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/escalation/pipeline.py:44",
+        "location": "src/praisonai-agents/praisonaiagents/escalation/pipeline.py:45",
         "resolved_class": "EscalationPipeline"
       },
       "ts_only": [
@@ -3329,7 +3329,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/knowledge/indexing.py:326",
+        "location": "src/praisonai-agents/praisonaiagents/knowledge/indexing.py:328",
         "resolved_class": "FileTracker"
       },
       "ts_only": [],
@@ -3766,7 +3766,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/handoff.py:358",
+        "location": "src/praisonai-agents/praisonaiagents/agent/handoff.py:391",
         "resolved_class": "Handoff"
       },
       "ts_only": [
@@ -4659,7 +4659,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:673",
+        "location": "src/praisonai-agents/praisonaiagents/llm/llm.py:679",
         "resolved_class": "LLM"
       },
       "ts_only": [
@@ -5142,7 +5142,7 @@
       ],
       "ts_only_required": [],
       "typescript": {
-        "ctor_location": "src/praisonai-ts/src/session/session.ts:132",
+        "ctor_location": "src/praisonai-ts/src/session/session.ts:133",
         "location": "src/praisonai-ts/src/session/session.ts:29",
         "options_parameters": [
           "config"

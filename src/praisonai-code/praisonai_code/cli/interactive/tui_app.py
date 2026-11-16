@@ -148,8 +148,6 @@ class PraisonTUI:
         self.messages: List[Message] = []
         self._running = False
         self._agent = None
-        self._total_tokens = 0
-        self._total_cost = 0.0
         self._pending_context: List[str] = []  # `!!cmd` output for next turn
         
         # Get terminal size
@@ -282,9 +280,12 @@ Available Commands:
             return True
         
         elif cmd == "cost":
+            from praisonai_code.cli.features.cost_tracker import collected_usage_line
+
+            tokens, cost_text = collected_usage_line(self.config.model)
             self.messages.append(Message(
                 role="system",
-                content=f"Tokens: {self._total_tokens} | Cost: ${self._total_cost:.4f}"
+                content=f"Tokens: {tokens} | Cost: {cost_text}"
             ))
             return True
         

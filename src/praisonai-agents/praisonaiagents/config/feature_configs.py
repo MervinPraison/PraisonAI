@@ -282,9 +282,11 @@ class MemoryConfig:
     history: bool = False
     history_limit: int = 10
 
-    # Turn-start long-term memory retrieval. Disabled by default so existing
-    # agents incur no backend query or prompt changes.
-    prefetch: bool = False
+    # Turn-start long-term memory retrieval. None = auto: on for query-based
+    # backends (sqlite/chroma/mem0), whose system-prompt context is empty
+    # without a query; off for FileMemory, which injects recent items itself.
+    # True/False force it on/off.
+    prefetch: Optional[bool] = None
     prefetch_limit: int = 5
     prefetch_token_budget: int = 512
     
@@ -590,8 +592,11 @@ class GuardrailConfig:
         # With validator function
         Agent(guardrails=my_validator_fn)
         
-        # With string preset
-        Agent(guardrails="strict")  # Uses strict preset
+        # With a string: an LLM-validation prompt (not a preset name)
+        Agent(guardrails="Ensure the response is polite")
+
+        # With a preset (sets max_retries only) plus a validator
+        Agent(guardrails=["strict", {"validator": my_validator_fn}])
 
         # For tool policy enforcement, use the dedicated `policy` param instead:
         Agent(policy=PolicyEngine(...))  # policy strings on guardrails are NOT enforced
@@ -600,7 +605,7 @@ class GuardrailConfig:
         Agent(guardrails=GuardrailConfig(
             validator=my_validator_fn,
             max_retries=3,
-            on_fail="retry",
+            on_fail="retry",  # only "retry" is implemented
         ))
         
         # With LLM-based validation
@@ -919,7 +924,7 @@ class ExecutionConfig:
     retry_backoff_factor: float = 2.0
     retry_jitter: float = 0.1  # fraction of computed delay
     
-    # Tool call limits (loop protection)
+    # Tool-call budget; see resolved_max_tool_calls for provider and resume limits.
     max_tool_calls_per_turn: int = 10
     
     # Code execution (consolidated from allow_code_execution + code_execution_mode)
@@ -1067,13 +1072,14 @@ class ExecutionConfig:
         return self.max_iter
 
     def resolved_max_tool_calls(self) -> int:
-        """Per-turn tool-call guardrail (max parallel tool calls in one response).
+        """Return the configured tool-call budget.
 
-        This is intentionally *independent* of ``max_steps``: ``max_steps``
-        bounds outer-loop iterations (one LLM round-trip each), whereas this
-        caps how many tool calls may fire within a single LLM response. Coupling
-        them would let a single parallel-tool response exhaust the step budget
-        (e.g. ``max_steps=5`` truncating after one round of 5 parallel calls).
+        LiteLLM tool loops count calls across model responses, not just calls
+        in one parallel batch. Their counter starts fresh on durable resume,
+        so an interrupted and resumed turn may exceed the configured budget
+        in total. The native OpenAI tool loop does not enforce this budget.
+        ``max_steps`` separately bounds loop iterations rather than tool calls,
+        since one model response can request multiple tools.
         """
         return self.max_tool_calls_per_turn
 

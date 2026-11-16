@@ -8,6 +8,7 @@ and status inspection for long-running agent tasks.
 import threading
 import time
 import uuid
+from weakref import WeakValueDictionary
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable
 from dataclasses import dataclass, field
@@ -171,6 +172,9 @@ class BackgroundJobManager:
         self._store = store
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._jobs: Dict[str, JobInfo] = {}
+        # Keep generation identity while callbacks hold jobs, without retaining
+        # every completed job after cleanup.
+        self._latest_jobs = WeakValueDictionary()
         self._futures: Dict[str, Future] = {}
         self._lock = threading.Lock()
         self._last_gc = time.time()
@@ -187,8 +191,7 @@ class BackgroundJobManager:
         # Check-and-write under the lock: a finished job whose id was reused
         # must not overwrite the newer job's persisted record.
         with self._lock:
-            current = self._jobs.get(job.job_id)
-            if current is not None and current is not job:
+            if self._latest_jobs.get(job.job_id) is not job:
                 return
             try:
                 self._store.upsert(job)
@@ -269,6 +272,7 @@ class BackgroundJobManager:
             # Publish job and future together so a concurrent cancel_job never
             # sees the new job paired with the old future.
             self._jobs[job_id] = job_info
+            self._latest_jobs[job_id] = job_info
             self._futures[job_id] = done
         # Persist the PENDING record before it starts so a crash between spawn
         # and first run still leaves a recoverable trace (reconciled as LOST).
@@ -417,6 +421,19 @@ class BackgroundJobManager:
         if job is None:
             raise KeyError(f"Job {job_id} not found")
         return job
+
+    def _get_job_snapshot(self, job_id: str):
+        """Return the job and its matching future from one locked lookup."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            future = self._futures.get(job_id)
+        if job is None:
+            job = self._store.get(job_id) if self._store else None
+            if job is None:
+                raise KeyError(f"Job {job_id} not found")
+        if future is None and job.status not in self._EVICTABLE_STATES:
+            raise KeyError(f"Job {job_id} not found")
+        return job, future
     
     def get_result(self, job_id: str, timeout: Optional[float] = None) -> Any:
         """
@@ -452,8 +469,12 @@ class BackgroundJobManager:
         
         try:
             return future.result(timeout=timeout)
-        except FuturesTimeoutError:
-            # Distinct from builtin TimeoutError on Python 3.10.
+        except FuturesTimeoutError as exc:
+            # On Python 3.11+ this is also the task's builtin TimeoutError.
+            # Compare the exception object: the task may finish after the wait
+            # timed out but before we inspect the future.
+            if future.done() and not future.cancelled() and future.exception() is exc:
+                raise
             raise TimeoutError(f"Job {job_id} did not complete within {timeout} seconds")
     
     def cancel_job(self, job_id: str) -> bool:
@@ -560,6 +581,7 @@ class BackgroundJobManager:
 
             with self._lock:
                 self._jobs[job.job_id] = job
+                self._latest_jobs[job.job_id] = job
             counts["rehydrated"] += 1
 
             if orphaned:
