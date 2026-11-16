@@ -84,6 +84,12 @@ def _current_turn_loop_guard(agent):
         return slot[1]
 
 
+def _is_fatal_model_error(exc):
+    """Invalid model / bad request: re-raise instead of returning ``None`` (#5956)."""
+    from ..llm.error_classifier import _is_fatal_model_error as _fatal
+    return _fatal(exc)
+
+
 def _reset_loop_guard_for_turn(agent):
     """Start fresh per-turn loop-guard limits. Inside a chat turn this drops the turn's
     own guard; outside one it resets the agent-level guard. Never force-creates a guard."""
@@ -3147,8 +3153,8 @@ Your Role: {self.role}"""
             except Exception as hook_error:
                 logging.debug(f"Error in on_error hook: {hook_error}")
         
-        # Raise the enriched error
-        raise error
+        # Raise the enriched error, keeping the provider error as its cause
+        raise error from exc
 
     def _native_reasoning_kwargs(self, model=None):
         """Provider-native reasoning effort for the direct OpenAI client path.
@@ -4341,12 +4347,16 @@ Your Role: {self.role}"""
                     # Rollback chat history if LLM call fails
                     self._rollback_chat_history_to(chat_history_length)
                     _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
+                    if _is_fatal_model_error(e):
+                        raise
                     return None
             except (ToolExecutionError, BudgetExceededError):
                 raise
             except Exception as e:
                 self._last_stop_reason = "error"
                 _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
+                if _is_fatal_model_error(e):
+                    raise
                 return None
             finally:
                 self._end_turn_tracking(_turn_token)
@@ -4652,6 +4662,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 _get_display_functions()['display_error'](f"Unexpected error in chat: {e}", console=self.console)
                 # Rollback chat history
                 self._rollback_chat_history_to(chat_history_length)
+                if _is_fatal_model_error(e):
+                    raise
                 return None
             finally:
                 # End per-turn tracking after any rollback has run (rollback
@@ -5080,6 +5092,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
                         logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
+                    if _is_fatal_model_error(e):
+                        raise
                     return None
 
             # For OpenAI client
@@ -5570,6 +5584,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # a dangling, unanswered user message (mirrors the sync path
                     # and achat()'s own guardrail handler).
                     self._rollback_chat_history_to(chat_history_length)
+                    if _is_fatal_model_error(e):
+                        raise
                     return None
         except ToolExecutionError:
             raise
@@ -5585,6 +5601,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Rollback chat history so a failed async turn does not leave a
             # dangling, unanswered user message (mirrors the sync path).
             self._rollback_chat_history_to(chat_history_length)
+            if _is_fatal_model_error(e):
+                raise
             return None
         finally:
             # Unregister this turn's ownership list from the process-wide

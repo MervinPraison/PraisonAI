@@ -1558,7 +1558,8 @@ class OpenAIClient:
             
         except Exception as e:
             status = raw.get("status") if isinstance(raw, dict) else getattr(raw, "status", None)
-            if status == "failed":
+            from .error_classifier import _is_fatal_model_error
+            if status == "failed" or _is_fatal_model_error(e):
                 raise
             self.logger.error(f"Error in stream processing: {e}")
             return None
@@ -1841,7 +1842,8 @@ class OpenAIClient:
             
         except Exception as e:
             status = raw.get("status") if isinstance(raw, dict) else getattr(raw, "status", None)
-            if status == "failed":
+            from .error_classifier import _is_fatal_model_error
+            if status == "failed" or _is_fatal_model_error(e):
                 raise
             self.logger.error(f"Error in async stream processing: {e}")
             return None
