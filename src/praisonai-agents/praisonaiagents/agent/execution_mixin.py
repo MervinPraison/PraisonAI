@@ -1643,6 +1643,8 @@ Write the complete compiled report:"""
         tool_timeout = getattr(self, '_tool_timeout', None)
         worker_timeout = (tool_timeout + 1.0) if tool_timeout and tool_timeout > 0 else None
 
+        _handled = []  # what the innermost handler returned, to spot a middleware rewrite
+
         def _final_handler(req):
             import concurrent.futures
             future = asyncio.run_coroutine_threadsafe(
@@ -1673,6 +1675,7 @@ Write the complete compiled report:"""
                     "timeout": True,
                     "_praison_retryable": False,
                 }
+            _handled.append(result)
             return ToolResponse(tool_name=req.tool_name, result=result)
 
         def _run_chain():
@@ -1683,7 +1686,14 @@ Write the complete compiled report:"""
         # still see session identity, cancel state and the handoff chain.
         import contextvars
         response = await loop.run_in_executor(None, contextvars.copy_context().run, _run_chain)
-        return response.result if isinstance(response, ToolResponse) else response
+        final = response.result if isinstance(response, ToolResponse) else response
+        # On the sync path middleware wraps the swap, so it sees (and may redact)
+        # the compact view. Here it sees the full result: if it replaced that
+        # result, its replacement wins over the view.
+        holder = _model_facing_holder.get()
+        if holder and not (_handled and final is _handled[-1]):
+            holder.clear()
+        return final
 
     async def _execute_tool_async_with_retry(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
         """Async tool execution with retry policy, framed by tool trace events.

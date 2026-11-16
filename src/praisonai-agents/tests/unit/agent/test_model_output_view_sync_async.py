@@ -141,3 +141,18 @@ def test_after_tool_block_wins_over_the_compact_view(stub, mode):
     sent = _sent()
     assert "secret detected" in sent and "COMPACT" not in sent and "FULL-LOG-LINE" not in sent
     assert seen and "FULL-LOG-LINE" in seen[0]  # the hook judged the full result
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_middleware_rewrite_is_not_overridden_by_the_view(stub, mode):
+    from praisonaiagents.hooks import wrap_tool_call
+
+    @wrap_tool_call
+    def redact(request, call_next):
+        call_next(request)
+        return "REDACTED"
+
+    agent = Agent(name="m", instructions="hi", llm="gpt-4o-mini", tools=[read_logs], output="silent", hooks=[redact])
+    assert (agent.chat("go") if mode == "chat" else asyncio.run(agent.achat("go"))) == "done"
+    sent = _sent()
+    assert "REDACTED" in sent and "COMPACT" not in sent and "FULL-LOG-LINE" not in sent
