@@ -295,7 +295,8 @@ def register_cli_tools() -> None:
         try:
             from praisonaiagents.session import get_default_session_store
             store = get_default_session_store()
-            store.delete_session(session_id)
+            if not store.delete_session(session_id):
+                return f"Error: Failed to delete session: {session_id}"
             return f"Session deleted: {session_id}"
         except ImportError:
             return "Error: Session management not available"
