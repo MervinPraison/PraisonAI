@@ -610,11 +610,13 @@ class MemoryMixin:
             # Set agent info first: this locked read-modify-write returns False
             # when the session cannot be read, and on success caches it, so the
             # history read below cannot mistake a transient I/O error for [].
-            info_saved = self._session_store.set_agent_info(
+            # Optional: custom stores may not implement it (not in the protocol).
+            set_info = getattr(self._session_store, "set_agent_info", None)
+            info_saved = set_info(
                 self._session_id,
                 agent_name=self.name,
                 user_id=self.user_id,
-            )
+            ) if callable(set_info) else None
 
             # Restore chat history from previous session. Prefer the compacted
             # working history (summary + retained tail) when a compaction

@@ -181,3 +181,29 @@ def test_resume_preserves_working_history_and_empty_sessions(tmp_path, store_typ
     conn = getattr(store, '_conn', None)
     if conn is not None:
         conn.close()
+
+
+def test_custom_store_without_set_agent_info_still_restores_history():
+    """A store that only implements the protocol keeps resuming history."""
+    from praisonaiagents import Agent
+
+    class MinimalStore:
+        def get_chat_history(self, session_id, max_messages=None):
+            return [{"role": "user", "content": "earlier"}, {"role": "assistant", "content": "reply"}]
+
+        def add_message(self, *a, **k):
+            return True
+
+        def add_user_message(self, *a, **k):
+            return True
+
+        def add_assistant_message(self, *a, **k):
+            return True
+
+    agent = Agent(name="t", instructions="x", llm="gpt-4o-mini")
+    agent._session_store = MinimalStore()
+    agent._session_id = "s1"
+    agent._session_store_initialized = False
+    agent._init_session_store()
+    assert [m["content"] for m in agent.chat_history][:2] == ["earlier", "reply"]
+
