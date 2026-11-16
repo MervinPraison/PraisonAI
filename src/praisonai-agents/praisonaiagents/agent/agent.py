@@ -4819,19 +4819,8 @@ Summary:"""
                 "Create agent with autonomy=True or autonomy={...}"
             )
         
-        # Take initial snapshot before autonomous execution starts
-        # NOTE: Snapshot tracking is disabled by default for performance (G12 fix)
-        # FileSnapshot.track() walks entire project and is too slow for large codebases
-        # Enable with AutonomyConfig(snapshot=True) / autonomy={"snapshot": True}
-        if self._file_snapshot is not None and self.autonomy_config.get("snapshot", False):
-            try:
-                snap_info = self._file_snapshot.track(message="pre-autonomous")
-                with self._snapshot_lock:
-                    self._snapshot_stack.append(snap_info.commit_hash)
-                    self._redo_stack.clear()
-            except Exception as e:
-                logging.debug(f"Pre-autonomous snapshot failed: {e}")
-        
+        self._take_pre_autonomous_snapshot()
+
         start_time = time_module.time()
         started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         iterations = 0
@@ -5275,6 +5264,24 @@ Summary:"""
                 started_at=started_at,
             )
     
+    def _take_pre_autonomous_snapshot(self) -> None:
+        """Take the pre-run file snapshot for an autonomous run, if enabled.
+
+        Shared by run_autonomous and run_autonomous_async (the async path runs
+        it in a worker thread: track() walks the project).
+        NOTE: Snapshot tracking is disabled by default for performance (G12 fix)
+        FileSnapshot.track() walks entire project and is too slow for large codebases
+        Enable with AutonomyConfig(snapshot=True) / autonomy={"snapshot": True}
+        """
+        if self._file_snapshot is not None and self.autonomy_config.get("snapshot", False):
+            try:
+                snap_info = self._file_snapshot.track(message="pre-autonomous")
+                with self._snapshot_lock:
+                    self._snapshot_stack.append(snap_info.commit_hash)
+                    self._redo_stack.clear()
+            except Exception as e:
+                logging.debug(f"Pre-autonomous snapshot failed: {e}")
+
     async def run_autonomous_async(
         self,
         prompt: str,
@@ -5334,6 +5341,8 @@ Summary:"""
                 "Create agent with autonomy=True or autonomy={...}"
             )
         
+        await asyncio.to_thread(self._take_pre_autonomous_snapshot)
+
         start_time = time_module.time()
         started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         iterations = 0
@@ -5369,10 +5378,19 @@ Summary:"""
         # Clear any stale loop-warning latch/nudge from a previous run.
         self._reset_loop_warnings()
         
+        # Autonomy callbacks for CLI/UI visibility, as run_autonomous emits them.
+        from ..main import execute_callback
+
+        async def _emit_complete(reason):
+            await execute_callback('autonomy_complete', completion_reason=reason,
+                                   iterations=iterations, duration_seconds=time_module.time() - start_time)
+
         try:
             # Execute the autonomous loop
             while iterations < effective_max_iter:
                 iterations += 1
+                await execute_callback('autonomy_iteration', iteration=iterations,
+                                       max_iterations=effective_max_iter, stage=stage)
                 
                 # Check timeout
                 _timed_out = _timeout_result(
@@ -5441,6 +5459,7 @@ Summary:"""
                     response_str, spend_baseline
                 )
                 if _budget_result is not None:
+                    await _emit_complete(_budget_result.completion_reason)
                     return _budget_result
                 
                 # Record response text for content streaming loop detection
@@ -5467,6 +5486,7 @@ Summary:"""
                 # of loop for correct detection timing).
                 if self._is_doom_loop():
                     recovery = self._get_doom_recovery()
+                    await execute_callback('autonomy_doom_loop', iteration=iterations, recovery_action=recovery)
                     obs = getattr(self, '_observability_hooks', None)
                     if obs is not None:
                         from ..escalation.observability import EventType as _EvtType
@@ -5587,6 +5607,7 @@ Summary:"""
                 # the task naturally (model stopped calling tools = done).
                 # ─────────────────────────────────────────────────────────────
                 if not effective_promise and self._autonomy_turn_tool_count > 0 and len(response_str) > 100:
+                    await _emit_complete("tool_completion")
                     return AutonomyResult(
                         success=True,
                         output=response_str,
@@ -5606,6 +5627,7 @@ Summary:"""
                     idx = stage_order.index(stage) if stage in stage_order else 0
                     if idx < len(stage_order) - 1:
                         stage = stage_order[idx + 1]
+                        await execute_callback('autonomy_stage_change', from_stage=stage_order[idx], to_stage=stage)
                         if obs is not None:
                             obs.emit(_EvtType.STAGE_ESCALATE, {"from": stage_order[idx], "to": stage})
                 
@@ -5614,6 +5636,7 @@ Summary:"""
                 if effective_promise:
                     promise_tag = f"<promise>{effective_promise}</promise>"
                     if promise_tag in response_str:
+                        await _emit_complete("promise")
                         return AutonomyResult(
                             success=True,
                             output=response_str,
@@ -5627,6 +5650,7 @@ Summary:"""
                 
                 # Check for keyword-based completion signals (word-boundary, G-COMPLETION-1 fix)
                 if not effective_promise and self._is_completion_signal(response_str):
+                    await _emit_complete("goal")
                     return AutonomyResult(
                         success=True,
                         output=response_str,
@@ -5640,6 +5664,7 @@ Summary:"""
                 
                 # For DIRECT stage, complete after first response
                 if not effective_promise and stage == "direct":
+                    await _emit_complete("goal")
                     return AutonomyResult(
                         success=True,
                         output=response_str,
@@ -5664,6 +5689,7 @@ Summary:"""
                         and not self._doom_recovery_active):
                     self._consecutive_no_tool_turns += 1
                     if self._consecutive_no_tool_turns >= 2:
+                        await _emit_complete("no_tool_calls")
                         return AutonomyResult(
                             success=True,
                             output=response_str,
@@ -5684,6 +5710,7 @@ Summary:"""
             await asyncio.to_thread(self._auto_save_session)
             
             # Max iterations reached
+            await _emit_complete("max_iterations")
             return AutonomyResult(
                 success=False,
                 output="Max iterations reached",
