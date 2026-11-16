@@ -40,7 +40,8 @@ _SCRIPT = textwrap.dedent('''
         def log_message(self, *a): pass
     srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
-    os.environ["OPENAI_BASE_URL"] = "http://127.0.0.1:%d/v1" % srv.server_address[1]
+    # Point both base-URL variables the SDK reads at the stub (CI sets OPENAI_API_BASE).
+    os.environ["OPENAI_BASE_URL"] = os.environ["OPENAI_API_BASE"] = "http://127.0.0.1:%d/v1" % srv.server_address[1]
     from praisonaiagents import Agent
     def add(a: int, b: int) -> int:
         """Add two numbers."""
