@@ -452,6 +452,45 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             elif (web is None or isinstance(web, bool)) and (web or web_fetch):
                 agent_kwargs['web'] = WebConfig(search=bool(web), fetch=bool(web_fetch))
 
+    _EXECUTION_LIMIT_FIELDS = (
+        'max_execution_time', 'max_iter', 'max_rpm', 'max_retry_limit',
+    )
+
+    @staticmethod
+    def _translate_execution(details, agent_kwargs):
+        """Forward YAML execution limits to core via ``execution=``.
+
+        Core Agent takes max_execution_time/max_iter/max_rpm/max_retry_limit
+        only through ``ExecutionConfig``; as top-level YAML keys they were
+        silently dropped. Merge them over any ``execution`` value given
+        (mapping, preset name or config); unset fields keep core defaults.
+        """
+        execution = details.get('execution')
+        limits = {
+            k: details[k]
+            for k in PraisonAIAdapter._EXECUTION_LIMIT_FIELDS
+            if details.get(k) is not None
+        }
+        if not limits:
+            if execution is not None:
+                agent_kwargs['execution'] = execution
+            return
+
+        import dataclasses
+        from praisonaiagents.config.feature_configs import ExecutionConfig
+
+        if isinstance(execution, ExecutionConfig):
+            agent_kwargs['execution'] = dataclasses.replace(execution, **limits)
+            return
+        if isinstance(execution, dict):
+            base = dict(execution)
+        elif isinstance(execution, str):
+            from praisonaiagents.config.presets import EXECUTION_PRESETS
+            base = dict(EXECUTION_PRESETS.get(execution.lower(), {}))
+        else:
+            base = {}
+        agent_kwargs['execution'] = ExecutionConfig(**{**base, **limits})
+
     @staticmethod
     def _normalize_autonomy(value):
         """Translate a wrapper autonomy value into one core Agent accepts.
@@ -678,6 +717,7 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
             self._translate_tool_planning_web(
                 details, agent_kwargs, tools_dict, role_filled
             )
+            self._translate_execution(details, agent_kwargs)
 
             # Add approval config if present
             if agent_approval:
