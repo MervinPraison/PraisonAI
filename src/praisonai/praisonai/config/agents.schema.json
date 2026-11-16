@@ -186,6 +186,37 @@
           "description": "Maximum execution time",
           "title": "Max Execution Time"
         },
+        "max_retry_limit": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Maximum retries",
+          "title": "Max Retry Limit"
+        },
+        "execution": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Execution preset name or ExecutionConfig fields",
+          "title": "Execution"
+        },
         "verbose": {
           "anyOf": [
             {
@@ -889,6 +920,22 @@
           "minimum": 0,
           "title": "Max Delay",
           "type": "number"
+        },
+        "retry_on": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Error types to retry on",
+          "title": "Retry On"
         }
       },
       "title": "ToolRetryPolicy",
@@ -1384,11 +1431,15 @@
           "type": "string"
         },
         {
+          "additionalProperties": true,
+          "type": "object"
+        },
+        {
           "type": "null"
         }
       ],
       "default": null,
-      "description": "Default LLM",
+      "description": "Default LLM (string or dict with 'model' key)",
       "title": "Llm"
     },
     "models": {

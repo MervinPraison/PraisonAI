@@ -1342,8 +1342,24 @@ class BotSessionManager:
                         thread_id=thread_id,
                         message_id=message_id or None,
                     )
+                # Issue #6160: bind outbound effects to this turn's liveness.
+                # The run-control InterruptController is created fresh per run
+                # and set on /stop or supersede, so a stopped/superseded turn
+                # (or a retained handle to this messenger) is dropped
+                # fail-closed. A normally completed turn never sets it, so
+                # post-turn background deliveries keep working. No controller
+                # (run control off) -> unbound, today's behaviour.
+                from praisonaiagents.agent.interrupt import InterruptController
+
+                _ic = getattr(agent, "interrupt_controller", None)
                 messenger = BotOutboundMessenger(
-                    self._delivery_router, origin=origin_source
+                    self._delivery_router,
+                    origin=origin_source,
+                    liveness=(
+                        (lambda: not _ic.is_set())
+                        if isinstance(_ic, InterruptController)
+                        else None
+                    ),
                 )
                 messenger_token = _register_messenger(messenger)
             except Exception as e:  # pragma: no cover — defensive

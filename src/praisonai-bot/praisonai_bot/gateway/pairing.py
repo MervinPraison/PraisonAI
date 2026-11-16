@@ -19,6 +19,7 @@ import tempfile
 import time
 import threading
 from dataclasses import asdict, dataclass, field
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -307,7 +308,19 @@ class PairingStore:
             lockout_seconds=lockout_cooldown,
         )
 
-        self._load()
+        with self._transaction():
+            pass
+
+    @contextmanager
+    def _transaction(self):
+        """Refresh and serialize a complete operation across store instances/processes."""
+        from praisonaiagents.storage.base import FileLock
+
+        with self._lock:
+            Path(self._dir).mkdir(parents=True, exist_ok=True)
+            with FileLock(Path(self._path)):
+                self._load()
+                yield
 
     # ── Code lifecycle ────────────────────────────────────────────────
 
@@ -320,8 +333,17 @@ class PairingStore:
         code = "".join(secrets.choice(_CODE_ALPHABET) for _ in range(_CODE_LENGTH))
         sig = self._sign(code)
 
-        with self._lock:
+        with self._transaction():
             self._prune_expired()
+            if channel_id:
+                for existing, info in self._pending.items():
+                    if info.get("channel_id") == channel_id and info.get("channel_type") == channel_type:
+                        return existing
+                # Another process knows only the salted hash: replace that
+                # request in-place, never consume another pending slot.
+                for chash, info in list(self._pending_by_hash.items()):
+                    if info.get("channel_id") == channel_id and info.get("channel_type") == channel_type:
+                        self._pending_by_hash.pop(chash)
             # Count *all* logical pending entries, including ones rehydrated
             # from disk into ``_pending_by_hash`` after a restart. ``_pending``
             # alone under-counts cross-process state, letting repeated restarts
@@ -349,88 +371,69 @@ class PairingStore:
         channel_type: str,
         label: str = "",
     ) -> bool:
-        """Verify a pairing code and, if valid, authorise the channel.
+        """Consume a valid code only after matching platform and requester.
 
-        Returns ``True`` on success, ``False`` on invalid / expired code.
-        The code is consumed (one-time use) regardless of outcome.
-        If ``channel_id`` is omitted, a channel-bound pending code may provide it.
+        Invalid or mismatched requests count towards lockout but do not consume
+        a pending request; successful pairing clears the failure count.
         """
-        # Store-level brute-force ceiling: refuse verification for a channel
-        # type that has exceeded its failed-attempt budget, regardless of which
-        # approval surface (HTTP, in-chat, CLI) is calling. Checking the lockout
-        # here does not itself count as an attempt — only failures are counted.
         if self._locked_out(channel_type):
-            logger.warning(
-                "Pairing verification locked out for channel_type=%s", channel_type
-            )
+            logger.warning("Pairing verification locked out for channel type %s", channel_type)
             return False
 
-        with self._lock:
+        with self._transaction():
             self._prune_expired()
-            pending = self._pending.pop(code, None)
-            if pending is None:
-                # Cross-process fallback: the raw code was never persisted, so
-                # match against the salted hash rehydrated from disk.
-                pending = self._pending_by_hash.pop(self._hash(code), None)
-            if pending is not None:
-                self._pending_by_hash.pop(self._hash(code), None)
-                self._save()  # NEW — persist the pop
+            chash = self._hash(code)
+            pending = self._pending_by_hash.get(chash)
+            if pending is None or not hmac.compare_digest(pending["signature"], self._sign(code)):
+                self._record_failure(channel_type)
+                return False
+            if pending.get("channel_type") != channel_type:
+                self._record_failure(channel_type)
+                return False
+            bound_id = pending.get("channel_id")
+            if bound_id and channel_id and bound_id != channel_id:
+                self._record_failure(channel_type)
+                return False
+            resolved_id = channel_id or bound_id
+            if not resolved_id:
+                return False
 
-        if pending is None:
-            self._record_failure(channel_type)
-            return False
-
-        # Timing-safe comparison
-        expected_sig = self._sign(code)
-        if not hmac.compare_digest(pending["signature"], expected_sig):
-            self._record_failure(channel_type)
-            return False
-
-        # Validate the channel binding *before* clearing the failure counter.
-        # A valid HMAC presented against the wrong ``channel_id`` still fails
-        # to pair — clearing the lockout here would hand subsequent guesses a
-        # fresh attempt budget after an unsuccessful pairing.
-        pending_channel_id = pending.get("channel_id")
-        if pending_channel_id and channel_id and channel_id != pending_channel_id:
-            return False
-
-        resolved_channel_id = channel_id or pending_channel_id
-        if not resolved_channel_id:
-            return False
-
-        # Binding is valid — this was a legitimate, successful verification, so
-        # the brute-force counter for this channel_type is cleared.
-        self._clear_failures(channel_type)
-
-        paired = PairedChannel(
-            channel_id=resolved_channel_id,
-            channel_type=channel_type,
-            paired_at=time.time(),
-            label=label,
-        )
-
-        with self._lock:
-            self._paired[(resolved_channel_id, channel_type)] = paired
+            self._pending.pop(code, None)
+            self._pending_by_hash.pop(chash)
+            self._paired[(resolved_id, channel_type)] = PairedChannel(
+                channel_id=resolved_id, channel_type=channel_type,
+                paired_at=time.time(), label=label,
+            )
             self._save()
-
-        logger.info("Channel paired: %s (%s)", resolved_channel_id, channel_type)
+            self._clear_failures(channel_type)
+        logger.info("Channel paired: %s (%s)", resolved_id, channel_type)
         return True
+
+    def reject(self, code: str) -> bool:
+        """Consume a pending request without authorizing any identity."""
+        with self._transaction():
+            self._prune_expired()
+            removed = self._pending_by_hash.pop(self._hash(code), None)
+            self._pending.pop(code, None)
+            if removed is not None:
+                self._save()
+            return removed is not None
 
     # ── Query API ─────────────────────────────────────────────────────
 
     def is_paired(self, channel_id: str, channel_type: str) -> bool:
         """Check if a channel is authorised."""
-        with self._lock:
+        with self._transaction():
             return (channel_id, channel_type) in self._paired
 
     def list_paired(self) -> List[PairedChannel]:
         """List all authorised channels."""
-        with self._lock:
+        with self._transaction():
             return list(self._paired.values())
 
     def revoke(self, channel_id: str, channel_type: str) -> bool:
         """Revoke a paired channel.  Returns ``True`` if it existed."""
-        with self._lock:
+        with self._transaction():
             removed = self._paired.pop((channel_id, channel_type), None)
             if removed:
                 self._save()
@@ -438,28 +441,8 @@ class PairingStore:
             return removed is not None
 
     def approve(self, channel_type: str, code: str, user_id: str = "", user_name: str = "") -> bool:
-        """Convenience method for approving a pairing code.
-        
-        Args:
-            channel_type: Channel type (e.g., "telegram", "slack")
-            code: Pairing code to verify
-            user_id: User ID for the channel (optional, uses code if not provided)
-            user_name: Human-readable username (optional)
-            
-        Returns:
-            True if approval successful, False if code invalid/expired
-            
-        Note:
-            Current implementation uses pairing code as temporary channel_id when
-            no user_id is provided. This is a simplified approval flow where admin
-            approval immediately pairs the code. In a full implementation, approval
-            would mark the code as "approved" and actual pairing would happen when
-            the real user presents the code with their user_id.
-        """
-        # Use code as channel_id if user_id not provided (current simple implementation)
-        channel_id = user_id or code
-        label = user_name or f"User {channel_id}"
-        return self.verify_and_pair(code, channel_id, channel_type, label)
+        """Approve the bound requester, or an explicitly supplied legacy identity."""
+        return self.verify_and_pair(code, user_id or None, channel_type, user_name)
 
     def list_pending(self, channel_type: Optional[str] = None) -> List[Dict[str, any]]:
         """List pending pairing requests.
@@ -470,7 +453,7 @@ class PairingStore:
         Returns:
             List of pending requests with channel, code, user info, and age
         """
-        with self._lock:
+        with self._transaction():
             self._prune_expired()
             
             pending_list = []
@@ -492,8 +475,8 @@ class PairingStore:
                     "created_at": created_at,
                     # UI-friendly aliases (used by praisonai.ui._pairing banner)
                     "channel": ct,
-                    "user_id": code,
-                    "user_name": f"User {code}",
+                    "user_id": cid,
+                    "user_name": f"User {cid}" if cid else "pending",
                     "age_seconds": int(now - created_at),
                 })
 
@@ -573,10 +556,17 @@ class PairingStore:
     def _load(self) -> None:
         """Load paired channels from disk."""
         if not os.path.exists(self._path):
+            self._pending.clear()
+            self._pending_by_hash.clear()
+            self._paired.clear()
             return
         try:
             with open(self._path) as fh:
                 data = json.load(fh)
+            raw_pending = self._pending
+            self._pending = {}
+            self._pending_by_hash = {}
+            self._paired = {}
             for entry in data.get("paired", []):
                 ch = PairedChannel(**entry)
                 self._paired[(ch.channel_id, ch.channel_type)] = ch
@@ -591,6 +581,10 @@ class PairingStore:
                 elif "code_hash" in entry:  # hashed-at-rest store
                     chash = entry.pop("code_hash")
                     self._pending_by_hash[chash] = entry
+            for code in raw_pending:
+                info = self._pending_by_hash.get(self._hash(code))
+                if info is not None:
+                    self._pending[code] = info
             logger.debug(
                 "Loaded %d paired channels, %d pending codes",
                 len(self._paired),

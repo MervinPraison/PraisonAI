@@ -14,7 +14,6 @@ from typing import Any, Optional, Tuple, TYPE_CHECKING
 
 from praisonaiagents._logging import get_logger
 
-from .judge import judge_goal, _tail
 
 if TYPE_CHECKING:
     from .models import GoalCriteria, GoalState
@@ -167,6 +166,8 @@ class GoalLoopMixin:
                     return "budget_paused", reason
                 self._persist_goal_state()
                 return "continue", reason
+
+        from .judge import judge_goal, _tail  # lazy: goal loop is opt-in
 
         state.turns_used += 1
         verdict, reason = judge_goal(

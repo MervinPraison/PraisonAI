@@ -9,6 +9,7 @@ import os
 import json
 import time
 import asyncio
+import inspect
 from praisonaiagents._logging import get_logger
 import subprocess
 import threading
@@ -348,6 +349,11 @@ class HookRunner:
                     process.communicate(input=input_json),
                     timeout=timeout
                 )
+            except asyncio.CancelledError:
+                # Caller cancelled (e.g. a shutdown deadline): don't orphan the child.
+                if process.returncode is None:
+                    process.kill()
+                raise
             except asyncio.TimeoutError:
                 process.kill()
                 await process.wait()
@@ -474,6 +480,16 @@ class HookRunner:
                             lambda f, hid=hook.id: self._release_stuck(hid, f)
                         )
                     raise
+                # A sync-path callable (partial, lambda, callable object)
+                # may still return an awaitable; await it rather than
+                # letting it fall through to "unknown type -> allow".
+                if inspect.isawaitable(result):
+                    remaining = timeout - (time.time() - start_time)
+                    if remaining <= 0:
+                        if inspect.iscoroutine(result):
+                            result.close()
+                        raise asyncio.TimeoutError()
+                    result = await asyncio.wait_for(result, timeout=remaining)
             
             duration = (time.time() - start_time) * 1000
             

@@ -445,15 +445,23 @@ def create_subagent_tool(
                 handle["deliver"] = deliver
             return handle
 
-        return _run_subagent(
-            task=task,
-            agent_name=agent_name,
-            context=context,
-            tools=tools,
-            effective_llm=effective_llm,
-            effective_permission_mode=effective_permission_mode,
-            parent_depth=parent_depth,
-        )
+        # A foreground subagent is work the parent turn must not be superseded
+        # in the middle of: mark it on the parent's interrupt controller so the
+        # gateway's ``interrupt`` busy-mode queues new messages instead.
+        from praisonaiagents.agent.interrupt import protect_turn
+        from praisonaiagents.agent.tool_execution import _active_turn_cancel
+
+        parent = (_active_turn_cancel.get() or (None,))[0]
+        with protect_turn(getattr(parent, "interrupt_controller", None)):
+            return _run_subagent(
+                task=task,
+                agent_name=agent_name,
+                context=context,
+                tools=tools,
+                effective_llm=effective_llm,
+                effective_permission_mode=effective_permission_mode,
+                parent_depth=parent_depth,
+            )
 
     def subagent_result(job_id: str, wait: bool = False) -> Dict[str, Any]:
         """
@@ -477,32 +485,16 @@ def create_subagent_tool(
         job_manager = get_job_manager()
         try:
             if wait:
-                try:
-                    result = job_manager.get_result(job_id)
-                except KeyError:
-                    return {
-                        "success": False,
-                        "job_id": job_id,
-                        "error": f"Job '{job_id}' not found",
-                    }
-                except Exception as e:
-                    # The worker failed or was cancelled. Surface the same
-                    # clean failure shape the non-blocking path returns
-                    # instead of re-raising to the caller.
-                    return {
-                        "success": False,
-                        "job_id": job_id,
-                        "status": JobStatus.FAILED.value,
-                        "error": str(e),
-                    }
-                return {
-                    "success": True,
-                    "job_id": job_id,
-                    "status": JobStatus.COMPLETED.value,
-                    "result": result,
-                }
-
-            info = job_manager.get_job_info(job_id)
+                info, future = job_manager._get_job_snapshot(job_id)
+                if future is not None:
+                    try:
+                        future.result()
+                    except Exception:
+                        # The matching JobInfo below carries failure or
+                        # cancellation details for this exact future.
+                        pass
+            else:
+                info = job_manager.get_job_info(job_id)
         except KeyError:
             return {
                 "success": False,

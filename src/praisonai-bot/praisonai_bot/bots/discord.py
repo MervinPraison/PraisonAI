@@ -86,6 +86,7 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
     """
     
     _outbound_platform = "discord"
+    _mention_template = "<@{}>"
     
     def __init__(
         self,

@@ -363,8 +363,21 @@ class EditorOutput:
         label: str,
         args: Optional[Dict[str, Any]],
     ) -> str:
-        """Build human-readable action string from tool args."""
-        if not args:
+        """Build human-readable action string from tool args.
+
+        ``args`` may also be the raw JSON string a streamed tool call carries
+        (``DELTA_TOOL_CALL``), possibly still partial; it is parsed, and
+        anything that is not a mapping is ignored. A string used to pass the
+        ``key in args`` substring check and then raise TypeError on
+        ``args[key]``, aborting the caller's whole run.
+        """
+        if isinstance(args, (str, bytes)):
+            try:
+                import json
+                args = json.loads(args)
+            except (ValueError, TypeError):
+                args = None
+        if not args or not isinstance(args, dict):
             return f"{step_prefix}{icon} {label}"
 
         # Extract the most meaningful argument for context

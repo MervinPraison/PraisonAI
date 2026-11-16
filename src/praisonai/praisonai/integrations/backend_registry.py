@@ -119,6 +119,10 @@ class ManagedBackendRegistry(PluginRegistry):
         self._ensure_compute_registered()
         return super().list_names()
 
+    def list_all_names(self) -> list[str]:
+        self._ensure_compute_registered()
+        return super().list_all_names()
+
     def has(self, name: str) -> bool:
         self._ensure_compute_registered()
         return super().has(name)

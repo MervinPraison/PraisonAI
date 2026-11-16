@@ -42,11 +42,8 @@ class TestPairingUIApproval:
     async def test_pairing_ui_approval_via_http_api(self):
         """Test pairing approval through HTTP API (simulating Chainlit UI)."""
         
-        # 1. Seed a pending pairing entry
-        # Use the simplified approval flow (code becomes channel_id on approval,
-        # per PairingStore.approve() docstring — the /api/pairing/approve route
-        # accepts only {channel, code} and uses the code as the channel_id).
-        code = self.pairing_store.generate_code(channel_type="ui")
+        # The HTTP route approves the identity bound to the pending request.
+        code = self.pairing_store.generate_code(channel_type="ui", channel_id="ui-requester")
         
         # Verify pending state
         pending = self.pairing_store.list_pending("ui")
@@ -87,9 +84,9 @@ class TestPairingUIApproval:
             data = response.json()
             assert data["approved"] is True
         
-        # 5. Verify PairingStore was updated (code is the channel_id in the
-        # simplified approval flow)
-        assert self.pairing_store.is_paired(code, "ui") is True
+        # 5. The requester is authorized; the bearer code is never an identity.
+        assert self.pairing_store.is_paired("ui-requester", "ui") is True
+        assert self.pairing_store.is_paired(code, "ui") is False
         
         # 6. Verify no more pending codes for this channel
         pending_after = self.pairing_store.list_pending("ui")
@@ -215,9 +212,8 @@ class TestPairingUIApproval:
     async def test_pairing_ui_approval_emits_event(self):
         """Test that pairing approval emits event on EventBus."""
         
-        # Seed pending entry (simplified approval flow — code becomes the
-        # channel_id once approved via the /api/pairing/approve route).
-        code = self.pairing_store.generate_code("ui")
+        # Seed a requester-bound pending entry for the unchanged HTTP API.
+        code = self.pairing_store.generate_code("ui", channel_id="ui-requester")
         
         from praisonai_bot.gateway.pairing_routes import create_pairing_routes
         from starlette.applications import Starlette
@@ -254,9 +250,8 @@ class TestPairingUIApproval:
         )
         assert event_found, f"pairing_approved event not found in {self.received_events}"
         
-        # Also verify the pairing succeeded in the store (code is the channel_id
-        # in the simplified approval flow)
-        assert self.pairing_store.is_paired(code, "ui") is True
+        assert self.pairing_store.is_paired("ui-requester", "ui") is True
+        assert self.pairing_store.is_paired(code, "ui") is False
 
 
 if __name__ == "__main__":

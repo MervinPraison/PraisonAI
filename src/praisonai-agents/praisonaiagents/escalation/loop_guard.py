@@ -8,6 +8,7 @@ standard agent.chat() path, extending the existing DoomLoopDetector infrastructu
 from dataclasses import dataclass
 from typing import Dict, Any, Optional, Set
 from enum import Enum
+import threading
 import time
 
 from .doom_loop import DoomLoopDetector, DoomLoopConfig
@@ -168,11 +169,22 @@ class LoopGuard:
         self._tool_counts: Dict[str, int] = {}
         self._last_progress_count = 0
         self._last_progress_action_index = 0
+        # Parallel calls share this guard: an allowed check reserves its call until record().
+        self._lock = threading.RLock()
+        self._in_flight: Dict[str, int] = {}
+
+    def __getstate__(self):  # deepcopy/pickle (Agent clone): locks can't be copied
+        return {k: v for k, v in self.__dict__.items() if k != "_lock"}
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        self._lock = threading.RLock()
         
     def reset_turn(self) -> None:
         """Reset tracking for a new chat turn."""
         self._turn_start_time = time.time()
         self._tool_counts.clear()
+        self._in_flight.clear()
         # Reset the underlying DoomLoopDetector to clear cross-turn state
         self.detector.start_session()
         self._last_progress_count = 0
@@ -195,7 +207,10 @@ class LoopGuard:
         """
         if not self.config.enabled:
             return
-            
+        with self._lock:
+            self._record(tool_name, args, success, result)
+
+    def _record(self, tool_name: str, args: Dict[str, Any], success: bool, result: Any) -> None:
         # Initialize turn tracking if needed
         if self._turn_start_time is None:
             self.reset_turn()
@@ -221,8 +236,19 @@ class LoopGuard:
         
         # Track per-turn counts
         self._tool_counts[tool_name] = self._tool_counts.get(tool_name, 0) + 1
+        reserved = self._in_flight.get(tool_name, 0)
+        if reserved:
+            self._in_flight[tool_name] = reserved - 1
         
     def check(self, tool_name: str, args: Dict[str, Any], is_pre_execution: bool = True) -> LoopGuardDecision:
+        """Check a call; an allowed pre-execution check reserves it (see ``__init__``)."""
+        with self._lock:
+            decision = self._check(tool_name, args, is_pre_execution)
+            if is_pre_execution and self.config.enabled and not decision.should_block():
+                self._in_flight[tool_name] = self._in_flight.get(tool_name, 0) + 1
+            return decision
+
+    def _check(self, tool_name: str, args: Dict[str, Any], is_pre_execution: bool = True) -> LoopGuardDecision:
         """
         Check if tool execution should be allowed, warned, blocked, or halted.
         
@@ -256,14 +282,19 @@ class LoopGuard:
             )
             
         # Get current count for this tool
-        current_count = self._tool_counts.get(tool_name, 0)
+        current_count = self._tool_counts.get(tool_name, 0) + self._in_flight.get(tool_name, 0)
         
         # For pre-execution checks, account for the pending execution
         if is_pre_execution:
             current_count += 1
         
         # Check for no-progress patterns first
-        no_progress_decision = self._check_no_progress()
+        # In-flight calls to the tool on a stuck streak will extend it: count them.
+        actions = self.detector._actions
+        pending = 0
+        if is_pre_execution and actions and actions[-1].action_type == tool_name:
+            pending = self._in_flight.get(tool_name, 0)
+        no_progress_decision = self._check_no_progress(pending)
         if no_progress_decision and no_progress_decision.action != GuardAction.ALLOW:
             return no_progress_decision
 
@@ -379,7 +410,7 @@ class LoopGuard:
                 message="Tool execution allowed"
             )
             
-    def _check_no_progress(self) -> Optional[LoopGuardDecision]:
+    def _check_no_progress(self, pending: int = 0) -> Optional[LoopGuardDecision]:
         """Check for no-progress patterns.
 
         "No progress" means the agent keeps producing the *same* tool results
@@ -391,6 +422,8 @@ class LoopGuard:
         explicit progress marker, resets the streak.
         """
         stuck_run = self._trailing_identical_result_run()
+        if stuck_run:
+            stuck_run += pending
 
         if stuck_run >= self.config.no_progress_halt:
             return LoopGuardDecision(

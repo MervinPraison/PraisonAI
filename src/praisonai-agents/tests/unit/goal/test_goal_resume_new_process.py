@@ -7,7 +7,7 @@ at ``turns_used=0``. A crashed run (still ``active``) was also never resumed.
 
 import pytest
 
-import praisonaiagents.goal.loop as goal_loop
+import praisonaiagents.goal.judge as goal_judge
 from praisonaiagents import Agent
 from praisonaiagents.goal.models import GoalState
 from praisonaiagents.model_harness import ScriptedModel
@@ -20,7 +20,7 @@ GOAL = "all tests pass"
 def _isolated_home(tmp_path, monkeypatch):
     monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path / ".praisonai"))
     monkeypatch.setattr(
-        goal_loop, "judge_goal", lambda state, *a, **k: ("continue", "not yet")
+        goal_judge, "judge_goal", lambda state, *a, **k: ("continue", "not yet")
     )
 
 

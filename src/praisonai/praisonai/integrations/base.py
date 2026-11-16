@@ -18,9 +18,10 @@ import contextlib
 import shutil
 import os
 import threading
+from praisonai._errors import _WrapperError
 
 
-class CLIExecutionError(RuntimeError):
+class CLIExecutionError(_WrapperError, RuntimeError):
     """Raised when a CLI command fails with non-zero exit code."""
     
     def __init__(self, cmd: List[str], returncode: int, stderr: str):

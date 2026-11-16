@@ -645,17 +645,20 @@ def _wire_shell_approval_backend(
             or os.environ.get("TELEGRAM_CHAT_ID")
         )
         if chat_id:
-            try:
-                from praisonai_bot.bots import TelegramApproval
+            # The channel's own adapter already polls this token, so a
+            # self-polling TelegramApproval would be a second getUpdates
+            # consumer (409s, swallowed user messages — Issue #6032). Use the
+            # durable backend instead; the adapter renders its buttons and
+            # resolves taps through its own CallbackQueryHandler.
+            from praisonai_bot.bots._presentation_approval_backend import (
+                PresentationApprovalBackend,
+            )
 
-                agent._approval_backend = TelegramApproval(
-                    token=token,
-                    chat_id=str(chat_id),
-                    allowed_approvers=approvers,
-                )
-                return
-            except ImportError:
-                logger.warning("TelegramApproval unavailable for allow_shell")
+            agent._approval_backend = PresentationApprovalBackend(
+                allowed_actors=approvers,
+                target=str(chat_id),
+            )
+            return
 
     elif channel_type == "discord":
         channel_id = (

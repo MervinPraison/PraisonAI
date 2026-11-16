@@ -10,6 +10,7 @@ import threading
 from typing import List, Optional, Any, Dict, Union, Literal, TYPE_CHECKING, Callable
 from collections import OrderedDict
 import inspect
+import uuid
 
 # Decomposed agent functionality - real implementations in mixin files
 from .chat_mixin import ChatMixin, _deadline_scope
@@ -53,6 +54,7 @@ _lazy_import_lock = threading.Lock()
 # mode wins.
 _output_mode_lock = threading.Lock()
 _llm_module = None
+_RULES_NOTICE_SEEN: set = set()  # rule-name sets already announced (issue #6257)
 _hooks_module = None
 _stream_emitter_class = None
 
@@ -134,7 +136,11 @@ from ..config.feature_configs import (
     PlanningConfig, ReflectionConfig, RulesConfig, GuardrailConfig, WebConfig,
     TemplateConfig, CachingConfig, HooksConfig, SkillsConfig,
     DEFAULT_TOOL_OUTPUT_LIMIT,
+    LearnConfig, LLMConfig, ToolConfig, resolve_tools,
 )
+# Already loaded by the imports above; hoisted so __init__ does not pay a
+# function-local relative import per construction (#5835).
+from ..config.parse_utils import canonical_preset_key, validate_preset_string
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
 # Single source of truth defined in config.feature_configs and imported here
@@ -188,8 +194,6 @@ def _validate_preset_params(params):
     Raises:
         ValueError: With a "Did you mean ...?" suggestion and the valid names.
     """
-    from ..config.parse_utils import validate_preset_string
-
     for name, value in params.items():
         if not isinstance(value, str):
             continue
@@ -436,7 +440,13 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         if self._llm_init_params:
             try:
                 from ..llm.llm import LLM
-                self._llm_instance = LLM(**self._llm_init_params)
+                # The manager stays off _llm_init_params: _fallback_llm_for()
+                # reuses them, and a profile's model would override the fallback's.
+                params = dict(self._llm_init_params)
+                failover_manager = getattr(self, "_failover_manager", None)
+                if failover_manager is not None:
+                    params["failover_manager"] = failover_manager
+                self._llm_instance = LLM(**params)
             except ImportError as e:
                 raise ImportError(
                     "LLM features requested but dependencies not installed. "
@@ -444,6 +454,13 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 ) from e
         self._wire_deferred_history_callback()
         return self._llm_instance
+
+    def _credential_failover_active(self) -> bool:
+        """True when credential rotation runs; the built LLM (e.g. after switch_model) is the truth."""
+        llm = getattr(self, "_llm_instance", None)
+        if llm is not None:
+            return getattr(llm, "_failover_manager", None) is not None
+        return getattr(self, "_failover_manager", None) is not None
 
     @property
     def llm_instance(self):
@@ -872,6 +889,9 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # LLMConfig(fallback_models=[...])), so accept it here without exposing
         # it in the signature and seed the local below.
         _cloned_fallback_models = legacy_kwargs.pop("fallback_models", None)
+        # Internal like fallback_models: clone_for_channel() forwards the shared
+        # FailoverManager. Not a public Agent(failover_manager=) param.
+        _cloned_failover_manager = legacy_kwargs.pop("failover_manager", None)
         # `thinking_budget` is a backward-compatible alias for `reasoning_effort`
         # (Issue #4452); accept it here (like fallback_models) without exposing
         # it in the signature so the unknown-kwarg guard below does not reject it.
@@ -1141,7 +1161,6 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         
         # Fast path: string preset lookup (most common case)
         if isinstance(output, str):
-            from ..config.parse_utils import canonical_preset_key
             output_lower = canonical_preset_key(output)
             preset_value = OUTPUT_PRESETS.get(output_lower)
             if preset_value is not None:
@@ -1267,7 +1286,6 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         elif isinstance(execution, ExecutionConfig):
             _exec_config = execution
         elif isinstance(execution, str):
-            from ..config.parse_utils import canonical_preset_key
             preset_value = EXECUTION_PRESETS.get(canonical_preset_key(execution))
             if preset_value is not None:
                 _exec_config = ExecutionConfig(**preset_value) if isinstance(preset_value, dict) else preset_value
@@ -1530,8 +1548,6 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Resolve LEARN param - FAST PATH (top-level, peer to memory)
         # learn= is a first-class citizen, independent of memory=
         # ─────────────────────────────────────────────────────────────────────
-        from ..config.feature_configs import LearnConfig
-        
         _learn_config = None
         
         # Top-level learn= takes precedence over memory.learn
@@ -2094,8 +2110,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # skill grant leak onto every other unnamed agent in the same process
         # (a cross-tenant privilege escalation). This id can never collide
         # across unrelated instances.
-        import uuid as _uuid
-        self._approval_scope_id = f"{self.name}:{_uuid.uuid4().hex}"
+        self._approval_scope_id = f"{self.name}:{uuid.uuid4().hex}"
 
         # Resolve tool_config for tool execution settings
         _tool_config = Agent._resolve_tool_config(
@@ -2150,13 +2165,14 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Seed from clone_for_channel()'s forwarded list (if any); an explicit
         # LLMConfig(fallback_models=[...]) on llm=/model= still takes precedence.
         fallback_models = _cloned_fallback_models  # Initialize for internal use
+        # LLMConfig.auth_profiles wins over a manager forwarded by a clone.
+        _auth_profiles = None
 
         # One rule for the alias pair: passing both is refused, everywhere.
         from ..utils.model_alias import resolve_model_alias
         resolve_model_alias(llm, model, type(self).__name__)
 
         # Check if llm is an LLMConfig object
-        from ..config import LLMConfig
         if isinstance(llm, LLMConfig):
             # Extract values from LLMConfig
             llm_config_obj = llm
@@ -2168,6 +2184,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 api_key = llm_config_obj.api_key
             if auth is None:
                 auth = llm_config_obj.auth
+            _auth_profiles = llm_config_obj.auth_profiles
         elif llm is not None and model is None:
             warn_deprecated_param(
                 "llm",
@@ -2191,8 +2208,16 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                     api_key = model.api_key
                 if auth is None:
                     auth = model.auth
+                if _auth_profiles is None:
+                    _auth_profiles = model.auth_profiles
             else:
                 llm = model  # model= takes precedence
+
+        if _auth_profiles is not None:
+            from ..llm.failover import manager_from_auth_profiles
+            _cloned_failover_manager = manager_from_auth_profiles(_auth_profiles)
+        if _cloned_failover_manager is not None:
+            self._failover_manager = _cloned_failover_manager
         
         # Resolve the subscription auth provider eagerly. `auth=` is opt-in, so
         # this costs nothing for everyone else, and a user who asked to be
@@ -2511,7 +2536,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             # client holding a model name OpenAI has never heard of. Re-check
             # the *resolved* name so `llm="ollama/x"` and OLLAMA_HOST agree.
             _has_provider_prefix = isinstance(model_name, str) and "/" in model_name
-            if auth or _has_provider_prefix:
+            # Auth profiles rotate inside LLM, so they force the custom-LLM path.
+            if auth or _has_provider_prefix or getattr(self, "_failover_manager", None) is not None:
                 # A subscription auth provider only takes effect inside LLM
                 # (which injects the resolved OAuth credentials), so a bare
                 # model name plus auth= must still build an LLM instance rather
@@ -2701,6 +2727,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         self.system_prompt = f"""{self.backstory}\n
 Your Role: {self.role}\n
 Your Goal: {self.goal}
+        """ if self.goal != self.backstory else f"""{self.backstory}\n
+Your Role: {self.role}
         """
 
         # Per-invocation system-prompt append (never persisted). Sourced from the
@@ -3271,9 +3299,6 @@ Your Goal: {self.goal}
     @staticmethod
     def _resolve_tool_config(tool_config):
         """Resolve tool_config parameter with backward compatibility."""
-        # Import here to avoid circular imports
-        from ..config.feature_configs import ToolConfig, resolve_tools
-        
         # Handle the new consolidated parameter
         if tool_config is not None:
             resolved_config = resolve_tools(tool_config)
@@ -3365,6 +3390,19 @@ Your Goal: {self.goal}
                     return original_backstory
         return self.backstory
 
+    def _fork_history(self) -> "Agent":
+        """Shallow copy that shares all config, tools and memory but has its
+        own ``chat_history`` (seeded with the current one).
+
+        Used by concurrent workflow branches so one shared agent does not
+        leak sibling prompts between threads, without the config loss of
+        rebuilding it through the constructor.
+        """
+        import copy
+        fork = copy.copy(self)
+        fork.__chat_history_state = AsyncSafeState(list(self.chat_history))
+        return fork
+
     def clone_for_channel(self) -> "Agent":
         """Return a fully independent copy of this agent for a gateway channel.
         
@@ -3394,6 +3432,7 @@ Your Goal: {self.goal}
             # LLM configuration 
             'llm': self.llm,
             'fallback_models': list(self.fallback_models) if hasattr(self, 'fallback_models') and self.fallback_models else None,
+            'failover_manager': getattr(self, '_failover_manager', None),
             'base_url': getattr(self, 'base_url', None),
             'api_key': getattr(self, 'api_key', None),
             'auth': getattr(self, 'auth', None),
@@ -3577,8 +3616,26 @@ Your Goal: {self.goal}
     
     def _replace_chat_history(self, new_history: List[Dict[str, Any]]):
         """Thread-safe replacement of entire chat history using proper locking."""
-        with self._history_lock.lock():
-            self._history_lock.value[:] = new_history
+        # Share _auto_save_session's lock so a save cannot interleave with the
+        # rewrite and the cursor update below (#6217).
+        with self._auto_save_lock, self._history_lock.lock():
+            history = self._history_lock.value
+            # Re-sync the positional auto-save cursor (#6217): resume at the
+            # first unsaved survivor, or right after the last survivor so
+            # appended messages (e.g. durable replays) are saved; summaries
+            # placed before survivors are not re-persisted.
+            last = getattr(self, '_auto_save_last_index', 0)
+            old = {id(m): i >= last for i, m in enumerate(history)}
+            cursor = len(new_history)
+            survivors = [i for i, m in enumerate(new_history) if id(m) in old]
+            if survivors:
+                cursor = survivors[-1] + 1
+                for i in survivors:
+                    if old[id(new_history[i])]:
+                        cursor = i
+                        break
+            history[:] = new_history
+            self._auto_save_last_index = cursor
 
     @property
     def _cache_lock(self):
@@ -6322,7 +6379,12 @@ Summary:"""
             # matches on reload. Zero-config runs still avoid injection cost.
             stats = self._rules_manager.get_stats()
             if stats["total_rules"] > 0:
-                logging.debug(f"RulesManager: Discovered {stats['total_rules']} rules")
+                # Only rules injected without a file/@mention; warn once per set so
+                # the notice is visible under default logging without repeating per agent.
+                names = ", ".join(sorted({r.name for r in self._rules_manager.get_active_rules()}))
+                if names and names not in _RULES_NOTICE_SEEN:
+                    _RULES_NOTICE_SEEN.add(names)
+                    logging.warning(f"Applied rules: {names} (pass rules=False to turn off)")
             elif not extra_files:
                 self._rules_manager = None
         except ImportError:
@@ -7229,7 +7291,7 @@ Answer:"""
         return getattr(self, "_last_guardrail_error", None)
 
     def _guardrail_blocked_message(self, error=None):
-        """Fixed, user-facing string returned when an output guardrail blocks a run.
+        """Fixed, user-facing string returned when an input or output guardrail blocks a run.
 
         A blocked response must never surface the rejected (potentially unsafe)
         model text, but it must also never be ``None`` - callers expect a
@@ -7331,7 +7393,8 @@ Answer:"""
         task_output = TaskOutput(
             description="Agent response output",
             raw=response_text,
-            agent=self.name
+            # TaskOutput.agent is a required str; an Agent built without name= has name None.
+            agent=self.name or getattr(self, "role", None) or "Agent"
         )
         
         guardrail_result = self._process_guardrail(task_output)
@@ -7415,7 +7478,7 @@ Answer:"""
         # Fall back to simple backoff if no execution config
         return 1.0 * (2.0 ** (retry_count - 1))
 
-    def _apply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None, cancel_token=None, messages=None):
+    def _apply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None, cancel_token=None, messages=None, response_format=None):
         """Apply guardrail validation with retry logic (sync version).
 
         Args:
@@ -7428,6 +7491,9 @@ Answer:"""
                 run with its context intact. When omitted (providers whose
                 message list the caller does not hold), the retry falls back to
                 re-asking the original prompt with the reason appended.
+
+            response_format: Structured-output contract of the original call,
+                kept on retries so ``output_pydantic``/``output_json`` survive.
 
         Bounded by ``max_guardrail_retries``; a validator that never passes
         raises rather than looping.
@@ -7473,7 +7539,7 @@ Answer:"""
                 # stream=False: the retry reads a complete message and nothing
                 # consumes deltas, so streaming here only costs a failed
                 # sync-adapter attempt and an ERROR log before falling back.
-                response = self._chat_completion(list(retry_messages), temperature, tools, stream=False, task_name=task_name, task_description=task_description, task_id=task_id, cancel_token=cancel_token)
+                response = self._chat_completion(list(retry_messages), temperature, tools, stream=False, task_name=task_name, task_description=task_description, task_id=task_id, cancel_token=cancel_token, response_format=response_format)
                 if response and response.choices:
                     content = response.choices[0].message.content
                     current_response = content.strip() if content else ""
@@ -7485,7 +7551,7 @@ Answer:"""
 
         return current_response
 
-    async def _aapply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None, messages=None):
+    async def _aapply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None, messages=None, response_format=None):
         """Apply guardrail validation with retry logic (async version).
 
         See ``_apply_guardrail_with_retry`` for the ``messages`` contract.
@@ -7548,7 +7614,7 @@ Answer:"""
                 # helper's own default is stream=True regardless of the agent's
                 # setting, which would make the retry stream when nothing reads
                 # the deltas.
-                response = await self._execute_unified_achat_completion(list(retry_messages), temperature, tools, stream=False, task_name=task_name, task_description=task_description, task_id=task_id)
+                response = await self._execute_unified_achat_completion(list(retry_messages), temperature, tools, stream=False, task_name=task_name, task_description=task_description, task_id=task_id, response_format=response_format)
                 if response and hasattr(response, 'choices') and response.choices:
                     content = response.choices[0].message.content
                     current_response = content.strip() if content else ""
@@ -7563,36 +7629,9 @@ Answer:"""
         return current_response
 
     def _get_tools_cache_key(self, tools):
-        """Generate a cache key for tools list."""
-        if tools is None:
-            return "none"
-        if not tools:
-            return "empty"
-        # Create a simple hash based on tool names
-        tool_names = []
-        try:
-            from ..tools.hosted import is_hosted_tool
-        except ImportError:
-            is_hosted_tool = lambda _tool: False
-
-        for tool in tools:
-            if callable(tool) and hasattr(tool, '__name__'):
-                tool_names.append(tool.__name__)
-            elif isinstance(tool, dict) and is_hosted_tool(tool):
-                try:
-                    hosted_key = json.dumps(tool, sort_keys=True)
-                except (TypeError, ValueError):
-                    hosted_key = str(id(tool))
-                tool_names.append(f"hosted:{hosted_key}")
-            elif (
-                isinstance(tool, dict)
-                and isinstance(tool.get('function'), dict)
-                and tool['function'].get('name')
-            ):
-                tool_names.append(tool['function']['name'])
-            elif isinstance(tool, str):
-                tool_names.append(tool)
-        return "|".join(sorted(tool_names))
+        """Generate a content-based cache key for a tools list."""
+        from ..tools.schema import tools_cache_key
+        return tools_cache_key(tools)
     
 
     # -------------------------------------------------------------------------

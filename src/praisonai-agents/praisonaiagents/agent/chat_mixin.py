@@ -18,6 +18,7 @@ import logging
 from praisonaiagents._logging import get_logger
 from ..errors import BudgetExceededError, ToolExecutionError
 from .tool_execution import _active_turn_cancel
+from .interrupt import protect_turn
 
 # Shared lazy display helpers (cached, thread-safe; avoid circular imports)
 from ._lazy_display import _get_console, _get_live, _get_display_functions
@@ -39,6 +40,14 @@ _stream_traced_agent = contextvars.ContextVar("praisonai_stream_traced_agent", d
 def _agent_end_status(db_status: str) -> str:
     """``agent_end`` status for replay: completed, failed or cancelled."""
     return "failed" if db_status == "error" else db_status
+
+
+async def _abackoff(agent, seconds, cancel_token):
+    """Recovery wait that stops early on ``cancel_token``/interrupt; False if cancelled."""
+    from .retry_utils import interruptible_sleep
+    _interrupted = getattr(agent, "_is_interrupted", lambda: False)
+    return await interruptible_sleep(seconds, interrupt_fn=lambda: _interrupted() or (
+        cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()))
 
 
 def _enter_turn(agent, cancel):
@@ -73,6 +82,12 @@ def _current_turn_loop_guard(agent):
             from ..escalation.loop_guard import LoopGuard
             slot[1] = LoopGuard(agent._loop_guard.config)
         return slot[1]
+
+
+def _is_fatal_model_error(exc):
+    """Invalid model / bad request: re-raise instead of returning ``None`` (#5956)."""
+    from ..llm.error_classifier import _is_fatal_model_error as _fatal
+    return _fatal(exc)
 
 
 def _reset_loop_guard_for_turn(agent):
@@ -127,6 +142,26 @@ def _deadline_scope(seconds):
         _run_deadline.reset(token)
 
 
+# Stop events for turns started in this context. Orchestrators (Parallel,
+# AgentTeam.astart) open a ``_stop_scope`` so abandoned branches still running
+# in worker threads observe the stop at their next cancel check. A tuple so a
+# nested scope still honours its enclosing ones.
+_run_stops = contextvars.ContextVar("praisonai_run_stops", default=())
+
+
+@contextlib.contextmanager
+def _stop_scope():
+    """Yield an Event that stops every turn started in this block; set on exit."""
+    stop = threading.Event()
+    token = _run_stops.set(_run_stops.get() + (stop,))
+    try:
+        yield stop
+    finally:
+        # Anything still running after the block has been abandoned by its caller.
+        stop.set()
+        _run_stops.reset(token)
+
+
 class _TurnCancelToken:
     """Track cancellation observed by one call without shared backend state.
 
@@ -145,11 +180,16 @@ class _TurnCancelToken:
         self._observed = False
         self._turn_id = turn_id
         self._deadline = deadline
+        self._stops = _run_stops.get()
         self.timed_out = False
+        self.stopped = False
 
     def is_set(self) -> bool:
         if self._deadline is not None and time.monotonic() >= self._deadline:
             self.timed_out = self._observed = True
+            return True
+        if any(stop.is_set() for stop in self._stops):
+            self.stopped = self._observed = True
             return True
         turn_checker = getattr(self._source, "_turn_is_cancelled", None)
         if self._turn_id is not None and callable(turn_checker):
@@ -163,6 +203,8 @@ class _TurnCancelToken:
     def reason(self):
         if self.timed_out:
             return "timeout"
+        if self.stopped:
+            return "run abandoned by caller"
         return getattr(self._source, "reason", None)
 
     def check(self) -> None:
@@ -210,7 +252,9 @@ class ChatMixin:
         if outer is not None:
             deadline = outer if deadline is None else min(deadline, outer)
         if source is None:
-            return None if deadline is None else _TurnCancelToken(None, deadline=deadline)
+            if deadline is None and not _run_stops.get():
+                return None
+            return _TurnCancelToken(None, deadline=deadline)
         begin_turn = getattr(source, "_begin_turn", None)
         if explicit or not callable(begin_turn):
             return _TurnCancelToken(source, deadline=deadline)
@@ -542,17 +586,53 @@ class ChatMixin:
             return int(getattr(execution, "max_tool_calls_per_turn", default))
         return default
 
-    def _resolve_harness_base_prompt(self):
+    _EDIT_TOOL_NAMES = frozenset({"edit_file", "apply_patch"})
+
+    def _offers_edit_tool(self, tools=None):
+        """True when ``tools`` (default: the agent's tools) include a file-edit primitive."""
+        for tool in (tools if tools is not None else getattr(self, "tools", None)) or ():
+            if isinstance(tool, list):
+                # _format_tools_for_completion flattens a nested list but keeps
+                # only its function-schema dicts, so only those can offer an edit tool.
+                if self._offers_edit_tool([
+                    t for t in tool
+                    if isinstance(t, dict) and t.get("type") == "function"
+                    and isinstance(t.get("function"), dict)
+                ]):
+                    return True
+                continue
+            if isinstance(tool, str):
+                name = tool
+            elif isinstance(tool, dict):
+                function = tool.get("function")
+                name = function.get("name") if isinstance(function, dict) else tool.get("name")
+            else:
+                # A tool's ``name`` is what the model is sent (``@tool(name=...)``
+                # keeps the function's own ``__name__``), so it wins.
+                name = getattr(tool, "name", None)
+                if not isinstance(name, str):
+                    name = getattr(tool, "__name__", None)
+            # _prune_denied_tools drops denied tools from the payload, so a
+            # denied edit tool must not earn the hint either.
+            if name in self._EDIT_TOOL_NAMES and self._tool_name_allowed(name):
+                return True
+        return False
+
+    def _resolve_harness_base_prompt(self, tools=None):
         """Resolve the model-family harness base-prompt fragment, if any.
 
         Honours an explicit ``harness_base_prompt`` override on the agent when
-        set; otherwise resolves lazily from the active model id. Returns an
-        empty string when no fragment applies (behaviour-preserving default).
-        Never raises: any resolution error collapses to no fragment.
+        set; otherwise resolves lazily from the active model id. The family
+        fragments are file-editing guidance, so they apply only when ``tools``
+        (default: the agent's tools) include ``edit_file`` or ``apply_patch``.
+        Returns an empty string when no fragment applies. Never raises: any
+        resolution error collapses to no fragment.
         """
         override = getattr(self, "harness_base_prompt", None)
         if override is not None:
             return override
+        if not self._offers_edit_tool(tools):
+            return ""
         try:
             from ..model_harness import resolve_harness
             # self.llm may be a string model id or an LLM object; resolve the
@@ -579,7 +659,10 @@ class ChatMixin:
         # Check cache first (skip cache if memory is enabled since context is dynamic)
         if not self._memory_instance:
             tools_key = self._get_tools_cache_key(tools)
-            cache_key = f"{self.role}:{self.goal}:{tools_key}"
+            # tools=None keys as "none" whatever self.tools holds, so key the
+            # edit-hint decision too; otherwise a cached prefix would keep (or
+            # miss) the hint after the agent's tools change.
+            cache_key = f"{self.role}:{self.goal}:{hash(self.backstory)}:{tools_key}:{self._offers_edit_tool(tools)}"
             
             cached_prompt = self._cache_get(self._system_prompt_cache, cache_key)
             if cached_prompt is not None:
@@ -590,13 +673,16 @@ class ChatMixin:
             cache_key = None  # Don't cache when memory is enabled
             
         system_prompt = f"""{self.backstory}\n
-Your Role: {self.role}\n
-Your Goal: {self.goal}"""
+Your Role: {self.role}"""
+        # Agent(instructions=...) sets backstory and goal to the same text;
+        # state it once.
+        if self.goal != self.backstory:
+            system_prompt += f"\n\nYour Goal: {self.goal}"
 
         # Prepend the model-family harness base prompt when one applies.
         # Resolution is lazy and falls back to a behaviour-preserving default
-        # (no fragment) for unknown models, so output is unchanged by default.
-        harness_prompt = self._resolve_harness_base_prompt()
+        # (no fragment) for unknown models or agents without edit tools.
+        harness_prompt = self._resolve_harness_base_prompt(tools)
         if harness_prompt:
             system_prompt = f"{harness_prompt}\n\n{system_prompt}"
         
@@ -952,6 +1038,37 @@ Your Goal: {self.goal}"""
         if is_replay_unsafe_chain(error):
             raise error
 
+    @staticmethod
+    def _assistant_reply_text(reply):
+        """Text form of a guardrail-approved reply for history/DB storage."""
+        if isinstance(reply, str):
+            return reply
+        if reply is None:
+            return ""
+        if hasattr(reply, "model_dump_json"):
+            return reply.model_dump_json()
+        if isinstance(reply, (dict, list)):
+            return json.dumps(reply, default=str)
+        return str(reply)
+
+    def _commit_assistant_reply(self, reply, persist=True):
+        """Record the *approved* assistant reply in chat history (and the DB).
+
+        Called only after guardrail validation so a rejected answer never
+        reaches history, the session store or the next turn's context.
+        """
+        text = self._assistant_reply_text(reply)
+        self._append_to_chat_history({"role": "assistant", "content": text})
+        if persist:
+            self._persist_message("assistant", text)
+
+    async def _acommit_assistant_reply(self, reply, persist=True):
+        """Async twin of :meth:`_commit_assistant_reply` (DB write off-loop)."""
+        text = self._assistant_reply_text(reply)
+        self._append_to_chat_history({"role": "assistant", "content": text})
+        if persist:
+            await self._apersist_message("assistant", text)
+
     def _structured_output_from_message(self, message, schema_model, response_text: str, original_text=None):
         """Resolve a Pydantic ``output_pydantic`` from an LLM message or JSON text.
 
@@ -1203,7 +1320,8 @@ Your Goal: {self.goal}"""
         if cached_entry is not None:
             cached_tools, cached_metadata = cached_entry
             self._tool_search_metadata = cached_metadata
-            return cached_tools
+            # Re-prune: permissions may have changed since the entry was cached.
+            return self._prune_denied_tools(cached_tools)
             
         formatted_tools = []
         # Provider-hosted tool specs have no local callable; the provider
@@ -1323,20 +1441,19 @@ Your Goal: {self.goal}"""
             return sorted(tools_list, key=sort_key)
         
         cleaned_tools = sort_formatted_tools(cleaned_tools)
-        
-        # Prune permission-denied tools from the advertised set so the model is
-        # only ever offered tools it can actually call. Mirrors the execution-time
-        # enforcement in tool_execution.py (_perm_deny / _perm_allow). No-op when
-        # no deny set and no allow set are configured (backward compatible).
-        cleaned_tools = self._prune_denied_tools(cleaned_tools)
-        
-        # Cache the formatted tools with LRU eviction, including tool search metadata
+
+        # Cache the unpruned tools with LRU eviction, including tool search
+        # metadata, so a later change to the deny/allow sets takes effect.
         self._cache_put(
             self._formatted_tools_cache,
             cache_key,
             (cleaned_tools, getattr(self, "_tool_search_metadata", None)),
         )
-        return cleaned_tools
+        # Prune permission-denied tools from the advertised set so the model is
+        # only ever offered tools it can actually call. Mirrors the execution-time
+        # enforcement in tool_execution.py (_perm_deny / _perm_allow). No-op when
+        # no deny set and no allow set are configured (backward compatible).
+        return self._prune_denied_tools(cleaned_tools)
 
     def _build_before_tool_definitions_input(self, formatted_tools):
         """Build the BEFORE_TOOL_DEFINITIONS hook input.
@@ -1724,8 +1841,9 @@ Your Goal: {self.goal}"""
 
         self._run_pre_compaction_memory_flush(messages, compactor)
         
-        # Perform compaction
-        compacted_msgs, result = compactor.compact(messages)
+        # Perform compaction (protected: interrupt busy-mode queues instead)
+        with protect_turn(getattr(self, 'interrupt_controller', None)):
+            compacted_msgs, result = compactor.compact(messages)
         
         logging.info(
             f"[proactive-compaction] {self.name}: {result.original_tokens}→{result.compacted_tokens} tokens "
@@ -1910,8 +2028,9 @@ Your Goal: {self.goal}"""
 
         await self._arun_pre_compaction_memory_flush(messages, compactor)
         
-        # Perform compaction
-        compacted_msgs, result = compactor.compact(messages)
+        # Perform compaction (protected: interrupt busy-mode queues instead)
+        with protect_turn(getattr(self, 'interrupt_controller', None)):
+            compacted_msgs, result = compactor.compact(messages)
         
         logging.info(
             f"[proactive-compaction-async] {self.name}: {result.original_tokens}→{result.compacted_tokens} tokens "
@@ -2039,14 +2158,130 @@ Your Goal: {self.goal}"""
                 return fn(*args, **kwargs)
         return {**llm_kwargs, 'execute_tool_fn': tracked}, ran
 
+    @staticmethod
+    def _history_before_turn(history, content):
+        """``history`` without the copy of this turn's user message stored before the call.
+
+        ``LLM._build_messages`` appends ``prompt`` after ``chat_history``, so
+        forwarding the stored copy as well sends the prompt twice. Only a
+        trailing match is dropped: messages a durable replay restored after
+        the turn keep their order.
+        """
+        if history:
+            last = history[-1]
+            if isinstance(last, dict) and last.get("role") == "user" and last.get("content") == content:
+                return list(history[:-1])
+        return history
+
+    def _custom_llm_hook_messages(self, llm_kwargs):
+        """The custom-LLM request as the message list BEFORE_LLM / AFTER_LLM hooks see."""
+        messages = []
+        if llm_kwargs.get('system_prompt'):
+            messages.append({"role": "system", "content": llm_kwargs['system_prompt']})
+        messages.extend(llm_kwargs.get('chat_history') or [])
+        messages.append({"role": "user", "content": llm_kwargs.get('prompt')})
+        return messages
+
+    def _custom_llm_before_input(self, llm_kwargs):
+        """BEFORE_LLM input for the custom-LLM path, or ``None`` when no hook is registered."""
+        from ..hooks import HookEvent, BeforeLLMInput
+        if not self._hook_runner.registry.has_hooks(HookEvent.BEFORE_LLM):
+            return None
+        return BeforeLLMInput(
+            session_id=getattr(self, '_session_id', 'default'),
+            cwd=os.getcwd(),
+            event_name=HookEvent.BEFORE_LLM,
+            timestamp=str(time.time()),
+            agent_name=self.name,
+            messages=self._custom_llm_hook_messages(llm_kwargs),
+            model=self.llm if isinstance(self.llm, str) else str(self.llm),
+            temperature=llm_kwargs.get('temperature'),
+        )
+
+    def _adopt_custom_llm_before(self, llm_kwargs, before, results):
+        """Apply BEFORE_LLM ``results`` like ``_chat_completion``: return ``(llm_kwargs, block_message)``."""
+        if self._hook_runner.is_blocked(results):
+            reason = next(
+                (getattr(r.output, "reason", None) for r in results
+                 if r.output and getattr(r.output, "is_denied", lambda: False)()),
+                None,
+            ) or "Blocked by hook"
+            logging.warning(f"Agent {self.name} LLM request blocked by BEFORE_LLM hook: {reason}")
+            return llm_kwargs, f"[LLM request blocked by hook: {reason}]"
+        messages = list(before.messages or [])
+        if messages and messages != self._custom_llm_hook_messages(llm_kwargs):
+            # A hook rewrote the messages (e.g. PII redactor): map them back.
+            system = None
+            if isinstance(messages[0], dict) and messages[0].get("role") == "system":
+                system = messages.pop(0).get("content")
+            last = messages.pop() if messages else {}
+            if not isinstance(last, dict) or last.get("role") != "user":
+                # ``LLM.get_response`` always sends the prompt as a user turn; fail closed
+                # rather than silently re-role a rewritten assistant/tool message.
+                logging.warning(f"Agent {self.name} BEFORE_LLM rewrite must end with a user message")
+                return llm_kwargs, "[LLM request blocked by hook: rewritten messages must end with a user message]"
+            llm_kwargs = {**llm_kwargs, 'system_prompt': system, 'chat_history': messages,
+                          'prompt': last.get("content")}
+        return llm_kwargs, None
+
+    def _custom_llm_after_input(self, llm_kwargs, response, tally, start_time):
+        """AFTER_LLM input for the custom-LLM path, or ``None`` when no hook is registered."""
+        from ..hooks import HookEvent, AfterLLMInput
+        if not self._hook_runner.registry.has_hooks(HookEvent.AFTER_LLM):
+            return None
+        return AfterLLMInput(
+            session_id=getattr(self, '_session_id', 'default'),
+            cwd=os.getcwd(),
+            event_name=HookEvent.AFTER_LLM,
+            timestamp=str(time.time()),
+            agent_name=self.name,
+            messages=self._custom_llm_hook_messages(llm_kwargs),
+            response=str(response),
+            model=self.llm if isinstance(self.llm, str) else str(self.llm),
+            tokens_used=sum(tally),
+            latency_ms=(time.time() - start_time) * 1000,
+        )
+
     def _custom_llm_get_response(self, llm_kwargs):
+        """Call the custom LLM, firing BEFORE_LLM / AFTER_LLM like ``_chat_completion``."""
+        from ..hooks import HookEvent
+        before = self._custom_llm_before_input(llm_kwargs)
+        if before is not None:
+            results = self._hook_runner.execute_sync(HookEvent.BEFORE_LLM, before)
+            llm_kwargs, blocked = self._adopt_custom_llm_before(llm_kwargs, before, results)
+            if blocked:
+                return blocked
+        start_time, tally = time.time(), []
+        response = self._custom_llm_dispatch(llm_kwargs, tally)
+        after = self._custom_llm_after_input(llm_kwargs, response, tally, start_time)
+        if after is not None:
+            self._hook_runner.execute_sync(HookEvent.AFTER_LLM, after)
+        return response
+
+    async def _custom_llm_get_response_async(self, llm_kwargs):
+        """Async twin of :meth:`_custom_llm_get_response`."""
+        from ..hooks import HookEvent
+        before = self._custom_llm_before_input(llm_kwargs)
+        if before is not None:
+            results = await self._hook_runner.execute(HookEvent.BEFORE_LLM, before)
+            llm_kwargs, blocked = self._adopt_custom_llm_before(llm_kwargs, before, results)
+            if blocked:
+                return blocked
+        start_time, tally = time.time(), []
+        response = await self._custom_llm_dispatch_async(llm_kwargs, tally)
+        after = self._custom_llm_after_input(llm_kwargs, response, tally, start_time)
+        if after is not None:
+            await self._hook_runner.execute(HookEvent.AFTER_LLM, after)
+        return response
+
+    def _custom_llm_dispatch(self, llm_kwargs, tally=None):
         """Call ``llm_instance.get_response`` walking ``fallback_models`` on outage."""
         llm, index, current = self.llm_instance, 0, self.llm
         stream_cb = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
         llm_kwargs, tools_ran = self._track_tool_runs(llm_kwargs)
         while True:
             try:
-                with self._llm_usage_sink(llm):
+                with self._llm_usage_sink(llm, tally):
                     return llm.get_response(**llm_kwargs)
             except (ToolExecutionError, BudgetExceededError, InterruptedError):
                 raise
@@ -2059,14 +2294,14 @@ Your Goal: {self.goal}"""
                 self._emit_model_fallback(current, next_model, category, index, stream_cb)
                 llm, index, current = self._fallback_llm_for(next_model), index + 1, next_model
 
-    async def _custom_llm_get_response_async(self, llm_kwargs):
-        """Async twin of :meth:`_custom_llm_get_response`."""
+    async def _custom_llm_dispatch_async(self, llm_kwargs, tally=None):
+        """Async twin of :meth:`_custom_llm_dispatch`."""
         llm, index, current = self.llm_instance, 0, self.llm
         stream_cb = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
         llm_kwargs, tools_ran = self._track_tool_runs(llm_kwargs)
         while True:
             try:
-                with self._llm_usage_sink(llm):
+                with self._llm_usage_sink(llm, tally):
                     return await llm.get_response_async(**llm_kwargs)
             except (ToolExecutionError, BudgetExceededError, InterruptedError):
                 raise
@@ -2288,9 +2523,10 @@ Your Goal: {self.goal}"""
                 self._on_budget_exceeded(current_cost, self._max_budget)
 
     @contextlib.contextmanager
-    def _llm_usage_sink(self, llm=None):
+    def _llm_usage_sink(self, llm=None, tally=None):
         """Route every call ``llm`` (default: the custom LLM) makes in this block into ``_record_llm_usage``.
 
+        Each call's total tokens are also appended to ``tally`` when given.
         Refuses to start when ``max_budget`` is already spent (``"stop"`` mode),
         so retrying after ``BudgetExceededError`` sends no further paid request.
         """
@@ -2309,10 +2545,12 @@ Your Goal: {self.goal}"""
         llm = llm if llm is not None else self.llm_instance
         # A fallback model is priced as itself, not as the primary ``self.llm``.
         model = None if llm is self.llm_instance else getattr(llm, 'model', None)
-        token = _usage_sink.set((
-            llm,
-            lambda response: self._record_llm_usage(*self._extract_llm_usage(response, model)),
-        ))
+        def record(response):
+            usage = self._extract_llm_usage(response, model)
+            if tally is not None:
+                tally.append(usage[0] + usage[1])
+            self._record_llm_usage(*usage)
+        token = _usage_sink.set((llm, record))
         try:
             yield
         finally:
@@ -2403,7 +2641,7 @@ Your Goal: {self.goal}"""
                     agent_id=self.name
                 )
 
-        logging.debug(f"{self.name} sending messages to LLM: {messages}")
+        logging.debug("%s sending messages to LLM: %s", self.name, messages)
         
         # Emit LLM request trace event (zero overhead when not set)
         from ..trace.context_events import get_context_emitter
@@ -2620,7 +2858,8 @@ Your Goal: {self.goal}"""
             
             if classification.should_rotate_credential:
                 # TODO: Implement credential rotation when available
-                logging.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
+                if not self._credential_failover_active():
+                    logging.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
                 # Don't retry without actual credential rotation
                 
             elif classification.should_fallback_model:
@@ -2693,7 +2932,7 @@ Your Goal: {self.goal}"""
             
             # Include remediation hints for unimplemented recovery actions
             user_message = classification.user_message
-            if classification.should_rotate_credential:
+            if classification.should_rotate_credential and not self._credential_failover_active():
                 user_message += " Credential rotation is not yet implemented."
             if classification.should_fallback_model:
                 if not self.fallback_models:
@@ -2738,7 +2977,8 @@ Your Goal: {self.goal}"""
         stream_callback=None,
         emit_events=True,
         _retry_depth=0,
-        _fallback_index=0
+        _fallback_index=0,
+        cancel_token=None,
     ):
         """
         Handle LLM errors in async context using structured classification.
@@ -2792,20 +3032,22 @@ Your Goal: {self.goal}"""
                         return await self._execute_unified_achat_completion(
                             truncated_messages, temperature, tools, stream, 
                             reasoning_steps, task_name, task_description, task_id, response_format,
-                            stream_callback, emit_events
+                            stream_callback, emit_events, cancel_token=cancel_token,
                         )
                     except Exception as retry_error:
                         return await self._handle_async_llm_error(
                             retry_error, truncated_messages, temperature, tools, stream,
                             reasoning_steps, task_name, task_description, task_id, response_format,
-                            stream_callback, emit_events, _retry_depth + 1, _fallback_index
+                            stream_callback, emit_events, _retry_depth + 1, _fallback_index,
+                            cancel_token=cancel_token,
                         )
             except Exception as compression_error:
                 logging.error(f"[{self.name}] Context compression failed: {compression_error}")
         
         if classification.should_rotate_credential:
             # TODO: Implement credential rotation when available
-            logging.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
+            if not self._credential_failover_active():
+                logging.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
             # Don't retry without actual credential rotation
             
         elif classification.should_fallback_model:
@@ -2830,7 +3072,8 @@ Your Goal: {self.goal}"""
 
                 # Apply backoff if suggested
                 if classification.backoff_seconds and classification.backoff_seconds > 0:
-                    await asyncio.sleep(classification.backoff_seconds)
+                    if not await _abackoff(self, classification.backoff_seconds, cancel_token):
+                        raise exc
                 
                 # Run this single retry against a throwaway dispatcher bound to
                 # the fallback model, passed per-call. This never mutates the
@@ -2847,12 +3090,14 @@ Your Goal: {self.goal}"""
                         reasoning_steps, task_name, task_description, task_id, response_format,
                         stream_callback, emit_events,
                         _dispatcher=_fallback_dispatcher,
+                        cancel_token=cancel_token,
                     )
                 except Exception as retry_error:
                     return await self._handle_async_llm_error(
                         retry_error, messages, temperature, tools, stream,
                         reasoning_steps, task_name, task_description, task_id, response_format,
-                        stream_callback, emit_events, _retry_depth + 1, _fallback_index + 1
+                        stream_callback, emit_events, _retry_depth + 1, _fallback_index + 1,
+                        cancel_token=cancel_token,
                     )
             else:
                 logging.warning(f"[{self.name}] {classification.user_message} (no more fallback models available)")
@@ -2861,24 +3106,26 @@ Your Goal: {self.goal}"""
         elif classification.is_retryable and classification.backoff_seconds > 0:
             if _retry_depth < self._max_retry_depth():  # Bounded by configured RetryBackoffConfig.max_retries
                 logging.info(f"[{self.name}] {classification.user_message} (waiting {classification.backoff_seconds:.1f}s)")
-                await asyncio.sleep(classification.backoff_seconds)
+                if not await _abackoff(self, classification.backoff_seconds, cancel_token):
+                    raise exc
                 # Need to call the full async method that includes error handling
                 try:
                     return await self._execute_unified_achat_completion(
                         messages, temperature, tools, stream, 
                         reasoning_steps, task_name, task_description, task_id, response_format,
-                        stream_callback, emit_events
+                        stream_callback, emit_events, cancel_token=cancel_token,
                     )
                 except Exception as retry_error:
                     return await self._handle_async_llm_error(
                         retry_error, messages, temperature, tools, stream,
                         reasoning_steps, task_name, task_description, task_id, response_format,
-                        stream_callback, emit_events, _retry_depth + 1, _fallback_index
+                        stream_callback, emit_events, _retry_depth + 1, _fallback_index,
+                        cancel_token=cancel_token,
                     )
         
         # Include remediation hints for unimplemented recovery actions
         user_message = classification.user_message
-        if classification.should_rotate_credential:
+        if classification.should_rotate_credential and not self._credential_failover_active():
             user_message += " Credential rotation is not yet implemented."
         if classification.should_fallback_model:
             if not self.fallback_models:
@@ -2908,8 +3155,25 @@ Your Goal: {self.goal}"""
             except Exception as hook_error:
                 logging.debug(f"Error in on_error hook: {hook_error}")
         
-        # Raise the enriched error
-        raise error
+        # Raise the enriched error, keeping the provider error as its cause
+        raise error from exc
+
+    def _native_reasoning_kwargs(self, model=None):
+        """Provider-native reasoning effort for the direct OpenAI client path.
+
+        An LLM instance translates ``reasoning_effort`` itself; the plain
+        OpenAI client only sees what the dispatcher forwards, so resolve the
+        unified level (Issue #4452) here, as the streaming path does. Returns
+        {} when unset/off or when the model has no native effort control.
+        """
+        effort = getattr(self, 'reasoning_effort', None)
+        if effort is None or getattr(self, '_using_custom_llm', False):
+            return {}
+        from ..thinking.effort import resolve_reasoning_params
+        native = resolve_reasoning_params(effort, model or self.llm)
+        if 'reasoning_effort' not in native:
+            return {}
+        return {'reasoning_effort': native['reasoning_effort']}
 
     def _execute_unified_chat_completion(
         self, 
@@ -2965,6 +3229,7 @@ Your Goal: {self.goal}"""
                     temperature=temperature,
                     max_tokens=getattr(self, 'max_tokens', None),
                     stream=True,  # Try streaming first
+                    **self._native_reasoning_kwargs(getattr(self._unified_dispatcher, 'model', None)),
                     response_format=response_format,
                     execute_tool_fn=self._durable_sync_tool_executor(
                         getattr(self, 'execute_tool', None)
@@ -2976,6 +3241,7 @@ Your Goal: {self.goal}"""
                     verbose=self.verbose,
                     max_iterations=self._resolve_max_steps(),
                     output_continuation=getattr(getattr(self, "execution", None), "output_continuation", True),
+                    parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
                     reasoning_steps=reasoning_steps,
                     task_name=task_name,
                     task_description=task_description,
@@ -3014,6 +3280,7 @@ Your Goal: {self.goal}"""
                 temperature=temperature,
                 max_tokens=getattr(self, 'max_tokens', None),
                 stream=stream,
+                **self._native_reasoning_kwargs(getattr(self._unified_dispatcher, 'model', None)),
                 response_format=response_format,
                 execute_tool_fn=self._durable_sync_tool_executor(
                     getattr(self, 'execute_tool', None)
@@ -3025,6 +3292,7 @@ Your Goal: {self.goal}"""
                 verbose=self.verbose,
                 max_iterations=self._resolve_max_steps(),
                 output_continuation=getattr(getattr(self, "execution", None), "output_continuation", True),
+                parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
                 reasoning_steps=reasoning_steps,
                 task_name=task_name,
                 task_description=task_description,
@@ -3067,6 +3335,7 @@ Your Goal: {self.goal}"""
         stream_callback=None,
         emit_events=True,
         _dispatcher=None,
+        cancel_token=None,
     ):
         """
         Execute unified async chat completion using composition instead of runtime class mutation.
@@ -3159,12 +3428,14 @@ Your Goal: {self.goal}"""
             if stream_callback is None and hasattr(self, 'stream_emitter'):
                 stream_callback = getattr(self.stream_emitter, 'emit', None)
             final_response = await dispatcher.achat_completion(
+                cancel_token=cancel_token,
                 messages=messages,
                 tools=tools,
                 tool_choice=getattr(self, 'tool_choice', None),
                 temperature=temperature,
                 max_tokens=getattr(self, 'max_tokens', None),
                 stream=stream,
+                **self._native_reasoning_kwargs(getattr(dispatcher, 'model', None)),
                 response_format=response_format,
                 execute_tool_fn=self._durable_async_tool_executor(
                     getattr(self, 'execute_tool_async', None)
@@ -3176,6 +3447,7 @@ Your Goal: {self.goal}"""
                 verbose=self.verbose,
                 max_iterations=self._resolve_max_steps(),
                 output_continuation=getattr(getattr(self, "execution", None), "output_continuation", True),
+                parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
                 reasoning_steps=reasoning_steps,
                 task_name=task_name,
                 task_description=task_description,
@@ -3222,12 +3494,17 @@ Your Goal: {self.goal}"""
 
         except BudgetExceededError:
             raise
+        except ToolExecutionError:
+            # Sync parity: a tool failure is not an LLM error — do not relabel
+            # it or re-drive the model without the tool result.
+            raise
         except Exception as e:
             from ..errors import LLMError
             # Apply the same structured error classification for async path
             return await self._handle_async_llm_error(
                 e, messages, temperature, tools, stream, reasoning_steps,
-                task_name, task_description, task_id, response_format, stream_callback, emit_events
+                task_name, task_description, task_id, response_format, stream_callback, emit_events,
+                cancel_token=cancel_token,
             )
 
     def _execute_callback_and_display(self, prompt: str, response: str, generation_time: float, task_name=None, task_description=None, task_id=None):
@@ -3585,7 +3862,8 @@ Your Goal: {self.goal}"""
             _in_ok, _in_prompt, _in_err = self._validate_input_with_guardrail(prompt)
             if not _in_ok:
                 logging.warning(f"Agent {self.name}: input blocked by guardrail: {_in_err}")
-                return None
+                self._last_guardrail_error = _in_err
+                return self._guardrail_blocked_message(_in_err)
             prompt = _in_prompt
 
         # Check if external managed backend is configured
@@ -3657,7 +3935,11 @@ Your Goal: {self.goal}"""
             if self._db is not None:
                 self._init_db_session()
                 self._start_run(prompt if isinstance(prompt, str) else str(prompt))
-            result = self._chat_impl(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice, seed=seed, cancel_token=_cancel)
+            _scope_token = self._enter_turn_tool_scope(tools)
+            try:
+                result = self._chat_impl(prompt, temperature, tools, output_json, output_pydantic, reasoning_steps, stream, task_name, task_description, task_id, config, force_retrieval, skip_retrieval, attachments, _trace_emitter, tool_choice, seed=seed, cancel_token=_cancel)
+            finally:
+                self._exit_turn_tool_scope(_scope_token)
             db_output = str(result) if result is not None else None
             # A guardrail-blocked turn returns a non-None refusal string; it must
             # be recorded as "error", not "completed" (the answer was rejected).
@@ -3978,7 +4260,7 @@ Your Goal: {self.goal}"""
                     llm_kwargs = dict(
                         prompt=llm_prompt,
                         system_prompt=system_prompt_for_llm,
-                        chat_history=processed_history,
+                        chat_history=self._history_before_turn(processed_history, normalized_content),
                         temperature=temperature,
                         tools=tool_param,
                         output_json=output_json,
@@ -4033,10 +4315,6 @@ Your Goal: {self.goal}"""
 
                     response_text = self._custom_llm_get_response(llm_kwargs)
 
-                    self._add_to_chat_history("assistant", response_text)
-                    # Persist assistant message to DB
-                    self._persist_message("assistant", response_text)
-
                     # Log completion time if in debug mode
                     if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
@@ -4045,6 +4323,8 @@ Your Goal: {self.goal}"""
                     # Apply guardrail validation for custom LLM response
                     try:
                         validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=processed_history)
+                        # Commit only the approved reply (never the rejected one).
+                        self._commit_assistant_reply(validated_response)
                         # Coerce into the requested Pydantic model so callers
                         # get a validated instance, not a raw JSON string.
                         # Only output_pydantic changes the return type; output_json
@@ -4069,12 +4349,16 @@ Your Goal: {self.goal}"""
                     # Rollback chat history if LLM call fails
                     self._rollback_chat_history_to(chat_history_length)
                     _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
+                    if _is_fatal_model_error(e):
+                        raise
                     return None
             except (ToolExecutionError, BudgetExceededError):
                 raise
             except Exception as e:
                 self._last_stop_reason = "error"
                 _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
+                if _is_fatal_model_error(e):
+                    raise
                 return None
             finally:
                 self._end_turn_tracking(_turn_token)
@@ -4095,6 +4379,7 @@ Your Goal: {self.goal}"""
             # Pass llm_prompt (which includes multimodal content if attachments present)
             messages, original_prompt = self._build_messages(
                 llm_prompt, temperature, output_json, output_pydantic,
+                tools=tools,
                 use_native_format=use_native_format,
                 memory_prefetch_context=memory_prefetch_context,
             )
@@ -4193,14 +4478,11 @@ Your Goal: {self.goal}"""
 
                         # Handle output_json or output_pydantic if specified
                         if output_json or output_pydantic:
-                            # Add to chat history and return raw response
-                            # User message already added before LLM call via _build_messages
-                            self._append_to_chat_history({"role": "assistant", "content": response_text})
-                            # Persist assistant message to DB
-                            self._persist_message("assistant", response_text)
-                            # Apply guardrail validation even for JSON output
+                            # Apply guardrail validation even for JSON output; the
+                            # reply is committed to history/DB only once approved.
                             try:
-                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages)
+                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages, response_format=response_format)
+                                self._commit_assistant_reply(validated_response)
                                 # Coerce into the requested Pydantic model so callers
                                 # get a validated instance, not a raw JSON string.
                                 # output_json intentionally stays a string (backward compat).
@@ -4218,10 +4500,8 @@ Your Goal: {self.goal}"""
                                 return self._guardrail_blocked_message(e)
 
                         if not self.self_reflect:
-                            # User message already added before LLM call via _build_messages
-                            self._append_to_chat_history({"role": "assistant", "content": response_text})
-                            # Persist assistant message to DB (non-reflect path)
-                            self._persist_message("assistant", response_text)
+                            # The assistant reply is committed to history/DB only
+                            # after guardrail validation (below).
                             if self.verbose:
                                 logging.debug(f"Agent {self.name} final response: {response_text}")
                             # Return only reasoning content if reasoning_steps is True
@@ -4229,6 +4509,8 @@ Your Goal: {self.goal}"""
                                 # Apply guardrail to reasoning content
                                 try:
                                     validated_reasoning = self._apply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages)
+                                    # Commit the approved text, not the unchecked answer.
+                                    self._commit_assistant_reply(validated_reasoning)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_reasoning, time.time() - start_time, task_name, task_description, task_id)
                                     return self._trigger_after_agent_hook(original_prompt, validated_reasoning, start_time)
@@ -4242,7 +4524,8 @@ Your Goal: {self.goal}"""
                                     return self._guardrail_blocked_message(e)
                             # Apply guardrail to regular response
                             try:
-                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages)
+                                validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages, response_format=response_format)
+                                self._commit_assistant_reply(validated_response)
                                 # Execute callback after validation
                                 self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                 return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -4304,11 +4587,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if reflection_output.satisfactory == "yes" and reflection_count >= self.min_reflect - 1:
                                 if self.verbose:
                                     _get_display_functions()['display_self_reflection']("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
-                                # User message already added before LLM call via _build_messages
-                                self._append_to_chat_history({"role": "assistant", "content": response_text})
                                 # Apply guardrail validation after satisfactory reflection
                                 try:
                                     validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages)
+                                    self._commit_assistant_reply(validated_response, persist=False)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                     return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -4322,11 +4604,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             if reflection_count >= self.max_reflect - 1:
                                 if self.verbose:
                                     _get_display_functions()['display_self_reflection']("Maximum reflection count reached, returning current response", console=self.console)
-                                # User message already added before LLM call via _build_messages
-                                self._append_to_chat_history({"role": "assistant", "content": response_text})
                                 # Apply guardrail validation after max reflections
                                 try:
                                     validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages)
+                                    self._commit_assistant_reply(validated_response, persist=False)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                     return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -4360,9 +4641,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     # None) loops forever, two LLM calls at a time.
                                     if self.verbose:
                                         _get_display_functions()['display_self_reflection']("Maximum reflection count reached after repeated parse errors, returning current response", console=self.console)
-                                    self._append_to_chat_history({"role": "assistant", "content": response_text})
                                     try:
                                         validated_response = self._apply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=messages)
+                                        self._commit_assistant_reply(validated_response, persist=False)
                                         self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                         return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
                                     except Exception as guard_e:
@@ -4373,7 +4654,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     except Exception:
                         # Catch any exception from the inner try block and re-raise to outer handler
                         raise
-            except ToolExecutionError:
+            except (ToolExecutionError, BudgetExceededError):
+                # Parity with the custom-LLM and async paths: a budget stop must
+                # reach the caller, not turn into a ``None`` reply.
                 raise
             except Exception as e:
                 self._last_stop_reason = "error"
@@ -4381,6 +4664,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 _get_display_functions()['display_error'](f"Unexpected error in chat: {e}", console=self.console)
                 # Rollback chat history
                 self._rollback_chat_history_to(chat_history_length)
+                if _is_fatal_model_error(e):
+                    raise
                 return None
             finally:
                 # End per-turn tracking after any rollback has run (rollback
@@ -4435,7 +4720,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 )
             if not _in_ok:
                 logging.warning(f"Agent {self.name}: input blocked by guardrail: {_in_err}")
-                return None
+                self._last_guardrail_error = _in_err
+                return self._guardrail_blocked_message(_in_err)
             prompt = _in_prompt
 
         # Check if external managed backend is configured (async parity with the
@@ -4499,15 +4785,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if self._db is not None:
                 await self._ainit_db_session()
                 await self._astart_run(prompt if isinstance(prompt, str) else str(prompt))
-            result = await self._achat_impl(
-                prompt=prompt, temperature=temperature, tools=tools,
-                output_json=output_json, output_pydantic=output_pydantic,
-                reasoning_steps=reasoning_steps, stream=stream,
-                task_name=task_name, task_description=task_description, task_id=task_id,
-                config=config, force_retrieval=force_retrieval, skip_retrieval=skip_retrieval,
-                attachments=attachments, _trace_emitter=_trace_emitter, tool_choice=tool_choice,
-                seed=seed, cancel_token=_cancel
-            )
+            _scope_token = self._enter_turn_tool_scope(tools)
+            try:
+                result = await self._achat_impl(
+                    prompt=prompt, temperature=temperature, tools=tools,
+                    output_json=output_json, output_pydantic=output_pydantic,
+                    reasoning_steps=reasoning_steps, stream=stream,
+                    task_name=task_name, task_description=task_description, task_id=task_id,
+                    config=config, force_retrieval=force_retrieval, skip_retrieval=skip_retrieval,
+                    attachments=attachments, _trace_emitter=_trace_emitter, tool_choice=tool_choice,
+                    seed=seed, cancel_token=_cancel
+                )
+            finally:
+                self._exit_turn_tool_scope(_scope_token)
             db_output = str(result) if result is not None else None
             # A guardrail-blocked turn returns a non-None refusal string; record
             # it as "error", not "completed" (see sync chat()).
@@ -4719,7 +5009,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             tools,
                             memory_prefetch_context=memory_prefetch_context,
                         ),
-                        'chat_history': effective_history,
+                        'chat_history': self._history_before_turn(effective_history, normalized_content),
                         'temperature': temperature,
                         'tools': tools,
                         'output_json': output_json,
@@ -4772,8 +5062,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if effective_history is not self.chat_history:
                         self._replace_chat_history(effective_history)
 
-                    self._append_to_chat_history({"role": "assistant", "content": response_text})
-
                     if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
                         logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
@@ -4781,6 +5069,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Apply guardrail validation for custom LLM response
                     try:
                         validated_response = await self._aapply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id, messages=effective_history)
+                        # Commit only the approved reply (never the rejected one).
+                        self._commit_assistant_reply(validated_response, persist=False)
                         # Coerce into the requested Pydantic model so callers
                         # get a validated instance, not a raw JSON string.
                         # output_json intentionally stays a string (backward compat).
@@ -4804,6 +5094,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
                         logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
+                    if _is_fatal_model_error(e):
+                        raise
                     return None
 
             # For OpenAI client
@@ -4813,6 +5105,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 temperature,
                 output_json,
                 output_pydantic,
+                tools=tools,
                 restore_durable=False,
                 memory_prefetch_context=memory_prefetch_context,
             )
@@ -4906,7 +5199,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             task_name=task_name,
                             task_description=task_description,
                             task_id=task_id,
-                            response_format=response_format
+                            response_format=response_format,
+                            cancel_token=_cancel,
                         )
                         
                         # Process response - mirror sync _chat_impl behavior (lines ~1544-1602)
@@ -4922,16 +5216,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                         # Handle output_json or output_pydantic if specified
                         if output_json or output_pydantic:
-                            # Add to chat history and return raw response
-                            # User message already added before LLM call via _build_messages
-                            self._append_to_chat_history({"role": "assistant", "content": response_text})
-                            # Persist assistant message to DB (offloaded to a
-                            # worker thread so file-locked disk I/O doesn't
-                            # block the event loop on this async turn).
-                            await self._apersist_message("assistant", response_text)
-                            # Apply guardrail validation even for JSON output
+                            # Apply guardrail validation even for JSON output; the
+                            # reply is committed to history/DB only once approved.
                             try:
-                                validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages)
+                                validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages, response_format=response_format)
+                                await self._acommit_assistant_reply(validated_response)
                                 # Coerce into the requested Pydantic model so callers
                                 # get a validated instance, not a raw JSON string.
                                 # output_json intentionally stays a string (backward compat).
@@ -4948,11 +5237,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                         # For regular responses (no self-reflection)
                         if not self.self_reflect:
-                            # User message already added before LLM call via _build_messages
-                            self._append_to_chat_history({"role": "assistant", "content": response_text})
-                            # Persist assistant message to DB (non-reflect path,
-                            # offloaded to a worker thread to avoid blocking the loop)
-                            await self._apersist_message("assistant", response_text)
+                            # The assistant reply is committed to history/DB only
+                            # after guardrail validation (below).
                             if self.verbose:
                                 logging.debug(f"Agent {self.name} final response: {response_text}")
                             # Return only reasoning content if reasoning_steps is True
@@ -4960,6 +5246,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 # Apply guardrail to reasoning content
                                 try:
                                     validated_reasoning = await self._aapply_guardrail_with_retry(response.choices[0].message.reasoning_content, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages)
+                                    # Commit the approved text, not the unchecked answer.
+                                    await self._acommit_assistant_reply(validated_reasoning)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_reasoning, time.time() - start_time, task_name, task_description, task_id)
                                     return await self._atrigger_after_agent_hook(original_prompt, validated_reasoning, start_time)
@@ -4971,7 +5259,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             else:
                                 # Apply guardrail to regular response content
                                 try:
-                                    validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages)
+                                    validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages, response_format=response_format)
+                                    await self._acommit_assistant_reply(validated_response)
                                     # Execute callback after validation
                                     self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                     return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -5007,11 +5296,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         if self.verbose:
                                             _get_display_functions()['display_self_reflection'](f"Agent {self.name}: Self-reflection with structured output is not supported for custom LLM providers. Skipping reflection.", console=self.console)
                                         # Return the original response without reflection
-                                        self._append_to_chat_history({"role": "assistant", "content": response_text})
-                                        # Persist assistant message to DB (offloaded to a worker thread)
-                                        await self._apersist_message("assistant", response_text)
                                         try:
                                             validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages)
+                                            await self._acommit_assistant_reply(validated_response)
                                             # Execute callback after validation
                                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                             return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -5041,11 +5328,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         if self.verbose:
                                             _get_display_functions()['display_self_reflection']("Agent marked the response as satisfactory after meeting minimum reflections", console=self.console)
                                         # Add to chat history and return
-                                        self._append_to_chat_history({"role": "assistant", "content": response_text})
-                                        # Persist assistant message to DB (offloaded to a worker thread)
-                                        await self._apersist_message("assistant", response_text)
                                         try:
                                             validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages)
+                                            await self._acommit_assistant_reply(validated_response)
                                             # Execute callback after validation
                                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                             return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -5060,11 +5345,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         if self.verbose:
                                             _get_display_functions()['display_self_reflection']("Maximum reflection count reached, returning current response", console=self.console)
                                         # Add to chat history and return
-                                        self._append_to_chat_history({"role": "assistant", "content": response_text})
-                                        # Persist assistant message to DB (offloaded to a worker thread)
-                                        await self._apersist_message("assistant", response_text)
                                         try:
                                             validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages)
+                                            await self._acommit_assistant_reply(validated_response)
                                             # Execute callback after validation
                                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                             return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -5089,7 +5372,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         task_name=task_name,
                                         task_description=task_description,
                                         task_id=task_id,
-                                        response_format=response_format
+                                        response_format=response_format,
+                                        cancel_token=_cancel,
                                     )
                                     
                                     if new_response:
@@ -5110,11 +5394,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     reflection_count += 1
                                     if reflection_count >= self.max_reflect:
                                         # Return original response after max reflection attempts
-                                        self._append_to_chat_history({"role": "assistant", "content": response_text})
-                                        # Persist assistant message to DB (offloaded to a worker thread)
-                                        await self._apersist_message("assistant", response_text)
                                         try:
                                             validated_response = await self._aapply_guardrail_with_retry(response_text, original_prompt, temperature, tools, task_name, task_description, task_id, messages=messages)
+                                            await self._acommit_assistant_reply(validated_response)
                                             # Execute callback after validation
                                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                             return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
@@ -5151,7 +5433,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             response = await self._openai_client.async_client.chat.completions.create(
                                 **tool_call_kwargs
                             )
-                            result = await self._achat_completion(response, tools)
+                            result = await self._achat_completion(response, tools, messages=messages)
                             if get_logger().getEffectiveLevel() == logging.DEBUG:
                                 total_time = time.time() - start_time
                                 logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
@@ -5304,6 +5586,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # a dangling, unanswered user message (mirrors the sync path
                     # and achat()'s own guardrail handler).
                     self._rollback_chat_history_to(chat_history_length)
+                    if _is_fatal_model_error(e):
+                        raise
                     return None
         except ToolExecutionError:
             raise
@@ -5319,6 +5603,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Rollback chat history so a failed async turn does not leave a
             # dangling, unanswered user message (mirrors the sync path).
             self._rollback_chat_history_to(chat_history_length)
+            if _is_fatal_model_error(e):
+                raise
             return None
         finally:
             # Unregister this turn's ownership list from the process-wide
@@ -5331,8 +5617,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # the except blocks above already read ownership before this runs.
             self._clear_turn_tracking()
 
-    async def _achat_completion(self, response, tools, reasoning_steps=False):
-        """Async version of _chat_completion method"""
+    async def _achat_completion(self, response, tools, reasoning_steps=False, messages=None):
+        """Async version of _chat_completion method.
+
+        ``messages`` is the conversation that produced ``response``; it is kept in
+        the follow-up request so the final answer still sees the user's question.
+        """
         try:
             message = response.choices[0].message
             if not hasattr(message, 'tool_calls') or not message.tool_calls:
@@ -5418,17 +5708,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if results:
                 formatted_results = "\n".join([str(r) for r in results if r is not None])
                 if formatted_results:
-                    messages = [
-                        {"role": "system", "content": self.system_prompt},
+                    if messages:
+                        follow_up_messages = list(messages)
+                    else:
+                        follow_up_messages = [{"role": "system", "content": self.system_prompt}]
+                    follow_up_messages.extend([
                         {"role": "assistant", "content": "Here are the tool results:"},
                         {"role": "user", "content": formatted_results + "\nPlease process these results and provide a final response."}
-                    ]
+                    ])
                     try:
                         final_response = await self._openai_client.async_client.chat.completions.create(
                             model=self.llm,
-                            messages=messages,
+                            messages=follow_up_messages,
                             temperature=1.0,
-                            stream=stream
+                            stream=True
                         )
                         full_response_text = ""
                         reasoning_content = ""
@@ -5438,6 +5731,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Process stream without display_generating since streaming is active
                         async for chunk in final_response:
                             chunks.append(chunk)
+                            if not chunk.choices:
+                                # e.g. Azure content-filter annotation chunks
+                                continue
                             if chunk.choices[0].delta.content:
                                 full_response_text += chunk.choices[0].delta.content
                             
@@ -5445,9 +5741,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 rc = chunk.choices[0].delta.reasoning_content
                                 if rc:
                                     reasoning_content += rc
+
+                        if not full_response_text.strip() and not reasoning_content.strip():
+                            # No answer text (only annotation, contentless or
+                            # whitespace-only chunks): fall back to the tool results via the
+                            # except below.
+                            raise ValueError("follow-up stream returned no answer text")
                         
-                        self.console.print()
+                        console = self.console  # None unless verbose
+                        if console is not None:
+                            console.print()
                         
+                        from .agent import _get_llm_functions
                         final_response = _get_llm_functions()['process_stream_chunks'](chunks)
                         # Return only reasoning content if reasoning_steps is True
                         if reasoning_steps and hasattr(final_response.choices[0].message, 'reasoning_content') and final_response.choices[0].message.reasoning_content:
@@ -5555,7 +5860,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             _in_ok, _in_prompt, _in_err = self._validate_input_with_guardrail(prompt)
             if not _in_ok:
                 logging.warning(f"Agent {getattr(self, 'name', '')}: input blocked by guardrail: {_in_err}")
-                yield f"[Input blocked by guardrail: {_in_err}]"
+                self._last_guardrail_error = _in_err
+                yield self._guardrail_blocked_message(_in_err)
                 return "failed"
             prompt = _in_prompt
 
@@ -5764,7 +6070,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     for chunk in self.llm_instance.get_response_stream(
                         prompt=actual_prompt,
                         system_prompt=stream_system_prompt,
-                        chat_history=stream_history,
+                        chat_history=self._history_before_turn(stream_history, normalized_content),
                         temperature=kwargs.get('temperature', 1.0),
                         tools=tool_param,
                         output_json=kwargs.get('output_json'),
@@ -5839,6 +6145,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # Build messages using the helper method
                 messages, original_prompt = self._build_messages(actual_prompt, kwargs.get('temperature', 1.0), 
                                                                kwargs.get('output_json'), kwargs.get('output_pydantic'),
+                                                               tools=tool_param,
                                                                memory_prefetch_context=memory_prefetch_context)
                 
                 # Apply context management so the streaming path compacts long
@@ -6521,23 +6828,24 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             self._run_pre_compaction_memory_flush(messages, _compactor)
             
             # Perform compaction
-            if _strategy == CompactionStrategy.LLM_SUMMARIZE and _llm_fn:
-                # Drive the async summariser through the shared bridge so it runs
-                # correctly whether or not a loop is already running (FastAPI /
-                # Jupyter / a bot handler). The previous code caught bare
-                # RuntimeError from ``asyncio.run`` ("event loop already
-                # running") and silently downgraded LLM summarisation to naive
-                # truncation whenever a loop was live; the bridge removes that
-                # spurious fallback so the real summariser always runs. Provider
-                # errors inside the summariser remain best-effort (see
-                # ``_llm_summarize_async``, which falls back to a naive summary on
-                # failure) — compaction never hard-fails the turn.
-                from ..utils.async_bridge import run_coroutine_from_any_context
-                compacted_msgs, _cr = run_coroutine_from_any_context(
-                    _compactor.compact_async(messages)
-                )
-            else:
-                compacted_msgs, _cr = _compactor.compact(messages)
+            with protect_turn(getattr(self, 'interrupt_controller', None)):
+                if _strategy == CompactionStrategy.LLM_SUMMARIZE and _llm_fn:
+                    # Drive the async summariser through the shared bridge so it runs
+                    # correctly whether or not a loop is already running (FastAPI /
+                    # Jupyter / a bot handler). The previous code caught bare
+                    # RuntimeError from ``asyncio.run`` ("event loop already
+                    # running") and silently downgraded LLM summarisation to naive
+                    # truncation whenever a loop was live; the bridge removes that
+                    # spurious fallback so the real summariser always runs. Provider
+                    # errors inside the summariser remain best-effort (see
+                    # ``_llm_summarize_async``, which falls back to a naive summary on
+                    # failure) — compaction never hard-fails the turn.
+                    from ..utils.async_bridge import run_coroutine_from_any_context
+                    compacted_msgs, _cr = run_coroutine_from_any_context(
+                        _compactor.compact_async(messages)
+                    )
+                else:
+                    compacted_msgs, _cr = _compactor.compact(messages)
             
             messages[:] = compacted_msgs  # in-place update so callers see the change
             logging.info(
@@ -6611,10 +6919,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             await self._arun_pre_compaction_memory_flush(messages, _compactor)
             
             # Perform compaction (use async version when available)
-            if _strategy == CompactionStrategy.LLM_SUMMARIZE and _llm_fn:
-                compacted_msgs, _cr = await _compactor.compact_async(messages)
-            else:
-                compacted_msgs, _cr = _compactor.compact(messages)
+            with protect_turn(getattr(self, 'interrupt_controller', None)):
+                if _strategy == CompactionStrategy.LLM_SUMMARIZE and _llm_fn:
+                    compacted_msgs, _cr = await _compactor.compact_async(messages)
+                else:
+                    compacted_msgs, _cr = _compactor.compact(messages)
             
             # If messages is the same object as chat_history, replace chat history
             # Otherwise, update the passed messages list in-place
@@ -6882,7 +7191,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # This should never be reached, but just in case
         raise RuntimeError("Retry loop completed without returning or raising an exception")
 
-    async def _achat_completion_with_retry(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
+    async def _achat_completion_with_retry(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True, cancel_token=None):
         """Async model call with retry, recorded as ``llm_request``/``llm_response`` like the sync path.
 
         ``Agent.astart``/``achat`` recorded no model calls before this, so a replay
@@ -6895,6 +7204,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             messages, temperature, tools, stream, reasoning_steps, task_name,
             task_description, task_id, response_format,
             stream_callback=stream_callback, emit_events=emit_events,
+            cancel_token=cancel_token,
         )
         if not _trace_emitter._enabled:  # zero overhead when tracing is off
             return await call
@@ -6933,7 +7243,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         )
         return response
 
-    async def _achat_completion_with_retry_dispatch(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
+    async def _achat_completion_with_retry_dispatch(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True, cancel_token=None):
         """
         Async wrapper for _execute_unified_achat_completion that adds jittered exponential backoff retry logic.
         
@@ -6960,7 +7270,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         req.messages, effective_temperature, effective_tools, stream,
                         reasoning_steps, task_name, task_description, task_id,
                         response_format, stream_callback=stream_callback,
-                        emit_events=emit_events,
+                        emit_events=emit_events, cancel_token=cancel_token,
                     ),
                     loop,
                 )
@@ -6983,8 +7293,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     model_name=str(getattr(self, 'llm', '') or ''),
                 ),
             )
+            # Copy ContextVars into the worker so the re-scheduled model call
+            # keeps the caller's context (session identity, AG-UI run owner).
+            import contextvars
+            _ctx = contextvars.copy_context()
             response = await loop.run_in_executor(
-                None, lambda: manager.execute_model_call(request, _model_fn)
+                None, lambda: _ctx.run(manager.execute_model_call, request, _model_fn)
             )
             return self._unwrap_model_response(response)
 
@@ -6992,9 +7306,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             messages, temperature, tools, stream, reasoning_steps,
             task_name, task_description, task_id, response_format,
             stream_callback=stream_callback, emit_events=emit_events,
+            cancel_token=cancel_token,
         )
 
-    async def _achat_completion_with_retry_core(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True):
+    async def _achat_completion_with_retry_core(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True, cancel_token=None):
         """Async retry/backoff core for chat completion (middleware-agnostic)."""
         # Reset the agent-level finish-reason classification at the start of each
         # async OpenAI-native turn, mirroring the sync ``_chat_completion`` reset,
@@ -7008,7 +7323,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             return await self._execute_unified_achat_completion(
                 messages, temperature, tools, stream, reasoning_steps, 
                 task_name, task_description, task_id, response_format,
-                stream_callback=stream_callback, emit_events=emit_events
+                stream_callback=stream_callback, emit_events=emit_events,
+                cancel_token=cancel_token,
             )
         
         from .retry_utils import jittered_backoff, interruptible_sleep
@@ -7024,7 +7340,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 return await self._execute_unified_achat_completion(
                     messages, temperature, tools, stream, reasoning_steps,
                     task_name, task_description, task_id, response_format,
-                    stream_callback=stream_callback, emit_events=emit_events
+                    stream_callback=stream_callback, emit_events=emit_events,
+                    cancel_token=cancel_token,
                 )
             
             except Exception as e:
@@ -7076,7 +7393,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 logger.debug(f"[{self.name}] Async retry {attempt + 1}/{max_attempts} after {delay:.1f}s: {str(e)[:100]}")
                 
                 # Async sleep with interrupt awareness using the helper
-                interrupt_fn = getattr(self, '_is_interrupted', lambda: False)
+                _is_interrupted = getattr(self, '_is_interrupted', lambda: False)
+                _tok = cancel_token
+
+                def interrupt_fn():
+                    return _is_interrupted() or (
+                        _tok is not None and getattr(_tok, "is_set", lambda: False)()
+                    )
                 if not await interruptible_sleep(delay, interrupt_fn=interrupt_fn):
                     raise RuntimeError("Agent interrupted during retry backoff")
         

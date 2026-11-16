@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from .models import RecipeResult
+from praisonai._errors import _WrapperError
 
 try:
     import fcntl
@@ -56,7 +57,7 @@ def _index_flock(lock_path: Path):
 DEFAULT_RUNS_PATH = Path.home() / ".praison" / "runs"
 
 
-class RunHistoryError(Exception):
+class RunHistoryError(_WrapperError):
     """Base exception for run history operations."""
     pass
 

@@ -174,7 +174,7 @@ SPECIALIZED AGENT TYPES
 
 ## VideoAgent - Video Generation
 - Use `agent: VideoAgent` in agent definition
-- llm: openai/sora-2 or gemini/veo-3.0-generate-preview
+- llm: openai/sora-2 or gemini/veo-3.1-generate-preview
 
 ## OCRAgent - Text Extraction from Documents
 - Use `agent: OCRAgent` in agent definition

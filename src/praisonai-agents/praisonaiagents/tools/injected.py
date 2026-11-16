@@ -20,6 +20,8 @@ Usage:
         return f"Query: {query}, Session: {session_id}"
 """
 
+import re
+import weakref
 from dataclasses import dataclass, field
 from typing import Any, Dict, Generic, List, Optional, TypeVar, get_type_hints, get_origin, get_args
 from contextvars import ContextVar
@@ -171,17 +173,57 @@ def get_injected_params(func) -> Dict[str, Any]:
     try:
         hints = get_type_hints(func)
     except Exception:
-        # If we can't get hints, return empty
-        return {}
+        # Same fallback as the schema builder, so a param hidden from the
+        # model schema is still filled at runtime.
+        hints = getattr(func, "__annotations__", None) or {}
     
     injected = {}
     for name, hint in hints.items():
         if name == 'return':
             continue
         if is_injected_type(hint):
+            if isinstance(hint, str):
+                # Unresolved postponed annotation: read the inner type by name
+                # (no evaluation) so ``Injected[AgentState]`` still gets state.
+                match = re.search(r"Injected\[\s*([\w.]+)\s*\]", hint)
+                inner = match.group(1).rsplit(".", 1)[-1] if match else None
+                hint = Injected[AgentState] if inner == "AgentState" else Injected[dict]
             injected[name] = hint
     
     return injected
+
+
+# Keyed weakly on the underlying function (bound methods share ``__func__``),
+# so per-call LangChain/CrewAI instances are neither pinned nor re-scanned.
+_plain_injected_cache: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def inject_into_plain_callable(func, kwargs: Dict[str, Any], state: Optional[AgentState] = None) -> Dict[str, Any]:
+    """Fill ``Injected[...]`` params for an undecorated callable.
+
+    ``@tool`` (FunctionTool) injects on its own call, so it is skipped here.
+    Detected params are cached per function so the hot path stays cheap.
+    """
+    if hasattr(func, "injected_params") or not callable(func):
+        return kwargs
+    key = getattr(func, "__func__", func)
+    try:
+        params = _plain_injected_cache.get(key)
+    except TypeError:  # not weak-referenceable / unhashable
+        params = get_injected_params(func)
+    else:
+        if params is None:
+            params = get_injected_params(func)
+            _plain_injected_cache[key] = params
+    if not params:
+        return kwargs
+    if state is None:
+        return inject_state_into_kwargs(kwargs, params)
+    token = _current_state.set(state)
+    try:
+        return inject_state_into_kwargs(kwargs, params)
+    finally:
+        _current_state.reset(token)
 
 
 def inject_state_into_kwargs(kwargs: Dict[str, Any], injected_params: Dict[str, Any]) -> Dict[str, Any]:
@@ -201,7 +243,10 @@ def inject_state_into_kwargs(kwargs: Dict[str, Any], injected_params: Dict[str, 
     result = kwargs.copy()
     
     for param_name, annotation in injected_params.items():
-        if param_name not in result:
+        # Inside an agent run the framework state is authoritative: a value the
+        # model supplied (prompt injection) must never override it. Outside an
+        # injection context, an explicit caller value is kept.
+        if state is not None or param_name not in result:
             result[param_name] = resolve_injected_value(annotation, state)
     
     return result

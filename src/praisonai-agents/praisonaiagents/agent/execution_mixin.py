@@ -22,12 +22,6 @@ logger = logging.getLogger(__name__)
 
 from typing import List, Optional, Any, Dict, Union, Generator, TYPE_CHECKING
 
-# Shared HTTP launch state — the process-wide registry is defined in
-# agent/server_registry.py and shared with PraisonAIAgents.launch() so a
-# standalone Agent and a team launched on the same port cannot double-bind it or
-# hide each other's endpoints.
-from .server_registry import _server_registry
-
 
 class _TimeoutCancelToken:
     """cancel_token for caller-mode ``start(timeout=...)``.
@@ -76,6 +70,8 @@ def cleanup_launch_registration(agent_id: str) -> None:
     ``_AgentServerRegistry.teardown_routes_for``) so cleanup cannot race a
     concurrent launch that reserves and registers a route on the same port.
     """
+    from .server_registry import _server_registry  # lazy: launch path only
+
     _server_registry.teardown_routes_for(agent_id)
 
 if TYPE_CHECKING:
@@ -1647,6 +1643,26 @@ Write the complete compiled report:"""
         return response.result if isinstance(response, ToolResponse) else response
 
     async def _execute_tool_async_with_retry(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
+        """Async tool execution with retry policy, framed by tool trace events.
+
+        Emits ``tool_call_start``/``tool_call_end`` once per tool call, as the
+        sync ``_execute_tool_with_context`` does. The default emitter is a
+        disabled NoOp, so this costs nothing unless tracing is on.
+        """
+        from ..trace.context_events import get_context_emitter
+        _trace_emitter = get_context_emitter()
+        _trace_emitter.tool_call_start(self.name, function_name, arguments)
+        _tool_start_time = time.time()
+        try:
+            result = await self._execute_tool_async_retry_loop(function_name, arguments, tool_call_id, tools_override)
+        except BaseException as e:  # incl. asyncio.CancelledError, so the START is always closed
+            _trace_emitter.tool_call_end(self.name, function_name, None, (time.time() - _tool_start_time) * 1000, str(e) or type(e).__name__)
+            raise
+        if _trace_emitter.enabled:
+            _trace_emitter.tool_call_end(self.name, function_name, str(result) if result else None, (time.time() - _tool_start_time) * 1000)
+        return result
+
+    async def _execute_tool_async_retry_loop(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
         """Async tool execution with retry policy (middleware-agnostic core)."""
         from ..errors import ToolExecutionError
 
@@ -1654,11 +1670,28 @@ Write the complete compiled report:"""
         retry_policy = self._get_tool_retry_policy(function_name)
         
         last_exception = None
-        
+
+        def _finish(result, raised, retryable_ok=True):
+            # Strip the private control-plane tag before it reaches the model. A
+            # tool that *raised* ends the turn with ToolExecutionError so the run
+            # is finalized failed — the same contract as the sync path
+            # (tool_execution.py, test_tool_failure_not_relabelled). A plain
+            # tool-returned {"error": ...} stays a recoverable model input.
+            retryable = result.pop("_praison_retryable", None) is True and retryable_ok
+            if raised:
+                raise ToolExecutionError(
+                    result.get("error", f"Tool '{function_name}' failed"),
+                    tool_name=function_name,
+                    agent_id=self.name,
+                    is_retryable=retryable,
+                )
+            return result
+
         # Retry loop with exponential backoff
         for attempt in range(retry_policy.max_attempts):
             try:
                 result = await self._execute_tool_async_impl(function_name, arguments, tool_call_id, tools_override)
+                raised = isinstance(result, dict) and bool(result.pop("_praison_raised", False))
                 
                 # Check if result is an error that should be retried
                 if isinstance(result, dict) and result.get("error"):
@@ -1673,8 +1706,7 @@ Write the complete compiled report:"""
                         result.get("circuit_open") or
                         result.get("loop_blocked") or
                         result.get("_praison_retryable") is False):
-                        result.pop("_praison_retryable", None)
-                        return result
+                        return _finish(result, raised)
 
                     # The body already ran and may have completed its side effect
                     # before failing. Honour an explicit restart_safe=False /
@@ -1684,8 +1716,9 @@ Write the complete compiled report:"""
                     # up to max_attempts times -- charging a card three times for
                     # a tool the author marked "must never be silently re-executed".
                     if self._tool_declares_not_idempotent(function_name, tools_override):
-                        result.pop("_praison_retryable", None)
-                        return result
+                        # Must not run again: report non-retryable so durable
+                        # runs are finalized failed (sync parity).
+                        return _finish(result, raised, retryable_ok=False)
 
                     # Determine error type for retry policy
                     error_type = self._classify_error_type(result, last_exception)
@@ -1703,13 +1736,11 @@ Write the complete compiled report:"""
                     # never steer our retry loop.
                     if (not retry_policy.should_retry(error_type, attempt)
                             and result.get("_praison_retryable") is not True):
-                        result.pop("_praison_retryable", None)
-                        return result
+                        return _finish(result, raised)
                     
                     # Don't retry on last attempt
                     if attempt == retry_policy.max_attempts - 1:
-                        result.pop("_praison_retryable", None)
-                        return result
+                        return _finish(result, raised)
                     
                     # Emit retry hook event  
                     delay_ms = retry_policy.get_delay_ms(attempt)
@@ -1734,7 +1765,9 @@ Write the complete compiled report:"""
                 
                 # Check if retryable and not last attempt
                 if not is_retryable or attempt == retry_policy.max_attempts - 1:
-                    # Return error dict instead of raising for consistency with sync version
+                    # A framework-internal failure escaping the impl (not a tool
+                    # body raise — those are flattened and handled above) is
+                    # returned as an error dict.
                     return {"error": f"Error in execute_tool_async: {str(e)}"}
                 
                 # Determine error type  
@@ -1762,7 +1795,15 @@ Write the complete compiled report:"""
         from .tool_execution import _CALLER_ERROR_TYPES
         try:
             logging.info(f"Executing async tool: {function_name} with arguments: {arguments}")
-            
+
+            # Gate on the tool that will actually run (parity with the sync path).
+            if hasattr(self, "_canonical_tool_name"):
+                function_name = self._canonical_tool_name(function_name, tools_override)
+            if hasattr(self, "_turn_tool_denial"):
+                turn_denial = self._turn_tool_denial(function_name)
+                if turn_denial is not None:
+                    return turn_denial
+
             # Check if approval is required for this tool (protocol-driven)
             try:
                 result = await self._check_tool_approval_async(function_name, arguments)
@@ -1952,9 +1993,14 @@ Write the complete compiled report:"""
                 except ImportError:
                     durable_key = None
                 call_arguments = arguments
+                if hasattr(self, "_cast_arguments"):  # sync-path parity
+                    call_arguments = self._cast_arguments(call_target, arguments)
                 if durable_key:
+                    sig_target = (
+                        func._signature_target() if isinstance(func, BaseTool) else call_target
+                    )
                     try:
-                        parameters = inspect.signature(call_target).parameters.values()
+                        parameters = inspect.signature(sig_target).parameters.values()
                     except (TypeError, ValueError):
                         parameters = ()
                     if any(
@@ -1962,7 +2008,7 @@ Write the complete compiled report:"""
                         or parameter.kind == inspect.Parameter.VAR_KEYWORD
                         for parameter in parameters
                     ):
-                        call_arguments = dict(arguments)
+                        call_arguments = dict(call_arguments)
                         call_arguments["idempotency_key"] = durable_key
 
                 # Establish the injection context (Injected[T] params, including
@@ -1978,6 +2024,9 @@ Write the complete compiled report:"""
                         _inject_state = self._build_agent_state()
                     except Exception:
                         _inject_state = None
+                if not isinstance(func, BaseTool):
+                    from ..tools.injected import inject_into_plain_callable
+                    call_arguments = inject_into_plain_callable(call_target, call_arguments, _inject_state)
 
                 async def _invoke():
                     # Set the tool-progress channel BEFORE dispatch so the sink
@@ -2235,7 +2284,7 @@ Write the complete compiled report:"""
                             result = {"value": result, "_loop_guard": {"message": decision.message, "action": decision.action.value}}
 
                 # Ensure result is JSON serializable
-                logging.debug(f"Raw result from tool: {result}")
+                logging.debug("Raw result from tool: %s", result)
                 if result is None:
                     return {"result": None}
                 try:
@@ -2285,9 +2334,14 @@ Write the complete compiled report:"""
                 # Private control-plane key: a tool's own result may legitimately
                 # contain "retryable" (common for HTTP-API wrappers) and must not
                 # collide with the framework's verdict nor leak to the model.
+                # ``_praison_raised`` marks the dict as a flattened *raised*
+                # exception (timeouts/pool exhaustion also carry
+                # ``_praison_retryable`` but did not raise), so the retry loop can
+                # surface it as ToolExecutionError exactly like the sync path.
                 return {
                     "error": f"Error executing {function_name}: {str(e)}",
                     "_praison_retryable": retryable,
+                    "_praison_raised": True,
                 }
 
         except ToolExecutionError:
@@ -2372,7 +2426,11 @@ Write the complete compiled report:"""
         host = resolve_launch_host(host)
 
         # Get or create the shared FastAPI app for this port (shared with
-        # PraisonAIAgents.launch via the same _server_registry singleton).
+        # PraisonAIAgents.launch via the same _server_registry singleton, so a
+        # standalone Agent and a team on one port cannot double-bind it).
+        # Imported lazily: only the HTTP launch path needs the registry.
+        from .server_registry import _server_registry
+
         app, is_new_app = _server_registry.get_or_create_app(
             port,
             title=f"PraisonAI Agents API (Port {port})",
@@ -2468,44 +2526,9 @@ Write the complete compiled report:"""
             print(f"📚 API documentation available at http://{host}:{port}/docs")
         print(f"🔌 Available endpoints on port {port}: {', '.join(endpoints)}")
 
-        # Get the stack frame to check if this is the last launch() call in the script
-        import inspect
-        stack = inspect.stack()
-
-        # If this is called from a Python script (not interactive), try to detect if it's the last launch call
-        if len(stack) > 1 and stack[1].filename.endswith('.py'):
-            caller_frame = stack[1]
-            caller_line = caller_frame.lineno
-
-            try:
-                # Read the file to check if there are more launch calls after this one
-                with open(caller_frame.filename, 'r') as f:
-                    lines = f.readlines()
-
-                # Check if there are more launch() calls after the current line
-                has_more_launches = False
-                for line_content in lines[caller_line:]: # renamed line to line_content
-                    if '.launch(' in line_content and not line_content.strip().startswith('#'):
-                        has_more_launches = True
-                        break
-
-                # If this is the last launch call, block the main thread
-                if not has_more_launches:
-                    try:
-                        print("\nAll agents registered for HTTP mode. Press Ctrl+C to stop the servers.")
-                        while True:
-                            self._safe_sleep(1)
-                    except KeyboardInterrupt:
-                        print("\nServers stopped")
-            except Exception as e:
-                # If something goes wrong with detection, block anyway to be safe
-                logging.error(f"Error in launch detection: {e}")
-                try:
-                    print("\nKeeping HTTP servers alive. Press Ctrl+C to stop.")
-                    while True:
-                        self._safe_sleep(1)
-                except KeyboardInterrupt:
-                    print("\nServers stopped")
+        # Keep the daemon server threads alive once the script finishes
+        # (no source-text inspection of the caller).
+        _server_registry.keep_alive_at_exit()
         return None
 
     def _launch_mcp_server(self, path: str, port: int, host: str, debug: bool):

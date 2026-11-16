@@ -939,7 +939,9 @@ class PluginManager:
                         name=f"{name}:{event.value}",
                         # Delivery policies compose in order: apply a rewrite
                         # before the next policy, and stop the chain on denial.
-                        sequential=event == PluginHook.MESSAGE_SENDING,
+                        # AFTER_AGENT adapters mutate the shared response, so
+                        # stacked redactors must also run in order.
+                        sequential=event in (PluginHook.MESSAGE_SENDING, PluginHook.AFTER_AGENT),
                     )
                     hook_ids.append(hook_id)
                     count += 1
@@ -1171,8 +1173,14 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
 
     if _overrides("after_agent"):
         def after_agent_hook(data, _p=resolving_plugin):
-            new_resp = _p.after_agent(getattr(data, "response", ""),
-                                      {"agent_name": getattr(data, "agent_name", None)})
+            try:
+                new_resp = _p.after_agent(getattr(data, "response", ""),
+                                          {"agent_name": getattr(data, "agent_name", None)})
+            except GuardrailBlocked as e:
+                return HookResult.block(e.reason)
+            decision = _as_decision(new_resp)
+            if decision is not None:
+                return decision
             if isinstance(new_resp, str) and hasattr(data, "response"):
                 data.response = new_resp
             return HookResult.allow()

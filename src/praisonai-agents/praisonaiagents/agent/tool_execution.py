@@ -7,6 +7,8 @@ for maintainability.
 """
 
 import os
+import dataclasses
+import typing
 import time
 import json
 import logging
@@ -38,6 +40,14 @@ _active_turn_cancel: "contextvars.ContextVar[Optional[tuple]]" = contextvars.Con
     "praisonai_active_turn_cancel", default=None
 )
 
+# Per-turn tool allow-set as ``(agent, frozenset_of_names)``. Set by
+# ``chat``/``achat`` only when the caller passed ``tools=[...]`` (e.g. a handoff
+# ``intersect`` policy) so the subset is enforced at dispatch, not only in the
+# schema sent to the model.
+_turn_tool_scope: "contextvars.ContextVar[Optional[tuple]]" = contextvars.ContextVar(
+    "praisonai_turn_tool_scope", default=None
+)
+
 # Exceptions a tool body raises about its *input* (bad value, missing key or
 # path). They are terminal for the same arguments and say nothing about the
 # tool's health, so they are never retried and never count toward the per-tool
@@ -67,6 +77,93 @@ _MAX_SPILL_TOOL_THREADS = 8
 # Lives here (agent-side, lightweight) so both chat_mixin.py and llm.py share
 # one identity — an `is` check only works against the same object.
 _TOOL_ARGUMENTS_PARSE_FAILED = object()
+
+
+def _int_cast_exact(value, coerced):
+    """True if ``coerced`` equals ``value`` exactly ("5", "3.0", large IDs); False for "1.5"."""
+    if isinstance(value, str):
+        try:
+            return int(value) == coerced
+        except ValueError:
+            return float(value) == coerced
+    return value == coerced
+
+
+def _coerce_value(value, annotation):
+    """Best-effort cast of an LLM-supplied value to ``annotation``.
+
+    Returns ``value`` unchanged when it cannot be converted.
+    """
+    import collections.abc as cabc
+    import types
+    from typing import get_origin, get_args, Union as _Union
+
+    if annotation is typing.Any:  # a class on 3.11+, so isinstance() would raise
+        return value
+    origin, args = get_origin(annotation), get_args(annotation)
+    if origin is _Union or origin is getattr(types, "UnionType", _Union):  # Optional/Union, X | Y
+        members = [a for a in args if a is not type(None)]
+        if value is None or any(isinstance(a, type) and isinstance(value, a) for a in members):
+            return value
+        for arg in members:
+            coerced = _coerce_value(value, arg)
+            # Inside a union, skip lossy scalar casts ("1.5"->1, "5"->False).
+            if arg is int and coerced is not value and not _int_cast_exact(value, coerced):
+                continue
+            if arg is bool and str(value).lower() not in (
+                    'true', '1', 'yes', 'on', 'false', '0', 'no', 'off'):
+                continue
+            target = get_origin(arg) or arg
+            # Only accept a member's result if it actually produced that type.
+            if coerced is not value and (not isinstance(target, type) or isinstance(coerced, target)):
+                return coerced
+        return value
+    original = value  # returned whenever conversion does not succeed
+    try:
+        if annotation is int and isinstance(value, (str, float)) and not isinstance(value, bool):
+            try:  # int() first so large integer strings (IDs) are not rounded via float
+                return int(value)
+            except ValueError:
+                return int(float(value))  # "3.0"
+        if annotation is float and isinstance(value, (str, int)) and not isinstance(value, bool):
+            return float(value)
+        if annotation is bool and isinstance(value, str):
+            return value.lower() in ('true', '1', 'yes', 'on')
+        container = origin or annotation
+        if not isinstance(container, type):
+            return value
+        is_model = hasattr(container, "model_validate")
+        if isinstance(value, str) and container is not str and (
+            is_model or dataclasses.is_dataclass(container)
+            or issubclass(container, (cabc.Iterable, cabc.Mapping))
+        ):
+            stripped = value.strip()
+            if stripped[:1] in ('[', '{'):
+                value = json.loads(stripped)
+        if is_model and isinstance(value, dict):
+            return container.model_validate(value)
+        if isinstance(value, dict) and dataclasses.is_dataclass(container):
+            hints = typing.get_type_hints(container)
+            return container(**{k: _coerce_value(v, hints[k]) if k in hints else v
+                                for k, v in value.items()})
+        if isinstance(value, (list, tuple)) and not isinstance(value, str):
+            if container is tuple and args and Ellipsis not in args:
+                if len(args) != len(value):
+                    return original
+                return tuple(_coerce_value(v, a) for v, a in zip(value, args))
+            if container in (set, frozenset, tuple):
+                item_ann = args[0] if args else None
+                items = [_coerce_value(v, item_ann) for v in value] if item_ann else list(value)
+                return container(items)
+            if container is list and args:
+                return [_coerce_value(v, args[0]) for v in value]
+        # Keep parsed JSON only if it matches the container (e.g. bare ``list``).
+        return value if isinstance(value, container) else original
+    except (ValueError, TypeError):
+        return original
+    except Exception as e:  # e.g. pydantic.ValidationError, json.JSONDecodeError
+        logging.debug(f"Could not coerce tool argument to {annotation!r}: {e}")
+        return original
 
 
 class _CallableGuardrailAdapter:
@@ -470,10 +567,15 @@ class ToolExecutionMixin:
             
             # Only add if not already present
             existing_tool_names = {getattr(t, '__name__', str(t)) for t in self.tools}
+            # Exempt from the per-turn ``tools=`` scope only the framework tools
+            # actually appended; a same-named user tool stays caller-scoped.
+            added = set(getattr(self, '_framework_tool_names', ()))
             for tool in tools_to_add:
                 tool_name = getattr(tool, '__name__', str(tool))
                 if tool_name not in existing_tool_names:
                     self.tools.append(tool)
+                    added.add(tool_name)
+            self._framework_tool_names = frozenset(added)
             
             logging.debug("Registered artifact retrieval tools")
         except Exception as e:
@@ -882,7 +984,17 @@ class ToolExecutionMixin:
             return arguments
         
         try:
+            # ``@tool`` wraps the function in FunctionTool whose run() takes
+            # **kwargs; read parameters from the wrapped function instead.
+            from ..tools.decorator import FunctionTool
+            owner = getattr(func, "__self__", func)
+            if isinstance(owner, FunctionTool):
+                func = owner._func
             sig = inspect.signature(func)
+            try:  # resolve postponed (string) annotations
+                hints = typing.get_type_hints(func)
+            except Exception:
+                hints = {}
             valid_params = set(sig.parameters.keys()) - {'self'}
             casted_args = {}
             
@@ -907,21 +1019,8 @@ class ToolExecutionMixin:
                 if param_name in sig.parameters:
                     param = sig.parameters[param_name]
                     if param.annotation != inspect.Parameter.empty:
-                        # Handle common type conversions
-                        if param.annotation == int and isinstance(arg_value, (str, float)):
-                            try:
-                                casted_args[param_name] = int(float(arg_value))
-                            except (ValueError, TypeError):
-                                casted_args[param_name] = arg_value
-                        elif param.annotation == float and isinstance(arg_value, (str, int)):
-                            try:
-                                casted_args[param_name] = float(arg_value)
-                            except (ValueError, TypeError):
-                                casted_args[param_name] = arg_value
-                        elif param.annotation == bool and isinstance(arg_value, str):
-                            casted_args[param_name] = arg_value.lower() in ('true', '1', 'yes', 'on')
-                        else:
-                            casted_args[param_name] = arg_value
+                        annotation = hints.get(param_name, param.annotation)
+                        casted_args[param_name] = _coerce_value(arg_value, annotation)
                     else:
                         casted_args[param_name] = arg_value
                 else:
@@ -2068,6 +2167,41 @@ class ToolExecutionMixin:
             execution_time_ms=(time.time() - start_time) * 1000
         )
 
+    def _apply_after_agent_results(self, response, after_agent_input, results):
+        """Honour AFTER_AGENT hook outcomes on the final response.
+
+        A blocking hook/plugin (``GuardrailBlocked`` / ``PluginDecision.deny``)
+        replaces the returned value with a visible refusal marker, mirroring
+        the BEFORE_LLM block. Otherwise a string rewrite (e.g. PII redaction)
+        is adopted so it actually reaches the caller. The matching in-memory
+        assistant turn is updated too, so later turns and auto-memory never
+        see the withheld or unredacted text. Interaction callbacks, verbose
+        display and session/DB persistence run earlier and are not gated here.
+        """
+        if self._hook_runner.is_blocked(results):
+            reason = self._hook_runner.get_blocking_reason(results) or "Blocked by hook"
+            logging.warning(f"Agent {self.name} response blocked by AFTER_AGENT hook: {reason}")
+            final = f"[Response blocked by hook: {reason}]"
+        elif isinstance(response, str) and isinstance(after_agent_input.response, str):
+            final = after_agent_input.response
+        else:
+            return response
+        if final != response and isinstance(response, str):
+            # Prefer this turn's own messages (by identity) so a concurrent
+            # turn with identical text is never touched; fall back to a
+            # content match over shared history for untracked callers.
+            from .memory_mixin import _active_turn_owned
+            owned = _active_turn_owned.get() or []
+            with self._history_lock:
+                for candidates in (owned, self.chat_history):
+                    msg = next((m for m in reversed(candidates)
+                                if isinstance(m, dict) and m.get("role") == "assistant"
+                                and m.get("content") == response), None)
+                    if msg is not None:
+                        msg["content"] = final
+                        break
+        return final
+
     def _after_agent_side_effects(self, prompt, response, *, process_auto_memory=True):
         """Run loop-agnostic after-agent side effects (no ``await`` inside).
 
@@ -2125,7 +2259,8 @@ class ToolExecutionMixin:
         from ..hooks import HookEvent
         if self._hook_runner.registry.has_hooks(HookEvent.AFTER_AGENT):
             after_agent_input = self._build_after_agent_input(prompt, response, start_time, tools_used)
-            self._hook_runner.execute_sync(HookEvent.AFTER_AGENT, after_agent_input)
+            results = self._hook_runner.execute_sync(HookEvent.AFTER_AGENT, after_agent_input)
+            response = self._apply_after_agent_results(response, after_agent_input, results)
 
         self._after_agent_side_effects(prompt, response)
 
@@ -2183,7 +2318,8 @@ class ToolExecutionMixin:
         from ..hooks import HookEvent
         if self._hook_runner.registry.has_hooks(HookEvent.AFTER_AGENT):
             after_agent_input = self._build_after_agent_input(prompt, response, start_time, tools_used)
-            await self._hook_runner.execute(HookEvent.AFTER_AGENT, after_agent_input)
+            results = await self._hook_runner.execute(HookEvent.AFTER_AGENT, after_agent_input)
+            response = self._apply_after_agent_results(response, after_agent_input, results)
 
         if response and getattr(self, '_memory_instance', None):
             prompt_str = _memory_prompt_text(prompt)
@@ -3723,6 +3859,12 @@ class ToolExecutionMixin:
     def _execute_tool_impl(self, function_name, arguments):
         """Internal tool execution implementation."""
 
+        # Gate on the tool that will actually run, not the raw model-emitted name.
+        function_name = self._canonical_tool_name(function_name)
+        turn_denial = self._turn_tool_denial(function_name)
+        if turn_denial is not None:
+            return turn_denial
+
         # Check if approval is required for this tool (protocol-driven)
         try:
             result = self._check_tool_approval_sync(function_name, arguments)
@@ -3836,8 +3978,12 @@ class ToolExecutionMixin:
                 from ..tools.base import BaseTool
                 if isinstance(func, BaseTool):
                     bind_target = func.run
-                    keyed_arguments = _with_durable_key(func.run, arguments)
-                    casted_arguments = self._cast_arguments(func.run, keyed_arguments)
+                    # Introspect the real parameters (e.g. the @tool-wrapped
+                    # function) so casting and durable-key injection match
+                    # plain functions instead of seeing run(**kwargs).
+                    sig_target = func._signature_target()
+                    keyed_arguments = _with_durable_key(sig_target, arguments)
+                    casted_arguments = self._cast_arguments(sig_target, keyed_arguments)
                     bind_arguments = casted_arguments
                     return _resolve_result(func.run(**casted_arguments))
                 
@@ -3850,6 +3996,8 @@ class ToolExecutionMixin:
                                   if k in inspect.signature(instance.run).parameters 
                                   and k != 'self'}
                     casted_params = self._cast_arguments(instance.run, run_params)
+                    from ..tools.injected import inject_into_plain_callable
+                    casted_params = inject_into_plain_callable(instance.run, casted_params)
                     bind_arguments = casted_params
                     return _resolve_result(instance.run(**casted_params))
 
@@ -3862,6 +4010,8 @@ class ToolExecutionMixin:
                                   if k in inspect.signature(instance._run).parameters 
                                   and k != 'self'}
                     casted_params = self._cast_arguments(instance._run, run_params)
+                    from ..tools.injected import inject_into_plain_callable
+                    casted_params = inject_into_plain_callable(instance._run, casted_params)
                     bind_arguments = casted_params
                     return _resolve_result(instance._run(**casted_params))
 
@@ -3870,6 +4020,8 @@ class ToolExecutionMixin:
                     bind_target = func
                     keyed_arguments = _with_durable_key(func, arguments)
                     casted_arguments = self._cast_arguments(func, keyed_arguments)
+                    from ..tools.injected import inject_into_plain_callable
+                    casted_arguments = inject_into_plain_callable(func, casted_arguments)
                     bind_arguments = casted_arguments
                     return _resolve_result(func(**casted_arguments))
             except Exception as e:
@@ -4108,6 +4260,15 @@ class ToolExecutionMixin:
         to the same key (e.g. 'WebSearch' -> 'web_search'), else ``None``.
         Shared by the sync and async tool-resolution paths.
         """
+        match = self._self_repair_tool_match(function_name)
+        if match is None:
+            return None
+        matched_name, tool = match
+        logging.debug(f"Self-repaired tool name {function_name!r} -> {matched_name!r}")
+        return tool
+
+    def _self_repair_tool_match(self, function_name):
+        """Return ``(canonical_name, tool)`` for a unique self-repair match, else ``None``."""
         def _norm(n):
             return str(n).lower().replace('_', '').replace('-', '').replace(' ', '')
 
@@ -4116,10 +4277,95 @@ class ToolExecutionMixin:
             normalised.setdefault(_norm(name), []).append((name, tool))
         match = normalised.get(_norm(function_name))
         if match and len(match) == 1:
-            matched_name, tool = match[0]
-            logging.debug(f"Self-repaired tool name {function_name!r} -> {matched_name!r}")
-            return tool
+            return match[0]
         return None
+
+    def _canonical_tool_name(self, function_name, tools=None):
+        """Resolve a model-emitted tool name to the name of the tool that will run.
+
+        Permission/approval/policy gates must see the same name dispatch uses,
+        otherwise a case/separator variant (``DeleteFile``) that self-repair maps
+        to ``delete_file`` would bypass a ``delete_file`` deny rule. ``tools`` is
+        an explicit lookup list (async ``tools_override``); dispatch then does
+        no self-repair, so only the ``__name__`` alias is mapped.
+        """
+        if not isinstance(function_name, str):
+            return function_name
+        if tools is not None:
+            for tool in tools if isinstance(tools, (list, tuple)) else [tools]:
+                name = self._get_tool_display_name(tool)
+                if name == function_name or (name and getattr(tool, '__name__', None) == function_name):
+                    return name
+            return function_name
+        # Dispatch also accepts a tool's ``__name__`` (e.g. ``@tool(name="delete_file")``
+        # on ``def remove_file``); map that alias to the declared name so gates see it.
+        for name, tool in self._iter_active_named_tools():
+            if name == function_name or getattr(tool, '__name__', None) == function_name:
+                return name
+        if getattr(self, '_allow_global_tools', False):
+            try:
+                from ..tools.registry import get_registry
+                if get_registry().get(function_name) is not None:
+                    return function_name
+            except ImportError:
+                pass
+        match = self._self_repair_tool_match(function_name)
+        return match[0] if match is not None else function_name
+
+    def _turn_tool_denial(self, function_name):
+        """Error dict when ``function_name`` is an agent tool outside this turn's ``tools=``."""
+        scope = _turn_tool_scope.get()
+        if scope is None or scope[0] is not self or function_name in scope[1]:
+            return None
+        # Framework tools added mid-turn (artifact retrieval) are not caller-scoped.
+        if function_name in getattr(self, '_framework_tool_names', ()):
+            return None
+        if not any(name == function_name for name, _t in self._iter_active_named_tools()):
+            return None
+        return {
+            "error": f"Tool '{function_name}' is not available in this turn",
+            "permission_denied": True,
+        }
+
+    def _enter_turn_tool_scope(self, tools):
+        """Bind the per-turn ``tools=`` allow-set for dispatch; ``None`` = inherit."""
+        if tools is None:
+            return None
+        return _turn_tool_scope.set((self, self._turn_tool_names(tools)))
+
+    @staticmethod
+    def _exit_turn_tool_scope(token):
+        if token is not None:
+            _turn_tool_scope.reset(token)
+
+    def _turn_tool_names(self, tools):
+        """Names of every tool in a per-turn ``tools=`` list (MCP containers expanded)."""
+        MCP = None
+        try:
+            from ..mcp.mcp import MCP
+        except ImportError:
+            pass
+        names = set()
+        for tool in tools if isinstance(tools, (list, tuple)) else [tools]:
+            if isinstance(tool, str):
+                names.add(tool)
+            elif isinstance(tool, dict):
+                fn = tool.get('function') if isinstance(tool.get('function'), dict) else tool
+                if isinstance(fn.get('name'), str):
+                    names.add(fn['name'])
+            elif MCP is not None and isinstance(tool, MCP):
+                try:
+                    for sub in tool:
+                        sub_name = self._get_tool_display_name(sub)
+                        if sub_name:
+                            names.add(sub_name)
+                except Exception:
+                    pass
+            else:
+                name = self._get_tool_display_name(tool)
+                if name:
+                    names.add(name)
+        return frozenset(names)
 
     def _resolve_callable_signature_target(self, func):
         """Return the callable whose signature describes ``func``'s arguments."""
@@ -4325,8 +4571,13 @@ class ToolExecutionMixin:
             return "Tool search not in bridge mode"
         
         # Get deferrable tools from metadata
-        deferrable_tools = metadata.get("deferrable_tools", [])
-        
+        # Hide permission-denied tools from search/describe; the cached
+        # metadata is built before pruning, so filter locally here.
+        deferrable_tools = [
+            t for t in metadata.get("deferrable_tools", [])
+            if self._tool_name_allowed(t.get("function", {}).get("name", ""))
+        ]
+
         if function_name == "tool_search":
             # Handle tool_search bridge call
             try:

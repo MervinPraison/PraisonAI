@@ -1,0 +1,173 @@
+"""
+Tests that AFTER_AGENT plugins can block or rewrite the final response (#5061).
+"""
+
+import asyncio
+import os
+import time
+
+from praisonaiagents.plugins.plugin import (
+    Plugin,
+    PluginInfo,
+    PluginHook,
+    PluginDecision,
+    GuardrailBlocked,
+)
+from praisonaiagents.plugins.manager import PluginManager
+from praisonaiagents.hooks.registry import HookRegistry
+from praisonaiagents.hooks.runner import HookRunner
+from praisonaiagents.hooks.types import HookEvent
+from praisonaiagents.hooks.events import AfterAgentInput
+
+SECRET = "123-45-6789"
+
+
+class RaiseBlockPlugin(Plugin):
+    @property
+    def info(self):
+        return PluginInfo(name="raiseblock", hooks=[PluginHook.AFTER_AGENT])
+
+    def after_agent(self, response, context):
+        if SECRET in response:
+            raise GuardrailBlocked("PII in response")
+        return response
+
+
+class DecisionBlockPlugin(Plugin):
+    @property
+    def info(self):
+        return PluginInfo(name="decisionblock", hooks=[PluginHook.AFTER_AGENT])
+
+    def after_agent(self, response, context):
+        if SECRET in response:
+            return PluginDecision.block("PII in response")
+        return response
+
+
+class RedactPlugin(Plugin):
+    @property
+    def info(self):
+        return PluginInfo(name="redact", hooks=[PluginHook.AFTER_AGENT])
+
+    def after_agent(self, response, context):
+        return response.replace(SECRET, "[REDACTED]")
+
+
+def _registry(plugin):
+    reg = HookRegistry()
+    mgr = PluginManager()
+    mgr.register(plugin)
+    mgr.set_plugin_options({plugin.info.name: {"allow_conversation": True}})
+    assert mgr.wire_into_hook_registry(reg) == 1
+    return reg
+
+
+def _input(response):
+    return AfterAgentInput(
+        session_id="s", cwd=os.getcwd(), event_name=HookEvent.AFTER_AGENT,
+        timestamp=str(time.time()), agent_name="a", response=response,
+    )
+
+
+def _agent(plugin):
+    from praisonaiagents import Agent
+    return Agent(name="a", role="r", goal="g", hooks=_registry(plugin))
+
+
+class TestAfterAgentAdapter:
+    def test_guardrail_blocked_blocks(self):
+        runner = HookRunner(registry=_registry(RaiseBlockPlugin()), cwd=os.getcwd())
+        results = runner.execute_sync(HookEvent.AFTER_AGENT, _input(f"SSN {SECRET}"))
+        assert runner.is_blocked(results) is True
+        assert runner.get_blocking_reason(results) == "PII in response"
+
+    def test_decision_blocks(self):
+        runner = HookRunner(registry=_registry(DecisionBlockPlugin()), cwd=os.getcwd())
+        results = runner.execute_sync(HookEvent.AFTER_AGENT, _input(f"SSN {SECRET}"))
+        assert runner.is_blocked(results) is True
+
+    def test_clean_response_allowed(self):
+        runner = HookRunner(registry=_registry(RaiseBlockPlugin()), cwd=os.getcwd())
+        data = _input("all good")
+        results = runner.execute_sync(HookEvent.AFTER_AGENT, data)
+        assert runner.is_blocked(results) is False
+        assert data.response == "all good"
+
+
+class TestAgentAfterAgentEnforcement:
+    def test_sync_block_withholds_response(self):
+        agent = _agent(RaiseBlockPlugin())
+        out = agent._trigger_after_agent_hook("q", f"SSN {SECRET}", time.time())
+        assert SECRET not in out
+        assert "blocked" in out.lower() and "PII in response" in out
+
+    def test_async_block_withholds_response(self):
+        agent = _agent(DecisionBlockPlugin())
+        out = asyncio.run(agent._atrigger_after_agent_hook("q", f"SSN {SECRET}", time.time()))
+        assert SECRET not in out
+        assert "PII in response" in out
+
+    def test_sync_rewrite_is_adopted(self):
+        agent = _agent(RedactPlugin())
+        out = agent._trigger_after_agent_hook("q", f"SSN {SECRET}", time.time())
+        assert out == "SSN [REDACTED]"
+
+    def test_clean_response_passes_through(self):
+        agent = _agent(RaiseBlockPlugin())
+        assert agent._trigger_after_agent_hook("q", "hello", time.time()) == "hello"
+
+    def test_block_scrubs_stored_assistant_turn(self):
+        agent = _agent(RaiseBlockPlugin())
+        agent.chat_history.append({"role": "assistant", "content": f"SSN {SECRET}"})
+        out = agent._trigger_after_agent_hook("q", f"SSN {SECRET}", time.time())
+        assert agent.chat_history[-1]["content"] == out
+        assert all(SECRET not in str(m.get("content")) for m in agent.chat_history)
+
+    def test_block_scrubs_turn_when_newer_turn_interleaved(self):
+        agent = _agent(RaiseBlockPlugin())
+        agent.chat_history.append({"role": "assistant", "content": f"SSN {SECRET}"})
+        agent.chat_history.append({"role": "user", "content": "other"})
+        agent.chat_history.append({"role": "assistant", "content": "concurrent reply"})
+        agent._trigger_after_agent_hook("q", f"SSN {SECRET}", time.time())
+        assert all(SECRET not in str(m.get("content")) for m in agent.chat_history)
+        assert agent.chat_history[-1]["content"] == "concurrent reply"
+
+    def test_block_scrubs_own_turn_not_identical_concurrent_turn(self):
+        agent = _agent(RaiseBlockPlugin())
+        own = {"role": "assistant", "content": f"SSN {SECRET}"}
+        # A concurrent (untracked here) turn appends an identical answer later.
+        other = {"role": "assistant", "content": f"SSN {SECRET}"}
+        token = agent._begin_turn_tracking()
+        try:
+            agent._append_to_chat_history(own)
+            agent.chat_history.append(other)
+            out = agent._trigger_after_agent_hook("q", f"SSN {SECRET}", time.time())
+        finally:
+            agent._end_turn_tracking(token)
+        assert own["content"] == out
+        assert other["content"] == f"SSN {SECRET}"
+
+
+class EmailRedactPlugin(Plugin):
+    @property
+    def info(self):
+        return PluginInfo(name="emailredact", hooks=[PluginHook.AFTER_AGENT])
+
+    def after_agent(self, response, context):
+        return response.replace("a@b.com", "[EMAIL]")
+
+
+def test_stacked_redactors_compose():
+    reg = HookRegistry()
+    mgr = PluginManager()
+    for p in (RedactPlugin(), EmailRedactPlugin()):
+        mgr.register(p)
+    mgr.set_plugin_options({
+        "redact": {"allow_conversation": True},
+        "emailredact": {"allow_conversation": True},
+    })
+    assert mgr.wire_into_hook_registry(reg) == 2
+    runner = HookRunner(registry=reg, cwd=os.getcwd())
+    data = _input(f"SSN {SECRET} mail a@b.com")
+    runner.execute_sync(HookEvent.AFTER_AGENT, data)
+    assert data.response == "SSN [REDACTED] mail [EMAIL]"

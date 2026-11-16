@@ -176,3 +176,56 @@ def test_shutdown_does_not_block_on_pending_stdin_read():
             _sys.stdin = original
 
     asyncio.run(_scenario())
+
+
+def test_injected_streams_drive_a_turn_without_touching_sys():
+    """``stdin``/``stdout`` kwargs give an offline, credential-free harness:
+    the real hook → session → send path runs and the reply is assertable,
+    with the process streams left untouched (Issue #5744)."""
+    real_out = sys.stdout
+    out = io.StringIO()
+    bot = LocalBot(prompt="you> ", stdin=io.StringIO("hello\n/help\n"), stdout=out)
+    bot.set_agent(_Agent())
+    sent = []
+
+    async def _fake_chat(agent, user_id, content, **kwargs):
+        sent.append((user_id, content, kwargs.get("chat_id")))
+        return f"echo:{content}"
+
+    bot._session.chat = _fake_chat
+
+    asyncio.run(asyncio.wait_for(bot.start(), timeout=5))
+
+    printed = out.getvalue()
+    assert "echo:hello" in printed
+    assert "/help" not in [c for _, c, _ in sent]  # commands bypass the agent
+    assert sent == [("local-operator", "hello", "local")]
+    assert sys.stdout is real_out
+    assert bot.is_running is False
+
+
+def test_falsy_injected_streams_are_still_used():
+    """An empty buffer (``len() == 0``) is falsy but must not fall back to
+    the process streams."""
+
+    class _FalsyOut(io.StringIO):
+        def __len__(self):
+            return 0
+
+    class _FalsyIn(_FakeStdin):
+        def __len__(self):
+            return 0
+
+    real_out = sys.stdout
+    out = _FalsyOut()
+    bot = LocalBot(stdin=_FalsyIn(["hi\n"]), stdout=out)
+    bot.set_agent(_Agent())
+
+    async def _fake_chat(agent, user_id, content, **kwargs):
+        return f"echo:{content}"
+
+    bot._session.chat = _fake_chat
+    asyncio.run(asyncio.wait_for(bot.start(), timeout=5))
+
+    assert "echo:hi" in out.getvalue()
+    assert sys.stdout is real_out

@@ -49,6 +49,7 @@ class ToolRetryPolicy(BaseModel):
     delay: float = Field(default=1.0, ge=0, description="Delay between retries in seconds")
     backoff_factor: float = Field(default=2.0, ge=1, description="Exponential backoff factor")
     max_delay: float = Field(default=60.0, ge=0, description="Maximum delay between retries")
+    retry_on: Optional[List[str]] = Field(default=None, description="Error types to retry on")
 
 
 class HandoffConfig(BaseModel):
@@ -105,6 +106,8 @@ class AgentConfig(BaseModel):
     max_iter: Optional[int] = Field(default=10, ge=1, description="Maximum iterations")
     max_rpm: Optional[int] = Field(default=60, ge=1, description="Maximum requests per minute")
     max_execution_time: Optional[float] = Field(default=None, ge=0, description="Maximum execution time")
+    max_retry_limit: Optional[int] = Field(default=None, ge=0, description="Maximum retries")
+    execution: Optional[Union[str, Dict[str, Any]]] = Field(default=None, description="Execution preset name or ExecutionConfig fields")
     verbose: Optional[bool] = Field(default=False, description="Verbose output")
     cache: Optional[bool] = Field(default=True, description="Enable caching")
     streaming: Optional[bool] = Field(default=False, description="Enable streaming")
@@ -151,6 +154,7 @@ class AgentConfig(BaseModel):
                         "delay": policy.initial_delay_ms / 1000.0,
                         "backoff_factor": policy.backoff_factor,
                         "max_delay": policy.max_delay_ms / 1000.0,
+                        "retry_on": sorted(policy.retry_on),
                     }
             except (ImportError, AttributeError, TypeError):
                 pass
@@ -209,6 +213,7 @@ class AgentConfig(BaseModel):
                         delay=self.tool_retry_policy.initial_delay_ms / 1000.0,
                         backoff_factor=self.tool_retry_policy.backoff_factor,
                         max_delay=self.tool_retry_policy.max_delay_ms / 1000.0,
+                        retry_on=sorted(self.tool_retry_policy.retry_on),
                     )
             except (ImportError, AttributeError, TypeError):
                 pass
@@ -395,7 +400,7 @@ class YAMLConfig(BaseModel):
     config: Optional[GlobalConfig] = Field(default=None, description="Global configuration")
     
     # LLM config
-    llm: Optional[str] = Field(default=None, description="Default LLM")
+    llm: Optional[Union[str, Dict[str, Any]]] = Field(default=None, description="Default LLM (string or dict with 'model' key)")
     models: Optional[Dict[str, Any]] = Field(default=None, description="Model configurations")
     providers: Optional[Dict[str, Any]] = Field(default=None, description="Provider configurations")
 

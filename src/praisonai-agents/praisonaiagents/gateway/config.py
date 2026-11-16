@@ -128,6 +128,56 @@ def _check_unknown_keys(
     )
 
 
+_GRANT_KEYS = {"scopes", "agents"}
+
+
+def _parse_grant(scopes: Any, agents: Any, path: str) -> Any:
+    """Normalise one operator grant to a scope list or ``{scopes, agents}``.
+
+    Issue #6253: unknown grant keys always fail closed — a typo such as
+    ``agnts`` would otherwise silently drop the agent confinement and leave
+    the token able to reach every agent.
+    """
+    if isinstance(scopes, Mapping):
+        _check_unknown_keys(scopes, _GRANT_KEYS, path, strict=True)
+        scopes, agents = scopes.get("scopes", []), scopes.get("agents")
+    scopes = list(scopes or [])
+    if agents is None:
+        return scopes
+    if not isinstance(agents, (list, tuple)):
+        # ``agents: support`` would otherwise iterate into ['s', 'u', ...].
+        raise ValueError(f"{path}: 'agents' must be a list of agent ids")
+    return {"scopes": scopes, "agents": [str(a) for a in agents]}
+
+
+def _parse_auth_scopes(gw_data: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
+    """Parse the YAML ``gateway.auth.tokens`` / ``gateway.auth_scopes`` policy.
+
+    Returns ``None`` when neither form is present so callers can leave an
+    existing policy untouched.
+    """
+    auth_section = gw_data.get("auth")
+    if isinstance(auth_section, Mapping) and isinstance(auth_section.get("tokens"), list):
+        policy: Dict[str, Any] = {}
+        for entry in auth_section["tokens"]:
+            if isinstance(entry, Mapping) and entry.get("token"):
+                # A typo such as ``agnts`` must fail closed here too.
+                _check_unknown_keys(
+                    entry, _GRANT_KEYS | {"token"}, "gateway.auth.tokens", strict=True
+                )
+                policy[str(entry["token"])] = _parse_grant(
+                    entry.get("scopes", []), entry.get("agents"),
+                    "gateway.auth.tokens",
+                )
+        return policy
+    if isinstance(gw_data.get("auth_scopes"), Mapping):
+        return {
+            str(tok): _parse_grant(grant, None, "gateway.auth_scopes")
+            for tok, grant in gw_data["auth_scopes"].items()
+        }
+    return None
+
+
 def _check_typo_keys(
     data: Mapping[str, Any],
     reserved: Set[str],
@@ -1150,7 +1200,13 @@ class GatewayConfig:
             scope names (see OperatorScope). When None/empty (default), any
             successfully authenticated client is granted all scopes — identical
             to the previous binary behaviour. Single-operator setups are
-            unaffected.
+            unaffected. A token's value may instead be a mapping
+            ``{"scopes": [...], "agents": [...]}`` to also confine the operator
+            to the listed agent ids (omitted ``agents`` = all agents).
+            Confinement covers WebSocket bind/resume and event delivery only;
+            the HTTP approval endpoints are not yet filtered per agent
+            (tracked in #5151), so do not grant ``approvals`` to a token that
+            must not act on other agents' requests.
     """
     
     host: str = "127.0.0.1"
@@ -1163,6 +1219,9 @@ class GatewayConfig:
     # across trusted hops (see ``resolve_ingress_attribution``); anything
     # proxy-shaped but unattributable fails closed to the socket peer.
     trusted_proxies: List[str] = field(default_factory=list)
+    # Issue #6428: honour a caller-supplied ``X-Operator-Id`` as the approval
+    # identity only when this is on *and* the peer is a trusted proxy.
+    trust_operator_header: bool = False
     cors_origins: List[str] = field(default_factory=lambda: [])
     allowed_origins: List[str] = field(default_factory=lambda: [])
     auth_token: Optional[str] = None
@@ -1208,7 +1267,9 @@ class GatewayConfig:
     # (0 = disabled).
     max_unauthorized_frames: int = 10
     push: PushConfig = field(default_factory=PushConfig)
-    auth_scopes: Optional[Dict[str, List[str]]] = None
+    # Issue #6253: a value is either a scope list or
+    # ``{"scopes": [...], "agents": [...]}`` (agent confinement).
+    auth_scopes: Optional[Dict[str, Any]] = None
     # Additive protocol surfaces (OpenAI-compatible / MCP) served on the same
     # app and auth. Opt-in; disabled by default so the gateway is unchanged.
     api: ApiConfig = field(default_factory=ApiConfig)
@@ -1329,6 +1390,8 @@ class GatewayConfig:
         if token is None:
             return []
         granted = self.auth_scopes.get(token)
+        if isinstance(granted, dict):
+            granted = granted.get("scopes") or []
         if granted is None:
             return []
         resolved: List[str] = []
@@ -1348,12 +1411,29 @@ class GatewayConfig:
             )
         return resolved
 
+    def resolve_agents(self, token: Optional[str]) -> Optional[List[str]]:
+        """Resolve the agent ids ``token`` is confined to (Issue #6253).
+
+        ``None`` means unconfined (every agent) — the result whenever no
+        policy is set or the token's entry carries no ``agents`` list, so
+        existing ``token -> [scopes]`` policies are unchanged. A token absent
+        from a configured policy holds no scopes, so it never reaches an
+        agent regardless of this value.
+        """
+        if not self.auth_scopes or token is None:
+            return None
+        entry = self.auth_scopes.get(token)
+        if not isinstance(entry, dict) or entry.get("agents") is None:
+            return None
+        return [str(a) for a in entry["agents"]]
+
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary (hides sensitive data)."""
         return {
             "host": self.host,
             "port": self.port,
             "trusted_proxies": list(self.trusted_proxies),
+            "trust_operator_header": self.trust_operator_header,
             "cors_origins": self.cors_origins,
             "allowed_origins": self.allowed_origins,
             "auth_token": "***" if self.auth_token else None,
@@ -1488,7 +1568,7 @@ class MultiChannelGatewayConfig:
     # surfaces (YAML, CLI, Python) — ``gateway doctor`` reuses the same sets.
     _KNOWN_TOP_KEYS = frozenset({"gateway", "agents", "channels", "hooks", "config_version"})
     _KNOWN_GATEWAY_KEYS = frozenset({
-        "host", "port", "trusted_proxies", "cors_origins", "allowed_origins",
+        "host", "port", "trusted_proxies", "trust_operator_header", "cors_origins", "allowed_origins",
         "auth_token", "auth", "auth_scopes", "max_connections",
         "max_sessions_per_agent", "session_config", "heartbeat_interval",
         "reconnect_timeout", "per_turn_timeout", "ssl_cert", "ssl_key",
@@ -1578,18 +1658,10 @@ class MultiChannelGatewayConfig:
         #   gateway:
         #     auth_scopes:
         #       "${VIEWER_TOKEN}": [read]
-        auth_scopes: Optional[Dict[str, List[str]]] = None
-        auth_section = gw_data.get("auth")
-        if isinstance(auth_section, dict) and isinstance(auth_section.get("tokens"), list):
-            auth_scopes = {}
-            for entry in auth_section["tokens"]:
-                if isinstance(entry, dict) and entry.get("token"):
-                    auth_scopes[str(entry["token"])] = list(entry.get("scopes", []))
-        elif isinstance(gw_data.get("auth_scopes"), dict):
-            auth_scopes = {
-                str(tok): list(scopes)
-                for tok, scopes in gw_data["auth_scopes"].items()
-            }
+        # Either shape may add ``agents: [...]`` per token (Issue #6253):
+        #     auth_scopes:
+        #       "${SUPPORT_TOKEN}": {scopes: [read, write], agents: [support]}
+        auth_scopes = _parse_auth_scopes(gw_data)
 
         raw_trusted = gw_data.get("trusted_proxies", [])
         trusted_proxies = (
@@ -1602,6 +1674,7 @@ class MultiChannelGatewayConfig:
             host=gw_data.get("host", "127.0.0.1"),
             port=gw_data.get("port", 8765),
             trusted_proxies=trusted_proxies,
+            trust_operator_header=gw_data.get("trust_operator_header") is True,
             cors_origins=gw_data.get("cors_origins", []),
             allowed_origins=gw_data.get("allowed_origins", []),
             auth_token=gw_data.get("auth_token"),

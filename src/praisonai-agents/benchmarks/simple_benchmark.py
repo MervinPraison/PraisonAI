@@ -109,17 +109,11 @@ def run_benchmark(skip_crewai: bool = False, quiet: bool = False,
         pass
     
     try:
-        from langchain_core.tools import tool as langchain_tool
         from langchain_openai import ChatOpenAI
         from langgraph.prebuilt import create_react_agent
-        
-        @langchain_tool
-        def get_weather_lg(city: Literal['nyc', 'sf']):
-            """Get weather info."""
-            return 'sunny' if city == 'sf' else 'cloudy'
-        
+
         results['LangGraph'] = measure(
-            lambda: create_react_agent(model=ChatOpenAI(model='gpt-4o-mini'), tools=[get_weather_lg])
+            lambda: create_react_agent(model=ChatOpenAI(model='gpt-4o-mini'), tools=[])
         )
     except ImportError:
         pass
@@ -129,19 +123,12 @@ def run_benchmark(skip_crewai: bool = False, quiet: bool = False,
     else:
         try:
             from crewai.agent import Agent as CrewAgent
-            from crewai.tools import tool as crewai_tool
-
-            @crewai_tool("Weather Tool")
-            def get_weather_crew(city: Literal['nyc', 'sf']):
-                """Get weather info."""
-                return 'sunny' if city == 'sf' else 'cloudy'
 
             results['CrewAI'] = measure(
                 lambda: CrewAgent(
                     role='Weather Agent',
                     goal='Provide weather info',
                     backstory='A weather expert',
-                    tools=[get_weather_crew],
                     verbose=False
                 )
             )
