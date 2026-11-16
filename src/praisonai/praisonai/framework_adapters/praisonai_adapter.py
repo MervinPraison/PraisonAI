@@ -479,18 +479,20 @@ class PraisonAIAdapter(BaseFrameworkAdapter):
         import dataclasses
         from praisonaiagents.config.feature_configs import ExecutionConfig
 
-        if isinstance(execution, ExecutionConfig):
-            agent_kwargs['execution'] = dataclasses.replace(execution, **limits)
-            return
-        if isinstance(execution, dict):
-            base = dict(execution)
+        if execution is None:
+            base = ExecutionConfig()
         elif isinstance(execution, str):
+            # Like core Agent: unknown preset names fall back to defaults.
             from praisonaiagents.config.parse_utils import canonical_preset_key
             from praisonaiagents.config.presets import EXECUTION_PRESETS
-            base = dict(EXECUTION_PRESETS.get(canonical_preset_key(execution), {}))
+            base = ExecutionConfig(
+                **EXECUTION_PRESETS.get(canonical_preset_key(execution), {})
+            )
         else:
-            base = {}
-        agent_kwargs['execution'] = ExecutionConfig(**{**base, **limits})
+            # Config, mapping, [preset, overrides] list, bool: core's resolver.
+            from praisonaiagents.config.param_resolver import resolve_execution
+            base = resolve_execution(execution, ExecutionConfig)
+        agent_kwargs['execution'] = dataclasses.replace(base, **limits)
 
     @staticmethod
     def _normalize_autonomy(value):

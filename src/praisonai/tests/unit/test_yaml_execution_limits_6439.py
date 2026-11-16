@@ -63,6 +63,15 @@ def test_limits_merge_with_execution_config_and_preset(ExecutionConfig):
     assert kwargs["execution"].max_iter == 10  # from the "fast" preset
 
 
+def test_limits_merge_with_preset_override_list():
+    kwargs = {}
+    PraisonAIAdapter._translate_execution(
+        {"max_iter": 3, "execution": ["fast", {"max_rpm": 2}]}, kwargs
+    )
+    cfg = kwargs["execution"]
+    assert (cfg.max_iter, cfg.max_rpm, cfg.max_retry_limit) == (3, 2, 1)
+
+
 def test_no_limits_forwards_execution_as_is():
     kwargs = {}
     PraisonAIAdapter._translate_execution({"execution": "fast"}, kwargs)
