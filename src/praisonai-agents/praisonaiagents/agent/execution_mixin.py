@@ -1965,6 +1965,8 @@ Write the complete compiled report:"""
                 except ImportError:
                     durable_key = None
                 call_arguments = arguments
+                if hasattr(self, "_cast_arguments"):  # sync-path parity
+                    call_arguments = self._cast_arguments(call_target, arguments)
                 if durable_key:
                     try:
                         parameters = inspect.signature(call_target).parameters.values()
@@ -1975,7 +1977,7 @@ Write the complete compiled report:"""
                         or parameter.kind == inspect.Parameter.VAR_KEYWORD
                         for parameter in parameters
                     ):
-                        call_arguments = dict(arguments)
+                        call_arguments = dict(call_arguments)
                         call_arguments["idempotency_key"] = durable_key
 
                 # Establish the injection context (Injected[T] params, including

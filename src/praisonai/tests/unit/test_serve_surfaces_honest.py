@@ -72,7 +72,9 @@ def test_a2a_agent_failure_returns_internal_error(agents_file, monkeypatch):
     )), "hi")
     assert body["id"] == 1
     assert body["error"]["code"] == -32603
-    assert "boom" in body["error"]["message"]
+    # #6268: exception text is logged server-side, never echoed to the client.
+    assert "boom" not in body["error"]["message"]
+    assert body["error"]["data"]["error_id"]
 
 
 def test_a2a_requires_api_key_off_localhost(agents_file, monkeypatch):

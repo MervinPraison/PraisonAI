@@ -1,8 +1,16 @@
 """Regression tests for issue #6156 (wrapper hardening)."""
 
+import sys
 import threading
 
 import pytest
+
+# `echo` and `env` are cmd.exe builtins / absent on Windows; execute_command
+# runs without a shell by design (#6157), so these probes are POSIX-only.
+_posix_only = pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="echo/env are not executables on Windows (shell=False); see #6264",
+)
 
 
 # ── Gap 1: praisonai.code execute_command reuses core safety guards ─────
@@ -17,6 +25,7 @@ def test_code_execute_command_rejects_shell_syntax(tmp_path):
     assert not (tmp_path / "redir.txt").exists()
 
 
+@_posix_only
 def test_code_execute_command_allows_quoted_metachar(tmp_path):
     from praisonai.code.tools.execute_command import execute_command
 
@@ -25,6 +34,7 @@ def test_code_execute_command_allows_quoted_metachar(tmp_path):
     assert "a > b" in result["stdout"]
 
 
+@_posix_only
 def test_code_execute_command_scrubs_secret_env(tmp_path, monkeypatch):
     from praisonai.code.tools.execute_command import execute_command
 
@@ -32,6 +42,32 @@ def test_code_execute_command_scrubs_secret_env(tmp_path, monkeypatch):
     monkeypatch.delenv("PRAISONAI_SHELL_ENV_ALLOWLIST", raising=False)
     result = execute_command("env", cwd=str(tmp_path))
     assert result["success"] is True
+    assert "sk-should-not-leak" not in result["stdout"]
+
+
+def _interpreter_path_unusable():
+    from praisonaiagents.tools.shell_tools import _find_shell_syntax
+
+    exe = sys.executable
+    return any(c.isspace() for c in exe) or _find_shell_syntax(exe) is not None
+
+
+@pytest.mark.skipif(
+    _interpreter_path_unusable(),
+    reason="interpreter path has whitespace or shell metacharacters",
+)
+def test_code_execute_command_scrubs_secret_env_cross_platform(tmp_path, monkeypatch):
+    """Platform-neutral env-scrub probe (#6264): a Python child dumps its env."""
+    from praisonai.code.tools.execute_command import execute_command
+
+    (tmp_path / "probe.py").write_text(
+        "import os\nfor k, v in os.environ.items():\n    print(k + '=' + v)\n"
+    )
+    monkeypatch.setenv("FAKE_PROVIDER_API_KEY", "sk-should-not-leak")
+    monkeypatch.delenv("PRAISONAI_SHELL_ENV_ALLOWLIST", raising=False)
+    result = execute_command(f"{sys.executable} probe.py", cwd=str(tmp_path))
+    assert result["success"] is True, result
+    assert "PAGER=cat" in result["stdout"]
     assert "sk-should-not-leak" not in result["stdout"]
 
 
