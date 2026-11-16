@@ -91,6 +91,7 @@ def run_coroutine_from_any_context(coro: Awaitable[T], timeout: Optional[float] 
         ) from exc
 
 _thread_loop = threading.local()
+_atexit_registered = False
 
 
 def _close_thread_runner() -> None:
@@ -120,12 +121,17 @@ def run_coroutine_on_thread_loop(coro: Awaitable[T], timeout: Optional[float] = 
     """
     if sys.version_info < (3, 11) or is_async_context():
         return run_coroutine_from_any_context(coro, timeout)
+    global _atexit_registered
     runner = getattr(_thread_loop, "runner", None)
-    if runner is None or getattr(_thread_loop, "pid", None) != os.getpid():
+    # The Runner installs its loop as the thread's current loop, so user code
+    # calling ``asyncio.get_event_loop().close()`` can close it under us.
+    if (runner is None or getattr(_thread_loop, "pid", None) != os.getpid()
+            or runner.get_loop().is_closed()):
         runner = asyncio.Runner()
         _thread_loop.runner, _thread_loop.pid = runner, os.getpid()
-        if threading.current_thread() is threading.main_thread():
+        if not _atexit_registered and threading.current_thread() is threading.main_thread():
             atexit.register(_close_thread_runner)
+            _atexit_registered = True
     wrapped = asyncio.wait_for(coro, timeout) if timeout is not None else coro
     return runner.run(wrapped, context=contextvars.copy_context())
 

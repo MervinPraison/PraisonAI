@@ -106,6 +106,16 @@ def test_thread_loop_is_reused_per_thread_and_replaced_after_fork(monkeypatch):
     assert async_bridge.run_coroutine_on_thread_loop(current_loop(), timeout=None) is not first
 
 
+def test_loop_closed_by_user_code_is_replaced():
+    async def current_loop():
+        return asyncio.get_running_loop()
+
+    first = async_bridge.run_coroutine_on_thread_loop(current_loop(), timeout=None)
+    first.close()  # e.g. legacy ``asyncio.get_event_loop().close()``
+    again = async_bridge.run_coroutine_on_thread_loop(current_loop(), timeout=None)
+    assert again is not first and not again.is_closed()
+
+
 def test_inside_a_running_loop_still_offloads(monkeypatch):
     async def outer():
         async def inner():
