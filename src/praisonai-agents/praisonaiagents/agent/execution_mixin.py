@@ -2284,7 +2284,7 @@ Write the complete compiled report:"""
                             result = {"value": result, "_loop_guard": {"message": decision.message, "action": decision.action.value}}
 
                 # Ensure result is JSON serializable
-                logging.debug(f"Raw result from tool: {result}")
+                logging.debug("Raw result from tool: %s", result)
                 if result is None:
                     return {"result": None}
                 try:

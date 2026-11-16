@@ -3695,7 +3695,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                 tool_results.append(tool_result)
                                 accumulated_tool_results.append(tool_result)
 
-                                logging.debug(f"[RESPONSES_API] Executed tool {tool_result_obj.function_name} with result: {tool_result}")
+                                logging.debug("[RESPONSES_API] Executed tool %s with result: %s", tool_result_obj.function_name, tool_result)
 
                                 if verbose:
                                     display_message = f"Agent {agent_name} called function '{tool_call_obj.function_name}' with arguments: {tool_call_obj.arguments}\n"
@@ -4425,7 +4425,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                 except (TypeError, ValueError):
                                     logging.warning(f"Result of '{function_name}' not JSON serializable, converting to string")
                                     tool_result = {"result": str(tool_result)}
-                            logging.debug(f"[TOOL_EXEC_DEBUG] Tool execution result: {tool_result} (call #{tool_call_count})")
+                            logging.debug("[TOOL_EXEC_DEBUG] Tool execution result: %s (call #%s)", tool_result, tool_call_count)
                             tool_results.append(tool_result)  # Store the result
                             accumulated_tool_results.append(tool_result)  # Accumulate across iterations
                             

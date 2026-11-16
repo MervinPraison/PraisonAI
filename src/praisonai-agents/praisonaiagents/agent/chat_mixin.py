@@ -2641,7 +2641,7 @@ Your Role: {self.role}"""
                     agent_id=self.name
                 )
 
-        logging.debug(f"{self.name} sending messages to LLM: {messages}")
+        logging.debug("%s sending messages to LLM: %s", self.name, messages)
         
         # Emit LLM request trace event (zero overhead when not set)
         from ..trace.context_events import get_context_emitter
