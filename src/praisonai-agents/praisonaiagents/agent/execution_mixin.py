@@ -1643,6 +1643,26 @@ Write the complete compiled report:"""
         return response.result if isinstance(response, ToolResponse) else response
 
     async def _execute_tool_async_with_retry(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
+        """Async tool execution with retry policy, framed by tool trace events.
+
+        Emits ``tool_call_start``/``tool_call_end`` once per tool call, as the
+        sync ``_execute_tool_with_context`` does. The default emitter is a
+        disabled NoOp, so this costs nothing unless tracing is on.
+        """
+        from ..trace.context_events import get_context_emitter
+        _trace_emitter = get_context_emitter()
+        _trace_emitter.tool_call_start(self.name, function_name, arguments)
+        _tool_start_time = time.time()
+        try:
+            result = await self._execute_tool_async_retry_loop(function_name, arguments, tool_call_id, tools_override)
+        except BaseException as e:  # incl. asyncio.CancelledError, so the START is always closed
+            _trace_emitter.tool_call_end(self.name, function_name, None, (time.time() - _tool_start_time) * 1000, str(e) or type(e).__name__)
+            raise
+        if _trace_emitter.enabled:
+            _trace_emitter.tool_call_end(self.name, function_name, str(result) if result else None, (time.time() - _tool_start_time) * 1000)
+        return result
+
+    async def _execute_tool_async_retry_loop(self, function_name: str, arguments: Dict[str, Any], tool_call_id: Optional[str] = None, tools_override: Optional[List] = None) -> Any:
         """Async tool execution with retry policy (middleware-agnostic core)."""
         from ..errors import ToolExecutionError
 
