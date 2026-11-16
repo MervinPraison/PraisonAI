@@ -13,6 +13,8 @@ import threading
 
 from praisonaiagents import AgentOSConfig, AgentOSProtocol
 
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+
 
 def _run_to_dict(record: Any) -> Dict[str, Any]:
     """A RunRecord as JSON. Uses whatever the record exposes rather than
@@ -95,6 +97,7 @@ class AgentOS:
         
         # FastAPI app instance (lazy initialized)
         self._app = None
+        self._app_token = None
     
     def _create_app(self) -> Any:
         """Create the FastAPI application."""
@@ -131,6 +134,9 @@ class AgentOS:
         self._register_routes(app)
 
         launch_token = self.config.api_key or os.environ.get("PRAISONAI_AGENTOS_API_KEY")
+        # The key is captured at build time; serve() checks this, not the
+        # current config, so a key set after get_app() cannot fake auth.
+        self._app_token = launch_token
         if launch_token:
             from .._api_auth import build_api_key_middleware
             app.add_middleware(build_api_key_middleware(launch_token, {"/health", "/"}))
@@ -610,6 +616,26 @@ class AgentOS:
         resolved_port = port or self.config.port
         enable_reload = reload or self.config.reload
 
+        # Fail closed: never expose agents on a non-loopback bind without auth.
+        # Check the key baked into the app actually served (it may be cached).
+        app = self.get_app()
+        is_loopback = (resolved_host or "").lower() in _LOOPBACK_HOSTS
+        if not self._app_token and not is_loopback:
+            raise RuntimeError(
+                f"AgentOS refuses to serve on non-loopback host {resolved_host!r} "
+                "without an API key. Set AgentOSConfig(api_key=...) or "
+                "PRAISONAI_AGENTOS_API_KEY, or bind to 127.0.0.1."
+            )
+        # Default bind is loopback (unreachable from outside a container);
+        # log it so Docker users see why and how to expose it.
+        import logging
+        logging.getLogger(__name__).warning(
+            "AgentOS binding to %s:%s (auth %s)%s", resolved_host, resolved_port,
+            "on" if self._app_token else "off",
+            "; set host='0.0.0.0' and an API key to expose (e.g. in Docker)"
+            if is_loopback else "",
+        )
+
         if enable_reload:
             # Uvicorn's reload spawns a fresh worker *process* that re-imports
             # the target module; it cannot see this parent process's in-memory
@@ -633,7 +659,7 @@ class AgentOS:
             )
 
         uvicorn.run(
-            self.get_app(),
+            app,
             host=resolved_host,
             port=resolved_port,
             log_level=self.config.log_level,

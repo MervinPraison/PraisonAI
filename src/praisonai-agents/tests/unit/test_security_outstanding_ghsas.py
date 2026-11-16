@@ -15,26 +15,36 @@ def test_searxng_url_blocks_private_ip():
     assert validate_searxng_url("http://10.0.0.1/search") is None
 
 
-def test_workflow_yaml_approve_gated_without_allow_dangerous():
+def test_workflow_yaml_approve_gated_without_allow_dangerous(monkeypatch):
     """GHSA-7qw2: approve list must not auto-approve when allow_dangerous_tools=False."""
-    from praisonaiagents import Agent, Workflow
-    from praisonaiagents.approval import get_approval_registry
+    from praisonaiagents import Workflow
+    from praisonaiagents.approval import (
+        get_approval_registry, reset_yaml_approved_tools, set_yaml_approved_tools,
+    )
+    from praisonaiagents.workflows.workflow_configs import WorkflowHooksConfig
 
-    agent = Agent(name="a", instructions="test")
-    wf = Workflow(steps=[agent])
-    wf.approve_tools = ["execute_command"]
-    wf.allow_dangerous_tools = False
+    def no_network(*args, **kwargs):
+        pytest.fail("unexpected network connection")
 
+    monkeypatch.setattr("socket.socket.connect", no_network)
+    monkeypatch.setattr("socket.socket.connect_ex", no_network)
     registry = get_approval_registry()
-    before = set(registry._yaml_approved_tools.get() or ())
-
+    token = set_yaml_approved_tools([])
     try:
-        wf.run("hello", verbose=False)
-    except Exception:
-        pass
-
-    after = set(registry._yaml_approved_tools.get() or ())
-    assert after == before
+        for allowed in (False, True):
+            observed = []
+            wf = Workflow(steps=[], hooks=WorkflowHooksConfig(
+                on_workflow_start=lambda *_: observed.append(
+                    set(registry._yaml_approved_tools.get() or ())
+                )
+            ))
+            wf.approve_tools = ["execute_command"]
+            wf.allow_dangerous_tools = allowed
+            wf.run("hello", verbose=False)
+            assert observed == [{"execute_command"} if allowed else set()]
+            assert not registry._yaml_approved_tools.get()
+    finally:
+        reset_yaml_approved_tools(token)
 
 
 def test_search_tools_read_file_blocks_traversal(tmp_path):
@@ -78,11 +88,20 @@ def test_skill_tools_blocks_outside_script(tmp_path, monkeypatch):
     assert "outside working directory" in result.lower()
 
 
-def test_web_crawl_blocks_private_ip():
+def test_web_crawl_blocks_private_ip(monkeypatch):
     """GHSA-qg25: web_crawl SSRF blocks private targets."""
-    from praisonaiagents.tools.web_crawl_tools import web_crawl
+    from praisonaiagents.tools import web_crawl_tools
 
-    result = web_crawl("http://169.254.169.254/latest/meta-data/")
+    monkeypatch.delenv("ALLOW_LOCAL_CRAWL", raising=False)
+    monkeypatch.setattr(
+        "socket.getaddrinfo",
+        lambda *args, **kwargs: [(2, 1, 6, "", ("169.254.169.254", 0))],
+    )
+    monkeypatch.setattr(
+        web_crawl_tools, "_get_available_crawl_providers",
+        lambda: pytest.fail("unsafe URL reached provider discovery"),
+    )
+    result = web_crawl_tools.web_crawl("http://169.254.169.254/latest/meta-data/")
     assert "error" in result
 
 

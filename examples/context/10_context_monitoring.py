@@ -148,7 +148,7 @@ def main():
     print("-" * 40)
     
     sensitive_text = """
-    Here's my API key: sk-proj-abc123def456ghi789
+    Here's my API key: sk-proj-FAKE-demo-key-not-real
     And my password is: supersecret123
     Database connection: postgresql://user:pass@localhost/db
     """
