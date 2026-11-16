@@ -489,6 +489,18 @@ class HookConfig:
         # its own is a working, verifying configuration rather than a 401 trap.
         if self.secret and not self.signature_header:
             self.signature_header = "X-Hub-Signature-256"
+        # ``${VAR}`` substitution leaves strings: parse strictly so "false"
+        # never disables token auth, and reject anything unrecognised.
+        flag = self.signature_only
+        if isinstance(flag, str):
+            flag = {"true": True, "1": True, "yes": True, "on": True,
+                    "false": False, "0": False, "no": False, "off": False,
+                    "": False}.get(flag.strip().lower(), flag)
+        if not isinstance(flag, bool):
+            raise ValueError(
+                f"HookConfig.signature_only must be a boolean, got {flag!r}"
+            )
+        self.signature_only = flag
         # A body-only HMAC signs no timestamp, so a captured delivery could be
         # replayed forever: it must never stand in for the gateway token.
         if self.signature_only and not (
@@ -713,7 +725,7 @@ class HookConfig:
             event_header=data.get("event_header"),
             deliver_only=data.get("deliver_only", False),
             coalesce=data.get("coalesce"),
-            signature_only=bool(data.get("signature_only", False)),
+            signature_only=data.get("signature_only", False),
             metadata={
                 **(data.get("metadata") or {}),
                 **{k: v for k, v in data.items() if k not in known},

@@ -126,6 +126,29 @@ def test_signature_only_from_dict(monkeypatch, tmp_path):
     assert runs == 1
 
 
+@pytest.mark.parametrize("raw", ["false", "0", "False", "off", "", False])
+def test_signature_only_false_strings_keep_token_required(monkeypatch, tmp_path, raw):
+    # ``${VAR}``-substituted YAML yields strings; "false" must not opt in.
+    hook = HookConfig.from_dict({
+        "path": "github", "agent": "triage", "idempotency_key": "{issue.number}",
+        "secret": SECRET, "signature_header": "X-Signature",
+        "timestamp_header": "X-Timestamp", "signature_scheme": "hmac_timestamped",
+        "signature_only": raw,
+    })
+    assert hook.signature_only is False
+    codes, runs = _run(monkeypatch, tmp_path, hook, [_timestamped(12)])
+    assert codes == [401]
+    assert runs == 0
+
+
+def test_signature_only_true_string_and_garbage():
+    base = {"path": "github", "secret": SECRET, "signature_scheme": "structured"}
+    assert HookConfig.from_dict({**base, "signature_only": "true"}).signature_only is True
+    for bad in ("maybe", 1, None):
+        with pytest.raises(ValueError, match="signature_only"):
+            HookConfig.from_dict({**base, "signature_only": bad})
+
+
 @pytest.mark.parametrize("kw", [
     {"secret": SECRET},  # body-only hmac_hex
     {"secret": SECRET, "signature_scheme": "hmac_base64"},
