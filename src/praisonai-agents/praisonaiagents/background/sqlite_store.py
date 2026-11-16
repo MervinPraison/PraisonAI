@@ -109,6 +109,7 @@ class SqliteBackgroundJobStore:
                 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(job_id) DO UPDATE SET
                     status=excluded.status,
+                    created_at=excluded.created_at,
                     started_at=excluded.started_at,
                     completed_at=excluded.completed_at,
                     result=excluded.result,
