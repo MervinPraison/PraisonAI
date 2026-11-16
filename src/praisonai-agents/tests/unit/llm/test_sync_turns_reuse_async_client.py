@@ -51,6 +51,7 @@ def stub(monkeypatch, tmp_path):
     threading.Thread(target=server.serve_forever, daemon=True).start()
     monkeypatch.setenv("OPENAI_API_KEY", "sk-local-fake")
     monkeypatch.setenv("OPENAI_BASE_URL", f"http://127.0.0.1:{server.server_address[1]}/v1")
+    monkeypatch.delenv("OPENAI_API_BASE", raising=False)  # wins over OPENAI_BASE_URL (CI sets it)
     monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
     yield
     server.shutdown()
@@ -104,6 +105,7 @@ def test_thread_loop_is_reused_per_thread_and_replaced_after_fork(monkeypatch):
     real_pid = os.getpid()
     monkeypatch.setattr(os, "getpid", lambda: real_pid + 1)  # as after os.fork()
     assert async_bridge.run_coroutine_on_thread_loop(current_loop(), timeout=None) is not first
+    assert any(r.get_loop() is first for r in async_bridge._inherited_runners)  # never finalized in the child
 
 
 def test_loop_closed_by_user_code_is_replaced():
@@ -146,6 +148,7 @@ def test_interpreter_exits_cleanly_after_sync_turns(tmp_path):
     ''') % (_BODY,)
     env = dict(os.environ, PYTHONPATH=PKG_ROOT, PRAISONAI_HOME=str(tmp_path), PYTHONWARNINGS="default")
     env.pop("OPENAI_BASE_URL", None)
+    env.pop("OPENAI_API_BASE", None)  # would win over the stub's OPENAI_BASE_URL
     proc = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True,
                           cwd=str(tmp_path), env=env, timeout=60)
     assert proc.returncode == 0, proc.stderr[-2000:]

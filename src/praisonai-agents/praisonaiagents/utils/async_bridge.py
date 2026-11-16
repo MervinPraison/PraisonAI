@@ -92,6 +92,10 @@ def run_coroutine_from_any_context(coro: Awaitable[T], timeout: Optional[float] 
 
 _thread_loop = threading.local()
 _atexit_registered = False
+# Runners inherited across fork(), kept alive in the child: finalizing one
+# would close() its loop and unregister the parent's wakeup fd from the epoll
+# instance the two processes share.
+_inherited_runners: list = []
 
 
 def _close_thread_runner() -> None:
@@ -127,6 +131,8 @@ def run_coroutine_on_thread_loop(coro: Awaitable[T], timeout: Optional[float] = 
     # calling ``asyncio.get_event_loop().close()`` can close it under us.
     if (runner is None or getattr(_thread_loop, "pid", None) != os.getpid()
             or runner.get_loop().is_closed()):
+        if runner is not None and getattr(_thread_loop, "pid", None) != os.getpid():
+            _inherited_runners.append(runner)
         runner = asyncio.Runner()
         _thread_loop.runner, _thread_loop.pid = runner, os.getpid()
         if not _atexit_registered and threading.current_thread() is threading.main_thread():
