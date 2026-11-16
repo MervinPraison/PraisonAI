@@ -2732,6 +2732,20 @@ Respond with ONLY a valid JSON tool call in this format:
         except Exception as e:  # noqa: BLE001 — registration must never break the turn
             logging.debug("Deferred registration skipped (non-fatal): %s", e)
 
+    def _unwrap_deferred_result(self, result: Any, function_name: str, tool_call_id: Optional[str]) -> Any:
+        """Register a ``defer(...)`` value returned by a direct tool call and
+        return its note, as the executor-based loop does. Loops that call the
+        tool function directly (async, sync Chat Completions) otherwise lost
+        the handle and sent the model ``str(DeferredToolResult)``. Any other
+        value passes through unchanged.
+        """
+        if type(result).__name__ != "DeferredToolResult":  # no import on the hot path
+            return result
+        from types import SimpleNamespace
+        self._register_deferred_if_any(SimpleNamespace(
+            deferred=result, tool_call_id=tool_call_id, function_name=function_name))
+        return result.note
+
     def _finalise_on_limit(self, messages: List[Dict], response_text: str,
                            temperature: float = 0.2,
                            wrap_up_prompt: Optional[str] = None, **kwargs) -> str:
@@ -4400,16 +4414,17 @@ Respond with ONLY a valid JSON tool call in this format:
                             # the model instead of aborting the whole run.
                             try:
                                 if index in parallel_results:
+                                    self._register_deferred_if_any(parallel_results[index])
                                     tool_result = parallel_results[index].result
                                 else:
-                                    tool_result = execute_tool_fn(
+                                    tool_result = self._unwrap_deferred_result(execute_tool_fn(
                                         function_name,
                                         arguments,
                                         tool_call_id=tool_call_id,
                                         **_durable_iteration_kwargs(
                                             execute_tool_fn, iteration_count
                                         ),
-                                    )
+                                    ), function_name, tool_call_id)
                             except ToolExecutionError:
                                 raise
                             except Exception as tool_error:
@@ -5783,15 +5798,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     _dispatch_async_tool(execute_tool_fn, fn, args, tc_id, iteration_index)
                     for (fn, args, tc_id) in dispatch_specs
                 ), return_exceptions=True)
-                for item in gathered:
+                # Register successful deferred siblings before re-raising, so a
+                # failing tool does not orphan another tool's background job.
+                results = [r if isinstance(r, BaseException) else self._unwrap_deferred_result(r, fn, tc_id)
+                           for r, (fn, _args, tc_id) in zip(gathered, dispatch_specs)]
+                for item in results:
                     if isinstance(item, BaseException):
                         raise item
-                return gathered
+                return results
             results = []
             for (fn, args, tc_id) in dispatch_specs:
-                results.append(await _dispatch_async_tool(
+                results.append(self._unwrap_deferred_result(await _dispatch_async_tool(
                     execute_tool_fn, fn, args, tc_id, iteration_index
-                ))
+                ), fn, tc_id))
             return results
 
         try:
@@ -6350,13 +6369,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                         _call_plan.append(('call', function_name, arguments, tool_call_id))
                         if is_ollama and not parallel_tool_calls:
-                            _batch_results.append(await _dispatch_async_tool(
+                            _batch_results.append(self._unwrap_deferred_result(await _dispatch_async_tool(
                                 execute_tool_fn,
                                 function_name,
                                 arguments,
                                 tool_call_id,
                                 iteration_count,
-                            ))
+                            ), function_name, tool_call_id))
                             if _ollama_tool_result_is_successful(_batch_results[-1]):
                                 self._record_ollama_tool_result(
                                     ollama_tool_result_mapping, function_name,
