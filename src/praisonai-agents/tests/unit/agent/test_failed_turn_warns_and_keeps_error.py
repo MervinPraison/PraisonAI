@@ -51,6 +51,9 @@ def stub(monkeypatch, tmp_path):
     base = f"http://127.0.0.1:{server.server_address[1]}/v1"
     monkeypatch.setenv("OPENAI_API_KEY", "sk-bad")
     monkeypatch.setenv("OPENAI_BASE_URL", base)
+    # Pin the legacy name too: a value leaked by another test would win
+    # and send the "next turn succeeds" call to the wrong endpoint.
+    monkeypatch.setenv("OPENAI_API_BASE", base)
     monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
     yield base
     server.shutdown()
