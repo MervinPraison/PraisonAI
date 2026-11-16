@@ -63,6 +63,12 @@ _run_generation: "contextvars.ContextVar[Optional[int]]" = contextvars.ContextVa
     "praisonai_workflow_run_generation", default=None
 )
 
+# Chain of includes active in the current execution (recipe names / workflow
+# ids). A ContextVar so nested ``run()`` calls of included workflows share it.
+_include_chain: "contextvars.ContextVar[tuple]" = contextvars.ContextVar(
+    "praisonai_workflow_include_chain", default=()
+)
+
 from .._run_lock import ensure_run_lock
 
 
@@ -196,6 +202,62 @@ def _rebuild_isolated(value: Any, memo: dict) -> Any:
     # Unknown/atomic object that could not be deep-copied: share by reference as
     # a last resort (read-only intent).
     return value
+
+
+# Per-branch agent clones for concurrent fan-out (Parallel / Loop(parallel=True)).
+# Maps id(shared agent) -> that branch's clone (created lazily), or None if unset.
+_BRANCH_AGENTS: "contextvars.ContextVar[Optional[dict]]" = contextvars.ContextVar(
+    "praisonai_workflow_branch_agents", default=None
+)
+
+
+def _step_agents(step: Any, _seen: Optional[set] = None) -> List[Any]:
+    """Return every Agent a step runs on, including inside nested patterns."""
+    seen = set() if _seen is None else _seen
+    if step is None or id(step) in seen:
+        return []
+    seen.add(id(step))
+    if isinstance(step, Task):
+        agent = step.agent
+        return [agent] if hasattr(agent, "_fork_history") else []
+    if hasattr(step, "_fork_history"):
+        return [step]
+    if isinstance(step, (list, tuple)):
+        children = list(step)
+    elif isinstance(step, Route):
+        children = [*step.routes.values(), step.default]
+    elif isinstance(step, If):
+        children = [step.then_steps, step.else_steps]
+    elif isinstance(step, (Parallel, Loop, Repeat)):
+        children = [getattr(step, "step", None), getattr(step, "steps", None)]
+    else:
+        return []
+    return [a for child in children for a in _step_agents(child, seen)]
+
+
+def _enter_branch(shared_agents) -> "contextvars.Token":
+    """Mark ``shared_agents`` for per-branch cloning in the current context."""
+    clones = dict(_BRANCH_AGENTS.get() or {})
+    for agent in shared_agents:
+        clones[id(agent)] = None
+    return _BRANCH_AGENTS.set(clones)
+
+
+def _branch_agent(agent: Any) -> Any:
+    """Return this branch's private clone of ``agent`` if it is shared across
+    concurrent branches, otherwise ``agent`` itself.
+
+    One Agent instance appends every call to its own ``chat_history``, so
+    running it from several threads at once leaks sibling prompts into each
+    request. The fork shares config, tools and memory but owns its history.
+    """
+    clones = _BRANCH_AGENTS.get()
+    if not clones or id(agent) not in clones or not hasattr(agent, "_fork_history"):
+        return agent
+    clone = clones[id(agent)]
+    if clone is None:
+        clone = clones[id(agent)] = agent._fork_history()
+    return clone
 
 
 def _isolate_scope(variables: dict) -> dict:
@@ -1996,6 +2058,11 @@ class AgentFlow:
                 results.extend(include_result["steps"])
                 previous_output = include_result["output"]
                 all_variables.update(include_result.get("variables", {}))
+                if include_result.get("stop"):
+                    self.status = "failed"
+                    if verbose:
+                        print("🛑 Workflow stopped by failed include step")
+                    break
                 i += 1
                 continue
             
@@ -3242,23 +3309,14 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                     "step": step.name, "output": previous_output,
                     "stop": False, "skipped": True, "variables": {},
                 }
-        cache = getattr(self, "_step_cache", None)
-        if cache is None:
+        def _run_uncached():
             _snapshot_scope(_replay, all_variables)
             return self._execute_single_step_uncached(
                 step, previous_output, input, all_variables, model, verbose, index,
                 stream=stream, depth=depth,
             )
-        from .step_cache import make_step_key
-        key = make_step_key(step, previous_output, input, all_variables)
-        try:
-            hit = copy.deepcopy(cache.get(key))
-        except Exception:
-            hit = None
-            logger.warning("Could not restore cached workflow step")
-        if hit is not None:
-            if verbose:
-                print(f"↩︎  cache hit: {getattr(step, 'name', getattr(step, '__name__', step))}")
+
+        def _on_hit():
             # A cache hit means the gated-in step is being served a prior result,
             # so its status is "completed" -- not whatever a previous run left in
             # step_statuses. Without this reset, a step that was gated OUT on an
@@ -3269,24 +3327,12 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             self.step_statuses[step.name] = "completed"
             if _replay is not None:
                 _replay["status"] = "cached"
-            # Copy: a caller mutating a returned result must not edit the cache.
-            return dict(hit)
-        _snapshot_scope(_replay, all_variables)
-        result = self._execute_single_step_uncached(
-            step, previous_output, input, all_variables, model, verbose, index,
-            stream=stream, depth=depth,
+
+        return _with_step_cache(
+            getattr(self, "_step_cache", None),
+            step, (previous_output, input, all_variables), _run_uncached,
+            verbose=verbose, on_hit=_on_hit,
         )
-        # Only cache a SUCCESSFUL result. A nested step that exhausts its
-        # retries or fails a guardrail returns a dict carrying an "error" key
-        # (see the failure branches of _execute_single_step_uncached); caching
-        # that would replay the failure on every identical re-run and never let
-        # the step retry -- turning a transient error into a permanent one.
-        if isinstance(result, dict) and not result.get("error"):
-            try:
-                cache.set(key, copy.deepcopy(result))
-            except Exception:
-                logger.warning("Could not cache workflow step")
-        return result
 
     def _execute_single_step_uncached(
         self, 
@@ -3406,9 +3452,9 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             # Return in the expected format for single step
             combined_output = include_result.get("output", "")
             return {
-                "step": f"include:{step.recipe}",
+                "step": f"include:{step.recipe or getattr(step.workflow, 'name', None) or 'workflow'}",
                 "output": combined_output,
-                "stop": False,
+                "stop": include_result.get("stop", False),
                 "variables": include_result.get("variables", all_variables)
             }
         
@@ -3436,16 +3482,19 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                     return result.output
                 return str(result)
             elif normalized.agent:
+                # A concurrent branch gets its own clone of a shared agent so
+                # sibling branches never see each other's chat_history.
+                agent = _branch_agent(normalized.agent)
                 # Propagate context management to existing agent if workflow has it enabled
-                if self.context and hasattr(normalized.agent, '_context_manager_initialized'):
-                    if not normalized.agent._context_manager_initialized:
-                        normalized.agent._context_param = self.context
+                if self.context and hasattr(agent, '_context_manager_initialized'):
+                    if not agent._context_manager_initialized:
+                        agent._context_param = self.context
                     # Share session deduplication cache for cross-agent deduplication
                     if self._session_dedup_cache:
-                        normalized.agent._session_dedup_cache = self._session_dedup_cache
+                        agent._session_dedup_cache = self._session_dedup_cache
                         # Also set on existing context manager if already initialized
-                        if normalized.agent._context_manager and hasattr(normalized.agent._context_manager, '_session_cache'):
-                            normalized.agent._context_manager._session_cache = self._session_dedup_cache
+                        if agent._context_manager and hasattr(agent._context_manager, '_session_cache'):
+                            agent._context_manager._session_cache = self._session_dedup_cache
 
                 action = normalized.action or input
                 # Substitute variables
@@ -3454,9 +3503,9 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                     action = f"{action}\n\nPrevious attempt feedback: {validation_feedback}"
 
                 # Check if this is a specialized agent (AudioAgent, VideoAgent, ImageAgent, OCRAgent)
-                agent_class_name = normalized.agent.__class__.__name__
+                agent_class_name = agent.__class__.__name__
                 out = self._execute_specialized_agent(
-                    normalized.agent, agent_class_name, action, normalized, all_variables, stream
+                    agent, agent_class_name, action, normalized, all_variables, stream
                 )
                 # Parse JSON output if output_json was requested
                 step_output_json = getattr(normalized, '_output_json', None)
@@ -4024,6 +4073,12 @@ CONCISE SUMMARY:"""
         # agent turn still running after timeout/fail_fast/caller exit stop at
         # its next cancel check instead of running on unseen (Issue #6266).
         from ..agent.chat_mixin import _stop_scope
+
+        # Agents used by more than one branch must not share chat_history.
+        per_branch = [{id(a): a for a in _step_agents(s)} for s in parallel_step.steps]
+        uses = collections.Counter(k for b in per_branch for k in b)
+        shared_agents = [a for b in per_branch for k, a in b.items() if uses[k] > 1]
+
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=effective_workers)
         abandon_scope = _stop_scope()
         abandon_scope.__enter__()
@@ -4043,11 +4098,13 @@ CONCISE SUMMARY:"""
                 def execute_with_branch(step=step, idx=idx, opt_prev=optimized_previous, branch_vars=branch_vars):
                     emitter = get_context_emitter()
                     emitter.set_branch(f"parallel_{idx}")
+                    token = _enter_branch(shared_agents)
                     try:
                         return self._execute_single_step_internal(
                             step, opt_prev, input, branch_vars, model, False, idx, stream, depth=depth+1
                         )
                     finally:
+                        _BRANCH_AGENTS.reset(token)
                         emitter.clear_branch()
 
                 future = executor.submit(copy_context_to_callable(execute_with_branch))
@@ -4301,6 +4358,9 @@ CONCISE SUMMARY:"""
                 # Set branch context for parallel tracking
                 emitter = get_context_emitter()
                 emitter.set_branch(f"loop_{idx}")
+                # Every item runs the same steps, so each iteration needs its
+                # own clone of their agents (fresh chat_history per item).
+                token = _enter_branch(_step_agents(steps_to_run))
                 
                 try:
                     # CRITICAL: Deep copy variables to ensure thread isolation
@@ -4354,6 +4414,7 @@ CONCISE SUMMARY:"""
                     }
                     return idx, final_result
                 finally:
+                    _BRANCH_AGENTS.reset(token)
                     emitter.clear_branch()
             
             with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
@@ -4848,44 +4909,64 @@ CONCISE SUMMARY:"""
         model: str,
         verbose: bool,
         stream: bool = True,
-        visited_recipes: Optional[set] = None
     ) -> Dict[str, Any]:
-        """Execute an included recipe as a workflow step.
+        """Execute an included recipe or workflow as a workflow step.
         
         Args:
-            include_step: The Include step with recipe name
+            include_step: The Include step (``recipe`` name/path or ``workflow`` instance)
             previous_output: Output from previous step
             input: Original workflow input
             all_variables: Current workflow variables
             model: LLM model to use
             verbose: Verbose output
             stream: Enable streaming
-            visited_recipes: Set of already-visited recipe names (for cycle detection)
             
         Returns:
-            Dict with 'steps', 'output', and 'variables'
+            Dict with 'steps', 'output', 'variables' and 'stop' (True on failure,
+            so the parent run halts with status "failed" like any failing step).
         """
         recipe_name = include_step.recipe
-        
-        # Cycle detection
-        if visited_recipes is None:
-            visited_recipes = set()
-        
-        if recipe_name in visited_recipes:
-            error_msg = f"Circular include detected: {recipe_name} was already included in this execution chain"
+        sub_workflow = include_step.workflow
+        if sub_workflow is not None:
+            recipe_name = recipe_name or getattr(sub_workflow, "name", None) or "workflow"
+            include_key = ("workflow", id(sub_workflow))
+        else:
+            include_key = ("recipe", recipe_name)
+
+        def _fail(error_msg: str) -> Dict[str, Any]:
             logger.error(error_msg)
             return {
-                "steps": [{"step": f"include:{recipe_name}", "output": f"Error: {error_msg}"}],
+                "steps": [{
+                    "step": f"include:{recipe_name}",
+                    "output": f"Error: {error_msg}",
+                    "status": "failed",
+                    "error": error_msg,
+                }],
                 "output": error_msg,
-                "variables": all_variables
+                "variables": all_variables,
+                "stop": True,
             }
-        
-        visited_recipes.add(recipe_name)
+
+        # Cycle detection. The chain lives in a ContextVar so it survives the
+        # nested ``run()`` of the included workflow (a per-call set was reset at
+        # every level, so A -> B -> A recursed until RecursionError) (#6353).
+        chain = _include_chain.get()
+        if include_key in chain:
+            return _fail(
+                f"Circular include detected: {recipe_name} was already included in this execution chain"
+            )
+        chain_token = _include_chain.set(chain + (include_key,))
         
         if verbose:
             print(f"📦 Including recipe: {recipe_name}")
         
         try:
+            if sub_workflow is not None:
+                return self._run_included_workflow(
+                    sub_workflow, recipe_name, include_step, previous_output,
+                    input, all_variables, model, verbose, stream, _fail,
+                )
+
             # Try to resolve recipe path using agent_recipes if available
             recipe_path = None
             
@@ -4906,13 +4987,7 @@ CONCISE SUMMARY:"""
                         recipe_path = potential_path
             
             if not recipe_path:
-                error_msg = f"Recipe not found: {recipe_name}"
-                logger.error(error_msg)
-                return {
-                    "steps": [{"step": f"include:{recipe_name}", "output": f"Error: {error_msg}"}],
-                    "output": error_msg,
-                    "variables": all_variables
-                }
+                return _fail(f"Recipe not found: {recipe_name}")
             
             # Find the YAML file (agents.yaml or workflow.yaml)
             recipe_yaml = None
@@ -4926,13 +5001,7 @@ CONCISE SUMMARY:"""
                     break
             
             if not recipe_yaml:
-                error_msg = f"No workflow YAML found in {recipe_path}"
-                logger.error(error_msg)
-                return {
-                    "steps": [{"step": f"include:{recipe_name}", "output": f"Error: {error_msg}"}],
-                    "output": error_msg,
-                    "variables": all_variables
-                }
+                return _fail(f"No workflow YAML found in {recipe_path}")
             
             # Load tools from the recipe's tools.py if present (opt-in only)
             tool_registry = {}
@@ -4971,21 +5040,7 @@ CONCISE SUMMARY:"""
                 except Exception as e:
                     logger.warning(f"Failed to load tools from {tools_py}: {e}")
             
-            # Determine input for the included recipe
-            recipe_input = include_step.input or previous_output or input
-            
-            # Convert non-string inputs to JSON string for variable substitution
-            if recipe_input and not isinstance(recipe_input, str):
-                recipe_input = json.dumps(recipe_input)
-            
-            # Substitute variables in the input (only if it's a string)
-            if recipe_input and isinstance(recipe_input, str):
-                for key, value in all_variables.items():
-                    recipe_input = recipe_input.replace(f"{{{{{key}}}}}", str(value))
-                if previous_output:
-                    prev_str = previous_output if isinstance(previous_output, str) else json.dumps(previous_output)
-                    recipe_input = recipe_input.replace("{{previous_output}}", prev_str)
-                recipe_input = recipe_input.replace("{{input}}", input)
+            recipe_input = self._include_input(include_step, previous_output, input, all_variables)
             
             # Parse and execute the included workflow
             from .yaml_parser import YAMLWorkflowParser
@@ -5014,27 +5069,72 @@ CONCISE SUMMARY:"""
                 verbose=verbose,
                 stream=stream
             )
-            
-            if verbose:
-                print(f"✅ Included recipe {recipe_name} completed")
-            
-            # Return result in expected format
-            return {
-                "steps": result.get("steps", []),
-                "output": result.get("output", ""),
-                "variables": {**all_variables, **result.get("variables", {})}
-            }
+            return self._include_result(result, recipe_name, all_variables, verbose, _fail)
             
         except Exception as e:
-            logger.error(f"Failed to execute included recipe {recipe_name}: {e}")
-            return {
-                "steps": [{"step": f"include:{recipe_name}", "output": f"Error: {e}"}],
-                "output": f"Error executing {recipe_name}: {e}",
-                "variables": all_variables
-            }
+            return _fail(f"Error executing {recipe_name}: {e}")
         finally:
-            # Remove from visited after execution completes (allow re-use in different branches)
-            visited_recipes.discard(recipe_name)
+            # Pop this include so the same recipe can be reused in other branches
+            _include_chain.reset(chain_token)
+
+    @staticmethod
+    def _include_input(include_step, previous_output, input, all_variables):
+        """Resolve the input for an included recipe/workflow."""
+        recipe_input = include_step.input or previous_output or input
+        
+        # Convert non-string inputs to JSON string for variable substitution
+        if recipe_input and not isinstance(recipe_input, str):
+            recipe_input = json.dumps(recipe_input)
+        
+        # Substitute variables in the input (only if it's a string)
+        if recipe_input and isinstance(recipe_input, str):
+            for key, value in all_variables.items():
+                recipe_input = recipe_input.replace(f"{{{{{key}}}}}", str(value))
+            if previous_output:
+                prev_str = previous_output if isinstance(previous_output, str) else json.dumps(previous_output)
+                recipe_input = recipe_input.replace("{{previous_output}}", prev_str)
+            recipe_input = recipe_input.replace("{{input}}", input)
+        return recipe_input
+
+    @staticmethod
+    def _include_result(result, recipe_name, all_variables, verbose, fail):
+        """Map an included run's result to step output; a failed run halts the parent."""
+        if not isinstance(result, dict):
+            return fail(f"Included {recipe_name} returned no result")
+        if result.get("status") == "failed":
+            steps = result.get("steps") or [{}]
+            detail = result.get("output") or (steps[-1] or {}).get("output") or result.get("error", "")
+            return fail(f"Included {recipe_name} failed: {detail}")
+        if verbose:
+            print(f"✅ Included recipe {recipe_name} completed")
+        return {
+            "steps": result.get("steps", []),
+            "output": result.get("output", ""),
+            "variables": {**all_variables, **result.get("variables", {})},
+        }
+
+    def _run_included_workflow(
+        self, sub_workflow, recipe_name, include_step, previous_output,
+        input, all_variables, model, verbose, stream, fail,
+    ):
+        """Run an ``include(workflow=...)`` sub-workflow instance.
+
+        Parent variables are applied to a shallow copy, so the caller's
+        instance is never mutated. The copy shares the instance's run lock, so
+        an overlapping include of the same sub-workflow is rejected by ``run()``
+        (and reported as a failed include) instead of racing on its state.
+        """
+        recipe_input = self._include_input(include_step, previous_output, input, all_variables)
+        ensure_run_lock(sub_workflow)
+        run_copy = copy.copy(sub_workflow)
+        run_copy.variables = {
+            **(getattr(sub_workflow, "variables", None) or {}),
+            **all_variables, "previous_output": previous_output,
+        }
+        result = run_copy.run(
+            input=recipe_input or "", llm=model, verbose=verbose, stream=stream
+        )
+        return self._include_result(result, recipe_name, all_variables, verbose, fail)
     
     def start(self, input: str = "", **kwargs) -> Dict[str, Any]:
         """Alias for run() for consistency with Agents."""
@@ -5045,6 +5145,45 @@ CONCISE SUMMARY:"""
 # Workflow and Pipeline are silent aliases
 Workflow = AgentFlow
 Pipeline = AgentFlow
+
+
+def _with_step_cache(cache, step, key_args, run_uncached, *, verbose=False, on_hit=None):
+    """Shared step-cache envelope for both step executors.
+
+    Module-level (not a method) because the two callers live on unrelated
+    classes: ``AgentFlow._execute_leaf_step`` and
+    ``WorkflowManager._execute_single_step``.
+
+    Restores a deep-copied hit (copied out again so callers cannot mutate
+    the cache), otherwise runs ``run_uncached`` and stores a deep copy of the
+    result -- but only a SUCCESSFUL one. A step that exhausts its retries or
+    fails a guardrail returns a dict carrying an "error" key; caching that
+    would replay the failure forever instead of letting the step retry.
+    """
+    if cache is None:
+        return run_uncached()
+    from .step_cache import make_step_key
+    key = make_step_key(step, *key_args)
+    try:
+        hit = copy.deepcopy(cache.get(key))
+    except Exception:
+        hit = None
+        logger.warning("Could not restore cached workflow step")
+    if hit is not None:
+        if verbose:
+            print(f"↩︎  cache hit: {getattr(step, 'name', getattr(step, '__name__', step))}")
+        if on_hit is not None:
+            on_hit()
+        # Copy: a caller mutating a returned result must not edit the cache.
+        return dict(hit)
+    result = run_uncached()
+    if isinstance(result, dict) and not result.get("error"):
+        try:
+            cache.set(key, copy.deepcopy(result))
+        except Exception:
+            logger.warning("Could not cache workflow step")
+    return result
+
 
 class WorkflowManager:
     """
@@ -6257,35 +6396,15 @@ class WorkflowManager:
         because caching only one would make the feature work or not depending on
         whether the step happened to sit inside a Parallel or an If.
         """
-        cache = getattr(self, "_step_cache", None)
-        if cache is None:
-            return self._execute_single_step_nocache(
+        return _with_step_cache(
+            getattr(self, "_step_cache", None),
+            step, (None, original_input, all_variables),
+            lambda: self._execute_single_step_nocache(
                 step, step_idx, results, all_variables, executor, default_agent,
                 default_llm, memory, planning, verbose, on_step, on_result, original_input,
-            )
-        from .step_cache import make_step_key
-        key = make_step_key(step, None, original_input, all_variables)
-        try:
-            hit = copy.deepcopy(cache.get(key))
-        except Exception:
-            hit = None
-            logger.warning("Could not restore cached workflow step")
-        if hit is not None:
-            if verbose:
-                print(f"↩︎  cache hit: {getattr(step, 'name', getattr(step, '__name__', step))}")
-            return dict(hit)
-        result = self._execute_single_step_nocache(
-            step, step_idx, results, all_variables, executor, default_agent,
-            default_llm, memory, planning, verbose, on_step, on_result, original_input,
+            ),
+            verbose=verbose,
         )
-        # Only cache a successful result -- a failed step must be free to retry
-        # on the next run rather than replay a cached failure forever.
-        if isinstance(result, dict) and not result.get("error"):
-            try:
-                cache.set(key, copy.deepcopy(result))
-            except Exception:
-                logger.warning("Could not cache workflow step")
-        return result
 
     def _execute_single_step_nocache(
         self,

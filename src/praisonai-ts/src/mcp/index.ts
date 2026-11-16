@@ -30,6 +30,7 @@
  */
 
 import { randomUUID } from '../utils/uuid';
+import type { Request } from '@modelcontextprotocol/sdk/types.js';
 
 /**
  * MCP Transport types
@@ -85,6 +86,10 @@ export interface MCPClientConfig {
     env?: Record<string, string>;
     /** Connection timeout in ms */
     timeout?: number;
+    /** Stdio RPC deadline in ms (default: 60000, independently of connection timeout).
+     * Increase this for long-running tools; the MCP SDK does not support an unbounded deadline.
+     */
+    requestTimeout?: number;
     /** Enable verbose logging */
     verbose?: boolean;
     /** API key for authentication */
@@ -129,6 +134,7 @@ export class MCPClient {
     private config: Required<MCPClientConfig>;
     private session: MCPSession;
     private transport: any = null;
+    private disconnectGeneration = 0;
 
     constructor(config: MCPClientConfig = {}) {
         this.id = randomUUID();
@@ -139,6 +145,7 @@ export class MCPClient {
             args: config.args ?? [],
             env: config.env ?? {},
             timeout: config.timeout ?? 30000,
+            requestTimeout: config.requestTimeout ?? 60000,
             verbose: config.verbose ?? false,
             apiKey: config.apiKey ?? '',
         };
@@ -157,6 +164,7 @@ export class MCPClient {
      */
     async connect(): Promise<void> {
         if (this.session.connected) return;
+        const generation = this.disconnectGeneration;
 
         if (this.config.verbose) {
             console.log(`[MCP] Connecting via ${this.config.transport}...`);
@@ -165,7 +173,7 @@ export class MCPClient {
         try {
             switch (this.config.transport) {
                 case 'stdio':
-                    await this.connectStdio();
+                    await this.connectStdio(generation);
                     break;
                 case 'http':
                 case 'sse':
@@ -178,8 +186,31 @@ export class MCPClient {
                     throw new Error(`Unsupported transport: ${this.config.transport}`);
             }
 
+            if (generation !== this.disconnectGeneration) {
+                throw new Error('MCP connection disconnected during initialization');
+            }
+
             // Initialize session
-            await this.initialize();
+            if (this.transport.type === 'stdio') {
+                const stdioClient = this.transport.client;
+                // The SDK negotiates and sends notifications/initialized itself.
+                try {
+                    await this.discoverTools();
+                } catch (error) {
+                    this.session.tools = [];
+                    const { ErrorCode } = await import('@modelcontextprotocol/sdk/types.js');
+                    if ((error as { code?: number })?.code === ErrorCode.RequestTimeout) {
+                        await stdioClient.close();
+                        throw error;
+                    }
+                    // Servers without tool support may still provide resources/prompts.
+                }
+                if (!stdioClient.transport) {
+                    throw new Error('MCP stdio connection closed during initialization');
+                }
+            } else {
+                await this.initialize();
+            }
             this.session.connected = true;
 
             if (this.config.verbose) {
@@ -194,31 +225,54 @@ export class MCPClient {
     /**
      * Connect via stdio (spawn process)
      */
-    private async connectStdio(): Promise<void> {
+    private async connectStdio(generation: number): Promise<void> {
         if (!this.config.command) {
             throw new Error('Command is required for stdio transport');
         }
 
-        // Lazy import child_process
-        const { spawn } = await import('child_process');
-
-        const proc = spawn(this.config.command, this.config.args, {
-            env: { ...process.env, ...this.config.env },
-            stdio: ['pipe', 'pipe', 'inherit'],
+        const [{ Client }, { StdioClientTransport }, { ResultSchema }] = await Promise.all([
+            import('@modelcontextprotocol/sdk/client/index.js'),
+            import('@modelcontextprotocol/sdk/client/stdio.js'),
+            import('@modelcontextprotocol/sdk/types.js'),
+        ]);
+        if (generation !== this.disconnectGeneration) {
+            throw new Error('MCP connection disconnected during initialization');
+        }
+        const client = new Client<Request>({ name: 'praisonai-ts', version: '1.0.0' });
+        const env: Record<string, string> = {};
+        for (const [key, value] of Object.entries(process.env)) {
+            if (value !== undefined) env[key] = value;
+        }
+        Object.assign(env, this.config.env);
+        const stdio = new StdioClientTransport({
+            command: this.config.command,
+            args: this.config.args,
+            env,
+            stderr: 'inherit',
         });
-
+        // Publish before awaiting the handshake so disconnect() can close the child.
         this.transport = {
             type: 'stdio',
-            process: proc,
-            send: (message: any) => {
-                proc.stdin.write(JSON.stringify(message) + '\n');
-            },
-            receive: () => new Promise((resolve) => {
-                proc.stdout.once('data', (data) => {
-                    resolve(JSON.parse(data.toString()));
-                });
-            }),
+            client,
+            send: (method: string, params?: any) => client.request(
+                { method, params }, ResultSchema, { timeout: this.config.requestTimeout }
+            ),
+            close: () => client.close(),
         };
+        client.onclose = () => {
+            if (this.transport?.client === client) this.session.connected = false;
+        };
+        try {
+            await client.connect(stdio, { timeout: this.config.timeout });
+        } catch (error) {
+            await stdio.close();
+            if (this.transport?.client === client) this.transport = null;
+            if (generation !== this.disconnectGeneration) {
+                throw new Error('MCP connection disconnected during initialization');
+            }
+            throw error;
+        }
+        this.session.serverInfo = client.getServerVersion();
     }
 
     /**
@@ -345,12 +399,12 @@ export class MCPClient {
             throw new Error('Not connected');
         }
 
-        if (this.transport.type === 'stdio') {
-            this.transport.send({ jsonrpc: '2.0', id: randomUUID(), method, params });
-            return this.transport.receive();
-        }
-
         return this.transport.send(method, params);
+    }
+
+    private async discoverTools(): Promise<void> {
+        const result = await this.rpc('tools/list', {});
+        this.session.tools = result.tools ?? [];
     }
 
     /**
@@ -358,8 +412,7 @@ export class MCPClient {
      */
     async refreshTools(): Promise<void> {
         try {
-            const result = await this.rpc('tools/list', {});
-            this.session.tools = result.tools ?? [];
+            await this.discoverTools();
         } catch {
             // Server may not support tools
             this.session.tools = [];
@@ -415,14 +468,15 @@ export class MCPClient {
      * Disconnect from server
      */
     async disconnect(): Promise<void> {
-        if (this.transport?.type === 'stdio' && this.transport.process) {
-            this.transport.process.kill();
-        } else if (this.transport?.type === 'websocket' && this.transport.ws) {
-            this.transport.ws.close();
-        }
-
+        this.disconnectGeneration++;
+        const transport = this.transport;
         this.transport = null;
         this.session.connected = false;
+        if (transport?.type === 'stdio') {
+            await transport.close();
+        } else if (transport?.type === 'websocket' && transport.ws) {
+            transport.ws.close();
+        }
     }
 
     /**

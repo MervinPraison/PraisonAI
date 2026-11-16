@@ -3362,6 +3362,19 @@ Your Role: {self.role}
                     return original_backstory
         return self.backstory
 
+    def _fork_history(self) -> "Agent":
+        """Shallow copy that shares all config, tools and memory but has its
+        own ``chat_history`` (seeded with the current one).
+
+        Used by concurrent workflow branches so one shared agent does not
+        leak sibling prompts between threads, without the config loss of
+        rebuilding it through the constructor.
+        """
+        import copy
+        fork = copy.copy(self)
+        fork.__chat_history_state = AsyncSafeState(list(self.chat_history))
+        return fork
+
     def clone_for_channel(self) -> "Agent":
         """Return a fully independent copy of this agent for a gateway channel.
         
@@ -7436,7 +7449,7 @@ Answer:"""
         # Fall back to simple backoff if no execution config
         return 1.0 * (2.0 ** (retry_count - 1))
 
-    def _apply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None, cancel_token=None, messages=None):
+    def _apply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None, cancel_token=None, messages=None, response_format=None):
         """Apply guardrail validation with retry logic (sync version).
 
         Args:
@@ -7449,6 +7462,9 @@ Answer:"""
                 run with its context intact. When omitted (providers whose
                 message list the caller does not hold), the retry falls back to
                 re-asking the original prompt with the reason appended.
+
+            response_format: Structured-output contract of the original call,
+                kept on retries so ``output_pydantic``/``output_json`` survive.
 
         Bounded by ``max_guardrail_retries``; a validator that never passes
         raises rather than looping.
@@ -7494,7 +7510,7 @@ Answer:"""
                 # stream=False: the retry reads a complete message and nothing
                 # consumes deltas, so streaming here only costs a failed
                 # sync-adapter attempt and an ERROR log before falling back.
-                response = self._chat_completion(list(retry_messages), temperature, tools, stream=False, task_name=task_name, task_description=task_description, task_id=task_id, cancel_token=cancel_token)
+                response = self._chat_completion(list(retry_messages), temperature, tools, stream=False, task_name=task_name, task_description=task_description, task_id=task_id, cancel_token=cancel_token, response_format=response_format)
                 if response and response.choices:
                     content = response.choices[0].message.content
                     current_response = content.strip() if content else ""
@@ -7506,7 +7522,7 @@ Answer:"""
 
         return current_response
 
-    async def _aapply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None, messages=None):
+    async def _aapply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None, messages=None, response_format=None):
         """Apply guardrail validation with retry logic (async version).
 
         See ``_apply_guardrail_with_retry`` for the ``messages`` contract.
@@ -7569,7 +7585,7 @@ Answer:"""
                 # helper's own default is stream=True regardless of the agent's
                 # setting, which would make the retry stream when nothing reads
                 # the deltas.
-                response = await self._execute_unified_achat_completion(list(retry_messages), temperature, tools, stream=False, task_name=task_name, task_description=task_description, task_id=task_id)
+                response = await self._execute_unified_achat_completion(list(retry_messages), temperature, tools, stream=False, task_name=task_name, task_description=task_description, task_id=task_id, response_format=response_format)
                 if response and hasattr(response, 'choices') and response.choices:
                     content = response.choices[0].message.content
                     current_response = content.strip() if content else ""
@@ -7584,36 +7600,9 @@ Answer:"""
         return current_response
 
     def _get_tools_cache_key(self, tools):
-        """Generate a cache key for tools list."""
-        if tools is None:
-            return "none"
-        if not tools:
-            return "empty"
-        # Create a simple hash based on tool names
-        tool_names = []
-        try:
-            from ..tools.hosted import is_hosted_tool
-        except ImportError:
-            is_hosted_tool = lambda _tool: False
-
-        for tool in tools:
-            if callable(tool) and hasattr(tool, '__name__'):
-                tool_names.append(tool.__name__)
-            elif isinstance(tool, dict) and is_hosted_tool(tool):
-                try:
-                    hosted_key = json.dumps(tool, sort_keys=True)
-                except (TypeError, ValueError):
-                    hosted_key = str(id(tool))
-                tool_names.append(f"hosted:{hosted_key}")
-            elif (
-                isinstance(tool, dict)
-                and isinstance(tool.get('function'), dict)
-                and tool['function'].get('name')
-            ):
-                tool_names.append(tool['function']['name'])
-            elif isinstance(tool, str):
-                tool_names.append(tool)
-        return "|".join(sorted(tool_names))
+        """Generate a content-based cache key for a tools list."""
+        from ..tools.schema import tools_cache_key
+        return tools_cache_key(tools)
     
 
     # -------------------------------------------------------------------------
