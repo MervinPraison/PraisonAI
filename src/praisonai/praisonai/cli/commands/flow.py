@@ -278,9 +278,13 @@ def flow_export(
 
     from pathlib import Path
     from rich.console import Console
-    
+
+    # Validated here: Typer 0.28 dropped Option(click_type=...).
+    if format not in ("yaml", "json"):
+        raise typer.BadParameter("must be 'yaml' or 'json'", param_hint="--format")
+
     console = Console()
-    
+
     try:
         from praisonai.flow.client import create_client
         
