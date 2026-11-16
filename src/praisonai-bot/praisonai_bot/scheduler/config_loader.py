@@ -74,16 +74,15 @@ def schedule_job_from_config(job_key: str, spec: Dict[str, Any]):
 
     sched = parse_schedule(_schedule_expr(spec))
 
-    def _target(key: str) -> Optional[DeliveryTarget]:
-        deliver = spec.get(key)
-        if isinstance(deliver, dict) and deliver.get("channel"):
-            return DeliveryTarget(
-                channel=deliver["channel"],
-                channel_id=str(deliver.get("channel_id", "") or ""),
-                thread_id=deliver.get("thread_id"),
-                continuable=deliver.get("continuable", True),
-            )
-        return None
+    delivery: Optional[DeliveryTarget] = None
+    deliver = spec.get("deliver")
+    if isinstance(deliver, dict) and deliver.get("channel"):
+        delivery = DeliveryTarget(
+            channel=deliver["channel"],
+            channel_id=str(deliver.get("channel_id", "") or ""),
+            thread_id=deliver.get("thread_id"),
+            continuable=deliver.get("continuable", True),
+        )
 
     return ScheduleJob(
         id=_stable_job_id(job_key),
@@ -91,8 +90,7 @@ def schedule_job_from_config(job_key: str, spec: Dict[str, Any]):
         schedule=sched,
         message=spec.get("prompt", ""),
         agent_id=spec.get("agent") or None,
-        delivery=_target("deliver"),
-        failure_delivery=_target("failure_deliver"),
+        delivery=delivery,
         pre_run=spec.get("pre_run"),
         enabled=spec.get("enabled", True),
     )
