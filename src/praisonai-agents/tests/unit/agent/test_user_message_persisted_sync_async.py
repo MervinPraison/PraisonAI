@@ -63,6 +63,9 @@ def stub_base(monkeypatch, tmp_path):
     base = f"http://127.0.0.1:{server.server_address[1]}/v1"
     monkeypatch.setenv("OPENAI_API_KEY", "sk-local-fake")
     monkeypatch.setenv("OPENAI_BASE_URL", base)
+    # OPENAI_API_BASE takes precedence in the OpenAI client and CI exports it,
+    # so pin it to the stub too or requests escape to the real API.
+    monkeypatch.setenv("OPENAI_API_BASE", base)
     monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
     yield base
     server.shutdown()
