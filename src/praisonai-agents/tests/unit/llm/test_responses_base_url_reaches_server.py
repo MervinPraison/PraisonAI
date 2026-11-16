@@ -56,6 +56,7 @@ def stub(monkeypatch):
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{server.server_address[1]}/v1", hits
     server.shutdown()
+    server.server_close()
 
 
 def test_responses_params_carry_api_base():
@@ -63,6 +64,15 @@ def test_responses_params_carry_api_base():
         [{"role": "user", "content": "hi"}]
     )
     assert params["api_base"] == "http://proxy.local/v1"
+
+
+def test_per_call_base_url_wins_and_explicit_api_base_is_kept():
+    llm = LLM(model="gpt-4o-mini", base_url="http://a.local/v1")
+    msgs = [{"role": "user", "content": "hi"}]
+    assert llm._build_responses_params(msgs, base_url="http://b.local/v1")["api_base"] == "http://b.local/v1"
+    assert LLM(model="gpt-4o-mini")._build_responses_params(
+        msgs, base_url="http://b.local/v1")["api_base"] == "http://b.local/v1"
+    assert llm._build_responses_params(msgs, api_base="http://c.local/v1")["api_base"] == "http://c.local/v1"
 
 
 @pytest.mark.parametrize("mode", ["sync", "async"])

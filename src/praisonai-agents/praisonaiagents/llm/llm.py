@@ -7787,10 +7787,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 extra_headers = dict(params.get("extra_headers") or {})
                 extra_headers.update(creds.headers)
                 params["extra_headers"] = extra_headers
-        # litellm.responses() routes on api_base and ignores base_url, which
-        # sent base_url= requests (and their key) to api.openai.com.
-        if params.get("base_url"):
-            params["api_base"] = params["base_url"]
 
         # ── Structured output ───────────────────────────────────────────
         output_json = kwargs.pop("output_json", None)
@@ -7826,6 +7822,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         for k, v in kwargs.items():
             if k not in _internal and v is not None:
                 params[k] = v
+        # litellm.responses() routes on api_base and ignores base_url, which
+        # sent base_url= requests (and their key) to api.openai.com. Mirror the
+        # final base_url (after per-call overrides); an explicit api_base wins.
+        if params.get("base_url") and kwargs.get("api_base") is None:
+            params["api_base"] = params["base_url"]
 
         # ── Reasoning effort ────────────────────────────────────────────
         # Translate the unified level (Issue #4452) like
