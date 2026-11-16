@@ -83,15 +83,8 @@ def test_user_message_is_persisted(stub_base, mode, route):
     assert db.rows.count(("user", "hi there")) == 1
 
 
-@pytest.mark.parametrize("mode,route", [
-    ("sync", "openai_client"),
-    ("async", "openai_client"),
-    ("sync", "custom_llm"),
-    pytest.param("async", "custom_llm", marks=pytest.mark.xfail(
-        strict=True,
-        reason="async custom-LLM branch commits the reply with persist=False; "
-               "found during G-03, not in the review, fix tracked separately")),
-])
+@pytest.mark.parametrize("route", ["openai_client", "custom_llm"])
+@pytest.mark.parametrize("mode", ["sync", "async"])
 def test_assistant_reply_is_persisted(stub_base, mode, route):
     db = _Recorder()
     if route == "openai_client":
