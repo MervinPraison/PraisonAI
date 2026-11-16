@@ -53,7 +53,10 @@ def stub(monkeypatch, tmp_path):
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     monkeypatch.setenv("OPENAI_API_KEY", "sk-local-fake")
-    monkeypatch.setenv("OPENAI_BASE_URL", f"http://127.0.0.1:{server.server_address[1]}/v1")
+    base_url = f"http://127.0.0.1:{server.server_address[1]}/v1"
+    # OPENAI_API_BASE takes precedence over OPENAI_BASE_URL; CI sets it.
+    monkeypatch.setenv("OPENAI_BASE_URL", base_url)
+    monkeypatch.setenv("OPENAI_API_BASE", base_url)
     monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
     yield
     server.shutdown()
