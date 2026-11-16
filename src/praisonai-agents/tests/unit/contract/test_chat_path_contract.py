@@ -210,7 +210,6 @@ F13 = _drift("F-13", "OpenAI-client stream tool step does not register a deferre
              ("stream", "openai_client"))
 F14 = _drift("F-14", "achat() on the litellm Chat Completions route calls the model again after a tool "
              "set the cancel token", ("achat", "litellm_chat"))
-F01 = _drift("F-01", "async tool path skips the external-tool fence (fixed by #6450, open)", ("achat", "*"))
 
 
 # --- tools ------------------------------------------------------------------
@@ -299,7 +298,7 @@ def test_tool_output_truncated(stub, mode, route):
     assert len(sent[-1]) < 50_000, f"{len(sent[-1]):,} chars of tool output sent to the model"
 
 
-@pytest.mark.parametrize("mode,route", _cells(F01))
+@pytest.mark.parametrize("mode,route", _cells())
 def test_external_tool_output_fenced_once(stub, mode, route):
     assert _turn(_agent(route, stub, tools=[web_search]), mode) == "hello"
     sent = _tool_outputs()
