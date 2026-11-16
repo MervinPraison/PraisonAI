@@ -1033,7 +1033,7 @@ class MemoryMixin:
                 assistant_response=str(assistant_response),
             )
         except Exception as e:
-            logging.debug(f"Auto-memory extraction failed: {e}")
+            logging.warning("Auto-memory extraction failed for agent %s: %s", getattr(self, "name", None), e)
 
     def _persist_memory_turn(self, user_message: str, assistant_response: str):
         """Persist a raw conversation turn to the memory store.
@@ -1088,12 +1088,12 @@ class MemoryMixin:
                 try:
                     long_store(text, metadata=metadata)
                 except Exception as e:
-                    logging.debug(f"Long-term memory turn persistence failed: {e}")
+                    logging.warning("Long-term memory turn persistence failed for agent %s: %s", getattr(self, "name", None), e)
             if short_store is not None:
                 try:
                     short_store(text, metadata=metadata)
                 except Exception as e:
-                    logging.debug(f"Short-term memory turn persistence failed: {e}")
+                    logging.warning("Short-term memory turn persistence failed for agent %s: %s", getattr(self, "name", None), e)
 
         try:
             import asyncio
@@ -1155,7 +1155,7 @@ class MemoryMixin:
                                 if pt:
                                     learn_manager.add_pending(pt, category="patterns")
                 except Exception as e:
-                    logging.debug(f"PROPOSE mode learning extraction failed: {e}")
+                    logging.warning("PROPOSE mode learning extraction failed for agent %s: %s", getattr(self, "name", None), e)
             return
         
         if mode is None or (isinstance(mode, LearnMode) and mode != LearnMode.AGENTIC):
@@ -1180,7 +1180,7 @@ class MemoryMixin:
                     llm=getattr(self._learn_config, 'llm', None) or self.llm,
                 )
         except Exception as e:
-            logging.debug(f"Auto-learning extraction failed: {e}")
+            logging.warning("Auto-learning extraction failed for agent %s: %s", getattr(self, "name", None), e)
 
     def _maybe_emit_nudge(self, user_message: str) -> Optional[str]:
         """Return a system note to append to the next user turn, or None.
@@ -1287,7 +1287,7 @@ class MemoryMixin:
                     )
                     logging.debug(f"Auto-saved session to Memory: {self.auto_save}")
             except Exception as e:
-                logging.debug(f"Error auto-saving session: {e}")
+                logging.warning("Auto-saving session %s failed for agent %s: %s", self.auto_save, getattr(self, "name", None), e)
 
     def _save_output_to_file(self, content: str) -> bool:
         """Save agent output to file if output_file is configured.

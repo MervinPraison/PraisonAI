@@ -3486,7 +3486,7 @@ class AgentTeam(SpawnAnnounceProtocol):
                     },
                 )
             except Exception as e:
-                logger.debug(f"Shared-memory session enrichment failed: {e}")
+                logger.warning("Shared-memory session enrichment failed for session %s: %s", session_id, e)
 
         return durable_saved
 
