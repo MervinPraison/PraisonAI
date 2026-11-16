@@ -51,11 +51,12 @@ def test_auto_save_failure_is_a_warning(monkeypatch, tmp_path, caplog):
     assert "sess-1" in hits[0].getMessage() and "saver" in hits[0].getMessage()
 
 
-def test_sqlite_index_refresh_failure_is_a_warning(tmp_path, caplog, monkeypatch):
+def test_sqlite_index_refresh_failure_is_a_warning(tmp_path, caplog):
     from praisonaiagents.session.sqlite_store import SqliteSessionStore
     store = SqliteSessionStore(session_dir=str(tmp_path), db_path=":memory:")
-    monkeypatch.setattr(store, "_index_session", _boom)
+    conn = store._connect()
+    conn.execute("DROP TABLE session_meta")  # a real database write now fails
     with caplog.at_level(logging.WARNING):
         assert store.add_message("s1", "user", "hello") is True  # the JSON write still succeeds
-    assert any(r.levelno == logging.WARNING and "Post-add index refresh failed for s1" in r.getMessage()
+    assert any(r.levelno == logging.WARNING and "Session index update failed for s1" in r.getMessage()
                for r in caplog.records)

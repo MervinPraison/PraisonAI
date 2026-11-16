@@ -301,7 +301,7 @@ class SqliteSessionStore(DefaultSessionStore):
                             conn.execute("RELEASE praisonai_index_refresh")
                     raise
         except Exception as exc:  # never let indexing break a write
-            logger.debug("Session index update failed for %s: %s", sid, exc)
+            logger.warning("Session index update failed for %s: %s", sid, exc)
             return False
         return True
 
