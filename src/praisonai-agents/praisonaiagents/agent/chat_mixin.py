@@ -2858,7 +2858,8 @@ Your Role: {self.role}"""
             
             if classification.should_rotate_credential:
                 # TODO: Implement credential rotation when available
-                logging.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
+                if not self._credential_failover_active():
+                    logging.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
                 # Don't retry without actual credential rotation
                 
             elif classification.should_fallback_model:
@@ -2931,7 +2932,7 @@ Your Role: {self.role}"""
             
             # Include remediation hints for unimplemented recovery actions
             user_message = classification.user_message
-            if classification.should_rotate_credential:
+            if classification.should_rotate_credential and not self._credential_failover_active():
                 user_message += " Credential rotation is not yet implemented."
             if classification.should_fallback_model:
                 if not self.fallback_models:
@@ -3045,7 +3046,8 @@ Your Role: {self.role}"""
         
         if classification.should_rotate_credential:
             # TODO: Implement credential rotation when available
-            logging.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
+            if not self._credential_failover_active():
+                logging.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
             # Don't retry without actual credential rotation
             
         elif classification.should_fallback_model:
@@ -3123,7 +3125,7 @@ Your Role: {self.role}"""
         
         # Include remediation hints for unimplemented recovery actions
         user_message = classification.user_message
-        if classification.should_rotate_credential:
+        if classification.should_rotate_credential and not self._credential_failover_active():
             user_message += " Credential rotation is not yet implemented."
         if classification.should_fallback_model:
             if not self.fallback_models:

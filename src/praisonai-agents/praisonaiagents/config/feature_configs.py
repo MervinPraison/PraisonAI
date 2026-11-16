@@ -1166,6 +1166,15 @@ class ExecutionConfig:
         )
 
 
+def _mask_profile_key(profile: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep ``${ENV}`` and secret refs as written; mask a literal key like AuthProfile.to_dict."""
+    profile = dict(profile)
+    key = profile.get("api_key")
+    if isinstance(key, str) and key and not (key.startswith("${") and key.endswith("}")):
+        profile["api_key"] = "***" + key[-4:]
+    return profile
+
+
 @dataclass
 class LLMConfig:
     """
@@ -1206,6 +1215,10 @@ class LLMConfig:
     
     # Additional auth headers (optional)
     auth: Optional[Dict[str, str]] = None
+
+    # Credential failover profiles: dicts of AuthProfile fields. api_key may be
+    # plaintext, ${ENV} or a secret ref; to_dict() masks plaintext keys.
+    auth_profiles: Optional[List[Dict[str, Any]]] = None
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -1215,6 +1228,7 @@ class LLMConfig:
             "base_url": self.base_url,
             "api_key": self.api_key,
             "auth": dict(self.auth) if self.auth else None,
+            "auth_profiles": [_mask_profile_key(p) for p in self.auth_profiles] if self.auth_profiles is not None else None,
         }
     
     @classmethod
@@ -1226,6 +1240,7 @@ class LLMConfig:
             base_url=data.get("base_url"),
             api_key=data.get("api_key"),
             auth=dict(data["auth"]) if data.get("auth") else None,
+            auth_profiles=[dict(p) for p in data["auth_profiles"]] if data.get("auth_profiles") is not None else None,
         )
 
 
