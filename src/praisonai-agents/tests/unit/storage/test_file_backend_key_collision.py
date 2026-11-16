@@ -144,3 +144,11 @@ def test_deletion_markers_are_per_suffix_and_clear_is_robust(tmp_path):
     assert j.load("a@b") is None  # clearing .txt kept the .json marker
     assert j.clear() == 1
     assert sorted(p.name for p in tmp_path.iterdir()) == [".cache.deleted"]
+
+
+def test_hash_shaped_keys_respect_filename_limit(tmp_path):
+    b = FileBackend(str(tmp_path))
+    key = "team/" * 30 + "%~" + "0" * 64
+    b.save(key, {"v": 1})
+    assert all(len(p.name.encode()) <= 255 for p in tmp_path.iterdir())
+    assert b.load(key) == {"v": 1}

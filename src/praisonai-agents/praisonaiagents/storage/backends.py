@@ -101,8 +101,10 @@ class FileBackend:
 
         key = str(key)
         hashed = _LONG_KEY.fullmatch(key)
-        if hashed:
-            return self.storage_dir / f"{enc(hashed.group(1))}%~{hashed.group(2)}{self.suffix}"
+        if hashed:  # a listed hashed name; still bound by the filename limit
+            name = f"{enc(hashed.group(1))}%~{hashed.group(2)}{self.suffix}"
+            if size(name) <= 255:
+                return self.storage_dir / name
         stem = enc(key)
         budget = 255 - size(self.suffix)
         if size(stem) > budget:
