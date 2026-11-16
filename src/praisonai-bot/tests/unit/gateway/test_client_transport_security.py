@@ -22,6 +22,7 @@ from praisonaiagents.gateway import (
     "wss://203.0.113.7",
     "ws://127.1:8765",  # short-form loopback
     "ws://3232235786:8765",  # 192.168.1.10 as an integer
+    "ws://[::ffff:192.168.1.10]:8765",  # IPv4-mapped private address
 ])
 def test_allowed(url, monkeypatch, caplog):
     monkeypatch.delenv("PRAISONAI_ALLOW_INSECURE_WS", raising=False)
@@ -48,6 +49,7 @@ def test_plaintext_dns_name_warns_not_raises(url, monkeypatch, caplog):
     "ws://8.8.8.8:8765",
     "http://8.8.8.8",
     "ws://[2001:4860:4860::8888]:8765",
+    "ws://[::ffff:8.8.8.8]:8765",  # IPv4-mapped public address
     # Alternate numeric spellings of public 8.8.8.8 must not pass as
     # single-label hostnames.
     "ws://134744072:8765",

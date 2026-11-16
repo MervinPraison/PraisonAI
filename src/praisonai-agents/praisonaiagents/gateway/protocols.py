@@ -2761,6 +2761,8 @@ def assert_secure_gateway_transport(url: str) -> None:
                 host, fix,
             )
         return
+    # Python < 3.13 reports every IPv4-mapped IPv6 (::ffff:8.8.8.8) as private.
+    ip = getattr(ip, "ipv4_mapped", None) or ip
     if ip.is_private or ip.is_link_local or ip in ipaddress.ip_network("100.64.0.0/10"):
         return
     raise InsecureGatewayTransportError(
