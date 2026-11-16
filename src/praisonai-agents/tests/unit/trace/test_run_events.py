@@ -491,7 +491,7 @@ class TestTeamTasks:
                 return ApprovalDecision(approved=True, reason="looks good", approver="ana")
 
         registry = get_approval_registry()
-        previous = registry.get_backend()
+        previous = registry._global_backend  # not get_backend(): its ConsoleBackend fallback would be installed globally on restore
         registry.set_backend(Reviewer())
         try:
             writer = Agent(name="Writer", instructions="write")
@@ -500,7 +500,7 @@ class TestTeamTasks:
             out = TaskOutput(description="Draft", raw="api_key=sk-secret123456 text", agent="Writer")
             team._apply_human_review(task, 0, out)
         finally:
-            registry.set_backend(previous)
+            registry._global_backend = previous
         requested, decided = _of(recorder, "approval_requested"), _of(recorder, "approval_decided")
         assert len(requested) == len(decided) == 1
         assert requested[0].data["kind"] == "task_output_review"

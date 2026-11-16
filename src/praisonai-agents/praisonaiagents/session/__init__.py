@@ -192,6 +192,12 @@ def __getattr__(name: str):
         _module_cache[name] = workspace_id
         return workspace_id
 
+    # Session manifest: plane refs + run-in-flight marker (Issue #6248)
+    if name in ("FileSessionManifest", "ManifestEntry", "SessionManifestProtocol"):
+        from . import manifest as _manifest
+        _module_cache[name] = getattr(_manifest, name)
+        return _module_cache[name]
+
     # Cross-context continuation prompt assembler (session handoff)
     if name == "build_handoff_prompt":
         from .handoff import build_handoff_prompt
@@ -249,6 +255,9 @@ __all__ = [
     "clear_session_context",
     "workspace_id",
     "build_handoff_prompt",
+    "FileSessionManifest",
+    "ManifestEntry",
+    "SessionManifestProtocol",
     "MessageOrigin",
     "wrap_inter_agent",
     # Encryption at rest

@@ -313,7 +313,8 @@ PARAMETER top_p 0.9
         create_and_push_ollama_model(
             self.config['ollama_model'], 
             self.config['model_parameters'], 
-            modelfile_content
+            modelfile_content,
+            push=self._flag(self.config.get('ollama_push'), default=True),
         )
 
     def run(self):

@@ -54,6 +54,7 @@ _lazy_import_lock = threading.Lock()
 # mode wins.
 _output_mode_lock = threading.Lock()
 _llm_module = None
+_RULES_NOTICE_SEEN: set = set()  # rule-name sets already announced (issue #6257)
 _hooks_module = None
 _stream_emitter_class = None
 
@@ -6336,7 +6337,12 @@ Summary:"""
             # matches on reload. Zero-config runs still avoid injection cost.
             stats = self._rules_manager.get_stats()
             if stats["total_rules"] > 0:
-                logging.debug(f"RulesManager: Discovered {stats['total_rules']} rules")
+                # Only rules injected without a file/@mention; warn once per set so
+                # the notice is visible under default logging without repeating per agent.
+                names = ", ".join(sorted({r.name for r in self._rules_manager.get_active_rules()}))
+                if names and names not in _RULES_NOTICE_SEEN:
+                    _RULES_NOTICE_SEEN.add(names)
+                    logging.warning(f"Applied rules: {names} (pass rules=False to turn off)")
             elif not extra_files:
                 self._rules_manager = None
         except ImportError:
@@ -7345,7 +7351,8 @@ Answer:"""
         task_output = TaskOutput(
             description="Agent response output",
             raw=response_text,
-            agent=self.name
+            # TaskOutput.agent is a required str; an Agent built without name= has name None.
+            agent=self.name or getattr(self, "role", None) or "Agent"
         )
         
         guardrail_result = self._process_guardrail(task_output)
