@@ -5069,8 +5069,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # Apply guardrail validation for custom LLM response
                     try:
                         validated_response = await self._aapply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id, messages=effective_history)
-                        # Commit only the approved reply (never the rejected one).
-                        self._commit_assistant_reply(validated_response, persist=False)
+                        # Commit + persist only the approved reply (matches sync chat()).
+                        await self._acommit_assistant_reply(validated_response)
                         # Coerce into the requested Pydantic model so callers
                         # get a validated instance, not a raw JSON string.
                         # output_json intentionally stays a string (backward compat).
@@ -5136,7 +5136,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # unatomic read of chat_history[-1] followed by a separate append
             # lets a concurrent turn's user message be mistaken for this turn's
             # own duplicate, silently dropping this user turn from the record.
-            self._add_to_chat_history_if_not_duplicate("user", normalized_content)
+            if self._add_to_chat_history_if_not_duplicate("user", normalized_content):
+                # Persist user message to DB (matches sync chat())
+                await self._apersist_message("user", normalized_content)
 
             # --- Proactive Context Budget Management (async standard OpenAI path) ---
             try:
