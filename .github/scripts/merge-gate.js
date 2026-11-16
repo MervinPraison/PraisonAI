@@ -18,8 +18,10 @@ const PUSH_AFTER_FINAL_DEBOUNCE_MS = 15 * 60 * 1000;
 const PUSH_SETTLE_MS = 30 * 60 * 1000;
 const ALLOWED_MERGE_STATES = new Set(['CLEAN', 'UNSTABLE']);
 const AGENT_PY_MAX_AUTO_LINES = 100;
-const PR_MAX_AUTO_ADDITIONS = 800;
-const PR_MAX_AUTO_FILES = 30;
+// Maintainer merge rule (#6429): auto-merge only at most 5 non-test files and
+// fewer than 100 non-test lines (additions + deletions). Test files don't count.
+const PR_MAX_AUTO_NONTEST_FILES = 5;
+const PR_MAX_AUTO_NONTEST_LINES = 100;
 const MANUAL_ONLY_LABELS = new Set(['security', 'breaking-change', 'needs-manual-review', 'release']);
 const WORKFLOW_ONLY_LABEL = 'merge-gate-ci-only';
 const EXTERNAL_EXAMPLE_PATH_PREFIX = 'examples/tools/external/';
@@ -1000,14 +1002,24 @@ function sensitivePathReasons(files, labels = []) {
   return reasons;
 }
 
+function isTestPath(filename) {
+  return (
+    /(^|\/)tests?\//.test(filename) ||
+    /(^|\/)test_[^/]*$/.test(filename) ||
+    /_test\.py$/.test(filename) ||
+    /\.(test|spec)\.[jt]sx?$/.test(filename)
+  );
+}
+
 function prSizeReasons(files) {
   const reasons = [];
-  const totalAdditions = files.reduce((sum, f) => sum + (f.additions || 0), 0);
-  if (totalAdditions > PR_MAX_AUTO_ADDITIONS) {
-    reasons.push(`PR +${totalAdditions} lines (>${PR_MAX_AUTO_ADDITIONS}) requires manual review`);
+  const nonTest = files.filter((f) => !isTestPath(f.filename || ''));
+  const lines = nonTest.reduce((sum, f) => sum + (f.additions || 0) + (f.deletions || 0), 0);
+  if (lines >= PR_MAX_AUTO_NONTEST_LINES) {
+    reasons.push(`PR ${lines} non-test lines (limit <${PR_MAX_AUTO_NONTEST_LINES}) requires manual review`);
   }
-  if (files.length > PR_MAX_AUTO_FILES) {
-    reasons.push(`${files.length} files changed (>${PR_MAX_AUTO_FILES}) requires manual review`);
+  if (nonTest.length > PR_MAX_AUTO_NONTEST_FILES) {
+    reasons.push(`PR ${nonTest.length} non-test files (>${PR_MAX_AUTO_NONTEST_FILES}) requires manual review`);
   }
   return reasons;
 }
@@ -1634,6 +1646,7 @@ module.exports = {
   hasManualOnlyLabel,
   sensitivePathReasons,
   prSizeReasons,
+  isTestPath,
   missingTestsReason,
   secretScanReasons,
   sdkTestChecksReason,
