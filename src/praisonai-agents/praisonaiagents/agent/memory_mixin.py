@@ -607,6 +607,17 @@ class MemoryMixin:
                 from ..session import get_default_session_store
                 self._session_store = get_default_session_store()
             
+            # Set agent info first: this locked read-modify-write returns False
+            # when the session cannot be read, and on success caches it, so the
+            # history read below cannot mistake a transient I/O error for [].
+            # Optional: custom stores may not implement it (not in the protocol).
+            set_info = getattr(self._session_store, "set_agent_info", None)
+            info_saved = set_info(
+                self._session_id,
+                agent_name=self.name,
+                user_id=self.user_id,
+            ) if callable(set_info) else None
+
             # Restore chat history from previous session. Prefer the compacted
             # working history (summary + retained tail) when a compaction
             # checkpoint exists so resume is cheap and won't overflow context
@@ -615,21 +626,27 @@ class MemoryMixin:
                 history = self._session_store.get_working_history(self._session_id)
             else:
                 history = self._session_store.get_chat_history(self._session_id)
+            if not history and info_saved is False:
+                raise OSError("session could not be read")
             if history:
-                # Only restore if chat_history is empty (avoid duplicates)
-                if not self.chat_history:
+                # Only restore if chat_history is empty (avoid duplicates), or on
+                # a retry, ahead of the turns run while the store was unreadable.
+                if not self.chat_history or getattr(self, "_session_resume_pending", False):
+                    key = lambda m: (m.get("role"), m.get("content"))
+                    n = len(self.chat_history)
+                    if n and list(map(key, history[-n:])) == list(map(key, self.chat_history)):
+                        history = history[:-n]  # those turns were already stored
                     # The store returns LLM-shaped dicts (to_llm_message), so
                     # keep tool_calls / tool_call_id intact (#6217).
-                    for msg in history:
-                        self.chat_history.append(dict(msg))
+                    self.chat_history[:0] = [dict(msg) for msg in history]
                     logging.info(f"Restored session {self._session_id} with {len(history)} messages from JSON store")
-            
-            # Set agent info
-            self._session_store.set_agent_info(
-                self._session_id,
-                agent_name=self.name,
-                user_id=self.user_id,
-            )
+            self._session_resume_pending = False
+        except OSError as e:
+            # Transient storage error: keep the store and leave initialization
+            # retryable so the next turn resumes once storage recovers.
+            logging.warning(f"Session {self._session_id} history unavailable, retrying next turn: {e}")
+            self._session_resume_pending = True
+            return
         except Exception as e:
             logging.warning(f"Failed to initialize session store: {e}")
             self._session_store = None
