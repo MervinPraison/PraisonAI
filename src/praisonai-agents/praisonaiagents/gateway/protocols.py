@@ -2891,6 +2891,7 @@ def _is_trusted_hop(host: str, trusted_proxies: "Sequence[str]") -> bool:
         except ValueError:
             continue
     return False
+is_trusted_hop = _is_trusted_hop  # public name for other PraisonAI packages (G-22); the private name stays
 
 
 def resolve_ingress_attribution(

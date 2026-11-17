@@ -41,6 +41,7 @@ def _parse_email_list(emails: Union[str, List[str]]) -> List[str]:
     if isinstance(emails, str):
         return [email.strip() for email in emails.split(',') if email.strip()]
     return [email.strip() for email in emails if email and email.strip()]
+parse_email_list = _parse_email_list  # public name for other PraisonAI packages (G-22); the private name stays
 
 def _detect_backend() -> str:
     """Detect which email backend is available.
