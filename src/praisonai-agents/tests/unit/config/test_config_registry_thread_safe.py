@@ -38,6 +38,12 @@ def test_unknown_env_vars_survives_a_registration_mid_read(registry):
     assert "g23.during.read.1" in registry._entries
 
 
+def test_get_entry_returns_none_for_dangling_alias(registry):
+    # State seen by a reader when clear() runs between the alias and entry lookups.
+    registry._aliases["g23.dangling"] = "g23.gone"
+    assert registry.get_entry("g23.dangling") is None
+
+
 def test_register_and_lookup_still_work(registry):
     registry.register("g23.key", env_var="PRAISONAI_G23_KEY", aliases=["g23.alias"])
     assert registry.get_entry("g23.alias").key == "g23.key"
