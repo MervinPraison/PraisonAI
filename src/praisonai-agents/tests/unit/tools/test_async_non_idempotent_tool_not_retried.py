@@ -14,11 +14,11 @@ from praisonaiagents.config.feature_configs import ToolConfig
 from praisonaiagents.errors import ToolExecutionError
 from praisonaiagents.tools.retry import RetryPolicy
 
-# The effectful tool raises ``RuntimeError``. The async path flattens it into an
-# error dict (nothing surfaces), while the sync path re-raises it wrapped in a
-# ``ToolExecutionError``. Catch *only* those two expected failures so an unrelated
+# The effectful tool raises ``ConnectionError`` (D-03: only timeouts and
+# connection errors are retried). Both paths report it to the model as an error
+# dict; the sync path may still raise ``ToolExecutionError`` from a guard. Catch *only* those two expected failures so an unrelated
 # setup error can never masquerade as a valid execution count.
-EXPECTED_FAILURE = (RuntimeError, ToolExecutionError)
+EXPECTED_FAILURE = (ConnectionError, ToolExecutionError)
 
 ATTEMPTS = 3
 FAST = ToolConfig(retry_policy=RetryPolicy(max_attempts=ATTEMPTS, initial_delay_ms=0))
@@ -31,7 +31,7 @@ def _charges(declare, is_async, attr="restart_safe"):
     def charge_card(amount: str) -> str:
         """Charge a customer's card."""
         charged.append(amount)
-        raise RuntimeError("gateway 502 from acquirer")
+        raise ConnectionError("gateway 502 from acquirer")
 
     if declare is not None:
         setattr(charge_card, attr, declare)
@@ -82,7 +82,7 @@ def test_async_honours_declaration_on_override_only_tool(attr):
     def charge_card(amount: str) -> str:
         """Charge a customer's card."""
         charged.append(amount)
-        raise RuntimeError("gateway 502 from acquirer")
+        raise ConnectionError("gateway 502 from acquirer")
 
     setattr(charge_card, attr, False)
 

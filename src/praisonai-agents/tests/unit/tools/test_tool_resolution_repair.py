@@ -153,20 +153,16 @@ def test_an_unknown_tool_does_not_end_the_run():
 
 
 def test_bind_failure_parameter_hint_reaches_model_via_public_path():
-    # Greptile P1: the parameter hint must survive conversion to
-    # ToolExecutionError (which keeps only the message) so the model can retry
-    # with the right arguments instead of only seeing the raw error.
+    # Greptile P1: the parameter hint must be in the error message so the model
+    # can retry with the right arguments instead of only seeing the raw error.
+    # D-03: the error reaches the model as the tool result, not as a raise.
     def web_search(query: str, limit: int = 10) -> str:
         """Search the web."""
         raise TypeError("missing a required argument: 'query'")
 
-    from praisonaiagents.errors import ToolExecutionError
-
     agent = _make_agent([web_search])
 
-    with pytest.raises(ToolExecutionError) as exc:
-        agent.execute_tool("web_search", {})
-    msg = str(exc.value)
+    msg = str(agent.execute_tool("web_search", {}))
     assert "query" in msg
     assert "limit" in msg
 

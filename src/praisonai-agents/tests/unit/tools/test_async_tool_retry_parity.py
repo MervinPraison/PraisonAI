@@ -1,4 +1,7 @@
-"""execute_tool_async must retry a raised tool exception, like execute_tool does.
+"""execute_tool_async must retry a raised transient tool exception, like execute_tool does.
+
+D-03: only a timeout or connection error is retried; any other raised error
+runs once and reaches the model as the tool result.
 
 The async implementation flattens the exception into an error dict before any
 policy can classify it; the retry verdict has to survive that flattening.
@@ -45,7 +48,12 @@ def _async_runs(exc, **kw):
 
 
 def test_async_retries_a_raised_tool_exception():
-    assert _async_runs(RuntimeError("boom")) == 3
+    assert _async_runs(ConnectionError("boom")) == 3
+    assert _async_runs(TimeoutError("boom")) == 3
+
+
+def test_async_does_not_retry_a_non_transient_error():
+    assert _async_runs(RuntimeError("boom")) == 1 == _sync_runs(RuntimeError("boom"))
 
 
 def test_async_matches_sync_attempt_count():
@@ -60,15 +68,22 @@ def test_async_does_not_retry_programming_errors(exc):
 
 def test_async_honours_max_attempts():
     policy = ToolConfig(retry_policy=RetryPolicy(max_attempts=2, initial_delay_ms=0))
-    assert _async_runs(RuntimeError("boom"), tool_config=policy) == 2
+    assert _async_runs(ConnectionError("boom"), tool_config=policy) == 2
 
 
 def test_async_flattened_error_carries_the_retry_verdict():
-    agent, _ = _make_agent(RuntimeError("boom"))
+    agent, _ = _make_agent(ConnectionError("boom"))
     result = asyncio.run(
         agent._execute_tool_async_impl("flaky", {}, None, None)
     )
     assert result["_praison_retryable"] is True
+
+    # Neither transient nor a caller error: not retried, still a breaker failure.
+    agent3, _ = _make_agent(RuntimeError("boom"))
+    result3 = asyncio.run(
+        agent3._execute_tool_async_impl("flaky", {}, None, None)
+    )
+    assert result3["_praison_retryable"] is None
 
     agent2, _ = _make_agent(ValueError("bad"))
     result2 = asyncio.run(
@@ -170,10 +185,10 @@ def test_async_framework_verdict_is_not_visible_to_the_model():
         raise RuntimeError("network down")
 
     agent = Agent(name="t", instructions="x", tools=[boom], tool_config=FAST)
-    # A raised tool exception surfaces as ToolExecutionError (sync parity, #6041).
-    with pytest.raises(ToolExecutionError) as exc_info:
-        asyncio.run(agent.execute_tool_async("boom", {}))
-    assert "_praison_retryable" not in str(exc_info.value)
+    # D-03: a raised tool exception reaches the model as an error dict.
+    result = asyncio.run(agent.execute_tool_async("boom", {}))
+    assert "network down" in result["error"]
+    assert "_praison_retryable" not in result
 
 
 def test_async_breaker_opens_after_raised_exceptions():

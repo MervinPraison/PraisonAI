@@ -18,7 +18,8 @@ def _runs(**agent_kwargs):
     def flaky():
         """Always fails."""
         calls.append(1)
-        raise RuntimeError("boom")
+        # D-03: only a timeout or connection error is retried, so the tool raises one.
+        raise ConnectionError("boom")
 
     agent = Agent(instructions="x", tools=[flaky], **agent_kwargs)
     try:
