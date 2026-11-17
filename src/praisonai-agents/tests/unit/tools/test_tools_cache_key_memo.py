@@ -6,10 +6,15 @@ from praisonaiagents.tools import schema
 
 
 def _make(n):
-    ns = {}
+    tools = []
     for i in range(n):
-        exec(f"def tool_{i}(query: str, limit: int = 5) -> str:\n    '''Tool {i}.'''\n    return query", ns)
-    return [ns[f"tool_{i}"] for i in range(n)]
+        def tool(query: str, limit: int = 5) -> str:
+            return query
+
+        tool.__name__ = tool.__qualname__ = f"tool_{i}"
+        tool.__doc__ = f"Tool {i}."
+        tools.append(tool)
+    return tools
 
 
 def test_repeated_keys_do_not_reinspect_plain_functions(monkeypatch):
