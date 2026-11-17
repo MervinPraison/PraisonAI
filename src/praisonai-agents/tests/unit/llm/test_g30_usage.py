@@ -1,4 +1,4 @@
-"""G-30 (usage): one copy of a helper llm.py, openai_client.py and tool_execution.py shared (G-30)."""
+"""G-30 (usage): one copy of the token-usage lookups shared by llm.py and openai_client.py."""
 
 from pathlib import Path
 from types import SimpleNamespace
