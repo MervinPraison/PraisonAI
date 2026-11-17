@@ -14,6 +14,8 @@ import logging
 import time
 from importlib import util
 
+logger = logging.getLogger(__name__)
+
 # Retry configuration
 MAX_RETRIES = 3
 RETRY_DELAY = 1.0  # seconds
@@ -58,14 +60,14 @@ def internet_search(query: str, max_results: int = 5, retries: int = MAX_RETRIES
     # Check if ddgs is installed
     if util.find_spec("ddgs") is None:
         error_msg = "DuckDuckGo search is not available. Please install ddgs package using: pip install ddgs"
-        logging.error(error_msg)
+        logger.error(error_msg)
         return [{"error": error_msg}]
 
     try:
         return _do_duckduckgo_search(query, max_results)
     except Exception as e:
         error_msg = f"DuckDuckGo search failed: {str(e)}"
-        logging.warning(error_msg)
+        logger.warning(error_msg)
         return [{"error": error_msg}]
 
 def duckduckgo(query: str) -> List[Dict]:

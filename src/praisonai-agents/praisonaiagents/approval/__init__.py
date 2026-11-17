@@ -237,7 +237,7 @@ def require_approval(risk_level: RiskLevel = "high"):
                     # Safe to run async approval using registry
                     decision = run_coroutine_from_any_context(request_approval(tool_name, approval_args))
             except Exception as e:
-                logging.warning(f"Approval request failed: {e}", exc_info=True)
+                logger.warning(f"Approval request failed: {e}", exc_info=True)
                 # Fail closed - do not fall back to console
                 raise PermissionError(f"Approval request failed for {tool_name}: {e}") from e
             if not decision.approved:

@@ -24,6 +24,8 @@ from .artifacts import (
     generate_summary,
 )
 
+logger = logging.getLogger(__name__)
+
 
 def _safe_segment(value: Any) -> str:
     """Sanitise an id for use as a single path segment under the store root."""
@@ -146,7 +148,7 @@ class FileSystemArtifactStore:
             turn_id=metadata.turn_id,
         )
         
-        logging.debug(f"Stored artifact {artifact_id} ({len(content_bytes)} bytes) at {artifact_path}")
+        logger.debug(f"Stored artifact {artifact_id} ({len(content_bytes)} bytes) at {artifact_path}")
         
         return ref
     
@@ -414,7 +416,7 @@ class FileSystemArtifactStore:
                     )
                     artifacts.append(ref)
                 except Exception as e:
-                    logging.debug(f"Error loading artifact metadata from {meta_file}: {e}")
+                    logger.debug(f"Error loading artifact metadata from {meta_file}: {e}")
         
         # Sort by creation time (newest first)
         artifacts.sort(key=lambda x: x.created_at, reverse=True)
@@ -439,6 +441,6 @@ class FileSystemArtifactStore:
             if artifact.created_at < cutoff_time:
                 if self.delete(artifact):
                     deleted_count += 1
-                    logging.debug(f"Deleted old artifact {artifact.artifact_id}")
+                    logger.debug(f"Deleted old artifact {artifact.artifact_id}")
         
         return deleted_count
