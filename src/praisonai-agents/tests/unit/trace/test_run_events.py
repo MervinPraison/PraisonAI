@@ -812,7 +812,11 @@ class TestLiteLLMPath:
     def test_control_disabled_tracing_leaves_the_stream_untouched(self, fake_litellm):
         llm = self._llm()
         stream = llm._completion_with_retry(model="gpt-4o-mini", messages=[], stream=True)
-        assert type(stream).__name__ == "list_iterator"
+        # No replay wrapper when tracing is off. (The stream is still passed
+        # through the usage tracker, which records its usage chunk: F-08.)
+        from praisonaiagents.llm.llm import _ReplayStream
+        assert not isinstance(stream, _ReplayStream)
+        assert len(list(stream)) == 3  # every chunk passes through unchanged
 
 
 # ---------------------------------------------------------------------------

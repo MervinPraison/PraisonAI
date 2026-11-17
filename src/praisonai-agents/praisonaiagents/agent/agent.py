@@ -141,7 +141,9 @@ from ..config.feature_configs import (
 # Already loaded by the imports above; hoisted so __init__ does not pay a
 # function-local relative import per construction (#5835).
 from ..config.parse_utils import canonical_preset_key, validate_preset_string
-from ..config.agent_init import resolve_agent_caching
+from ..config.agent_init import (
+    resolve_agent_caching, resolve_agent_planning, resolve_agent_reflection, resolve_agent_templates,
+)
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
 # Single source of truth defined in config.feature_configs and imported here
@@ -1335,27 +1337,9 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # ─────────────────────────────────────────────────────────────────────
         # Resolve TEMPLATES param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        # Fast path: None -> no templates (skip resolve() call)
-        if templates is None:
-            _template_config = None
-        elif isinstance(templates, TemplateConfig):
-            _template_config = templates
-        elif isinstance(templates, dict):
-            _template_config = TemplateConfig(**templates)
-        else:
-            _template_config = resolve(
-                value=templates,
-                param_name="templates",
-                config_class=TemplateConfig,
-                default=None,
-            )
-        if _template_config:
-            system_template = _template_config.system
-            prompt_template = _template_config.prompt
-            response_template = _template_config.response
-            use_system_prompt = _template_config.use_system_prompt
-        else:
-            system_template, prompt_template, response_template, use_system_prompt = None, None, None, True
+        # None -> no templates, default system prompt (config.agent_init)
+        (_template_config, system_template, prompt_template, response_template,
+         use_system_prompt) = resolve_agent_templates(templates)
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve CACHING param - FAST PATH
@@ -1771,70 +1755,23 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # ─────────────────────────────────────────────────────────────────────
         # Resolve PLANNING param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        # Fast path: None/False -> no planning (skip resolve() call)
-        if planning is None or planning is False:
-            _planning_config = None
-        elif planning is True:
-            _planning_config = PlanningConfig()
-        elif isinstance(planning, PlanningConfig):
-            _planning_config = planning
-        else:
-            _planning_config = resolve(
-                value=planning,
-                param_name="planning",
-                config_class=PlanningConfig,
-                presets=PLANNING_PRESETS,
-                string_mode="llm_model",
-                array_mode=ArrayMode.PRESET_OVERRIDE,
-                default=None,
-            )
-        
-        if _planning_config is not None:
-            if isinstance(_planning_config, PlanningConfig):
-                planning = True
-                planning_tools = _planning_config.tools
-                planning_reasoning = _planning_config.reasoning
-                plan_mode = _planning_config.read_only
-            else:
-                planning = bool(_planning_config)
-        elif planning is True:
-            pass  # Keep as True
-        else:
-            planning = False
+        # None/False -> no planning; only the values it sets change (config.agent_init)
+        _planning_config, _planning_set = resolve_agent_planning(planning)
+        planning = _planning_set.get("planning", planning)
+        planning_tools = _planning_set.get("planning_tools", planning_tools)
+        planning_reasoning = _planning_set.get("planning_reasoning", planning_reasoning)
+        plan_mode = _planning_set.get("plan_mode", plan_mode)
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve REFLECTION param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        # Fast path: None/False -> no reflection (skip resolve() call)
-        if reflection is None or reflection is False:
-            _reflection_config = None
-        elif reflection is True:
-            _reflection_config = ReflectionConfig()
-        elif isinstance(reflection, ReflectionConfig):
-            _reflection_config = reflection
-        else:
-            _reflection_config = resolve(
-                value=reflection,
-                param_name="reflection",
-                config_class=ReflectionConfig,
-                presets=REFLECTION_PRESETS,
-                array_mode=ArrayMode.PRESET_OVERRIDE,
-                default=None,
-            )
-        
-        if _reflection_config is not None:
-            if isinstance(_reflection_config, ReflectionConfig):
-                self_reflect = True
-                min_reflect = _reflection_config.min_iterations
-                max_reflect = _reflection_config.max_iterations
-                reflect_llm = _reflection_config.llm
-                reflect_prompt = _reflection_config.prompt
-            else:
-                self_reflect = bool(_reflection_config)
-        elif reflection is True:
-            self_reflect = True
-        elif reflection is False:
-            self_reflect = False
+        # None sets nothing; only the values it sets change (config.agent_init)
+        _reflection_config, _reflection_set = resolve_agent_reflection(reflection)
+        self_reflect = _reflection_set.get("self_reflect", self_reflect)
+        min_reflect = _reflection_set.get("min_reflect", min_reflect)
+        max_reflect = _reflection_set.get("max_reflect", max_reflect)
+        reflect_llm = _reflection_set.get("reflect_llm", reflect_llm)
+        reflect_prompt = _reflection_set.get("reflect_prompt", reflect_prompt)
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve GUARDRAILS param - FAST PATH

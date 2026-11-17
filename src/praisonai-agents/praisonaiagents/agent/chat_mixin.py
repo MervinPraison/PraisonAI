@@ -2554,6 +2554,17 @@ Your Role: {self.role}"""
             error_message=str(exc), operation=operation, delay_seconds=delay, attempt=retry_depth,
         )
 
+    def _loop_usage_kwargs(self):
+        """OpenAI-client route: have the tool loop report each earlier call (F-07).
+
+        The loop makes one billed request per tool round; the agent records the
+        final response itself, so the loop reports only the calls before it.
+        The litellm route records every call through ``_llm_usage_sink``.
+        """
+        if getattr(self, "_using_custom_llm", False):
+            return {}
+        return {"usage_callback": lambda response: self._record_llm_usage(*self._extract_llm_usage(response))}
+
     def _extract_llm_usage(self, response, model=None):
         """Return ``(prompt_tokens, completion_tokens, cost_usd)`` for one LLM response priced as ``model``."""
         usage = getattr(response, 'usage', None) if response else None
@@ -3296,6 +3307,7 @@ Your Role: {self.role}"""
                 if stream_callback is None and hasattr(self, 'stream_emitter'):
                     stream_callback = getattr(self.stream_emitter, 'emit', None)
                 final_response = self._unified_dispatcher.chat_completion(
+                    **self._loop_usage_kwargs(),
                     cancel_token=cancel_token,
                     messages=messages,
                     tools=tools,
@@ -3348,6 +3360,7 @@ Your Role: {self.role}"""
             if stream_callback is None and hasattr(self, 'stream_emitter'):
                 stream_callback = getattr(self.stream_emitter, 'emit', None)
             final_response = self._unified_dispatcher.chat_completion(
+                **self._loop_usage_kwargs(),
                 cancel_token=cancel_token,
                 messages=messages,
                 tools=tools,
@@ -3504,6 +3517,7 @@ Your Role: {self.role}"""
             if stream_callback is None and hasattr(self, 'stream_emitter'):
                 stream_callback = getattr(self.stream_emitter, 'emit', None)
             final_response = await dispatcher.achat_completion(
+                **self._loop_usage_kwargs(),
                 cancel_token=cancel_token,
                 messages=messages,
                 tools=tools,
@@ -6010,6 +6024,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # begin_durable_run), so the prompt reaching this generator is already
         # validated/transformed. Kept out of this impl so a blocked prompt never
         # opens a durable run that would then finalize as "succeeded".
+        # Cancellation, resolved once for the whole streamed turn (explicit
+        # token first, then the interrupt controller, as chat() does). A token
+        # that is already set stops the turn before any request (F-09).
+        _stream_cancel_source = kwargs.get('cancel_token')
+        if _stream_cancel_source is None:
+            _stream_cancel_source = getattr(self, "interrupt_controller", None)
+        _stream_cancel_token = self._turn_cancel_token(
+            _stream_cancel_source, explicit=kwargs.get('cancel_token') is not None)
+        if _stream_cancel_token is not None and _stream_cancel_token.is_set():
+            reason = getattr(_stream_cancel_token, "reason", None) or "cancelled before LLM call"
+            raise InterruptedError(f"Agent stream cancelled: {reason}")
         try:
             # Reset the final display flag for each new conversation
             self._final_display_shown = False
@@ -6130,45 +6155,41 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         stream_sampling_kwargs['reasoning_effort'] = _stream_effort
                     # Forward the cancellation token so a Stop/interrupt during
                     # the streamed tool phase short-circuits pending tool calls
-                    # (Issue #5073). Resolve the explicit token first, then fall
-                    # back to the agent's interrupt controller, mirroring chat().
-                    _stream_cancel_source = kwargs.get('cancel_token')
-                    if _stream_cancel_source is None:
-                        _stream_cancel_source = getattr(self, "interrupt_controller", None)
-                    _stream_cancel_token = self._turn_cancel_token(
-                        _stream_cancel_source,
-                        explicit=kwargs.get('cancel_token') is not None,
-                    )
+                    # (Issue #5073). Reuses the token resolved once at the top
+                    # of this turn.
                     if _stream_cancel_token is not None:
                         stream_sampling_kwargs['cancel_token'] = _stream_cancel_token
-                    for chunk in self.llm_instance.get_response_stream(
-                        prompt=actual_prompt,
-                        system_prompt=stream_system_prompt,
-                        chat_history=self._history_before_turn(stream_history, normalized_content),
-                        temperature=kwargs.get('temperature', 1.0),
-                        tools=tool_param,
-                        output_json=kwargs.get('output_json'),
-                        output_pydantic=kwargs.get('output_pydantic'),
-                        verbose=False,  # Keep verbose false for streaming
-                        markdown=self.markdown,
-                        agent_name=self.name,
-                        agent_role=self.role,
-                        agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tool_param or [])],
-                        task_name=kwargs.get('task_name'),
-                        task_description=kwargs.get('task_description'),
-                        task_id=kwargs.get('task_id'),
-                        execute_tool_fn=self._durable_sync_tool_executor(
-                            self.execute_tool
-                        ),
-                        parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
-                        max_tool_calls_per_turn=self._resolve_max_tool_calls(),
-                        **stream_sampling_kwargs
-                    ):
-                        response_content += chunk
-                        # Flush the growing partial turn so an interrupt mid
-                        # stream retains it in the store (Issue #5407, debounced).
-                        self._persist_assistant_delta(response_content)
-                        yield chunk
+                    # Every model call this stream makes (the streamed one and
+                    # any tool follow-ups) is recorded on the agent (F-08).
+                    with self._llm_usage_sink(self.llm_instance):
+                        for chunk in self.llm_instance.get_response_stream(
+                            prompt=actual_prompt,
+                            system_prompt=stream_system_prompt,
+                            chat_history=self._history_before_turn(stream_history, normalized_content),
+                            temperature=kwargs.get('temperature', 1.0),
+                            tools=tool_param,
+                            output_json=kwargs.get('output_json'),
+                            output_pydantic=kwargs.get('output_pydantic'),
+                            verbose=False,  # Keep verbose false for streaming
+                            markdown=self.markdown,
+                            agent_name=self.name,
+                            agent_role=self.role,
+                            agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tool_param or [])],
+                            task_name=kwargs.get('task_name'),
+                            task_description=kwargs.get('task_description'),
+                            task_id=kwargs.get('task_id'),
+                            execute_tool_fn=self._durable_sync_tool_executor(
+                                self.execute_tool
+                            ),
+                            parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
+                            max_tool_calls_per_turn=self._resolve_max_tool_calls(),
+                            **stream_sampling_kwargs
+                        ):
+                            response_content += chunk
+                            # Flush the growing partial turn so an interrupt mid
+                            # stream retains it in the store (Issue #5407, debounced).
+                            self._persist_assistant_delta(response_content)
+                            yield chunk
 
                     # Add complete response to chat history
                     if response_content:
@@ -6182,7 +6203,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # was produced so --continue can recover it (Issue #5407).
                     self._persist_assistant_delta(response_content, force=True)
                     raise
-                except ToolExecutionError:
+                except (ToolExecutionError, InterruptedError):
+                    # A cancel is not a streaming failure: no error log.
                     self._rollback_chat_history_to(chat_history_length)
                     raise
                 except Exception as e:
@@ -6260,6 +6282,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # is paired with its prompt on resume (Issue #5407).
                     self._persist_message("user", normalized_content)
                 
+                # (emitter, start) of an llm_request with no llm_response yet,
+                # so a failed stream still closes its trace pair (F-11).
+                _open_llm_call = None
                 try:
                     # Check if OpenAI client is available
                     if self._openai_client is None:
@@ -6273,7 +6298,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         "model": self.llm,
                         "messages": messages,
                         "temperature": kwargs.get('temperature', 1.0),
-                        "stream": True
+                        "stream": True,
+                        # The usage chunk (no choices) is the only token count a
+                        # stream gets; copied into followup_args below (F-08).
+                        "stream_options": {"include_usage": True},
                     }
                     if kwargs.get('max_tokens') is not None:
                         completion_args["max_tokens"] = kwargs['max_tokens']
@@ -6321,7 +6349,16 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         metadata={"model": self.llm, "message_count": len(messages)}
                     ))
                     
-                    completion = self._openai_client.sync_client.chat.completions.create(**completion_args)
+                    # Trace parity with the non-streaming path (F-11): one
+                    # llm_request / llm_response pair per streamed model call.
+                    from ..trace.context_events import get_context_emitter
+                    _stream_trace = get_context_emitter()
+                    _stream_trace.llm_request(
+                        self.name, messages_count=len(messages), tokens_used=0,
+                        model=self.llm if isinstance(self.llm, str) else None, messages=messages,
+                    )
+                    _open_llm_call = (_stream_trace, request_start_perf)
+                    completion =self._openai_client.sync_client.chat.completions.create(**completion_args)
                     
                     # Emit HEADERS_RECEIVED event
                     self.stream_emitter.emit(StreamEvent(
@@ -6342,7 +6379,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # pre-tool response_text over the real answer (Issue #5407).
                     active_stream = {"text": "", "after_tools": False}
                     
+                    _stream_usage = None
                     for chunk in completion:
+                        if getattr(chunk, "usage", None):
+                            _stream_usage = chunk
                         # Azure opens with a content-filter chunk and usage
                         # chunks carry no choices; skip them, as the follow-up
                         # loop below does (F-10).
@@ -6394,6 +6434,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 if tool_call_delta.function.arguments:
                                     tool_calls_data[tool_call_delta.index]['function']['arguments'] += tool_call_delta.function.arguments
                     
+                    if _stream_usage is not None:  # one billed call (F-08)
+                        self._record_llm_usage(*self._extract_llm_usage(_stream_usage))
                     # Emit LAST_TOKEN and STREAM_END events after streaming loop
                     if last_content_time:
                         self.stream_emitter.emit(StreamEvent(
@@ -6405,6 +6447,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         timestamp=time_module.perf_counter(),
                         metadata={"response_length": len(response_text)}
                     ))
+                    _stream_trace.llm_response(
+                        self.name,
+                        duration_ms=(time_module.perf_counter() - request_start_perf) * 1000,
+                        response_content=response_text,
+                    )
+                    _open_llm_call = None
                     
                     # Handle any tool calls that were accumulated
                     if tool_calls_data:
@@ -6518,6 +6566,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             success=False,
                                         )
                                         raise
+                                    # A deferred result is registered and the
+                                    # model gets its note, as on the
+                                    # non-streaming path (F-13).
+                                    from ..llm.openai_client import _handle_native_deferred_result
+                                    tool_result = _handle_native_deferred_result(
+                                        tool_result, self.chat_history, tool_call.get('id'),
+                                        tool_call['function']['name'],
+                                    )
                                     # Parity with the non-streaming path, which
                                     # fires 'tool_call' after every tool run.
                                     self._notify_tool_call(
@@ -6585,6 +6641,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # output format. Append only the tool turns produced by
                         # this round -- everything added to chat history since
                         # the completion began.
+                        if _stream_cancel_token is not None and _stream_cancel_token.is_set():
+                            reason = getattr(_stream_cancel_token, "reason", None) or "cancelled during tools"
+                            raise InterruptedError(f"Agent stream cancelled: {reason}")
                         followup_args = dict(completion_args)
                         followup_args['messages'] = (
                             list(messages) + self.chat_history[tool_turn_start:]
@@ -6613,9 +6672,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                         followup_text = ""
                         followup_last_content_time = None
+                        _followup_started = time_module.perf_counter()
+                        _stream_trace.llm_request(
+                            self.name, messages_count=len(followup_args['messages']), tokens_used=0,
+                            model=self.llm if isinstance(self.llm, str) else None,
+                            messages=followup_args['messages'],
+                        )
+                        _open_llm_call = (_stream_trace, _followup_started)
+                        _followup_usage = None
                         for followup_chunk in self._openai_client.sync_client.chat.completions.create(
                             **followup_args
                         ):
+                            if getattr(followup_chunk, "usage", None):
+                                _followup_usage = followup_chunk
                             if not followup_chunk.choices:
                                 continue
                             piece = followup_chunk.choices[0].delta.content
@@ -6628,6 +6697,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 active_stream["text"] = followup_text
                                 self._persist_assistant_delta(followup_text)
                                 yield piece
+                        if _followup_usage is not None:  # the follow-up is billed too (F-08)
+                            self._record_llm_usage(*self._extract_llm_usage(_followup_usage))
                         if followup_last_content_time:
                             self.stream_emitter.emit(StreamEvent(
                                 type=StreamEventType.LAST_TOKEN,
@@ -6638,6 +6709,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             timestamp=time_module.perf_counter(),
                             metadata={"response_length": len(followup_text)}
                         ))
+                        _stream_trace.llm_response(
+                            self.name,
+                            duration_ms=(time_module.perf_counter() - _followup_started) * 1000,
+                            response_content=followup_text,
+                        )
+                        _open_llm_call = None
                         if followup_text:
                             self._append_to_chat_history(
                                 {"role": "assistant", "content": followup_text}
@@ -6674,10 +6751,20 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         active_stream["text"], force=True
                     )
                     raise
-                except ToolExecutionError:
+                except (ToolExecutionError, InterruptedError, BudgetExceededError):
+                    # A cancel or a budget stop is not a streaming failure: no fallback request.
                     self._rollback_chat_history_to(chat_history_length)
                     raise
                 except Exception as e:
+                    if _open_llm_call is not None:
+                        _trace, _started = _open_llm_call
+                        _open_llm_call = None
+                        _trace.llm_response(
+                            self.name,
+                            duration_ms=(time_module.perf_counter() - _started) * 1000,
+                            finish_reason="error",
+                            response_content=str(e),
+                        )
                     # Rollback chat history on error
                     self._rollback_chat_history_to(chat_history_length)
                     logger.error(f"OpenAI streaming error: {e}")
@@ -6696,7 +6783,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Restore original verbose mode
             self.verbose = original_verbose
                     
-        except ToolExecutionError:
+        except (ToolExecutionError, InterruptedError, BudgetExceededError):
             self.verbose = original_verbose
             raise
         except Exception as e:

@@ -1937,6 +1937,11 @@ Respond with ONLY a valid JSON tool call in this format:
         # entirely, so scripted turns never reach (or trip) the guard.
         check_model_request(self.model, "litellm.completion")
         import litellm
+        # A stream's only token count is its usage chunk; ask for it where the
+        # provider supports stream_options (F-08), never overriding the caller.
+        if (completion_params.get("stream") and "stream_options" not in completion_params
+                and self._stream_usage_supported()):
+            completion_params["stream_options"] = {"include_usage": True}
         _replay = _replay_llm_begin(self, completion_params)
         try:
             for step in range(_CONTEXT_OVERFLOW_SHRINK_STEPS + 1):
@@ -1954,9 +1959,33 @@ Respond with ONLY a valid JSON tool call in this format:
             if _replay is not None:
                 _replay_observe(_replay, response, chunk=False)
                 _replay_llm_end(_replay)
-        elif _replay is not None:
-            response = _ReplayStream(response, _replay)
+        else:
+            response = self._track_stream_usage(response)
+            if _replay is not None:
+                response = _ReplayStream(response, _replay)
         return response
+
+    def _stream_usage_supported(self) -> bool:
+        """Whether litellm sends ``stream_options`` for this model (cached)."""
+        supported = getattr(self, "_stream_usage_ok", None)
+        if supported is None:
+            try:
+                import litellm
+                supported = "stream_options" in (litellm.get_supported_openai_params(model=self.model) or [])
+            except Exception:  # noqa: BLE001 - unknown model: do not send it
+                supported = False
+            self._stream_usage_ok = supported
+        return supported
+
+    def _track_stream_usage(self, stream):
+        """Yield the stream's chunks, then track the last usage seen (F-08)."""
+        usage_chunk = None
+        for chunk in stream:
+            if getattr(chunk, "usage", None):
+                usage_chunk = chunk
+            yield chunk
+        if usage_chunk is not None:
+            self._track_token_usage(usage_chunk, self._response_model_for_tracking(usage_chunk))
 
     async def _acompletion_with_retry(self, **completion_params):
         """Execute litellm.acompletion with automatic retry on rate limit errors.
@@ -5044,6 +5073,26 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     ollama_tool_result_mapping: Dict[str, Any] = {}
                     consecutive_errors = 0
                     max_consecutive_errors = 3  # Fallback to non-streaming after 3 consecutive errors
+
+                    # Responses API models stream over the Responses API, as
+                    # get_response() does (F-05). Tool turns keep the Chat
+                    # Completions stream below, which runs the tool loop.
+                    if self._supports_responses_api() and not formatted_tools:
+                        responses_params = self._build_responses_params(
+                            messages=messages,
+                            temperature=temperature,
+                            output_json=output_json,
+                            output_pydantic=output_pydantic,
+                            **{k: v for k, v in kwargs.items() if k != 'reasoning_steps'},
+                        )
+                        _responses_text, _, _responses_final = yield from self._stream_responses_api_events(
+                            responses_params, verbose=verbose)
+                        if _responses_final is not None:
+                            self._track_token_usage(_responses_final, self.model)
+                        if _responses_text and _responses_text.strip():
+                            _get_display_functions()['execute_sync_callback'](
+                                'llm_content', content=_responses_text.strip(), agent_name=agent_name)
+                        return
                     
                     stream_iterator = self._completion_with_retry(
                         **self._build_completion_params(
@@ -6457,6 +6506,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # below decides whether there is another round. A stale
                     # value re-sent the same follow-up a second time (F-06).
                     tool_calls = None
+                    # A tool may have cancelled the turn: stop before the
+                    # follow-up model call, as the sync loop does (F-14).
+                    if _is_cancelled():
+                        reason = _cancel_reason()
+                        logger.debug(f"Async LLM tool loop cancelled after tool dispatch: {reason}")
+                        return _prepare_return_value(f"Task interrupted: {reason}")
                     
                     # If no special handling was needed
                     if reasoning_steps:
@@ -8101,8 +8156,41 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         emit_events: bool = False,
         current_time: Optional[float] = None,
     ) -> tuple:
+        """Stream a Responses API call and return ``(text, tool_calls, final_response)``."""
+        events = self._responses_stream_events(
+            params, verbose=verbose, stream_callback=stream_callback,
+            emit_events=emit_events, current_time=current_time)
+        while True:
+            try:
+                next(events)
+            except StopIteration as done:
+                return done.value
+
+    def _stream_responses_api_events(self, params: Dict[str, Any], **kwargs: Any):
+        """Generator form of :meth:`_stream_responses_api`: yields text deltas as
+        they arrive and returns the same tuple; recorded on the replay trace."""
+        span = _replay_llm_begin(self, params)
+        try:
+            result = yield from self._responses_stream_events(params, **kwargs)
+        except BaseException as exc:
+            if span is not None:
+                _replay_llm_end(span, exc)
+            raise
+        if span is not None:
+            _replay_stream_result(span, result)
+        return result
+
+    def _responses_stream_events(
+        self,
+        params: Dict[str, Any],
+        verbose: bool = True,
+        stream_callback: Optional[Callable] = None,
+        emit_events: bool = False,
+        current_time: Optional[float] = None,
+    ):
         """
-        Stream a Responses API call, accumulating text and tool calls.
+        Stream a Responses API call, accumulating text and tool calls, and yield
+        each text delta as it arrives (a generator; its return value is the tuple).
 
         Returns the same (response_text, tool_calls) tuple as the Chat
         Completions streaming path.  Emits StreamEvents when configured.
@@ -8162,6 +8250,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             content=delta_text,
                             is_reasoning=False,
                         ))
+                    if delta_text:
+                        yield delta_text
 
                 # ── Reasoning delta ─────────────────────────────────────
                 elif evt_type == "response.reasoning_summary_text.delta":

@@ -192,19 +192,6 @@ def _cells(*drifts):
 
 # --- known drift (strict xfail; remove the mark in the PR that fixes it) ------
 
-F05 = _drift("F-05", "start(stream=True) on an openai/gpt-4o* model uses Chat Completions; "
-             "LLM.get_response_stream has no Responses API branch", ("stream", "litellm_responses"))
-F07 = _drift("F-07", "OpenAI-client tool loop records usage for one of the two model calls",
-             ("chat", "openai_client"), ("achat", "openai_client"))
-F08 = _drift("F-08", "start(stream=True) records no token usage or cost on any route", ("stream", "*"))
-F09 = _drift("F-09", "start(stream=True) ignores cancel_token", ("stream", "*"))
-F09_TOOL = _drift("F-09", "start(stream=True) ignores cancel_token", ("stream", "openai_client"))
-F11 = _drift("F-11", "OpenAI-client stream emits no llm_request/llm_response trace events",
-             ("stream", "openai_client"))
-F13 = _drift("F-13", "OpenAI-client stream tool step does not register a deferred result",
-             ("stream", "openai_client"))
-F14 = _drift("F-14", "achat() on the litellm Chat Completions route calls the model again after a tool "
-             "set the cancel token", ("achat", "litellm_chat"))
 
 
 # --- tools ------------------------------------------------------------------
@@ -251,7 +238,7 @@ class _Recorder:
 
 # --- the contract -------------------------------------------------------------
 
-@pytest.mark.parametrize("mode,route", _cells(F05))
+@pytest.mark.parametrize("mode,route", _cells())
 def test_route_reaches_its_endpoint(stub, mode, route):
     """Guards the matrix itself: each route really is the transport it names."""
     assert _turn(_agent(route, stub), mode) == "hello"
@@ -300,7 +287,7 @@ def test_external_tool_output_fenced_once(stub, mode, route):
     assert sent[-1].count(EXTERNAL_CONTENT_FENCE_OPEN) == 1
 
 
-@pytest.mark.parametrize("mode,route", _cells(F11))
+@pytest.mark.parametrize("mode,route", _cells())
 def test_trace_events_emitted(stub, mode, route):
     from praisonaiagents.trace.context_events import (
         ContextEventType as E, ContextListSink, ContextTraceEmitter, trace_context)
@@ -313,7 +300,7 @@ def test_trace_events_emitted(stub, mode, route):
     assert E.LLM_RESPONSE in types
 
 
-@pytest.mark.parametrize("mode,route", _cells(F08))
+@pytest.mark.parametrize("mode,route", _cells())
 def test_token_usage_recorded(stub, mode, route):
     agent = _agent(route, stub)
     assert _turn(agent, mode) == "hello"
@@ -321,7 +308,17 @@ def test_token_usage_recorded(stub, mode, route):
     assert (usage["tokens_in"], usage["tokens_out"], usage["llm_calls"]) == (USAGE_IN, USAGE_OUT, 1)
 
 
-@pytest.mark.parametrize("mode,route", _cells(F07, F08))
+def test_stream_budget_stop_raises_without_fallback_call(stub, monkeypatch):
+    from praisonaiagents.config.feature_configs import ExecutionConfig
+    from praisonaiagents.errors import BudgetExceededError
+    agent = _agent("openai_client", stub, execution=ExecutionConfig(max_budget=0.005))
+    monkeypatch.setattr(agent, "_calculate_llm_cost", lambda *a, **k: 0.01)
+    with pytest.raises(BudgetExceededError, match="exceeded budget: "):  # the post-call stop
+        _turn(agent, "stream")
+    assert len(REQUESTS) == 1 and agent.cost_summary["llm_calls"] == 1
+
+
+@pytest.mark.parametrize("mode,route", _cells())
 def test_token_usage_recorded_for_every_call_in_a_tool_round(stub, mode, route):
     agent = _agent(route, stub, tools=[lookup])
     assert _turn(agent, mode) == "hello"
@@ -329,7 +326,7 @@ def test_token_usage_recorded_for_every_call_in_a_tool_round(stub, mode, route):
     assert (usage["tokens_in"], usage["tokens_out"], usage["llm_calls"]) == (2 * USAGE_IN, 2 * USAGE_OUT, 2)
 
 
-@pytest.mark.parametrize("mode,route", _cells(F13))
+@pytest.mark.parametrize("mode,route", _cells())
 def test_deferred_tool_result_registered(stub, mode, route):
     from praisonaiagents.tools.call_executor import defer, get_deferred_resolver
     resolver = get_deferred_resolver()
@@ -350,7 +347,7 @@ def test_deferred_tool_result_registered(stub, mode, route):
         resolver.cancel(handle)
 
 
-@pytest.mark.parametrize("mode,route", _cells(F09))
+@pytest.mark.parametrize("mode,route", _cells())
 def test_cancel_token_set_before_turn_stops_it(stub, mode, route):
     token = threading.Event()
     token.set()
@@ -362,7 +359,7 @@ def test_cancel_token_set_before_turn_stops_it(stub, mode, route):
     assert REQUESTS == []
 
 
-@pytest.mark.parametrize("mode,route", _cells(F09_TOOL, F14))
+@pytest.mark.parametrize("mode,route", _cells())
 def test_cancel_during_tool_stops_the_loop(stub, mode, route):
     token = threading.Event()
 
