@@ -10,6 +10,11 @@ import random
 def jittered_backoff(attempt: int, base: float = 5.0, cap: float = 120.0) -> float:
     """
     Exponential backoff with ±50% jitter.
+
+    Not the same as ``praisonaiagents.agent.retry_utils.jittered_backoff``
+    (0-based attempt, positive-only jitter, keyword arguments, used by
+    ``RetryBackoffConfig``). They are kept separate on purpose: merging them
+    would change one side's delays (G-12).
     
     Prevents thundering herd problems when multiple agents hit rate limits
     simultaneously by adding randomization to retry timing.
