@@ -20,6 +20,8 @@ import dataclasses
 import enum
 import inspect
 import logging
+import types
+import weakref
 from typing import Any, Union, Literal, get_origin, get_args, get_type_hints, Callable, Dict, Optional, Set, Tuple
 
 
@@ -496,15 +498,36 @@ def _tool_fingerprint(tool: Any) -> str:
         return "d:" + hashlib.sha1(blob.encode()).hexdigest()
     if isinstance(tool, str):
         return f"s:{tool}"
+    if isinstance(tool, types.FunctionType):
+        # Called every turn for every tool: reuse the fingerprint until the
+        # function's code, docstring, defaults or annotations are replaced.
+        stamp = tuple(getattr(tool, a, None) for a in _FUNCTION_STAMP_ATTRS)
+        cached = _function_fingerprints.get(tool)
+        if cached is not None and all(x is y for x, y in zip(cached[0], stamp)):
+            return cached[1]
+        fingerprint = _callable_fingerprint(tool)
+        _function_fingerprints[tool] = (stamp, fingerprint)
+        return fingerprint
     if callable(tool):
-        try:
-            sig = str(inspect.signature(tool))
-        except (TypeError, ValueError):
-            sig = ""
-        name = getattr(tool, "__qualname__", None) or type(tool).__qualname__
-        doc = inspect.getdoc(tool) or ""
-        return f"c:{getattr(tool, '__module__', '')}.{name}:{id(tool)}:{sig}:{hash(doc)}"
+        return _callable_fingerprint(tool)
     return f"o:{id(tool)}"
+
+
+_FUNCTION_STAMP_ATTRS = (
+    "__code__", "__doc__", "__defaults__", "__kwdefaults__",
+    "__annotations__", "__signature__", "__wrapped__", "__qualname__",
+)
+_function_fingerprints: "weakref.WeakKeyDictionary" = weakref.WeakKeyDictionary()
+
+
+def _callable_fingerprint(tool: Any) -> str:
+    try:
+        sig = str(inspect.signature(tool))
+    except (TypeError, ValueError):
+        sig = ""
+    name = getattr(tool, "__qualname__", None) or type(tool).__qualname__
+    doc = inspect.getdoc(tool) or ""
+    return f"c:{getattr(tool, '__module__', '')}.{name}:{id(tool)}:{sig}:{hash(doc)}"
 
 
 def tools_cache_key(tools: Any) -> str:
