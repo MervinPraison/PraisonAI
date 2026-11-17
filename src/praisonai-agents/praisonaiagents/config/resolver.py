@@ -221,16 +221,13 @@ class ConfigRegistry:
     @classmethod
     def get_entry(cls, key: str) -> Optional[ConfigEntry]:
         """Get configuration entry by key or alias."""
-        # Check direct key first
-        if key in cls._entries:
-            return cls._entries[key]
-        
-        # Check aliases
+        # Single .get() lookups (no check-then-index), so a concurrent clear()
+        # yields None instead of KeyError and no lock is needed.
+        entry = cls._entries.get(key)
+        if entry is not None:
+            return entry
         canonical_key = cls._aliases.get(key)
-        if canonical_key:
-            return cls._entries[canonical_key]
-        
-        return None
+        return cls._entries.get(canonical_key) if canonical_key else None
     
     @classmethod
     def list_entries(cls, scope: Optional[ConfigScope] = None) -> List[ConfigEntry]:
