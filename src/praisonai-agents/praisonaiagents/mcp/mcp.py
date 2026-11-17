@@ -12,6 +12,8 @@ import platform
 from typing import Any, List, Optional, Callable, Iterable, Union
 from functools import wraps, partial
 
+logger = logging.getLogger(__name__)
+
 try:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
@@ -236,7 +238,7 @@ class MCPToolRunner(threading.Thread):
             resources_result = await session.list_resources()
             self.resources = list(getattr(resources_result, "resources", []) or [])
         except Exception as e:
-            logging.debug(f"MCP list_resources unavailable: {e}")
+            logger.debug(f"MCP list_resources unavailable: {e}")
 
         try:
             templates_result = await session.list_resource_templates()
@@ -244,13 +246,13 @@ class MCPToolRunner(threading.Thread):
                 getattr(templates_result, "resourceTemplates", []) or []
             )
         except Exception as e:
-            logging.debug(f"MCP list_resource_templates unavailable: {e}")
+            logger.debug(f"MCP list_resource_templates unavailable: {e}")
 
         try:
             prompts_result = await session.list_prompts()
             self.prompts = list(getattr(prompts_result, "prompts", []) or [])
         except Exception as e:
-            logging.debug(f"MCP list_prompts unavailable: {e}")
+            logger.debug(f"MCP list_prompts unavailable: {e}")
 
     def _dispatch(self, kind, name, arguments):
         """Send a request to the runner thread and wait for its result.
@@ -392,7 +394,7 @@ class MCPToolRunner(threading.Thread):
             execution_time = end_time - start_time
             
             # Log timing information for debugging
-            logging.debug(f"Tool '{tool_name}' execution time: {execution_time:.3f} seconds")
+            logger.debug(f"Tool '{tool_name}' execution time: {execution_time:.3f} seconds")
             
             # Store timing in thread-safe manner
             with self._timings_lock:
@@ -992,7 +994,7 @@ class MCP:
             if (self.runner is runner and not getattr(self, "_closing", False)
                     and restarts < self._MAX_STDIO_RESTARTS):
                 self._stdio_restarts = restarts + 1
-                logging.warning(
+                logger.warning(
                     "MCP stdio server lost (%s); restarting (%d/%d)",
                     runner._dead, self._stdio_restarts, self._MAX_STDIO_RESTARTS,
                 )
@@ -1091,17 +1093,17 @@ class MCP:
             # For NPX tools, we'll use the same approach as regular MCP tools
             # but we need to handle the initialization differently
             if self.debug:
-                logging.debug(f"Initializing NPX MCP tools with command: {cmd} {' '.join(arguments)}")
+                logger.debug(f"Initializing NPX MCP tools with command: {cmd} {' '.join(arguments)}")
             
             # Generate tool functions using the regular MCP approach
             self._tools = self._apply_tool_filters(self._generate_tool_functions())
             
             if self.debug:
-                logging.debug(f"Generated {len(self._tools)} NPX MCP tools")
+                logger.debug(f"Generated {len(self._tools)} NPX MCP tools")
                 
         except Exception as e:
             if self.debug:
-                logging.error(f"Failed to initialize NPX MCP tools: {e}")
+                logger.error(f"Failed to initialize NPX MCP tools: {e}")
             raise RuntimeError(f"Failed to initialize NPX MCP tools: {e}")
     
     def _apply_tool_filters(self, raw_tools: List[Any]) -> List[Any]:
@@ -1406,7 +1408,7 @@ class MCP:
         if not hasattr(self, 'runner') or not self.runner.tools:
             if synthetic_tools:
                 return synthetic_tools
-            logging.warning("No MCP tools available to convert to OpenAI format")
+            logger.warning("No MCP tools available to convert to OpenAI format")
             return None
             
         # Convert all tools to OpenAI format
