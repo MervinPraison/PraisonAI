@@ -18,6 +18,23 @@ from praisonaiagents import Agent, ExecutionConfig
 # ExecutionConfig — unified knob + backward-compatible resolvers
 # ---------------------------------------------------------------------------
 
+def _mirror_async(client):
+    """chat_completion_with_tools runs the async loop (G-16): point its async
+    calls at the sync fakes this test installed, so the test still drives it."""
+    import inspect as _inspect
+
+    def _wrap(fn):
+        async def _async(*args, **kwargs):
+            result = fn(*args, **kwargs)
+            return await result if _inspect.isawaitable(result) else result
+        return _async
+
+    for sync_name, async_name in (("create_completion", "acreate_completion"),
+                                  ("process_stream_response", "process_stream_response_async")):
+        if sync_name in vars(client):  # only what the test patched on the instance
+            setattr(client, async_name, _wrap(vars(client)[sync_name]))
+
+
 def test_max_steps_defaults_to_none_and_falls_back_to_max_iter():
     cfg = ExecutionConfig()
     assert cfg.max_steps is None
@@ -152,6 +169,7 @@ def test_openai_loop_sets_max_steps_when_budget_exhausted(monkeypatch):
 
     monkeypatch.setattr(client, "create_completion", _tracking_create)
 
+    _mirror_async(client)
     client.chat_completion_with_tools(
         messages=messages,
         model="gpt-4o-mini",
@@ -202,6 +220,7 @@ def test_openai_loop_completed_when_no_tool_calls(monkeypatch):
         lambda **kwargs: _FakeResponse(tool_calls=None, content="done"),
     )
 
+    _mirror_async(client)
     client.chat_completion_with_tools(
         messages=[{"role": "user", "content": "hi"}],
         model="gpt-4o-mini",

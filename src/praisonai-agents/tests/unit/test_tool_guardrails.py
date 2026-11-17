@@ -276,6 +276,14 @@ def _run_stubbed_turn(agent, tool_name, arguments):
     client._sync_client = type(
         "StubOpenAI", (), {"chat": type("Chat", (), {"completions": completions})()})()
 
+    class _AsyncCompletions:  # the sync entry point runs the async loop (G-16)
+        async def create(self, **kwargs):
+            return completions.create(**kwargs)
+
+    client._async_client = type(
+        "StubAsyncOpenAI", (), {"chat": type("Chat", (), {"completions": _AsyncCompletions()})()})()
+    client._async_client_owned = False
+
     client.chat_completion_with_tools(
         messages=[{"role": "user", "content": "go"}],
         model="gpt-4o-mini",
