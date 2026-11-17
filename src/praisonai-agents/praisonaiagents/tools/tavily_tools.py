@@ -23,6 +23,8 @@ import logging
 import os
 from importlib import util
 
+logger = logging.getLogger(__name__)
+
 
 def _check_tavily_available() -> tuple[bool, Optional[str]]:
     """Check if Tavily is available and API key is set.
@@ -137,7 +139,7 @@ class TavilyTools:
         """
         client, error = self._get_client()
         if error:
-            logging.error(error)
+            logger.error(error)
             return {"error": error}
         
         try:
@@ -163,7 +165,7 @@ class TavilyTools:
             
         except Exception as e:
             error_msg = f"Tavily search error: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {"error": error_msg}
     
     def extract(
@@ -187,7 +189,7 @@ class TavilyTools:
         """
         client, error = self._get_client()
         if error:
-            logging.error(error)
+            logger.error(error)
             return {"error": error}
         
         try:
@@ -200,7 +202,7 @@ class TavilyTools:
             
         except Exception as e:
             error_msg = f"Tavily extract error: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {"error": error_msg}
     
     def crawl(
@@ -232,7 +234,7 @@ class TavilyTools:
         """
         client, error = self._get_client()
         if error:
-            logging.error(error)
+            logger.error(error)
             return {"error": error}
         
         try:
@@ -253,7 +255,7 @@ class TavilyTools:
             
         except Exception as e:
             error_msg = f"Tavily crawl error: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {"error": error_msg}
     
     def map(
@@ -281,7 +283,7 @@ class TavilyTools:
         """
         client, error = self._get_client()
         if error:
-            logging.error(error)
+            logger.error(error)
             return {"error": error}
         
         try:
@@ -300,7 +302,7 @@ class TavilyTools:
             
         except Exception as e:
             error_msg = f"Tavily map error: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {"error": error_msg}
     
     # Async methods
@@ -320,7 +322,7 @@ class TavilyTools:
         """Async version of search. See search() for documentation."""
         client, error = self._get_async_client()
         if error:
-            logging.error(error)
+            logger.error(error)
             return {"error": error}
         
         try:
@@ -346,7 +348,7 @@ class TavilyTools:
             
         except Exception as e:
             error_msg = f"Tavily async search error: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {"error": error_msg}
     
     async def aextract(
@@ -358,7 +360,7 @@ class TavilyTools:
         """Async version of extract. See extract() for documentation."""
         client, error = self._get_async_client()
         if error:
-            logging.error(error)
+            logger.error(error)
             return {"error": error}
         
         try:
@@ -371,7 +373,7 @@ class TavilyTools:
             
         except Exception as e:
             error_msg = f"Tavily async extract error: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {"error": error_msg}
 
 
