@@ -126,7 +126,7 @@ def _process_telemetry_queue():
     except Exception as e:
         # Log error for debugging while maintaining non-disruptive behavior
         import logging
-        logging.debug(f"Telemetry queue processing error: {e}")
+        logging.getLogger(__name__).debug(f"Telemetry queue processing error: {e}")
         pass
     finally:
         _queue_processor_running = False
@@ -167,7 +167,7 @@ def _process_event_batch(events):
     except Exception as e:
         # Log error for debugging while maintaining non-disruptive behavior
         import logging
-        logging.debug(f"Telemetry batch processing error: {e}")
+        logging.getLogger(__name__).debug(f"Telemetry batch processing error: {e}")
         pass
 
 @contextmanager
@@ -583,7 +583,7 @@ def cleanup_telemetry_resources():
             _telemetry_executor.shutdown(wait=True, timeout=shutdown_timeout)
         except Exception as e:
             import logging
-            logging.debug(f"Telemetry executor shutdown error: {e}")
+            logging.getLogger(__name__).debug(f"Telemetry executor shutdown error: {e}")
             pass
         _telemetry_executor = None
     

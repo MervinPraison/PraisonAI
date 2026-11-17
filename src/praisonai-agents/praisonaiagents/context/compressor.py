@@ -397,7 +397,7 @@ Provide a concise summary under {max_tokens} tokens that preserves the essential
         except Exception as e:
             # Log error but don't raise - fallback will handle
             import logging
-            logging.warning(f"LLM summarization failed: {e}")
+            logging.getLogger(__name__).warning(f"LLM summarization failed: {e}")
             return None
     
     def _create_fallback_summary(self, messages: List[Dict[str, Any]]) -> str:
