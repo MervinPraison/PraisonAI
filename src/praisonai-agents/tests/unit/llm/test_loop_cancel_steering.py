@@ -19,6 +19,23 @@ from praisonaiagents.agent.message_steering import SteeringMixin
 from praisonaiagents.llm.openai_client import OpenAIClient
 
 
+def _mirror_async(client):
+    """chat_completion_with_tools runs the async loop (G-16): point its async
+    calls at the sync fakes this test installed, so the test still drives it."""
+    import inspect as _inspect
+
+    def _wrap(fn):
+        async def _async(*args, **kwargs):
+            result = fn(*args, **kwargs)
+            return await result if _inspect.isawaitable(result) else result
+        return _async
+
+    for sync_name, async_name in (("create_completion", "acreate_completion"),
+                                  ("process_stream_response", "process_stream_response_async")):
+        if sync_name in vars(client):  # only what the test patched on the instance
+            setattr(client, async_name, _wrap(vars(client)[sync_name]))
+
+
 class _Steerable(SteeringMixin):
     def __init__(self):
         self._init_message_steering(True)
@@ -108,6 +125,7 @@ def test_interrupt_stops_loop_between_iterations(monkeypatch):
         controller.request("user /stop")
         return "ok"
 
+    _mirror_async(c)
     c.chat_completion_with_tools(
         messages=[{"role": "user", "content": "go"}],
         tools=[],
@@ -137,6 +155,7 @@ def test_interrupt_before_tool_dispatch(monkeypatch):
         tool_runs.append(name)
         return "ok"
 
+    _mirror_async(c)
     c.chat_completion_with_tools(
         messages=[{"role": "user", "content": "go"}],
         tools=[],
@@ -182,6 +201,7 @@ def test_steering_injected_mid_run(monkeypatch):
     def execute_tool_fn(name, args, **kw):
         return "ok"
 
+    _mirror_async(c)
     c.chat_completion_with_tools(
         messages=[{"role": "user", "content": "go"}],
         tools=[],
@@ -216,6 +236,7 @@ def test_no_controller_is_noop(monkeypatch):
     def execute_tool_fn(name, args, **kw):
         return "ok"
 
+    _mirror_async(c)
     c.chat_completion_with_tools(
         messages=[{"role": "user", "content": "go"}],
         tools=[],

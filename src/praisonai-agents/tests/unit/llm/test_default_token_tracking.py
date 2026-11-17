@@ -9,6 +9,23 @@ from praisonaiagents.llm.llm import LLM
 from praisonaiagents.telemetry.token_collector import get_token_collector
 
 
+def _mirror_async(client):
+    """chat_completion_with_tools runs the async loop (G-16): point its async
+    calls at the sync fakes this test installed, so the test still drives it."""
+    import inspect as _inspect
+
+    def _wrap(fn):
+        async def _async(*args, **kwargs):
+            result = fn(*args, **kwargs)
+            return await result if _inspect.isawaitable(result) else result
+        return _async
+
+    for sync_name, async_name in (("create_completion", "acreate_completion"),
+                                  ("process_stream_response", "process_stream_response_async")):
+        if sync_name in vars(client):  # only what the test patched on the instance
+            setattr(client, async_name, _wrap(vars(client)[sync_name]))
+
+
 def _display_functions():
     return defaultdict(MagicMock)
 
@@ -119,6 +136,7 @@ def test_openai_client_tracks_tokens_when_display_is_disabled(monkeypatch):
     monkeypatch.setattr(client, "create_completion", lambda **_kwargs: response)
     monkeypatch.setattr(client, "format_tools", lambda _tools: None)
 
+    _mirror_async(client)
     result = client.chat_completion_with_tools(
         messages=[{"role": "user", "content": "Say OK"}],
         model="gpt-4o-mini",
@@ -159,6 +177,7 @@ def test_openai_client_usage_without_tokens_is_not_recorded(monkeypatch):
     monkeypatch.setattr(client, "create_completion", lambda **_kwargs: response)
     monkeypatch.setattr(client, "format_tools", lambda _tools: None)
 
+    _mirror_async(client)
     client.chat_completion_with_tools(
         messages=[{"role": "user", "content": "Say OK"}],
         model="gpt-4o-mini",
@@ -217,6 +236,7 @@ def test_openai_client_tracks_every_tool_loop_iteration(monkeypatch):
     monkeypatch.setattr(client, "create_completion", lambda **_kwargs: next(responses))
     monkeypatch.setattr(client, "format_tools", lambda _tools: [{"type": "function"}])
 
+    _mirror_async(client)
     client.chat_completion_with_tools(
         messages=[{"role": "user", "content": "Use the tool"}],
         model="gpt-4o-mini",
@@ -269,6 +289,7 @@ def test_openai_client_clears_stale_metrics_when_usage_absent(monkeypatch):
     monkeypatch.setattr(client, "format_tools", lambda _tools: None)
 
     monkeypatch.setattr(client, "create_completion", lambda **_kwargs: with_usage)
+    _mirror_async(client)
     client.chat_completion_with_tools(
         messages=[{"role": "user", "content": "Say OK"}],
         model="gpt-4o-mini",
@@ -279,6 +300,7 @@ def test_openai_client_clears_stale_metrics_when_usage_absent(monkeypatch):
     assert client.last_token_metrics is not None
 
     monkeypatch.setattr(client, "create_completion", lambda **_kwargs: without_usage)
+    _mirror_async(client)
     client.chat_completion_with_tools(
         messages=[{"role": "user", "content": "Say OK again"}],
         model="gpt-4o-mini",
