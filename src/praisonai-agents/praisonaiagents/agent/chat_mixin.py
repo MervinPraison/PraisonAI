@@ -6321,6 +6321,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         metadata={"model": self.llm, "message_count": len(messages)}
                     ))
                     
+                    # Trace parity with the non-streaming path (F-11): one
+                    # llm_request / llm_response pair per streamed model call.
+                    from ..trace.context_events import get_context_emitter
+                    _stream_trace = get_context_emitter()
+                    _stream_trace.llm_request(
+                        self.name, messages_count=len(messages), tokens_used=0,
+                        model=self.llm if isinstance(self.llm, str) else None, messages=messages,
+                    )
                     completion = self._openai_client.sync_client.chat.completions.create(**completion_args)
                     
                     # Emit HEADERS_RECEIVED event
@@ -6400,6 +6408,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         timestamp=time_module.perf_counter(),
                         metadata={"response_length": len(response_text)}
                     ))
+                    _stream_trace.llm_response(
+                        self.name,
+                        duration_ms=(time_module.perf_counter() - request_start_perf) * 1000,
+                        response_content=response_text,
+                    )
                     
                     # Handle any tool calls that were accumulated
                     if tool_calls_data:
@@ -6608,6 +6621,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                         followup_text = ""
                         followup_last_content_time = None
+                        _followup_started = time_module.perf_counter()
+                        _stream_trace.llm_request(
+                            self.name, messages_count=len(followup_args['messages']), tokens_used=0,
+                            model=self.llm if isinstance(self.llm, str) else None,
+                            messages=followup_args['messages'],
+                        )
                         for followup_chunk in self._openai_client.sync_client.chat.completions.create(
                             **followup_args
                         ):
@@ -6633,6 +6652,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             timestamp=time_module.perf_counter(),
                             metadata={"response_length": len(followup_text)}
                         ))
+                        _stream_trace.llm_response(
+                            self.name,
+                            duration_ms=(time_module.perf_counter() - _followup_started) * 1000,
+                            response_content=followup_text,
+                        )
                         if followup_text:
                             self._append_to_chat_history(
                                 {"role": "assistant", "content": followup_text}

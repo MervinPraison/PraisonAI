@@ -203,8 +203,6 @@ F09 = _drift("F-09", "start(stream=True) ignores cancel_token", ("stream", "*"))
 F09_TOOL = _drift("F-09", "start(stream=True) ignores cancel_token", ("stream", "openai_client"))
 F10 = _drift("F-10", "OpenAI-client stream fails on a chunk with no choices and resends the turn unstreamed",
              ("stream", "openai_client"))
-F11 = _drift("F-11", "OpenAI-client stream emits no llm_request/llm_response trace events",
-             ("stream", "openai_client"))
 F12 = _drift("F-12", "async agent tool step turns DeferredToolResult into {'result': str(...)} "
              "before the loop can register it (execution_mixin JSON coercion)", ("achat", "*"))
 F13 = _drift("F-13", "OpenAI-client stream tool step does not register a deferred result",
@@ -307,7 +305,7 @@ def test_external_tool_output_fenced_once(stub, mode, route):
     assert sent[-1].count(EXTERNAL_CONTENT_FENCE_OPEN) == 1
 
 
-@pytest.mark.parametrize("mode,route", _cells(F11))
+@pytest.mark.parametrize("mode,route", _cells())
 def test_trace_events_emitted(stub, mode, route):
     from praisonaiagents.trace.context_events import (
         ContextEventType as E, ContextListSink, ContextTraceEmitter, trace_context)
