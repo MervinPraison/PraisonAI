@@ -48,3 +48,6 @@ def test_custom_llm_route_also_leaves_fetch_off():
     assert not agent.web_fetch
     assert getattr(agent.llm_instance, "web_fetch", False) is False
     assert agent._llm_option_kwargs.get("web_fetch") is False
+    # Deferred params are reused for rebuilds (default-model swap, fallbacks).
+    assert agent._llm_init_params.get("web_fetch") is False
+    assert agent._fallback_llm_for("openai/gpt-4o").web_fetch is False

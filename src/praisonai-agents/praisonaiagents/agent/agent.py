@@ -2791,10 +2791,13 @@ Your Role: {self.role}
         if web_fetch and not self._model_supports_web_fetch() and _web_fetch_is_default:
             # Defaults mean "what this model supports": keep search, leave fetch off.
             web_fetch = self.web_fetch = False
-            if getattr(self, "_llm_option_kwargs", None) is not None:
-                self._llm_option_kwargs["web_fetch"] = False  # rebuilt LLMs too
-            if getattr(getattr(self, "llm_instance", None), "web_fetch", None):
-                self.llm_instance.web_fetch = False
+            # Every kwargs dict an LLM is (re)built from: default-model swap,
+            # fallback models and panels must not turn fetch back on.
+            for _kw in (self._llm_option_kwargs, self._llm_init_params, self._panel_llm_kwargs):
+                if _kw and "web_fetch" in _kw:
+                    _kw["web_fetch"] = False
+            if getattr(self._llm_instance, "web_fetch", None):
+                self._llm_instance.web_fetch = False
             logging.info(
                 f"Agent {self.name!r}: web fetch is Claude-only, so it is off for model "
                 f"{self.llm!r}; web search stays on."
