@@ -8,9 +8,11 @@ defaults (for example ``resolve_caching(None)`` returns ``None``).
 
 from typing import Any, Dict, Optional, Tuple
 
-from .feature_configs import CachingConfig, PlanningConfig, ReflectionConfig, TemplateConfig
+from .feature_configs import CachingConfig, MemoryConfig, PlanningConfig, ReflectionConfig, TemplateConfig
 from .param_resolver import ArrayMode, resolve
-from .presets import CACHING_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS
+from .presets import (
+    CACHING_PRESETS, MEMORY_PRESETS, MEMORY_URL_SCHEMES, PLANNING_PRESETS, REFLECTION_PRESETS,
+)
 
 
 def resolve_agent_caching(caching: Any) -> Tuple[Optional[CachingConfig], bool, Optional[bool]]:
@@ -123,3 +125,34 @@ def resolve_agent_reflection(reflection: Any) -> Tuple[Optional[ReflectionConfig
     if reflection is False:
         return config, {"self_reflect": False}
     return config, {}
+
+
+def resolve_agent_memory(memory: Any) -> Any:
+    """``memory=`` -> ``MemoryConfig``, a live backend, or ``None``.
+
+    ``None``/``False`` mean no memory and ``True`` the defaults. A live
+    backend (an object with ``search`` and ``add``, or a ``db()`` instance
+    with ``database_url``) passes through; presets, URLs, dicts and lists
+    resolve as before.
+    """
+    # Fast path: None/False -> no memory (skip resolve() call)
+    if memory is None or memory is False:
+        return None
+    if memory is True:
+        return MemoryConfig()
+    if isinstance(memory, MemoryConfig):
+        return memory
+    if hasattr(memory, 'search') and hasattr(memory, 'add'):
+        return memory  # Memory instance passthrough
+    if hasattr(memory, 'database_url'):
+        return memory  # db() instance passthrough
+    return resolve(
+        value=memory,
+        param_name="memory",
+        config_class=MemoryConfig,
+        presets=MEMORY_PRESETS,
+        url_schemes=MEMORY_URL_SCHEMES,
+        instance_check=lambda v: (hasattr(v, 'search') and hasattr(v, 'add')) or hasattr(v, 'database_url'),
+        array_mode=ArrayMode.SINGLE_OR_LIST,
+        default=None,
+    )
