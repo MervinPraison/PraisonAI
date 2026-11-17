@@ -17,6 +17,7 @@ from typing import Dict, Iterator, List, Optional
 from .models import ScheduleJob, RunRecord
 from .due import is_due as _is_due, is_misfire as _is_misfire, lease_state as _lease_state, past_until as _past_until, resolve_schedule_timezone
 from .hook_emit import emit_schedule_add, emit_schedule_remove
+from .store import _ScheduleStoreQueries
 
 logger = get_logger(__name__)
 
@@ -29,7 +30,7 @@ _MAX_HISTORY = 200
 # state kept) rather than silently truncated.
 _MAX_STATE_BYTES = 16 * 1024
 
-class ConfigYamlScheduleStore:
+class ConfigYamlScheduleStore(_ScheduleStoreQueries):
     """CRUD store backed by ``config.yaml``.
 
     Schedules are stored as a dict under the ``schedules`` key,
@@ -76,49 +77,6 @@ class ConfigYamlScheduleStore:
         # Emit SCHEDULE_ADD outside the store locks: a hook must never be able
         # to deadlock the cross-process file lock by calling back in.
         emit_schedule_add(job)
-
-    def get(self, job_id: str) -> Optional[ScheduleJob]:
-        with self._lock:
-            return self._jobs.get(job_id)
-
-    def get_by_name(
-        self,
-        name: str,
-        principal: Optional[str] = None,
-    ) -> Optional[ScheduleJob]:
-        """Return a job by name, optionally scoped to ``principal``.
-
-        When ``principal`` is given, a job owned by a *different* identity is
-        treated as not found (returns ``None``) so one gateway user cannot
-        read another's automation by guessing its name. ``None`` (the default)
-        preserves the pre-scoping global lookup.
-        """
-        with self._lock:
-            for job in self._jobs.values():
-                if job.name == name:
-                    if principal is not None and job.principal != principal:
-                        continue
-                    return job
-            return None
-
-    def list(
-        self,
-        agent_id: Optional[str] = None,
-        principal: Optional[str] = None,
-    ) -> List[ScheduleJob]:
-        """List jobs, optionally filtered by owning agent and/or principal.
-
-        ``principal`` isolates a gateway end-user's automations from
-        another's. ``None`` (the default) returns everything, preserving
-        the pre-scoping global behaviour.
-        """
-        with self._lock:
-            jobs = list(self._jobs.values())
-        if agent_id is not None:
-            jobs = [j for j in jobs if j.agent_id == agent_id]
-        if principal is not None:
-            jobs = [j for j in jobs if j.principal == principal]
-        return jobs
 
     def update(self, job: ScheduleJob) -> None:
         with self._lock, self._file_lock():
@@ -302,20 +260,6 @@ class ConfigYamlScheduleStore:
             )
         return claimed
 
-    def complete(self, job_id: str, owner_id: str) -> None:
-        """Release the lease for ``job_id`` if held by ``owner_id`` (idempotent)."""
-        with self._lock, self._file_lock():
-            self._reload_locked()
-            self._held_leases.pop(job_id, None)
-            job = self._jobs.get(job_id)
-            if job is None:
-                return
-            if getattr(job, "_lease_owner", None) != owner_id:
-                return
-            job._lease_until = 0.0
-            job._lease_owner = None
-            self._save()
-
     # ── cross-process lock ────────────────────────────────────────────
 
     @contextlib.contextmanager
@@ -406,18 +350,6 @@ class ConfigYamlScheduleStore:
             if len(self._history) > self._max_history:
                 self._history = self._history[:self._max_history]
             self._save_history()
-
-    def get_history(
-        self,
-        job_id: Optional[str] = None,
-        limit: int = 200,
-    ) -> List[RunRecord]:
-        """Get execution history records, newest first."""
-        with self._lock:
-            records = list(self._history)
-        if job_id is not None:
-            records = [r for r in records if r.job_id == job_id]
-        return records[:limit]
 
     # ── per-job state (JobStateStoreProtocol) ─────────────────────────
 

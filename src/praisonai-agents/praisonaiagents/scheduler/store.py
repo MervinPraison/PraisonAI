@@ -27,46 +27,10 @@ _HISTORY_FILE = "history.json"
 _LOCK_FILE = "jobs.lock"
 _MAX_HISTORY = 200
 
-class FileScheduleStore:
-    """CRUD store backed by a single JSON file.
-
-    Thread-safe for multi-agent scenarios.
-    """
-
-    def __init__(self, store_dir: Optional[str] = None, max_history: int = _MAX_HISTORY):
-        self._dir = store_dir or _DEFAULT_DIR
-        self._path = os.path.join(self._dir, _JOBS_FILE)
-        self._history_path = os.path.join(self._dir, _HISTORY_FILE)
-        self._lock_path = os.path.join(self._dir, _LOCK_FILE)
-        self._max_history = max_history
-        self._lock = threading.RLock()
-        self._jobs: Dict[str, ScheduleJob] = {}
-        self._history: List[RunRecord] = []
-        # Run records whose history write failed; merged into the next save.
-        self._unsaved: List[RunRecord] = []
-        # In-memory record of leases we currently hold, so ``complete`` can
-        # release them. Cross-process leases live in the persisted job
-        # (``lease_until`` / ``lease_owner``) which is the source of truth.
-        self._held_leases: Dict[str, str] = {}
-        self._load()
-        self._load_history()
-
-    # ── public API ───────────────────────────────────────────────────
-
-    def add(self, job: ScheduleJob) -> None:
-        """Add a job. Raises ``ValueError`` if id already exists."""
-        with self._lock, self._file_lock():
-            # Reload under the cross-process lock so we don't overwrite lease
-            # / last_run_at written by a concurrent ``claim_due`` in another
-            # process before applying our change.
-            self._reload_locked()
-            if job.id in self._jobs:
-                raise ValueError(f"Job '{job.id}' already exists")
-            self._jobs[job.id] = job
-            self._save_or_rollback(job.id)
-        # Emit SCHEDULE_ADD outside the store locks: a hook must never be able
-        # to deadlock the cross-process file lock by calling back in.
-        emit_schedule_add(job)
+class _ScheduleStoreQueries:
+    """Read-side queries and lease release shared by ``FileScheduleStore``
+    and ``ConfigYamlScheduleStore``: both keep ``_jobs``/``_history`` behind
+    ``_lock`` and expose ``_file_lock``/``_reload_locked``/``_save``."""
 
     def get(self, job_id: str) -> Optional[ScheduleJob]:
         with self._lock:
@@ -110,6 +74,74 @@ class FileScheduleStore:
         if principal is not None:
             jobs = [j for j in jobs if j.principal == principal]
         return jobs
+
+    def complete(self, job_id: str, owner_id: str) -> None:
+        """Release the lease for ``job_id`` if held by ``owner_id`` (idempotent)."""
+        with self._lock, self._file_lock():
+            self._reload_locked()
+            self._held_leases.pop(job_id, None)
+            job = self._jobs.get(job_id)
+            if job is None:
+                return
+            if getattr(job, "_lease_owner", None) != owner_id:
+                return
+            job._lease_until = 0.0
+            job._lease_owner = None
+            self._save()
+
+    def get_history(
+        self,
+        job_id: Optional[str] = None,
+        limit: int = 200,
+    ) -> List[RunRecord]:
+        """Get execution history records, newest first."""
+        with self._lock:
+            records = list(self._history)
+        if job_id is not None:
+            records = [r for r in records if r.job_id == job_id]
+        return records[:limit]
+
+
+class FileScheduleStore(_ScheduleStoreQueries):
+    """CRUD store backed by a single JSON file.
+
+    Thread-safe for multi-agent scenarios.
+    """
+
+    def __init__(self, store_dir: Optional[str] = None, max_history: int = _MAX_HISTORY):
+        self._dir = store_dir or _DEFAULT_DIR
+        self._path = os.path.join(self._dir, _JOBS_FILE)
+        self._history_path = os.path.join(self._dir, _HISTORY_FILE)
+        self._lock_path = os.path.join(self._dir, _LOCK_FILE)
+        self._max_history = max_history
+        self._lock = threading.RLock()
+        self._jobs: Dict[str, ScheduleJob] = {}
+        self._history: List[RunRecord] = []
+        # Run records whose history write failed; merged into the next save.
+        self._unsaved: List[RunRecord] = []
+        # In-memory record of leases we currently hold, so ``complete`` can
+        # release them. Cross-process leases live in the persisted job
+        # (``lease_until`` / ``lease_owner``) which is the source of truth.
+        self._held_leases: Dict[str, str] = {}
+        self._load()
+        self._load_history()
+
+    # ── public API ───────────────────────────────────────────────────
+
+    def add(self, job: ScheduleJob) -> None:
+        """Add a job. Raises ``ValueError`` if id already exists."""
+        with self._lock, self._file_lock():
+            # Reload under the cross-process lock so we don't overwrite lease
+            # / last_run_at written by a concurrent ``claim_due`` in another
+            # process before applying our change.
+            self._reload_locked()
+            if job.id in self._jobs:
+                raise ValueError(f"Job '{job.id}' already exists")
+            self._jobs[job.id] = job
+            self._save_or_rollback(job.id)
+        # Emit SCHEDULE_ADD outside the store locks: a hook must never be able
+        # to deadlock the cross-process file lock by calling back in.
+        emit_schedule_add(job)
 
     def update(self, job: ScheduleJob) -> None:
         with self._lock, self._file_lock():
@@ -291,20 +323,6 @@ class FileScheduleStore:
             )
         return claimed
 
-    def complete(self, job_id: str, owner_id: str) -> None:
-        """Release the lease for ``job_id`` if held by ``owner_id`` (idempotent)."""
-        with self._lock, self._file_lock():
-            self._reload_locked()
-            self._held_leases.pop(job_id, None)
-            job = self._jobs.get(job_id)
-            if job is None:
-                return
-            if getattr(job, "_lease_owner", None) != owner_id:
-                return
-            job._lease_until = 0.0
-            job._lease_owner = None
-            self._save()
-
     # ── execution history ─────────────────────────────────────────────
 
     def log_run(
@@ -348,18 +366,6 @@ class FileScheduleStore:
             )
             self._history = merged[:self._max_history]
             self._unsaved = [] if self._save_history() else pending
-
-    def get_history(
-        self,
-        job_id: Optional[str] = None,
-        limit: int = 200,
-    ) -> List[RunRecord]:
-        """Get execution history records, newest first."""
-        with self._lock:
-            records = list(self._history)
-        if job_id is not None:
-            records = [r for r in records if r.job_id == job_id]
-        return records[:limit]
 
     # ── cross-process lock ────────────────────────────────────────────
 
