@@ -30,6 +30,7 @@ from ..model_harness.guard import check_model_request
 # Gap 2: Tool call execution imports
 from ..tools.call_executor import ToolCall, create_tool_call_executor
 from ..tools.schema import build_tool_definition
+from ._helpers import inject_steering, tool_parse_error_message, usage_detail, usage_value
 
 logger = get_logger(__name__)
 
@@ -3363,14 +3364,7 @@ Respond with ONLY a valid JSON tool call in this format:
             return getattr(cancel_token, "reason", None) or "user"
 
         def _inject_steering(msgs) -> None:
-            if steering_drain is None:
-                return
-            try:
-                for note in (steering_drain() or []):
-                    if note:
-                        msgs.append({"role": "user", "content": f"[steering] {note}"})
-            except Exception as _steer_err:
-                logger.debug(f"Steering drain failed (ignored): {_steer_err}")
+            inject_steering(msgs, steering_drain)
 
         # Variable to store final response for token usage extraction
         _final_llm_response = None
@@ -5794,14 +5788,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             return getattr(cancel_token, "reason", None) or "user"
 
         def _inject_steering(msgs) -> None:
-            if steering_drain is None:
-                return
-            try:
-                for note in (steering_drain() or []):
-                    if note:
-                        msgs.append({"role": "user", "content": f"[steering] {note}"})
-            except Exception as _steer_err:
-                logging.debug(f"Steering drain failed (ignored): {_steer_err}")
+            inject_steering(msgs, steering_drain)
 
         async def _dispatch_tool_batch(dispatch_specs, iteration_index):
             """Run a batch of (function_name, arguments, tool_call_id) dispatches.
@@ -6963,31 +6950,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 return None
 
             def _usage_value(*names: str) -> int:
-                for name in names:
-                    if isinstance(usage, dict):
-                        value = usage.get(name)
-                    else:
-                        value = getattr(usage, name, None)
-                    if value is not None:
-                        return int(value or 0)
-                return 0
+                return usage_value(usage, *names)
 
-            def _detail_value(detail_names: tuple[str, ...], name: str) -> int:
-                for detail_name in detail_names:
-                    details = (
-                        usage.get(detail_name)
-                        if isinstance(usage, dict)
-                        else getattr(usage, detail_name, None)
-                    )
-                    if details:
-                        value = (
-                            details.get(name)
-                            if isinstance(details, dict)
-                            else getattr(details, name, None)
-                        )
-                        if value is not None:
-                            return int(value or 0)
-                return 0
+            def _detail_value(detail_names: tuple, name: str) -> int:
+                return usage_detail(usage, detail_names, name)
 
             # Extract token counts
             metrics = TokenMetrics(
@@ -7115,15 +7081,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # instead of prompt_tokens/completion_tokens, so accept both spellings
             # (mirroring _track_token_usage) to avoid returning zero counts.
             def _usage_value(*names: str) -> int:
-                for name in names:
-                    value = (
-                        usage.get(name)
-                        if isinstance(usage, dict)
-                        else getattr(usage, name, None)
-                    )
-                    if value is not None:
-                        return int(value or 0)
-                return 0
+                return usage_value(usage, *names)
 
             return TokenUsage(
                 prompt_tokens=_usage_value("prompt_tokens", "input_tokens"),
@@ -8586,23 +8544,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """True when tool-call arguments could not be parsed (vs. legitimately empty)."""
         return arguments is _TOOL_ARGUMENTS_PARSE_FAILED
 
-    @staticmethod
-    def _tool_parse_error_message(function_name: str, tool_call_id: str) -> Dict[str, str]:
-        """Build a tool-role message telling the model its arguments were lost.
-
-        Surfacing this instead of dispatching with {} converts a silent
-        wrong-action-reported-as-success into a visible, retryable error.
-        """
-        return {
-            "role": "tool",
-            "tool_call_id": tool_call_id,
-            "content": (
-                f"Error: arguments for tool '{function_name}' could not be parsed "
-                f"(the argument string was invalid or truncated). "
-                f"The tool was NOT executed. Please re-emit the tool call with "
-                f"complete, valid JSON arguments."
-            ),
-        }
+    _tool_parse_error_message = staticmethod(tool_parse_error_message)
 
     # Response without tool calls
     def response(
