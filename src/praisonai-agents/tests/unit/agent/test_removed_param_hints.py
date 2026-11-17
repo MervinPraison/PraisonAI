@@ -53,6 +53,14 @@ def test_model_dict_carries_temperature_and_max_tokens():
     assert (agent.llm_instance.temperature, agent.llm_instance.max_tokens) == (0.2, 50)
 
 
+def test_web_search_hint_replacement_is_accepted_on_non_claude_model():
+    # The advertised replacement must construct; fetch defaults True and is Claude-only.
+    with pytest.raises(TypeError) as err:
+        Agent(name="a", instructions="x", web_search=True)
+    assert "WebConfig(search=True, fetch=False)" in str(err.value)
+    Agent(name="a", instructions="x", model="gpt-4o-mini", web=WebConfig(search=True, fetch=False))
+
+
 def test_unhinted_unknown_param_still_raises_plainly():
     with pytest.raises(TypeError, match="not_a_real_param"):
         Agent(name="a", instructions="x", not_a_real_param=1)

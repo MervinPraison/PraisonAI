@@ -927,7 +927,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 "min_reflect": "moved into reflection=; use reflection=ReflectionConfig(min_iterations=...).",
                 "system_template": "moved into templates=; use templates=TemplateConfig(system=...).",
                 "cache": "moved into caching=; use caching=True or False (or caching=CachingConfig(enabled=...)).",
-                "web_search": "moved into web=; use web=True (or web=WebConfig(search=True)).",
+                "web_search": "moved into web=; use web=True (or web=WebConfig(search=True, fetch=False)).",
                 "max_iter": "moved into execution=; use execution=ExecutionConfig(max_iter=...).",
                 "temperature": (
                     "set it on the model; use model={'model': 'gpt-4o-mini', 'temperature': ...} "
