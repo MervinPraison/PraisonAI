@@ -194,12 +194,16 @@ def artifact_load(
         import json
         from pathlib import Path
         
-        meta_path = artifact_path.replace(".artifact", ".meta.json")
+        # Confine the path to the store before reading its sidecar metadata.
+        p = Path(artifact_path)
+        validate = getattr(_artifact_store, "_validate_artifact_path", None)
+        if validate is not None:
+            p = validate(p)
         meta = {}
         try:
-            p = Path(meta_path)
-            if p.exists():
-                meta = json.loads(p.read_text())
+            meta_path = p.with_suffix(".meta.json")
+            if p.suffix == ".artifact" and meta_path.exists():
+                meta = json.loads(meta_path.read_text())
         except Exception:
             pass
         
