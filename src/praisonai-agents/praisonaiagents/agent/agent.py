@@ -4928,10 +4928,14 @@ Summary:"""
                     return _timed_out
                 
                 if response is None:
-                    # chat()/achat() return None when the model call failed; that
-                    # is not an answer (F-21). The error is on _last_error.
-                    _err = str(getattr(self, "_last_error", None) or "the model call failed")
-                    return AutonomyResult(
+                    # chat()/achat() return None when the model call failed (error on
+                    # _last_error) or a BEFORE_AGENT hook blocked the turn; neither is
+                    # an answer (F-21). A spend cap hit first keeps its budget result.
+                    _err = str(getattr(self, "_last_error", None) or "the turn produced no response")
+                    return self._autonomy_budget_result(
+                        iterations, stage, actions_taken, start_time, started_at,
+                        "", spend_baseline
+                    ) or AutonomyResult(
                         success=False,
                         output=_err,
                         completion_reason="error",
@@ -5473,10 +5477,14 @@ Summary:"""
                     return _timed_out
                 
                 if response is None:
-                    # chat()/achat() return None when the model call failed; that
-                    # is not an answer (F-21). The error is on _last_error.
-                    _err = str(getattr(self, "_last_error", None) or "the model call failed")
-                    return AutonomyResult(
+                    # chat()/achat() return None when the model call failed (error on
+                    # _last_error) or a BEFORE_AGENT hook blocked the turn; neither is
+                    # an answer (F-21). A spend cap hit first keeps its budget result.
+                    _err = str(getattr(self, "_last_error", None) or "the turn produced no response")
+                    return self._autonomy_budget_result(
+                        iterations, stage, actions_taken, start_time, started_at,
+                        "", spend_baseline
+                    ) or AutonomyResult(
                         success=False,
                         output=_err,
                         completion_reason="error",
