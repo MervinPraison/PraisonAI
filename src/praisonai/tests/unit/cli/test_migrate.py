@@ -351,11 +351,9 @@ class TestCLIIntegration:
             
             # Stub the agent flow: this checks the CLI wiring, and a live LLM
             # call here took 17-90 s against a blocked network.
-            import importlib
             from unittest import mock
-            # The handler imports ``.migration_flow`` relative to its own module.
-            migration_flow = importlib.import_module(
-                handle_migrate_command.__module__.rsplit(".", 1)[0] + ".migration_flow")
+            # The same module object the handler's relative import resolves to.
+            from praisonai.cli.features import migration_flow
             seen = {}
 
             def fake_run(flow):
