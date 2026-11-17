@@ -2516,7 +2516,10 @@ Your Role: {self.role}"""
         to a server ``Retry-After``. ``retry=False`` turns retries off.
         """
         cfg = getattr(self, '_retry_config', None)
-        if cfg is None or not classification.is_retryable or retry_depth >= cfg.max_retries:
+        # A context overflow is only fixed by compression: resending the same
+        # messages fails the same way, so it is not retried here.
+        if (cfg is None or not classification.is_retryable or classification.should_compress_context
+                or retry_depth >= cfg.max_retries):
             return None
         from .retry_utils import jittered_backoff
         from ..llm.error_classifier import extract_retry_after
@@ -3187,7 +3190,9 @@ Your Role: {self.role}"""
             str(exc),
             model_name=model_name,
             agent_id=self.name,
-            is_retryable=classification.is_retryable,
+            # As on sync (``_retry_delay``): an overflow compression did not fix
+            # would fail the same way, so the retry loop must not resend it.
+            is_retryable=classification.is_retryable and not classification.should_compress_context,
             context={
                 "session_id": session_id,
                 "error_category": classification.error_category,

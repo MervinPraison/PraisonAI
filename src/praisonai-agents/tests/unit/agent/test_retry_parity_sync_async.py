@@ -38,8 +38,13 @@ class _Handler(BaseHTTPRequestHandler):
         HITS.append(time.monotonic())
         if STATE["kind"] == "timeout":
             time.sleep(1.5)  # past OPENAI_TIMEOUT
-        code = 429 if STATE["kind"] == "429" else 500
-        body = json.dumps({"error": {"message": f"stub {code}", "type": "server_error", "code": str(code)}}).encode()
+        if STATE["kind"] == "overflow":
+            code, err = 400, {"message": "This model's maximum context length is 8192 tokens.",
+                              "type": "invalid_request_error", "code": "context_length_exceeded"}
+        else:
+            code = 429 if STATE["kind"] == "429" else 500
+            err = {"message": f"stub {code}", "type": "server_error", "code": str(code)}
+        body = json.dumps({"error": err}).encode()
         try:
             self.send_response(code)
             self.send_header("content-type", "application/json")
@@ -95,3 +100,14 @@ def test_retry_false_makes_one_attempt(stub, mode, kind):
     result, _, _ = _turn(mode, retry=False)
     assert result is None
     assert len(HITS) == 1
+
+
+
+def test_context_overflow_is_not_resent_unchanged(stub):
+    # Only compression fixes an overflow: its own restarts (bounded by
+    # max_retries) still run, but the backoff layer must not also resend the
+    # same messages (7 requests instead of 3 before the fix).
+    STATE["kind"] = "overflow"
+    result, _, agent = _turn("chat", retry=FAST_RETRY)
+    assert result is None and agent._last_error is not None
+    assert len(HITS) <= 1 + FAST_RETRY["max_retries"]
