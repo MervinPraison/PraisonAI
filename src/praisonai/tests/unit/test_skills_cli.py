@@ -17,6 +17,16 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 
+@pytest.fixture(autouse=True)
+def _no_live_ai(monkeypatch):
+    """create_skill() defaults to use_ai=True and calls a model whenever one of
+    these keys is set. In CI a key is set but the network is blocked, so the
+    call is retried until pytest's 60 s timeout (F-23). Tests that want the AI
+    path mock it and set a key themselves."""
+    for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+
+
 class TestSkillsCreateCommand:
     """Tests for skills create command."""
     
