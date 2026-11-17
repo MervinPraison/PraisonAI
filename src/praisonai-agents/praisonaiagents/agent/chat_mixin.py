@@ -6302,6 +6302,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     active_stream = {"text": "", "after_tools": False}
                     
                     for chunk in completion:
+                        # Azure opens with a content-filter chunk and usage
+                        # chunks carry no choices; skip them, as the follow-up
+                        # loop below does (F-10).
+                        if not chunk.choices:
+                            continue
                         delta = chunk.choices[0].delta
                         
                         # Handle text content
