@@ -461,6 +461,7 @@ def _flow_process(flow: Any) -> str:
 def _flow_graph(flow: Any) -> _Graph:
     return _build_flow(getattr(flow, "steps", None), getattr(flow, "name", None),
                        process=_flow_process(flow))
+flow_graph = _flow_graph  # public name for other PraisonAI packages (G-22); the private name stays
 
 
 # ---------------------------------------------------------------------------
