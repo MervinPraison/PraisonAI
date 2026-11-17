@@ -16,4 +16,5 @@ warnings.filterwarnings("ignore", message=".*Use 'content=<...>' to upload raw b
 warnings.filterwarnings("ignore", message=".*The `dict` method is deprecated.*")
 warnings.filterwarnings("ignore", message=".*Mixing V1 models and V2 models.*")
 warnings.filterwarnings("ignore", message=".*Please upgrade `Settings` to V2.*")
-warnings.filterwarnings("ignore", category=UserWarning, module="pydantic.*")
+# No blanket filter for pydantic UserWarnings: it hid the host application's
+# own model warnings, and an SDK run raises none (X-09).
