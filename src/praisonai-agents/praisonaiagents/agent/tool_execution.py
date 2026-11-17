@@ -222,22 +222,7 @@ def tool_arguments_parse_failed(arguments) -> bool:
     return arguments is _TOOL_ARGUMENTS_PARSE_FAILED
 
 
-def tool_parse_error_message(function_name: str, tool_call_id: str) -> Dict[str, str]:
-    """Build a tool-role message telling the model its arguments were lost.
-
-    Surfacing this instead of dispatching with {} converts a silent
-    wrong-action-reported-as-success into a visible, retryable error.
-    """
-    return {
-        "role": "tool",
-        "tool_call_id": tool_call_id,
-        "content": (
-            f"Error: arguments for tool '{function_name}' could not be parsed "
-            f"(the argument string was invalid or truncated). "
-            f"The tool was NOT executed. Please re-emit the tool call with "
-            f"complete, valid JSON arguments."
-        ),
-    }
+from ..llm._helpers import tool_parse_error_message  # noqa: E402,F401 - re-exported here
 
 
 if TYPE_CHECKING:

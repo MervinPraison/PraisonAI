@@ -39,3 +39,21 @@ def usage_detail(usage: Any, detail_names: tuple, name: str) -> int:
             if value is not None:
                 return int(value or 0)
     return 0
+
+
+def tool_parse_error_message(function_name: str, tool_call_id: str) -> Dict[str, str]:
+    """Build a tool-role message telling the model its arguments were lost.
+
+    Surfacing this instead of dispatching with {} converts a silent
+    wrong-action-reported-as-success into a visible, retryable error.
+    """
+    return {
+        "role": "tool",
+        "tool_call_id": tool_call_id,
+        "content": (
+            f"Error: arguments for tool '{function_name}' could not be parsed "
+            f"(the argument string was invalid or truncated). "
+            f"The tool was NOT executed. Please re-emit the tool call with "
+            f"complete, valid JSON arguments."
+        ),
+    }
