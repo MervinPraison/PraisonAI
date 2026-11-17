@@ -6510,7 +6510,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # follow-up model call, as the sync loop does (F-14).
                     if _is_cancelled():
                         reason = _cancel_reason()
-                        logging.debug(f"Async LLM tool loop cancelled after tool dispatch: {reason}")
+                        logger.debug(f"Async LLM tool loop cancelled after tool dispatch: {reason}")
                         return _prepare_return_value(f"Task interrupted: {reason}")
                     
                     # If no special handling was needed
