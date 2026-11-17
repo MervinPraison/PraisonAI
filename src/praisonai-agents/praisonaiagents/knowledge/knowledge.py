@@ -752,7 +752,7 @@ class Knowledge:
                                 else:
                                     # Log warning for unexpected types but don't break
                                     import logging
-                                    logging.warning(f"Unexpected memory_result type: {type(memory_result)}, skipping")
+                                    logger.warning(f"Unexpected memory_result type: {type(memory_result)}, skipping")
                             progress.advance(store_task)
                         else:
                             # store() catches embedding/persistence exceptions and
