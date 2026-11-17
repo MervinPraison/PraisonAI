@@ -20,7 +20,7 @@ import json
 import base64
 from dotenv import load_dotenv
 from qdrant_client import QdrantClient
-from praisonaiagents import Agent, Task, AgentTeam, Memory, MemoryConfig, OutputConfig
+from praisonaiagents import Agent, Task, AgentTeam, Memory, OutputConfig
 
 # Load environment variables from .env.local
 if not load_dotenv(dotenv_path=".env.local"):
@@ -164,7 +164,7 @@ manager_agent = Agent(
     tools=[],
     llm="gpt-4o-mini",
     output=OutputConfig(markdown=True),
-    memory=MemoryConfig(config={"short_term": {"target_domain": domain}, "long_term": qdrant_client}),
+    memory=True,
 )
 
 tool_agent = Agent(
@@ -187,7 +187,7 @@ tool_agent = Agent(
     tools=domain_tools,  # Use domain-aware tools
     llm="gpt-4o-mini",
     output=OutputConfig(markdown=True),
-    memory=MemoryConfig(config={"short_term": {"target_domain": domain}, "long_term": qdrant_client}),
+    memory=True,
 )
 
 sr_pentester_agent = Agent(
@@ -209,7 +209,7 @@ sr_pentester_agent = Agent(
     tools=[],
     llm="gpt-4o-mini",
     output=OutputConfig(markdown=True),
-    memory=MemoryConfig(config={"short_term": {"target_domain": domain}, "long_term": qdrant_client}),
+    memory=True,
 )
 
 ciso_agent = Agent(
@@ -231,7 +231,7 @@ ciso_agent = Agent(
     tools=[],
     llm="gpt-4o-mini",
     output=OutputConfig(markdown=True),
-    memory=MemoryConfig(config={"short_term": {"target_domain": domain}, "long_term": qdrant_client}),
+    memory=True,
 )
 
 # SOLUTION 3: Tasks with Domain Context Parameter

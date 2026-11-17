@@ -47,11 +47,9 @@ def example_agent_with_knowledge():
         instructions="You are a helpful assistant with knowledge about AI.",
         knowledge=KnowledgeConfig(
             sources=["AI agents can use tools to accomplish tasks."],
-            config={
-                "embedder": {
-                    "provider": "openai",
-                    "config": {"model": "text-embedding-3-small"}
-                }
+            embedder_config={
+                "provider": "openai",
+                "config": {"model": "text-embedding-3-small"},
             },
         ),
     )
@@ -72,7 +70,12 @@ def example_agent_with_memory():
     
     agent = Agent(
         instructions="You are a helpful assistant that remembers conversations.",
-        memory=MemoryConfig(config={"embedding_model": "text-embedding-3-small"}),
+        # The file backend has no embeddings; chroma is the semantic one.
+        memory=MemoryConfig(
+            backend="chroma",
+            config={"embedder": {"provider": "openai",
+                                 "config": {"model": "text-embedding-3-small"}}},
+        ),
     )
     
     # The agent uses embeddings internally for memory storage/retrieval
