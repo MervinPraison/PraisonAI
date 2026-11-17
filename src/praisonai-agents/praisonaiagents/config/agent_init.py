@@ -16,6 +16,7 @@ from .._logging import get_logger
 
 from .feature_configs import CachingConfig, LearnConfig, MemoryConfig, PlanningConfig, ReflectionConfig, TemplateConfig
 from .feature_configs import CachingConfig, MemoryConfig, PlanningConfig, ReflectionConfig, TemplateConfig
+from .feature_configs import CachingConfig, KnowledgeConfig, PlanningConfig, ReflectionConfig, TemplateConfig
 from .param_resolver import ArrayMode, resolve
 from .presets import CACHING_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS, WEB_PRESETS
 from .parse_utils import canonical_preset_key
@@ -446,3 +447,108 @@ def resolve_agent_memory(memory: Any) -> Any:
         array_mode=ArrayMode.SINGLE_OR_LIST,
         default=None,
     )
+
+
+def resolve_agent_knowledge(knowledge: Any, user_retrieval_config: Any
+                            ) -> Tuple[Any, Any, Any, Optional[Dict[str, Any]]]:
+    """``knowledge=`` -> ``(config, knowledge, retrieval_config, embedder_config)``.
+
+    ``knowledge`` comes back as what Agent hands to Knowledge: the sources
+    list, a live instance, or ``None``. ``retrieval_config`` is the dict
+    derived from a ``KnowledgeConfig`` with ``user_retrieval_config``
+    (``Agent(retrieval_config=)``) merged on top.
+    """
+    retrieval_config = None
+    embedder_config = None
+    
+    # Fast path: None/False -> no knowledge (skip resolve() call)
+    if knowledge is None or knowledge is False:
+        _knowledge_config = None
+    elif knowledge is True:
+        _knowledge_config = KnowledgeConfig()
+    elif isinstance(knowledge, KnowledgeConfig):
+        _knowledge_config = knowledge
+    elif isinstance(knowledge, list):
+        _knowledge_config = KnowledgeConfig(sources=knowledge)
+    elif hasattr(knowledge, 'search') and hasattr(knowledge, 'add'):
+        _knowledge_config = knowledge  # Knowledge instance passthrough
+    else:
+        _knowledge_config = resolve(
+            value=knowledge,
+            param_name="knowledge",
+            config_class=KnowledgeConfig,
+            instance_check=lambda v: hasattr(v, 'search') and hasattr(v, 'add'),
+            array_mode=ArrayMode.SOURCES_WITH_CONFIG,
+            string_mode="path_as_source",
+            default=None,
+        )
+    
+    if _knowledge_config is not None:
+        if hasattr(_knowledge_config, 'search') and hasattr(_knowledge_config, 'add'):
+            # Knowledge instance - pass through
+            knowledge = _knowledge_config
+        elif isinstance(_knowledge_config, KnowledgeConfig):
+            embedder_config = _knowledge_config.embedder_config
+            # Every declared field is forwarded. Previously only top_k /
+            # rerank survived: 'threshold' was spelled 'min_score' by
+            # RetrievalConfig.from_dict, 'rerank_model' had no field at
+            # all, and chunking + vector_store were never forwarded, so
+            # those settings were silently inert.
+            _chunker = _knowledge_config.chunker or {}
+            _strategy = _knowledge_config.chunking_strategy
+            _strategy = getattr(_strategy, 'value', _strategy)
+            _vector_store = _knowledge_config.vector_store or {}
+            retrieval_config = {
+                'enabled': _knowledge_config.auto_retrieve,
+                'top_k': _knowledge_config.retrieval_k,
+                'min_score': _knowledge_config.retrieval_threshold,
+                'rerank': _knowledge_config.rerank,
+                'rerank_model': _knowledge_config.rerank_model,
+                'chunking_strategy': _chunker.get('type', _strategy),
+                'chunk_size': _chunker.get('chunk_size', _knowledge_config.chunk_size),
+                'chunk_overlap': _chunker.get(
+                    'chunk_overlap', _knowledge_config.chunk_overlap),
+            }
+            if _vector_store:
+                _vs = dict(_vector_store)
+                _vs_provider = _vs.pop('provider', None)
+                if _vs_provider:
+                    retrieval_config['vector_store_provider'] = _vs_provider
+                _vs_inner = _vs.pop('config', None)
+                if isinstance(_vs_inner, dict):
+                    _vs.update(_vs_inner)
+                if 'collection_name' in _vs:
+                    retrieval_config['collection_name'] = _vs.pop('collection_name')
+                if 'path' in _vs:
+                    retrieval_config['persist_path'] = _vs.pop('path')
+                if _vs:
+                    retrieval_config['vector_store_config'] = _vs
+            # Forward embedder settings so they reach Knowledge (mem0).
+            # embedder is a provider shorthand (e.g. "gemini"); embedder_config
+            # is the full mem0 embedder dict. Only override when explicitly set.
+            if _knowledge_config.embedder and _knowledge_config.embedder != "openai":
+                retrieval_config.setdefault('embedder_provider', _knowledge_config.embedder)
+            if _knowledge_config.embedder_config:
+                retrieval_config.setdefault('embedder_config', _knowledge_config.embedder_config)
+            # `config=` is an escape hatch for keys the dataclass does not
+            # model. It now overrides the resolved values instead of
+            # replacing the whole dict, which silently reset retrieval_k.
+            if _knowledge_config.config:
+                retrieval_config.update(_knowledge_config.config)
+            knowledge = _knowledge_config.sources if _knowledge_config.sources else None
+        elif isinstance(_knowledge_config, list):
+            knowledge = _knowledge_config
+    elif knowledge is False:
+        knowledge = None
+
+    # Explicit retrieval_config= (the RAG tuning surface shown in the docs
+    # and docstring examples) is merged on top of whatever the knowledge=
+    # param derived. A dict overrides the derived keys; a RetrievalConfig
+    # instance (or when no knowledge= was given) replaces it wholesale so
+    # the downstream RetrievalConfig resolver (in Agent.__init__) receives it unchanged.
+    if user_retrieval_config is not None:
+        if isinstance(user_retrieval_config, dict) and isinstance(retrieval_config, dict):
+            retrieval_config.update(user_retrieval_config)
+        else:
+            retrieval_config = user_retrieval_config
+    return _knowledge_config, knowledge, retrieval_config, embedder_config
