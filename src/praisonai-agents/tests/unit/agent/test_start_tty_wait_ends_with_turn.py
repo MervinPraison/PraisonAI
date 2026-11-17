@@ -49,6 +49,7 @@ def stub(monkeypatch, tmp_path):
     monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
     yield
     server.shutdown()
+    server.server_close()
 
 
 def test_terminal_turn_does_not_poll_with_sleep(stub, monkeypatch):
