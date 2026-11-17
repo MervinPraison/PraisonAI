@@ -35,7 +35,12 @@ def test_tavily_preset_uses_tavily_when_available(monkeypatch):
     assert "tavily_search" in names and "internet_search" not in names
 
 
-def test_tavily_without_key_keeps_duckduckgo_and_says_why(caplog):
+def test_tavily_without_key_keeps_duckduckgo_and_says_why(monkeypatch, caplog):
+    # Report the package as installed so the real key check runs whether or
+    # not tavily-python is present in this environment.
+    real_find_spec = tavily_tools.util.find_spec
+    monkeypatch.setattr(tavily_tools.util, "find_spec",
+                        lambda name, *a: object() if name == "tavily" else real_find_spec(name, *a))
     with caplog.at_level(logging.WARNING):
         names = _tool_names(web="tavily")
     assert names.count("internet_search") == 1
