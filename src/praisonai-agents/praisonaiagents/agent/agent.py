@@ -141,6 +141,7 @@ from ..config.feature_configs import (
 # Already loaded by the imports above; hoisted so __init__ does not pay a
 # function-local relative import per construction (#5835).
 from ..config.parse_utils import canonical_preset_key, validate_preset_string
+from ..config.agent_init import resolve_agent_caching
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
 # Single source of truth defined in config.feature_configs and imported here
@@ -1359,30 +1360,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # ─────────────────────────────────────────────────────────────────────
         # Resolve CACHING param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        # Fast path: None -> default caching, False -> disabled
-        if caching is None:
-            _caching_config = CachingConfig()
-        elif caching is False:
-            _caching_config = None
-        elif caching is True:
-            _caching_config = CachingConfig()
-        elif isinstance(caching, CachingConfig):
-            _caching_config = caching
-        else:
-            _caching_config = resolve(
-                value=caching,
-                param_name="caching",
-                config_class=CachingConfig,
-                presets=CACHING_PRESETS,
-                default=CachingConfig(),
-            )
-        if _caching_config:
-            cache = _caching_config.enabled
-            prompt_caching = _caching_config.prompt_caching
-        elif caching is False:
-            cache, prompt_caching = False, None
-        else:
-            cache, prompt_caching = True, None
+        # None/True -> default caching, False -> disabled (config.agent_init)
+        _caching_config, cache, prompt_caching = resolve_agent_caching(caching)
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve HOOKS param - FAST PATH
