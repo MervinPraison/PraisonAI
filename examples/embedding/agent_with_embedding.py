@@ -11,7 +11,7 @@ Embeddings are used internally by Agent for:
 You can also use the embedding API directly for custom use cases.
 """
 
-from praisonaiagents import Agent, embedding
+from praisonaiagents import Agent, KnowledgeConfig, MemoryConfig, embedding
 
 # =============================================================================
 # Example 1: Direct Embedding API
@@ -45,13 +45,13 @@ def example_agent_with_knowledge():
     
     agent = Agent(
         instructions="You are a helpful assistant with knowledge about AI.",
-        knowledge=["AI agents can use tools to accomplish tasks."],
-        knowledge_config={
-            "embedder": {
+        knowledge=KnowledgeConfig(
+            sources=["AI agents can use tools to accomplish tasks."],
+            embedder_config={
                 "provider": "openai",
-                "config": {"model": "text-embedding-3-small"}
-            }
-        }
+                "config": {"model": "text-embedding-3-small"},
+            },
+        ),
     )
     
     # The agent uses embeddings internally for knowledge retrieval
@@ -70,10 +70,12 @@ def example_agent_with_memory():
     
     agent = Agent(
         instructions="You are a helpful assistant that remembers conversations.",
-        memory=True,
-        memory_config={
-            "embedding_model": "text-embedding-3-small"
-        }
+        # The file backend has no embeddings; chroma is the semantic one.
+        memory=MemoryConfig(
+            backend="chroma",
+            config={"embedder": {"provider": "openai",
+                                 "config": {"model": "text-embedding-3-small"}}},
+        ),
     )
     
     # The agent uses embeddings internally for memory storage/retrieval

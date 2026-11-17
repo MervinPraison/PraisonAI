@@ -42,7 +42,7 @@ agent = Agent(
     ],
     memory=True,
     web=True,
-    auto_approve_tools=True,
+    approval=True,  # auto-approve tool calls
 )
 
 # Create Linear bot

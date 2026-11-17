@@ -75,7 +75,7 @@ def initialize_agent():
                 Always be polite and provide comprehensive information about properties.""",
                 llm=llm_model,
                 tools=mcp_tools,
-                verbose=debug_mode
+                output="verbose" if debug_mode else None
             )
             
             return agent, None
