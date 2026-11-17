@@ -17,6 +17,8 @@ from typing import Any, Optional
 
 from ._litellm_loader import get_litellm
 
+logger = logging.getLogger(__name__)
+
 
 def _get_litellm():
     """
@@ -26,7 +28,7 @@ def _get_litellm():
     Caches the result to avoid repeated import attempts.
     """
     return get_litellm(
-        on_missing=lambda: logging.debug(
+        on_missing=lambda: logger.debug(
             "litellm not available for cost calculation"
         )
     )
@@ -102,7 +104,7 @@ def calculate_cost(
         return cost
         
     except Exception as e:
-        logging.debug(f"Cost calculation failed: {e}")
+        logger.debug(f"Cost calculation failed: {e}")
         return None
 
 
