@@ -430,6 +430,30 @@ def test_warm_runtime_publishes_session_events():
     assert done["result"] == "echo: hello"
 
 
+def _record_subscriptions(monkeypatch, server_mod):
+    """Return a dict of session id -> threading.Event set when a client subscribes.
+
+    The attach tests used a fixed sleep before starting the run; when the SSE
+    subscription took longer, ``run.start`` was published to nobody and the
+    test failed intermittently (seen on main and in CI).
+    """
+    seen = {}
+    real = server_mod.SessionEventHub.subscribe
+
+    def subscribe(self, session_id):
+        q = real(self, session_id)
+        seen.setdefault(session_id, threading.Event()).set()
+        return q
+
+    monkeypatch.setattr(server_mod.SessionEventHub, "subscribe", subscribe)
+    return seen
+
+
+def _wait_subscribed(seen, session_id, timeout=5.0):
+    event = seen.setdefault(session_id, threading.Event())
+    assert event.wait(timeout), f"attach client never subscribed to {session_id!r}"
+
+
 def test_attach_streams_live_session_events(monkeypatch):
     """End-to-end: a run with session_id is observable via client.attach()."""
     from praisonai.runtime import server as server_mod
@@ -446,6 +470,7 @@ def test_attach_streams_live_session_events(monkeypatch):
     import praisonaiagents
 
     monkeypatch.setattr(praisonaiagents, "Agent", _SlowAgent, raising=False)
+    subscribed = _record_subscriptions(monkeypatch, server_mod)
 
     t = threading.Thread(
         target=server_mod.serve_runtime,
@@ -474,7 +499,7 @@ def test_attach_streams_live_session_events(monkeypatch):
 
         watcher = threading.Thread(target=_collect, daemon=True)
         watcher.start()
-        time.sleep(0.1)  # let the SSE stream connect
+        _wait_subscribed(subscribed, "sess-live")
 
         result = client.run("ping", session_id="sess-live")
         assert result == "done: ping"
@@ -507,6 +532,7 @@ def test_attach_session_id_with_reserved_chars_round_trips(monkeypatch):
     import praisonaiagents
 
     monkeypatch.setattr(praisonaiagents, "Agent", _SlowAgent, raising=False)
+    subscribed = _record_subscriptions(monkeypatch, server_mod)
 
     t = threading.Thread(
         target=server_mod.serve_runtime,
@@ -536,7 +562,7 @@ def test_attach_session_id_with_reserved_chars_round_trips(monkeypatch):
 
         watcher = threading.Thread(target=_collect, daemon=True)
         watcher.start()
-        time.sleep(0.1)
+        _wait_subscribed(subscribed, session)
 
         result = client.run("ping", session_id=session)
         assert result == "done: ping"
