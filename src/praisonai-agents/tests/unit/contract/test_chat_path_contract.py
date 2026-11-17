@@ -199,8 +199,6 @@ F07 = _drift("F-07", "OpenAI-client tool loop records usage for one of the two m
 F08 = _drift("F-08", "start(stream=True) records no token usage or cost on any route", ("stream", "*"))
 F09 = _drift("F-09", "start(stream=True) ignores cancel_token", ("stream", "*"))
 F09_TOOL = _drift("F-09", "start(stream=True) ignores cancel_token", ("stream", "openai_client"))
-F10 = _drift("F-10", "OpenAI-client stream fails on a chunk with no choices and resends the turn unstreamed",
-             ("stream", "openai_client"))
 F11 = _drift("F-11", "OpenAI-client stream emits no llm_request/llm_response trace events",
              ("stream", "openai_client"))
 F13 = _drift("F-13", "OpenAI-client stream tool step does not register a deferred result",
@@ -269,8 +267,7 @@ def test_tool_round_costs_two_model_calls(stub, mode, route):
     assert len(REQUESTS) == 2, [p for p, _ in REQUESTS]
 
 
-@pytest.mark.parametrize("route", [pytest.param(r, marks=[pytest.mark.xfail(strict=True, reason=f"F-10: {F10[1]}")]
-                                                 if r == "openai_client" else [], id=r) for r in ROUTES])
+@pytest.mark.parametrize("route", ROUTES)
 def test_stream_survives_a_chunk_without_choices(stub, route):
     """Azure OpenAI opens a stream with a content-filter chunk that has ``choices: []``."""
     STATE["filter_chunk"] = True
