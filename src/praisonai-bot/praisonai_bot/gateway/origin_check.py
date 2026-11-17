@@ -11,6 +11,9 @@ from __future__ import annotations
 
 from typing import List, Optional
 
+# One implementation, in core (G-21); re-exported so old imports keep working.
+from praisonaiagents.gateway.protocols import is_loopback  # noqa: F401
+
 
 def check_origin(origin: Optional[str], allowed_origins: List[str], bind_host: str) -> bool:
     """Check if the WebSocket origin is allowed.
@@ -44,9 +47,6 @@ def check_origin(origin: Optional[str], allowed_origins: List[str], bind_host: s
     # Check if origin is in the allowlist or wildcard is present
     return origin in allowed_origins or "*" in allowed_origins
 
-
-# One implementation, in core (G-21); re-exported so old imports keep working.
-from praisonaiagents.gateway.protocols import is_loopback  # noqa: E402,F401
 
 class GatewayStartupError(Exception):
     """Raised when gateway cannot start due to configuration issues."""
