@@ -166,3 +166,8 @@ class DecisionTriageRouter:
 
     def start(self, prompt: str, **extra_state: Any) -> dict[str, Any]:
         return triaged_start(prompt, self.plan, extra_state=extra_state or None)
+
+
+# ``Protocol``-suffixed names (G-26, the project naming rule). The original
+# names stay and are the same class, so existing imports keep working.
+AgentLikeProtocol = AgentLike

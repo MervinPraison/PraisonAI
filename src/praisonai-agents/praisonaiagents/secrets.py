@@ -34,6 +34,7 @@ __all__ = [
     "SecretInput",
     "SecretResolution",
     "SecretResolver",
+    "SecretResolverProtocol",
     "DefaultSecretResolver",
     "resolve_secret",
     "register_resolver",
@@ -41,6 +42,7 @@ __all__ = [
     "redact_secrets",
     "redact_outbound",
     "OutboundRedactor",
+    "OutboundRedactorProtocol",
     "is_secret_ref",
     "sentinelize",
     "desentinelize",
@@ -496,3 +498,9 @@ class EgressGuardProtocol(Protocol):
     def sentinel_for(self, ref: "SecretRef") -> str: ...
 
     def allow_egress(self, host: str, ref: "SecretRef") -> bool: ...
+
+
+# ``Protocol``-suffixed names (G-26, the project naming rule). The original
+# names stay and are the same class, so existing imports keep working.
+SecretResolverProtocol = SecretResolver
+OutboundRedactorProtocol = OutboundRedactor
