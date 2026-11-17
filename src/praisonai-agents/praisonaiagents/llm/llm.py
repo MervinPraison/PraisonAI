@@ -1264,6 +1264,10 @@ Respond with ONLY a valid JSON tool call in this format:
         """Name the endpoint that refused the connection and how to start it."""
         model = str(self.model or "")
         url = self.base_url or ("http://localhost:11434" if model.startswith("ollama") else None)
+        if url and "@" in url:  # never log credentials embedded in the URL
+            from urllib.parse import urlsplit
+            parts = urlsplit(url)
+            url = parts._replace(netloc=parts.netloc.rsplit("@", 1)[-1]).geturl()
         start = "run `ollama serve`" if model.startswith("ollama") or ":11434" in (url or "") else "start the server"
         logging.warning(
             f"Could not connect to {url or 'the model endpoint'} for {model!r}: connection refused. "
@@ -1305,6 +1309,9 @@ Respond with ONLY a valid JSON tool call in this format:
         # error (X-07, as on the OpenAI-client path). Say where and what to run.
         from .error_classifier import _is_connection_refused
         if _is_connection_refused(error):
+            # Another auth profile may point at a server that is up: rotate to it.
+            if self._failover_manager and attempt <= max_retries:
+                return FailoverDecision(action="rotate_profile", reason=error_kind, backoff_ms=0, is_retryable=True)
             self._warn_connection_refused()
             return FailoverDecision(action="surface_error", reason=error_kind, is_retryable=False)
 
