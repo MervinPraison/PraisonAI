@@ -24,6 +24,8 @@ from praisonaiagents._logging import get_logger
 import os
 from importlib import util
 
+logger = logging.getLogger(__name__)
+
 def _check_exa_available() -> tuple[bool, Optional[str]]:
     """Check if Exa is available and API key is set.
     
@@ -511,7 +513,7 @@ def exa_search(
     """
     is_available, error = _check_exa_available()
     if not is_available:
-        logging.error(error)
+        logger.error(error)
         return {"error": error}
     
     tools = ExaTools()
@@ -556,7 +558,7 @@ def exa_search_contents(
     """
     is_available, error = _check_exa_available()
     if not is_available:
-        logging.error(error)
+        logger.error(error)
         return {"error": error}
     
     tools = ExaTools()
@@ -593,7 +595,7 @@ def exa_find_similar(
     """
     is_available, error = _check_exa_available()
     if not is_available:
-        logging.error(error)
+        logger.error(error)
         return {"error": error}
     
     tools = ExaTools()
@@ -623,7 +625,7 @@ def exa_answer(
     """
     is_available, error = _check_exa_available()
     if not is_available:
-        logging.error(error)
+        logger.error(error)
         return {"error": error}
     
     tools = ExaTools()

@@ -28,6 +28,8 @@ from importlib import util
 
 import warnings
 
+logger = logging.getLogger(__name__)
+
 warnings.warn(
     "praisonaiagents.tools.youdotcom_tools is deprecated and will be removed in a future release; "
     "use praisonai_tools.tools.youdotcom_tool instead (pip install praisonai-tools)",
@@ -141,7 +143,7 @@ class YouTools:
         """
         client, error = self._get_client()
         if error:
-            logging.error(error)
+            logger.error(error)
             return {"error": error}
         
         try:
@@ -173,7 +175,7 @@ class YouTools:
             
         except Exception as e:
             error_msg = f"You.com search error: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {"error": error_msg}
     
     def _convert_response(self, response) -> Dict[str, Any]:
@@ -240,7 +242,7 @@ class YouTools:
         """
         client, error = self._get_client()
         if error:
-            logging.error(error)
+            logger.error(error)
             return {"error": error}
         
         try:
@@ -271,7 +273,7 @@ class YouTools:
             
         except Exception as e:
             error_msg = f"You.com contents error: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {"error": error_msg}
     
     def live_news(
@@ -294,7 +296,7 @@ class YouTools:
         """
         client, error = self._get_client()
         if error:
-            logging.error(error)
+            logger.error(error)
             return {"error": error}
         
         try:
@@ -337,7 +339,7 @@ class YouTools:
             
         except Exception as e:
             error_msg = f"You.com live news error: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {"error": error_msg}
     
     def images(
@@ -359,7 +361,7 @@ class YouTools:
         """
         client, error = self._get_client()
         if error:
-            logging.error(error)
+            logger.error(error)
             return {"error": error}
         
         try:
@@ -392,7 +394,7 @@ class YouTools:
             
         except Exception as e:
             error_msg = f"You.com images error: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {"error": error_msg}
     
     def __enter__(self):

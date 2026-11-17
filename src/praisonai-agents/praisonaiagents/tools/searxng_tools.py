@@ -13,6 +13,8 @@ from typing import List, Dict, Optional
 import logging
 from importlib import util
 
+logger = logging.getLogger(__name__)
+
 def searxng_search(
     query: str, 
     max_results: int = 5,
@@ -32,7 +34,7 @@ def searxng_search(
     # Check if requests is available
     if util.find_spec("requests") is None:
         error_msg = "SearxNG search requires requests package. Install with: pip install requests"
-        logging.error(error_msg)
+        logger.error(error_msg)
         return [{"error": error_msg}]
     
     try:
@@ -43,7 +45,7 @@ def searxng_search(
         url = searxng_url or "http://localhost:32768/search"
         if validate_searxng_url(url) is None:
             error_msg = "SearxNG URL blocked by SSRF policy"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return [{"error": error_msg}]
         
         params = {
@@ -71,19 +73,19 @@ def searxng_search(
         
     except requests.exceptions.ConnectionError:
         error_msg = f"Could not connect to SearxNG at {url}. Ensure SearxNG is running."
-        logging.error(error_msg)
+        logger.error(error_msg)
         return [{"error": error_msg}]
     except requests.exceptions.Timeout:
         error_msg = "SearxNG search request timed out"
-        logging.error(error_msg)
+        logger.error(error_msg)
         return [{"error": error_msg}]
     except requests.exceptions.RequestException as e:
         error_msg = f"SearxNG search request failed: {e}"
-        logging.error(error_msg)
+        logger.error(error_msg)
         return [{"error": error_msg}]
     except (ValueError, KeyError) as e:
         error_msg = f"Error parsing SearxNG response: {e}"
-        logging.error(error_msg)
+        logger.error(error_msg)
         return [{"error": error_msg}]
 
 def searxng(query: str, max_results: int = 5, searxng_url: Optional[str] = None) -> List[Dict]:

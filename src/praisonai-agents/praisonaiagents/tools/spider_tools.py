@@ -22,6 +22,8 @@ import os
 import hashlib
 import time
 
+logger = logging.getLogger(__name__)
+
 
 def _host_is_blocked(hostname: str) -> bool:
     """Return True when hostname resolves to loopback/private/internal targets."""
@@ -142,7 +144,7 @@ class SpiderTools:
         """Get or create requests session with common headers."""
         if util.find_spec('requests') is None:
             error_msg = "requests package is not available. Please install it using: pip install requests"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return None
             
         if self._session is None:
@@ -192,7 +194,7 @@ class SpiderTools:
             # Import BeautifulSoup only when needed
             if util.find_spec('bs4') is None:
                 error_msg = "bs4 package is not available. Please install it using: pip install beautifulsoup4"
-                logging.error(error_msg)
+                logger.error(error_msg)
                 return {"error": error_msg}
             from bs4 import BeautifulSoup
 
@@ -285,7 +287,7 @@ class SpiderTools:
             return result
         except Exception as e:
             error_msg = f"Error scraping {url}: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {"error": error_msg}
 
     def extract_links(
@@ -357,7 +359,7 @@ class SpiderTools:
             return links
         except Exception as e:
             error_msg = f"Error extracting links from {url}: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {"error": error_msg}
 
     def crawl(
@@ -421,7 +423,7 @@ class SpiderTools:
                 )
                 
                 if "error" in result:
-                    logging.warning(f"Error crawling {url}: {result['error']}")
+                    logger.warning(f"Error crawling {url}: {result['error']}")
                     continue
                 
                 # Save result
@@ -456,7 +458,7 @@ class SpiderTools:
             return results
         except Exception as e:
             error_msg = f"Error crawling from {start_url}: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {"error": error_msg}
 
     def extract_text(
@@ -494,7 +496,7 @@ class SpiderTools:
             return result['content']
         except Exception as e:
             error_msg = f"Error extracting text from {url}: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {"error": error_msg}
 
 # Create instance for direct function access
