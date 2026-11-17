@@ -142,7 +142,8 @@ from ..config.feature_configs import (
 # function-local relative import per construction (#5835).
 from ..config.parse_utils import canonical_preset_key, validate_preset_string
 from ..config.agent_init import (
-    resolve_agent_caching, resolve_agent_planning, resolve_agent_reflection, resolve_agent_templates,
+    resolve_agent_caching, resolve_agent_hooks, resolve_agent_planning, resolve_agent_reflection,
+    resolve_agent_templates,
 )
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
@@ -1350,45 +1351,9 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # ─────────────────────────────────────────────────────────────────────
         # Resolve HOOKS param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        _hooks_list = []
-        step_callback = None
-        # Fast path: None -> no hooks (skip resolve() call)
-        if hooks is None:
-            _hooks_config = None
-        elif isinstance(hooks, list):
-            _hooks_config = hooks  # Passthrough list directly
-        elif isinstance(hooks, HooksConfig):
-            _hooks_config = hooks
-        else:
-            _hooks_config = resolve(
-                value=hooks,
-                param_name="hooks",
-                config_class=HooksConfig,
-                array_mode=ArrayMode.PASSTHROUGH,
-                default=None,
-            )
-        # Per-agent event-hook registry (isolates BEFORE_TOOL/AFTER_AGENT/...
-        # hooks so they never fire on unrelated agents sharing the default
-        # registry). A bare HookRegistry passed as ``hooks=`` still works too.
-        _hooks_registry = None
-        if _hooks_config is not None:
-            if isinstance(_hooks_config, list):
-                _hooks_list = _hooks_config
-            elif isinstance(_hooks_config, HooksConfig):
-                step_callback = _hooks_config.on_step
-                _hooks_list = list(_hooks_config.middleware or [])
-                _hooks_registry = getattr(_hooks_config, "registry", None)
-                # Route on_step / on_tool_call onto the SAME middleware chain
-                # that already powers ``hooks=[...]`` (MiddlewareManager). Both
-                # keys used to be stored-and-never-called, so the TypeError that
-                # advertises them ("Valid keys: on_step, on_tool_call,
-                # middleware") promised behaviour that did not exist.
-                if _hooks_config.on_step is not None or _hooks_config.on_tool_call is not None:
-                    from ..hooks.middleware import as_step_hook, as_tool_call_hook
-                    if _hooks_config.on_step is not None:
-                        _hooks_list.append(as_step_hook(_hooks_config.on_step))
-                    if _hooks_config.on_tool_call is not None:
-                        _hooks_list.append(as_tool_call_hook(_hooks_config.on_tool_call))
+        # None -> no hooks; list passthrough; HooksConfig on_step/on_tool_call
+        # join the middleware chain (config.agent_init)
+        _hooks_config, _hooks_list, step_callback, _hooks_registry = resolve_agent_hooks(hooks)
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve SKILLS param - FAST PATH
