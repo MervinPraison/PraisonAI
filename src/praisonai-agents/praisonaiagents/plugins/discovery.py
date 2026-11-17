@@ -66,6 +66,7 @@ def _project_plugins_allowed() -> bool:
         return bool(getattr(get_plugins_config(), "allow_project_plugins", False))
     except Exception:
         return False
+project_plugins_allowed = _project_plugins_allowed  # public name for other PraisonAI packages (G-22); the private name stays
 
 
 def _is_project_local(path: Path) -> bool:
