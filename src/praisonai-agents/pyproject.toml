@@ -8,8 +8,20 @@ version = "1.7.23"
 description = "Open-source Python AI agent framework that runs on your own computers, even fully offline."
 readme = "README.md"
 requires-python = ">=3.10"
+license = {text = "MIT"}
 authors = [
     { name="Mervin Praison" }
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Intended Audience :: Developers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
     "pydantic>=2.10.0",
@@ -25,6 +37,12 @@ dependencies = [
     # only python-dateutil.
     "croniter>=6.0"
 ]
+
+[project.urls]
+Homepage = "https://docs.praison.ai"
+Documentation = "https://docs.praison.ai"
+Repository = "https://github.com/MervinPraison/PraisonAI"
+Issues = "https://github.com/MervinPraison/PraisonAI/issues"
 
 [project.optional-dependencies]
 # Isolated code execution backends (docker, sandlock, ssh, novita, e2b, modal,
