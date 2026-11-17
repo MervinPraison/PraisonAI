@@ -196,7 +196,8 @@ F05 = _drift("F-05", "start(stream=True) on an openai/gpt-4o* model uses Chat Co
              "LLM.get_response_stream has no Responses API branch", ("stream", "litellm_responses"))
 F07 = _drift("F-07", "OpenAI-client tool loop records usage for one of the two model calls",
              ("chat", "openai_client"), ("achat", "openai_client"))
-F08 = _drift("F-08", "start(stream=True) records no token usage or cost on any route", ("stream", "*"))
+F08 = _drift("F-08", "start(stream=True) on the litellm routes records no token usage or cost",
+             ("stream", "litellm_chat"), ("stream", "litellm_responses"))
 F09 = _drift("F-09", "start(stream=True) ignores cancel_token", ("stream", "*"))
 F09_TOOL = _drift("F-09", "start(stream=True) ignores cancel_token", ("stream", "openai_client"))
 F11 = _drift("F-11", "OpenAI-client stream emits no llm_request/llm_response trace events",
