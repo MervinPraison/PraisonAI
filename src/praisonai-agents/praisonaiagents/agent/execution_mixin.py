@@ -1038,7 +1038,7 @@ Write the complete compiled report:"""
                 
                 # Show animated status during LLM call if verbose
                 if self.verbose and is_tty:
-                    from ..main import PRAISON_COLORS, sync_display_callbacks, _callbacks_lock
+                    from ..main import PRAISON_COLORS
                     import time as time_module
                     
                     console = _get_console()()
@@ -1058,11 +1058,9 @@ Write the complete compiled report:"""
                             tools_called.append(tool_name)
                             current_status[0] = f"Calling tool: {tool_name}..."
                     
-                    # Store original callback and register ours (use the module's
-                    # own lock so this doesn't race concurrent verbose agents)
-                    with _callbacks_lock:
-                        original_tool_callback = sync_display_callbacks.get('tool_call')
-                        sync_display_callbacks['tool_call'] = status_tool_callback
+                    # Our status line takes tool_call for this run's thread only
+                    # (main._tool_call_override); the global registry is untouched.
+                    from ..main import _tool_call_override
                     
                     # Animation state
                     result_holder = [None]
@@ -1072,6 +1070,7 @@ Write the complete compiled report:"""
                     original_verbose_chat = self.verbose
                     
                     def run_chat():
+                        _override_token = _tool_call_override.set(status_tool_callback)
                         try:
                             # Suppress verbose during animation - we'll display result ourselves
                             self.verbose = False
@@ -1100,16 +1099,7 @@ Write the complete compiled report:"""
                             error_holder[0] = e
                         finally:
                             self.verbose = original_verbose_chat
-                            # Restore original callback under the lock. The identity
-                            # check guards the entire restore, so we only mutate the
-                            # entry while it's still ours and never clobber a callback
-                            # a concurrent verbose agent has since installed.
-                            with _callbacks_lock:
-                                if sync_display_callbacks.get('tool_call') is status_tool_callback:
-                                    if original_tool_callback:
-                                        sync_display_callbacks['tool_call'] = original_tool_callback
-                                    else:
-                                        del sync_display_callbacks['tool_call']
+                            _tool_call_override.reset(_override_token)
                     
                     # Start chat in background thread
                     # daemon: a Ctrl-C in the display loop must not leave the
