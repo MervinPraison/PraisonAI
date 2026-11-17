@@ -30,7 +30,7 @@ from ..model_harness.guard import check_model_request
 # Gap 2: Tool call execution imports
 from ..tools.call_executor import ToolCall, create_tool_call_executor
 from ..tools.schema import build_tool_definition
-from ._helpers import inject_steering
+from ._helpers import inject_steering, usage_detail, usage_value
 
 logger = get_logger(__name__)
 
@@ -6926,31 +6926,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 return None
 
             def _usage_value(*names: str) -> int:
-                for name in names:
-                    if isinstance(usage, dict):
-                        value = usage.get(name)
-                    else:
-                        value = getattr(usage, name, None)
-                    if value is not None:
-                        return int(value or 0)
-                return 0
+                return usage_value(usage, *names)
 
-            def _detail_value(detail_names: tuple[str, ...], name: str) -> int:
-                for detail_name in detail_names:
-                    details = (
-                        usage.get(detail_name)
-                        if isinstance(usage, dict)
-                        else getattr(usage, detail_name, None)
-                    )
-                    if details:
-                        value = (
-                            details.get(name)
-                            if isinstance(details, dict)
-                            else getattr(details, name, None)
-                        )
-                        if value is not None:
-                            return int(value or 0)
-                return 0
+            def _detail_value(detail_names: tuple, name: str) -> int:
+                return usage_detail(usage, detail_names, name)
 
             # Extract token counts
             metrics = TokenMetrics(
@@ -7078,15 +7057,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # instead of prompt_tokens/completion_tokens, so accept both spellings
             # (mirroring _track_token_usage) to avoid returning zero counts.
             def _usage_value(*names: str) -> int:
-                for name in names:
-                    value = (
-                        usage.get(name)
-                        if isinstance(usage, dict)
-                        else getattr(usage, name, None)
-                    )
-                    if value is not None:
-                        return int(value or 0)
-                return 0
+                return usage_value(usage, *names)
 
             return TokenUsage(
                 prompt_tokens=_usage_value("prompt_tokens", "input_tokens"),
