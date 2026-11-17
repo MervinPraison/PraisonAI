@@ -6159,34 +6159,37 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # of this turn.
                     if _stream_cancel_token is not None:
                         stream_sampling_kwargs['cancel_token'] = _stream_cancel_token
-                    for chunk in self.llm_instance.get_response_stream(
-                        prompt=actual_prompt,
-                        system_prompt=stream_system_prompt,
-                        chat_history=self._history_before_turn(stream_history, normalized_content),
-                        temperature=kwargs.get('temperature', 1.0),
-                        tools=tool_param,
-                        output_json=kwargs.get('output_json'),
-                        output_pydantic=kwargs.get('output_pydantic'),
-                        verbose=False,  # Keep verbose false for streaming
-                        markdown=self.markdown,
-                        agent_name=self.name,
-                        agent_role=self.role,
-                        agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tool_param or [])],
-                        task_name=kwargs.get('task_name'),
-                        task_description=kwargs.get('task_description'),
-                        task_id=kwargs.get('task_id'),
-                        execute_tool_fn=self._durable_sync_tool_executor(
-                            self.execute_tool
-                        ),
-                        parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
-                        max_tool_calls_per_turn=self._resolve_max_tool_calls(),
-                        **stream_sampling_kwargs
-                    ):
-                        response_content += chunk
-                        # Flush the growing partial turn so an interrupt mid
-                        # stream retains it in the store (Issue #5407, debounced).
-                        self._persist_assistant_delta(response_content)
-                        yield chunk
+                    # Every model call this stream makes (the streamed one and
+                    # any tool follow-ups) is recorded on the agent (F-08).
+                    with self._llm_usage_sink(self.llm_instance):
+                        for chunk in self.llm_instance.get_response_stream(
+                            prompt=actual_prompt,
+                            system_prompt=stream_system_prompt,
+                            chat_history=self._history_before_turn(stream_history, normalized_content),
+                            temperature=kwargs.get('temperature', 1.0),
+                            tools=tool_param,
+                            output_json=kwargs.get('output_json'),
+                            output_pydantic=kwargs.get('output_pydantic'),
+                            verbose=False,  # Keep verbose false for streaming
+                            markdown=self.markdown,
+                            agent_name=self.name,
+                            agent_role=self.role,
+                            agent_tools=[t.__name__ if hasattr(t, '__name__') else str(t) for t in (tool_param or [])],
+                            task_name=kwargs.get('task_name'),
+                            task_description=kwargs.get('task_description'),
+                            task_id=kwargs.get('task_id'),
+                            execute_tool_fn=self._durable_sync_tool_executor(
+                                self.execute_tool
+                            ),
+                            parallel_tool_calls=getattr(getattr(self, "execution", None), "parallel_tool_calls", False),
+                            max_tool_calls_per_turn=self._resolve_max_tool_calls(),
+                            **stream_sampling_kwargs
+                        ):
+                            response_content += chunk
+                            # Flush the growing partial turn so an interrupt mid
+                            # stream retains it in the store (Issue #5407, debounced).
+                            self._persist_assistant_delta(response_content)
+                            yield chunk
 
                     # Add complete response to chat history
                     if response_content:
