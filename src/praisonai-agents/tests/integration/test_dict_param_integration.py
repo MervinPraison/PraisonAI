@@ -181,11 +181,10 @@ class TestWorkflowDictParams:
             action="do something",
             context=TaskContextConfig(from_steps=["step0"], retain_full=True),
         )
-        # context stores the TaskContextConfig object
-        assert hasattr(step.context, 'from_steps')
-        assert step.context.from_steps == ["step0"]
-        # retain_full_context is a separate param on Task
-        assert step.context.retain_full is True
+        # Task unpacks the config; .context stays a list of tasks
+        assert step.context == []
+        assert step.context_from == ["step0"]
+        assert step.retain_full_context is True
     
     def test_workflowstep_output_dict(self):
         """Task accepts output as dict."""

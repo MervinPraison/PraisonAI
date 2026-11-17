@@ -130,11 +130,8 @@ Write summary
         steps = manager._parse_steps(body)
         
         assert len(steps) == 3
-        # context_from is now accessed via context.from_steps (TaskContextConfig)
-        assert steps[2].context is not None
-        assert hasattr(steps[2].context, 'from_steps')
-        assert "Research" in steps[2].context.from_steps
-        assert "Analyze" in steps[2].context.from_steps
+        assert "Research" in steps[2].context_from
+        assert "Analyze" in steps[2].context_from
 
 
 class TestParseRetainFullContext:
@@ -176,13 +173,7 @@ Process the data
         steps = manager._parse_steps(body)
         
         assert len(steps) == 1
-        # When only retain_full_context: true is set (the default), no TaskContextConfig is created
-        # This is because the SDK only creates config when: context_from is set OR retain_full is False
-        # So context will be empty list (default from Task.__init__)
-        context = steps[0].context
-        assert context == [] or context is None or (
-            hasattr(context, 'retain_full') and context.retain_full is True
-        )
+        assert steps[0].retain_full_context is True
     
     def test_retain_full_context_default_true(self):
         """retain_full_context should default to True."""
@@ -338,9 +329,8 @@ Write report based on analysis
         # Step 2
         assert steps[1].name == "Analyze"
         assert steps[1].agent_config["role"] == "Analyst"
-        # context_from is now accessed via context.from_steps (TaskContextConfig)
-        assert steps[1].context.from_steps == ["Research"]
-        assert steps[1].context.retain_full is False
+        assert steps[1].context_from == ["Research"]
+        assert steps[1].retain_full_context is False
         
         # Step 3
         assert steps[2].name == "Write"
