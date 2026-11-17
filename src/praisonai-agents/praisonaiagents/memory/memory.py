@@ -2441,8 +2441,8 @@ class Memory(MemoryCoreMixin):
         # Delegate to the active adapter whenever one is configured, mirroring
         # delete_short_term/reset_short_term. Data written through the adapter
         # lives in short_term_memory/long_term_memory; the legacy SELECTs below
-        # target short_mem/long_mem, which nothing in the codebase creates, so
-        # they raise OperationalError, get swallowed, and return [] every time.
+        # target short_mem/long_mem, which the adapter never writes to, so they
+        # would return [] every time.
         if (getattr(self, "memory_adapter", None)
                 and hasattr(self.memory_adapter, "get_all_memories")):
             # Adapters expose the tier under different keys (the SQLite adapter
