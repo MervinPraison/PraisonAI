@@ -6513,6 +6513,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             success=False,
                                         )
                                         raise
+                                    # A deferred result is registered and the
+                                    # model gets its note, as on the
+                                    # non-streaming path (F-13).
+                                    from ..llm.openai_client import _handle_native_deferred_result
+                                    tool_result = _handle_native_deferred_result(
+                                        tool_result, self.chat_history, tool_call.get('id'),
+                                        tool_call['function']['name'],
+                                        history_sink=getattr(self, 'chat_history', None),
+                                    )
                                     # Parity with the non-streaming path, which
                                     # fires 'tool_call' after every tool run.
                                     self._notify_tool_call(

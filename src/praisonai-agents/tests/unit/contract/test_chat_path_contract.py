@@ -207,8 +207,6 @@ F11 = _drift("F-11", "OpenAI-client stream emits no llm_request/llm_response tra
              ("stream", "openai_client"))
 F12 = _drift("F-12", "async agent tool step turns DeferredToolResult into {'result': str(...)} "
              "before the loop can register it (execution_mixin JSON coercion)", ("achat", "*"))
-F13 = _drift("F-13", "OpenAI-client stream tool step does not register a deferred result",
-             ("stream", "openai_client"))
 F14 = _drift("F-14", "achat() on the litellm Chat Completions route calls the model again after a tool "
              "set the cancel token", ("achat", "litellm_chat"))
 
@@ -336,7 +334,7 @@ def test_token_usage_recorded_for_every_call_in_a_tool_round(stub, mode, route):
     assert (usage["tokens_in"], usage["tokens_out"], usage["llm_calls"]) == (2 * USAGE_IN, 2 * USAGE_OUT, 2)
 
 
-@pytest.mark.parametrize("mode,route", _cells(F12, F13))
+@pytest.mark.parametrize("mode,route", _cells(F12))
 def test_deferred_tool_result_registered(stub, mode, route):
     from praisonaiagents.tools.call_executor import defer, get_deferred_resolver
     resolver = get_deferred_resolver()
