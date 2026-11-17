@@ -1993,6 +1993,9 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # ─────────────────────────────────────────────────────────────────────
         # Resolve WEB param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
+        # ``web=True`` or a dict that does not mention fetch asks for defaults,
+        # not for fetch specifically (X-14); see the model check below.
+        _web_fetch_is_default = web is True or (isinstance(web, dict) and "fetch" not in web)
         # Fast path: None/False -> no web (skip resolve() call)
         if web is None or web is False:
             _web_config = None
@@ -2785,6 +2788,17 @@ Your Role: {self.role}
         
         # Raise error if web_fetch is explicitly enabled but model doesn't support it
         # Web fetch is only supported by Anthropic/Claude models
+        if web_fetch and not self._model_supports_web_fetch() and _web_fetch_is_default:
+            # Defaults mean "what this model supports": keep search, leave fetch off.
+            web_fetch = self.web_fetch = False
+            if getattr(self, "_llm_option_kwargs", None) is not None:
+                self._llm_option_kwargs["web_fetch"] = False  # rebuilt LLMs too
+            if getattr(getattr(self, "llm_instance", None), "web_fetch", None):
+                self.llm_instance.web_fetch = False
+            logging.info(
+                f"Agent {self.name!r}: web fetch is Claude-only, so it is off for model "
+                f"{self.llm!r}; web search stays on."
+            )
         if web_fetch and not self._model_supports_web_fetch():
             raise ValueError(
                 f"web_fetch is only supported on Anthropic/Claude models. "
