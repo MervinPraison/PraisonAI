@@ -1166,7 +1166,9 @@ Write the complete compiled report:"""
                     ) as status:
                         last_status = current_status[0]
                         while chat_thread.is_alive():
-                            time_module.sleep(0.15)  # More responsive updates
+                            # Wait on the thread, not a fixed sleep: the loop
+                            # ends the moment the turn does (R-04, was +150 ms).
+                            chat_thread.join(0.15)
                             # Only update if status changed (reduces flicker)
                             if current_status[0] != last_status:
                                 last_status = current_status[0]
