@@ -207,7 +207,7 @@ TS-only members: `dependencies`?
 
 ### `Agent.start`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:815`
+- Python: `src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:838`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:2497`
 - Counts: 1 python params: 1 exact, 0 camelCase, 0 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 20 TS-only of 21
 
@@ -219,7 +219,7 @@ TS-only members: `previousResult`?, `onToken`?, `signal`?, `onEvent`?, `options`
 
 ### `Agent.chat`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3852`
+- Python: `src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3899`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:3592`
 - Counts: 17 python params: 7 exact, 9 camelCase, 1 alias, 0 flattened, 0 missing; 0 mismatches; 0 waived; 2 TS-only of 19
 
@@ -315,7 +315,7 @@ TS-only members: `config`
 
 ### `Session.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/session/api.py:67`
+- Python: `src/praisonai-agents/praisonaiagents/session/api.py:69`
 - TypeScript: `src/praisonai-ts/src/session/session.ts:29` (ctor `src/praisonai-ts/src/session/session.ts:133`)
 - Counts: 7 python params: 1 exact, 6 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 5 TS-only of 12
 
@@ -333,7 +333,7 @@ TS-only members: `config`?, `id`?, `parent`?, `db`?, `ttl`?
 
 ### `tool()`
 
-- Python: `src/praisonai-agents/praisonaiagents/tools/decorator.py:261`
+- Python: `src/praisonai-agents/praisonaiagents/tools/decorator.py:263`
 - TypeScript: `src/praisonai-ts/src/tools/decorator.ts:57` (ctor `src/praisonai-ts/src/tools/decorator.ts:238`)
 - Counts: 13 python params: 5 exact, 7 camelCase, 1 alias, 0 flattened, 0 missing; 3 mismatches; 3 waived; 3 TS-only of 16
 
