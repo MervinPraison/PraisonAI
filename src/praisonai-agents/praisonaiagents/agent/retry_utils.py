@@ -54,6 +54,11 @@ def jittered_backoff(
     Example:
         >>> # Attempt 0: ~5s, Attempt 1: ~10s, Attempt 2: ~20s
         >>> delay = jittered_backoff(1, base_delay=5.0, max_delay=120.0, jitter_ratio=0.5)
+
+    Not the same as ``praisonaiagents.llm.retry_utils.jittered_backoff``
+    (1-based attempt, +/-50% jitter, used by llm/error_classifier.py). They are
+    kept separate on purpose: merging them would change one side's delays,
+    and the TypeScript SDK mirrors this one (G-12).
     """
     # Exponential backoff: base * 2^attempt
     delay = min(base_delay * (2 ** max(0, attempt)), max_delay)
