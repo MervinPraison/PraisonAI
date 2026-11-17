@@ -430,7 +430,6 @@ def test_warm_runtime_publishes_session_events():
     assert done["result"] == "echo: hello"
 
 
-
 def _record_subscriptions(monkeypatch, server_mod):
     """Return a dict of session id -> threading.Event set when a client subscribes.
 
@@ -453,6 +452,7 @@ def _record_subscriptions(monkeypatch, server_mod):
 def _wait_subscribed(seen, session_id, timeout=5.0):
     event = seen.setdefault(session_id, threading.Event())
     assert event.wait(timeout), f"attach client never subscribed to {session_id!r}"
+
 
 def test_attach_streams_live_session_events(monkeypatch):
     """End-to-end: a run with session_id is observable via client.attach()."""
