@@ -20,13 +20,23 @@ class _OwnInit(PraisonAIError):
         self.path = path
 
 
+class _SetsMessage(RuntimeError, PraisonAIError):
+    # Like LLMResponseError / RecipeError: own __init__ that sets self.message.
+    def __init__(self, message):
+        self.message = message
+        super().__init__(message)
+
+
 @pytest.mark.parametrize("exc, text", [
     (_ValueStyle("bad value"), "bad value"),
     (_OwnInit("/x"), "not found: /x"),
+    (_SetsMessage("loop failed"), "loop failed"),
 ])
 def test_mixin_keeps_the_plain_message(exc, text):
     assert str(exc) == text
-    assert (exc.agent_id, exc.run_id, exc.error_category, exc.is_retryable) == ("unknown", None, "unknown", False)
+    assert (exc.agent_id, exc.error_category, exc.is_retryable) == ("unknown", "unknown", False)
+    # None, or a generated id where the MRO reaches PraisonAIError.__init__ (3.14+).
+    assert exc.run_id is None or isinstance(exc.run_id, str)
     assert exc.context == {}
     with pytest.raises(ValueError if isinstance(exc, ValueError) else PraisonAIError):
         raise exc
@@ -38,3 +48,12 @@ def test_normal_message_unchanged():
     assert e.context == {}
     e.context["k"] = 1
     assert PraisonAIError("x").context == {}, "context is per instance"
+
+
+def test_pickle_and_copy_keep_format():
+    import copy, pickle
+    e = PraisonAIError("boom", agent_id="a1", run_id="r1")
+    for clone in (pickle.loads(pickle.dumps(e)), copy.deepcopy(e)):
+        assert str(clone) == str(e)
+    m = _ValueStyle("bad")
+    assert str(pickle.loads(pickle.dumps(m))) == "bad"

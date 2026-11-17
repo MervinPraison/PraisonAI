@@ -92,6 +92,7 @@ class PraisonAIError(Exception):
     run_id = None
     error_category = "unknown"
     is_retryable = False
+    _structured = False  # set by __init__; picks the str() format
 
     def __getattr__(self, name):
         # Only reached when the attribute is missing, i.e. this __init__ never ran.
@@ -132,9 +133,17 @@ class PraisonAIError(Exception):
             
         self.is_retryable = is_retryable
         self.context = context or {}
+        # Plain str() when another exception class precedes this one in the MRO
+        # (class X(ValueError, PraisonAIError)). On 3.14+ ValueError has no
+        # own __init__, so this __init__ runs for such classes too.
+        mro = type(self).__mro__
+        self._structured = not any(
+            issubclass(c, BaseException) and not issubclass(c, PraisonAIError)
+            for c in mro[1:mro.index(PraisonAIError)]
+        )
 
     def __str__(self) -> str:
-        if "message" not in self.__dict__:
+        if not self._structured:
             return super().__str__()
         return f"[{self.error_category}] {self.message} (agent: {self.agent_id}, run: {self.run_id})"
 
