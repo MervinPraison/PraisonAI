@@ -96,7 +96,7 @@ class BaseStore(ABC):
             )
         except Exception as e:
             import logging
-            logging.warning(f"Failed to connect to backend: {e}. Falling back to FILE.")
+            logging.getLogger(__name__).warning(f"Failed to connect to backend: {e}. Falling back to FILE.")
             self._backend = None
             self._store = BaseJSONStore(
                 storage_path=self.store_path,
@@ -208,7 +208,7 @@ class BaseStore(ABC):
         except Exception as exc:
             refresh_error = exc
         import logging
-        logging.warning("Failed to refresh learning store; using read-only cached entries: %s", refresh_error)
+        logging.getLogger(__name__).warning("Failed to refresh learning store; using read-only cached entries: %s", refresh_error)
         return False
     
     def search(self, query: str, limit: int = 10) -> List[LearnEntry]:
@@ -303,7 +303,7 @@ class BaseStore(ABC):
             return True
         except Exception as e:
             import logging
-            logging.warning(f"Failed to archive pruned entries: {e}")
+            logging.getLogger(__name__).warning(f"Failed to archive pruned entries: {e}")
             return False
     
     def _is_stale(self, entry: LearnEntry, now: datetime) -> bool:

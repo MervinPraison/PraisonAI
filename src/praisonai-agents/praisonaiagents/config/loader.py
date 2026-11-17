@@ -345,7 +345,7 @@ def _parse_toml(path: Path) -> Dict[str, Any]:
         except ImportError:
             # No TOML parser available - return empty config
             import logging
-            logging.debug(
+            logging.getLogger(__name__).debug(
                 "TOML parser not available. Install tomli for Python < 3.11: "
                 "pip install tomli"
             )
@@ -362,7 +362,7 @@ def _parse_yaml(path: Path) -> Dict[str, Any]:
         import yaml
     except ImportError:
         import logging
-        logging.debug(
+        logging.getLogger(__name__).debug(
             "PyYAML not available; cannot read YAML config. Install pyyaml to "
             "use .praisonai/config.yaml."
         )
@@ -380,7 +380,7 @@ def _parse_config_file(config_path: Path) -> Dict[str, Any]:
         return _parse_toml(config_path)
     except Exception as e:
         import logging
-        logging.warning(f"Failed to load config from {config_path}: {e}")
+        logging.getLogger(__name__).warning(f"Failed to load config from {config_path}: {e}")
         return {}
 
 

@@ -219,19 +219,19 @@ def enable(plugins: list = None, options_by_name: dict = None) -> None:
     # methods actually fire during Agent/bot execution.
     try:
         wired = manager.wire_into_hook_registry()
-        logging.debug(f"Wired {wired} plugin hook(s) into the default registry")
+        logging.getLogger(__name__).debug(f"Wired {wired} plugin hook(s) into the default registry")
     except Exception as e:
-        logging.warning(f"Failed to wire plugins into hook registry: {e}")
+        logging.getLogger(__name__).warning(f"Failed to wire plugins into hook registry: {e}")
 
     # Deliver per-plugin options to each enabled plugin via its on_config hook.
     try:
         delivered = manager.apply_plugin_options()
         if delivered:
-            logging.debug(f"Delivered options to {delivered} plugin(s) via on_config")
+            logging.getLogger(__name__).debug(f"Delivered options to {delivered} plugin(s) via on_config")
     except Exception as e:
-        logging.warning(f"Failed to deliver plugin options: {e}")
+        logging.getLogger(__name__).warning(f"Failed to deliver plugin options: {e}")
 
-    logging.debug(f"Plugins enabled: {plugins if plugins else 'all'}")
+    logging.getLogger(__name__).debug(f"Plugins enabled: {plugins if plugins else 'all'}")
 
 
 def disable(plugins: list = None) -> None:
