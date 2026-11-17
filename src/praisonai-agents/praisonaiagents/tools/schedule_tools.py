@@ -91,6 +91,7 @@ def _get_store():
             return _store_instance
     from ..scheduler import get_default_store
     return get_default_store()
+get_store = _get_store  # public name for other PraisonAI packages (G-22); the private name stays
 
 # ── tools ────────────────────────────────────────────────────────────────────
 

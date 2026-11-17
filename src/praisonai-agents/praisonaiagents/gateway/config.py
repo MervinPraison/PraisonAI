@@ -176,6 +176,7 @@ def _parse_auth_scopes(gw_data: Mapping[str, Any]) -> Optional[Dict[str, Any]]:
             for tok, grant in gw_data["auth_scopes"].items()
         }
     return None
+parse_auth_scopes = _parse_auth_scopes  # public name for other PraisonAI packages (G-22); the private name stays
 
 
 def _check_typo_keys(
