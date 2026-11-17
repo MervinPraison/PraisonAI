@@ -2947,6 +2947,21 @@ Your Role: {self.role}
             self._approval_timeout = 0
             self._approval_permissions = None
         
+        # X-13: the caller turned code execution on, but the active tool-safety
+        # policy keeps execute_code from the model. The policy stays; say so once.
+        if allow_code_execution and "execute_code" in self._perm_deny:
+            import warnings
+            _policy = (f"approval={approval!r}" if isinstance(approval, str)
+                       else f"the {os.environ.get('PRAISONAI_TOOL_SAFETY') or 'default'!r} tool-safety preset")
+            warnings.warn(
+                f"Agent {self.name!r}: code execution is on, but {_policy} blocks "
+                "'execute_code', so the model is not offered it. To allow it pass "
+                "approval=True (auto-approve) or approval=\"full\", set "
+                "PRAISONAI_TOOL_SAFETY=off, or run in a terminal to be asked each time.",
+                UserWarning,
+                stacklevel=2,
+            )
+
         # Per-agent autonomy→approval bridge (G-BRIDGE-1 fix)
         # If autonomy level is full_auto and no explicit approval was set,
         # auto-approve all tools for this agent (no global env var).
