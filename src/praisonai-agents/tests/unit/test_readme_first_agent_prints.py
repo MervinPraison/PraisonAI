@@ -45,6 +45,7 @@ def test_first_agent_example_prints_when_piped(tmp_path):
     env = dict(os.environ, PYTHONPATH=PKG_ROOT, PRAISONAI_HOME=str(tmp_path), OPENAI_API_KEY="sk-local-fake")
     env.pop("OPENAI_BASE_URL", None)
     env.pop("OPENAI_API_BASE", None)
+    env.pop("OPENAI_MODEL_NAME", None)  # an inherited non-OpenAI model would bypass the stub
     proc = subprocess.run([sys.executable, "-c", _STUB + _first_agent_block()], capture_output=True, text=True,
                           cwd=str(tmp_path), env=env, timeout=120)
     assert proc.returncode == 0, proc.stderr[-1500:]
