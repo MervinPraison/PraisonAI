@@ -181,7 +181,6 @@ class TestWorkflowDictParams:
             action="do something",
             context=TaskContextConfig(from_steps=["step0"], retain_full=True),
         )
-        # context stores the TaskContextConfig object
         # Task unpacks the config; .context stays a list of tasks
         assert step.context == []
         assert step.context_from == ["step0"]

@@ -27,7 +27,7 @@ class TestTaskContextFields:
             action="do something",
             context=TaskContextConfig(from_steps=["step1", "step2"])
         )
-        # context stores the TaskContextConfig object directly
+        # Task unpacks the config; .context stays a list of tasks
         assert hasattr(step, 'context')
         assert step.context == []
         assert step.context_from == ["step1", "step2"]
