@@ -29,8 +29,8 @@ class TestTaskContextFields:
         )
         # context stores the TaskContextConfig object directly
         assert hasattr(step, 'context')
-        assert hasattr(step.context, 'from_steps')
-        assert step.context.from_steps == ["step1", "step2"]
+        assert step.context == []
+        assert step.context_from == ["step1", "step2"]
     
     def test_workflow_step_has_retain_full_context_field(self):
         """Task should have retain_full_context field with default False."""
