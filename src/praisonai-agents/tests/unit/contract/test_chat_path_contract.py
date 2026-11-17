@@ -320,6 +320,16 @@ def test_token_usage_recorded(stub, mode, route):
     assert (usage["tokens_in"], usage["tokens_out"], usage["llm_calls"]) == (USAGE_IN, USAGE_OUT, 1)
 
 
+def test_stream_budget_stop_raises_without_fallback_call(stub, monkeypatch):
+    from praisonaiagents.config.feature_configs import ExecutionConfig
+    from praisonaiagents.errors import BudgetExceededError
+    agent = _agent("openai_client", stub, execution=ExecutionConfig(max_budget=0.005))
+    monkeypatch.setattr(agent, "_calculate_llm_cost", lambda *a, **k: 0.01)
+    with pytest.raises(BudgetExceededError, match="exceeded budget: "):  # the post-call stop
+        _turn(agent, "stream")
+    assert len(REQUESTS) == 1 and agent.cost_summary["llm_calls"] == 1
+
+
 @pytest.mark.parametrize("mode,route", _cells(F07, F08))
 def test_token_usage_recorded_for_every_call_in_a_tool_round(stub, mode, route):
     agent = _agent(route, stub, tools=[lookup])
