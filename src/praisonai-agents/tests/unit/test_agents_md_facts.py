@@ -6,6 +6,7 @@ Coding agents read this file first and copy from it. It listed
 that raises ``TypeError``.
 """
 
+import ast
 import os
 import re
 
@@ -25,9 +26,23 @@ def test_openai_floor_matches_pyproject_everywhere():
     assert re.search(r"^openai>=([\d.]+)", _read("requirements.txt"), re.M).group(1) == floor
 
 
+def _value(node, names):
+    # Only literals and known placeholder names: never evaluate file text.
+    if isinstance(node, ast.Name):
+        return names[node.id]
+    if isinstance(node, ast.List):
+        return [_value(e, names) for e in node.elts]
+    return ast.literal_eval(node)
+
+
 def test_config_examples_construct():
+    classes = {"MemoryConfig": MemoryConfig, "HooksConfig": HooksConfig}
     placeholders = {"my_tool_logger": print, "my_validator": print, "my_hook": print}
     calls = re.findall(r"\b((?:MemoryConfig|HooksConfig)\([^()]*\))", _read("AGENTS.md"))
     assert calls
     for call in calls:
-        eval(call, {"MemoryConfig": MemoryConfig, "HooksConfig": HooksConfig, **placeholders})
+        node = ast.parse(call, mode="eval").body
+        cls = classes[node.func.id]
+        args = [_value(a, placeholders) for a in node.args]
+        kwargs = {k.arg: _value(k.value, placeholders) for k in node.keywords}
+        cls(*args, **kwargs)
