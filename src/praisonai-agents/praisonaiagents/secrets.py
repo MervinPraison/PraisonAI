@@ -268,7 +268,9 @@ def _coerce_ref(value: object) -> Optional[SecretRef]:
 # ────────────────────────────────────────────────────────────────────────────
 
 _redaction_values: set = set()
+redaction_values = _redaction_values  # public name for other PraisonAI packages (G-22); the private name stays
 _redaction_lock = threading.Lock()
+redaction_lock = _redaction_lock  # public name for other PraisonAI packages (G-22); the private name stays
 _REDACTED = "[REDACTED]"
 
 # Never register trivially short values — they would over-redact ordinary text.

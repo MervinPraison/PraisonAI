@@ -116,6 +116,7 @@ def _litellm_model_info(model: str) -> Optional[Dict[str, Any]]:
     except Exception:
         return None
     return None
+litellm_model_info = _litellm_model_info  # public name for other PraisonAI packages (G-22); the private name stays
 
 
 def get_model_limit(model: str) -> int:
