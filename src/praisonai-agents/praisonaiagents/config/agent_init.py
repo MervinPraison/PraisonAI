@@ -11,16 +11,13 @@ from typing import Any, Dict, List, Optional, Tuple
 from .feature_configs import (
     CachingConfig, HooksConfig, PlanningConfig, ReflectionConfig,
     TemplateConfig, WebConfig, ExecutionConfig, MemoryConfig,
+    ) from .._logging import get_logger from .feature_configs import CachingConfig, LearnConfig,
 )
-from .._logging import get_logger
-
-from .feature_configs import CachingConfig, LearnConfig, MemoryConfig, PlanningConfig, ReflectionConfig, TemplateConfig
 from .param_resolver import ArrayMode, resolve
-from .presets import CACHING_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS, WEB_PRESETS
-from .parse_utils import canonical_preset_key
-from .presets import CACHING_PRESETS, EXECUTION_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS
-
-logger = get_logger(__name__)
+from .presets import (
+    CACHING_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS, WEB_PRESETS from .parse_utils import canonical_preset_key from .presets import CACHING_PRESETS,
+    EXECUTION_PRESETS, REFLECTION_PRESETS logger = get_logger(__name__, MEMORY_PRESETS, MEMORY_URL_SCHEMES,
+)
 
 
 def resolve_agent_caching(caching: Any) -> Tuple[Optional[CachingConfig], bool, Optional[bool]]:
@@ -411,3 +408,34 @@ def resolve_agent_learn(learn: Any, memory_config: Any, memory: Any,
     if learn is True and auto_memory is None:
         auto_memory = True
     return _learn_config, memory, auto_memory
+
+
+def resolve_agent_memory(memory: Any) -> Any:
+    """``memory=`` -> ``MemoryConfig``, a live backend, or ``None``.
+
+    ``None``/``False`` mean no memory and ``True`` the defaults. A live
+    backend (an object with ``search`` and ``add``, or a ``db()`` instance
+    with ``database_url``) passes through; presets, URLs, dicts and lists
+    resolve as before.
+    """
+    # Fast path: None/False -> no memory (skip resolve() call)
+    if memory is None or memory is False:
+        return None
+    if memory is True:
+        return MemoryConfig()
+    if isinstance(memory, MemoryConfig):
+        return memory
+    if hasattr(memory, 'search') and hasattr(memory, 'add'):
+        return memory  # Memory instance passthrough
+    if hasattr(memory, 'database_url'):
+        return memory  # db() instance passthrough
+    return resolve(
+        value=memory,
+        param_name="memory",
+        config_class=MemoryConfig,
+        presets=MEMORY_PRESETS,
+        url_schemes=MEMORY_URL_SCHEMES,
+        instance_check=lambda v: (hasattr(v, 'search') and hasattr(v, 'add')) or hasattr(v, 'database_url'),
+        array_mode=ArrayMode.SINGLE_OR_LIST,
+        default=None,
+    )
