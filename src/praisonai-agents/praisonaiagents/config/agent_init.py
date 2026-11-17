@@ -8,9 +8,12 @@ defaults (for example ``resolve_caching(None)`` returns ``None``).
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from .feature_configs import CachingConfig, HooksConfig, PlanningConfig, ReflectionConfig, TemplateConfig
+from .feature_configs import (
+    CachingConfig, HooksConfig, PlanningConfig, ReflectionConfig,
+    TemplateConfig, WebConfig,
+)
 from .param_resolver import ArrayMode, resolve
-from .presets import CACHING_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS
+from .presets import CACHING_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS, WEB_PRESETS
 
 
 def resolve_agent_caching(caching: Any) -> Tuple[Optional[CachingConfig], bool, Optional[bool]]:
@@ -167,3 +170,50 @@ def resolve_agent_hooks(hooks: Any) -> Tuple[Any, List[Any], Optional[Any], Opti
             if config.on_tool_call is not None:
                 hooks_list.append(as_tool_call_hook(config.on_tool_call))
     return config, hooks_list, step_callback, registry
+
+
+def resolve_agent_web(web: Any, web_search: Optional[bool] = None,
+                      web_fetch: Optional[bool] = None
+                      ) -> Tuple[Optional[WebConfig], Optional[bool], Optional[bool], str, bool]:
+    """``web=`` -> ``(config, web_search, web_fetch, search_provider, fetch_is_default)``.
+
+    ``web_search`` / ``web_fetch`` are the values to keep when ``web`` is
+    ``None``. ``fetch_is_default`` tells Agent's later model check that fetch
+    was not asked for explicitly.
+    """
+    # ``web=True`` or a dict that does not mention fetch asks for defaults,
+    # not for fetch specifically (X-14); see the model check in Agent.__init__.
+    _web_fetch_is_default = web is True or (isinstance(web, dict) and "fetch" not in web)
+    # Fast path: None/False -> no web (skip resolve() call)
+    if web is None or web is False:
+        _web_config = None
+    elif web is True:
+        _web_config = WebConfig()
+    elif isinstance(web, WebConfig):
+        _web_config = web
+    else:
+        _web_config = resolve(
+            value=web,
+            param_name="web",
+            config_class=WebConfig,
+            presets=WEB_PRESETS,
+            array_mode=ArrayMode.PRESET_OVERRIDE,
+            default=None,
+        )
+    
+    _search_provider = "duckduckgo"
+    if _web_config is not None:
+        if isinstance(_web_config, WebConfig):
+            web_search = _web_config.search
+            web_fetch = _web_config.fetch
+            _search_provider = str(getattr(_web_config.search_provider, "value", _web_config.search_provider) or "duckduckgo").lower()
+        else:
+            web_search = bool(_web_config)
+            web_fetch = bool(_web_config)
+    elif web is True:
+        web_search = True
+        web_fetch = True
+    elif web is False:
+        web_search = False
+        web_fetch = False
+    return _web_config, web_search, web_fetch, _search_provider, _web_fetch_is_default
