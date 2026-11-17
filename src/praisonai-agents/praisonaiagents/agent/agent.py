@@ -152,6 +152,8 @@ from ..config.agent_init import (
     resolve_agent_templates,
     resolve_agent_caching, resolve_agent_learn, resolve_agent_planning, resolve_agent_reflection,
     resolve_agent_templates,
+    resolve_agent_caching, resolve_agent_memory, resolve_agent_planning, resolve_agent_reflection,
+    resolve_agent_templates,
 )
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
@@ -1395,28 +1397,9 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # ─────────────────────────────────────────────────────────────────────
         # Resolve MEMORY param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        # Fast path: None/False -> no memory (skip resolve() call)
-        if memory is None or memory is False:
-            _memory_config = None
-        elif memory is True:
-            _memory_config = MemoryConfig()
-        elif isinstance(memory, MemoryConfig):
-            _memory_config = memory
-        elif hasattr(memory, 'search') and hasattr(memory, 'add'):
-            _memory_config = memory  # Memory instance passthrough
-        elif hasattr(memory, 'database_url'):
-            _memory_config = memory  # db() instance passthrough
-        else:
-            _memory_config = resolve(
-                value=memory,
-                param_name="memory",
-                config_class=MemoryConfig,
-                presets=MEMORY_PRESETS,
-                url_schemes=MEMORY_URL_SCHEMES,
-                instance_check=lambda v: (hasattr(v, 'search') and hasattr(v, 'add')) or hasattr(v, 'database_url'),
-                array_mode=ArrayMode.SINGLE_OR_LIST,
-                default=None,
-            )
+        # None/False -> no memory; True -> defaults; live backends pass through
+        # (config.agent_init)
+        _memory_config = resolve_agent_memory(memory)
         
         # Persist the resolved memory config so clone_for_channel() can forward
         # (and isolate) it per channel. Without this, clones would receive no
