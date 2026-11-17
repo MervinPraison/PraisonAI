@@ -2,7 +2,10 @@
 Minimal telemetry implementation for PraisonAI Agents.
 
 This module provides anonymous usage tracking with privacy-first design.
-All telemetry is opt-out via environment variables.
+Telemetry is off by default (opt-in): set ``PRAISONAI_TELEMETRY_ENABLED=true``
+or call ``enable_telemetry()`` to turn it on. ``DO_NOT_TRACK``,
+``PRAISONAI_TELEMETRY_DISABLED`` or ``PRAISONAI_DISABLE_TELEMETRY`` keep it off
+even then.
 """
 
 import os
