@@ -2477,9 +2477,26 @@ Your Role: {self.role}"""
             int(get_model_limit(model_name) * 0.7),  # 70% of limit for safety
             compactor.count_total_tokens(messages) // 2,
         )
+        # Remember the size so later turns shrink before sending instead of
+        # re-uploading the rejected request every turn (chat_history is kept).
+        self.__dict__.setdefault("_overflow_ceilings", {})[model_name] = target
         if self.context_manager:
             return self.context_manager.emergency_truncate(messages, target)
         return compactor.shrink_to_fit(messages, target)
+
+    def _fit_overflow_ceiling(self, messages, tools):
+        """Shrink to the size remembered from an earlier overflow, if over it."""
+        model_name = self.llm if isinstance(self.llm, str) else "unknown"
+        ceiling = self.__dict__.get("_overflow_ceilings", {}).get(model_name)
+        if not ceiling or not isinstance(messages, list) or not self._can_restart_after_overflow(tools):
+            return messages
+        from ..compaction import ContextCompactor
+        compactor = ContextCompactor()
+        if compactor.count_total_tokens(messages) <= ceiling:
+            return messages
+        if self.context_manager:
+            return self.context_manager.emergency_truncate(messages, ceiling)
+        return compactor.shrink_to_fit(messages, ceiling)
 
     def _can_restart_after_overflow(self, tools) -> bool:
         """Whether an overflow may restart the whole turn with shrunk messages.
@@ -2593,6 +2610,7 @@ Your Role: {self.role}"""
         # run (see ``_extract_llm_response_content``) never leaks into this one.
         # The LiteLLM path resets its own backend flag independently.
         self._last_stop_reason = "completed"
+        messages = self._fit_overflow_ceiling(messages, tools)
 
         # --- Proactive Context Budget Management (default-on) ---
         # Analyzes token budget BEFORE LLM call and applies appropriate strategy
@@ -3378,6 +3396,7 @@ Your Role: {self.role}"""
         the same Agent never observe another turn's fallback model.
         """
         from ..llm import create_llm_dispatcher
+        messages = self._fit_overflow_ceiling(messages, tools)
         
         # Resolve the dispatcher for THIS call. A caller-supplied dispatcher
         # (async model fallback) is used as-is and never cached onto the
