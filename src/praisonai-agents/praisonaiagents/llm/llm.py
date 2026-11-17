@@ -668,13 +668,13 @@ Respond with ONLY a valid JSON tool call in this format:
             
             # Log based on method name - check more specific conditions first
             if method_name == '__init__':
-                logging.debug(f"LLM instance initialized with: {json.dumps(safe_config, indent=2, default=str)}")
+                logger.debug(f"LLM instance initialized with: {json.dumps(safe_config, indent=2, default=str)}")
             elif "parameters" in method_name:
-                logging.debug(f"{method_name}: {json.dumps(safe_config, indent=2, default=str)}")
+                logger.debug(f"{method_name}: {json.dumps(safe_config, indent=2, default=str)}")
             elif "_async" in method_name:
-                logging.debug(f"LLM async instance configuration: {json.dumps(safe_config, indent=2, default=str)}")
+                logger.debug(f"LLM async instance configuration: {json.dumps(safe_config, indent=2, default=str)}")
             else:
-                logging.debug(f"{method_name} configuration: {json.dumps(safe_config, indent=2, default=str)}")
+                logger.debug(f"{method_name} configuration: {json.dumps(safe_config, indent=2, default=str)}")
 
     def __init__(
         self,
@@ -848,7 +848,7 @@ Respond with ONLY a valid JSON tool call in this format:
                 if profile.base_url:
                     self.base_url = profile.base_url
                 if profile.model and profile.model != self.model:
-                    logging.info(f"Failover: using profile model {profile.model}")
+                    logger.info(f"Failover: using profile model {profile.model}")
                     self.model = profile.model
 
         # Cache for formatted tools and messages
@@ -989,7 +989,7 @@ Respond with ONLY a valid JSON tool call in this format:
         from .adapters import get_provider_adapter
         adapter = get_provider_adapter(provider)
         
-        logging.debug(f"[ADAPTER] Initialized {provider} adapter: {adapter.__class__.__name__}")
+        logger.debug(f"[ADAPTER] Initialized {provider} adapter: {adapter.__class__.__name__}")
         return adapter
     
     def _apply_provider_defaults(self):
@@ -1004,7 +1004,7 @@ Respond with ONLY a valid JSON tool call in this format:
                     self.force_tool_usage = defaults['force_tool_usage']
                 
                 if defaults:  # Only log if there were actual defaults
-                    logging.debug(f"[PROVIDER_DEFAULTS] Applied {self._provider_adapter.__class__.__name__} defaults: {defaults}")
+                    logger.debug(f"[PROVIDER_DEFAULTS] Applied {self._provider_adapter.__class__.__name__} defaults: {defaults}")
 
     def _is_ollama_provider(self) -> bool:
         """Detect if this is an Ollama provider regardless of naming convention"""
@@ -1533,10 +1533,10 @@ Respond with ONLY a valid JSON tool call in this format:
         loop via ``asyncio.to_thread``.
         """
         try:
-            logging.info("Authentication error detected - attempting credential refresh")
+            logger.info("Authentication error detected - attempting credential refresh")
             return self._refresh_subscription_creds()
         except Exception as refresh_error:  # noqa: BLE001 - refresh failures must stay non-fatal so retry/failover can continue
-            logging.warning(
+            logger.warning(
                 "Failed to refresh subscription credentials for auth provider %r (%s). "
                 "Verify the provider login/configuration and retry or re-authenticate.",
                 self._auth_provider_id,
@@ -1631,7 +1631,7 @@ Respond with ONLY a valid JSON tool call in this format:
             can_retry = True
             retry_delay = 0.0
             refreshed_auth = True
-            logging.info("Subscription credentials refreshed, retrying...")
+            logger.info("Subscription credentials refreshed, retrying...")
 
         # A successful credential refresh fully resolves the auth error: retry
         # immediately with fresh credentials and skip profile rotation so we
@@ -1655,7 +1655,7 @@ Respond with ONLY a valid JSON tool call in this format:
                 # Thread the active profile through the per-call kwargs so the
                 # shared instance state is never mutated (issue #3613 gap 2).
                 kwargs = self._apply_profile_to_kwargs(next_profile, kwargs)
-                logging.info(f"Failover: switched to profile '{next_profile.name}'")
+                logger.info(f"Failover: switched to profile '{next_profile.name}'")
             else:
                 # No alternate profile available - retrying would just hit the
                 # same failing profile, so surface the error instead.
@@ -1675,7 +1675,7 @@ Respond with ONLY a valid JSON tool call in this format:
                 # Enable retry for profile switch even if originally non-retryable
                 can_retry = True
                 retry_delay = 0.0
-                logging.info(f"Failover: switched to profile '{next_profile.name}'")
+                logger.info(f"Failover: switched to profile '{next_profile.name}'")
 
         should_raise = decision.action == "surface_error" or not can_retry
         return should_raise, category, retry_delay, error_str, kwargs, active_profile
@@ -1739,7 +1739,7 @@ Respond with ONLY a valid JSON tool call in this format:
                     raise
 
                 if attempt < self._max_retries:
-                    logging.warning(
+                    logger.warning(
                         f"{category} error hit (attempt {attempt + 1}/{self._max_retries + 1}), "
                         f"waiting {retry_delay:.1f}s before retry..."
                     )
@@ -1761,7 +1761,7 @@ Respond with ONLY a valid JSON tool call in this format:
                     else:
                         time.sleep(retry_delay)
                 else:
-                    logging.error(f"Rate limit exceeded after {self._max_retries + 1} attempts")
+                    logger.error(f"Rate limit exceeded after {self._max_retries + 1} attempts")
                     raise
 
         raise last_error
@@ -1828,7 +1828,7 @@ Respond with ONLY a valid JSON tool call in this format:
                     raise
 
                 if attempt < self._max_retries:
-                    logging.warning(
+                    logger.warning(
                         f"{category} error hit (attempt {attempt + 1}/{self._max_retries + 1}), "
                         f"waiting {retry_delay:.1f}s before retry..."
                     )
@@ -1853,7 +1853,7 @@ Respond with ONLY a valid JSON tool call in this format:
                     else:
                         await asyncio.sleep(retry_delay)
                 else:
-                    logging.error(f"Rate limit exceeded after {self._max_retries + 1} attempts")
+                    logger.error(f"Rate limit exceeded after {self._max_retries + 1} attempts")
                     raise
 
         raise last_error
@@ -1880,11 +1880,11 @@ Respond with ONLY a valid JSON tool call in this format:
             shrunk = compactor.shrink_to_fit(messages, before // 2)
             after = compactor.count_total_tokens(shrunk)
         except Exception as shrink_error:
-            logging.debug(f"Context overflow recovery skipped: {shrink_error}")
+            logger.debug(f"Context overflow recovery skipped: {shrink_error}")
             return False
         if after >= before:
             return False
-        logging.warning(
+        logger.warning(
             f"Context window exceeded for {self.model}; shrank prompt "
             f"{before}→{after} tokens and retrying "
             f"({step + 1}/{_CONTEXT_OVERFLOW_SHRINK_STEPS})"
@@ -2541,7 +2541,7 @@ Respond with ONLY a valid JSON tool call in this format:
                 tool_call_id = tool_call["id"]
                 
         except (KeyError, json.JSONDecodeError, TypeError) as e:
-            logging.error(f"Error parsing tool call arguments: {e}")
+            logger.error(f"Error parsing tool call arguments: {e}")
             function_name = (
                 tool_call.get("function", {}).get("name")
                 if isinstance(tool_call.get("function"), dict)
@@ -2572,7 +2572,7 @@ Respond with ONLY a valid JSON tool call in this format:
             Filtered arguments dictionary with only valid parameters
         """
         if not available_tools:
-            logging.debug(f"[OLLAMA_FIX] No available tools provided for validation")
+            logger.debug(f"[OLLAMA_FIX] No available tools provided for validation")
             return arguments
             
         # Find the target function
@@ -2584,7 +2584,7 @@ Respond with ONLY a valid JSON tool call in this format:
                 break
                 
         if not target_function:
-            logging.debug(f"[OLLAMA_FIX] Function {function_name} not found in available tools")
+            logger.debug(f"[OLLAMA_FIX] Function {function_name} not found in available tools")
             return arguments
             
         try:
@@ -2618,15 +2618,15 @@ Respond with ONLY a valid JSON tool call in this format:
                     invalid_params.append(param_name)
                     
             if invalid_params:
-                logging.debug(f"[OLLAMA_FIX] Function {function_name} received invalid parameters: {invalid_params}")
-                logging.debug(f"[OLLAMA_FIX] Valid parameters for {function_name}: {list(valid_params)}")
-                logging.debug(f"[OLLAMA_FIX] Original arguments: {arguments}")
-                logging.debug(f"[OLLAMA_FIX] Filtered arguments: {filtered_args}")
+                logger.debug(f"[OLLAMA_FIX] Function {function_name} received invalid parameters: {invalid_params}")
+                logger.debug(f"[OLLAMA_FIX] Valid parameters for {function_name}: {list(valid_params)}")
+                logger.debug(f"[OLLAMA_FIX] Original arguments: {arguments}")
+                logger.debug(f"[OLLAMA_FIX] Filtered arguments: {filtered_args}")
                 
             return filtered_args
 
         except Exception as e:
-            logging.debug(f"[OLLAMA_FIX] Error validating arguments for {function_name}: {e}")
+            logger.debug(f"[OLLAMA_FIX] Error validating arguments for {function_name}: {e}")
             return arguments
 
     def _filter_ollama_dispatch_arguments(
@@ -2730,7 +2730,7 @@ Respond with ONLY a valid JSON tool call in this format:
             # overridden and concurrent turns cannot clobber each other.
             resolver.register_if_absent(deferred.handle_id, _reinject)
         except Exception as e:  # noqa: BLE001 — registration must never break the turn
-            logging.debug("Deferred registration skipped (non-fatal): %s", e)
+            logger.debug("Deferred registration skipped (non-fatal): %s", e)
 
     def _unwrap_deferred_result(self, result: Any, function_name: str, tool_call_id: Optional[str]) -> Any:
         """Register a ``defer(...)`` value returned by a direct tool call and
@@ -2793,7 +2793,7 @@ Respond with ONLY a valid JSON tool call in this format:
             if summary and summary.strip():
                 return summary.strip()
         except Exception as e:
-            logging.warning(f"Step-limit finalisation call failed, using fallback: {e}")
+            logger.warning(f"Step-limit finalisation call failed, using fallback: {e}")
 
         if response_text and response_text.strip():
             return response_text.strip()
@@ -2826,7 +2826,7 @@ Respond with ONLY a valid JSON tool call in this format:
             if summary and summary.strip():
                 return summary.strip()
         except Exception as e:
-            logging.warning(f"Step-limit finalisation call failed, using fallback: {e}")
+            logger.warning(f"Step-limit finalisation call failed, using fallback: {e}")
 
         if response_text and response_text.strip():
             return response_text.strip()
@@ -3100,36 +3100,36 @@ Respond with ONLY a valid JSON tool call in this format:
             # simply never had it. Forward them untouched, allowlisted by type
             # so a genuinely malformed tool is still reported.
             if isinstance(tool, dict) and is_hosted_tool(tool):
-                logging.debug(f"Forwarding provider-hosted tool: {tool.get('type')}")
+                logger.debug(f"Forwarding provider-hosted tool: {tool.get('type')}")
                 formatted_tools.append(tool)
             elif isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
                 # Validate nested dictionary structure before accessing
                 if 'function' in tool and isinstance(tool['function'], dict) and 'name' in tool['function']:
-                    logging.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
+                    logger.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
                     # Fix array schemas in the tool parameters
                     fixed_tool = tool.copy()
                     if 'parameters' in fixed_tool['function']:
                         fixed_tool['function']['parameters'] = self._fix_array_schemas(fixed_tool['function']['parameters'])
                     formatted_tools.append(fixed_tool)
                 else:
-                    logging.debug(f"Skipping malformed OpenAI tool: missing function or name")
+                    logger.debug(f"Skipping malformed OpenAI tool: missing function or name")
             # Handle lists of tools (e.g. from MCP.to_openai_tool())
             elif isinstance(tool, list):
                 for subtool in tool:
                     if isinstance(subtool, dict) and is_hosted_tool(subtool):
-                        logging.debug(f"Forwarding provider-hosted tool from list: {subtool.get('type')}")
+                        logger.debug(f"Forwarding provider-hosted tool from list: {subtool.get('type')}")
                         formatted_tools.append(subtool)
                     elif isinstance(subtool, dict) and 'type' in subtool and subtool['type'] == 'function':
                         # Validate nested dictionary structure before accessing
                         if 'function' in subtool and isinstance(subtool['function'], dict) and 'name' in subtool['function']:
-                            logging.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
+                            logger.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
                             # Fix array schemas in the tool parameters
                             fixed_tool = subtool.copy()
                             if 'parameters' in fixed_tool['function']:
                                 fixed_tool['function']['parameters'] = self._fix_array_schemas(fixed_tool['function']['parameters'])
                             formatted_tools.append(fixed_tool)
                         else:
-                            logging.debug(f"Skipping malformed OpenAI tool in list: missing function or name")
+                            logger.debug(f"Skipping malformed OpenAI tool in list: missing function or name")
             elif callable(tool):
                 tool_def = self._generate_tool_definition(tool)
                 if tool_def:
@@ -3143,12 +3143,12 @@ Respond with ONLY a valid JSON tool call in this format:
                 tool_name = next(iter(tool.keys()))
                 from .model_capabilities import GEMINI_INTERNAL_TOOLS
                 if tool_name in GEMINI_INTERNAL_TOOLS:
-                    logging.debug(f"Using Gemini internal tool: {tool_name}")
+                    logger.debug(f"Using Gemini internal tool: {tool_name}")
                     formatted_tools.append(tool)
                 else:
-                    logging.debug(f"Skipping unknown tool: {tool_name}")
+                    logger.debug(f"Skipping unknown tool: {tool_name}")
             else:
-                logging.debug(f"Skipping tool of unsupported type: {type(tool)}")
+                logger.debug(f"Skipping tool of unsupported type: {type(tool)}")
                 
         # Validate JSON serialization before returning
         if formatted_tools:
@@ -3156,7 +3156,7 @@ Respond with ONLY a valid JSON tool call in this format:
                 import json
                 json.dumps(formatted_tools)  # Validate serialization
             except (TypeError, ValueError) as e:
-                logging.error(f"Tools are not JSON serializable: {e}")
+                logger.error(f"Tools are not JSON serializable: {e}")
                 return None
         
         # Let the provider adapter rewrite anything its server cannot parse.
@@ -3169,7 +3169,7 @@ Respond with ONLY a valid JSON tool call in this format:
                 if adapter is not None:
                     formatted_tools = adapter.format_tools(formatted_tools)
             except Exception as e:  # noqa: BLE001 -- never break tool formatting
-                logging.debug(f"Adapter tool formatting skipped: {e}")
+                logger.debug(f"Adapter tool formatting skipped: {e}")
 
         # Cache the formatted tools
         result = formatted_tools if formatted_tools else None
@@ -3286,7 +3286,7 @@ Respond with ONLY a valid JSON tool call in this format:
             managed[self._loop_conversation_key(messages)] = compactor.count_total_tokens(messages)
             return messages
         except Exception as e:
-            logging.debug(f"In-loop context management skipped: {e}")
+            logger.debug(f"In-loop context management skipped: {e}")
             return messages
 
     @_request_stop_reason
@@ -3321,7 +3321,7 @@ Respond with ONLY a valid JSON tool call in this format:
         **kwargs
     ) -> Union[str, tuple[str, TokenUsage]]:
         """Enhanced get_response with all OpenAI-like features"""
-        logging.debug(f"Getting response from {self.model}")
+        logger.debug(f"Getting response from {self.model}")
         
         # G2: Cooperative cancellation - honour InterruptController between tool iterations
         # so /stop (and cancellation generally) halts mid-flight runs on every provider.
@@ -3346,7 +3346,7 @@ Respond with ONLY a valid JSON tool call in this format:
                     if note:
                         msgs.append({"role": "user", "content": f"[steering] {note}"})
             except Exception as _steer_err:
-                logging.debug(f"Steering drain failed (ignored): {_steer_err}")
+                logger.debug(f"Steering drain failed (ignored): {_steer_err}")
 
         # Variable to store final response for token usage extraction
         _final_llm_response = None
@@ -3485,7 +3485,7 @@ Respond with ONLY a valid JSON tool call in this format:
                 # /stop request promptly halts a mid-flight run on every provider.
                 if _is_cancelled():
                     reason = _cancel_reason()
-                    logging.debug(f"LLM tool loop cancelled: {reason}")
+                    logger.debug(f"LLM tool loop cancelled: {reason}")
                     return _prepare_return_value(f"Task interrupted: {reason}")
                 # G2: Mid-run steering - drain any pending steering notes and inject
                 # them as user messages so the model sees them on its next step.
@@ -3630,20 +3630,20 @@ Respond with ONLY a valid JSON tool call in this format:
                             # tools so a /stop mid-iteration skips running them.
                             if _is_cancelled():
                                 reason = _cancel_reason()
-                                logging.debug(f"LLM tool loop cancelled before tool dispatch: {reason}")
+                                logger.debug(f"LLM tool loop cancelled before tool dispatch: {reason}")
                                 return _prepare_return_value(f"Task interrupted: {reason}")
                             # Same per-turn cap as the chat-completions loop, applied
                             # before recording the assistant turn so every declared
                             # tool_call_id gets exactly one tool reply.
                             if tool_call_count >= max_tool_calls_per_turn:
-                                logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
+                                logger.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
                                 self._last_stop_reason = "max_steps"
                                 if not (final_response_text and final_response_text.strip()):
                                     final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
                                 break
                             if tool_call_count + len(tool_calls) > max_tool_calls_per_turn:
                                 tool_calls = tool_calls[:max_tool_calls_per_turn - tool_call_count]
-                                logging.warning(f"Limiting batch to {len(tool_calls)} tool calls to stay within limit of {max_tool_calls_per_turn}.")
+                                logger.warning(f"Limiting batch to {len(tool_calls)} tool calls to stay within limit of {max_tool_calls_per_turn}.")
                             tool_call_count += len(tool_calls)
                             serializable_tool_calls = self._serialize_tool_calls(tool_calls)
                             messages.append({
@@ -3690,7 +3690,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                     # Report the failure back to the model instead of
                                     # aborting the whole run (safe-by-default, matching
                                     # the async path in execution_mixin.py).
-                                    logging.warning(f"Tool '{tool_result_obj.function_name}' failed: {tool_result_obj.error}")
+                                    logger.warning(f"Tool '{tool_result_obj.function_name}' failed: {tool_result_obj.error}")
                                     tool_result = {"error": str(tool_result_obj.error)}
                                 else:
                                     # Register any deferred handle so its eventual
@@ -3704,12 +3704,12 @@ Respond with ONLY a valid JSON tool call in this format:
                                         try:
                                             json.dumps(tool_result)
                                         except (TypeError, ValueError):
-                                            logging.warning(f"Result of '{tool_result_obj.function_name}' not JSON serializable, converting to string")
+                                            logger.warning(f"Result of '{tool_result_obj.function_name}' not JSON serializable, converting to string")
                                             tool_result = {"result": str(tool_result)}
                                 tool_results.append(tool_result)
                                 accumulated_tool_results.append(tool_result)
 
-                                logging.debug("[RESPONSES_API] Executed tool %s with result: %s", tool_result_obj.function_name, tool_result)
+                                logger.debug("[RESPONSES_API] Executed tool %s with result: %s", tool_result_obj.function_name, tool_result)
 
                                 if verbose:
                                     display_message = f"Agent {agent_name} called function '{tool_call_obj.function_name}' with arguments: {tool_call_obj.arguments}\n"
@@ -3946,8 +3946,8 @@ Respond with ONLY a valid JSON tool call in this format:
                                 # Handle streaming errors with recovery logic
                                 if self._is_streaming_error_recoverable(streaming_error):
                                     if verbose:
-                                        logging.warning(f"Streaming error (recoverable): {streaming_error}")
-                                        logging.warning("Falling back to non-streaming mode")
+                                        logger.warning(f"Streaming error (recoverable): {streaming_error}")
+                                        logger.warning("Falling back to non-streaming mode")
                                     # Immediately perform non-streaming fallback with actual API call
                                     try:
                                         if verbose:
@@ -4050,8 +4050,8 @@ Respond with ONLY a valid JSON tool call in this format:
                                         raise
                                     except Exception as fallback_error:
                                         # If non-streaming also fails, create a graceful fallback with partial streaming data
-                                        logging.warning(f"Non-streaming fallback also failed: {fallback_error}")
-                                        logging.warning("Using partial streaming response data")
+                                        logger.warning(f"Non-streaming fallback also failed: {fallback_error}")
+                                        logger.warning("Using partial streaming response data")
                                         response_text = response_text or ""
                                         # Create a mock response with whatever partial data we have
                                         final_response = {
@@ -4066,7 +4066,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                         streaming_success = False
                                 else:
                                     # For non-recoverable errors, re-raise immediately
-                                    logging.error(f"Non-recoverable streaming error: {streaming_error}")
+                                    logger.error(f"Non-recoverable streaming error: {streaming_error}")
                                     raise streaming_error
                             
                             if streaming_success:
@@ -4250,7 +4250,7 @@ Respond with ONLY a valid JSON tool call in this format:
                             response_text, formatted_tools)
                         if recovered:
                             tool_calls = recovered
-                            logging.debug(f"Recovered tool calls from response text: {tool_calls}")
+                            logger.debug(f"Recovered tool calls from response text: {tool_calls}")
                     
                     # XML-format models (Qwen, or xml_tool_format=True), or any reply
                     # carrying a <tool_call> tag: recover only <tool_call> blocks
@@ -4261,12 +4261,12 @@ Respond with ONLY a valid JSON tool call in this format:
                         from .adapters import _recover_tool_call_tags
                         tool_calls = _recover_tool_call_tags(response_text, formatted_tools)
                         if tool_calls:
-                            logging.debug(f"Parsed {len(tool_calls)} tool call(s) from XML format")
+                            logger.debug(f"Parsed {len(tool_calls)} tool call(s) from XML format")
 
                     # Force tool usage logic: if model ignores tools but should use them
                     _force = self._force_tool_usage_message(response_text, tool_calls, formatted_tools, iteration_count)
                     if _force is not None:
-                        logging.debug(f"[OLLAMA_RELIABILITY] Force tool usage triggered. Adding prompt for tools: {self._get_tool_names_for_prompt(formatted_tools)}")
+                        logger.debug(f"[OLLAMA_RELIABILITY] Force tool usage triggered. Adding prompt for tools: {self._get_tool_names_for_prompt(formatted_tools)}")
                         messages.append({
                             "role": "user",
                             "content": _force
@@ -4286,7 +4286,7 @@ Respond with ONLY a valid JSON tool call in this format:
                     # Tool call repair logic: validate and repair malformed tool calls
                     _repair = self._tool_repair_message(tool_calls, formatted_tools)
                     if _repair is not None:
-                        logging.debug(f"[OLLAMA_RELIABILITY] Tool call repair attempt {self._current_repair_count}/{self.max_tool_repairs}")
+                        logger.debug(f"[OLLAMA_RELIABILITY] Tool call repair attempt {self._current_repair_count}/{self.max_tool_repairs}")
                         messages.append({
                             "role": "user",
                             "content": _repair
@@ -4314,14 +4314,14 @@ Respond with ONLY a valid JSON tool call in this format:
                         # tools so a /stop mid-iteration skips running them.
                         if _is_cancelled():
                             reason = _cancel_reason()
-                            logging.debug(f"LLM tool loop cancelled before tool dispatch: {reason}")
+                            logger.debug(f"LLM tool loop cancelled before tool dispatch: {reason}")
                             return _prepare_return_value(f"Task interrupted: {reason}")
                         # Apply the cap BEFORE recording the assistant turn so every
                         # declared tool_call_id gets exactly one tool reply.
                         # Guardrail: Check tool call limit to prevent infinite loops
                         # Allow execution if we haven't reached the limit yet, but limit the batch size
                         if tool_call_count >= max_tool_calls_per_turn:
-                            logging.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
+                            logger.warning(f"Tool call limit reached ({max_tool_calls_per_turn}). Stopping to prevent infinite loop.")
                             self._last_stop_reason = "max_steps"
                             if not (final_response_text and final_response_text.strip()):
                                 final_response_text = f"Tool call limit reached ({max_tool_calls_per_turn} calls). Task may be too complex or there may be a broken tool causing repeated calls."
@@ -4330,7 +4330,7 @@ Respond with ONLY a valid JSON tool call in this format:
                             # Limit the batch to stay within the total limit
                             remaining_calls = max_tool_calls_per_turn - tool_call_count
                             tool_calls = tool_calls[:remaining_calls]
-                            logging.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
+                            logger.warning(f"Limiting batch to {remaining_calls} tool calls to stay within limit of {max_tool_calls_per_turn}.")
                         
                         # Convert tool_calls to a serializable format for all providers
                         serializable_tool_calls = self._serialize_tool_calls(tool_calls)
@@ -4378,7 +4378,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                 except ToolExecutionError:
                                     raise
                                 except Exception as error:
-                                    logging.warning(f"Tool '{name}' failed: {error}")
+                                    logger.warning(f"Tool '{name}' failed: {error}")
                                     return {"error": str(error)}
 
                             if getattr(execute_tool_fn, "_accepts_durable_iteration", False):
@@ -4406,7 +4406,7 @@ Respond with ONLY a valid JSON tool call in this format:
                             if is_ollama and tools:
                                 arguments = self._validate_and_filter_ollama_arguments(function_name, arguments, tools)
 
-                            logging.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
+                            logger.debug(f"[TOOL_EXEC_DEBUG] About to execute tool {function_name} with args: {arguments}")
                             # A ToolExecutionError (a tool that raised, or a terminal
                             # framework decision such as a loop-guard HALT) ends the
                             # turn, same as the async path in execution_mixin.py.
@@ -4428,7 +4428,7 @@ Respond with ONLY a valid JSON tool call in this format:
                             except ToolExecutionError:
                                 raise
                             except Exception as tool_error:
-                                logging.warning(f"Tool '{function_name}' failed: {tool_error}")
+                                logger.warning(f"Tool '{function_name}' failed: {tool_error}")
                                 tool_result = {"error": str(tool_error)}
                             tool_call_count += 1  # Increment tool call counter for guardrails
                             # Guard against non-JSON-serializable results (datetime,
@@ -4438,9 +4438,9 @@ Respond with ONLY a valid JSON tool call in this format:
                                 try:
                                     json.dumps(tool_result)
                                 except (TypeError, ValueError):
-                                    logging.warning(f"Result of '{function_name}' not JSON serializable, converting to string")
+                                    logger.warning(f"Result of '{function_name}' not JSON serializable, converting to string")
                                     tool_result = {"result": str(tool_result)}
-                            logging.debug("[TOOL_EXEC_DEBUG] Tool execution result: %s (call #%s)", tool_result, tool_call_count)
+                            logger.debug("[TOOL_EXEC_DEBUG] Tool execution result: %s (call #%s)", tool_result, tool_call_count)
                             tool_results.append(tool_result)  # Store the result
                             accumulated_tool_results.append(tool_result)  # Accumulate across iterations
                             
@@ -4454,12 +4454,12 @@ Respond with ONLY a valid JSON tool call in this format:
                                 display_message = f"Agent {agent_name} called function '{function_name}' with arguments: {arguments}\n"
                                 if tool_result:
                                     display_message += f"Function returned: {tool_result}"
-                                    logging.debug(f"[TOOL_EXEC_DEBUG] Display message with result: {display_message}")
+                                    logger.debug(f"[TOOL_EXEC_DEBUG] Display message with result: {display_message}")
                                 else:
                                     display_message += "Function returned no output"
-                                    logging.debug("[TOOL_EXEC_DEBUG] Tool returned no output")
+                                    logger.debug("[TOOL_EXEC_DEBUG] Tool returned no output")
                                 
-                                logging.debug(f"[TOOL_EXEC_DEBUG] About to display tool call with message: {display_message}")
+                                logger.debug(f"[TOOL_EXEC_DEBUG] About to display tool call with message: {display_message}")
                                 _get_display_functions()['display_tool_call'](display_message, console=self.console)
                             
                             # Always trigger callback for status output (even when verbose=False)
@@ -4566,7 +4566,7 @@ Respond with ONLY a valid JSON tool call in this format:
                 except (LLMResponseError, ToolExecutionError, BudgetExceededError):
                     raise
                 except Exception as e:
-                    logging.error(f"Error in LLM iteration {iteration_count}: {e}")
+                    logger.error(f"Error in LLM iteration {iteration_count}: {e}")
                     # Don't swallow the failure and return an empty string as if
                     # the call succeeded. Re-raise as a distinguishable exception
                     # so the caller (e.g. Agent.chat) can surface the real error.
@@ -4930,7 +4930,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Log completion time if in debug mode
         if get_logger().getEffectiveLevel() == logging.DEBUG:
             total_time = time.time() - start_time
-            logging.debug(f"get_response completed in {total_time:.2f} seconds")
+            logger.debug(f"get_response completed in {total_time:.2f} seconds")
 
     def get_response_stream(
         self,
