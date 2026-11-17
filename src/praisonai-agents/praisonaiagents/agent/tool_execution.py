@@ -173,7 +173,7 @@ def _coerce_value(value, annotation):
     except (ValueError, TypeError):
         return original
     except Exception as e:  # e.g. pydantic.ValidationError, json.JSONDecodeError
-        logging.debug(f"Could not coerce tool argument to {annotation!r}: {e}")
+        logger.debug(f"Could not coerce tool argument to {annotation!r}: {e}")
         return original
 
 
@@ -332,7 +332,7 @@ def _content_part_to_data_uri(part: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         mime = part.get("mime") or "image/png"
         if isinstance(data, (bytes, bytearray)):
             if len(data) > MULTIMODAL_IMAGE_BYTE_LIMIT:
-                logging.warning(
+                logger.warning(
                     "Multimodal image part (%d bytes) exceeds limit %d; skipping",
                     len(data), MULTIMODAL_IMAGE_BYTE_LIMIT,
                 )
@@ -344,7 +344,7 @@ def _content_part_to_data_uri(part: Dict[str, Any]) -> Optional[Dict[str, Any]]:
             if encoded.startswith("data:"):
                 return {"type": "image_url", "image_url": {"url": encoded}}
             if len(encoded) > MULTIMODAL_IMAGE_BYTE_LIMIT * 2:
-                logging.warning(
+                logger.warning(
                     "Multimodal image part (encoded %d chars) exceeds limit; skipping",
                     len(encoded),
                 )
@@ -541,7 +541,7 @@ def try_append_multimodal_tool_result(
                 messages.append(followup_message)
             return True
     except Exception as e:
-        logging.debug(f"Multimodal tool result formatting skipped: {e}")
+        logger.debug(f"Multimodal tool result formatting skipped: {e}")
     return False
 
 
@@ -588,9 +588,9 @@ class ToolExecutionMixin:
                     added.add(tool_name)
             self._framework_tool_names = frozenset(added)
             
-            logging.debug("Registered artifact retrieval tools")
+            logger.debug("Registered artifact retrieval tools")
         except Exception as e:
-            logging.warning(f"Failed to register artifact tools: {e}")
+            logger.warning(f"Failed to register artifact tools: {e}")
 
     def _get_existing_stream_emitter(self):
         """Return an already-initialized stream emitter without creating one."""
@@ -683,7 +683,7 @@ class ToolExecutionMixin:
                     return True
             return False
         except Exception as exc:  # pragma: no cover - defensive plugin boundary
-            logging.warning("Failed to check plugin tool state: %s", exc)
+            logger.warning("Failed to check plugin tool state: %s", exc)
             return False
 
     def _merge_plugin_tools(self):
@@ -723,7 +723,7 @@ class ToolExecutionMixin:
             else:  # pragma: no cover - compatibility with custom managers
                 plugin_entries = [(None, tool) for tool in manager.get_all_tools()]
         except Exception as exc:  # pragma: no cover - defensive plugin boundary
-            logging.warning("Failed to attach plugin tools: %s", exc)
+            logger.warning("Failed to attach plugin tools: %s", exc)
             return
 
         current_tools = self.tools if isinstance(self.tools, list) else [self.tools]
@@ -770,7 +770,7 @@ class ToolExecutionMixin:
                 and isinstance(function.get("name"), str)
                 and function["name"]
             ):
-                logging.warning(
+                logger.warning(
                     "Skipping plugin function tool %r: function schemas are not "
                     "executable without a callable implementation",
                     name,
@@ -779,13 +779,13 @@ class ToolExecutionMixin:
             if not self._is_supported_plugin_tool(tool) or (
                 name is not None and not isinstance(name, str)
             ) or (callable(tool) and not name):
-                logging.warning(
+                logger.warning(
                     "Skipping plugin tool %r: expected a named callable or valid tool spec",
                     name or tool,
                 )
                 continue
             if name and name in existing_names:
-                logging.warning(
+                logger.warning(
                     "Skipping plugin tool %r because Agent already has a tool with that name",
                     name,
                 )
@@ -809,7 +809,7 @@ class ToolExecutionMixin:
             display_name = name
             if not display_name and isinstance(tool, dict):
                 display_name = tool.get("type", "spec")
-            logging.debug("Added plugin tool to Agent: %s", display_name or tool)
+            logger.debug("Added plugin tool to Agent: %s", display_name or tool)
 
     def _merge_plugin_subsystems(self):
         """Route enabled GUARDRAIL/POLICY/SKILL plugins into their subsystems.
@@ -845,7 +845,7 @@ class ToolExecutionMixin:
 
             manager = get_plugin_manager()
         except Exception as exc:  # pragma: no cover - defensive plugin boundary
-            logging.warning("Failed to access plugin manager for subsystems: %s", exc)
+            logger.warning("Failed to access plugin manager for subsystems: %s", exc)
             return
 
         # --- GUARDRAIL plugins -> self.guardrail (GuardrailChain) -------------
@@ -854,7 +854,7 @@ class ToolExecutionMixin:
             try:
                 plugin_guardrails = get_guardrails() or []
             except Exception as exc:  # pragma: no cover - defensive boundary
-                logging.warning("Failed to collect plugin guardrails: %s", exc)
+                logger.warning("Failed to collect plugin guardrails: %s", exc)
                 plugin_guardrails = []
             if plugin_guardrails:
                 try:
@@ -904,7 +904,7 @@ class ToolExecutionMixin:
                             self.guardrail = combined
                             self._guardrail_fn = combined
                 except Exception as exc:  # pragma: no cover - defensive boundary
-                    logging.warning("Failed to wire plugin guardrails: %s", exc)
+                    logger.warning("Failed to wire plugin guardrails: %s", exc)
 
         # --- POLICY plugins -> self._policy (PolicyEngine) -------------------
         get_policies = getattr(manager, "get_all_policies", None)
@@ -912,7 +912,7 @@ class ToolExecutionMixin:
             try:
                 plugin_policies = get_policies() or []
             except Exception as exc:  # pragma: no cover - defensive boundary
-                logging.warning("Failed to collect plugin policies: %s", exc)
+                logger.warning("Failed to collect plugin policies: %s", exc)
                 plugin_policies = []
             if plugin_policies:
                 try:
@@ -935,7 +935,7 @@ class ToolExecutionMixin:
                             if rule_name is not None and callable(get_policy):
                                 try:
                                     if get_policy(rule_name) is not None:
-                                        logging.warning(
+                                        logger.warning(
                                             "Skipping plugin policy %r: a policy "
                                             "with that name already exists.",
                                             rule_name,
@@ -944,7 +944,7 @@ class ToolExecutionMixin:
                                 except Exception:  # pragma: no cover
                                     pass
                             if rule_name is not None and rule_name in existing:
-                                logging.warning(
+                                logger.warning(
                                     "Skipping duplicate plugin policy %r.",
                                     rule_name,
                                 )
@@ -954,11 +954,11 @@ class ToolExecutionMixin:
                                 if rule_name is not None:
                                     existing.add(rule_name)
                             except Exception as exc:  # pragma: no cover
-                                logging.warning(
+                                logger.warning(
                                     "Failed to add plugin policy %r: %s", rule, exc
                                 )
                 except Exception as exc:  # pragma: no cover - defensive boundary
-                    logging.warning("Failed to wire plugin policies: %s", exc)
+                    logger.warning("Failed to wire plugin policies: %s", exc)
 
         # --- SKILL plugins -> self._skills (SkillManager discovers them) -----
         get_skills = getattr(manager, "get_all_skills", None)
@@ -966,7 +966,7 @@ class ToolExecutionMixin:
             try:
                 plugin_skills = get_skills() or []
             except Exception as exc:  # pragma: no cover - defensive boundary
-                logging.warning("Failed to collect plugin skills: %s", exc)
+                logger.warning("Failed to collect plugin skills: %s", exc)
                 plugin_skills = []
             if plugin_skills:
                 current = getattr(self, "_skills", None)
@@ -979,7 +979,7 @@ class ToolExecutionMixin:
                     # source object) would raise inside ``Path()``, so skip it
                     # with a clear warning rather than corrupt discovery.
                     if not isinstance(skill, str):
-                        logging.warning(
+                        logger.warning(
                             "Skipping plugin skill %r: get_skills() must return "
                             "filesystem path strings to skill directories.",
                             skill,
@@ -1039,7 +1039,7 @@ class ToolExecutionMixin:
             
             return casted_args
         except Exception as e:
-            logging.debug(f"Type casting failed for {getattr(func, '__name__', 'unknown function')}: {e}")
+            logger.debug(f"Type casting failed for {getattr(func, '__name__', 'unknown function')}: {e}")
             return arguments
 
     def _current_cancel_event(self):
@@ -1133,7 +1133,7 @@ class ToolExecutionMixin:
             tool_call_id: Optional ID from the LLM's tool_call (e.g., 'call_xxxxx')
                          Used for correlating TOOL_CALL_START/RESULT stream events
         """
-        logging.debug(f"{self.name} executing tool {function_name} with arguments: {arguments}")
+        logger.debug(f"{self.name} executing tool {function_name} with arguments: {arguments}")
         
         # Handle bridge tool unwrapping BEFORE trace/stream/hooks (design invariant #6)
         # Only intercept when tool_search is active; otherwise fall through to real tool execution
@@ -1403,14 +1403,14 @@ class ToolExecutionMixin:
                         
                         # Store the full output
                         artifact_ref = self._artifact_store.store(result_str, metadata)
-                        logging.debug(f"Stored {function_name} output ({len(result_str)} bytes) as artifact {artifact_ref.artifact_id}")
+                        logger.debug(f"Stored {function_name} output ({len(result_str)} bytes) as artifact {artifact_ref.artifact_id}")
                         
                         # Register artifact retrieval tools if not already registered
                         if not hasattr(self, '_artifact_tools_registered'):
                             self._register_artifact_tools()
                             self._artifact_tools_registered = True
                     except Exception as e:
-                        logging.debug(f"Failed to store artifact: {e}")
+                        logger.debug(f"Failed to store artifact: {e}")
                 
                 if len(capped_str) <= limit:
                     # Only the line cap applied
@@ -1452,7 +1452,7 @@ class ToolExecutionMixin:
             # preview no shorter than the original (many short lines).
             line_capped = capped_str is not result_str
             if line_capped or len(truncated) < len(result_str):
-                logging.debug(f"Truncated {function_name} output from {len(result_str)} to {len(truncated)} chars")
+                logger.debug(f"Truncated {function_name} output from {len(result_str)} to {len(truncated)} chars")
                 # For dicts, truncate large string fields (e.g., raw_content from search).
                 # Field truncation keeps both ends, so a line cap or a head/tail
                 # direction uses the string preview instead.
@@ -1483,7 +1483,7 @@ class ToolExecutionMixin:
                 else:
                     result = truncated
         except Exception as e:
-            logging.debug(f"Tool truncation skipped: {e}")
+            logger.debug(f"Tool truncation skipped: {e}")
         return result
 
     def _execute_tool_with_context(self, function_name, arguments, state, tool_call_id=None):
@@ -1567,7 +1567,7 @@ class ToolExecutionMixin:
                 )
                 tool_hook_results = self._hook_runner.execute_sync(HookEvent.BEFORE_TOOL, before_tool_input, target=function_name)
                 if self._hook_runner.is_blocked(tool_hook_results):
-                    logging.warning(f"Tool {function_name} execution blocked by BEFORE_TOOL hook")
+                    logger.warning(f"Tool {function_name} execution blocked by BEFORE_TOOL hook")
                     return f"Execution of {function_name} was blocked by security policy."
                 
                 # Update arguments if modified by hooks
@@ -1583,10 +1583,10 @@ class ToolExecutionMixin:
                 
                 if decision.action == GuardAction.WARN:
                     # Inject warning into tool result so LLM sees guidance
-                    logging.warning(f"Loop guard warning for {function_name}: {decision.message}")
+                    logger.warning(f"Loop guard warning for {function_name}: {decision.message}")
                 elif decision.action == GuardAction.BLOCK:
                     # Block tool execution but continue through teardown path
-                    logging.warning(f"Loop guard blocked {function_name}: {decision.message}")
+                    logger.warning(f"Loop guard blocked {function_name}: {decision.message}")
                     # Set flag to use blocked result instead of executing tool
                     blocked_result = {"error": f"[loop-guard] {decision.message}", "loop_blocked": True}
                 elif decision.action == GuardAction.HALT:
@@ -1663,12 +1663,12 @@ class ToolExecutionMixin:
                     _vres = _validator.validate_args(function_name, arguments)
                     if _vres is not None and not getattr(_vres, 'valid', True):
                         _errs = "; ".join(getattr(_vres, 'errors', []) or ["validation failed"])
-                        logging.warning(
+                        logger.warning(
                             f"Tool {function_name} args rejected by validator: {_errs}"
                         )
                         return f"Tool arguments rejected: {_errs}"
                 except Exception as _ve:  # noqa: BLE001 — never break tool exec on validator bug
-                    logging.debug(f"Tool validator raised; skipping validation: {_ve}")
+                    logger.debug(f"Tool validator raised; skipping validation: {_ve}")
 
             # Check if loop guard blocked execution
             if blocked_result is not None:
@@ -1721,7 +1721,7 @@ class ToolExecutionMixin:
                                 # Use reusable executor to prevent resource leaks
                                 future, executor, orphaned = self._submit_to_tool_pool(ctx.run, execute_with_context)
                                 if future is None:
-                                    logging.warning(
+                                    logger.warning(
                                         f"Tool worker pool exhausted; refusing to queue '{function_name}' "
                                         f"behind {orphaned} hung tool call(s)."
                                     )
@@ -1747,7 +1747,7 @@ class ToolExecutionMixin:
                                     if _progress_active is not None:
                                         _progress_active.clear()
                                     future.cancel()
-                                    logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
+                                    logger.warning(f"Tool {function_name} timed out after {tool_timeout}s")
                                     # Tag as an OUTER wall-clock timeout: unlike an
                                     # inner-loop timeout (already retried to
                                     # exhaustion), the body ran once here and the
@@ -1864,7 +1864,7 @@ class ToolExecutionMixin:
 
                         # Calculate delay for exponential backoff (policy owns it)
                         delay = retry_policy.get_delay_ms(attempt - 1) / 1000.0
-                        logging.warning(
+                        logger.warning(
                             f"Tool {function_name} failed (attempt {attempt}/{max_attempts}): {e}. "
                             f"Retrying in {delay:.2f}s..."
                         )
@@ -1887,7 +1887,7 @@ class ToolExecutionMixin:
 
                         # Calculate delay for exponential backoff (policy owns it)
                         delay = retry_policy.get_delay_ms(attempt - 1) / 1000.0
-                        logging.warning(
+                        logger.warning(
                             f"Tool {function_name} failed (attempt {attempt}/{max_attempts}): {e}. "
                             f"Retrying in {delay:.2f}s..."
                         )
@@ -2066,7 +2066,7 @@ class ToolExecutionMixin:
                 # reaches the model. Mirrors the BEFORE_TOOL block path above.
                 if self._hook_runner.is_blocked(after_tool_results):
                     reason = self._hook_runner.get_blocking_reason(after_tool_results)
-                    logging.warning(f"Tool {function_name} result blocked by AFTER_TOOL hook")
+                    logger.warning(f"Tool {function_name} result blocked by AFTER_TOOL hook")
                     return reason or f"Result of {function_name} was blocked by security policy."
 
                 # Read back any rewritten/redacted tool_output so a plugin can
@@ -2211,7 +2211,7 @@ class ToolExecutionMixin:
         """
         if self._hook_runner.is_blocked(results):
             reason = self._hook_runner.get_blocking_reason(results) or "Blocked by hook"
-            logging.warning(f"Agent {self.name} response blocked by AFTER_AGENT hook: {reason}")
+            logger.warning(f"Agent {self.name} response blocked by AFTER_AGENT hook: {reason}")
             final = f"[Response blocked by hook: {reason}]"
         elif isinstance(response, str) and isinstance(after_agent_input.response, str):
             final = after_agent_input.response
@@ -2491,12 +2491,12 @@ class ToolExecutionMixin:
                     metadata = store.store(f"{tool_name}.{key}", value, call_id=field_call_id)
                     if metadata:
                         truncated = store.format_reference(metadata, truncated)
-                        logging.debug(f"Stored full {tool_name}.{key} field ({len(value)} bytes) at {metadata.get('path')}")
+                        logger.debug(f"Stored full {tool_name}.{key} field ({len(value)} bytes) at {metadata.get('path')}")
                 except Exception as e:
-                    logging.debug(f"Failed to store dict field: {e}")
+                    logger.debug(f"Failed to store dict field: {e}")
                 
                 result[key] = truncated
-                logging.debug(f"Smart truncated field '{key}' from {len(value)} to ~{max_field_chars} chars")
+                logger.debug(f"Smart truncated field '{key}' from {len(value)} to ~{max_field_chars} chars")
             elif isinstance(value, dict):
                 result[key] = self._truncate_dict_fields(value, tool_name, max_field_chars, tool_call_id)
             elif isinstance(value, list):
@@ -2844,7 +2844,7 @@ class ToolExecutionMixin:
                     if action == PermissionAction.DENY:
                         return False
                 except Exception as e:  # noqa: BLE001
-                    logging.debug(
+                    logger.debug(
                         "doom_loop permission-manager resolve failed (%s); "
                         "falling through to backend", e,
                     )
@@ -2874,7 +2874,7 @@ class ToolExecutionMixin:
             )
             return bool(getattr(decision, "approved", False))
         except Exception as e:  # noqa: BLE001 — fail closed to the block path
-            logging.debug(
+            logger.debug(
                 "doom_loop approval routing failed for %s (%s); blocking",
                 function_name, e,
             )
@@ -2906,7 +2906,7 @@ class ToolExecutionMixin:
                     if action == PermissionAction.DENY:
                         return False
                 except Exception as e:  # noqa: BLE001
-                    logging.debug(
+                    logger.debug(
                         "doom_loop permission-manager resolve failed (%s); "
                         "falling through to backend", e,
                     )
@@ -2929,7 +2929,7 @@ class ToolExecutionMixin:
             )
             return bool(getattr(decision, "approved", False))
         except Exception as e:  # noqa: BLE001 — fail closed to the block path
-            logging.debug(
+            logger.debug(
                 "doom_loop async approval routing failed for %s (%s); blocking",
                 function_name, e,
             )
@@ -2963,7 +2963,7 @@ class ToolExecutionMixin:
             )
             return action == PermissionAction.ASK
         except Exception as e:  # noqa: BLE001
-            logging.debug(
+            logger.debug(
                 "permission manager resolve_tool_action failed for %s: %s",
                 function_name, e,
             )
@@ -3076,7 +3076,7 @@ class ToolExecutionMixin:
             if get_tool_registry().get_trust_level(function_name) == "external":
                 return True
         except Exception as e:  # noqa: BLE001
-            logging.debug("_tool_would_prompt failed for %s: %s", function_name, e)
+            logger.debug("_tool_would_prompt failed for %s: %s", function_name, e)
         return False
 
     @staticmethod
@@ -3154,7 +3154,7 @@ class ToolExecutionMixin:
                 if scoped_target and scoped_target != function_name:
                     targets.append(scoped_target)
             except Exception as e:  # noqa: BLE001
-                logging.debug(
+                logger.debug(
                     "could not build argument-scoped permission target for %s: %s",
                     function_name, e,
                 )
@@ -3166,7 +3166,7 @@ class ToolExecutionMixin:
                         "permission_denied": True,
                     }
             except Exception as e:
-                logging.debug("permission manager is_denied failed for %s: %s", target, e)
+                logger.debug("permission manager is_denied failed for %s: %s", target, e)
         return None
 
     def _check_permission_manager_doom_loop(self, function_name, arguments=None):
@@ -3202,7 +3202,7 @@ class ToolExecutionMixin:
                     "loop_blocked": True,
                 }
         except Exception as e:  # noqa: BLE001
-            logging.debug("permission manager doom-loop check failed for %s: %s", function_name, e)
+            logger.debug("permission manager doom-loop check failed for %s: %s", function_name, e)
         return None
 
     def _is_bypass_mode(self) -> bool:
@@ -3245,7 +3245,7 @@ class ToolExecutionMixin:
         
         if not decision.approved:
             error_msg = f"Tool execution denied: {decision.reason}"
-            logging.warning(error_msg)
+            logger.warning(error_msg)
             feedback = getattr(decision, "feedback", None)
             if feedback:
                 error_msg = (
@@ -3256,7 +3256,7 @@ class ToolExecutionMixin:
         
         if decision.modified_args:
             arguments = decision.modified_args
-            logging.info(f"Using modified arguments: {arguments}")
+            logger.info(f"Using modified arguments: {arguments}")
             # Re-authorize: an approval backend may have rewritten the arguments
             # into a command that an argument-scoped deny rule prohibits. The
             # earlier gate only saw the original args, so re-run it against the
@@ -3300,7 +3300,7 @@ class ToolExecutionMixin:
         
         if not decision.approved:
             error_msg = f"Tool execution denied: {decision.reason}"
-            logging.warning(error_msg)
+            logger.warning(error_msg)
             feedback = getattr(decision, "feedback", None)
             if feedback:
                 error_msg = (
@@ -3311,7 +3311,7 @@ class ToolExecutionMixin:
         
         if decision.modified_args:
             arguments = decision.modified_args
-            logging.info(f"Using modified arguments: {arguments}")
+            logger.info(f"Using modified arguments: {arguments}")
             # Re-authorize modified args against the deny gate — see the sync
             # path for rationale. BYPASS still opts out entirely.
             if not self._is_bypass_mode():
@@ -3571,7 +3571,7 @@ class ToolExecutionMixin:
             from ..tools.circuit_breaker import CircuitBreakerException, _NeutralOutcome
         except ImportError:
             # Circuit breaker not available - fallback to direct execution
-            logging.debug("Circuit breaker not available, falling back to direct tool execution")
+            logger.debug("Circuit breaker not available, falling back to direct tool execution")
             return self._execute_tool_impl(function_name, arguments)
 
         try:
@@ -3619,7 +3619,7 @@ class ToolExecutionMixin:
             
         except CircuitBreakerException as e:
             # Circuit breaker is open - return error dict instead of raising
-            logging.warning(f"Tool '{function_name}' circuit breaker open: {e}")
+            logger.warning(f"Tool '{function_name}' circuit breaker open: {e}")
             return self._circuit_breaker_open_result(function_name)
 
     def _find_declared_tool(self, function_name, tools=None):
@@ -3684,7 +3684,7 @@ class ToolExecutionMixin:
             # react (pick different arguments, choose another tool, explain to
             # the user). Raising here would abort the run and surface a stack
             # trace to the user for what is a normal, expected policy outcome.
-            logging.warning(
+            logger.warning(
                 f"Tool '{function_name}' blocked by its input guardrail: {processed}"
             )
             return {
@@ -3728,7 +3728,7 @@ class ToolExecutionMixin:
             return result
         is_valid, processed = chain.validate_tool_result(function_name, result)
         if not is_valid:
-            logging.warning(
+            logger.warning(
                 f"Tool '{function_name}' result blocked by its output guardrail: {processed}"
             )
             return {
@@ -3757,7 +3757,7 @@ class ToolExecutionMixin:
                 # Fail closed: an operator opted into policy enforcement, so a
                 # broken/misconfigured PolicyEngine must deny rather than let a
                 # protected tool run without a decision.
-                logging.warning(
+                logger.warning(
                     f"Tool '{function_name}' denied: policy check_tool raised: {e}"
                 )
                 return {
@@ -3766,7 +3766,7 @@ class ToolExecutionMixin:
                 }
             if not getattr(result, "allowed", True):
                 reason = getattr(result, "reason", "denied by policy")
-                logging.warning(
+                logger.warning(
                     f"Tool '{function_name}' denied by policy: {reason}"
                 )
                 return {
@@ -3784,7 +3784,7 @@ class ToolExecutionMixin:
                 # Fail closed: mirror the guardrail-chain default. A guardrail
                 # dependency/implementation error must block, not permit, the
                 # unchecked call.
-                logging.warning(
+                logger.warning(
                     f"Tool '{function_name}' denied: guardrail validate_tool_call raised: {e}"
                 )
                 return {
@@ -3792,7 +3792,7 @@ class ToolExecutionMixin:
                     "guardrail_denied": True,
                 }
             if not is_valid:
-                logging.warning(
+                logger.warning(
                     f"Tool '{function_name}' rejected by tool-call guardrail"
                 )
                 return {
@@ -3869,7 +3869,7 @@ class ToolExecutionMixin:
             except Exception as e:  # noqa: BLE001
                 # Fail closed: a guardrail dependency/implementation error must
                 # block, not deliver, the unchecked result.
-                logging.warning(
+                logger.warning(
                     f"Tool '{function_name}' result denied: guardrail validate_tool_result raised: {e}"
                 )
                 return {
@@ -3877,7 +3877,7 @@ class ToolExecutionMixin:
                     "guardrail_denied": True,
                 }
             if not is_valid:
-                logging.warning(
+                logger.warning(
                     f"Tool '{function_name}' result rejected by tool-result guardrail"
                 )
                 return {
@@ -3904,7 +3904,7 @@ class ToolExecutionMixin:
             _, arguments = result
         except Exception as e:
             error_msg = f"Error during approval process: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {"error": error_msg, "approval_error": True}
 
         # Policy/guardrail gate (protocol-driven). Runs after approval so an
@@ -4057,7 +4057,7 @@ class ToolExecutionMixin:
                     return _resolve_result(func(**casted_arguments))
             except Exception as e:
                 error_msg = str(e)
-                logging.error(f"Error executing tool {function_name}: {error_msg}")
+                logger.error(f"Error executing tool {function_name}: {error_msg}")
                 # Only echo the parameter schema when the failure is a genuine
                 # argument-binding error (wrong/missing/extra kwargs). A
                 # TypeError/ValueError raised *inside* a successfully-bound tool
@@ -4104,7 +4104,7 @@ class ToolExecutionMixin:
             f"Tool '{function_name}' not found.{hint} "
             f"Available tools: {available}"
         )
-        logging.error(error_msg)
+        logger.error(error_msg)
         return {"error": error_msg, "available_tools": available}
 
     def _get_tool_display_name(self, tool):
@@ -4157,7 +4157,7 @@ class ToolExecutionMixin:
                     try:
                         return hook(hook_input)
                     except Exception as e:
-                        logging.debug(
+                        logger.debug(
                             f"to_model_output hook failed for '{function_name}': {e}"
                         )
                 return None
@@ -4289,7 +4289,7 @@ class ToolExecutionMixin:
         if match is None:
             return None
         matched_name, tool = match
-        logging.debug(f"Self-repaired tool name {function_name!r} -> {matched_name!r}")
+        logger.debug(f"Self-repaired tool name {function_name!r} -> {matched_name!r}")
         return tool
 
     def _self_repair_tool_match(self, function_name):
@@ -4491,7 +4491,7 @@ class ToolExecutionMixin:
                 "arguments": frozen_args,
                 "request": request,
             }
-        logging.info(f"Approval request submitted: {tracking_id} for {function_name}")
+        logger.info(f"Approval request submitted: {tracking_id} for {function_name}")
         return tracking_id
 
     async def check_pending_approvals(self) -> Dict[str, Any]:
@@ -4616,7 +4616,7 @@ class ToolExecutionMixin:
             except ImportError:
                 return "Tool search module not available"
             except Exception as e:
-                logging.error(f"Error in tool_search: {e}")
+                logger.error(f"Error in tool_search: {e}")
                 return f"Error searching tools: {e}"
         
         elif function_name == "tool_describe":
@@ -4633,7 +4633,7 @@ class ToolExecutionMixin:
             except ImportError:
                 return "Tool search module not available"
             except Exception as e:
-                logging.error(f"Error in tool_describe: {e}")
+                logger.error(f"Error in tool_describe: {e}")
                 return f"Error describing tool: {e}"
         
         elif function_name == "tool_call":
@@ -4659,7 +4659,7 @@ class ToolExecutionMixin:
             except ImportError:
                 return "Tool search module not available"
             except Exception as e:
-                logging.error(f"Error in tool_call unwrap: {e}")
+                logger.error(f"Error in tool_call unwrap: {e}")
                 return f"Error executing tool: {e}"
         
         else:
@@ -4913,4 +4913,4 @@ class ToolExecutionMixin:
             
         except Exception as e:
             # Don't let hook failures break retry logic
-            logging.debug(f"Failed to emit retry hook: {e}")
+            logger.debug(f"Failed to emit retry hook: {e}")
