@@ -1,8 +1,9 @@
 """A tool that raises must give the same outcome via chat() and achat() (#6041).
 
-Contract: a *raised* tool exception ends the turn with ToolExecutionError on
-both paths. A tool that *returns* ``{"error": ...}`` stays a recoverable tool
-result the model sees.
+Contract (D-03): a *raised* tool exception that is not a timeout or connection
+error runs once and reaches the model as the tool result, on both paths, the
+same as a tool that *returns* ``{"error": ...}``. Was: the turn ended with
+ToolExecutionError.
 """
 import asyncio
 import json
@@ -19,17 +20,16 @@ from tests.unit.agent.test_tool_failure_not_relabelled import (
 
 # --- OpenAI-native path -----------------------------------------------------
 
-def test_native_chat_and_achat_both_raise(monkeypatch):
+def test_native_chat_and_achat_both_report_to_model(monkeypatch):
     monkeypatch.setattr("asyncio.sleep", _no_sleep)
-    agent, _rec, runs = _agent_with_failing_tool("smtp down", monkeypatch)
-    with pytest.raises(ToolExecutionError):
-        agent.chat("send the email")
-    assert runs
-
-    agent, _rec, runs = _agent_with_failing_tool("smtp down", monkeypatch)
-    with pytest.raises(ToolExecutionError):
-        asyncio.run(agent.achat("send the email"))
-    assert runs
+    for run in (lambda a: a.chat("send the email"),
+                lambda a: asyncio.run(a.achat("send the email"))):
+        agent, rec, runs = _agent_with_failing_tool("smtp down", monkeypatch)
+        run(agent)
+        assert runs == ["a@b.com"]
+        tool_msgs = [m["content"] for m in rec.requests[-1]["messages"]
+                     if m.get("role") == "tool"]
+        assert any("smtp down" in c for c in tool_msgs)
 
 
 # --- provider (litellm) path ------------------------------------------------
@@ -99,8 +99,8 @@ def test_provider_raised_tool_exception_same_outcome(monkeypatch):
     async_ = _outcome(
         lambda: asyncio.run(_provider_agent(send_email).achat("email a@b.c"))
     )
-    assert sync[0] == async_[0] == "raised"
-    assert seen == []
+    assert sync == async_ == ("returned", "the email could not be sent")
+    assert len(seen) == 2 and all("SMTP server unreachable" in m for m in seen)
 
 
 def test_provider_returned_error_dict_reaches_model_on_both(monkeypatch):
@@ -124,9 +124,8 @@ def test_provider_returned_error_dict_reaches_model_on_both(monkeypatch):
     assert seen and all("mailbox full" in m for m in seen)
 
 
-def test_provider_not_restart_safe_raise_is_not_retryable(monkeypatch):
-    # A restart_safe=False tool must not run again, so the error must not
-    # advertise a retry (durable runs would otherwise stay open).
+def test_provider_not_restart_safe_raise_runs_once(monkeypatch):
+    # A restart_safe=False tool must not run again; its error reaches the model.
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-test")
     seen = []
     _stub_litellm(monkeypatch, seen)
@@ -138,8 +137,7 @@ def test_provider_not_restart_safe_raise_is_not_retryable(monkeypatch):
         raise RuntimeError("SMTP server unreachable")
     send_email.restart_safe = False
 
-    with pytest.raises(ToolExecutionError) as exc:
-        asyncio.run(_provider_agent(send_email).achat("email a@b.c"))
-    assert exc.value.is_retryable is False
+    out = asyncio.run(_provider_agent(send_email).achat("email a@b.c"))
+    assert out == "the email could not be sent"
     assert runs == ["a@b.c"]
-    assert seen == []
+    assert seen and "SMTP server unreachable" in seen[-1]

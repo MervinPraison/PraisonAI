@@ -1,4 +1,4 @@
-"""A tool failure must reach the caller as a tool failure.
+"""A tool failure must reach the model as a tool failure (D-03), never as an LLM error.
 
 `_chat_completion` wraps its body in a blanket `except Exception`, which also
 catches the `ToolExecutionError` raised by the sync tool executor and re-raises
@@ -16,7 +16,6 @@ import types
 import pytest
 
 from praisonaiagents import Agent
-from praisonaiagents.errors import ToolExecutionError
 from praisonaiagents.llm.openai_client import OpenAIClient
 
 
@@ -140,33 +139,39 @@ def _agent_with_failing_tool(message, monkeypatch):
     return agent, rec, runs
 
 
-def test_chat_raises_tool_execution_error(monkeypatch):
-    """A failing tool must surface as ToolExecutionError, not as None."""
-    agent, _rec, runs = _agent_with_failing_tool("smtp down", monkeypatch)
-    with pytest.raises(ToolExecutionError):
-        agent.chat("send the email")
-    # The failing tool must have actually run, proving the error surfaced
-    # *because of* the tool call rather than before it. The tool executor retries
-    # a failing tool up to 3 times, and every attempt targets the same recipient.
-    assert runs and all(to == "a@b.com" for to in runs)
+def _tool_results(rec):
+    return [m["content"] for m in rec.requests[-1]["messages"] if m.get("role") == "tool"]
+
+
+def test_chat_reports_tool_error_to_model(monkeypatch):
+    """A failing tool runs once and its error reaches the model (D-03).
+
+    Was: the turn ended with ToolExecutionError after three runs.
+    """
+    agent, rec, runs = _agent_with_failing_tool("smtp down", monkeypatch)
+    out = agent.chat("send the email")
+    assert runs == ["a@b.com"]
+    assert len(rec.requests) == 2
+    assert any("smtp down" in c for c in _tool_results(rec))
+    assert out == "CONFIDENT ANSWER WITH NO TOOL RESULT"
 
 
 def test_tool_error_text_is_not_classified_as_an_llm_error(monkeypatch):
-    """A tool whose message looks like a rate limit must not re-drive the model.
+    """A tool whose message looks like a rate limit must not re-drive the model
+    without the tool result.
 
-    Without the fix the framework classifies the *tool's* text as a retryable
-    LLM error, sleeps, and calls the model a second time with no tool result --
-    returning that answer to the user as a success.
+    Without the fix the framework classified the *tool's* text as a retryable
+    LLM error, slept, and called the model again with no tool result. Now the
+    second model call carries the tool's error as its result. The text matches
+    the tool RetryPolicy's ``rate_limit`` type, so the tool itself may retry.
     """
     agent, rec, runs = _agent_with_failing_tool("429 too many requests", monkeypatch)
-    with pytest.raises(ToolExecutionError):
-        agent.chat("send the email")
+    agent.chat("send the email")
 
     assert runs and all(to == "a@b.com" for to in runs), (
         "the failing tool must have executed"
     )
-    assert len(rec.requests) == 1, (
-        f"model was re-driven {len(rec.requests)} times after a tool failure; "
-        f"last request carried roles "
-        f"{[m['role'] for m in rec.requests[-1]['messages']]}"
+    assert len(rec.requests) == 2
+    assert any("429 too many requests" in c for c in _tool_results(rec)), (
+        "the follow-up model call must carry the tool's error as its result"
     )

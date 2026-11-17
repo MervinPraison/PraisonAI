@@ -49,7 +49,8 @@ def _runs(fname, declare=None):
     def fn(x: str) -> str:
         """A tool."""
         calls.append(x)
-        raise RuntimeError("transient blip")
+        # D-03: only a timeout or connection error is retried, so the tool raises one.
+        raise ConnectionError("transient blip")
 
     fn.__name__ = fname
     if declare is not None:

@@ -69,6 +69,24 @@ _CALLER_ERROR_TYPES = (
     FileNotFoundError, FileExistsError, IsADirectoryError, NotADirectoryError, PermissionError,
 )
 
+
+
+def _raised_retry_verdict(exc):
+    """``_praison_retryable`` value for a tool body that raised (D-03).
+
+    True: a timeout or connection failure, the only raised errors re-run
+    (class names across the MRO also cover requests/httpx/aiohttp).
+    False: a caller error, neutral for the circuit breaker.
+    None: any other failure; counts toward the breaker, runs once and is
+    reported to the model.
+    """
+    if isinstance(exc, (TimeoutError, ConnectionError)) or any(
+            "Timeout" in c.__name__ or "Connection" in c.__name__
+            for c in type(exc).__mro__):
+        return True
+    return False if isinstance(exc, _CALLER_ERROR_TYPES) else None
+
+
 # Worker count for the per-agent tool ThreadPoolExecutor. Used both when the
 # pool is created and to decide (with the per-executor in-flight counter)
 # whether a fresh call would have to queue behind hung workers. Matches the
@@ -1818,7 +1836,10 @@ class ToolExecutionMixin:
                             # Strip the private control-plane tag before it can reach
                             # the model or be re-surfaced as the tool's payload.
                             result.pop("_praison_retryable", None)
-                            if is_retryable or raised_exception:
+                            # D-03: a raised error is retried only while it is
+                            # transient and attempts remain; otherwise it falls
+                            # through to ``break`` and reaches the model once.
+                            if is_retryable and (attempt < max_attempts or not raised_exception):
                                 raise ToolExecutionError(
                                     result.get("error", f"Tool '{function_name}' failed"),
                                     tool_name=function_name,
@@ -4069,7 +4090,7 @@ class ToolExecutionMixin:
                 # model and cannot collide with a tool's own "retryable" field.
                 return {
                     "error": error_msg,
-                    "_praison_retryable": not isinstance(e, _CALLER_ERROR_TYPES),
+                    "_praison_retryable": _raised_retry_verdict(e),
                 }
 
         # Unresolved: return a corrective, model-readable message so the model can
