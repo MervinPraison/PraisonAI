@@ -6,6 +6,7 @@ finish "restored" the other's dead closure, so the user's own callback was gone
 for good.
 """
 
+import io
 import sys
 import threading
 
@@ -48,12 +49,18 @@ def test_global_callback_is_not_replaced_during_or_after_the_run(user_callback):
     assert display.sync_display_callbacks["tool_call"] is cb
 
 
-def test_run_status_still_sees_its_own_tool_calls(user_callback):
+def test_run_status_still_sees_its_own_tool_calls(user_callback, monkeypatch):
     # The per-run status line still receives the tool call (it overrides the
     # global callback for this run only), and the user's callback is untouched.
+    from rich.console import Console
+    from praisonaiagents.agent import execution_mixin
+
+    out = io.StringIO()
+    monkeypatch.setattr(execution_mixin, "_get_console", lambda: lambda: Console(file=out, width=200))
     cb, seen = user_callback
     _agent_whose_chat_calls_a_tool("a", []).start("go")
     assert seen == []  # same as before: the status line owns tool_call during the run
+    assert "Tools used: a-tool" in out.getvalue(), "the run's status line dropped its tool call"
 
 
 def test_other_threads_keep_the_global_callback(user_callback):
