@@ -1000,6 +1000,13 @@ Write the complete compiled report:"""
                 result = self._start_with_planning(prompt, **kwargs)
             elif stream_requested:
                 # Return a generator for streaming response
+                if kwargs.get('output_pydantic') or kwargs.get('output_json'):
+                    import warnings
+                    warnings.warn(
+                        "start(stream=True) yields raw text chunks; output_pydantic/output_json "
+                        "is not applied. Use stream=False to get the parsed result.",
+                        UserWarning, stacklevel=2,
+                    )
                 kwargs['stream'] = True
                 result = self._start_stream(prompt, **kwargs)
             else:
