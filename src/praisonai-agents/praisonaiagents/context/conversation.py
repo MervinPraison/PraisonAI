@@ -19,6 +19,8 @@ from dataclasses import dataclass
 from .protocols import ConversationAnalyzerProtocol, ConversationCompactorProtocol, ConversationContext
 from .tokens import estimate_messages_tokens, estimate_message_tokens
 
+logger = logging.getLogger(__name__)
+
 
 class HybridConversationAnalyzer:
     """
@@ -46,7 +48,7 @@ class HybridConversationAnalyzer:
                 return self._llm_analysis(messages)
             except Exception as e:
                 # Fall back to rule-based analysis
-                logging.debug(f"LLM analysis failed, falling back to rule-based analysis: {e}")
+                logger.debug(f"LLM analysis failed, falling back to rule-based analysis: {e}")
         
         return self._rule_based_analysis(messages)
     
@@ -270,10 +272,10 @@ class HybridConversationAnalyzer:
                 )
             except json.JSONDecodeError as e:
                 # Fall back to rule-based if JSON parsing fails
-                logging.debug(f"Failed to parse LLM response as JSON: {e}, response: {response[:100]}")
+                logger.debug(f"Failed to parse LLM response as JSON: {e}, response: {response[:100]}")
         except Exception as e:
             # Fall back to rule-based analysis if LLM call fails
-            logging.debug(f"LLM analysis error: {e}")
+            logger.debug(f"LLM analysis error: {e}")
             pass
         
         # Fallback to rule-based analysis

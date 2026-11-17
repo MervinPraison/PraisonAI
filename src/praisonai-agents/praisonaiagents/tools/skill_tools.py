@@ -14,6 +14,8 @@ import os
 import logging
 from ..approval import require_approval
 
+logger = logging.getLogger(__name__)
+
 
 class SkillTools:
     """Tools for executing Agent Skills scripts and managing skills."""
@@ -116,7 +118,7 @@ class SkillTools:
                 # Try to run directly
                 cmd = [script_path] + resolved_args
             
-            logging.debug(f"Running skill script: {' '.join(cmd)}")
+            logger.debug(f"Running skill script: {' '.join(cmd)}")
             
             result = subprocess.run(
                 cmd,
