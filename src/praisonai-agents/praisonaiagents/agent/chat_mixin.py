@@ -6520,7 +6520,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     tool_result = _handle_native_deferred_result(
                                         tool_result, self.chat_history, tool_call.get('id'),
                                         tool_call['function']['name'],
-                                        history_sink=getattr(self, 'chat_history', None),
                                     )
                                     # Parity with the non-streaming path, which
                                     # fires 'tool_call' after every tool run.
