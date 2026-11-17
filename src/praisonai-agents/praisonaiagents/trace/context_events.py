@@ -176,6 +176,7 @@ def _run_scope(run_id: Optional[str] = None) -> Generator[str, None, None]:
         except ValueError:
             # Exited from a different context than it was entered in.
             _run_id_var.set(None)
+run_scope = _run_scope  # public name for other PraisonAI packages (G-22); the private name stays
 
 
 @contextmanager

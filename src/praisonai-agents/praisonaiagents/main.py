@@ -36,6 +36,7 @@ _error_logs_lock = threading.Lock()
 sync_display_callbacks = {}
 async_display_callbacks = {}
 _callbacks_lock = threading.Lock()
+callbacks_lock = _callbacks_lock  # public name for other PraisonAI packages (G-22); the private name stays
 
 # Global approval callback registry
 approval_callback = None

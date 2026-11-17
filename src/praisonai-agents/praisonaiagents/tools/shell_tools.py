@@ -90,6 +90,7 @@ def _find_shell_syntax(command: str):
                     return token
         i += 1
     return None
+find_shell_syntax = _find_shell_syntax  # public name for other PraisonAI packages (G-22); the private name stays
 
 
 # Credential-looking variable names are withheld from model-driven commands:
@@ -113,6 +114,7 @@ def _build_subprocess_env(extra_env: Optional[Dict[str, str]] = None) -> Dict[st
     if extra_env:
         process_env.update(extra_env)
     return process_env
+build_subprocess_env = _build_subprocess_env  # public name for other PraisonAI packages (G-22); the private name stays
 
 
 def _expandvars(value: str, env: Dict[str, str]) -> str:
