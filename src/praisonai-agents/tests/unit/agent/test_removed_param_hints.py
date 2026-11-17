@@ -48,6 +48,7 @@ def test_removed_param_error_names_the_replacement(name):
 
 
 def test_model_dict_carries_temperature_and_max_tokens():
+    pytest.importorskip("litellm")  # llm_instance needs the optional llm extra
     agent = Agent(name="a", instructions="x", model={"model": "gpt-4o-mini", "temperature": 0.2, "max_tokens": 50})
     assert (agent.llm_instance.temperature, agent.llm_instance.max_tokens) == (0.2, 50)
 
