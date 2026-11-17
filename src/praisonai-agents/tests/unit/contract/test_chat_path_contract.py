@@ -207,8 +207,6 @@ F12 = _drift("F-12", "async agent tool step turns DeferredToolResult into {'resu
              "before the loop can register it (execution_mixin JSON coercion)", ("achat", "*"))
 F13 = _drift("F-13", "OpenAI-client stream tool step does not register a deferred result",
              ("stream", "openai_client"))
-F14 = _drift("F-14", "achat() on the litellm Chat Completions route calls the model again after a tool "
-             "set the cancel token", ("achat", "litellm_chat"))
 
 
 # --- tools ------------------------------------------------------------------
@@ -367,7 +365,7 @@ def test_cancel_token_set_before_turn_stops_it(stub, mode, route):
     assert REQUESTS == []
 
 
-@pytest.mark.parametrize("mode,route", _cells(F09_TOOL, F14))
+@pytest.mark.parametrize("mode,route", _cells(F09_TOOL))
 def test_cancel_during_tool_stops_the_loop(stub, mode, route):
     token = threading.Event()
 
