@@ -91,7 +91,8 @@ def _live_update(live, display_fn, text, start_time):
     anyway. The panel is transient, and the final answer is printed after it.
     """
     now = time.perf_counter()
-    if now - getattr(live, "_praison_last_update", 0.0) >= 0.1:
+    last = getattr(live, "_praison_last_update", None)  # perf_counter's zero is undefined
+    if last is None or now - last >= 0.1:
         live._praison_last_update = now
         live.update(display_fn(text, start_time))
 

@@ -6,7 +6,7 @@ from praisonaiagents.llm import openai_client as oc
 
 
 def test_panel_rebuilt_at_most_every_100ms(monkeypatch):
-    clock = {"t": 1000.0}
+    clock = {"t": 0.0}  # first chunk must render even when the clock starts near zero
     monkeypatch.setattr(oc.time, "perf_counter", lambda: clock["t"])
     built, shown = [], []
     live = SimpleNamespace(update=shown.append)
