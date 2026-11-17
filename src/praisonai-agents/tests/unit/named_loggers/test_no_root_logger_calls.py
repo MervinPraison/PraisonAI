@@ -25,11 +25,17 @@ ROOT = Path(praisonaiagents.__file__).parent
 
 
 def _root_logger_calls(path):
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    # Names bound to the logging module, so `import logging as _logging` is covered.
+    names = {"logging"} | {
+        alias.asname for node in ast.walk(tree) if isinstance(node, ast.Import)
+        for alias in node.names if alias.name == "logging" and alias.asname
+    }
     lines = []
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+    for node in ast.walk(tree):
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                 and node.func.attr in LEVELS and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "logging"):
+                and node.func.value.id in names):
             lines.append(node.lineno)
         elif isinstance(node, ast.ImportFrom) and node.module == "logging":
             lines += [node.lineno for alias in node.names if alias.name in LEVELS]
