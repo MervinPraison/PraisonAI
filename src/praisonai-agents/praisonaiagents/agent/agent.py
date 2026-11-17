@@ -1398,8 +1398,9 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Fast path: None -> no skills (skip resolve() call)
         if skills is None:
             _skills_config = None
-        elif isinstance(skills, list):
-            _skills_config = SkillsConfig(paths=skills)
+        elif isinstance(skills, (list, str)):
+            # A single string ('./dir', 'name', '@bundle') is a one-item list.
+            _skills_config = SkillsConfig(paths=[skills] if isinstance(skills, str) else skills)
         elif isinstance(skills, SkillsConfig):
             _skills_config = skills
         else:
