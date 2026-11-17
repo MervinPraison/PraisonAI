@@ -31,6 +31,9 @@ dependencies = [
     "PyYAML>=6.0",
     "aiohttp>=3.8.0",
     "tzdata; sys_platform == 'win32'",
+    # config.toml support on 3.10 (3.11+ has tomllib); without it the file was
+    # silently ignored.
+    "tomli>=1.1.0; python_version < '3.11'",
     # The scheduler converts every natural-language recurring schedule
     # ("every day at 9am", "weekdays at 9am") to cron; without this engine
     # those jobs are accepted and silently never fire. Pure Python; pulls
