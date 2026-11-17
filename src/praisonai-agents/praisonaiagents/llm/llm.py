@@ -1260,6 +1260,16 @@ Respond with ONLY a valid JSON tool call in this format:
         except Exception:  # noqa: BLE001 - classification must never break retry
             return False
 
+    def _warn_connection_refused(self) -> None:
+        """Name the endpoint that refused the connection and how to start it."""
+        model = str(self.model or "")
+        url = self.base_url or ("http://localhost:11434" if model.startswith("ollama") else None)
+        start = "run `ollama serve`" if model.startswith("ollama") or ":11434" in (url or "") else "start the server"
+        logging.warning(
+            f"Could not connect to {url or 'the model endpoint'} for {model!r}: connection refused. "
+            f"Is the server running? To fix it, {start}, or point base_url at the right address."
+        )
+
     def resolve_failover_decision(self, error: Exception, attempt_state: dict) -> FailoverDecision:
         """
         Resolve failover decision based on error kind and attempt state.
@@ -1291,6 +1301,13 @@ Respond with ONLY a valid JSON tool call in this format:
                 is_retryable=False
             )
         
+        # Nothing is listening: retrying the same endpoint only delays the
+        # error (X-07, as on the OpenAI-client path). Say where and what to run.
+        from .error_classifier import _is_connection_refused
+        if _is_connection_refused(error):
+            self._warn_connection_refused()
+            return FailoverDecision(action="surface_error", reason=error_kind, is_retryable=False)
+
         # Exceeded retry limit
         if attempt > max_retries:
             return FailoverDecision(
