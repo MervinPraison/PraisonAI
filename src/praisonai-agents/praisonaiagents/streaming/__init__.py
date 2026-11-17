@@ -23,6 +23,8 @@ __all__ = [
     "StreamEventEmitter",
     "StreamCallback",
     "AsyncStreamCallback",
+    "StreamCallbackProtocol",
+    "AsyncStreamCallbackProtocol",
     "create_text_printer_callback",
     "create_metrics_callback",
     "emit_tool_progress",
@@ -43,6 +45,7 @@ def __getattr__(name: str):
         if name in (
             "StreamEvent", "StreamEventType", "StreamMetrics", 
             "StreamEventEmitter", "StreamCallback", "AsyncStreamCallback",
+            "StreamCallbackProtocol", "AsyncStreamCallbackProtocol",
             "create_text_printer_callback", "create_metrics_callback",
             "emit_tool_progress", "emit_todo_update", "tool_progress_channel"
         ):
@@ -53,6 +56,8 @@ def __getattr__(name: str):
                 StreamEventEmitter,
                 StreamCallback,
                 AsyncStreamCallback,
+                StreamCallbackProtocol,
+                AsyncStreamCallbackProtocol,
                 create_text_printer_callback,
                 create_metrics_callback,
                 emit_tool_progress,
@@ -67,6 +72,8 @@ def __getattr__(name: str):
                 "StreamEventEmitter": StreamEventEmitter,
                 "StreamCallback": StreamCallback,
                 "AsyncStreamCallback": AsyncStreamCallback,
+                "StreamCallbackProtocol": StreamCallbackProtocol,
+                "AsyncStreamCallbackProtocol": AsyncStreamCallbackProtocol,
                 "create_text_printer_callback": create_text_printer_callback,
                 "create_metrics_callback": create_metrics_callback,
                 "emit_tool_progress": emit_tool_progress,

@@ -576,3 +576,9 @@ class AsyncDbAdapter(Protocol):
     async def close(self) -> None:
         """Async close the database connection."""
         ...
+
+
+# ``Protocol``-suffixed names (G-26, the project naming rule). The original
+# names stay and are the same class, so existing imports keep working.
+DbAdapterProtocol = DbAdapter
+AsyncDbAdapterProtocol = AsyncDbAdapter
