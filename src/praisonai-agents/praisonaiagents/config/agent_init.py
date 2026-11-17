@@ -6,11 +6,11 @@ infix because ``config.resolve_<param>`` already exists with different
 defaults (for example ``resolve_caching(None)`` returns ``None``).
 """
 
-from typing import Any, Optional, Tuple
+from typing import Any, Dict, Optional, Tuple
 
-from .feature_configs import CachingConfig, TemplateConfig
-from .param_resolver import resolve
-from .presets import CACHING_PRESETS
+from .feature_configs import CachingConfig, PlanningConfig, TemplateConfig
+from .param_resolver import ArrayMode, resolve
+from .presets import CACHING_PRESETS, PLANNING_PRESETS
 
 
 def resolve_agent_caching(caching: Any) -> Tuple[Optional[CachingConfig], bool, Optional[bool]]:
@@ -57,3 +57,34 @@ def resolve_agent_templates(templates: Any) -> Tuple[Optional[TemplateConfig], O
     if config:
         return config, config.system, config.prompt, config.response, config.use_system_prompt
     return config, None, None, None, True
+
+
+def resolve_agent_planning(planning: Any) -> Tuple[Optional[PlanningConfig], Dict[str, Any]]:
+    """``planning=`` -> ``(config, overrides)``.
+
+    *overrides* holds only the ``planning`` / ``planning_tools`` /
+    ``planning_reasoning`` / ``plan_mode`` values this parameter sets; keys it
+    does not set keep the caller's current value, as the inline block did.
+    """
+    if planning is None or planning is False:
+        config = None
+    elif planning is True:
+        config = PlanningConfig()
+    elif isinstance(planning, PlanningConfig):
+        config = planning
+    else:
+        config = resolve(
+            value=planning,
+            param_name="planning",
+            config_class=PlanningConfig,
+            presets=PLANNING_PRESETS,
+            string_mode="llm_model",
+            array_mode=ArrayMode.PRESET_OVERRIDE,
+            default=None,
+        )
+    if config is not None:
+        if isinstance(config, PlanningConfig):
+            return config, {"planning": True, "planning_tools": config.tools,
+                            "planning_reasoning": config.reasoning, "plan_mode": config.read_only}
+        return config, {"planning": bool(config)}
+    return config, {"planning": False}
