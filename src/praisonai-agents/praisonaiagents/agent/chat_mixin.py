@@ -6232,7 +6232,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         "model": self.llm,
                         "messages": messages,
                         "temperature": kwargs.get('temperature', 1.0),
-                        "stream": True
+                        "stream": True,
+                        # The usage chunk (no choices) is the only token count a
+                        # stream gets; copied into followup_args below (F-08).
+                        "stream_options": {"include_usage": True},
                     }
                     if kwargs.get('max_tokens') is not None:
                         completion_args["max_tokens"] = kwargs['max_tokens']
@@ -6301,7 +6304,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # pre-tool response_text over the real answer (Issue #5407).
                     active_stream = {"text": "", "after_tools": False}
                     
+                    _stream_usage = None
                     for chunk in completion:
+                        if getattr(chunk, "usage", None):
+                            _stream_usage = chunk
                         # Azure opens with a content-filter chunk and usage
                         # chunks carry no choices; skip them, as the follow-up
                         # loop below does (F-10).
@@ -6353,6 +6359,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 if tool_call_delta.function.arguments:
                                     tool_calls_data[tool_call_delta.index]['function']['arguments'] += tool_call_delta.function.arguments
                     
+                    if _stream_usage is not None:  # one billed call (F-08)
+                        self._record_llm_usage(*self._extract_llm_usage(_stream_usage))
                     # Emit LAST_TOKEN and STREAM_END events after streaming loop
                     if last_content_time:
                         self.stream_emitter.emit(StreamEvent(
@@ -6572,9 +6580,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                         followup_text = ""
                         followup_last_content_time = None
+                        _followup_usage = None
                         for followup_chunk in self._openai_client.sync_client.chat.completions.create(
                             **followup_args
                         ):
+                            if getattr(followup_chunk, "usage", None):
+                                _followup_usage = followup_chunk
                             if not followup_chunk.choices:
                                 continue
                             piece = followup_chunk.choices[0].delta.content
@@ -6587,6 +6598,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 active_stream["text"] = followup_text
                                 self._persist_assistant_delta(followup_text)
                                 yield piece
+                        if _followup_usage is not None:  # the follow-up is billed too (F-08)
+                            self._record_llm_usage(*self._extract_llm_usage(_followup_usage))
                         if followup_last_content_time:
                             self.stream_emitter.emit(StreamEvent(
                                 type=StreamEventType.LAST_TOKEN,
