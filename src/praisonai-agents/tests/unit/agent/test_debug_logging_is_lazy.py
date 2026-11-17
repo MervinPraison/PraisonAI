@@ -71,13 +71,16 @@ def payload_tool() -> dict:
 @pytest.mark.parametrize("mode", ["sync", "async"])
 def test_debug_templates_do_not_embed_payloads(stub, monkeypatch, mode):
     templates = []
-    real_debug = logging.debug
+    real_debug = logging.Logger.debug
 
-    def recording_debug(msg, *args, **kwargs):
+    # Patch the method, not the module function: it sees root-logger calls
+    # (logging.debug delegates to it) and named-logger calls alike (X-08), at
+    # call time and whatever the level, so eager formatting is still caught.
+    def recording_debug(self, msg, *args, **kwargs):
         templates.append(str(msg))
-        return real_debug(msg, *args, **kwargs)
+        return real_debug(self, msg, *args, **kwargs)
 
-    monkeypatch.setattr(logging, "debug", recording_debug)
+    monkeypatch.setattr(logging.Logger, "debug", recording_debug)
     agent = Agent(name="t", instructions="hi", llm="gpt-4o-mini", tools=[payload_tool], output="silent")
     prompt = "go " + PROMPT_MARK
     result = agent.chat(prompt) if mode == "sync" else asyncio.run(agent.achat(prompt))
