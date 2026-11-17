@@ -349,11 +349,25 @@ class TestCLIIntegration:
                 to_format="praisonai"
             )
             
-            # Should not raise
-            try:
-                handle_migrate_command(args)
-            except SystemExit:
-                pass  # CLI may exit
+            # Stub the agent flow: this checks the CLI wiring, and a live LLM
+            # call here took 17-90 s against a blocked network.
+            import importlib
+            from unittest import mock
+            # The handler imports ``.migration_flow`` relative to its own module.
+            migration_flow = importlib.import_module(
+                handle_migrate_command.__module__.rsplit(".", 1)[0] + ".migration_flow")
+            seen = {}
+
+            def fake_run(flow):
+                seen["dry_run"] = flow.dry_run
+                return migration_flow.MigrationResult(success=True, files_converted=1, iterations=1)
+
+            with mock.patch.object(migration_flow.MigrationFlow, "run", autospec=True, side_effect=fake_run):
+                try:
+                    handle_migrate_command(args)
+                except SystemExit:
+                    pass  # CLI may exit
+            assert seen == {"dry_run": True}
 
 
 class TestValidation:

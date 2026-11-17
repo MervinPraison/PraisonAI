@@ -536,7 +536,9 @@ class SetupHandler(CommandHandler):
             return
 
         try:
-            agent = Agent(name="setup-check", llm=model)
+            # One attempt: a key/network problem should be reported now, not
+            # after the default retry backoff.
+            agent = Agent(name="setup-check", llm=model, retry=False)
             result = agent.start("Say hello in one sentence")
             if result:
                 output.print_success("Verified — your agent is working!")

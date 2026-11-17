@@ -149,9 +149,13 @@ def test_workflow_async_output_file_input_traversal_blocked(root):
 
 
 @pytest.mark.skipif(not os.environ.get("OPENAI_API_KEY"), reason="OPENAI_API_KEY not set")
-def test_task_output_file_traversal_blocked_real_run(root):
-    team, _ = _team("../escaped.txt")
+def test_task_output_file_traversal_blocked_real_run(root, monkeypatch):
+    # Stub the model so the task completes and the save path really runs; a
+    # live call against a blocked network failed the task before any save.
+    monkeypatch.setattr(Agent, "chat", lambda self, *a, **k: "report")
+    team, task = _team("../escaped.txt")
     team.start()
+    assert task.result is not None and "report" in str(task.result.raw)
     assert not (root.parent / "escaped.txt").exists()
 
 
