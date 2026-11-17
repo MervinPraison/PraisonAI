@@ -8,9 +8,9 @@ defaults (for example ``resolve_caching(None)`` returns ``None``).
 
 from typing import Any, Dict, Optional, Tuple
 
-from .feature_configs import CachingConfig, PlanningConfig, TemplateConfig
+from .feature_configs import CachingConfig, PlanningConfig, ReflectionConfig, TemplateConfig
 from .param_resolver import ArrayMode, resolve
-from .presets import CACHING_PRESETS, PLANNING_PRESETS
+from .presets import CACHING_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS
 
 
 def resolve_agent_caching(caching: Any) -> Tuple[Optional[CachingConfig], bool, Optional[bool]]:
@@ -90,3 +90,38 @@ def resolve_agent_planning(planning: Any) -> Tuple[Optional[PlanningConfig], Dic
     if planning is True:
         return config, {}
     return config, {"planning": False}
+
+
+def resolve_agent_reflection(reflection: Any) -> Tuple[Optional[ReflectionConfig], Dict[str, Any]]:
+    """``reflection=`` -> ``(config, overrides)``.
+
+    *overrides* holds only the ``self_reflect`` / ``min_reflect`` /
+    ``max_reflect`` / ``reflect_llm`` / ``reflect_prompt`` values this
+    parameter sets; ``None`` sets nothing, as the inline block did.
+    """
+    if reflection is None or reflection is False:
+        config = None
+    elif reflection is True:
+        config = ReflectionConfig()
+    elif isinstance(reflection, ReflectionConfig):
+        config = reflection
+    else:
+        config = resolve(
+            value=reflection,
+            param_name="reflection",
+            config_class=ReflectionConfig,
+            presets=REFLECTION_PRESETS,
+            array_mode=ArrayMode.PRESET_OVERRIDE,
+            default=None,
+        )
+    if config is not None:
+        if isinstance(config, ReflectionConfig):
+            return config, {"self_reflect": True, "min_reflect": config.min_iterations,
+                            "max_reflect": config.max_iterations, "reflect_llm": config.llm,
+                            "reflect_prompt": config.prompt}
+        return config, {"self_reflect": bool(config)}
+    if reflection is True:
+        return config, {"self_reflect": True}
+    if reflection is False:
+        return config, {"self_reflect": False}
+    return config, {}
