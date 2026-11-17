@@ -81,6 +81,20 @@ def _handle_native_deferred_result(
         logging.debug("Native deferred registration skipped (non-fatal): %s", e)
     return tool_result.note
 
+
+def _live_update(live, display_fn, text, start_time):
+    """Rebuild the streaming panel at most every 100 ms (R-01).
+
+    Each rebuild parses the whole answer so far as Markdown, so rebuilding on
+    every chunk made a long answer quadratic (2,000 chunks: 2-5 s vs 0.13 s
+    for the raw stream); the Live display redraws about ten times a second
+    anyway. The panel is transient, and the final answer is printed after it.
+    """
+    now = time.perf_counter()
+    if now - getattr(live, "_praison_last_update", 0.0) >= 0.1:
+        live._praison_last_update = now
+        live.update(display_fn(text, start_time))
+
 # Lazy imports for optional dependencies
 _openai_module = None
 _rich_console = None
@@ -1453,7 +1467,7 @@ class OpenAIClient:
                                     content=content
                                 ))
                             
-                            live.update(display_fn(full_response_text, start_time))
+                            _live_update(live, display_fn, full_response_text, start_time)
                         
                         # Handle tool calls streaming
                         if _emit and chunk.choices and hasattr(chunk.choices[0].delta, 'tool_calls') and chunk.choices[0].delta.tool_calls:
@@ -1483,7 +1497,7 @@ class OpenAIClient:
                                 ))
                             if reasoning_steps:
                                 reasoning_content += rc
-                                live.update(display_fn(f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
+                                _live_update(live, display_fn, f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time)
                 
                 # Clear the last generating display with a blank line
                 console.print()
@@ -1745,7 +1759,7 @@ class OpenAIClient:
                                     content=content
                                 ))
                             
-                            live.update(display_fn(full_response_text, start_time))
+                            _live_update(live, display_fn, full_response_text, start_time)
                         
                         # Handle tool calls streaming
                         if _emit and chunk.choices and hasattr(chunk.choices[0].delta, 'tool_calls') and chunk.choices[0].delta.tool_calls:
@@ -1775,7 +1789,7 @@ class OpenAIClient:
                                 ))
                             if reasoning_steps:
                                 reasoning_content += rc
-                                live.update(display_fn(f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
+                                _live_update(live, display_fn, f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time)
                 
                 # Clear the last generating display with a blank line
                 console.print()
@@ -2222,7 +2236,7 @@ class OpenAIClient:
                                         logging.debug(f"TTFT (Time To First Token): {ttft_ms:.0f}ms")
                                         ttft_logged = True
                                     full_response_text += chunk.choices[0].delta.content
-                                    live.update(display_fn(full_response_text, start_time))
+                                    _live_update(live, display_fn, full_response_text, start_time)
                             
                             # Process final response from chunks
                             final_response = process_stream_chunks(chunks)
@@ -2586,7 +2600,7 @@ class OpenAIClient:
                                 chunks.append(chunk)
                                 if chunk.choices[0].delta.content:
                                     full_response_text += chunk.choices[0].delta.content
-                                    live.update(display_fn(full_response_text, start_time))
+                                    _live_update(live, display_fn, full_response_text, start_time)
                             
                             # Process final response from chunks
                             final_response = process_stream_chunks(chunks)
