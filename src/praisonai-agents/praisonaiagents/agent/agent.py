@@ -2513,6 +2513,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 llm is None
                 and model_name == 'gpt-4o-mini'
                 and not os.getenv('OPENAI_MODEL_NAME')
+                # Guard keeps the default Agent() from eagerly importing openai_client.
+                and (os.getenv('OPENAI_BASE_URL') or os.getenv('OPENAI_API_BASE'))
             ):
                 from ..llm.openai_client import _env_base_url
                 _endpoint = _env_base_url()
