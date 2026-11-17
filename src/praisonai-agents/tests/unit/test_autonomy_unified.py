@@ -156,7 +156,7 @@ class TestUnifiedDoomLoop:
 class TestRunAutonomousRecovery:
     """run_autonomous() should attempt recovery on doom loop instead of immediate abort."""
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     def test_recovery_on_doom_loop(self, mock_chat):
         from praisonaiagents import Agent
         # Return identical responses to trigger doom loop
@@ -180,7 +180,7 @@ class TestRunAutonomousRecovery:
 class TestObservabilityWiring:
     """observe=True should emit ObservabilityHooks events."""
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     def test_observe_emits_events(self, mock_chat):
         from praisonaiagents import Agent
         mock_chat.return_value = "Task completed"
@@ -199,7 +199,7 @@ class TestObservabilityWiring:
             metrics = hooks.get_metrics()
             assert metrics.total_steps >= 1
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     def test_observe_false_no_hooks(self, mock_chat):
         from praisonaiagents import Agent
         mock_chat.return_value = "Task completed"
@@ -406,7 +406,7 @@ class TestExports:
 class TestAutonomySmokeTests:
     """End-to-end smoke tests with mocked LLM responses."""
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     def test_full_auto_completes_on_keyword(self, mock_chat):
         from praisonaiagents import Agent
         mock_chat.return_value = "I have finished the task. Task completed."
@@ -422,7 +422,7 @@ class TestAutonomySmokeTests:
         assert result.completion_reason == "goal"
         assert result.iterations >= 1
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     def test_promise_completion(self, mock_chat):
         from praisonaiagents import Agent
         mock_chat.side_effect = [
@@ -471,7 +471,7 @@ class TestAutonomySmokeTests:
         )
         assert result.completion_reason == "timeout"
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     def test_max_iterations_stops(self, mock_chat):
         from praisonaiagents import Agent
         # Response must NOT contain any completion keywords: done, finished, completed, task complete
@@ -489,7 +489,7 @@ class TestAutonomySmokeTests:
         assert result.completion_reason == "max_iterations"
         assert result.iterations == 3
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     def test_clear_context_between_iterations(self, mock_chat):
         from praisonaiagents import Agent
         call_count = 0
@@ -514,7 +514,7 @@ class TestAutonomySmokeTests:
         )
         assert result.success is True
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     def test_error_handling(self, mock_chat):
         from praisonaiagents import Agent
         mock_chat.side_effect = RuntimeError("LLM connection failed")
@@ -540,7 +540,7 @@ class TestAutonomySmokeTests:
         with pytest.raises(ValueError, match="[Aa]utonomy"):
             agent.run_autonomous("Do something")
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     def test_auto_escalate_progresses_stage(self, mock_chat):
         from praisonaiagents import Agent
         responses = ["Working..."] * 5 + ["Task completed"]

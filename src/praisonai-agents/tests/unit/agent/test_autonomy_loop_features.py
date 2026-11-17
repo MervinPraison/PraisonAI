@@ -41,7 +41,7 @@ class TestCompletionPromise:
         )
         
         # Mock chat to return a response with promise
-        with patch.object(agent, 'chat', return_value="Task done. <promise>DONE</promise>"):
+        with patch.object(agent, 'achat', return_value="Task done. <promise>DONE</promise>"):
             result = agent.run_autonomous(
                 "Test task",
                 max_iterations=5,
@@ -62,7 +62,7 @@ class TestCompletionPromise:
         )
         
         # Mock chat to return response with promise tag
-        with patch.object(agent, 'chat', return_value="I have completed the task. <promise>TASK_COMPLETE</promise>"):
+        with patch.object(agent, 'achat', return_value="I have completed the task. <promise>TASK_COMPLETE</promise>"):
             result = agent.run_autonomous(
                 "Build something",
                 max_iterations=10,
@@ -92,7 +92,7 @@ class TestCompletionPromise:
             call_count[0] += 1
             return responses[idx]
         
-        with patch.object(agent, 'chat', side_effect=mock_chat):
+        with patch.object(agent, 'achat', side_effect=mock_chat):
             result = agent.run_autonomous(
                 "Build something",
                 max_iterations=3,
@@ -113,7 +113,7 @@ class TestCompletionPromise:
         )
         
         # Mock chat with wrong promise text
-        with patch.object(agent, 'chat', return_value="<promise>WRONG</promise>"):
+        with patch.object(agent, 'achat', return_value="<promise>WRONG</promise>"):
             result = agent.run_autonomous(
                 "Test task",
                 max_iterations=2,
@@ -147,7 +147,7 @@ class TestPromptReinjection:
                 return "<promise>DONE</promise>"
             return "Working..."
         
-        with patch.object(agent, 'chat', side_effect=mock_chat):
+        with patch.object(agent, 'achat', side_effect=mock_chat):
             result = agent.run_autonomous(
                 "Build a REST API",
                 max_iterations=5,
@@ -181,7 +181,7 @@ class TestPromptReinjection:
                 return "<promise>DONE</promise>"
             return "Working..."
         
-        with patch.object(agent, 'chat', side_effect=mock_chat):
+        with patch.object(agent, 'achat', side_effect=mock_chat):
             result = agent.run_autonomous(
                 "My specific task",
                 max_iterations=5,
@@ -220,7 +220,7 @@ class TestContextClearing:
             output="silent"
         )
         
-        with patch.object(agent, 'chat', return_value="<promise>DONE</promise>"):
+        with patch.object(agent, 'achat', return_value="<promise>DONE</promise>"):
             # Should not raise
             result = agent.run_autonomous(
                 "Test task",
@@ -249,7 +249,7 @@ class TestContextClearing:
                 return "<promise>DONE</promise>"
             return "Working..."
         
-        with patch.object(agent, 'chat', side_effect=mock_chat):
+        with patch.object(agent, 'achat', side_effect=mock_chat):
             with patch.object(agent, 'clear_history') as mock_clear:
                 result = agent.run_autonomous(
                     "Test task",
@@ -279,7 +279,7 @@ class TestContextClearing:
                 return "<promise>DONE</promise>"
             return "Working..."
         
-        with patch.object(agent, 'chat', side_effect=mock_chat):
+        with patch.object(agent, 'achat', side_effect=mock_chat):
             with patch.object(agent, 'clear_history') as mock_clear:
                 result = agent.run_autonomous(
                     "Test task",
@@ -306,7 +306,7 @@ class TestBackwardCompatibility:
         )
         
         # Mock to return completion signal (old style)
-        with patch.object(agent, 'chat', return_value="Task completed successfully"):
+        with patch.object(agent, 'achat', return_value="Task completed successfully"):
             result = agent.run_autonomous(
                 "Test task",
                 max_iterations=5
@@ -325,7 +325,7 @@ class TestBackwardCompatibility:
             output="silent"
         )
         
-        with patch.object(agent, 'chat', return_value="I have finished the task"):
+        with patch.object(agent, 'achat', return_value="I have finished the task"):
             result = agent.run_autonomous(
                 "Test task",
                 max_iterations=5
@@ -389,7 +389,7 @@ class TestStartedAtTimestamp:
             output="silent"
         )
         
-        with patch.object(agent, 'chat', return_value="<promise>DONE</promise>"):
+        with patch.object(agent, 'achat', return_value="<promise>DONE</promise>"):
             result = agent.run_autonomous(
                 "Test task",
                 max_iterations=5,
@@ -412,7 +412,7 @@ class TestStartedAtTimestamp:
             output="silent"
         )
         
-        with patch.object(agent, 'chat', return_value="<promise>DONE</promise>"):
+        with patch.object(agent, 'achat', return_value="<promise>DONE</promise>"):
             result = agent.run_autonomous(
                 "Test task",
                 max_iterations=5,

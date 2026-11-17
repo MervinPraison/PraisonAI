@@ -24,14 +24,14 @@ def events(monkeypatch):
 
 def _run(mode, reply):
     agent = Agent(name="a", instructions="hi", autonomy=True)
-    if mode == "sync":
-        agent.chat = lambda prompt, **kw: reply(prompt)
-        return agent, agent.run_autonomous("do x", max_iterations=3)
 
     async def achat(prompt, **kw):
         return reply(prompt)
 
+    # G-17: run_autonomous() runs the async loop, so both modes stub achat().
     agent.achat = achat
+    if mode == "sync":
+        return agent, agent.run_autonomous("do x", max_iterations=3)
     return agent, asyncio.run(agent.run_autonomous_async("do x", max_iterations=3))
 
 

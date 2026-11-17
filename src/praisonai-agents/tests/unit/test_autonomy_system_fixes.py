@@ -143,7 +143,7 @@ class TestF7_AutonomousMemoryIntegration:
         """_auto_save_session should be called during run_autonomous when memory exists."""
         agent = self._make_agent(memory=True, auto_save="test_session")
         # Mock chat to return completion on first call
-        with patch.object(agent, 'chat', return_value="task completed"):
+        with patch.object(agent, 'achat', return_value="task completed"):
             with patch.object(agent, '_auto_save_session') as mock_save:
                 result = agent.run_autonomous("Do something")
                 assert result.success
@@ -154,7 +154,7 @@ class TestF7_AutonomousMemoryIntegration:
     def test_no_save_without_memory(self):
         """Without memory, _auto_save_session should not be called extra times."""
         agent = self._make_agent()
-        with patch.object(agent, 'chat', return_value="task completed"):
+        with patch.object(agent, 'achat', return_value="task completed"):
             with patch.object(agent, '_auto_save_session') as mock_save:
                 result = agent.run_autonomous("Do something")
                 assert result.success
@@ -187,7 +187,7 @@ class TestF8_PlanningFromAutonomyStage:
         )
         # Mock both chat and _start_with_planning
         with patch.object(agent, 'get_recommended_stage', return_value="planned"):
-            with patch.object(agent, 'chat', return_value="<promise>DONE</promise>"):
+            with patch.object(agent, 'achat', return_value="<promise>DONE</promise>"):
                 with patch.object(agent, '_start_with_planning', return_value="planned result") as mock_plan:
                     result = agent.run_autonomous(
                         "edit the auth module",
