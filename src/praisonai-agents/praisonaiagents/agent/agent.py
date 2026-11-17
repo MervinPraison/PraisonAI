@@ -150,6 +150,8 @@ from ..config.agent_init import (
     resolve_agent_templates,
     resolve_agent_caching, resolve_agent_history, resolve_agent_planning, resolve_agent_reflection,
     resolve_agent_templates,
+    resolve_agent_caching, resolve_agent_learn, resolve_agent_planning, resolve_agent_reflection,
+    resolve_agent_templates,
 )
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
@@ -1483,80 +1485,9 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Resolve LEARN param - FAST PATH (top-level, peer to memory)
         # learn= is a first-class citizen, independent of memory=
         # ─────────────────────────────────────────────────────────────────────
-        _learn_config = None
-        
-        # Top-level learn= takes precedence over memory.learn
-        if learn is not None:
-            # Explicit top-level learn= param
-            if learn is False:
-                _learn_config = None
-            elif learn is True:
-                # learn=True is a coordinated posture (Issue #4864): enable
-                # AGENTIC extraction AND a conversational-aware nudge cadence in
-                # one switch, so an always-on companion bot actually learns.
-                # nudge_min_tool_iters=0 lets a chat-only turn (no tool calls)
-                # still nudge; auto_memory is turned on below so durable facts
-                # are captured on every turn, not just tool-using ones.
-                from ..memory.learn.protocols import LearnMode
-                _learn_config = LearnConfig(
-                    mode=LearnMode.AGENTIC,
-                    nudge_interval=10,
-                    nudge_min_tool_iters=0,
-                )
-            elif isinstance(learn, LearnConfig):
-                _learn_config = learn
-            elif isinstance(learn, dict):
-                _learn_config = LearnConfig(**learn)
-            elif isinstance(learn, str):
-                # String mode: "disabled", "agentic", "propose".
-                # Normalise case/whitespace so this branch agrees with the
-                # closed-set validation in _validate_preset_params (which
-                # already accepted "AGENTIC"/" agentic "); otherwise a validated
-                # value would fall through to the else and silently disable.
-                from ..memory.learn.protocols import LearnMode
-                _learn_mode = learn.strip().lower()
-                if _learn_mode == "disabled":
-                    _learn_config = None
-                elif _learn_mode == "agentic":
-                    _learn_config = LearnConfig(mode=LearnMode.AGENTIC)
-                elif _learn_mode == "propose":
-                    _learn_config = LearnConfig(mode=LearnMode.PROPOSE)
-                else:
-                    # Unknown string mode, disable learning
-                    _learn_config = None
-            else:
-                logger.warning(
-                    "Unsupported learn= value %r; expected bool, dict, or LearnConfig. "
-                    "Learning disabled.", learn
-                )
-                _learn_config = None
-        elif _memory_config is not None and isinstance(_memory_config, MemoryConfig):
-            # Fallback to memory.learn for backward compatibility
-            if _memory_config.learn:
-                if _memory_config.learn is True:
-                    # learn=True shorthand enables AGENTIC mode
-                    from ..memory.learn.protocols import LearnMode
-                    _learn_config = LearnConfig(mode=LearnMode.AGENTIC)
-                elif isinstance(_memory_config.learn, LearnConfig):
-                    _learn_config = _memory_config.learn
-                elif isinstance(_memory_config.learn, dict):
-                    _learn_config = LearnConfig(**_memory_config.learn)
-        
-        # If learn is enabled but memory is not, we need to enable memory for learn to work
-        if _learn_config is not None and memory is None:
-            # Enable minimal memory for learn to work
-            memory = {"learn": _learn_config.to_dict() if hasattr(_learn_config, 'to_dict') else _learn_config}
-        elif _learn_config is not None and isinstance(memory, dict):
-            # Merge learn config into memory dict
-            memory["learn"] = _learn_config.to_dict() if hasattr(_learn_config, 'to_dict') else _learn_config
-
-        # Coordinated learn posture (Issue #4864): the ``learn=True`` shorthand
-        # turns on conversational fact extraction too, so an always-on companion
-        # accrues durable persona/preferences from plain chat — not just from
-        # tool-using turns. Only defaults it on when the caller did not set
-        # auto_memory explicitly (via MemoryConfig), so an explicit choice wins.
-        if learn is True and auto_memory is None:
-            auto_memory = True
+        # Top-level learn= wins over memory.learn; enables memory if needed
+        # (config.agent_init)
+        _learn_config, memory, auto_memory = resolve_agent_learn(learn, _memory_config, memory, auto_memory)
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve HISTORY from MemoryConfig - FAST PATH
