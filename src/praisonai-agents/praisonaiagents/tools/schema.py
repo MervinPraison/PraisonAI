@@ -286,6 +286,37 @@ def get_parameter_requirements(sig: inspect.Signature, param_name: str) -> bool:
     return True
 
 
+_DEFAULT_TYPES = (bool, int, float, str, list, dict)
+_UNTYPED_WARNED: Set[str] = set()
+
+
+def _type_from_default(param: inspect.Parameter) -> Any:
+    """Schema type for an unannotated parameter, read from its default (D-14).
+
+    ``n=3`` is an integer, not a string. ``None`` or no default says nothing,
+    so the caller keeps its own fallback.
+    """
+    default = param.default
+    if default is inspect.Parameter.empty or default is None:
+        return None
+    kind = type(default)
+    if kind in _DEFAULT_TYPES:
+        return kind
+    return list if kind is tuple else None
+
+
+def _warn_if_untyped(function_name: str, sig: inspect.Signature, hints: Dict[str, Any]) -> None:
+    """Warn once per tool that has parameters but no type hints at all."""
+    params = [p for n, p in sig.parameters.items() if n not in ("self", "cls")
+              and p.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)]
+    if params and not any(p.annotation is not inspect.Parameter.empty or n in hints
+                          for n, p in ((p.name, p) for p in params)) and function_name not in _UNTYPED_WARNED:
+        _UNTYPED_WARNED.add(function_name)
+        logging.warning(
+            f"Tool {function_name!r} has no type hints: parameter types are taken from defaults "
+            "(string otherwise). Add type hints so the model gets an exact schema.")
+
+
 def build_parameters_schema(
     sig: inspect.Signature,
     hints: Dict[str, Any],
@@ -336,8 +367,8 @@ def build_parameters_schema(
         ):
             continue
 
-        # Get type hint
-        param_type = hints.get(param_name, Any)
+        # Get type hint (an untyped parameter takes its default's type)
+        param_type = hints.get(param_name) or _type_from_default(_param) or Any
         
         # Apply skip predicate if provided
         if skip_predicate and skip_predicate(param_name, param_type):
@@ -438,6 +469,7 @@ def build_tool_definition(
     from .injected import is_injected_type
     injected_names = getattr(func, "injected_params", None) or {}
 
+    _warn_if_untyped(function_name, sig, hints)
     for name, param in sig.parameters.items():
         if name == "self":
             continue
@@ -446,7 +478,8 @@ def build_tool_definition(
 
         annotation = hints.get(
             name,
-            param.annotation if param.annotation != inspect.Parameter.empty else str
+            param.annotation if param.annotation != inspect.Parameter.empty
+            else (_type_from_default(param) or str)
         )
         # Framework-injected state is filled at runtime; never expose it to the model.
         if name in injected_names or is_injected_type(annotation):
