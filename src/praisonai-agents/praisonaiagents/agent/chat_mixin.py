@@ -4123,7 +4123,7 @@ Your Role: {self.role}"""
             )
             hook_results = self._hook_runner.execute_sync(HookEvent.BEFORE_AGENT, before_agent_input)
             if self._hook_runner.is_blocked(hook_results):
-                logging.warning(f"Agent {self.name} execution blocked by BEFORE_AGENT hook")
+                logger.warning(f"Agent {self.name} execution blocked by BEFORE_AGENT hook")
                 return None
 
             # Update prompt if modified by hooks
@@ -4152,7 +4152,7 @@ Your Role: {self.role}"""
                 "agent_role": self.role,
                 "agent_goal": self.goal
             }
-            logging.debug(f"Agent.chat parameters: {json.dumps(param_info, indent=2, default=str)}")
+            logger.debug(f"Agent.chat parameters: {json.dumps(param_info, indent=2, default=str)}")
         
         start_time = time.time()
         reasoning_steps = reasoning_steps or self.reasoning_steps
@@ -4252,7 +4252,7 @@ Your Role: {self.role}"""
                     MCP = _loaded_mcp_class()
                     if MCP is not None and isinstance(tool_param, MCP) and hasattr(tool_param, 'to_openai_tool'):
                         # Single MCP instance
-                        logging.debug("Converting single MCP tool to OpenAI format")
+                        logger.debug("Converting single MCP tool to OpenAI format")
                         openai_tool = tool_param.to_openai_tool()
                         if openai_tool:
                             # Handle both single tool and list of tools
@@ -4260,13 +4260,13 @@ Your Role: {self.role}"""
                                 tool_param = openai_tool
                             else:
                                 tool_param = [openai_tool]
-                            logging.debug(f"Converted MCP tool: {tool_param}")
+                            logger.debug(f"Converted MCP tool: {tool_param}")
                     elif isinstance(tool_param, (list, tuple)):
                         # List that may contain MCP instances - convert each MCP to OpenAI format
                         converted_tools = []
                         for t in tool_param:
                             if MCP is not None and isinstance(t, MCP) and hasattr(t, 'to_openai_tool'):
-                                logging.debug("Converting MCP instance in list to OpenAI format")
+                                logger.debug("Converting MCP instance in list to OpenAI format")
                                 openai_tools = t.to_openai_tool()
                                 if isinstance(openai_tools, list):
                                     converted_tools.extend(openai_tools)
@@ -4276,7 +4276,7 @@ Your Role: {self.role}"""
                                 # Keep non-MCP tools as-is
                                 converted_tools.append(t)
                         tool_param = converted_tools
-                        logging.debug(f"Converted {len(converted_tools)} tools from list")
+                        logger.debug(f"Converted {len(converted_tools)} tools from list")
                 
                 # Store chat history length for potential rollback
                 chat_history_length = len(self.chat_history)
@@ -4312,7 +4312,7 @@ Your Role: {self.role}"""
                         # Fallback to original chat history if proactive handling fails
                         if getattr(self, '_strict_hooks', False):
                             raise
-                        logging.debug(f"[proactive-context-sync] fallback to original history: {_ce}")
+                        logger.debug(f"[proactive-context-sync] fallback to original history: {_ce}")
                         working_history = self.chat_history
                     
                     # Apply legacy context management on the (possibly compacted) history
@@ -4392,7 +4392,7 @@ Your Role: {self.role}"""
                     # Log completion time if in debug mode
                     if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
-                        logging.debug(f"Agent.chat completed in {total_time:.2f} seconds")
+                        logger.debug(f"Agent.chat completed in {total_time:.2f} seconds")
 
                     # Apply guardrail validation for custom LLM response
                     try:
@@ -4412,7 +4412,7 @@ Your Role: {self.role}"""
                         self._execute_callback_and_display(prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                         return self._trigger_after_agent_hook(prompt, validated_response, start_time)
                     except Exception as e:
-                        logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
+                        logger.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
                         # Rollback chat history on guardrail failure
                         self._rollback_chat_history_to(chat_history_length)
                         return self._guardrail_blocked_message(e)
@@ -4447,7 +4447,7 @@ Your Role: {self.role}"""
                 response_format = self._build_response_format(schema_model)
                 if response_format:
                     use_native_format = True
-                    logging.debug(f"Agent {self.name} using native structured output with response_format")
+                    logger.debug(f"Agent {self.name} using native structured output with response_format")
             
             # Use the new _build_messages helper method
             # Pass llm_prompt (which includes multimodal content if attachments present)
@@ -4568,7 +4568,7 @@ Your Role: {self.role}"""
                                 self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                 return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
                             except Exception as e:
-                                logging.error(f"Agent {self.name}: Guardrail validation failed for JSON output: {e}")
+                                logger.error(f"Agent {self.name}: Guardrail validation failed for JSON output: {e}")
                                 # Rollback chat history on guardrail failure
                                 self._rollback_chat_history_to(chat_history_length)
                                 return self._guardrail_blocked_message(e)
@@ -4577,7 +4577,7 @@ Your Role: {self.role}"""
                             # The assistant reply is committed to history/DB only
                             # after guardrail validation (below).
                             if self.verbose:
-                                logging.debug(f"Agent {self.name} final response: {response_text}")
+                                logger.debug(f"Agent {self.name} final response: {response_text}")
                             # Return only reasoning content if reasoning_steps is True
                             if reasoning_steps and hasattr(response.choices[0].message, 'reasoning_content') and response.choices[0].message.reasoning_content:
                                 # Apply guardrail to reasoning content
@@ -4589,7 +4589,7 @@ Your Role: {self.role}"""
                                     self._execute_callback_and_display(original_prompt, validated_reasoning, time.time() - start_time, task_name, task_description, task_id)
                                     return self._trigger_after_agent_hook(original_prompt, validated_reasoning, start_time)
                                 except Exception as e:
-                                    logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
+                                    logger.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
                                     # Rollback chat history on guardrail failure.
                                     # The public chat()/achat() finalizer records the
                                     # blocked turn as "error" (see _guardrail_blocked_message),
@@ -4604,7 +4604,7 @@ Your Role: {self.role}"""
                                 self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                 return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
                             except Exception as e:
-                                logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
+                                logger.error(f"Agent {self.name}: Guardrail validation failed: {e}")
                                 # Rollback chat history on guardrail failure
                                 self._rollback_chat_history_to(chat_history_length)
                                 return self._guardrail_blocked_message(e)
@@ -4615,7 +4615,7 @@ Reflect on your previous response: '{response_text}'.
 Provide a "satisfactory" status ('yes' or 'no').
 Output MUST be JSON with 'reflection' and 'satisfactory'.
                         """
-                        logging.debug(f"{self.name} reflection attempt {reflection_count+1}, sending prompt: {reflection_prompt}")
+                        logger.debug(f"{self.name} reflection attempt {reflection_count+1}, sending prompt: {reflection_prompt}")
                         messages.append({"role": "user", "content": reflection_prompt})
 
                         try:
@@ -4669,7 +4669,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                     return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
                                 except Exception as e:
-                                    logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
+                                    logger.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
                                     # Rollback chat history on guardrail failure
                                     self._rollback_chat_history_to(chat_history_length)
                                     return self._guardrail_blocked_message(e)
@@ -4686,13 +4686,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                     return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
                                 except Exception as e:
-                                    logging.error(f"Agent {self.name}: Guardrail validation failed after max reflections: {e}")
+                                    logger.error(f"Agent {self.name}: Guardrail validation failed after max reflections: {e}")
                                     # Rollback chat history on guardrail failure
                                     self._rollback_chat_history_to(chat_history_length)
                                     return self._guardrail_blocked_message(e)
                             
                             # If not satisfactory and not at max reflections, continue with regeneration
-                            logging.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
+                            logger.debug(f"{self.name} reflection count {reflection_count + 1}, continuing reflection process")
                             messages.append({"role": "user", "content": "Now regenerate your response using the reflection you made"})
                             # For reflection, always use non-streaming to ensure compatibility with sync adapters
                             # and to avoid streaming complexity during regeneration process
@@ -4705,7 +4705,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                         except Exception as e:
                                 _get_display_functions()['display_error'](f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
-                                logging.error("Reflection parsing failed.", exc_info=True)
+                                logger.error("Reflection parsing failed.", exc_info=True)
                                 messages.append({"role": "assistant", "content": "Self Reflection failed."})
                                 reflection_count += 1
                                 if reflection_count >= self.max_reflect:
@@ -4721,7 +4721,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                         return self._trigger_after_agent_hook(original_prompt, validated_response, start_time)
                                     except Exception as guard_e:
-                                        logging.error(f"Agent {self.name}: Guardrail validation failed after reflection error: {guard_e}")
+                                        logger.error(f"Agent {self.name}: Guardrail validation failed after reflection error: {guard_e}")
                                         self._rollback_chat_history_to(chat_history_length)
                                         return None
                                 continue  # Continue even after error to try again
@@ -4793,7 +4793,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     self._validate_input_with_guardrail, prompt
                 )
             if not _in_ok:
-                logging.warning(f"Agent {self.name}: input blocked by guardrail: {_in_err}")
+                logger.warning(f"Agent {self.name}: input blocked by guardrail: {_in_err}")
                 self._last_guardrail_error = _in_err
                 return self._guardrail_blocked_message(_in_err)
             prompt = _in_prompt
@@ -4968,7 +4968,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             )
             hook_results = await self._hook_runner.execute(HookEvent.BEFORE_AGENT, before_agent_input)
             if self._hook_runner.is_blocked(hook_results):
-                logging.warning(f"Agent {self.name} execution blocked by BEFORE_AGENT hook")
+                logger.warning(f"Agent {self.name} execution blocked by BEFORE_AGENT hook")
                 return None
 
             # Update prompt if modified by hooks
@@ -4997,7 +4997,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 "agent_role": self.role,
                 "agent_goal": self.goal
             }
-            logging.debug(f"Agent.achat parameters: {json.dumps(param_info, indent=2, default=str)}")
+            logger.debug(f"Agent.achat parameters: {json.dumps(param_info, indent=2, default=str)}")
         
         start_time = time.time()
         reasoning_steps = reasoning_steps or self.reasoning_steps
@@ -5060,7 +5060,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 except Exception as _ce:
                     if getattr(self, '_strict_hooks', False):
                         raise
-                    logging.debug(f"[proactive-context-async] fallback: {_ce}")
+                    logger.debug(f"[proactive-context-async] fallback: {_ce}")
                     effective_history = self.chat_history
                     
                 # --- Context compaction (async custom LLM path) ---
@@ -5139,7 +5139,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
                     if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
-                        logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
+                        logger.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                     
                     # Apply guardrail validation for custom LLM response
                     try:
@@ -5155,7 +5155,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         self._execute_callback_and_display(normalized_content, validated_response, time.time() - start_time, task_name, task_description, task_id)
                         return await self._atrigger_after_agent_hook(prompt, validated_response, start_time)
                     except Exception as e:
-                        logging.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
+                        logger.error(f"Agent {self.name}: Guardrail validation failed for custom LLM: {e}")
                         # Rollback chat history on guardrail failure
                         self._rollback_chat_history_to(chat_history_length)
                         return self._guardrail_blocked_message(e)
@@ -5168,7 +5168,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     _get_display_functions()['display_error'](f"Error in LLM chat: {e}")
                     if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
-                        logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
+                        logger.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
                     if _is_fatal_model_error(e):
                         raise
                     return self._none_after_failed_turn(e)
@@ -5226,7 +5226,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             except Exception as _ce2:
                 if getattr(self, '_strict_hooks', False):
                     raise
-                logging.debug(f"[proactive-context-async-standard] fallback: {_ce2}")
+                logger.debug(f"[proactive-context-async-standard] fallback: {_ce2}")
                 
             # --- Context compaction (async standard OpenAI path) ---
             from ..hooks import HookEvent as _HE2
@@ -5307,7 +5307,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                 return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
                             except Exception as e:
-                                logging.error(f"Agent {self.name}: Guardrail validation failed for JSON output: {e}")
+                                logger.error(f"Agent {self.name}: Guardrail validation failed for JSON output: {e}")
                                 # Rollback chat history on guardrail failure
                                 self._rollback_chat_history_to(chat_history_length)
                                 return self._guardrail_blocked_message(e)
@@ -5317,7 +5317,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # The assistant reply is committed to history/DB only
                             # after guardrail validation (below).
                             if self.verbose:
-                                logging.debug(f"Agent {self.name} final response: {response_text}")
+                                logger.debug(f"Agent {self.name} final response: {response_text}")
                             # Return only reasoning content if reasoning_steps is True
                             if reasoning_steps and hasattr(response, 'choices') and response.choices and hasattr(response.choices[0].message, 'reasoning_content') and response.choices[0].message.reasoning_content:
                                 # Apply guardrail to reasoning content
@@ -5329,7 +5329,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     self._execute_callback_and_display(original_prompt, validated_reasoning, time.time() - start_time, task_name, task_description, task_id)
                                     return await self._atrigger_after_agent_hook(original_prompt, validated_reasoning, start_time)
                                 except Exception as e:
-                                    logging.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
+                                    logger.error(f"Agent {self.name}: Guardrail validation failed for reasoning content: {e}")
                                     # Rollback chat history on guardrail failure
                                     self._rollback_chat_history_to(chat_history_length)
                                     return self._guardrail_blocked_message(e)
@@ -5342,7 +5342,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                     return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
                                 except Exception as e:
-                                    logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
+                                    logger.error(f"Agent {self.name}: Guardrail validation failed: {e}")
                                     # Rollback chat history on guardrail failure
                                     self._rollback_chat_history_to(chat_history_length)
                                     return self._guardrail_blocked_message(e)
@@ -5380,7 +5380,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                             return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
                                         except Exception as e:
-                                            logging.error(f"Agent {self.name}: Guardrail validation failed: {e}")
+                                            logger.error(f"Agent {self.name}: Guardrail validation failed: {e}")
                                             # Rollback chat history on guardrail failure
                                             self._rollback_chat_history_to(chat_history_length)
                                             return self._guardrail_blocked_message(e)
@@ -5412,7 +5412,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                             return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
                                         except Exception as e:
-                                            logging.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
+                                            logger.error(f"Agent {self.name}: Guardrail validation failed after reflection: {e}")
                                             # Rollback chat history on guardrail failure
                                             self._rollback_chat_history_to(chat_history_length)
                                             return self._guardrail_blocked_message(e)
@@ -5429,7 +5429,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                             return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
                                         except Exception as e:
-                                            logging.error(f"Agent {self.name}: Guardrail validation failed after max reflections: {e}")
+                                            logger.error(f"Agent {self.name}: Guardrail validation failed after max reflections: {e}")
                                             # Rollback chat history on guardrail failure
                                             self._rollback_chat_history_to(chat_history_length)
                                             return self._guardrail_blocked_message(e)
@@ -5467,7 +5467,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 except Exception as e:
                                     if self.verbose:
                                         _get_display_functions()['display_error'](f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
-                                    logging.error("Reflection parsing failed.", exc_info=True)
+                                    logger.error("Reflection parsing failed.", exc_info=True)
                                     reflection_count += 1
                                     if reflection_count >= self.max_reflect:
                                         # Return original response after max reflection attempts
@@ -5478,7 +5478,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                                             return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
                                         except Exception as guard_e:
-                                            logging.error(f"Agent {self.name}: Guardrail validation failed after reflection error: {guard_e}")
+                                            logger.error(f"Agent {self.name}: Guardrail validation failed after reflection error: {guard_e}")
                                             # Rollback chat history on guardrail failure
                                             self._rollback_chat_history_to(chat_history_length)
                                             return self._guardrail_blocked_message(guard_e)
@@ -5486,7 +5486,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         
                         # This should never be reached due to the returns above
                         # But adding as safety fallback
-                        logging.warning(f"Agent {self.name}: Unexpected code path reached in unified dispatch")
+                        logger.warning(f"Agent {self.name}: Unexpected code path reached in unified dispatch")
                         return None
                     else:
                         # LEGACY: Check if OpenAI client is available
@@ -5513,7 +5513,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             result = await self._achat_completion(response, tools, messages=messages)
                             if get_logger().getEffectiveLevel() == logging.DEBUG:
                                 total_time = time.time() - start_time
-                                logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
+                                logger.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                             # Execute callback after tool completion
                             self._execute_callback_and_display(original_prompt, result, time.time() - start_time, task_name, task_description, task_id)
                             return await self._atrigger_after_agent_hook(original_prompt, result, start_time)
@@ -5530,7 +5530,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             response_text = response.choices[0].message.content
                             if get_logger().getEffectiveLevel() == logging.DEBUG:
                                 total_time = time.time() - start_time
-                                logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
+                                logger.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                             # Coerce into the requested Pydantic model so callers
                             # get a validated instance, not a raw JSON string.
                             # output_json intentionally stays a string (backward compat).
@@ -5580,7 +5580,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                         self._append_to_chat_history({"role": "assistant", "content": response_text})
                                         if get_logger().getEffectiveLevel() == logging.DEBUG:
                                             total_time = time.time() - start_time
-                                            logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
+                                            logger.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                                         return await self._atrigger_after_agent_hook(original_prompt, response_text, start_time)
                                     
                                     _areflection_kwargs = {}
@@ -5630,7 +5630,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 except Exception as e:
                                     if self.verbose:
                                         _get_display_functions()['display_error'](f"Error in parsing self-reflection json {e}. Retrying", console=self.console)
-                                    logging.error("Reflection parsing failed.", exc_info=True)
+                                    logger.error("Reflection parsing failed.", exc_info=True)
                                     reflection_count += 1
                                     if reflection_count >= self.max_reflect:
                                         break
@@ -5638,7 +5638,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         
                         if get_logger().getEffectiveLevel() == logging.DEBUG:
                             total_time = time.time() - start_time
-                            logging.debug(f"Agent.achat completed in {total_time:.2f} seconds")
+                            logger.debug(f"Agent.achat completed in {total_time:.2f} seconds")
                         
                         # Apply guardrail validation for OpenAI client response
                         try:
@@ -5647,7 +5647,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             self._execute_callback_and_display(original_prompt, validated_response, time.time() - start_time, task_name, task_description, task_id)
                             return await self._atrigger_after_agent_hook(original_prompt, validated_response, start_time)
                         except Exception as e:
-                            logging.error(f"Agent {self.name}: Guardrail validation failed for OpenAI client: {e}")
+                            logger.error(f"Agent {self.name}: Guardrail validation failed for OpenAI client: {e}")
                             # Rollback chat history on guardrail failure
                             self._rollback_chat_history_to(chat_history_length)
                             return self._guardrail_blocked_message(e)
@@ -5658,7 +5658,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     _get_display_functions()['display_error'](f"Error in chat completion: {e}")
                     if get_logger().getEffectiveLevel() == logging.DEBUG:
                         total_time = time.time() - start_time
-                        logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
+                        logger.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
                     # Rollback chat history so a failed async turn does not leave
                     # a dangling, unanswered user message (mirrors the sync path
                     # and achat()'s own guardrail handler).
@@ -5676,7 +5676,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             _get_display_functions()['display_error'](f"Error in achat: {e}")
             if get_logger().getEffectiveLevel() == logging.DEBUG:
                 total_time = time.time() - start_time
-                logging.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
+                logger.debug(f"Agent.achat failed in {total_time:.2f} seconds: {str(e)}")
             # Rollback chat history so a failed async turn does not leave a
             # dangling, unanswered user message (mirrors the sync path).
             self._rollback_chat_history_to(chat_history_length)
@@ -5725,7 +5725,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # TypeError: a custom client can hand back a non-text
                         # argument value, which json.loads rejects. Treat it the
                         # same as malformed JSON (mirrors llm.py's parser).
-                        logging.error(f"Failed to parse tool arguments as JSON: {json_error}")
+                        logger.error(f"Failed to parse tool arguments as JSON: {json_error}")
                         arguments = _TOOL_ARGUMENTS_PARSE_FAILED
                     if tool_arguments_parse_failed(arguments):
                         # Report the failure to streaming observers before skipping
@@ -5936,7 +5936,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if hasattr(self, '_validate_input_with_guardrail'):
             _in_ok, _in_prompt, _in_err = self._validate_input_with_guardrail(prompt)
             if not _in_ok:
-                logging.warning(f"Agent {getattr(self, 'name', '')}: input blocked by guardrail: {_in_err}")
+                logger.warning(f"Agent {getattr(self, 'name', '')}: input blocked by guardrail: {_in_err}")
                 self._last_guardrail_error = _in_err
                 yield self._guardrail_blocked_message(_in_err)
                 return "failed"
@@ -5959,7 +5959,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 tools_available=[t.__name__ if hasattr(t, '__name__') else str(t) for t in self.tools]
             ))
             if self._hook_runner.is_blocked(hook_results):
-                logging.warning(f"Agent {self.name} execution blocked by BEFORE_AGENT hook")
+                logger.warning(f"Agent {self.name} execution blocked by BEFORE_AGENT hook")
                 return "failed"
             for res in hook_results:
                 if res.output and res.output.modified_input and "prompt" in res.output.modified_input:
@@ -6001,7 +6001,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # This lives here (the single common streaming path) so both
         # iter_stream() and start(stream=True) surface the bypass loudly.
         if getattr(self, 'guardrail', None) is not None:
-            logging.warning(
+            logger.warning(
                 f"Agent {getattr(self, 'name', '')}: output guardrail is not "
                 "applied to streamed responses (iter_stream / stream=True). "
                 "Use chat() for guardrail-validated output."
@@ -6188,7 +6188,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 except Exception as e:
                     # Rollback chat history on error
                     self._rollback_chat_history_to(chat_history_length)
-                    logging.error(f"Custom LLM streaming error: {e}")
+                    logger.error(f"Custom LLM streaming error: {e}")
                     raise
                     
             else:
@@ -6459,7 +6459,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     except (json.JSONDecodeError, TypeError) as json_error:
                                         # TypeError: a non-text argument value also
                                         # cannot be parsed; treat it as malformed.
-                                        logging.error(f"Failed to parse tool arguments as JSON: {json_error}")
+                                        logger.error(f"Failed to parse tool arguments as JSON: {json_error}")
                                         parsed_args = _TOOL_ARGUMENTS_PARSE_FAILED
                                     if tool_arguments_parse_failed(parsed_args):
                                         self._notify_tool_call(
@@ -6547,7 +6547,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 except ToolExecutionError:
                                     raise
                                 except Exception as tool_error:
-                                    logging.error(f"Tool execution error in streaming: {tool_error}")
+                                    logger.error(f"Tool execution error in streaming: {tool_error}")
                                     # Add error result to chat history
                                     self._append_to_chat_history({
                                         "role": "tool", 
@@ -6675,7 +6675,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 except Exception as e:
                     # Rollback chat history on error
                     self._rollback_chat_history_to(chat_history_length)
-                    logging.error(f"OpenAI streaming error: {e}")
+                    logger.error(f"OpenAI streaming error: {e}")
                     # Fall back to simulated streaming
                     response = self._stream_fallback_chat(prompt, kwargs, e)
                     if response:
@@ -6703,7 +6703,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 # error one level deeper; surface the chained failure as-is.
                 raise
             # Graceful fallback to non-streaming if streaming fails
-            logging.warning(f"Streaming failed, falling back to regular response: {e}")
+            logger.warning(f"Streaming failed, falling back to regular response: {e}")
             response = self._stream_fallback_chat(prompt, kwargs, e)
             if response:
                 yield response
@@ -6743,7 +6743,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             except Exception:  # noqa: BLE001 - never let classification break fallback
                 is_replay_unsafe_chain = None
             if is_replay_unsafe_chain is not None and is_replay_unsafe_chain(streaming_error):
-                logging.warning(
+                logger.warning(
                     "Not falling back to non-streaming chat() on a tool turn: the "
                     "streaming failure is replay-unsafe (post-dispatch); surfacing "
                     "the original error to avoid re-executing the turn."
@@ -6769,7 +6769,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         }
         dropped = sorted(set(kwargs) - set(fallback_kwargs))
         if dropped:
-            logging.debug(
+            logger.debug(
                 f"Streaming fallback: dropping kwargs chat() does not accept: {dropped}"
             )
         # The fallback is, by definition, the non-streaming path.
@@ -6784,7 +6784,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         try:
             return self.chat(prompt, **fallback_kwargs)
         except Exception as fallback_error:
-            logging.error(
+            logger.error(
                 f"Streaming failed ({streaming_error!r}) and the non-streaming "
                 f"fallback also failed ({fallback_error!r})"
             )
@@ -6825,7 +6825,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 return str(extracted).strip()
                     
             except Exception as e:
-                logging.warning(f"LLM summarization call failed: {e}")
+                logger.warning(f"LLM summarization call failed: {e}")
                 raise
         
         return llm_summarize_async
@@ -6880,7 +6880,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 try:
                     _llm_fn = self._create_llm_summarize_function()
                 except Exception as e:
-                    logging.warning(f"Failed to create LLM summarize function: {e}")
+                    logger.warning(f"Failed to create LLM summarize function: {e}")
             
             _compactor = ContextCompactor(
                 max_tokens=_max_tok,
@@ -6895,7 +6895,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             try:
                 self._hook_runner.execute_sync(hook_event_class.BEFORE_COMPACTION, None)
             except Exception as e:
-                logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
+                logger.warning(f"BEFORE_COMPACTION hook failed: {e}")
                 if getattr(self, '_strict_hooks', False):
                     raise
 
@@ -6922,7 +6922,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     compacted_msgs, _cr = _compactor.compact(messages)
             
             messages[:] = compacted_msgs  # in-place update so callers see the change
-            logging.info(
+            logger.info(
                 f"[compaction] {self.name}: {_cr.original_tokens}→{_cr.compacted_tokens} tokens "
                 f"({_cr.messages_removed} messages removed, strategy={_cr.strategy_used.value})"
             )
@@ -6931,7 +6931,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             try:
                 self._hook_runner.execute_sync(hook_event_class.AFTER_COMPACTION, None)
             except Exception as e:
-                logging.warning(f"AFTER_COMPACTION hook failed: {e}")
+                logger.warning(f"AFTER_COMPACTION hook failed: {e}")
                 if getattr(self, '_strict_hooks', False):
                     raise
                     
@@ -6940,7 +6940,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except Exception as _ce:
             if getattr(self, '_strict_hooks', False):
                 raise
-            logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
+            logger.debug(f"[compaction] skipped (non-fatal): {_ce}")
             return False
 
     async def _apply_context_compaction_async(self, messages, hook_event_class):
@@ -6971,7 +6971,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 try:
                     _llm_fn = self._create_llm_summarize_function()
                 except Exception as e:
-                    logging.warning(f"Failed to create LLM summarize function: {e}")
+                    logger.warning(f"Failed to create LLM summarize function: {e}")
             
             _compactor = ContextCompactor(
                 max_tokens=_max_tok,
@@ -6986,7 +6986,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             try:
                 await self._hook_runner.execute(hook_event_class.BEFORE_COMPACTION, None)
             except Exception as e:
-                logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
+                logger.warning(f"BEFORE_COMPACTION hook failed: {e}")
                 if getattr(self, '_strict_hooks', False):
                     raise
 
@@ -7005,7 +7005,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 self._replace_chat_history(compacted_msgs)
             else:
                 messages[:] = compacted_msgs
-            logging.info(
+            logger.info(
                 f"[compaction] {self.name}: {_cr.original_tokens}→{_cr.compacted_tokens} tokens "
                 f"({_cr.messages_removed} messages removed, strategy={_cr.strategy_used.value})"
             )
@@ -7014,7 +7014,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             try:
                 await self._hook_runner.execute(hook_event_class.AFTER_COMPACTION, None)
             except Exception as e:
-                logging.warning(f"AFTER_COMPACTION hook failed: {e}")
+                logger.warning(f"AFTER_COMPACTION hook failed: {e}")
                 if getattr(self, '_strict_hooks', False):
                     raise
                     
@@ -7023,7 +7023,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         except Exception as _ce:
             if getattr(self, '_strict_hooks', False):
                 raise
-            logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
+            logger.debug(f"[compaction] skipped (non-fatal): {_ce}")
             return False
 
     def _emit_stream_unavailable(self):
