@@ -10,7 +10,7 @@ import base64
 import logging
 import mimetypes
 from praisonaiagents._logging import get_logger
-from ._helpers import inject_steering
+from ._helpers import inject_steering, usage_detail, usage_value
 import time
 import json
 import asyncio
@@ -1871,28 +1871,10 @@ class OpenAIClient:
                 return
 
             def _val(*names: str) -> int:
-                for name in names:
-                    value = usage.get(name) if isinstance(usage, dict) else getattr(usage, name, None)
-                    if value is not None:
-                        return int(value or 0)
-                return 0
+                return usage_value(usage, *names)
 
             def _detail(detail_names: tuple, name: str) -> int:
-                for detail_name in detail_names:
-                    details = (
-                        usage.get(detail_name)
-                        if isinstance(usage, dict)
-                        else getattr(usage, detail_name, None)
-                    )
-                    if details:
-                        value = (
-                            details.get(name)
-                            if isinstance(details, dict)
-                            else getattr(details, name, None)
-                        )
-                        if value is not None:
-                            return int(value or 0)
-                return 0
+                return usage_detail(usage, detail_names, name)
 
             metrics = TokenMetrics(
                 input_tokens=_val("prompt_tokens", "input_tokens"),
