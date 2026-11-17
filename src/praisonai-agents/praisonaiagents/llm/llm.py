@@ -5044,6 +5044,23 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     ollama_tool_result_mapping: Dict[str, Any] = {}
                     consecutive_errors = 0
                     max_consecutive_errors = 3  # Fallback to non-streaming after 3 consecutive errors
+
+                    # Responses API models stream over the Responses API, as
+                    # get_response() does (F-05). Tool turns keep the Chat
+                    # Completions stream below, which runs the tool loop.
+                    if self._supports_responses_api() and not formatted_tools:
+                        responses_params = self._build_responses_params(
+                            messages=messages,
+                            temperature=temperature,
+                            output_json=output_json,
+                            output_pydantic=output_pydantic,
+                            **{k: v for k, v in kwargs.items() if k != 'reasoning_steps'},
+                        )
+                        _, _, _responses_final = yield from self._stream_responses_api_events(
+                            responses_params, verbose=verbose)
+                        if _responses_final is not None:
+                            self._track_token_usage(_responses_final, self.model)
+                        return
                     
                     stream_iterator = self._completion_with_retry(
                         **self._build_completion_params(
@@ -8089,8 +8106,41 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         emit_events: bool = False,
         current_time: Optional[float] = None,
     ) -> tuple:
+        """Stream a Responses API call and return ``(text, tool_calls, final_response)``."""
+        events = self._responses_stream_events(
+            params, verbose=verbose, stream_callback=stream_callback,
+            emit_events=emit_events, current_time=current_time)
+        while True:
+            try:
+                next(events)
+            except StopIteration as done:
+                return done.value
+
+    def _stream_responses_api_events(self, params: Dict[str, Any], **kwargs: Any):
+        """Generator form of :meth:`_stream_responses_api`: yields text deltas as
+        they arrive and returns the same tuple; recorded on the replay trace."""
+        span = _replay_llm_begin(self, params)
+        try:
+            result = yield from self._responses_stream_events(params, **kwargs)
+        except BaseException as exc:
+            if span is not None:
+                _replay_llm_end(span, exc)
+            raise
+        if span is not None:
+            _replay_stream_result(span, result)
+        return result
+
+    def _responses_stream_events(
+        self,
+        params: Dict[str, Any],
+        verbose: bool = True,
+        stream_callback: Optional[Callable] = None,
+        emit_events: bool = False,
+        current_time: Optional[float] = None,
+    ):
         """
-        Stream a Responses API call, accumulating text and tool calls.
+        Stream a Responses API call, accumulating text and tool calls, and yield
+        each text delta as it arrives (a generator; its return value is the tuple).
 
         Returns the same (response_text, tool_calls) tuple as the Chat
         Completions streaming path.  Emits StreamEvents when configured.
@@ -8150,6 +8200,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             content=delta_text,
                             is_reasoning=False,
                         ))
+                    if delta_text:
+                        yield delta_text
 
                 # ── Reasoning delta ─────────────────────────────────────
                 elif evt_type == "response.reasoning_summary_text.delta":

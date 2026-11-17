@@ -192,8 +192,6 @@ def _cells(*drifts):
 
 # --- known drift (strict xfail; remove the mark in the PR that fixes it) ------
 
-F05 = _drift("F-05", "start(stream=True) on an openai/gpt-4o* model uses Chat Completions; "
-             "LLM.get_response_stream has no Responses API branch", ("stream", "litellm_responses"))
 F06 = _drift("F-06", "achat() on the litellm Chat Completions route sends the post-tool follow-up twice",
              ("achat", "litellm_chat"))
 F07 = _drift("F-07", "OpenAI-client tool loop records usage for one of the two model calls",
@@ -257,7 +255,7 @@ class _Recorder:
 
 # --- the contract -------------------------------------------------------------
 
-@pytest.mark.parametrize("mode,route", _cells(F05))
+@pytest.mark.parametrize("mode,route", _cells())
 def test_route_reaches_its_endpoint(stub, mode, route):
     """Guards the matrix itself: each route really is the transport it names."""
     assert _turn(_agent(route, stub), mode) == "hello"
