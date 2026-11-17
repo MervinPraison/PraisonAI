@@ -1185,7 +1185,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/agent.py:650",
+        "location": "src/praisonai-agents/praisonaiagents/agent/agent.py:628",
         "resolved_class": "Agent"
       },
       "ts_only": [
@@ -4860,7 +4860,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/errors.py:87",
+        "location": "src/praisonai-agents/praisonaiagents/errors.py:119",
         "resolved_class": "PraisonAIError"
       },
       "ts_only": [
@@ -6812,7 +6812,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/task/task.py:48",
+        "location": "src/praisonai-agents/praisonaiagents/task/task.py:59",
         "resolved_class": "Task"
       },
       "ts_only": [

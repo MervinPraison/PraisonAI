@@ -46,7 +46,7 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 
 ### `Agent.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:650`
+- Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:628`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:197` (ctor `src/praisonai-ts/src/agent/simple.ts:1019`)
 - Counts: 42 python params: 29 exact, 8 camelCase, 2 alias, 3 flattened, 0 missing; 8 mismatches; 8 waived; 14 TS-only of 60
 
@@ -134,7 +134,7 @@ TS-only members: `configOrAgents`, `verbose`?, `pretty`?
 
 ### `Task.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/task/task.py:48`
+- Python: `src/praisonai-agents/praisonaiagents/task/task.py:59`
 - TypeScript: `src/praisonai-ts/src/agent/types.ts:115` (ctor `src/praisonai-ts/src/agent/types.ts:394`)
 - Counts: 62 python params: 31 exact, 31 camelCase, 0 alias, 0 flattened, 0 missing; 7 mismatches; 7 waived; 1 TS-only of 64
 
@@ -418,7 +418,7 @@ TS-only members: none
 
 ### `PraisonAIError.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/errors.py:87`
+- Python: `src/praisonai-agents/praisonaiagents/errors.py:119`
 - TypeScript: `src/praisonai-ts/src/errors-base.ts:142` (ctor `src/praisonai-ts/src/errors-base.ts:169`)
 - Counts: 6 python params: 2 exact, 4 camelCase, 0 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 1 TS-only of 7
 
