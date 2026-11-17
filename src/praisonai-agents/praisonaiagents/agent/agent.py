@@ -4990,6 +4990,21 @@ Summary:"""
                 if _timed_out is not None:
                     return _timed_out
                 
+                if response is None:
+                    # chat()/achat() return None when the model call failed; that
+                    # is not an answer (F-21). The error is on _last_error.
+                    _err = str(getattr(self, "_last_error", None) or "the model call failed")
+                    return AutonomyResult(
+                        success=False,
+                        output=_err,
+                        completion_reason="error",
+                        iterations=iterations,
+                        stage=stage,
+                        actions=actions_taken,
+                        duration_seconds=time_module.time() - start_time,
+                        error=_err,
+                        started_at=started_at,
+                    )
                 response_str = str(response)
                 
                 # Spend kill-switch: halt if cumulative cost/tokens exceed cap.
@@ -5520,6 +5535,21 @@ Summary:"""
                 if _timed_out is not None:
                     return _timed_out
                 
+                if response is None:
+                    # chat()/achat() return None when the model call failed; that
+                    # is not an answer (F-21). The error is on _last_error.
+                    _err = str(getattr(self, "_last_error", None) or "the model call failed")
+                    return AutonomyResult(
+                        success=False,
+                        output=_err,
+                        completion_reason="error",
+                        iterations=iterations,
+                        stage=stage,
+                        actions=actions_taken,
+                        duration_seconds=time_module.time() - start_time,
+                        error=_err,
+                        started_at=started_at,
+                    )
                 response_str = str(response)
                 
                 # Spend kill-switch: halt if cumulative cost/tokens exceed cap.
