@@ -71,7 +71,7 @@ def test_keyboard_interrupt_on_async_returns_a_cancelled_result(events):
     def ctrl_c(p):
         raise KeyboardInterrupt
     _, r = _run("async", ctrl_c)
-    assert (r.completion_reason, r.output) == ("cancelled", "Task cancelled")
+    assert (r.success, r.completion_reason, r.output) == (False, "cancelled", "Task cancelled")
 
 
 def test_task_cancel_on_async_reraises_and_keeps_the_partial_result(events):
@@ -83,4 +83,5 @@ def test_task_cancel_on_async_reraises_and_keeps_the_partial_result(events):
     agent.achat = achat
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(agent.run_autonomous_async("do x", max_iterations=3))
-    assert agent._last_autonomy_result.completion_reason == "cancelled"
+    partial = agent._last_autonomy_result
+    assert (partial.success, partial.completion_reason, partial.output) == (False, "cancelled", "Task cancelled")
