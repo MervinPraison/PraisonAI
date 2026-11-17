@@ -5467,8 +5467,10 @@ class WorkflowManager:
             
             # Build consolidated context config if needed
             context_config = None
-            if context_from or not retain_full_context:
-                # Only create config if context_from is set OR retain_full_context is False (non-default)
+            if context_from or retain_match:
+                # Only when the step states one: an unstated step keeps the engine
+                # default (previous step's output only), as before. A stated
+                # "retain_full_context: true" was dropped here (F-20).
                 context_config = TaskContextConfig(
                     from_steps=context_from,
                     retain_full=retain_full_context
