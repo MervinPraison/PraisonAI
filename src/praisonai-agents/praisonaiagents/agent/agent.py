@@ -4819,6 +4819,9 @@ Summary:"""
                 "Autonomy must be enabled to use run_autonomous(). "
                 "Create agent with autonomy=True or autonomy={...}"
             )
+        # Cleared before the loop starts so an early Ctrl-C never returns a
+        # previous run's partial result.
+        self._last_autonomy_result = None
         try:
             result = run_coroutine_on_thread_loop(
                 self.run_autonomous_async(
