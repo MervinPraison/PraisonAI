@@ -28,9 +28,10 @@ What it does NOT do, stated plainly rather than discovered later:
   design.
 """
 
-from ..errors import PraisonAIError
 import json
 from typing import Any, Dict, List, Optional
+
+from ..errors import PraisonAIError
 
 __all__ = ["EncryptedSessionStore", "SessionEncryptionError", "generate_session_key"]
 

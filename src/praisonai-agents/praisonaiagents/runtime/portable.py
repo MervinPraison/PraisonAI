@@ -20,10 +20,10 @@ already the single source of truth that ``DurableRunContext`` replays from, so
 a second representation would be a second thing to keep correct.
 """
 
-from ..errors import PraisonAIError
 import json
 from typing import Any, Dict, Optional
 
+from ..errors import PraisonAIError
 from .journal import VALID_KINDS, JournalEvent, RunJournal
 
 __all__ = [
