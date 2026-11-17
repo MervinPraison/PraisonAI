@@ -918,6 +918,22 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                     "streaming moved into output=; use "
                     "output=OutputConfig(stream=True)."
                 ),
+                # The other flat kwargs that were grouped into config objects
+                # (D-05): each names where the setting lives now.
+                "markdown": "moved into output=; use output=OutputConfig(markdown=True).",
+                "metrics": "moved into output=; use output=OutputConfig(metrics=True).",
+                "self_reflect": "moved into reflection=; use reflection=True (or reflection=ReflectionConfig(...)).",
+                "max_reflect": "moved into reflection=; use reflection=ReflectionConfig(max_iterations=...).",
+                "min_reflect": "moved into reflection=; use reflection=ReflectionConfig(min_iterations=...).",
+                "system_template": "moved into templates=; use templates=TemplateConfig(system=...).",
+                "cache": "moved into caching=; use caching=True or False (or caching=CachingConfig(enabled=...)).",
+                "web_search": "moved into web=; use web=True (or web=WebConfig(search=True, fetch=False)).",
+                "max_iter": "moved into execution=; use execution=ExecutionConfig(max_iter=...).",
+                "temperature": (
+                    "set it on the model; use model={'model': 'gpt-4o-mini', 'temperature': ...} "
+                    "(or pass temperature= to chat())."
+                ),
+                "max_tokens": "set it on the model; use model={'model': 'gpt-4o-mini', 'max_tokens': ...}.",
                 # Same migration, different container: these two were flat
                 # kwargs before they were grouped into tool_config. Without a
                 # hint the user gets a bare "unexpected keyword argument" and
