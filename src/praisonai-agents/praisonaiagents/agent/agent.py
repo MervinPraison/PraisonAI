@@ -141,7 +141,7 @@ from ..config.feature_configs import (
 # Already loaded by the imports above; hoisted so __init__ does not pay a
 # function-local relative import per construction (#5835).
 from ..config.parse_utils import canonical_preset_key, validate_preset_string
-from ..config.agent_init import resolve_agent_caching
+from ..config.agent_init import resolve_agent_caching, resolve_agent_templates
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
 # Single source of truth defined in config.feature_configs and imported here
@@ -1335,27 +1335,9 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # ─────────────────────────────────────────────────────────────────────
         # Resolve TEMPLATES param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        # Fast path: None -> no templates (skip resolve() call)
-        if templates is None:
-            _template_config = None
-        elif isinstance(templates, TemplateConfig):
-            _template_config = templates
-        elif isinstance(templates, dict):
-            _template_config = TemplateConfig(**templates)
-        else:
-            _template_config = resolve(
-                value=templates,
-                param_name="templates",
-                config_class=TemplateConfig,
-                default=None,
-            )
-        if _template_config:
-            system_template = _template_config.system
-            prompt_template = _template_config.prompt
-            response_template = _template_config.response
-            use_system_prompt = _template_config.use_system_prompt
-        else:
-            system_template, prompt_template, response_template, use_system_prompt = None, None, None, True
+        # None -> no templates, default system prompt (config.agent_init)
+        (_template_config, system_template, prompt_template, response_template,
+         use_system_prompt) = resolve_agent_templates(templates)
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve CACHING param - FAST PATH
