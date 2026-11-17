@@ -1723,7 +1723,7 @@ Write the complete compiled report:"""
         
         last_exception = None
 
-        def _finish(result, raised, retryable_ok=True):
+        def _finish(result):
             # Strip the private control-plane tag before it reaches the model.
             # D-03: a tool that *raised* is reported to the model once as its
             # tool result, the same as the sync path, instead of ending the turn.
@@ -1735,7 +1735,8 @@ Write the complete compiled report:"""
         for attempt in range(retry_policy.max_attempts):
             try:
                 result = await self._execute_tool_async_impl(function_name, arguments, tool_call_id, tools_override)
-                raised = isinstance(result, dict) and bool(result.pop("_praison_raised", False))
+                if isinstance(result, dict):
+                    result.pop("_praison_raised", None)
                 
                 # Check if result is an error that should be retried
                 if isinstance(result, dict) and result.get("error"):
@@ -1750,7 +1751,7 @@ Write the complete compiled report:"""
                         result.get("circuit_open") or
                         result.get("loop_blocked") or
                         result.get("_praison_retryable") is False):
-                        return _finish(result, raised)
+                        return _finish(result)
 
                     # The body already ran and may have completed its side effect
                     # before failing. Honour an explicit restart_safe=False /
@@ -1760,9 +1761,8 @@ Write the complete compiled report:"""
                     # up to max_attempts times -- charging a card three times for
                     # a tool the author marked "must never be silently re-executed".
                     if self._tool_declares_not_idempotent(function_name, tools_override):
-                        # Must not run again: report non-retryable so durable
-                        # runs are finalized failed (sync parity).
-                        return _finish(result, raised, retryable_ok=False)
+                        # Must not run again: report the error to the model once.
+                        return _finish(result)
 
                     # Determine error type for retry policy
                     error_type = self._classify_error_type(result, last_exception)
@@ -1780,11 +1780,11 @@ Write the complete compiled report:"""
                     # never steer our retry loop.
                     if (not retry_policy.should_retry(error_type, attempt)
                             and result.get("_praison_retryable") is not True):
-                        return _finish(result, raised)
+                        return _finish(result)
                     
                     # Don't retry on last attempt
                     if attempt == retry_policy.max_attempts - 1:
-                        return _finish(result, raised)
+                        return _finish(result)
                     
                     # Emit retry hook event  
                     delay_ms = retry_policy.get_delay_ms(attempt)
