@@ -2510,15 +2510,17 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             # Only fire when the resolved default really is the OpenAI default:
             # a provider credential (e.g. OLLAMA_HOST) resolves an
             # already-correct provider-prefixed model, so there is nothing to
-            # warn about. Read the endpoint in the order the OpenAI client uses
-            # (OPENAI_API_BASE before OPENAI_BASE_URL, see openai_client.py) so
-            # the message names the endpoint the request actually goes to.
+            # warn about. Read the endpoint the way the OpenAI client does
+            # (``_env_base_url``) so the message names where the request goes.
             if (
                 llm is None
                 and model_name == 'gpt-4o-mini'
                 and not os.getenv('OPENAI_MODEL_NAME')
+                # Guard keeps the default Agent() from eagerly importing openai_client.
+                and (os.getenv('OPENAI_BASE_URL') or os.getenv('OPENAI_API_BASE'))
             ):
-                _endpoint = os.getenv('OPENAI_API_BASE') or os.getenv('OPENAI_BASE_URL')
+                from ..llm.openai_client import _env_base_url
+                _endpoint = _env_base_url()
                 if _endpoint and 'api.openai.com' not in _endpoint:
                     global _LOCAL_ENDPOINT_DEFAULT_MODEL_WARNED
                     if not _LOCAL_ENDPOINT_DEFAULT_MODEL_WARNED:
