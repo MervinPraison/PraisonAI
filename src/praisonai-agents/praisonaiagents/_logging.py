@@ -90,12 +90,14 @@ def _configure_loggers():
             logger = logging.getLogger(logger_name)
             logger.setLevel(logging.INFO)
     else:
-        # Suppress all noisy loggers when not in DEBUG mode
+        # Quiet noisy dependency loggers without silencing them for the host
+        # (R-06): WARNING only where nothing set a level yet, and keep them
+        # propagating so an application that configures logging later still
+        # sees their warnings and errors.
         for logger_name in _get_all_noisy_loggers():
             logger = logging.getLogger(logger_name)
-            logger.setLevel(logging.CRITICAL)
-            logger.handlers = []
-            logger.propagate = False
+            if logger.level == logging.NOTSET:
+                logger.setLevel(logging.WARNING)
 
 
 # ========================================================================
