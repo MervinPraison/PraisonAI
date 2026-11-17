@@ -1784,3 +1784,8 @@ class MultiChannelGatewayConfig:
             },
             "hooks": [h.to_dict() for h in self.hooks],
         }
+
+
+# ``Protocol``-suffixed names (G-26, the project naming rule). The original
+# names stay and are the same class, so existing imports keep working.
+SupportsHotReloadProtocol = SupportsHotReload
