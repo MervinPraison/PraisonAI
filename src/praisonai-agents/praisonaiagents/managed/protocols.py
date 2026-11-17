@@ -612,3 +612,8 @@ class ManagedRuntimeProtocol(Protocol):
             session_id: Session ID to delete
         """
         ...
+
+
+# ``Protocol``-suffixed names (G-26, the project naming rule). The original
+# names stay and are the same class, so existing imports keep working.
+SupportsCaptureProtocol = SupportsCapture
