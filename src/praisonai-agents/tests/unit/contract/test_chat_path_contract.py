@@ -198,8 +198,6 @@ F06 = _drift("F-06", "achat() on the litellm Chat Completions route sends the po
              ("achat", "litellm_chat"))
 F07 = _drift("F-07", "OpenAI-client tool loop records usage for one of the two model calls",
              ("chat", "openai_client"), ("achat", "openai_client"))
-F08 = _drift("F-08", "start(stream=True) on the litellm routes records no token usage or cost",
-             ("stream", "litellm_chat"), ("stream", "litellm_responses"))
 F09 = _drift("F-09", "start(stream=True) ignores cancel_token", ("stream", "*"))
 F09_TOOL = _drift("F-09", "start(stream=True) ignores cancel_token", ("stream", "openai_client"))
 F11 = _drift("F-11", "OpenAI-client stream emits no llm_request/llm_response trace events",
@@ -318,7 +316,7 @@ def test_trace_events_emitted(stub, mode, route):
     assert E.LLM_RESPONSE in types
 
 
-@pytest.mark.parametrize("mode,route", _cells(F08))
+@pytest.mark.parametrize("mode,route", _cells())
 def test_token_usage_recorded(stub, mode, route):
     agent = _agent(route, stub)
     assert _turn(agent, mode) == "hello"
@@ -336,7 +334,7 @@ def test_stream_budget_stop_raises_without_fallback_call(stub, monkeypatch):
     assert len(REQUESTS) == 1 and agent.cost_summary["llm_calls"] == 1
 
 
-@pytest.mark.parametrize("mode,route", _cells(F06, F07, F08))
+@pytest.mark.parametrize("mode,route", _cells(F06, F07))
 def test_token_usage_recorded_for_every_call_in_a_tool_round(stub, mode, route):
     agent = _agent(route, stub, tools=[lookup])
     assert _turn(agent, mode) == "hello"
