@@ -332,7 +332,7 @@ class ChatMixin:
                 success=success,
             )
         except Exception as callback_error:
-            logging.debug(f"tool_call callback failed for '{tool_name}': {callback_error}")
+            logger.debug(f"tool_call callback failed for '{tool_name}': {callback_error}")
 
     def _durable_sync_tool_executor(self, execute_tool_fn):
         """Wrap tool execution only while an opt-in durable run is active."""
@@ -537,7 +537,7 @@ class ChatMixin:
                     break
             return self._format_memory_prefetch(results, limit, budget)
         except Exception as exc:
-            logging.debug("Memory prefetch failed; continuing without recalled context: %s", exc)
+            logger.debug("Memory prefetch failed; continuing without recalled context: %s", exc)
             return ""
 
     async def _aprefetch_memory(self, prompt: Any) -> str:
@@ -567,7 +567,7 @@ class ChatMixin:
                     break
             return self._format_memory_prefetch(results, limit, budget)
         except Exception as exc:
-            logging.debug("Async memory prefetch failed; continuing without recalled context: %s", exc)
+            logger.debug("Async memory prefetch failed; continuing without recalled context: %s", exc)
             return ""
 
     def _resolve_max_steps(self, default: int = 10) -> int:
@@ -834,7 +834,7 @@ Your Role: {self.role}"""
         except Exception as e:
             # Log unexpected errors but continue
             import logging
-            logging.debug(f"Session context injection failed: {e}", exc_info=True)
+            logger.debug(f"Session context injection failed: {e}", exc_info=True)
             pass
         
         # Add tool usage instructions if tools are available
@@ -860,7 +860,7 @@ Your Role: {self.role}"""
                         elif isinstance(openai_tools, dict) and 'function' in openai_tools:
                             tool_names.append(openai_tools['function']['name'])
                 except (AttributeError, KeyError, TypeError) as e:
-                    logging.warning(f"Could not extract tool name from {tool}: {e}")
+                    logger.warning(f"Could not extract tool name from {tool}: {e}")
                     continue
             
             # Prune permission-denied tool names so the advertised surface in the
@@ -1170,7 +1170,7 @@ Your Role: {self.role}"""
             except ValueError:
                 pass
 
-        logging.warning(
+        logger.warning(
             f"Agent {self.name}: output_pydantic={getattr(schema_model, '__name__', schema_model)} "
             f"was requested but the response could not be parsed into the model; "
             f"returning raw string."
@@ -1193,7 +1193,7 @@ Your Role: {self.role}"""
         try:
             return supports_structured_outputs(self.llm)
         except Exception as e:
-            logging.warning(
+            logger.warning(
                 "Structured output capability check failed for agent %s (model=%r); "
                 "falling back to prompt-based schema formatting. Check model capability "
                 "configuration and optional provider dependencies: %s",
@@ -1230,7 +1230,7 @@ Your Role: {self.role}"""
                 )
             return list(session_history) if session_history else []
         except Exception as e:
-            logging.debug(f"Failed to load session history: {e}")
+            logger.debug(f"Failed to load session history: {e}")
             return []
 
     def _build_messages(self, prompt, temperature=1.0, output_json=None, output_pydantic=None, tools=None, use_native_format=False, restore_durable=True, memory_prefetch_context: str = ""):
@@ -1369,7 +1369,7 @@ Your Role: {self.role}"""
                 if 'function' in tool and isinstance(tool['function'], dict) and 'name' in tool['function']:
                     formatted_tools.append(tool)
                 else:
-                    logging.warning(f"Skipping malformed OpenAI tool: missing function or name")
+                    logger.warning(f"Skipping malformed OpenAI tool: missing function or name")
             # Handle lists of tools
             elif isinstance(tool, list):
                 for subtool in tool:
@@ -1380,14 +1380,14 @@ Your Role: {self.role}"""
                         if 'function' in subtool and isinstance(subtool['function'], dict) and 'name' in subtool['function']:
                             formatted_tools.append(subtool)
                         else:
-                            logging.warning(f"Skipping malformed OpenAI tool in list: missing function or name")
+                            logger.warning(f"Skipping malformed OpenAI tool in list: missing function or name")
             # Handle string tool names
             elif isinstance(tool, str):
                 tool_def = self._generate_tool_definition(tool)
                 if tool_def:
                     formatted_tools.append(tool_def)
                 else:
-                    logging.warning(f"Could not generate definition for tool: {tool}")
+                    logger.warning(f"Could not generate definition for tool: {tool}")
             # Handle objects with to_openai_tool method (MCP tools)
             elif hasattr(tool, "to_openai_tool"):
                 openai_tools = tool.to_openai_tool()
@@ -1402,29 +1402,29 @@ Your Role: {self.role}"""
                 if tool_def:
                     formatted_tools.append(tool_def)
                 else:
-                    logging.warning(
+                    logger.warning(
                         "Could not generate definition for tool: %s", tool.name
                     )
             # Handle callable functions
             elif callable(tool):
                 fname = getattr(tool, "name", None) or getattr(tool, "__name__", None)
                 if not fname:
-                    logging.warning("Tool %r not recognized (no name)", tool)
+                    logger.warning("Tool %r not recognized (no name)", tool)
                     continue
                 tool_def = self._generate_tool_definition(fname)
                 if tool_def:
                     formatted_tools.append(tool_def)
                 else:
-                    logging.warning(f"Could not generate definition for tool: {fname}")
+                    logger.warning(f"Could not generate definition for tool: {fname}")
             else:
-                logging.warning(f"Tool {tool} not recognized")
+                logger.warning(f"Tool {tool} not recognized")
         
         # Validate JSON serialization before returning
         if formatted_tools:
             try:
                 json.dumps(formatted_tools)  # Validate serialization
             except (TypeError, ValueError) as e:
-                logging.error(f"Tools are not JSON serializable: {e}")
+                logger.error(f"Tools are not JSON serializable: {e}")
                 return []
         
         # Apply tool search assembly if enabled (after formatting, before caching)
@@ -1447,7 +1447,7 @@ Your Role: {self.role}"""
                 
             except ImportError:
                 # Tool search module not available, continue with original tools
-                logging.warning("Tool search requested but tool_search module not available")
+                logger.warning("Tool search requested but tool_search module not available")
         
         # Strip __praisonai_deferrable__ from provider-facing tool payloads
         # Keep the marker only for internal tool classification
@@ -1530,14 +1530,14 @@ Your Role: {self.role}"""
                      if r.output and getattr(r.output, "is_denied", lambda: False)()),
                     None,
                 ) or "Blocked by hook"
-                logging.warning(
+                logger.warning(
                     f"[before-tool-definitions] tool definitions blocked by hook: {_reason}"
                 )
                 return []
             # Adopt mutations, mirroring how BEFORE_LLM adopts its payload.
             return _inp.tool_definitions
         except Exception as _e:
-            logging.debug(f"[before-tool-definitions] hook skipped: {_e}")
+            logger.debug(f"[before-tool-definitions] hook skipped: {_e}")
             return formatted_tools
 
     async def _aapply_before_tool_definitions_hook(self, formatted_tools):
@@ -1561,13 +1561,13 @@ Your Role: {self.role}"""
                      if r.output and getattr(r.output, "is_denied", lambda: False)()),
                     None,
                 ) or "Blocked by hook"
-                logging.warning(
+                logger.warning(
                     f"[before-tool-definitions] tool definitions blocked by hook: {_reason}"
                 )
                 return []
             return _inp.tool_definitions
         except Exception as _e:
-            logging.debug(f"[before-tool-definitions] async hook skipped: {_e}")
+            logger.debug(f"[before-tool-definitions] async hook skipped: {_e}")
             return formatted_tools
 
     def _prune_denied_tools(self, formatted_tools):
@@ -1610,7 +1610,7 @@ Your Role: {self.role}"""
                 pruned.append(tool)
                 continue
             if not self._tool_name_allowed(name):
-                logging.debug("Pruning permission-denied tool from payload: %s", name)
+                logger.debug("Pruning permission-denied tool from payload: %s", name)
                 continue
             pruned.append(tool)
         return pruned
@@ -1643,7 +1643,7 @@ Your Role: {self.role}"""
                 if manager.is_denied(name, getattr(self, "name", None)):
                     return False
             except Exception as e:  # noqa: BLE001
-                logging.debug("permission manager is_denied failed for %s: %s", name, e)
+                logger.debug("permission manager is_denied failed for %s: %s", name, e)
         return True
 
     def _build_multimodal_prompt(
@@ -1720,7 +1720,7 @@ Your Role: {self.role}"""
                     finish_reason = getattr(choice, "finish_reason", None)
                     refusal = getattr(msg, "refusal", None)
                     if refusal or finish_reason not in (None, "stop"):
-                        logging.warning(
+                        logger.warning(
                             f"Agent {self.name}: model returned no content "
                             f"(finish_reason={finish_reason!r}, refused={bool(refusal)})"
                         )
@@ -1733,7 +1733,7 @@ Your Role: {self.role}"""
                             self._last_stop_reason = stop_reason
                     return ""
         except (AttributeError, IndexError, TypeError) as e:
-            logging.warning(
+            logger.warning(
                 f"Failed to extract LLM response content (falling back to str): {e}"
             )
             # Fallback to str(response) is still fine, but now it's visible
@@ -1792,7 +1792,7 @@ Your Role: {self.role}"""
         
         # Log budget analysis if enabled
         if getattr(self, '_verbose_context', False):
-            logging.info(
+            logger.info(
                 f"[context-budget] {self.name}: {budget_result.current_tokens} tokens, "
                 f"{budget_result.utilization:.1%} utilization, route: {budget_result.route.value}"
             )
@@ -1864,7 +1864,7 @@ Your Role: {self.role}"""
         try:
             self._hook_runner.execute_sync(_HookEvent.BEFORE_COMPACTION, None)
         except Exception as e:
-            logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
+            logger.warning(f"BEFORE_COMPACTION hook failed: {e}")
             if getattr(self, '_strict_hooks', False):
                 raise
 
@@ -1874,7 +1874,7 @@ Your Role: {self.role}"""
         with protect_turn(getattr(self, 'interrupt_controller', None)):
             compacted_msgs, result = compactor.compact(messages)
         
-        logging.info(
+        logger.info(
             f"[proactive-compaction] {self.name}: {result.original_tokens}→{result.compacted_tokens} tokens "
             f"({result.messages_removed} messages removed, strategy: {policy.strategy.value})"
         )
@@ -1888,7 +1888,7 @@ Your Role: {self.role}"""
         try:
             self._hook_runner.execute_sync(_HookEvent.AFTER_COMPACTION, result)
         except Exception as e:
-            logging.warning(f"AFTER_COMPACTION hook failed: {e}")
+            logger.warning(f"AFTER_COMPACTION hook failed: {e}")
             if getattr(self, '_strict_hooks', False):
                 raise
         
@@ -1926,7 +1926,7 @@ Your Role: {self.role}"""
                 tokens_after=getattr(result, "compacted_tokens", 0) or 0,
             )
         except Exception as e:
-            logging.debug(f"Failed to persist compaction checkpoint: {e}")
+            logger.debug(f"Failed to persist compaction checkpoint: {e}")
 
     def _run_pre_compaction_memory_flush(self, messages, compactor):
         """Run the default-off sync flush at the compactor's older boundary."""
@@ -1938,7 +1938,7 @@ Your Role: {self.role}"""
 
             return run_pre_compaction_flush_sync(self, older_slice, setting)
         except Exception as exc:
-            logging.warning(
+            logger.warning(
                 "Pre-compaction memory flush failed; continuing compaction: %s",
                 exc,
             )
@@ -1954,7 +1954,7 @@ Your Role: {self.role}"""
 
             return await run_pre_compaction_flush(self, older_slice, setting)
         except Exception as exc:
-            logging.warning(
+            logger.warning(
                 "Async pre-compaction memory flush failed; continuing compaction: %s",
                 exc,
             )
@@ -1985,7 +1985,7 @@ Your Role: {self.role}"""
         original_tokens = compactor.count_total_tokens(messages)
         new_tokens = compactor.count_total_tokens(truncated_msgs)
         
-        logging.info(
+        logger.info(
             f"[{log_tag}] {self.name}: {original_tokens}→{new_tokens} tokens "
             f"(truncated large tool outputs)"
         )
@@ -2051,7 +2051,7 @@ Your Role: {self.role}"""
         try:
             await self._hook_runner.execute(_HookEvent.BEFORE_COMPACTION, None)
         except Exception as e:
-            logging.warning(f"BEFORE_COMPACTION hook failed: {e}")
+            logger.warning(f"BEFORE_COMPACTION hook failed: {e}")
             if getattr(self, '_strict_hooks', False):
                 raise
 
@@ -2061,7 +2061,7 @@ Your Role: {self.role}"""
         with protect_turn(getattr(self, 'interrupt_controller', None)):
             compacted_msgs, result = compactor.compact(messages)
         
-        logging.info(
+        logger.info(
             f"[proactive-compaction-async] {self.name}: {result.original_tokens}→{result.compacted_tokens} tokens "
             f"({result.messages_removed} messages removed, strategy: {policy.strategy.value})"
         )
@@ -2075,12 +2075,12 @@ Your Role: {self.role}"""
         try:
             await asyncio.to_thread(self._persist_compaction_checkpoint, result)
         except Exception as e:
-            logging.debug(f"Failed to persist compaction checkpoint (async): {e}")
+            logger.debug(f"Failed to persist compaction checkpoint (async): {e}")
 
         try:
             await self._hook_runner.execute(_HookEvent.AFTER_COMPACTION, result)
         except Exception as e:
-            logging.warning(f"AFTER_COMPACTION hook failed: {e}")
+            logger.warning(f"AFTER_COMPACTION hook failed: {e}")
             if getattr(self, '_strict_hooks', False):
                 raise
         
@@ -2159,7 +2159,7 @@ Your Role: {self.role}"""
         classification = classify_llm_error(error, provider=provider, model=model_name)
         if not classification.should_fallback_model:
             return None, None
-        logging.info(f"[{self.name}] {model_name} unavailable — falling back to {next_model}")
+        logger.info(f"[{self.name}] {model_name} unavailable — falling back to {next_model}")
         return next_model, classification.error_category
 
     @staticmethod
@@ -2235,7 +2235,7 @@ Your Role: {self.role}"""
                  if r.output and getattr(r.output, "is_denied", lambda: False)()),
                 None,
             ) or "Blocked by hook"
-            logging.warning(f"Agent {self.name} LLM request blocked by BEFORE_LLM hook: {reason}")
+            logger.warning(f"Agent {self.name} LLM request blocked by BEFORE_LLM hook: {reason}")
             return llm_kwargs, f"[LLM request blocked by hook: {reason}]"
         messages = list(before.messages or [])
         if messages and messages != self._custom_llm_hook_messages(llm_kwargs):
@@ -2247,7 +2247,7 @@ Your Role: {self.role}"""
             if not isinstance(last, dict) or last.get("role") != "user":
                 # ``LLM.get_response`` always sends the prompt as a user turn; fail closed
                 # rather than silently re-role a rewritten assistant/tool message.
-                logging.warning(f"Agent {self.name} BEFORE_LLM rewrite must end with a user message")
+                logger.warning(f"Agent {self.name} BEFORE_LLM rewrite must end with a user message")
                 return llm_kwargs, "[LLM request blocked by hook: rewritten messages must end with a user message]"
             llm_kwargs = {**llm_kwargs, 'system_prompt': system, 'chat_history': messages,
                           'prompt': last.get("content")}
@@ -2389,7 +2389,7 @@ Your Role: {self.role}"""
                     ),
                 )
         except Exception:  # observability must never break the fallback path
-            logging.debug("MODEL_FALLBACK hook failed", exc_info=True)
+            logger.debug("MODEL_FALLBACK hook failed", exc_info=True)
 
         self._emit_model_fallback_stream(
             from_model, to_model, reason_category, fallback_index, stream_callback
@@ -2416,7 +2416,7 @@ Your Role: {self.role}"""
                     ),
                 )
         except Exception:  # observability must never break the fallback path
-            logging.debug("MODEL_FALLBACK hook failed", exc_info=True)
+            logger.debug("MODEL_FALLBACK hook failed", exc_info=True)
 
         self._emit_model_fallback_stream(
             from_model, to_model, reason_category, fallback_index, stream_callback
@@ -2460,7 +2460,7 @@ Your Role: {self.role}"""
                 run_id=getattr(self, '_current_run_id', None),
             ))
         except Exception:
-            logging.debug("MODEL_FALLBACK stream event failed", exc_info=True)
+            logger.debug("MODEL_FALLBACK stream event failed", exc_info=True)
 
     def _shrink_after_context_overflow(self, messages, model_name):
         """Shrink ``messages`` after the provider rejected them as too long.
@@ -2544,7 +2544,7 @@ Your Role: {self.role}"""
                     agent_id=self.name
                 )
             elif self._on_budget_exceeded == "warn":
-                logging.warning(
+                logger.warning(
                     f"[budget] {self.name}: ${current_cost:.4f} exceeded "
                     f"${self._max_budget:.4f} budget"
                 )
@@ -2608,7 +2608,7 @@ Your Role: {self.role}"""
             # Fallback to original messages if proactive handling fails
             if getattr(self, '_strict_hooks', False):
                 raise
-            logging.debug(f"[proactive-context] fallback to original messages: {_ce}")
+            logger.debug(f"[proactive-context] fallback to original messages: {_ce}")
         
         # --- Context compaction (opt-in via ExecutionConfig.context_compaction) ---
         # Compacts message history before sending to LLM. Zero overhead when disabled.
@@ -2640,7 +2640,7 @@ Your Role: {self.role}"""
                      if r.output and getattr(r.output, "is_denied", lambda: False)()),
                     None,
                 ) or "Blocked by hook"
-                logging.warning(f"Agent {self.name} LLM request blocked by BEFORE_LLM hook: {_block_reason}")
+                logger.warning(f"Agent {self.name} LLM request blocked by BEFORE_LLM hook: {_block_reason}")
                 return f"[LLM request blocked by hook: {_block_reason}]"
             # C7 - honour any BEFORE_LLM hook that mutated the message stream
             # (e.g. PII redactor). The runner applies modified_input in-place on
@@ -2670,7 +2670,7 @@ Your Role: {self.role}"""
                     agent_id=self.name
                 )
 
-        logging.debug("%s sending messages to LLM: %s", self.name, messages)
+        logger.debug("%s sending messages to LLM: %s", self.name, messages)
         
         # Emit LLM request trace event (zero overhead when not set)
         from ..trace.context_events import get_context_emitter
@@ -2714,7 +2714,7 @@ Your Role: {self.role}"""
             except ValueError as e:
                 if "Streaming is not supported" in str(e):
                     # Fallback: retry with non-streaming for sync adapters
-                    logging.debug(f"{self.name}: Streaming not supported by adapter, falling back to non-streaming")
+                    logger.debug(f"{self.name}: Streaming not supported by adapter, falling back to non-streaming")
                     stream = False  # Set for the main execution below
                 else:
                     raise  # Re-raise if it's a different ValueError
@@ -2731,7 +2731,7 @@ Your Role: {self.role}"""
                 # Never replay a tool turn after a post-dispatch failure (#3860)
                 self._raise_if_stream_replay_unsafe(e, formatted_tools)
                 # For any other exception, fall back to non-streaming
-                logging.debug(f"{self.name}: Streaming attempt failed, falling back to non-streaming")
+                logger.debug(f"{self.name}: Streaming attempt failed, falling back to non-streaming")
                 stream = False  # Set for the main execution below
         
         # If stream was explicitly set or fallback occurred, use the specified/fallback value
@@ -2764,7 +2764,7 @@ Your Role: {self.role}"""
                     # back to non-streaming so chat() still returns text, the
                     # same way the stream=None auto-detect path above does.
                     if stream and "Streaming is not supported" in str(e):
-                        logging.debug(f"{self.name}: Streaming not supported by adapter, falling back to non-streaming")
+                        logger.debug(f"{self.name}: Streaming not supported by adapter, falling back to non-streaming")
                         final_response = self._chat_completion_with_retry(
                             cancel_token=cancel_token,
                             messages=messages,
@@ -2871,7 +2871,7 @@ Your Role: {self.role}"""
                 try:
                     truncated_messages = self._shrink_after_context_overflow(messages, model_name)
                     
-                    logging.info(f"[{self.name}] {classification.user_message}")
+                    logger.info(f"[{self.name}] {classification.user_message}")
                     
                     # Retry with compressed context (recursive call, bounded by configured policy)
                     if _retry_depth < self._max_retry_depth():
@@ -2883,12 +2883,12 @@ Your Role: {self.role}"""
                             cancel_token=cancel_token
                         )
                 except Exception as compression_error:
-                    logging.error(f"[{self.name}] Context compression failed: {compression_error}")
+                    logger.error(f"[{self.name}] Context compression failed: {compression_error}")
             
             if classification.should_rotate_credential:
                 # TODO: Implement credential rotation when available
                 if not self._credential_failover_active():
-                    logging.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
+                    logger.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
                 # Don't retry without actual credential rotation
                 
             elif classification.should_fallback_model:
@@ -2896,7 +2896,7 @@ Your Role: {self.role}"""
                 next_model = self._get_next_fallback_model(_fallback_index)
                 if next_model:
                     current_model = self.llm if isinstance(self.llm, str) else str(self.llm)
-                    logging.info(f"[{self.name}] {current_model} unavailable — falling back to {next_model}")
+                    logger.info(f"[{self.name}] {current_model} unavailable — falling back to {next_model}")
 
                     # Surface the otherwise-silent switch as an observable event.
                     # Forward the active stream callback so streaming consumers
@@ -2941,12 +2941,12 @@ Your Role: {self.role}"""
                             self.llm = original_llm
                             self._unified_dispatcher = original_dispatcher  # Restore original dispatcher
                 else:
-                    logging.warning(f"[{self.name}] {classification.user_message} (no more fallback models available)")
+                    logger.warning(f"[{self.name}] {classification.user_message} (no more fallback models available)")
                     # Continue to error handling without retry
                 
             elif classification.is_retryable and classification.backoff_seconds > 0:
                 if _retry_depth < self._max_retry_depth():  # Bounded by configured RetryBackoffConfig.max_retries
-                    logging.info(f"[{self.name}] {classification.user_message} (waiting {classification.backoff_seconds:.1f}s)")
+                    logger.info(f"[{self.name}] {classification.user_message} (waiting {classification.backoff_seconds:.1f}s)")
                     _sleep_unless_cancelled(
                         classification.backoff_seconds,
                         cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None),
@@ -2987,7 +2987,7 @@ Your Role: {self.role}"""
                 try:
                     self.on_error(error)
                 except Exception as hook_error:
-                    logging.debug(f"Error in on_error hook: {hook_error}")
+                    logger.debug(f"Error in on_error hook: {hook_error}")
             
             raise error from e
 
@@ -3052,7 +3052,7 @@ Your Role: {self.role}"""
             try:
                 truncated_messages = self._shrink_after_context_overflow(messages, model_name)
                 
-                logging.info(f"[{self.name}] {classification.user_message}")
+                logger.info(f"[{self.name}] {classification.user_message}")
                 
                 # Retry with compressed context (recursive call, bounded by configured policy)
                 if _retry_depth < self._max_retry_depth():
@@ -3071,12 +3071,12 @@ Your Role: {self.role}"""
                             cancel_token=cancel_token,
                         )
             except Exception as compression_error:
-                logging.error(f"[{self.name}] Context compression failed: {compression_error}")
+                logger.error(f"[{self.name}] Context compression failed: {compression_error}")
         
         if classification.should_rotate_credential:
             # TODO: Implement credential rotation when available
             if not self._credential_failover_active():
-                logging.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
+                logger.warning(f"[{self.name}] {classification.user_message} (credential rotation not yet implemented)")
             # Don't retry without actual credential rotation
             
         elif classification.should_fallback_model:
@@ -3084,7 +3084,7 @@ Your Role: {self.role}"""
             next_model = self._get_next_fallback_model(_fallback_index)
             if next_model:
                 current_model = self.llm if isinstance(self.llm, str) else str(self.llm)
-                logging.info(f"[{self.name}] {current_model} unavailable — falling back to {next_model}")
+                logger.info(f"[{self.name}] {current_model} unavailable — falling back to {next_model}")
 
                 # Surface the otherwise-silent switch as an observable event.
                 # Await the async emitter so MODEL_FALLBACK hooks run in the
@@ -3129,12 +3129,12 @@ Your Role: {self.role}"""
                         cancel_token=cancel_token,
                     )
             else:
-                logging.warning(f"[{self.name}] {classification.user_message} (no more fallback models available)")
+                logger.warning(f"[{self.name}] {classification.user_message} (no more fallback models available)")
                 # Continue to error handling without retry
             
         elif classification.is_retryable and classification.backoff_seconds > 0:
             if _retry_depth < self._max_retry_depth():  # Bounded by configured RetryBackoffConfig.max_retries
-                logging.info(f"[{self.name}] {classification.user_message} (waiting {classification.backoff_seconds:.1f}s)")
+                logger.info(f"[{self.name}] {classification.user_message} (waiting {classification.backoff_seconds:.1f}s)")
                 if not await _abackoff(self, classification.backoff_seconds, cancel_token):
                     raise exc
                 # Need to call the full async method that includes error handling
@@ -3182,7 +3182,7 @@ Your Role: {self.role}"""
                 # for backward compatibility with existing hook implementations
                 self.on_error(error)
             except Exception as hook_error:
-                logging.debug(f"Error in on_error hook: {hook_error}")
+                logger.debug(f"Error in on_error hook: {hook_error}")
         
         # Raise the enriched error, keeping the provider error as its cause
         raise error from exc
@@ -3285,7 +3285,7 @@ Your Role: {self.role}"""
             except ValueError as e:
                 if "Streaming is not supported" in str(e):
                     # Fallback: retry with non-streaming for sync adapters
-                    logging.debug(f"Agent: Streaming not supported by adapter, falling back to non-streaming")
+                    logger.debug(f"Agent: Streaming not supported by adapter, falling back to non-streaming")
                     stream = False  # Set for the main execution below
                 else:
                     raise  # Re-raise if it's a different ValueError
@@ -3293,7 +3293,7 @@ Your Role: {self.role}"""
                 # Never replay a tool turn after a post-dispatch failure (#3860)
                 self._raise_if_stream_replay_unsafe(e, tools)
                 # For any other exception, fall back to non-streaming
-                logging.debug(f"Agent: Streaming attempt failed, falling back to non-streaming")
+                logger.debug(f"Agent: Streaming attempt failed, falling back to non-streaming")
                 stream = False  # Set for the main execution below
 
         # Execute unified dispatch with all necessary parameters
@@ -3347,7 +3347,7 @@ Your Role: {self.role}"""
             return final_response
             
         except Exception as e:
-            logging.error(f"Unified chat completion failed: {e}")
+            logger.error(f"Unified chat completion failed: {e}")
             raise
 
     async def _execute_unified_achat_completion(
@@ -3446,7 +3446,7 @@ Your Role: {self.role}"""
                      if r.output and getattr(r.output, "is_denied", lambda: False)()),
                     None,
                 ) or "Blocked by hook"
-                logging.warning(f"Agent {self.name} LLM request blocked by BEFORE_LLM hook: {_block_reason}")
+                logger.warning(f"Agent {self.name} LLM request blocked by BEFORE_LLM hook: {_block_reason}")
                 return f"[LLM request blocked by hook: {_block_reason}]"
             # Adopt any BEFORE_LLM hook mutations (e.g. PII redactor).
             messages = before_llm_input.messages
@@ -3655,9 +3655,9 @@ Your Role: {self.role}"""
                             summary = self._memory_instance.on_pre_compress(messages)
                     
                     if summary:
-                        logging.debug(f"[{self.name}] Memory provider extracted: {summary[:100]}...")
+                        logger.debug(f"[{self.name}] Memory provider extracted: {summary[:100]}...")
                 except Exception as e:
-                    logging.warning(f"[{self.name}] Memory on_pre_compress hook failed: {e}")
+                    logger.warning(f"[{self.name}] Memory on_pre_compress hook failed: {e}")
             
             # Process through context manager
             result = self.context_manager.process(
@@ -3671,7 +3671,7 @@ Your Role: {self.role}"""
             
             # Log if optimization occurred
             if result.get("optimized"):
-                logging.debug(
+                logger.debug(
                     f"[{self.name}] Context optimized: "
                     f"{result.get('tokens_before', 0)} -> {result.get('tokens_after', 0)} tokens "
                     f"(saved {result.get('tokens_saved', 0)})"
@@ -3692,7 +3692,7 @@ Your Role: {self.role}"""
                 
                 # If over 95% of limit, apply emergency truncation
                 if current_tokens > model_limit * 0.95:
-                    logging.warning(
+                    logger.warning(
                         f"[{self.name}] Context at {current_tokens} tokens (limit: {model_limit}), "
                         f"applying emergency truncation"
                     )
@@ -3703,7 +3703,7 @@ Your Role: {self.role}"""
                     result["emergency_truncated"] = True
                     result["tokens_after"] = estimate_messages_tokens(optimized) + overhead
             except Exception as e:
-                logging.debug(f"Hard limit check skipped: {e}")
+                logger.debug(f"Hard limit check skipped: {e}")
             
             return optimized, result
             
@@ -3712,7 +3712,7 @@ Your Role: {self.role}"""
             # returning the unchanged history disables the hard-limit truncation
             # too and sends an over-budget request. Fall back to emergency
             # truncation so we still fit within the model window.
-            logging.error(f"Context management failed: {e}")
+            logger.error(f"Context management failed: {e}")
             try:
                 from ..context.budgeter import get_model_limit
                 from ..context.tokens import estimate_messages_tokens
@@ -3728,7 +3728,7 @@ Your Role: {self.role}"""
                     truncated = self.context_manager.emergency_truncate(messages, target)
                     return truncated, {"emergency_truncated": True}
             except Exception as inner:
-                logging.debug(f"Emergency truncation fallback skipped: {inner}")
+                logger.debug(f"Emergency truncation fallback skipped: {inner}")
             return messages, None
 
     def _estimate_request_overhead_tokens(
@@ -3778,7 +3778,7 @@ Your Role: {self.role}"""
             run_id = getattr(self, '_current_run_id', None)
             return self.context_manager.truncate_tool_output(tool_name, output, tool_call_id, run_id)
         except Exception as e:
-            logging.warning(f"Tool output truncation error: {e}")
+            logger.warning(f"Tool output truncation error: {e}")
             return output
 
     def _resolve_skill_invocation(self, prompt):
@@ -3829,7 +3829,7 @@ Your Role: {self.role}"""
                         try:
                             registry.auto_approve_tool(_tn, agent_name=agent_name)
                         except Exception as exc:  # pragma: no cover - approval is optional
-                            logging.debug(
+                            logger.debug(
                                 "Failed to auto-approve skill tool '%s' for skill '%s' on agent '%s': %s. "
                                 "The skill will continue, but this tool may still require explicit approval.",
                                 _tn,
@@ -3839,7 +3839,7 @@ Your Role: {self.role}"""
                                 exc_info=True,
                             )
         except Exception as exc:  # pragma: no cover - approval is optional
-            logging.debug(
+            logger.debug(
                 "Failed to resolve allowed tools for skill '%s' on agent '%s': %s. "
                 "The skill will continue without pre-approving tools.",
                 name,
@@ -3890,7 +3890,7 @@ Your Role: {self.role}"""
         if hasattr(self, '_validate_input_with_guardrail'):
             _in_ok, _in_prompt, _in_err = self._validate_input_with_guardrail(prompt)
             if not _in_ok:
-                logging.warning(f"Agent {self.name}: input blocked by guardrail: {_in_err}")
+                logger.warning(f"Agent {self.name}: input blocked by guardrail: {_in_err}")
                 self._last_guardrail_error = _in_err
                 return self._guardrail_blocked_message(_in_err)
             prompt = _in_prompt
