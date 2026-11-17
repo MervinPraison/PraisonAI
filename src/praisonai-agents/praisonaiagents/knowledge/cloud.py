@@ -19,6 +19,7 @@ installing PraisonAI does not pull three cloud SDKs. A missing SDK raises with
 the exact pip command rather than failing later inside the provider.
 """
 
+from ..errors import PraisonAIError
 import os
 import tempfile
 from typing import Optional, Tuple
@@ -35,7 +36,7 @@ __all__ = [
 CLOUD_SCHEMES = ("s3", "gs", "gcs", "az", "abfs")
 
 
-class CloudSourceError(RuntimeError):
+class CloudSourceError(RuntimeError, PraisonAIError):
     """Raised when a cloud source cannot be resolved."""
 
 

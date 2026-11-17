@@ -20,6 +20,7 @@ already the single source of truth that ``DurableRunContext`` replays from, so
 a second representation would be a second thing to keep correct.
 """
 
+from ..errors import PraisonAIError
 import json
 from typing import Any, Dict, Optional
 
@@ -39,7 +40,7 @@ __all__ = [
 PORTABLE_RUN_VERSION = 1
 
 
-class PortableRunError(RuntimeError):
+class PortableRunError(RuntimeError, PraisonAIError):
     """Raised when a run cannot be exported or imported."""
 
 

@@ -28,13 +28,14 @@ What it does NOT do, stated plainly rather than discovered later:
   design.
 """
 
+from ..errors import PraisonAIError
 import json
 from typing import Any, Dict, List, Optional
 
 __all__ = ["EncryptedSessionStore", "SessionEncryptionError", "generate_session_key"]
 
 
-class SessionEncryptionError(RuntimeError):
+class SessionEncryptionError(RuntimeError, PraisonAIError):
     """Raised when encryption cannot be performed or undone."""
 
 
