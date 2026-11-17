@@ -6,7 +6,7 @@ to create flexible agent configurations that can be pre-configured via environme
 """
 
 import os
-from praisonaiagents import Agent, Task, AgentTeam
+from praisonaiagents import Agent, Task, AgentTeam, ExecutionConfig
 
 # Set via environment or use default
 default_topic = os.getenv("RESEARCH_TOPIC", "AI trends")
@@ -27,7 +27,7 @@ agent = Agent(
         "model": llm_model,
         "temperature": temperature
     },
-    max_retry_limit=max_retries
+    execution=ExecutionConfig(max_retry_limit=max_retries)
 )
 
 # Create task
