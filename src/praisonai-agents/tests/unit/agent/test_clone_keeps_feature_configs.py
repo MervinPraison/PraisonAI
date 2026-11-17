@@ -56,6 +56,21 @@ def test_clone_keeps_skills(tmp_path):
     assert agent.clone_for_channel()._skills == agent._skills == [str(skills_dir)]
 
 
+def test_clone_does_not_share_a_user_context_manager():
+    # A live ContextManager holds per-session ledger/history; sharing it would
+    # leak one channel's context into another.
+    from praisonaiagents.context import ContextManager
+
+    cm = ContextManager(model="gpt-4o-mini")
+    agent = Agent(name="a", instructions="hi", context=cm)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        clone = agent.clone_for_channel()
+    assert clone.context_manager is not None
+    assert clone.context_manager is not cm
+    assert agent.context_manager is cm
+
+
 def test_default_output_stays_implicit_on_the_clone():
     # Defaults must not turn into an explicit output mode on the clone; start()
     # only auto-enables verbose in a terminal when output was not set.

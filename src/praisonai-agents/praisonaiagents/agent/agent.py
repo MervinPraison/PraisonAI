@@ -3490,7 +3490,13 @@ Your Role: {self.role}
             'reflection': getattr(self, '_reflection_config', None),
             'guardrails': getattr(self, '_guardrails_config', None),
             'web': getattr(self, '_web_config', None),
-            'context': getattr(self, '_context_param', None),
+            # A user-supplied ContextManager holds per-session state (ledger,
+            # history), so a clone gets a fresh one built from its config.
+            'context': (
+                self._context_param.config
+                if hasattr(getattr(self, '_context_param', None), 'process')
+                else getattr(self, '_context_param', None)
+            ),
             'autonomy': getattr(self, '_autonomy_config_obj', None),
             'output': getattr(self, '_output_config', None),
             'execution': getattr(self, '_execution_config', None),
