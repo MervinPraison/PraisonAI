@@ -751,7 +751,6 @@ class Knowledge:
                                     all_results.extend(memory_result.results)
                                 else:
                                     # Log warning for unexpected types but don't break
-                                    import logging
                                     logger.warning(f"Unexpected memory_result type: {type(memory_result)}, skipping")
                             progress.advance(store_task)
                         else:
