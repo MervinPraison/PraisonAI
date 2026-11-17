@@ -5056,10 +5056,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             output_pydantic=output_pydantic,
                             **{k: v for k, v in kwargs.items() if k != 'reasoning_steps'},
                         )
-                        _, _, _responses_final = yield from self._stream_responses_api_events(
+                        _responses_text, _, _responses_final = yield from self._stream_responses_api_events(
                             responses_params, verbose=verbose)
                         if _responses_final is not None:
                             self._track_token_usage(_responses_final, self.model)
+                        if _responses_text and _responses_text.strip():
+                            _get_display_functions()['execute_sync_callback'](
+                                'llm_content', content=_responses_text.strip(), agent_name=agent_name)
                         return
                     
                     stream_iterator = self._completion_with_retry(
