@@ -245,3 +245,8 @@ def is_llmlingua_available() -> bool:
         True if llmlingua is installed
     """
     return _check_llmlingua()
+
+
+# ``Protocol``-suffixed names (G-26, the project naming rule). The original
+# names stay and are the same class, so existing imports keep working.
+ContextCompressorProtocol = ContextCompressor

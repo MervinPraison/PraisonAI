@@ -131,6 +131,8 @@ __all__ = [
     # Protocols (NEW)
     "ContextView",
     "ContextMutator",
+    "ContextViewProtocol",
+    "ContextMutatorProtocol",
     "ContextMessage",
     "MessageMetadata",
     "MessageRole",
@@ -248,7 +250,8 @@ def __getattr__(name: str):
         return getattr(manager, name)
     
     # Protocols
-    if name in ("ContextView", "ContextMutator", "ContextMessage",
+    if name in ("ContextView", "ContextMutator",
+                "ContextViewProtocol", "ContextMutatorProtocol", "ContextMessage",
                 "MessageMetadata", "MessageRole", "validate_message_schema",
                 "cleanup_orphaned_parents", "ConversationContext", 
                 "ConversationAnalyzerProtocol", "ConversationCompactorProtocol",
