@@ -2399,6 +2399,9 @@ Write the complete compiled report:"""
                 logger.debug("Raw result from tool: %s", result)
                 if result is None:
                     return {"result": None}
+                from ..tools.call_executor import DeferredToolResult
+                if isinstance(result, DeferredToolResult):
+                    return result  # the loop registers it; as on the sync path (F-12)
                 try:
                     json.dumps(result)  # Test serialization
                     return result
