@@ -816,7 +816,7 @@ class TestLiteLLMPath:
         # through the usage tracker, which records its usage chunk: F-08.)
         from praisonaiagents.llm.llm import _ReplayStream
         assert not isinstance(stream, _ReplayStream)
-        assert list(stream) is not None
+        assert len(list(stream)) == 3  # every chunk passes through unchanged
 
 
 # ---------------------------------------------------------------------------
