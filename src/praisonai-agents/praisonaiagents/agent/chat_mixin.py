@@ -2746,6 +2746,7 @@ Your Role: {self.role}"""
                 if "Streaming is not supported" in str(e):
                     # Fallback: retry with non-streaming for sync adapters
                     logging.debug(f"{self.name}: Streaming not supported by adapter, falling back to non-streaming")
+                    self._emit_stream_unavailable()
                     stream = False  # Set for the main execution below
                 else:
                     raise  # Re-raise if it's a different ValueError
@@ -2796,6 +2797,7 @@ Your Role: {self.role}"""
                     # same way the stream=None auto-detect path above does.
                     if stream and "Streaming is not supported" in str(e):
                         logging.debug(f"{self.name}: Streaming not supported by adapter, falling back to non-streaming")
+                        self._emit_stream_unavailable()
                         final_response = self._chat_completion_with_retry(
                             cancel_token=cancel_token,
                             messages=messages,
@@ -3311,6 +3313,7 @@ Your Role: {self.role}"""
                 if "Streaming is not supported" in str(e):
                     # Fallback: retry with non-streaming for sync adapters
                     logging.debug(f"Agent: Streaming not supported by adapter, falling back to non-streaming")
+                    self._emit_stream_unavailable()
                     stream = False  # Set for the main execution below
                 else:
                     raise  # Re-raise if it's a different ValueError
@@ -7003,6 +7006,25 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 raise
             logging.debug(f"[compaction] skipped (non-fatal): {_ce}")
             return False
+
+    def _emit_stream_unavailable(self):
+        """Tell stream consumers this turn falls back to one whole answer (X-04).
+
+        Emitted where a sync adapter refuses to stream; a no-op when nothing is
+        listening, and never raises into the fallback.
+        """
+        emitter = getattr(self, 'stream_emitter', None)
+        if emitter is None or not getattr(emitter, 'has_callbacks', False):
+            return
+        try:
+            from ..streaming.events import StreamEvent, StreamEventType
+            emitter.emit(StreamEvent(
+                type=StreamEventType.STREAM_UNAVAILABLE,
+                content="Streaming is not supported here; the answer arrives in one piece.",
+                agent_id=getattr(self, 'name', None),
+            ))
+        except Exception as _e:
+            logger.debug(f"Failed to emit STREAM_UNAVAILABLE stream event: {_e}")
 
     def _emit_retry_stream_event(self, *, attempt, max_attempts, delay, reason):
         """Emit a ``StreamEventType.RETRY`` event during backoff.
