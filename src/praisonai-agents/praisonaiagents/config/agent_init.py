@@ -8,7 +8,7 @@ defaults (for example ``resolve_caching(None)`` returns ``None``).
 
 from typing import Any, Dict, Optional, Tuple
 
-from .feature_configs import CachingConfig, PlanningConfig, ReflectionConfig, TemplateConfig
+from .feature_configs import CachingConfig, GuardrailConfig, PlanningConfig, ReflectionConfig, TemplateConfig
 from .param_resolver import ArrayMode, resolve
 from .presets import CACHING_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS
 
@@ -123,3 +123,139 @@ def resolve_agent_reflection(reflection: Any) -> Tuple[Optional[ReflectionConfig
     if reflection is False:
         return config, {"self_reflect": False}
     return config, {}
+
+
+def resolve_agent_guardrails(guardrails: Any, guardrail: Any, max_guardrail_retries: int
+                             ) -> Tuple[Any, Any, int]:
+    """``guardrails=`` -> ``(config, guardrail, max_guardrail_retries)``.
+
+    ``guardrail`` and ``max_guardrail_retries`` are the values to keep when
+    no guardrail is resolved. Raises instead of storing a guardrail that would
+    never run (policy strings, unsupported values, unimplemented on_fail).
+    """
+    from .loader import apply_config_defaults
+
+    # Fail loud instead of silently ignoring policy-string guardrails. The
+    # documented `guardrails=["policy:strict", ...]` shorthand has no
+    # enforcement path wired up, so accepting it silently would run with zero
+    # enforcement — a "safe by default" violation. Checked before resolution
+    # so the clear message wins over the generic resolver's error. Direct
+    # users to the working `Agent(policy=PolicyEngine(...))` param.
+    if isinstance(guardrails, (list, tuple)):
+        from .parse_utils import is_policy_string
+        _policy_strs = [g for g in guardrails if isinstance(g, str) and is_policy_string(g)]
+        if _policy_strs:
+            raise ValueError(
+                f"Policy-string guardrails {_policy_strs} are not enforced. "
+                "Use Agent(policy=PolicyEngine(...)) for tool policy enforcement, "
+                "or pass a validator via guardrails=... / GuardrailConfig(validator=...)."
+            )
+
+    # Apply [defaults].guardrails from config when not explicitly provided,
+    # mirroring the memory/web/caching/etc. resolution above so a config-wide
+    # guardrail safety net is actually honoured instead of silently ignored.
+    if guardrails is None:
+        guardrails = apply_config_defaults("guardrails", None, GuardrailConfig)
+
+    # Fast path: None/False -> no guardrails (skip resolve() call)
+    if guardrails is None or guardrails is False:
+        _guardrails_config = None
+    elif callable(guardrails) and not isinstance(guardrails, type):
+        _guardrails_config = guardrails  # Callable passthrough
+    elif isinstance(guardrails, GuardrailConfig):
+        _guardrails_config = guardrails
+    elif isinstance(guardrails, str):
+        # String could be LLM prompt - passthrough for later processing
+        _guardrails_config = guardrails
+    else:
+        # A protocol-conforming guardrail *object* (validate_input /
+        # validate_output / validate_tool_call) is not ``callable()``, so it
+        # used to fall straight through to the resolver, which returns None
+        # for an unknown object - the validator was silently discarded and
+        # the agent ran with zero enforcement. Adapt it into a
+        # ``GuardrailChain``, which is callable (so it satisfies the existing
+        # guardrail runner) and forwards every protocol method.
+        from ..guardrails.protocols import is_guardrail_object
+        if is_guardrail_object(guardrails):
+            from ..guardrails import GuardrailChain
+            _guardrails_config = GuardrailChain([guardrails])
+        elif isinstance(guardrails, (list, tuple)) and any(
+            is_guardrail_object(g) for g in guardrails
+        ):
+            _bad = [g for g in guardrails if not is_guardrail_object(g)]
+            if _bad:
+                raise TypeError(
+                    "guardrails=[...] may not mix guardrail objects with "
+                    f"{[type(g).__name__ for g in _bad]}. Every item must implement "
+                    "validate_input/validate_output/validate_tool_call, or wrap the "
+                    "list yourself with GuardrailChain([...])."
+                )
+            from ..guardrails import GuardrailChain
+            _guardrails_config = GuardrailChain(list(guardrails))
+        else:
+            from .param_resolver import resolve_guardrails as _resolve_guardrails
+            _guardrails_config = _resolve_guardrails(
+                value=guardrails,
+                config_class=GuardrailConfig,
+            )
+    
+    # Same fail-loud guard for GuardrailConfig.policy/.policies passed
+    # directly — those fields are never consumed downstream, so silently
+    # accepting them would also run with zero enforcement.
+    if isinstance(_guardrails_config, GuardrailConfig) and (
+        _guardrails_config.policy is not None or _guardrails_config.policies
+    ):
+        raise ValueError(
+            "GuardrailConfig.policy/.policies are not enforced. "
+            "Use Agent(policy=PolicyEngine(...)) for tool policy enforcement, "
+            "or pass a validator via GuardrailConfig(validator=...)."
+        )
+    # GuardrailConfig.on_fail has a single implemented policy (retry, then
+    # return the blocked message); refuse "skip"/"raise" rather than
+    # silently behaving as "retry".
+    if isinstance(_guardrails_config, GuardrailConfig) and (
+        getattr(_guardrails_config.on_fail, "value", _guardrails_config.on_fail) != "retry"
+    ):
+        raise ValueError(
+            f"GuardrailConfig.on_fail={_guardrails_config.on_fail!r} is not supported; "
+            "only 'retry' is implemented. Remove on_fail, or handle a blocked "
+            "response via Agent.last_guardrail_error."
+        )
+
+    # Fail loud when the value could not be turned into an enforceable
+    # guardrail, instead of storing something that never runs. Silently
+    # dropping a validator the caller explicitly asked for is a "safe by
+    # default" violation, same rationale as the policy-string guard above.
+    # An empty list/tuple resolves to None (no validator was actually
+    # supplied), which the resolver already treated as a no-op on main -
+    # keep that backward-compatible instead of raising on an empty opt-in.
+    _is_empty_guardrails = (
+        isinstance(guardrails, (list, tuple)) and len(guardrails) == 0
+    )
+    if (
+        guardrails is not None
+        and guardrails is not False
+        and not _is_empty_guardrails
+        and not (
+            callable(_guardrails_config)
+            or isinstance(_guardrails_config, (GuardrailConfig, str))
+        )
+    ):
+        raise TypeError(
+            f"guardrails={guardrails!r} (type {type(guardrails).__name__}) is not a "
+            "supported guardrail. Pass a validator callable taking one TaskOutput, an "
+            "object implementing validate_input/validate_output/validate_tool_call, a "
+            "list of such objects, a GuardrailConfig, or a string LLM-validation prompt."
+        )
+
+    if _guardrails_config is not None:
+        if callable(_guardrails_config) and not isinstance(_guardrails_config, type):
+            # Callable validator function
+            guardrail = _guardrails_config
+        elif isinstance(_guardrails_config, GuardrailConfig):
+            guardrail = _guardrails_config.validator or _guardrails_config.llm_validator
+            max_guardrail_retries = _guardrails_config.max_retries
+        elif isinstance(_guardrails_config, str):
+            # LLM validator prompt
+            guardrail = _guardrails_config
+    return _guardrails_config, guardrail, max_guardrail_retries
