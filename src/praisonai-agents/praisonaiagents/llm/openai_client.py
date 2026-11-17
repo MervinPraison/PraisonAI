@@ -2169,6 +2169,9 @@ class OpenAIClient:
         # Opt-in concurrent execution of a batch of tool calls
         # (ExecutionConfig.parallel_tool_calls); a loop setting, not an API param.
         parallel_tool_calls = bool(kwargs.pop("parallel_tool_calls", False))
+        # Agent hook: report each billed call except the final one (F-07).
+        usage_callback = kwargs.pop("usage_callback", None)
+        _unreported_usage = None
 
         def _is_cancelled() -> bool:
             return cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()
@@ -2303,6 +2306,9 @@ class OpenAIClient:
                     cost=None,
                     latency_ms=(time.time() - iteration_start_time) * 1000
                 )
+                # The agent records nothing on None; report the earlier billed call.
+                if usage_callback is not None and _unreported_usage is not None:
+                    usage_callback(_unreported_usage)
                 return None
 
             # Record usage for THIS billed completion. Every tool-loop iteration
@@ -2310,6 +2316,10 @@ class OpenAIClient:
             # not once after the loop — or intermediate completions are dropped
             # from session totals and by_model/by_agent rollups (Issue #3933).
             self._track_token_usage(final_response, model, agent_name)
+            if usage_callback is not None:
+                if _unreported_usage is not None:
+                    usage_callback(_unreported_usage)
+                _unreported_usage = final_response
 
             # Trigger llm_end callback with cost/latency metrics — mirrors the
             # sync tool-loop so async agents also emit LLM spans and cost figures
