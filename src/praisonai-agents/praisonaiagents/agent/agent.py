@@ -99,7 +99,6 @@ def _get_stream_emitter():
 # Performance: Module-level imports for param resolution (moved from __init__)
 # These imports are lightweight and avoid per-Agent import overhead
 # ============================================================================
-from ..config.param_resolver import resolve, ArrayMode
 from ..config.presets import (
     OUTPUT_PRESETS, EXECUTION_PRESETS, MEMORY_PRESETS, MEMORY_URL_SCHEMES,
     WEB_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS, CACHING_PRESETS,
