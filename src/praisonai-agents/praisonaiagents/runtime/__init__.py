@@ -44,6 +44,7 @@ __all__ = [
     'default_context_builder',
     # Tool result middleware
     "RuntimeToolResultMiddleware",
+    "RuntimeToolResultMiddlewareProtocol",
     "NormalizedToolResult", 
     "MiddlewareContext",
     # Middleware registry management  
@@ -136,6 +137,7 @@ _LAZY_GROUPS = {
     },
     'middleware': {
         'RuntimeToolResultMiddleware': ('praisonaiagents.runtime.middleware', 'RuntimeToolResultMiddleware'),
+        'RuntimeToolResultMiddlewareProtocol': ('praisonaiagents.runtime.middleware', 'RuntimeToolResultMiddlewareProtocol'),
         'NormalizedToolResult': ('praisonaiagents.runtime.middleware', 'NormalizedToolResult'),
         'MiddlewareContext': ('praisonaiagents.runtime.middleware', 'MiddlewareContext'),
     },

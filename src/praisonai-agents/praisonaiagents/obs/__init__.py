@@ -279,7 +279,13 @@ _sys.modules[__name__].__class__ = _CallableObsModule
 
 __all__ = [
     "ObservabilityAdapter",
+    "ObservabilityAdapterProtocol",
     "Span",
     "Trace",
     "obs",
 ]
+
+
+# ``Protocol``-suffixed names (G-26, the project naming rule). The original
+# names stay and are the same class, so existing imports keep working.
+ObservabilityAdapterProtocol = ObservabilityAdapter
