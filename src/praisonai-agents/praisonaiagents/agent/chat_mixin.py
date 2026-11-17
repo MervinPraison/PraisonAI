@@ -6646,7 +6646,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         active_stream["text"], force=True
                     )
                     raise
-                except ToolExecutionError:
+                except (ToolExecutionError, BudgetExceededError):
+                    # A budget stop is not a stream failure: no fallback call.
                     self._rollback_chat_history_to(chat_history_length)
                     raise
                 except Exception as e:
@@ -6668,7 +6669,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Restore original verbose mode
             self.verbose = original_verbose
                     
-        except ToolExecutionError:
+        except (ToolExecutionError, BudgetExceededError):
             self.verbose = original_verbose
             raise
         except Exception as e:
