@@ -95,31 +95,6 @@ def _get_stream_emitter():
                 _stream_emitter_class = StreamEventEmitter
     return _stream_emitter_class
 
-# File extensions that indicate a file path (for output parameter detection)
-_FILE_EXTENSIONS = frozenset({'.txt', '.md', '.json', '.yaml', '.yml', '.html', '.csv', '.log', '.xml', '.rst'})
-
-def _is_file_path(value: str) -> bool:
-    """Check if a string looks like a file path (not a preset name).
-    
-    Used to detect when output="path/to/file.txt" should be treated as
-    output_file instead of a preset name.
-    
-    Args:
-        value: String to check
-        
-    Returns:
-        True if the string looks like a file path
-    """
-    # Contains path separator
-    if '/' in value or '\\' in value:
-        return True
-    # Ends with common file extension
-    lower = value.lower()
-    for ext in _FILE_EXTENSIONS:
-        if lower.endswith(ext):
-            return True
-    return False
-
 # ============================================================================
 # Performance: Module-level imports for param resolution (moved from __init__)
 # These imports are lightweight and avoid per-Agent import overhead
@@ -142,10 +117,11 @@ from ..config.feature_configs import (
 # function-local relative import per construction (#5835).
 from ..config.parse_utils import canonical_preset_key, validate_preset_string
 from ..config.agent_init import (
-    resolve_agent_caching, resolve_agent_execution, resolve_agent_history,
-    resolve_agent_hooks, resolve_agent_knowledge, resolve_agent_learn,
-    resolve_agent_memory, resolve_agent_planning, resolve_agent_reflection,
-    resolve_agent_templates, resolve_agent_web,
+    _is_file_path, resolve_agent_caching, resolve_agent_execution,
+    resolve_agent_history, resolve_agent_hooks, resolve_agent_knowledge,
+    resolve_agent_learn, resolve_agent_memory, resolve_agent_output,
+    resolve_agent_planning, resolve_agent_reflection, resolve_agent_templates,
+    resolve_agent_web,
 )
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
@@ -1156,40 +1132,10 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Resolve OUTPUT param - FAST PATH for common cases
         # DEFAULT: "silent" mode (zero overhead, fastest performance)
         # ─────────────────────────────────────────────────────────────────────
-        # Fast path: None -> silent defaults (use cached env var)
-        if output is None:
-            env_output = Agent._get_env_output_mode()
-            if env_output and env_output in OUTPUT_PRESETS:
-                output = env_output
-            else:
-                output = DEFAULT_OUTPUT_MODE
-            _has_explicit_output = False
-        else:
-            _has_explicit_output = True
-        
-        # Fast path: string preset lookup (most common case)
-        if isinstance(output, str):
-            output_lower = canonical_preset_key(output)
-            preset_value = OUTPUT_PRESETS.get(output_lower)
-            if preset_value is not None:
-                _output_config = OutputConfig(**preset_value) if isinstance(preset_value, dict) else preset_value
-            elif _is_file_path(output):
-                # String looks like a file path - use as output_file
-                _output_config = OutputConfig(output_file=output)
-            else:
-                _output_config = OutputConfig()  # Default silent
-        elif isinstance(output, OutputConfig):
-            _output_config = output
-        else:
-            # Complex case: use full resolver
-            _output_config = resolve(
-                value=output,
-                param_name="output",
-                config_class=OutputConfig,
-                presets=OUTPUT_PRESETS,
-                array_mode=ArrayMode.PRESET_OVERRIDE,
-                default=OutputConfig(),
-            )
+        # None -> PRAISONAI_OUTPUT or silent defaults; str -> preset or file path
+        # (config.agent_init)
+        _output_config, _has_explicit_output = resolve_agent_output(
+            output, Agent._get_env_output_mode() if output is None else None)
         if _output_config:
             verbose = _output_config.verbose
             markdown = _output_config.markdown
