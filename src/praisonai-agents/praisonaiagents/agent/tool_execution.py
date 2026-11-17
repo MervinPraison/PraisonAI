@@ -6,6 +6,7 @@ cost tracking, and hook integration. Extracted from agent.py
 for maintainability.
 """
 
+import sys
 import os
 import dataclasses
 import typing
@@ -23,6 +24,16 @@ from ..errors import ToolExecutionError
 from ..config.feature_configs import DEFAULT_TOOL_OUTPUT_LIMIT
 
 logger = logging.getLogger(__name__)
+
+
+def _loaded_mcp_class():
+    """The ``MCP`` class if its module is already imported, else ``None`` (X-16).
+
+    No tool can be an ``MCP`` instance unless ``praisonaiagents.mcp.mcp`` was
+    imported, so an ``isinstance`` check needs no import; importing it pulls in
+    the ``mcp`` package (about 0.4 s) on runs that use no MCP tool at all.
+    """
+    return getattr(sys.modules.get("praisonaiagents.mcp.mcp"), "MCP", None)
 
 # Upper bound on how many timed-out (still-blocked) tool executors a single
 # agent may retire before it stops recycling and falls back to reusing the
@@ -4162,11 +4173,7 @@ class ToolExecutionMixin:
         in name repair and appear in the corrective inventory, rather than only
         exposing the opaque container.
         """
-        MCP = None
-        try:
-            from ..mcp.mcp import MCP
-        except ImportError:
-            pass
+        MCP = _loaded_mcp_class()
 
         def _expand(tool):
             if MCP is not None and isinstance(tool, MCP):
@@ -4233,10 +4240,8 @@ class ToolExecutionMixin:
         when no MCP tool matches. The ``result`` may be awaitable (the async
         caller awaits it); the sync caller normalizes/returns it directly.
         """
-        MCP = None
-        try:
-            from ..mcp.mcp import MCP
-        except ImportError:
+        MCP = _loaded_mcp_class()
+        if MCP is None:
             return False, None
 
         def _execute_mcp_tool(mcp_instance, func_name, args):
@@ -4360,11 +4365,7 @@ class ToolExecutionMixin:
 
     def _turn_tool_names(self, tools):
         """Names of every tool in a per-turn ``tools=`` list (MCP containers expanded)."""
-        MCP = None
-        try:
-            from ..mcp.mcp import MCP
-        except ImportError:
-            pass
+        MCP = _loaded_mcp_class()
         names = set()
         for tool in tools if isinstance(tools, (list, tuple)) else [tools]:
             if isinstance(tool, str):

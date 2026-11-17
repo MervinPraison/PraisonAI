@@ -4201,11 +4201,8 @@ Your Role: {self.role}"""
                 
                 # Convert MCP tool objects to OpenAI format if needed
                 if tool_param is not None:
-                    MCP = None
-                    try:
-                        from ..mcp.mcp import MCP
-                    except ImportError:
-                        pass
+                    from .tool_execution import _loaded_mcp_class
+                    MCP = _loaded_mcp_class()
                     if MCP is not None and isinstance(tool_param, MCP) and hasattr(tool_param, 'to_openai_tool'):
                         # Single MCP instance
                         logging.debug("Converting single MCP tool to OpenAI format")
@@ -6016,11 +6013,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
                 # Convert MCP tools if needed
                 if tool_param is not None:
-                    MCP = None
-                    try:
-                        from ..mcp.mcp import MCP
-                    except ImportError:
-                        pass
+                    from .tool_execution import _loaded_mcp_class
+                    MCP = _loaded_mcp_class()
                     if MCP is not None and isinstance(tool_param, MCP) and hasattr(tool_param, 'to_openai_tool'):
                         openai_tool = tool_param.to_openai_tool()
                         if openai_tool:
