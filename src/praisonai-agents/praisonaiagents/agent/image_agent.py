@@ -11,6 +11,8 @@ from pydantic import BaseModel, Field
 import logging
 from praisonaiagents._logging import get_logger
 import warnings
+
+logger = logging.getLogger(__name__)
 # Filter out Pydantic warning about fields
 warnings.filterwarnings("ignore", "Valid config keys have changed in V2", UserWarning)
 # dall-e-2/dall-e-3 were retired by OpenAI on 2026-05-12; gpt-image-1 on 2026-10-23.
@@ -172,7 +174,7 @@ class ImageAgent(Agent):
         except (ImportError, AttributeError, ValueError, TypeError, Exception) as e:
             # Log the specific error for debugging but continue with string-based fallback
             # Include generic Exception to catch provider-specific errors like BadRequestError
-            logging.debug(f"Provider detection failed for model '{model_name}': {e}")
+            logger.debug(f"Provider detection failed for model '{model_name}': {e}")
         
         if custom_llm_provider == "vertex_ai":
             # Vertex AI only supports 'n' and 'size' parameters for image generation
@@ -214,7 +216,7 @@ class ImageAgent(Agent):
                 error_msg = f"Error generating image: {str(e)}"
                 if self.verbose:
                     self.console.print(f"[red]{error_msg}[/red]")
-                logging.error(error_msg)
+                logger.error(error_msg)
                 raise
     async def agenerate_image(self, prompt: str, **kwargs) -> ImageResult:
         """Offload the synchronous generation path to keep the event loop responsive."""

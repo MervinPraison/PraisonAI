@@ -211,7 +211,7 @@ class UnifiedExecutionMixin:
             # Execute hooks in async context (handles both sync and async hooks)
             hook_results = await self._hook_runner.execute(HookEvent.BEFORE_AGENT, before_agent_input)
             if self._hook_runner.is_blocked(hook_results):
-                logging.warning(f"Agent {self.name} execution blocked by BEFORE_AGENT hook")
+                logger.warning(f"Agent {self.name} execution blocked by BEFORE_AGENT hook")
                 return None
             
             # Update prompt if modified by hooks
@@ -321,19 +321,19 @@ class UnifiedExecutionMixin:
                         metadata={"agent_id": getattr(self, 'agent_id', self.name)}
                     )
                 except Exception as e:
-                    logging.warning(f"Failed to store interaction in memory: {e}")
+                    logger.warning(f"Failed to store interaction in memory: {e}")
             
             # Apply guardrails if configured (unified path)
             if hasattr(self, 'guardrail') and self.guardrail and response_text:
                 try:
                     guardrail_result = await self._apply_guardrails_async(response_text)
                     if guardrail_result.blocked:
-                        logging.warning(f"Response blocked by guardrail: {guardrail_result.reason}")
+                        logger.warning(f"Response blocked by guardrail: {guardrail_result.reason}")
                         return guardrail_result.alternative_response or "Response blocked by content policy."
                     elif guardrail_result.modified_response:
                         response_text = guardrail_result.modified_response
                 except Exception as e:
-                    logging.warning(f"Guardrail application failed: {e}")
+                    logger.warning(f"Guardrail application failed: {e}")
             
             # Trigger AFTER_AGENT hook
             # (Implementation similar to BEFORE_AGENT hook)

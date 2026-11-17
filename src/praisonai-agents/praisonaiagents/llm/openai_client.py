@@ -10,6 +10,7 @@ import base64
 import logging
 import mimetypes
 from praisonaiagents._logging import get_logger
+from ._helpers import inject_steering, usage_detail, usage_value
 import time
 import json
 import asyncio
@@ -82,6 +83,40 @@ def _handle_native_deferred_result(
     except Exception as e:  # noqa: BLE001 — registration must never break the turn
         logger.debug("Native deferred registration skipped (non-fatal): %s", e)
     return tool_result.note
+
+_BOTH_BASE_URLS_WARNED = False
+
+
+def _env_base_url():
+    """The OpenAI base URL from the environment, or None (X-02).
+
+    ``OPENAI_BASE_URL`` (the openai SDK's name) first, then the legacy
+    ``OPENAI_API_BASE``. When both are set and differ, warns once naming both.
+    """
+    global _BOTH_BASE_URLS_WARNED
+    official, legacy = os.environ.get("OPENAI_BASE_URL"), os.environ.get("OPENAI_API_BASE")
+    if official and legacy and official != legacy and not _BOTH_BASE_URLS_WARNED:
+        _BOTH_BASE_URLS_WARNED = True
+        logger.warning(
+            "Both OPENAI_BASE_URL=%s and OPENAI_API_BASE=%s are set; using OPENAI_BASE_URL. "
+            "Unset OPENAI_API_BASE (the legacy name) to silence this.", official, legacy)
+    return official or legacy
+
+
+
+def _live_update(live, display_fn, text, start_time):
+    """Rebuild the streaming panel at most every 100 ms (R-01).
+
+    Each rebuild parses the whole answer so far as Markdown, so rebuilding on
+    every chunk made a long answer quadratic (2,000 chunks: 2-5 s vs 0.13 s
+    for the raw stream); the Live display redraws about ten times a second
+    anyway. The panel is transient, and the final answer is printed after it.
+    """
+    now = time.perf_counter()
+    last = getattr(live, "_praison_last_update", None)  # perf_counter's zero is undefined
+    if last is None or now - last >= 0.1:
+        live._praison_last_update = now
+        live.update(display_fn(text, start_time))
 
 # Lazy imports for optional dependencies
 _openai_module = None
@@ -457,7 +492,7 @@ class OpenAIClient:
         
         Args:
             api_key: OpenAI API key (defaults to OPENAI_API_KEY env var)
-            base_url: Custom base URL for API endpoints (defaults to OPENAI_API_BASE env var)
+            base_url: Custom base URL for API endpoints (defaults to OPENAI_BASE_URL, then the legacy OPENAI_API_BASE)
             max_retries: Number of automatic retries for transient errors (rate limits,
                 network blips) performed by the underlying OpenAI SDK, which honours
                 ``Retry-After`` and applies exponential backoff. Defaults to the
@@ -466,7 +501,7 @@ class OpenAIClient:
         """
         # Use provided values or fall back to environment variables
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
-        self.base_url = base_url or os.environ.get("OPENAI_API_BASE") or os.environ.get("OPENAI_BASE_URL")
+        self.base_url = base_url or _env_base_url()
 
         # Resolve retry configuration: explicit arg wins, else OPENAI_MAX_RETRIES env var.
         if max_retries is None:
@@ -486,7 +521,7 @@ class OpenAIClient:
         elif not self.api_key:
             raise ValueError(
                 "OPENAI_API_KEY environment variable is required for the default OpenAI service. "
-                "If you are targeting a local server (e.g., LM Studio), ensure OPENAI_API_BASE is set "
+                "If you are targeting a local server (e.g., LM Studio), ensure OPENAI_BASE_URL is set "
                 f"(e.g., 'http://localhost:1234/v1') and you can use a placeholder API key by setting OPENAI_API_KEY='{LOCAL_SERVER_API_KEY_PLACEHOLDER}'"
             )
         
@@ -1455,7 +1490,7 @@ class OpenAIClient:
                                     content=content
                                 ))
                             
-                            live.update(display_fn(full_response_text, start_time))
+                            _live_update(live, display_fn, full_response_text, start_time)
                         
                         # Handle tool calls streaming
                         if _emit and chunk.choices and hasattr(chunk.choices[0].delta, 'tool_calls') and chunk.choices[0].delta.tool_calls:
@@ -1485,7 +1520,7 @@ class OpenAIClient:
                                 ))
                             if reasoning_steps:
                                 reasoning_content += rc
-                                live.update(display_fn(f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
+                                _live_update(live, display_fn, f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time)
                 
                 # Clear the last generating display with a blank line
                 console.print()
@@ -1747,7 +1782,7 @@ class OpenAIClient:
                                     content=content
                                 ))
                             
-                            live.update(display_fn(full_response_text, start_time))
+                            _live_update(live, display_fn, full_response_text, start_time)
                         
                         # Handle tool calls streaming
                         if _emit and chunk.choices and hasattr(chunk.choices[0].delta, 'tool_calls') and chunk.choices[0].delta.tool_calls:
@@ -1777,7 +1812,7 @@ class OpenAIClient:
                                 ))
                             if reasoning_steps:
                                 reasoning_content += rc
-                                live.update(display_fn(f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time))
+                                _live_update(live, display_fn, f"{full_response_text}\n[Reasoning: {reasoning_content}]", start_time)
                 
                 # Clear the last generating display with a blank line
                 console.print()
@@ -1872,28 +1907,10 @@ class OpenAIClient:
                 return
 
             def _val(*names: str) -> int:
-                for name in names:
-                    value = usage.get(name) if isinstance(usage, dict) else getattr(usage, name, None)
-                    if value is not None:
-                        return int(value or 0)
-                return 0
+                return usage_value(usage, *names)
 
             def _detail(detail_names: tuple, name: str) -> int:
-                for detail_name in detail_names:
-                    details = (
-                        usage.get(detail_name)
-                        if isinstance(usage, dict)
-                        else getattr(usage, detail_name, None)
-                    )
-                    if details:
-                        value = (
-                            details.get(name)
-                            if isinstance(details, dict)
-                            else getattr(details, name, None)
-                        )
-                        if value is not None:
-                            return int(value or 0)
-                return 0
+                return usage_detail(usage, detail_names, name)
 
             metrics = TokenMetrics(
                 input_tokens=_val("prompt_tokens", "input_tokens"),
@@ -2124,14 +2141,7 @@ class OpenAIClient:
             return cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()
 
         def _inject_steering(msgs) -> None:
-            if steering_drain is None:
-                return
-            try:
-                for note in (steering_drain() or []):
-                    if note:
-                        msgs.append({"role": "user", "content": f"[steering] {note}"})
-            except Exception:
-                pass
+            inject_steering(msgs, steering_drain)
 
         # Work on a local copy so the tool-loop mutations (assistant/tool
         # turns and the graceful wrap-up control message) never leak back into
@@ -2224,7 +2234,7 @@ class OpenAIClient:
                                         logger.debug(f"TTFT (Time To First Token): {ttft_ms:.0f}ms")
                                         ttft_logged = True
                                     full_response_text += chunk.choices[0].delta.content
-                                    live.update(display_fn(full_response_text, start_time))
+                                    _live_update(live, display_fn, full_response_text, start_time)
                             
                             # Process final response from chunks
                             final_response = process_stream_chunks(chunks)
@@ -2492,14 +2502,7 @@ class OpenAIClient:
             return cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()
 
         def _inject_steering(msgs) -> None:
-            if steering_drain is None:
-                return
-            try:
-                for note in (steering_drain() or []):
-                    if note:
-                        msgs.append({"role": "user", "content": f"[steering] {note}"})
-            except Exception:
-                pass
+            inject_steering(msgs, steering_drain)
 
         # Work on a local copy so the tool-loop mutations (assistant/tool
         # turns and the graceful wrap-up control message) never leak back into
@@ -2588,7 +2591,7 @@ class OpenAIClient:
                                 chunks.append(chunk)
                                 if chunk.choices[0].delta.content:
                                     full_response_text += chunk.choices[0].delta.content
-                                    live.update(display_fn(full_response_text, start_time))
+                                    _live_update(live, display_fn, full_response_text, start_time)
                             
                             # Process final response from chunks
                             final_response = process_stream_chunks(chunks)
@@ -3176,9 +3179,7 @@ def get_openai_client(api_key: Optional[str] = None, base_url: Optional[str] = N
     # Normalize parameters for comparison, mirroring OpenAIClient.__init__ so that
     # an explicit argument matching the env-var fallback reuses the cached client.
     normalized_api_key = api_key or os.environ.get("OPENAI_API_KEY")
-    normalized_base_url = (
-        base_url or os.environ.get("OPENAI_API_BASE") or os.environ.get("OPENAI_BASE_URL")
-    )
+    normalized_base_url = base_url or _env_base_url()
     normalized_max_retries = max_retries
     if normalized_max_retries is None:
         _env_retries = os.environ.get("OPENAI_MAX_RETRIES")

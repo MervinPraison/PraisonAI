@@ -468,7 +468,7 @@ class MemoryMixin:
                 )
                 self._restore_db_history(history)
             except Exception as e:
-                logging.warning(f"Failed to initialize DB session: {e}")
+                logger.warning(f"Failed to initialize DB session: {e}")
             self._db_initialized = True
             self._current_run_id = None
 
@@ -526,7 +526,7 @@ class MemoryMixin:
                 if getattr(msg, "tool_call_id", None):
                     entry["tool_call_id"] = msg.tool_call_id
                 self.chat_history.append(entry)
-            logging.info(f"Resumed session {self._session_id} with {len(history)} messages")
+            logger.info(f"Resumed session {self._session_id} with {len(history)} messages")
 
     def _async_db_hook(self, name: str) -> Optional[Callable[..., Awaitable[Any]]]:
         """Use adapter-provided async hooks without changing sync-only adapters."""
@@ -552,7 +552,7 @@ class MemoryMixin:
                 )
                 self._restore_db_history(history)
             except Exception as exc:
-                logging.warning(f"Failed to initialize DB session: {exc}")
+                logger.warning(f"Failed to initialize DB session: {exc}")
                 return
             self._db_initialized = True
 
@@ -639,16 +639,16 @@ class MemoryMixin:
                     # The store returns LLM-shaped dicts (to_llm_message), so
                     # keep tool_calls / tool_call_id intact (#6217).
                     self.chat_history[:0] = [dict(msg) for msg in history]
-                    logging.info(f"Restored session {self._session_id} with {len(history)} messages from JSON store")
+                    logger.info(f"Restored session {self._session_id} with {len(history)} messages from JSON store")
             self._session_resume_pending = False
         except OSError as e:
             # Transient storage error: keep the store and leave initialization
             # retryable so the next turn resumes once storage recovers.
-            logging.warning(f"Session {self._session_id} history unavailable, retrying next turn: {e}")
+            logger.warning(f"Session {self._session_id} history unavailable, retrying next turn: {e}")
             self._session_resume_pending = True
             return
         except Exception as e:
-            logging.warning(f"Failed to initialize session store: {e}")
+            logger.warning(f"Failed to initialize session store: {e}")
             self._session_store = None
         
         self._session_store_initialized = True
@@ -673,7 +673,7 @@ class MemoryMixin:
             if hasattr(self._db, "on_run_start"):
                 self._db.on_run_start(**kwargs)
         except Exception as exc:
-            logging.warning(f"Failed to start run: {exc}")
+            logger.warning(f"Failed to start run: {exc}")
 
     async def _astart_run(self, input_content: str) -> None:
         callback = self._async_db_hook("on_run_start")
@@ -684,7 +684,7 @@ class MemoryMixin:
         try:
             await callback(**kwargs)
         except Exception as exc:
-            logging.warning(f"Failed to start run: {exc}")
+            logger.warning(f"Failed to start run: {exc}")
 
     def _db_run_end_kwargs(self, output_content, status, metrics) -> Optional[dict]:
         if self._db is None or self._current_run_id is None:
@@ -710,7 +710,7 @@ class MemoryMixin:
             if hasattr(self._db, "on_run_end"):
                 self._db.on_run_end(**kwargs)
         except Exception as exc:
-            logging.warning(f"Failed to end run: {exc}")
+            logger.warning(f"Failed to end run: {exc}")
         finally:
             self._current_run_id = None
 
@@ -728,7 +728,7 @@ class MemoryMixin:
             try:
                 await callback(**kwargs)
             except Exception as exc:
-                logging.warning(f"Failed to end run: {exc}")
+                logger.warning(f"Failed to end run: {exc}")
 
         pending = asyncio.create_task(save())
         try:
@@ -791,7 +791,7 @@ class MemoryMixin:
                             self._session_id, content, tool_call_id=tool_call_id
                         )
             except Exception as e:
-                logging.warning(f"Failed to persist message to DB: {e}")
+                logger.warning(f"Failed to persist message to DB: {e}")
             return
         
         # Fall back to session store (JSON-based)
@@ -825,7 +825,7 @@ class MemoryMixin:
                         )
                 self._persist_session_stats()
             except Exception as e:
-                logging.warning(f"Failed to persist message to session store: {e}")
+                logger.warning(f"Failed to persist message to session store: {e}")
 
     async def _apersist_message(
         self,
@@ -881,7 +881,7 @@ class MemoryMixin:
         try:
             upsert(session_id, content)
         except Exception as e:
-            logging.debug(f"Partial assistant persist skipped: {e}")
+            logger.debug(f"Partial assistant persist skipped: {e}")
 
     def _finalize_assistant_turn(self, content: str) -> None:
         """Finalize the streamed assistant turn, promoting the partial record.
@@ -902,7 +902,7 @@ class MemoryMixin:
                     self._persist_session_stats()
                     return
                 except Exception as e:
-                    logging.debug(f"Finalize assistant turn skipped: {e}")
+                    logger.debug(f"Finalize assistant turn skipped: {e}")
         # Fallback: no partial support — persist once terminally.
         if content:
             self._persist_message("assistant", content)
@@ -925,7 +925,7 @@ class MemoryMixin:
         try:
             discard(session_id)
         except Exception as e:
-            logging.debug(f"Discard partial assistant turn skipped: {e}")
+            logger.debug(f"Discard partial assistant turn skipped: {e}")
 
     def _add_message_with_tool_fields(self, role, content, session_id=None, **tool_fields):
         """Add a message carrying tool fields, tolerating stores without them.
@@ -989,7 +989,7 @@ class MemoryMixin:
                 agent_id=getattr(self, "agent_id", None) or getattr(self, "_agent_id", None),
             )
         except Exception as e:
-            logging.debug(f"Session stats persist skipped: {e}")
+            logger.debug(f"Session stats persist skipped: {e}")
 
     def session_id(self) -> Optional[str]:
         """Get the current session ID."""
@@ -1033,7 +1033,7 @@ class MemoryMixin:
                 assistant_response=str(assistant_response),
             )
         except Exception as e:
-            logging.warning("Auto-memory extraction failed for agent %s: %s", getattr(self, "name", None), e)
+            logger.warning("Auto-memory extraction failed for agent %s: %s", getattr(self, "name", None), e)
 
     def _persist_memory_turn(self, user_message: str, assistant_response: str):
         """Persist a raw conversation turn to the memory store.
@@ -1088,12 +1088,12 @@ class MemoryMixin:
                 try:
                     long_store(text, metadata=metadata)
                 except Exception as e:
-                    logging.warning("Long-term memory turn persistence failed for agent %s: %s", getattr(self, "name", None), e)
+                    logger.warning("Long-term memory turn persistence failed for agent %s: %s", getattr(self, "name", None), e)
             if short_store is not None:
                 try:
                     short_store(text, metadata=metadata)
                 except Exception as e:
-                    logging.warning("Short-term memory turn persistence failed for agent %s: %s", getattr(self, "name", None), e)
+                    logger.warning("Short-term memory turn persistence failed for agent %s: %s", getattr(self, "name", None), e)
 
         try:
             import asyncio
@@ -1108,7 +1108,7 @@ class MemoryMixin:
             import asyncio
             asyncio.get_running_loop().run_in_executor(None, _do_store)
         except Exception as e:
-            logging.debug(f"Memory turn persistence scheduling failed: {e}")
+            logger.debug(f"Memory turn persistence scheduling failed: {e}")
             _do_store()
 
     def _process_auto_learning(self):
@@ -1155,7 +1155,7 @@ class MemoryMixin:
                                 if pt:
                                     learn_manager.add_pending(pt, category="patterns")
                 except Exception as e:
-                    logging.warning("PROPOSE mode learning extraction failed for agent %s: %s", getattr(self, "name", None), e)
+                    logger.warning("PROPOSE mode learning extraction failed for agent %s: %s", getattr(self, "name", None), e)
             return
         
         if mode is None or (isinstance(mode, LearnMode) and mode != LearnMode.AGENTIC):
@@ -1180,7 +1180,7 @@ class MemoryMixin:
                     llm=getattr(self._learn_config, 'llm', None) or self.llm,
                 )
         except Exception as e:
-            logging.warning("Auto-learning extraction failed for agent %s: %s", getattr(self, "name", None), e)
+            logger.warning("Auto-learning extraction failed for agent %s: %s", getattr(self, "name", None), e)
 
     def _maybe_emit_nudge(self, user_message: str) -> Optional[str]:
         """Return a system note to append to the next user turn, or None.
@@ -1276,7 +1276,7 @@ class MemoryMixin:
                         )
                     # Update last saved index
                     self._auto_save_last_index = len(clean_history)
-                    logging.debug(f"Auto-saved {len(new_messages)} new messages to SessionStore: {self.auto_save}")
+                    logger.debug(f"Auto-saved {len(new_messages)} new messages to SessionStore: {self.auto_save}")
                 elif self._memory_instance and hasattr(self._memory_instance, 'save_session'):
                     # Fallback to Memory.save_session() for backward compatibility
                     # Memory.save_session() replaces entire history, so no duplicate issue
@@ -1285,9 +1285,9 @@ class MemoryMixin:
                         conversation_history=clean_history,
                         metadata={"agent_name": self.name, "user_id": self.user_id}
                     )
-                    logging.debug(f"Auto-saved session to Memory: {self.auto_save}")
+                    logger.debug(f"Auto-saved session to Memory: {self.auto_save}")
             except Exception as e:
-                logging.warning("Auto-saving session %s failed for agent %s: %s", self.auto_save, getattr(self, "name", None), e)
+                logger.warning("Auto-saving session %s failed for agent %s: %s", self.auto_save, getattr(self, "name", None), e)
 
     def _save_output_to_file(self, content: str) -> bool:
         """Save agent output to file if output_file is configured.
@@ -1311,10 +1311,10 @@ class MemoryMixin:
                 return False
 
             print(f"✅ Output saved to {file_path}")
-            logging.debug(f"Output saved to file: {file_path}")
+            logger.debug(f"Output saved to file: {file_path}")
             return True
 
         except Exception as e:
-            logging.warning(f"Failed to save output to file '{self._output_file}': {e}")
+            logger.warning(f"Failed to save output to file '{self._output_file}': {e}")
             print(f"⚠️ Failed to save output to {self._output_file}: {e}")
             return False

@@ -575,20 +575,20 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         """
         Generate a tool definition from a function name by inspecting the function.
         """
-        logging.debug(f"Attempting to generate tool definition for: {function_name}")
+        logger.debug(f"Attempting to generate tool definition for: {function_name}")
         
         # First try to get the tool definition if it exists
         tool_def_name = f"{function_name}_definition"
         tool_def = globals().get(tool_def_name)
-        logging.debug(f"Looking for {tool_def_name} in globals: {tool_def is not None}")
+        logger.debug(f"Looking for {tool_def_name} in globals: {tool_def is not None}")
         
         if not tool_def:
             import __main__
             tool_def = getattr(__main__, tool_def_name, None)
-            logging.debug(f"Looking for {tool_def_name} in __main__: {tool_def is not None}")
+            logger.debug(f"Looking for {tool_def_name} in __main__: {tool_def is not None}")
         
         if tool_def:
-            logging.debug(f"Found tool definition: {tool_def}")
+            logger.debug(f"Found tool definition: {tool_def}")
             return tool_def
 
         # Try to find the function in the agent's tools list first
@@ -598,20 +598,20 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 func = tool
                 break
         
-        logging.debug(f"Looking for {function_name} in agent tools: {func is not None}")
+        logger.debug(f"Looking for {function_name} in agent tools: {func is not None}")
         
         # If not found in tools, try globals and main
         if not func:
             func = globals().get(function_name)
-            logging.debug(f"Looking for {function_name} in globals: {func is not None}")
+            logger.debug(f"Looking for {function_name} in globals: {func is not None}")
             
             if not func:
                 import __main__
                 func = getattr(__main__, function_name, None)
-                logging.debug(f"Looking for {function_name} in __main__: {func is not None}")
+                logger.debug(f"Looking for {function_name} in __main__: {func is not None}")
 
         if not func or not callable(func):
-            logging.debug(f"Function {function_name} not found or not callable")
+            logger.debug(f"Function {function_name} not found or not callable")
             return None
 
         # Delegate signature introspection + schema generation to the shared
@@ -619,7 +619,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # (including array 'items' normalisation).
         from ..tools.schema import build_tool_definition
         tool_def = build_tool_definition(func, function_name)
-        logging.debug(f"Generated tool definition: {tool_def}")
+        logger.debug(f"Generated tool definition: {tool_def}")
         return tool_def
 
     @staticmethod
@@ -1592,7 +1592,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                     # Unknown string mode, disable learning
                     _learn_config = None
             else:
-                logging.warning(
+                logger.warning(
                     "Unsupported learn= value %r; expected bool, dict, or LearnConfig. "
                     "Learning disabled.", learn
                 )
@@ -2013,10 +2013,12 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 default=None,
             )
         
+        _search_provider = "duckduckgo"
         if _web_config is not None:
             if isinstance(_web_config, WebConfig):
                 web_search = _web_config.search
                 web_fetch = _web_config.fetch
+                _search_provider = str(getattr(_web_config.search_provider, "value", _web_config.search_provider) or "duckduckgo").lower()
             else:
                 web_search = bool(_web_config)
                 web_fetch = bool(_web_config)
@@ -2363,7 +2365,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                             retrieval_config, 'embedder_config', None) is None:
                         retrieval_config.embedder_config = embedder_config
                 else:
-                    logging.warning(
+                    logger.warning(
                         "llm=%r resolved a local model, but %s serves no embedding "
                         "model, so knowledge/memory would embed against a remote "
                         "provider -- sending your documents off this machine. "
@@ -2495,7 +2497,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             self.llm = llm
             
             if tools:
-                logging.debug(f"Tools passed to Agent with custom LLM: {tools}")
+                logger.debug(f"Tools passed to Agent with custom LLM: {tools}")
                 self.tools = tools
         # Otherwise, fall back to OpenAI environment/name (cached for performance)
         else:
@@ -2510,22 +2512,24 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             # Only fire when the resolved default really is the OpenAI default:
             # a provider credential (e.g. OLLAMA_HOST) resolves an
             # already-correct provider-prefixed model, so there is nothing to
-            # warn about. Read the endpoint in the order the OpenAI client uses
-            # (OPENAI_API_BASE before OPENAI_BASE_URL, see openai_client.py) so
-            # the message names the endpoint the request actually goes to.
+            # warn about. Read the endpoint the way the OpenAI client does
+            # (``_env_base_url``) so the message names where the request goes.
             if (
                 llm is None
                 and model_name == 'gpt-4o-mini'
                 and not os.getenv('OPENAI_MODEL_NAME')
+                # Guard keeps the default Agent() from eagerly importing openai_client.
+                and (os.getenv('OPENAI_BASE_URL') or os.getenv('OPENAI_API_BASE'))
             ):
-                _endpoint = os.getenv('OPENAI_API_BASE') or os.getenv('OPENAI_BASE_URL')
+                from ..llm.openai_client import _env_base_url
+                _endpoint = _env_base_url()
                 if _endpoint and 'api.openai.com' not in _endpoint:
                     global _LOCAL_ENDPOINT_DEFAULT_MODEL_WARNED
                     if not _LOCAL_ENDPOINT_DEFAULT_MODEL_WARNED:
                         with Agent._env_cache_lock:
                             if not _LOCAL_ENDPOINT_DEFAULT_MODEL_WARNED:
                                 _LOCAL_ENDPOINT_DEFAULT_MODEL_WARNED = True
-                                logging.warning(
+                                logger.warning(
                                     "No model specified, so the OpenAI default %r will be sent to %s. "
                                     "That endpoint probably does not serve it. Set OPENAI_MODEL_NAME "
                                     "to a model it does serve (e.g. OPENAI_MODEL_NAME=ollama/llama3.2), "
@@ -2608,7 +2612,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 unique_tool_names = [name for name in toolset_tool_names if name not in existing_tool_names]
                 toolset_tools = self._resolve_tool_names(unique_tool_names)
                 self.tools.extend(toolset_tools)
-                logging.debug(f"Resolved toolsets {toolsets} to {len(toolset_tools)} tools: {[getattr(t, '__name__', str(t)) for t in toolset_tools]}")
+                logger.debug(f"Resolved toolsets {toolsets} to {len(toolset_tools)} tools: {[getattr(t, '__name__', str(t)) for t in toolset_tools]}")
             except ToolResolutionError:
                 # Preserve the typed error (with .unknown / .suggestions) so
                 # strict-mode callers get the same self-correcting contract as
@@ -2792,12 +2796,27 @@ Your Role: {self.role}
         
         # Handle web_search fallback: inject DuckDuckGo tool for unsupported models
         if web_search and not self._model_supports_web_search():
-            from ..tools.duckduckgo_tools import internet_search
-            # Check if internet_search is not already in tools
             tool_names = [getattr(t, '__name__', str(t)) for t in self.tools]
-            if 'internet_search' not in tool_names and 'duckduckgo' not in tool_names:
-                self.tools.append(internet_search)
-                logging.info("Model does not support native web search. Added DuckDuckGo fallback tool.")
+            # The preset's provider picks the tool (X-01). Only Tavily has a
+            # built-in tool besides DuckDuckGo; anything else keeps DuckDuckGo
+            # and says so, so a build that works today still works.
+            if _search_provider == "tavily":
+                from ..tools import tavily_tools
+                _ok, _why = tavily_tools._check_tavily_available()
+                if _ok:
+                    if 'tavily_search' not in tool_names:
+                        self.tools.append(tavily_tools.tavily_search)
+                    _search_provider = None
+                else:
+                    logger.warning(f"Agent {self.name!r}: web search provider 'tavily' is not usable ({_why}); using DuckDuckGo.")
+            elif _search_provider != "duckduckgo":
+                logger.warning(f"Agent {self.name!r}: web search provider {_search_provider!r} has no built-in "
+                                "search tool; using DuckDuckGo. Built-in providers: 'duckduckgo', 'tavily'.")
+            if _search_provider is not None:
+                from ..tools.duckduckgo_tools import internet_search
+                if 'internet_search' not in tool_names and 'duckduckgo' not in tool_names:
+                    self.tools.append(internet_search)
+                    logger.info("Model does not support native web search. Added DuckDuckGo fallback tool.")
         
         # Raise error if web_fetch is explicitly enabled but model doesn't support it
         # Web fetch is only supported by Anthropic/Claude models
@@ -2811,7 +2830,7 @@ Your Role: {self.role}
                     _kw["web_fetch"] = False
             if getattr(self._llm_instance, "web_fetch", None):
                 self._llm_instance.web_fetch = False
-            logging.info(
+            logger.info(
                 f"Agent {self.name!r}: web fetch is Claude-only, so it is off for model "
                 f"{self.llm!r}; web search stays on."
             )
@@ -3429,7 +3448,7 @@ Your Role: {self.role}
                 return type(mem_inst)(cfg)
         except Exception:
             pass
-        logging.warning(
+        logger.warning(
             "clone_for_channel: could not isolate the live memory backend; clones "
             "will share it. Pass memory via MemoryConfig/db() for per-channel isolation."
         )
@@ -3947,7 +3966,7 @@ Your Role: {self.role}
                 else:
                     self._context_manager = None
             except Exception as e:
-                logging.debug(f"ContextConfig conversion failed: {e}")
+                logger.debug(f"ContextConfig conversion failed: {e}")
                 self._context_manager = None
         elif hasattr(self._context_param, 'process'):
             # Already a ContextManager instance
@@ -3971,7 +3990,7 @@ Your Role: {self.role}
                         llm_summarize_fn=None,
                     )
                 except Exception as e:
-                    logging.debug(f"Context preset conversion failed: {e}")
+                    logger.debug(f"Context preset conversion failed: {e}")
                     self._context_manager = None
             else:
                 # Unknown string preset, disable
@@ -3991,7 +4010,7 @@ Your Role: {self.role}
                     llm_summarize_fn=self._create_llm_summarize_fn() if llm_summarize_enabled else None,
                 )
             except Exception as e:
-                logging.debug(f"Context dict conversion failed: {e}")
+                logger.debug(f"Context dict conversion failed: {e}")
                 self._context_manager = None
         else:
             # Unknown type, disable
@@ -4073,7 +4092,7 @@ Summary:"""
                 
                 return response.choices[0].message.content or "[Summary unavailable]"
             except Exception as e:
-                logging.debug(f"LLM summarization failed: {e}")
+                logger.debug(f"LLM summarization failed: {e}")
                 return f"[Previous conversation summary - {len(messages)} messages]"
         
         return llm_summarize
@@ -4111,7 +4130,7 @@ Summary:"""
                     include_defaults=auto_discover or not self._skills_dirs,
                 )
             except Exception as e:  # noqa: BLE001 - bundles are optional
-                logging.debug("Bundle discovery skipped: %s", e)
+                logger.debug("Bundle discovery skipped: %s", e)
 
             # Add explicit skill selectors. '@bundle' entries expand to their
             # member skill names (resolved by name against discovered skills);
@@ -4129,7 +4148,7 @@ Summary:"""
                                 include_defaults=auto_discover,
                             )
                             if loaded is None:
-                                logging.warning(
+                                logger.warning(
                                     "Skill bundle member '%s' (from '%s') not "
                                     "found; skipping.", member, selector,
                                 )
@@ -4166,7 +4185,7 @@ Summary:"""
         """
         import os as _os
         if _os.environ.get("PRAISONAI_DISABLE_SKILL_TOOLS") in ("1", "true", "True"):
-            logging.info("Skill helper tools disabled via PRAISONAI_DISABLE_SKILL_TOOLS")
+            logger.info("Skill helper tools disabled via PRAISONAI_DISABLE_SKILL_TOOLS")
             return
 
         # Check if tools already include required capabilities
@@ -4182,9 +4201,9 @@ Summary:"""
             try:
                 from ..tools import read_file
                 self.tools.append(read_file)
-                logging.debug("Added read_file tool for skill support")
+                logger.debug("Added read_file tool for skill support")
             except ImportError:
-                logging.warning("Could not import read_file tool for skills")
+                logger.warning("Could not import read_file tool for skills")
         
         # G-E fix: run_skill_script safer by default
         # Only add if explicitly enabled OR any skill declares it in allowed-tools
@@ -4193,7 +4212,7 @@ Summary:"""
         # Check explicit environment enable
         if _os.environ.get("PRAISONAI_ENABLE_SKILL_TOOLS") in ("1", "true", "True"):
             should_add_script_tool = True
-            logging.debug("run_skill_script enabled via PRAISONAI_ENABLE_SKILL_TOOLS")
+            logger.debug("run_skill_script enabled via PRAISONAI_ENABLE_SKILL_TOOLS")
         
         # Check if any loaded skill declares it in allowed-tools
         if self._skill_manager and not should_add_script_tool:
@@ -4201,7 +4220,7 @@ Summary:"""
                 allowed_tools = self._skill_manager.get_allowed_tools(skill.properties.name)
                 if "run_skill_script" in allowed_tools:
                     should_add_script_tool = True
-                    logging.debug(f"run_skill_script enabled by skill '{skill.properties.name}' allowed-tools")
+                    logger.debug(f"run_skill_script enabled by skill '{skill.properties.name}' allowed-tools")
                     break
         
         # Add run_skill_script if conditions are met
@@ -4211,9 +4230,9 @@ Summary:"""
                 # Create skill tools with current working directory
                 skill_tools = create_skill_tools()
                 self.tools.append(skill_tools.run_skill_script)
-                logging.debug("Added run_skill_script tool for skill support")
+                logger.debug("Added run_skill_script tool for skill support")
             except ImportError as e:
-                logging.warning(f"Could not import skill_tools: {e}")
+                logger.warning(f"Could not import skill_tools: {e}")
     
     def get_skills_prompt(self) -> str:
         """Get the XML prompt for available skills.
@@ -5344,7 +5363,7 @@ Summary:"""
                     self._snapshot_stack.append(snap_info.commit_hash)
                     self._redo_stack.clear()
             except Exception as e:
-                logging.debug(f"Pre-autonomous snapshot failed: {e}")
+                logger.debug(f"Pre-autonomous snapshot failed: {e}")
 
     async def run_autonomous_async(
         self,
@@ -6268,7 +6287,7 @@ Summary:"""
         self._mcp_servers[name] = mcp
         self.tools.append(mcp)
         self.refresh_tools()
-        logging.debug(f"Attached MCP server '{name}' with runtime tools")
+        logger.debug(f"Attached MCP server '{name}' with runtime tools")
         return mcp
 
     def remove_mcp_server(self, name: str) -> bool:
@@ -6299,10 +6318,10 @@ Summary:"""
             if hasattr(mcp, "shutdown"):
                 mcp.shutdown()
         except Exception as e:
-            logging.warning(f"MCP server '{name}' shutdown failed: {e}")
+            logger.warning(f"MCP server '{name}' shutdown failed: {e}")
 
         self.refresh_tools()
-        logging.debug(f"Removed MCP server '{name}'")
+        logger.debug(f"Removed MCP server '{name}'")
         return True
 
     def refresh_tools(self) -> List[Any]:
@@ -6489,14 +6508,14 @@ Summary:"""
                 names = ", ".join(sorted({r.name for r in self._rules_manager.get_active_rules()}))
                 if names and names not in _RULES_NOTICE_SEEN:
                     _RULES_NOTICE_SEEN.add(names)
-                    logging.warning(f"Applied rules: {names} (pass rules=False to turn off)")
+                    logger.warning(f"Applied rules: {names} (pass rules=False to turn off)")
             elif not extra_files:
                 self._rules_manager = None
         except ImportError:
-            logging.debug("RulesManager not available")
+            logger.debug("RulesManager not available")
             self._rules_manager = None
         except Exception as e:
-            logging.debug(f"Could not initialize RulesManager: {e}")
+            logger.debug(f"Could not initialize RulesManager: {e}")
             self._rules_manager = None
     
     def get_rules_context(self, file_path: Optional[str] = None, include_manual: Optional[List[str]] = None) -> str:
@@ -6549,7 +6568,7 @@ Summary:"""
         if not mem_user_id:
             import uuid
             mem_user_id = f"agent-{uuid.uuid4().hex[:12]}"
-            logging.warning(
+            logger.warning(
                 "Agent memory enabled without an explicit user_id; using an "
                 "auto-generated, non-shared id (%s). Pass user_id=... explicitly "
                 "to persist/share memory across runs.", mem_user_id,
@@ -6580,7 +6599,7 @@ Summary:"""
                 config.setdefault("collection_name", f"memory_{mem_user_id}")
                 self._memory_instance = Memory(config)
             except ImportError:
-                logging.warning(f"Memory provider '{memory}' requires additional dependencies. Falling back to FileMemory.")
+                logger.warning(f"Memory provider '{memory}' requires additional dependencies. Falling back to FileMemory.")
                 from ..memory.file_memory import FileMemory
                 self._memory_instance = FileMemory(user_id=mem_user_id)
             except Exception as e:
@@ -6588,7 +6607,7 @@ Summary:"""
                 # (e.g. a SaaS backend like mem0 needs credentials/network).
                 # Honour the same "Falling back to FileMemory" contract used for
                 # missing dependencies so construction never hard-crashes.
-                logging.warning(f"Memory provider '{memory}' could not initialise ({e}). Falling back to FileMemory.")
+                logger.warning(f"Memory provider '{memory}' could not initialise ({e}). Falling back to FileMemory.")
                 from ..memory.file_memory import FileMemory
                 self._memory_instance = FileMemory(user_id=mem_user_id)
         elif isinstance(memory, dict):
@@ -6609,7 +6628,7 @@ Summary:"""
                     from ..memory.memory import Memory
                     self._memory_instance = Memory(scoped_memory)
                 except ImportError:
-                    logging.warning("Memory with learn requires additional dependencies. Falling back to FileMemory (learn disabled).")
+                    logger.warning("Memory with learn requires additional dependencies. Falling back to FileMemory (learn disabled).")
                     from ..memory.file_memory import FileMemory
                     self._memory_instance = FileMemory(user_id=memory.get("user_id", mem_user_id))
             elif provider == "file":
@@ -6623,12 +6642,12 @@ Summary:"""
                     from ..memory.memory import Memory
                     self._memory_instance = Memory(scoped_memory)
                 except ImportError:
-                    logging.warning("Full Memory class requires additional dependencies. Falling back to FileMemory.")
+                    logger.warning("Full Memory class requires additional dependencies. Falling back to FileMemory.")
                     from ..memory.file_memory import FileMemory
                     self._memory_instance = FileMemory(user_id=mem_user_id)
         elif isinstance(memory, str):
             # Unknown string backend - fall back to FileMemory with warning
-            logging.warning(f"Unknown memory backend '{memory}'. Falling back to FileMemory.")
+            logger.warning(f"Unknown memory backend '{memory}'. Falling back to FileMemory.")
             from ..memory.file_memory import FileMemory
             self._memory_instance = FileMemory(user_id=mem_user_id)
         else:
@@ -6737,7 +6756,7 @@ Summary:"""
                 raise ValueError(f"Memory provider does not support {memory_type} storage")
                 
         except Exception as e:
-            logging.warning(f"[{self.name}] Memory storage failed: {e}")
+            logger.warning(f"[{self.name}] Memory storage failed: {e}")
             raise
         
         # Only call on_memory_write hook AFTER successful storage
@@ -6760,7 +6779,7 @@ Summary:"""
                     if hasattr(self._memory_instance, 'on_memory_write'):
                         self._memory_instance.on_memory_write(action, memory_type, content, metadata)
             except Exception as e:
-                logging.warning(f"[{self.name}] Memory on_memory_write hook failed: {e}")
+                logger.warning(f"[{self.name}] Memory on_memory_write hook failed: {e}")
     
     def _display_memory_info(self):
         """Display memory information to user in a friendly format."""
@@ -6899,7 +6918,7 @@ Summary:"""
                         reranker=reranker,
                     )
                 except ImportError:
-                    logging.warning("RAG module not available. Install with: pip install 'praisonaiagents[rag]'")
+                    logger.warning("RAG module not available. Install with: pip install 'praisonaiagents[rag]'")
                     return None
         
         return self._rag_instance
@@ -6930,7 +6949,7 @@ Summary:"""
                 context_pack = self.rag.retrieve(query, user_id=self.user_id, agent_id=self.agent_id)
                 return context_pack.context, context_pack.citations
             except Exception as e:
-                logging.warning(f"RAG retrieve failed, falling back to basic retrieval: {e}")
+                logger.warning(f"RAG retrieve failed, falling back to basic retrieval: {e}")
         
         # Fallback: basic retrieval with token-aware formatting
         try:
@@ -7171,7 +7190,7 @@ Answer:"""
                 from urllib.parse import urlsplit
                 _parts = urlsplit(knowledge_item)
                 _safe_url = f"{_parts.scheme}://{_parts.hostname or ''}"
-                logging.warning(
+                logger.warning(
                     f"Knowledge source '{_safe_url}...' is a URL; URL knowledge "
                     "ingestion is not yet implemented in the core SDK. This source "
                     "will be skipped. Fetch and pass the content as text, or a local "
@@ -7181,7 +7200,7 @@ Answer:"""
                 # It's a string content
                 self.knowledge.store(knowledge_item, user_id=self.user_id, agent_id=self.agent_id)
         except Exception as e:
-            logging.error(f"Error processing knowledge item: {knowledge_item}, error: {e}")
+            logger.error(f"Error processing knowledge item: {knowledge_item}, error: {e}")
 
     @staticmethod
     def _is_interactive_session() -> bool:
@@ -7347,7 +7366,7 @@ Answer:"""
                         tool_func._praison_handoff_source = tool_item
                         self.tools[index] = tool_func
                     except Exception as e:
-                        logging.error(
+                        logger.error(
                             f"Failed to convert as_tool()/handoff {tool_item} "
                             f"passed in tools=: {e}"
                         )
@@ -7372,12 +7391,12 @@ Answer:"""
                     tool_func._praison_handoff_source = handoff_obj
                     self.tools.append(tool_func)
                 else:
-                    logging.warning(
+                    logger.warning(
                         f"Invalid handoff item type: {type(handoff_item)}. "
                         "Expected Agent or Handoff instance."
                     )
             except Exception as e:
-                logging.error(f"Failed to process handoff item {handoff_item}: {e}")
+                logger.error(f"Failed to process handoff item {handoff_item}: {e}")
 
     @property
     def guardrail_retry_count(self) -> int:
@@ -7412,7 +7431,7 @@ Answer:"""
         self._mark_db_run_error()
         reason = str(error) if error else getattr(self, "_last_guardrail_error", None)
         if reason:
-            logging.info(f"Agent {self.name}: guardrail block reason: {reason}")
+            logger.info(f"Agent {self.name}: guardrail block reason: {reason}")
         return "I'm sorry, but I can't share that response because it did not pass the safety guardrail."
 
     def _process_guardrail(self, task_output):
@@ -7449,11 +7468,11 @@ Answer:"""
             # author's wording verbatim - it is fed back into the conversation
             # by _apply_guardrail_with_retry - rather than wrapping it as an
             # internal validation *error*.
-            logging.warning(f"Agent {self.name}: Guardrail asked for a retry: {e.feedback}")
+            logger.warning(f"Agent {self.name}: Guardrail asked for a retry: {e.feedback}")
             return GuardrailResult(success=False, result=None, error=e.feedback)
 
         except Exception as e:
-            logging.error(f"Agent {self.name}: Error in guardrail validation: {e}")
+            logger.error(f"Agent {self.name}: Error in guardrail validation: {e}")
             # On error, return failure
             return GuardrailResult(
                 success=False,
@@ -7485,7 +7504,7 @@ Answer:"""
                 return True, (result if isinstance(result, str) else prompt), None
             return False, None, (result if isinstance(result, str) else "Input blocked by guardrail")
         except Exception as e:
-            logging.error(f"Agent {self.name}: Error in input guardrail validation: {e}")
+            logger.error(f"Agent {self.name}: Error in input guardrail validation: {e}")
             return False, None, f"Input guardrail validation error: {str(e)}"
 
     def _validate_with_guardrail(self, response_text):
@@ -7612,7 +7631,7 @@ Answer:"""
             success, result, error = self._validate_with_guardrail(current_response)
 
             if success:
-                logging.info(f"Agent {self.name}: Guardrail validation passed")
+                logger.info(f"Agent {self.name}: Guardrail validation passed")
                 return result
 
             # Guardrail failed
@@ -7623,13 +7642,13 @@ Answer:"""
                 )
 
             retry_count += 1
-            logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {error}")
+            logger.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {error}")
 
             # Add exponential backoff delay to avoid hammering the LLM
             total_delay = self._guardrail_retry_delay(retry_count)
             self._record_guardrail_retry(attempt=retry_count, error=error, delay=total_delay)
 
-            logging.info(f"Agent {self.name}: Waiting {total_delay:.2f}s before guardrail retry")
+            logger.info(f"Agent {self.name}: Waiting {total_delay:.2f}s before guardrail retry")
             time.sleep(total_delay)
 
             # Regenerate response for retry
@@ -7651,7 +7670,7 @@ Answer:"""
                 else:
                     raise Exception("Failed to generate retry response")
             except Exception as e:
-                logging.error(f"Agent {self.name}: Error during guardrail retry: {e}")
+                logger.error(f"Agent {self.name}: Error during guardrail retry: {e}")
                 raise Exception(f"Agent {self.name} guardrail retry failed: {e}")
 
         return current_response
@@ -7686,7 +7705,7 @@ Answer:"""
             )
 
             if success:
-                logging.info(f"Agent {self.name}: Guardrail validation passed")
+                logger.info(f"Agent {self.name}: Guardrail validation passed")
                 return result
 
             # Guardrail failed
@@ -7697,13 +7716,13 @@ Answer:"""
                 )
 
             retry_count += 1
-            logging.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {error}")
+            logger.warning(f"Agent {self.name}: Guardrail validation failed (retry {retry_count}/{self.max_guardrail_retries}): {error}")
 
             # Add exponential backoff delay to avoid hammering the LLM
             total_delay = self._guardrail_retry_delay(retry_count)
             self._record_guardrail_retry(attempt=retry_count, error=error, delay=total_delay)
 
-            logging.info(f"Agent {self.name}: Waiting {total_delay:.2f}s before guardrail retry")
+            logger.info(f"Agent {self.name}: Waiting {total_delay:.2f}s before guardrail retry")
             await asyncio.sleep(total_delay)
 
             # Regenerate response for retry (async version)
@@ -7728,7 +7747,7 @@ Answer:"""
                 else:
                     raise Exception("Failed to generate retry response")
             except Exception as e:
-                logging.error(f"Agent {self.name}: Error during guardrail retry: {e}")
+                logger.error(f"Agent {self.name}: Error during guardrail retry: {e}")
                 raise Exception(f"Agent {self.name} guardrail retry failed: {e}")
 
         return current_response
@@ -8164,7 +8183,7 @@ Answer:"""
                             "content": result.content
                         })
             except Exception as post_exc:
-                logging.warning(
+                logger.warning(
                     f"Post-execution bookkeeping failed after successful CLI "
                     f"backend turn (agent={self.display_name!r}, "
                     f"session_id={session_id!r}): {post_exc}"
@@ -8560,7 +8579,7 @@ Answer:"""
                     except Exception as e:
                         # Log the error for debugging but don't fail cleanup
                         import logging
-                        logging.debug(
+                        logging.getLogger(__name__).debug(
                             f"Failed to cleanup artifacts for agent {self.name}: {e}"
                         )
 
