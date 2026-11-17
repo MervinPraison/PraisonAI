@@ -1500,7 +1500,7 @@ Write the complete compiled report:"""
                     HookEvent.BEFORE_TOOL, before_tool_input, target=function_name
                 )
                 if hook_runner.is_blocked(before_results):
-                    logging.warning(f"Tool {function_name} execution blocked by BEFORE_TOOL hook")
+                    logger.warning(f"Tool {function_name} execution blocked by BEFORE_TOOL hook")
                     return f"Execution of {function_name} was blocked by security policy."
                 for res in before_results:
                     if res.output and res.output.modified_input:
@@ -1529,7 +1529,7 @@ Write the complete compiled report:"""
                 # reaches the model (mirrors the BEFORE_TOOL block path above).
                 if hook_runner.is_blocked(after_results):
                     reason = hook_runner.get_blocking_reason(after_results)
-                    logging.warning(f"Tool {function_name} result blocked by AFTER_TOOL hook")
+                    logger.warning(f"Tool {function_name} result blocked by AFTER_TOOL hook")
                     return _record_async_loop_outcome(
                         reason or f"Result of {function_name} was blocked by security policy."
                     )
@@ -1796,7 +1796,7 @@ Write the complete compiled report:"""
         from ..errors import ToolExecutionError
         from .tool_execution import _CALLER_ERROR_TYPES
         try:
-            logging.info(f"Executing async tool: {function_name} with arguments: {arguments}")
+            logger.info(f"Executing async tool: {function_name} with arguments: {arguments}")
 
             # Gate on the tool that will actually run (parity with the sync path).
             if hasattr(self, "_canonical_tool_name"):
@@ -1814,7 +1814,7 @@ Write the complete compiled report:"""
                 _, arguments = result
             except Exception as e:
                 error_msg = f"Error during approval process: {str(e)}"
-                logging.error(error_msg)
+                logger.error(error_msg)
                 return {"error": error_msg, "approval_error": True}
 
             # Policy/guardrail gate (protocol-driven). Mirrors the sync path in
@@ -1913,9 +1913,9 @@ Write the complete compiled report:"""
                         pass
                     hint = f" Did you mean '{suggestion}'?" if suggestion else ""
                     error_msg = f"Tool '{function_name}' not found.{hint} Available tools: {available}"
-                    logging.error(error_msg)
+                    logger.error(error_msg)
                     return {"error": error_msg, "available_tools": available}
-                logging.error(f"Function {function_name} not found in tools")
+                logger.error(f"Function {function_name} not found in tools")
                 return {"error": f"Function {function_name} not found in tools"}
 
             # Circuit breaker (pre-execution) — parity with the sync path
@@ -1941,7 +1941,7 @@ Write the complete compiled report:"""
                 from ..escalation.loop_guard import GuardAction
                 decision = loop_guard.check(function_name, arguments, is_pre_execution=True)
                 if decision.action == GuardAction.BLOCK:
-                    logging.warning(f"Loop guard blocked {function_name}: {decision.message}")
+                    logger.warning(f"Loop guard blocked {function_name}: {decision.message}")
                     return {"error": f"[loop-guard] {decision.message}", "loop_blocked": True}
                 elif decision.action == GuardAction.HALT:
                     raise ToolExecutionError(
@@ -1951,7 +1951,7 @@ Write the complete compiled report:"""
                         is_retryable=False,
                     )
                 elif decision.action == GuardAction.WARN:
-                    logging.warning(f"Loop guard warning for {function_name}: {decision.message}")
+                    logger.warning(f"Loop guard warning for {function_name}: {decision.message}")
 
             # Activate the tool-progress channel so tools running under the async
             # path can stream incremental output (emit_tool_progress) and the
@@ -2035,13 +2035,13 @@ Write the complete compiled report:"""
                     # propagates into the executor thread via contextvars, mirroring
                     # the sync execute_tool path.
                     if inspect.iscoroutinefunction(call_target):
-                        logging.debug(f"Executing async function: {function_name}")
+                        logger.debug(f"Executing async function: {function_name}")
                         if _inject_state is not None:
                             with with_injection_context(_inject_state), tool_progress_channel(_progress_sink):
                                 return await call_target(**call_arguments)
                         with tool_progress_channel(_progress_sink):
                             return await call_target(**call_arguments)
-                    logging.debug(f"Executing sync function in executor: {function_name}")
+                    logger.debug(f"Executing sync function in executor: {function_name}")
                     from ..trace.context_events import copy_context_to_callable
                     # copy_context_to_callable snapshots the CURRENT context (incl.
                     # the injection contextvar) into the executor thread, so setting
@@ -2065,7 +2065,7 @@ Write the complete compiled report:"""
                     # queueing into its timeout; refused once that cap is hit.
                     future, executor, orphaned = self._submit_to_tool_pool(fn, spill=True)
                     if future is None:
-                        logging.warning(
+                        logger.warning(
                             f"Tool worker pool exhausted; refusing to queue '{function_name}' "
                             f"behind {orphaned} hung tool call(s)."
                         )
@@ -2113,7 +2113,7 @@ Write the complete compiled report:"""
                         breaker = self._get_tool_circuit_breaker(function_name)
                 except ImportError:
                     # Circuit breaker not available - fall back to direct invocation.
-                    logging.debug("Circuit breaker not available on async path, executing directly")
+                    logger.debug("Circuit breaker not available on async path, executing directly")
 
                 # Sentinel used to register an error-dict result as a breaker
                 # failure without losing the dict, mirroring the sync path's
@@ -2184,10 +2184,10 @@ Write the complete compiled report:"""
                     try:
                         result = await asyncio.wait_for(_invoke_guarded(), timeout=tool_timeout)
                     except _CircuitBreakerException as cbe:
-                        logging.warning(f"Tool '{function_name}' circuit breaker open: {cbe}")
+                        logger.warning(f"Tool '{function_name}' circuit breaker open: {cbe}")
                         return _circuit_open_result()
                     except asyncio.TimeoutError:
-                        logging.warning(f"Tool {function_name} timed out after {tool_timeout}s")
+                        logger.warning(f"Tool {function_name} timed out after {tool_timeout}s")
                         # Mark as non-retryable: asyncio.wait_for cannot cancel a sync
                         # tool already running in the executor, so retrying would launch
                         # a duplicate invocation while the original keeps executing —
@@ -2210,7 +2210,7 @@ Write the complete compiled report:"""
                             try:
                                 breaker._on_failure()
                             except Exception:
-                                logging.debug(
+                                logger.debug(
                                     "Failed to record tool timeout on circuit breaker",
                                     exc_info=True,
                                 )
@@ -2223,7 +2223,7 @@ Write the complete compiled report:"""
                     try:
                         result = await _invoke_guarded()
                     except _CircuitBreakerException as cbe:
-                        logging.warning(f"Tool '{function_name}' circuit breaker open: {cbe}")
+                        logger.warning(f"Tool '{function_name}' circuit breaker open: {cbe}")
                         return _circuit_open_result()
 
                 # Circuit breaker (post-execution) — record the outcome so
@@ -2316,18 +2316,18 @@ Write the complete compiled report:"""
                             result = {"value": result, "_loop_guard": {"message": decision.message, "action": decision.action.value}}
 
                 # Ensure result is JSON serializable
-                logging.debug("Raw result from tool: %s", result)
+                logger.debug("Raw result from tool: %s", result)
                 if result is None:
                     return {"result": None}
                 try:
                     json.dumps(result)  # Test serialization
                     return result
                 except TypeError:
-                    logging.warning(f"Result not JSON serializable, converting to string: {result}")
+                    logger.warning(f"Result not JSON serializable, converting to string: {result}")
                     return {"result": str(result)}
 
             except Exception as e:
-                logging.error(f"Error executing {function_name}: {str(e)}", exc_info=True)
+                logger.error(f"Error executing {function_name}: {str(e)}", exc_info=True)
                 # Circuit breaker (failure on raised exception) — a raised tool
                 # exception is a failure just like an error-dict result, and the
                 # sync path's ``breaker.call`` counts it. Approval/permission/
@@ -2381,7 +2381,7 @@ Write the complete compiled report:"""
             # path; do not swallow it into an error dict.
             raise
         except Exception as e:
-            logging.error(f"Error in execute_tool_async: {str(e)}", exc_info=True)
+            logger.error(f"Error in execute_tool_async: {str(e)}", exc_info=True)
             return {"error": f"Error in execute_tool_async: {str(e)}"}
 
     def launch(self, path: str = '/', port: int = 8000, host: str = '127.0.0.1', debug: bool = False, protocol: str = "http"):
@@ -2442,7 +2442,7 @@ Write the complete compiled report:"""
             # Check which specific module is missing
             missing_module = str(e).split("No module named '")[-1].rstrip("'")
             _get_display_functions()['display_error'](f"Missing dependency: {missing_module}. Required for launch() method with HTTP mode.")
-            logging.error(f"Missing dependency: {missing_module}. Required for launch() method with HTTP mode.")
+            logger.error(f"Missing dependency: {missing_module}. Required for launch() method with HTTP mode.")
             print(f"\nTo add API capabilities, install the required dependencies:")
             print(f"pip install {missing_module}")
             print("\nOr install all API dependencies with:")
@@ -2493,7 +2493,7 @@ Write the complete compiled report:"""
         # de-duplicated path so multiple agents can share a single port.
         path, original_path = _server_registry.reserve_route(port, path, self.agent_id)
         if original_path is not None:
-            logging.warning(f"Path '{original_path}' is already registered on port {port}.")
+            logger.warning(f"Path '{original_path}' is already registered on port {port}.")
             print(f"⚠️ Warning: Path '{original_path}' is already registered on port {port}.")
             print(f"🔄 Using '{path}' instead")
 
@@ -2530,7 +2530,7 @@ Write the complete compiled report:"""
 
                 return {"response": response}
             except Exception as e:
-                logging.error(f"Error processing query: {str(e)}", exc_info=True)
+                logger.error(f"Error processing query: {str(e)}", exc_info=True)
                 return JSONResponse(
                     status_code=500,
                     content={"error": f"Error processing query: {str(e)}"}
@@ -2637,5 +2637,5 @@ Write the complete compiled report:"""
             
         except Exception as e:
             # Don't let hook failures break retry logic
-            logging.debug(f"Failed to emit async retry hook: {e}")
+            logger.debug(f"Failed to emit async retry hook: {e}")
 

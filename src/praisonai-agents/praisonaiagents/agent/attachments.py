@@ -42,6 +42,8 @@ from typing import Any, Dict, List, Optional
 
 from ..tools.base import file_part, image_part, text_part
 
+logger = logging.getLogger(__name__)
+
 __all__ = [
     "AttachmentError",
     "build_attachment_parts",
@@ -124,7 +126,7 @@ def _fail(message: str) -> List[Dict[str, Any]]:
     """Addressing error: raise, unless explicitly downgraded to a warning."""
     if _on_missing_raises():
         raise AttachmentError(message)
-    logging.warning("Attachment problem: %s", message)
+    logger.warning("Attachment problem: %s", message)
     return [text_part(f"[Attachment could not be read: {message}]")]
 
 
@@ -132,7 +134,7 @@ def _degrade(message: str, marker: str) -> List[Dict[str, Any]]:
     """Capability limit: warn loudly and leave a marker the model can see."""
     if _strict_unsupported():
         raise AttachmentError(message + " (PRAISONAI_ATTACHMENTS_STRICT is set)")
-    logging.warning("Attachment degraded: %s", message)
+    logger.warning("Attachment degraded: %s", message)
     return [text_part(marker)]
 
 
@@ -161,18 +163,18 @@ def _extract_pdf_text(path: str) -> Optional[str]:
             try:
                 pages.append(f"--- page {index} ---\n{page.extract_text() or ''}")
             except Exception as exc:  # noqa: BLE001 - one bad page must not kill the rest
-                logging.debug("PDF page %d of %s failed to extract: %s", index, path, exc)
+                logger.debug("PDF page %d of %s failed to extract: %s", index, path, exc)
         text = "\n".join(pages).strip()
         return text or None
     except Exception as exc:  # noqa: BLE001
-        logging.debug("PDF text extraction failed for %s: %s", path, exc)
+        logger.debug("PDF text extraction failed for %s: %s", path, exc)
         return None
 
 
 def _truncate(text: str, label: str) -> str:
     if len(text) <= MAX_INLINE_TEXT_CHARS:
         return text
-    logging.warning(
+    logger.warning(
         "Attachment %s truncated to %d of %d characters", label, MAX_INLINE_TEXT_CHARS, len(text)
     )
     return (
@@ -210,7 +212,7 @@ def _image_message_part(path: str, ext: str) -> Dict[str, Any]:
     # Canonical part first (shared vocabulary with tools/base.py), then the
     # provider-facing shape, so there is one definition of "an image part".
     canonical = image_part(encoded, mime=media_type, name=os.path.basename(path))
-    logging.debug(
+    logger.debug(
         "Successfully encoded image attachment: %s (%d bytes base64)", path, len(encoded)
     )
     return {
@@ -235,7 +237,7 @@ def _pdf_parts(path: str, model_name: str) -> List[Dict[str, Any]]:
 
     text = _extract_pdf_text(path)
     if text:
-        logging.warning(
+        logger.warning(
             "Model %r cannot accept PDF attachments natively; sending locally "
             "extracted text of %s instead. Use a PDF-capable model (e.g. an "
             "Anthropic Claude or OpenAI gpt-4o/4.1 model) to send the document itself.",
@@ -305,7 +307,7 @@ def _capability(kind: str, model_name: str) -> bool:
         if kind == "audio":
             return bool(supports_audio_input(model_name))
     except Exception as exc:  # noqa: BLE001
-        logging.debug("Capability probe %s/%s failed: %s", kind, model_name, exc)
+        logger.debug("Capability probe %s/%s failed: %s", kind, model_name, exc)
     return False
 
 
@@ -320,7 +322,7 @@ def build_attachment_parts(attachment: Any, model_name: str = "") -> List[Dict[s
     # Already-structured content parts pass through untouched.
     if isinstance(attachment, dict):
         if "type" not in attachment:
-            logging.warning(
+            logger.warning(
                 "Attachment dict has no 'type' key and may be ignored by the provider: %r",
                 attachment,
             )
@@ -379,7 +381,7 @@ def build_attachment_parts(attachment: Any, model_name: str = "") -> List[Dict[s
     # decodes cleanly as UTF-8; otherwise say plainly that it was not sent.
     sample_text = _maybe_text_file(attachment)
     if sample_text is not None:
-        logging.warning(
+        logger.warning(
             "Attachment %s has an unrecognised extension %r; inlining it as UTF-8 text.",
             attachment, ext or "(none)",
         )
