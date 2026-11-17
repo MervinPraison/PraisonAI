@@ -1750,7 +1750,10 @@ Write the complete compiled report:"""
                         result.get("approval_error") or
                         result.get("circuit_open") or
                         result.get("loop_blocked") or
-                        result.get("_praison_retryable") is False):
+                        # D-03: only a transient (True) verdict may re-run,
+                        # whatever the message text says.
+                        ("_praison_retryable" in result
+                         and result["_praison_retryable"] is not True)):
                         return _finish(result)
 
                     # The body already ran and may have completed its side effect

@@ -3374,6 +3374,11 @@ class ToolExecutionMixin:
                     if self._tool_declares_not_idempotent(function_name):
                         return result
 
+                    # D-03: a tool that raised carries its own verdict; only a
+                    # transient (True) may re-run, whatever the message text says.
+                    if "_praison_retryable" in result and result["_praison_retryable"] is not True:
+                        return result
+
                     # Determine error type for retry policy
                     error_type = self._classify_error_type(result, last_exception)
                     

@@ -36,6 +36,18 @@ def test_non_transient_error_runs_once_and_reaches_model(stub, route, mode):
 
 @pytest.mark.parametrize("route", ROUTES)
 @pytest.mark.parametrize("mode", MODES)
+@pytest.mark.parametrize("msg", ["connection refused by business rule",
+                                 "rate limit of 1 card per day", "request timed out"])
+def test_non_transient_error_is_not_retried_on_its_wording(stub, route, mode, msg):
+    calls = []
+    agent = _agent(route, stub, tools=[_raising_tool(RuntimeError(msg), calls)])
+    _turn(agent, mode)
+    assert len(calls) == 1
+    assert any(msg in out for out in _tool_outputs())
+
+
+@pytest.mark.parametrize("route", ROUTES)
+@pytest.mark.parametrize("mode", MODES)
 @pytest.mark.parametrize("exc", [TimeoutError("upstream timed out"),
                                  ConnectionError("connection reset")])
 def test_transient_error_is_retried_then_reaches_model(stub, route, mode, exc):
