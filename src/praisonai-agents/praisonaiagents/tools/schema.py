@@ -307,10 +307,11 @@ def _type_from_default(param: inspect.Parameter) -> Any:
 
 def _warn_if_untyped(function_name: str, sig: inspect.Signature, hints: Dict[str, Any]) -> None:
     """Warn once per tool that has parameters but no type hints at all."""
+    if function_name in _UNTYPED_WARNED:
+        return
     params = [p for n, p in sig.parameters.items() if n not in ("self", "cls")
               and p.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)]
-    if params and not any(p.annotation is not inspect.Parameter.empty or n in hints
-                          for n, p in ((p.name, p) for p in params)) and function_name not in _UNTYPED_WARNED:
+    if params and not any(p.annotation is not inspect.Parameter.empty or p.name in hints for p in params):
         _UNTYPED_WARNED.add(function_name)
         logging.warning(
             f"Tool {function_name!r} has no type hints: parameter types are taken from defaults "
