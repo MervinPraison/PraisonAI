@@ -525,6 +525,11 @@ class Memory(MemoryCoreMixin):
                 timeout=30.0,  # 30 second timeout for lock contention
                 busy_timeout_ms=30000,  # 30 seconds
             )
+            # The direct-SQLite paths read and write short_mem; create it so a
+            # first search or fallback write cannot fail on a missing table (R-02).
+            self._local.stm_conn.execute(
+                "CREATE TABLE IF NOT EXISTS short_mem (id TEXT PRIMARY KEY, content TEXT, meta TEXT, created_at REAL)"
+            )
             self._local.stm_conn.commit()
             
             # Register connection for cleanup (also reclaims dead threads' connections)
@@ -543,6 +548,11 @@ class Memory(MemoryCoreMixin):
                 check_same_thread=False,  # Allow cross-thread cleanup
                 timeout=30.0,  # 30 second timeout for lock contention
                 busy_timeout_ms=30000,  # 30 seconds
+            )
+            # The direct-SQLite paths read and write long_mem; create it so a
+            # first search or fallback write cannot fail on a missing table (R-02).
+            self._local.ltm_conn.execute(
+                "CREATE TABLE IF NOT EXISTS long_mem (id TEXT PRIMARY KEY, content TEXT, meta TEXT, created_at REAL)"
             )
             self._local.ltm_conn.commit()
             
