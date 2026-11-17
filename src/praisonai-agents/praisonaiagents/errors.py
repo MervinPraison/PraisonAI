@@ -82,7 +82,23 @@ class PraisonAIError(Exception):
     
     All PraisonAI errors inherit from this to ensure uniform error handling,
     context propagation, and observability hooks.
+
+    It also works as an extra base for an error class with its own
+    ``__init__`` (``class X(ValueError, PraisonAIError)``): the fields below
+    then read as defaults and ``str()`` is the plain message (G-25).
     """
+
+    agent_id = "unknown"
+    run_id = None
+    error_category = "unknown"
+    is_retryable = False
+
+    def __getattr__(self, name):
+        # Only reached when the attribute is missing, i.e. this __init__ never ran.
+        if name == "context":
+            self.context = {}
+            return self.context
+        raise AttributeError(f"{type(self).__name__!r} object has no attribute {name!r}")
     
     def __init__(
         self, 
@@ -118,6 +134,8 @@ class PraisonAIError(Exception):
         self.context = context or {}
 
     def __str__(self) -> str:
+        if "message" not in self.__dict__:
+            return super().__str__()
         return f"[{self.error_category}] {self.message} (agent: {self.agent_id}, run: {self.run_id})"
 
 
