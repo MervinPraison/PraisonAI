@@ -6024,6 +6024,17 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # begin_durable_run), so the prompt reaching this generator is already
         # validated/transformed. Kept out of this impl so a blocked prompt never
         # opens a durable run that would then finalize as "succeeded".
+        # Cancellation, resolved once for the whole streamed turn (explicit
+        # token first, then the interrupt controller, as chat() does). A token
+        # that is already set stops the turn before any request (F-09).
+        _stream_cancel_source = kwargs.get('cancel_token')
+        if _stream_cancel_source is None:
+            _stream_cancel_source = getattr(self, "interrupt_controller", None)
+        _stream_cancel_token = self._turn_cancel_token(
+            _stream_cancel_source, explicit=kwargs.get('cancel_token') is not None)
+        if _stream_cancel_token is not None and _stream_cancel_token.is_set():
+            reason = getattr(_stream_cancel_token, "reason", None) or "cancelled before LLM call"
+            raise InterruptedError(f"Agent stream cancelled: {reason}")
         try:
             # Reset the final display flag for each new conversation
             self._final_display_shown = False
@@ -6144,15 +6155,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         stream_sampling_kwargs['reasoning_effort'] = _stream_effort
                     # Forward the cancellation token so a Stop/interrupt during
                     # the streamed tool phase short-circuits pending tool calls
-                    # (Issue #5073). Resolve the explicit token first, then fall
-                    # back to the agent's interrupt controller, mirroring chat().
-                    _stream_cancel_source = kwargs.get('cancel_token')
-                    if _stream_cancel_source is None:
-                        _stream_cancel_source = getattr(self, "interrupt_controller", None)
-                    _stream_cancel_token = self._turn_cancel_token(
-                        _stream_cancel_source,
-                        explicit=kwargs.get('cancel_token') is not None,
-                    )
+                    # (Issue #5073). Reuses the token resolved once at the top
+                    # of this turn.
                     if _stream_cancel_token is not None:
                         stream_sampling_kwargs['cancel_token'] = _stream_cancel_token
                     for chunk in self.llm_instance.get_response_stream(
@@ -6196,7 +6200,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # was produced so --continue can recover it (Issue #5407).
                     self._persist_assistant_delta(response_content, force=True)
                     raise
-                except ToolExecutionError:
+                except (ToolExecutionError, InterruptedError):
+                    # A cancel is not a streaming failure: no error log.
                     self._rollback_chat_history_to(chat_history_length)
                     raise
                 except Exception as e:
@@ -6599,6 +6604,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # output format. Append only the tool turns produced by
                         # this round -- everything added to chat history since
                         # the completion began.
+                        if _stream_cancel_token is not None and _stream_cancel_token.is_set():
+                            reason = getattr(_stream_cancel_token, "reason", None) or "cancelled during tools"
+                            raise InterruptedError(f"Agent stream cancelled: {reason}")
                         followup_args = dict(completion_args)
                         followup_args['messages'] = (
                             list(messages) + self.chat_history[tool_turn_start:]
@@ -6688,7 +6696,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         active_stream["text"], force=True
                     )
                     raise
-                except ToolExecutionError:
+                except (ToolExecutionError, InterruptedError):
+                    # A cancel is not a streaming failure: no fallback request.
                     self._rollback_chat_history_to(chat_history_length)
                     raise
                 except Exception as e:
@@ -6710,7 +6719,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             # Restore original verbose mode
             self.verbose = original_verbose
                     
-        except ToolExecutionError:
+        except (ToolExecutionError, InterruptedError):
             self.verbose = original_verbose
             raise
         except Exception as e:
