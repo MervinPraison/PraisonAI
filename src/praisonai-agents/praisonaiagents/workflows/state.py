@@ -19,13 +19,14 @@ require Pydantic for a workflow to run. Without ``state_model`` nothing changes:
 ``variables`` stays the untyped dict it has always been, so this is additive.
 """
 
+from ..errors import PraisonAIError
 import dataclasses
 from typing import Any, Dict, Optional, Type
 
 __all__ = ["WorkflowStateError", "build_state", "state_field_names", "validate_variables"]
 
 
-class WorkflowStateError(ValueError):
+class WorkflowStateError(ValueError, PraisonAIError):
     """Raised when variables do not match the declared state model."""
 
 
