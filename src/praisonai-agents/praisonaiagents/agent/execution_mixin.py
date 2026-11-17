@@ -1575,7 +1575,7 @@ Write the complete compiled report:"""
                 # reaches the model (mirrors the BEFORE_TOOL block path above).
                 if hook_runner.is_blocked(after_results):
                     reason = hook_runner.get_blocking_reason(after_results)
-                    logging.warning(f"Tool {function_name} result blocked by AFTER_TOOL hook")
+                    logger.warning(f"Tool {function_name} result blocked by AFTER_TOOL hook")
                     (_model_facing_holder.get() or {}).clear()  # the block wins over the view
                     return _record_async_loop_outcome(
                         reason or f"Result of {function_name} was blocked by security policy."

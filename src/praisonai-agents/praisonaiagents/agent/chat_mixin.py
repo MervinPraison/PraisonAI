@@ -2763,7 +2763,7 @@ Your Role: {self.role}"""
             except ValueError as e:
                 if "Streaming is not supported" in str(e):
                     # Fallback: retry with non-streaming for sync adapters
-                    logging.debug(f"{self.name}: Streaming not supported by adapter, falling back to non-streaming")
+                    logger.debug(f"{self.name}: Streaming not supported by adapter, falling back to non-streaming")
                     self._emit_stream_unavailable()
                     stream = False  # Set for the main execution below
                 else:
@@ -2814,7 +2814,7 @@ Your Role: {self.role}"""
                     # back to non-streaming so chat() still returns text, the
                     # same way the stream=None auto-detect path above does.
                     if stream and "Streaming is not supported" in str(e):
-                        logging.debug(f"{self.name}: Streaming not supported by adapter, falling back to non-streaming")
+                        logger.debug(f"{self.name}: Streaming not supported by adapter, falling back to non-streaming")
                         self._emit_stream_unavailable()
                         final_response = self._chat_completion_with_retry(
                             cancel_token=cancel_token,
@@ -3001,7 +3001,7 @@ Your Role: {self.role}"""
             _delay = self._retry_delay(e, classification, _retry_depth)
             if _delay is not None:
                 from ..hooks import HookEvent
-                logging.info(f"[{self.name}] {type(e).__name__}: retrying in {_delay:.1f}s ({_retry_depth + 1}/{self._retry_config.max_retries})")
+                logger.info(f"[{self.name}] {type(e).__name__}: retrying in {_delay:.1f}s ({_retry_depth + 1}/{self._retry_config.max_retries})")
                 self._hook_runner.execute_sync(HookEvent.ON_RETRY, self._retry_hook_input(e, _retry_depth, _delay, "llm_request"))
                 self._emit_retry_stream_event(attempt=_retry_depth + 1, max_attempts=self._retry_config.max_retries + 1,
                                               delay=_delay, reason=str(e))
@@ -3330,7 +3330,7 @@ Your Role: {self.role}"""
             except ValueError as e:
                 if "Streaming is not supported" in str(e):
                     # Fallback: retry with non-streaming for sync adapters
-                    logging.debug(f"Agent: Streaming not supported by adapter, falling back to non-streaming")
+                    logger.debug(f"Agent: Streaming not supported by adapter, falling back to non-streaming")
                     self._emit_stream_unavailable()
                     stream = False  # Set for the main execution below
                 else:

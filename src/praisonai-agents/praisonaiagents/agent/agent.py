@@ -2808,15 +2808,15 @@ Your Role: {self.role}
                         self.tools.append(tavily_tools.tavily_search)
                     _search_provider = None
                 else:
-                    logging.warning(f"Agent {self.name!r}: web search provider 'tavily' is not usable ({_why}); using DuckDuckGo.")
+                    logger.warning(f"Agent {self.name!r}: web search provider 'tavily' is not usable ({_why}); using DuckDuckGo.")
             elif _search_provider != "duckduckgo":
-                logging.warning(f"Agent {self.name!r}: web search provider {_search_provider!r} has no built-in "
+                logger.warning(f"Agent {self.name!r}: web search provider {_search_provider!r} has no built-in "
                                 "search tool; using DuckDuckGo. Built-in providers: 'duckduckgo', 'tavily'.")
             if _search_provider is not None:
                 from ..tools.duckduckgo_tools import internet_search
                 if 'internet_search' not in tool_names and 'duckduckgo' not in tool_names:
                     self.tools.append(internet_search)
-                    logging.info("Model does not support native web search. Added DuckDuckGo fallback tool.")
+                    logger.info("Model does not support native web search. Added DuckDuckGo fallback tool.")
         
         # Raise error if web_fetch is explicitly enabled but model doesn't support it
         # Web fetch is only supported by Anthropic/Claude models
@@ -2830,7 +2830,7 @@ Your Role: {self.role}
                     _kw["web_fetch"] = False
             if getattr(self._llm_instance, "web_fetch", None):
                 self._llm_instance.web_fetch = False
-            logging.info(
+            logger.info(
                 f"Agent {self.name!r}: web fetch is Claude-only, so it is off for model "
                 f"{self.llm!r}; web search stays on."
             )

@@ -317,7 +317,7 @@ def _warn_if_untyped(function_name: str, sig: inspect.Signature, hints: Dict[str
               and p.kind not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)]
     if params and not any(p.annotation is not inspect.Parameter.empty or p.name in hints for p in params):
         _UNTYPED_WARNED.add(function_name)
-        logging.warning(
+        logger.warning(
             f"Tool {function_name!r} has no type hints: parameter types are taken from defaults "
             "(string otherwise). Add type hints so the model gets an exact schema.")
 

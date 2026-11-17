@@ -132,7 +132,12 @@ def _is_connection_refused(exc: BaseException, _depth: int = 0) -> bool:
     """
     seen = 0
     while exc is not None and seen < 8 and _depth < 4:
-        if isinstance(exc, ConnectionRefusedError) or "connection refused" in str(exc).lower():
+        if isinstance(exc, ConnectionRefusedError):
+            return True
+        # An error with a status code may be a server's answer (a proxy's 502
+        # "connection refused") or a wrapper around a real refusal (litellm):
+        # do not trust its text, keep walking to the cause.
+        if getattr(exc, "status_code", None) is None and "connection refused" in str(exc).lower():
             return True
         group = getattr(exc, "exceptions", None)
         if isinstance(group, (list, tuple)) and group:
