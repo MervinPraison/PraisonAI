@@ -17,6 +17,15 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 
+@pytest.fixture(autouse=True)
+def _no_provider_keys(monkeypatch):
+    # create_skill() calls a real LLM when a provider key is set; a key leaked
+    # into the environment by another test made these hit the network and time
+    # out. Tests that need a key set it themselves.
+    for key in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY", "GEMINI_API_KEY"):
+        monkeypatch.delenv(key, raising=False)
+
+
 class TestSkillsCreateCommand:
     """Tests for skills create command."""
     
