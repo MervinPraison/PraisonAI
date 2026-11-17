@@ -21,6 +21,8 @@ logger = logging.getLogger(__name__)
 # Sub-agent transcripts live *inside* the parent session's own record, under
 # ``SessionData.metadata[AGENT_HISTORY_KEY][agent_key]``.
 AGENT_HISTORY_KEY = "agent_histories"
+# Session state saved by save_state(), on the session record (X-12).
+SESSION_STATE_KEY = "session_state"
 
 # Opt-in restore of sub-agent transcripts written by older versions as separate
 # top-level sessions named ``"{parent}_{name}:{role}"`` *without* parentage
@@ -258,7 +260,14 @@ class Session:
             raise ValueError("State operations are not available for remote agent sessions")
             
         self._save_agent_chat_histories()
-        
+
+        # The state goes on the session record, like sub-agent histories: no
+        # embedding call to store a small dict, no dependence on memory tables.
+        update_meta = getattr(self._get_session_store(), "update_session_metadata", None)
+        if callable(update_meta) and update_meta(self.session_id, **{SESSION_STATE_KEY: dict(state_data)}):
+            return
+
+        # Stores without metadata support keep the original memory path.
         state_text = f"Session state: {state_data}"
         self.memory.store_short_term(
             text=state_text,
@@ -282,6 +291,17 @@ class Session:
         """
         if self.is_remote:
             raise ValueError("State operations are not available for remote agent sessions")
+        session_store = self._get_session_store()
+        try:
+            record = session_store.get_session(self.session_id) if hasattr(session_store, "get_session") else None
+            saved = (getattr(record, "metadata", None) or {}).get(SESSION_STATE_KEY)
+        except Exception:  # noqa: BLE001 - an unreadable record falls back to memory below
+            saved = None
+        if isinstance(saved, dict):
+            self._restore_agent_chat_histories()
+            return dict(saved)
+
+        # State saved by older versions lives in short-term memory.
         results = self.memory.search_short_term(
             query="Session state:",
             limit=10
