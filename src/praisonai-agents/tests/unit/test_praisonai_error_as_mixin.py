@@ -42,6 +42,31 @@ def test_mixin_keeps_the_plain_message(exc, text):
         raise exc
 
 
+class _PlainValue(ValueError):
+    pass
+
+
+@pytest.mark.parametrize("args", [(), ("m",), ("m", "x")])
+def test_mixin_constructs_like_the_builtin(args):
+    # On 3.14 ValueError has no own __init__, so PraisonAIError.__init__ used to
+    # run: X() raised TypeError and X("m", "x") took "x" as agent_id.
+    import pickle
+    plain, mixed = _PlainValue(*args), _ValueStyle(*args)
+    assert (mixed.args, str(mixed)) == (plain.args, str(plain))
+    assert mixed.agent_id == "unknown"
+    assert pickle.loads(pickle.dumps(mixed)).args == plain.args
+
+
+def test_subclass_of_a_structured_error_stays_structured():
+    from praisonaiagents.errors import ToolExecutionError
+
+    class _Mine(ToolExecutionError):
+        pass
+
+    e = _Mine("boom", tool_name="t", agent_id="a1", run_id="r1")
+    assert str(e) == str(ToolExecutionError("boom", tool_name="t", agent_id="a1", run_id="r1"))
+
+
 def test_normal_message_unchanged():
     e = PraisonAIError("boom", agent_id="a1", run_id="r1", error_category="rate_limit")
     assert str(e) == "[rate_limit] boom (agent: a1, run: r1)"

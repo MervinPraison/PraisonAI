@@ -93,6 +93,21 @@ class PraisonAIError(Exception):
     error_category = "unknown"
     is_retryable = False
     _structured = False  # set by __init__; picks the str() format
+    _mixin = False  # set per class by __init_subclass__
+
+    def __init_subclass__(cls, **kwargs):
+        # A class with another exception before PraisonAIError in its MRO
+        # (class X(ValueError, PraisonAIError)) is a mixin user: plain str(),
+        # and the built-in __init__ where it has none of its own (on 3.14+
+        # ValueError has none, so X() would otherwise reach this __init__).
+        super().__init_subclass__(**kwargs)
+        mro = cls.__mro__
+        cls._mixin = any(
+            issubclass(c, BaseException) and not issubclass(c, PraisonAIError)
+            for c in mro[1:mro.index(PraisonAIError)]
+        )
+        if cls._mixin and cls.__init__ is PraisonAIError.__init__:
+            cls.__init__ = BaseException.__init__
 
     def __getattr__(self, name):
         # Only reached when the attribute is missing, i.e. this __init__ never ran.
@@ -133,14 +148,7 @@ class PraisonAIError(Exception):
             
         self.is_retryable = is_retryable
         self.context = context or {}
-        # Plain str() when another exception class precedes this one in the MRO
-        # (class X(ValueError, PraisonAIError)). On 3.14+ ValueError has no
-        # own __init__, so this __init__ runs for such classes too.
-        mro = type(self).__mro__
-        self._structured = not any(
-            issubclass(c, BaseException) and not issubclass(c, PraisonAIError)
-            for c in mro[1:mro.index(PraisonAIError)]
-        )
+        self._structured = not self._mixin
 
     def __str__(self) -> str:
         if not self._structured:
