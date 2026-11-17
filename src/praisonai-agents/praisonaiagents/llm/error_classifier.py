@@ -124,6 +124,23 @@ _ERROR_PATTERNS: Dict[ErrorCategory, List[str]] = {
 }
 
 
+def _is_connection_refused(exc: BaseException, _depth: int = 0) -> bool:
+    """True if nothing accepted the connection (``ConnectionRefusedError`` in the chain).
+
+    An async connect to a name with several addresses (``localhost``: IPv6 and
+    IPv4) reports an exception group; it counts when every attempt was refused.
+    """
+    seen = 0
+    while exc is not None and seen < 8 and _depth < 4:
+        if isinstance(exc, ConnectionRefusedError) or "connection refused" in str(exc).lower():
+            return True
+        group = getattr(exc, "exceptions", None)
+        if isinstance(group, (list, tuple)) and group:
+            return all(_is_connection_refused(e, _depth + 1) for e in group)
+        exc, seen = exc.__cause__ or exc.__context__, seen + 1
+    return False
+
+
 def classify_llm_error(
     exc: Exception,
     *,
@@ -153,7 +170,21 @@ def classify_llm_error(
     from .retry_utils import jittered_backoff
     
     error_str = str(exc).lower()
-    
+
+    # A refused connection means no server is listening: retrying the same
+    # endpoint only delays the error (P-2/G-12), so it is not retryable. A
+    # fallback to another model is still allowed.
+    if _is_connection_refused(exc):
+        return LLMErrorClassification(
+            error_category="overloaded",
+            is_retryable=False,
+            should_compress_context=False,
+            should_rotate_credential=False,
+            should_fallback_model=True,
+            backoff_seconds=0.0,
+            user_message=f"Could not connect to {provider}: connection refused. Is the server running and the base URL right?",
+        )
+
     # Use existing classification as base
     category = classify_error(exc)
     
