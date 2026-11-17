@@ -81,6 +81,25 @@ def _handle_native_deferred_result(
         logging.debug("Native deferred registration skipped (non-fatal): %s", e)
     return tool_result.note
 
+_BOTH_BASE_URLS_WARNED = False
+
+
+def _env_base_url():
+    """The OpenAI base URL from the environment, or None (X-02).
+
+    ``OPENAI_BASE_URL`` (the openai SDK's name) first, then the legacy
+    ``OPENAI_API_BASE``. When both are set and differ, warns once naming both.
+    """
+    global _BOTH_BASE_URLS_WARNED
+    official, legacy = os.environ.get("OPENAI_BASE_URL"), os.environ.get("OPENAI_API_BASE")
+    if official and legacy and official != legacy and not _BOTH_BASE_URLS_WARNED:
+        _BOTH_BASE_URLS_WARNED = True
+        logging.warning(
+            "Both OPENAI_BASE_URL=%s and OPENAI_API_BASE=%s are set; using OPENAI_BASE_URL. "
+            "Unset OPENAI_API_BASE (the legacy name) to silence this.", official, legacy)
+    return official or legacy
+
+
 # Lazy imports for optional dependencies
 _openai_module = None
 _rich_console = None
@@ -455,7 +474,7 @@ class OpenAIClient:
         
         Args:
             api_key: OpenAI API key (defaults to OPENAI_API_KEY env var)
-            base_url: Custom base URL for API endpoints (defaults to OPENAI_API_BASE env var)
+            base_url: Custom base URL for API endpoints (defaults to OPENAI_BASE_URL, then the legacy OPENAI_API_BASE)
             max_retries: Number of automatic retries for transient errors (rate limits,
                 network blips) performed by the underlying OpenAI SDK, which honours
                 ``Retry-After`` and applies exponential backoff. Defaults to the
@@ -464,7 +483,7 @@ class OpenAIClient:
         """
         # Use provided values or fall back to environment variables
         self.api_key = api_key or os.environ.get("OPENAI_API_KEY")
-        self.base_url = base_url or os.environ.get("OPENAI_API_BASE") or os.environ.get("OPENAI_BASE_URL")
+        self.base_url = base_url or _env_base_url()
 
         # Resolve retry configuration: explicit arg wins, else OPENAI_MAX_RETRIES env var.
         if max_retries is None:
@@ -484,7 +503,7 @@ class OpenAIClient:
         elif not self.api_key:
             raise ValueError(
                 "OPENAI_API_KEY environment variable is required for the default OpenAI service. "
-                "If you are targeting a local server (e.g., LM Studio), ensure OPENAI_API_BASE is set "
+                "If you are targeting a local server (e.g., LM Studio), ensure OPENAI_BASE_URL is set "
                 f"(e.g., 'http://localhost:1234/v1') and you can use a placeholder API key by setting OPENAI_API_KEY='{LOCAL_SERVER_API_KEY_PLACEHOLDER}'"
             )
         
@@ -3174,9 +3193,7 @@ def get_openai_client(api_key: Optional[str] = None, base_url: Optional[str] = N
     # Normalize parameters for comparison, mirroring OpenAIClient.__init__ so that
     # an explicit argument matching the env-var fallback reuses the cached client.
     normalized_api_key = api_key or os.environ.get("OPENAI_API_KEY")
-    normalized_base_url = (
-        base_url or os.environ.get("OPENAI_API_BASE") or os.environ.get("OPENAI_BASE_URL")
-    )
+    normalized_base_url = base_url or _env_base_url()
     normalized_max_retries = max_retries
     if normalized_max_retries is None:
         _env_retries = os.environ.get("OPENAI_MAX_RETRIES")
