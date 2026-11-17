@@ -16,6 +16,8 @@ from uuid import uuid4
 
 from ..paths import get_cache_dir, ensure_dir
 
+logger = logging.getLogger(__name__)
+
 
 class ToolOutputStore:
     """Manages persistent storage of full tool outputs with TTL cleanup."""
@@ -77,7 +79,7 @@ class ToolOutputStore:
                 'timestamp': time.time()
             }
         except Exception as e:
-            logging.warning(f"Failed to store tool output: {e}")
+            logger.warning(f"Failed to store tool output: {e}")
             return {}
     
     def retrieve(self, path_or_metadata: Any) -> Optional[str]:
@@ -99,7 +101,7 @@ class ToolOutputStore:
             if path and Path(path).exists():
                 return Path(path).read_text(encoding='utf-8')
         except Exception as e:
-            logging.debug(f"Failed to retrieve tool output: {e}")
+            logger.debug(f"Failed to retrieve tool output: {e}")
         
         return None
     
@@ -118,11 +120,11 @@ class ToolOutputStore:
                     if run_dir.stat().st_mtime < cutoff_time:
                         try:
                             shutil.rmtree(run_dir)
-                            logging.debug(f"Cleaned up old tool output dir: {run_dir.name}")
+                            logger.debug(f"Cleaned up old tool output dir: {run_dir.name}")
                         except Exception as e:
-                            logging.debug(f"Failed to clean up {run_dir}: {e}")
+                            logger.debug(f"Failed to clean up {run_dir}: {e}")
         except Exception as e:
-            logging.debug(f"Error during tool output cleanup: {e}")
+            logger.debug(f"Error during tool output cleanup: {e}")
     
     def format_reference(self, metadata: Dict[str, Any], truncated_preview: str) -> str:
         """

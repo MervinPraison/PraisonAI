@@ -13,6 +13,8 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime
 from .results import MemoryResult, MemoryResultStatus, SearchResult
 
+logger = logging.getLogger(__name__)
+
 
 class MemoryCoreMixin:
     """Mixin class containing core memory functionality for the Memory class."""
@@ -71,7 +73,7 @@ class MemoryCoreMixin:
                 memory_id = self._sqlite_adapter.store_short_term(content, metadata=clean_metadata, **kwargs)
                 self._log_verbose(f"Stored in SQLite STM as fallback: {content[:100]}...")
             except Exception as e:
-                logging.error(f"Failed to store in SQLite STM fallback: {e}")
+                logger.error(f"Failed to store in SQLite STM fallback: {e}")
                 return ""
         
         # Auto-promote to long-term memory if quality is high
@@ -80,7 +82,7 @@ class MemoryCoreMixin:
                 self.store_long_term(content, clean_metadata, quality_score, user_id, **kwargs)
                 self._log_verbose(f"Auto-promoted STM content to LTM (score: {quality_score:.2f})")
             except Exception as e:
-                logging.warning(f"Failed to auto-promote to LTM: {e}")
+                logger.warning(f"Failed to auto-promote to LTM: {e}")
         
         # Emit memory event
         self._emit_memory_event("store", "short_term", content, clean_metadata)
@@ -145,7 +147,7 @@ class MemoryCoreMixin:
                     self._log_verbose(f"Auto-promoted STM content to LTM (score: {quality_score:.2f})")
                 except Exception as e:
                     # Auto-promotion failure doesn't affect the primary storage result
-                    logging.warning(f"Failed to auto-promote to LTM: {e}")
+                    logger.warning(f"Failed to auto-promote to LTM: {e}")
             
             # Emit memory event for successful storage
             self._emit_memory_event("store", "short_term", content, clean_metadata)
@@ -179,7 +181,7 @@ class MemoryCoreMixin:
                 )
             except Exception as e:
                 fallback_error = str(e)
-                logging.error(f"Failed to store in SQLite STM fallback: {e}")
+                logger.error(f"Failed to store in SQLite STM fallback: {e}")
         
         # Complete failure - both primary and fallback failed
         return MemoryResult.failed_result(
@@ -251,7 +253,7 @@ class MemoryCoreMixin:
                 if not memory_id:
                     memory_id = fallback_id
             except Exception as e:
-                logging.error(f"Failed to store in SQLite LTM fallback: {e}")
+                logger.error(f"Failed to store in SQLite LTM fallback: {e}")
                 if not memory_id:
                     return ""
         
@@ -374,7 +376,7 @@ class MemoryCoreMixin:
                     sanitized[str_key] = str(value)
                     
             except (ValueError, TypeError) as e:
-                logging.warning(f"Skipping non-serializable metadata key '{key}': {e}")
+                logger.warning(f"Skipping non-serializable metadata key '{key}': {e}")
                 continue
         
         return sanitized
@@ -411,13 +413,13 @@ class MemoryCoreMixin:
                 bus.publish(f"memory.{event_type}.{memory_type}", _build_event_data())
             except ImportError:
                 # EventBus not available, fall back to logging
-                logging.debug(f"Memory event: {event_type}.{memory_type} - {_build_event_data()}")
+                logger.debug(f"Memory event: {event_type}.{memory_type} - {_build_event_data()}")
             except Exception as bus_error:
                 # EventBus failed, log the event instead
-                logging.debug(f"Memory event (bus failed): {event_type}.{memory_type} - {_build_event_data()}")
-                logging.debug(f"EventBus error: {bus_error}")
+                logger.debug(f"Memory event (bus failed): {event_type}.{memory_type} - {_build_event_data()}")
+                logger.debug(f"EventBus error: {bus_error}")
         except Exception as e:
-            logging.debug(f"Failed to emit memory event: {e}")
+            logger.debug(f"Failed to emit memory event: {e}")
     
     @property
     def learn(self):
@@ -427,7 +429,7 @@ class MemoryCoreMixin:
                 from .learn.manager import LearnManager
                 self._learn_manager = LearnManager(config=self._learn_config)
             except ImportError:
-                logging.warning("Learn manager not available - install learn dependencies")
+                logger.warning("Learn manager not available - install learn dependencies")
         return self._learn_manager
 
     # Async variants to prevent event loop blocking
@@ -485,7 +487,7 @@ class MemoryCoreMixin:
                 memory_id = await asyncio.to_thread(self._sqlite_adapter.store_short_term, content, metadata=clean_metadata, **kwargs)
                 self._log_verbose(f"Stored in SQLite async STM as fallback: {content[:100]}...")
             except Exception as e:
-                logging.error(f"Failed to store in SQLite async STM fallback: {e}")
+                logger.error(f"Failed to store in SQLite async STM fallback: {e}")
                 return ""
         
         # Auto-promote to long-term memory if quality is high (async)
@@ -494,7 +496,7 @@ class MemoryCoreMixin:
                 await self.store_long_term_async(content, clean_metadata, quality_score, user_id, **kwargs)
                 self._log_verbose(f"Auto-promoted STM content to LTM (score: {quality_score:.2f})")
             except Exception as e:
-                logging.warning(f"Failed to auto-promote to LTM: {e}")
+                logger.warning(f"Failed to auto-promote to LTM: {e}")
         
         # Emit memory event
         self._emit_memory_event("store", "short_term", content, clean_metadata)

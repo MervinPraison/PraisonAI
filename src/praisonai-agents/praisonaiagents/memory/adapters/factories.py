@@ -638,7 +638,7 @@ class MongoDBMemoryAdapter:
                 self.client.close()
             except Exception as e:
                 import logging
-                logging.warning(f"MongoDB cleanup failed: {e}")
+                logger.warning(f"MongoDB cleanup failed: {e}")
             finally:
                 self.client = None
 
@@ -787,7 +787,7 @@ class DakeraMemoryAdapter:
             return True
         except Exception as e:
             import logging
-            logging.warning(
+            logger.warning(
                 f"Dakera delete_memory({memory_id}) failed for agent "
                 f"'{self.agent_id}': {e}"
             )

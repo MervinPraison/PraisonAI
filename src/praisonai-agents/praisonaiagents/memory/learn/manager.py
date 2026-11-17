@@ -21,6 +21,8 @@ from .stores import (
 )
 from ...llm.model_providers import default_auxiliary_model
 
+logger = logging.getLogger(__name__)
+
 
 class LearnManager:
     """
@@ -82,7 +84,7 @@ class LearnManager:
         # Resolve backend from config
         self._backend = self._create_backend()
         if self._backend is not None:
-            logging.info(
+            logger.info(
                 f"LearnManager using {self.config.backend} backend"
             )
         
@@ -192,7 +194,7 @@ class LearnManager:
                     db_path = db_path[len("sqlite:///"):]
                 return SQLiteBackend(db_path=db_path, table_name="learn_store")
             except Exception as e:
-                logging.warning(f"Failed to create SQLite backend: {e}. Falling back to FILE.")
+                logger.warning(f"Failed to create SQLite backend: {e}. Falling back to FILE.")
                 return None
         
         if backend_str == "redis":
@@ -201,7 +203,7 @@ class LearnManager:
                 url = self.config.db_url or "redis://localhost:6379"
                 return RedisBackend(url=url, prefix="praison:learn:")
             except Exception as e:
-                logging.warning(f"Failed to create Redis backend: {e}. Falling back to FILE.")
+                logger.warning(f"Failed to create Redis backend: {e}. Falling back to FILE.")
                 return None
         
         if backend_str == "mongodb":
@@ -210,10 +212,10 @@ class LearnManager:
                 url = self.config.db_url or "mongodb://localhost:27017/"
                 return MongoDBBackend(url=url, collection="praison_learn")
             except Exception as e:
-                logging.warning(f"Failed to create MongoDB backend: {e}. Falling back to FILE.")
+                logger.warning(f"Failed to create MongoDB backend: {e}. Falling back to FILE.")
                 return None
         
-        logging.warning(f"Unknown learn backend '{backend_str}'. Falling back to FILE.")
+        logger.warning(f"Unknown learn backend '{backend_str}'. Falling back to FILE.")
         return None
     
     def _get_store_path(self, store_name: str) -> Optional[str]:
@@ -346,7 +348,7 @@ class LearnManager:
                 try:
                     pruned[store_name] = prune_fn()
                 except Exception as e:
-                    logging.warning(f"Failed to prune store '{store_name}': {e}")
+                    logger.warning(f"Failed to prune store '{store_name}': {e}")
                     pruned[store_name] = 0
         return pruned
     
@@ -605,7 +607,7 @@ Return empty arrays if nothing is found for a category."""
             
         except Exception as e:
             import logging
-            logging.warning(f"Failed to extract learnings: {e}")
+            logger.warning(f"Failed to extract learnings: {e}")
             return {"persona": [], "insights": [], "patterns": [], "improvements": [], "stored": {}, "error": str(e)}
     
     async def aprocess_conversation(
@@ -713,5 +715,5 @@ Return empty arrays if nothing is found for a category."""
             
         except Exception as e:
             import logging
-            logging.warning(f"Failed to extract learnings: {e}")
+            logger.warning(f"Failed to extract learnings: {e}")
             return {"persona": [], "insights": [], "patterns": [], "improvements": [], "stored": {}, "error": str(e)}
