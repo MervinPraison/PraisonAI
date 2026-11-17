@@ -847,6 +847,29 @@ def warmup(include_litellm: bool = False, include_openai: bool = True) -> dict:
 # Organized imports available via sub-packages: config, tools, memory, workflows
 # ============================================================================
 
+# Static types for the lazy exports below (D-04). Type checkers and editors
+# read these; at runtime TYPE_CHECKING is False and __getattr__ stays lazy.
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from . import config, memory, tools, workflows
+    from .agent.agent import Agent
+    from .agent.autonomy import AutonomyConfig
+    from .agent.retry_utils import RetryBackoffConfig
+    from .agent.run_outcome import RunOutcome
+    from .agents.agents import AgentTeam
+    from .agents.agents import AgentTeam as AgentManager, AgentTeam as Agents, AgentTeam as PraisonAIAgents
+    from .app.config import AgentAppConfig, AgentAppConfig as AgentOSConfig
+    from .app.protocols import AgentOSProtocol, AgentOSProtocol as AgentAppProtocol
+    from .approval.backends import AutoApproveBackend
+    from .config.feature_configs import AutonomyLevel
+    from .embedding.dimensions import get_dimensions
+    from .embedding.embed import aembedding, aembedding as aembeddings
+    from .embedding.result import EmbeddingResult
+    from .task.task import Task
+    from .tools.decorator import tool
+    from .tools.tools import Tools
+    from .workflows.workflows import AgentFlow, AgentFlow as Pipeline, AgentFlow as Workflow
+
 __all__ = [
     # Version information
     '__version__',

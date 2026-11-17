@@ -162,6 +162,10 @@ all = [
     "praisonaiagents[a2ui]",
 ]
 
+[tool.setuptools.package-data]
+# Marks the package as typed (PEP 561) so type checkers use its annotations (D-04).
+praisonaiagents = ["py.typed"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["praisonaiagents*"]
