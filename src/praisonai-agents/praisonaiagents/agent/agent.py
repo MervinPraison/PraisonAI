@@ -2695,6 +2695,19 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         self.code_execution_mode = code_execution_mode
         # Store execution config for guardrail retry backoff
         self._execution_config = _exec_config
+        # Resolved feature configs, read back by clone_for_channel() so every
+        # channel clone keeps them (F-19; guardrails were fixed the same way in
+        # #4284). caching=False resolves to None, so keep the False itself; a
+        # default output mode is not stored, so the clone stays implicit too.
+        self._template_config = _template_config
+        self._caching_config = _caching_config if _caching_config is not None else caching
+        self._hooks_config = _hooks_config
+        self._skills_config = _skills_config
+        self._knowledge_config = _knowledge_config
+        self._planning_config = _planning_config
+        self._reflection_config = _reflection_config
+        self._web_config = _web_config
+        self._output_config = _output_config if _has_explicit_output else None
         self.embedder_config = embedder_config
         self.knowledge = knowledge
         self.use_system_prompt = use_system_prompt
@@ -3509,8 +3522,14 @@ Your Role: {self.role}
             'reflection': getattr(self, '_reflection_config', None),
             'guardrails': getattr(self, '_guardrails_config', None),
             'web': getattr(self, '_web_config', None),
-            'context': getattr(self, '_context_config', None),
-            'autonomy': getattr(self, '_autonomy_config', None),
+            # A user-supplied ContextManager holds per-session state (ledger,
+            # history), so a clone gets a fresh one built from its config.
+            'context': (
+                self._context_param.config
+                if hasattr(getattr(self, '_context_param', None), 'process')
+                else getattr(self, '_context_param', None)
+            ),
+            'autonomy': getattr(self, '_autonomy_config_obj', None),
             'output': getattr(self, '_output_config', None),
             'execution': getattr(self, '_execution_config', None),
             'templates': getattr(self, '_template_config', None),
