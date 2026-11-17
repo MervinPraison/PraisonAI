@@ -1152,8 +1152,7 @@ class ContextCompactor:
                 summary_written = True
             except Exception as e:
                 # Fallback to naive summarization if LLM call fails
-                import logging
-                logging.warning(f"LLM summarization failed, falling back to naive: {e}")
+                logger.warning(f"LLM summarization failed, falling back to naive: {e}")
                 summary_parts = []
                 for msg in older:
                     role = msg.get("role", "unknown")

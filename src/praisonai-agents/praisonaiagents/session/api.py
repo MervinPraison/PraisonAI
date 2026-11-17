@@ -607,7 +607,7 @@ class Session:
                     if not self._store_agent_history(
                         session_store, agent_key, messages
                     ):
-                        logging.warning(
+                        logger.warning(
                             f"Session store {type(session_store).__name__} cannot "
                             f"persist sub-agent history; chat history for "
                             f"{agent_key} in session {self.session_id} was lost."
