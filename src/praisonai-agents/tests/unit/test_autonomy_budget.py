@@ -88,7 +88,7 @@ def test_config_from_dict_budget_fields():
 # Enforcement — USD
 # ---------------------------------------------------------------------------
 
-@patch("praisonaiagents.agent.agent.Agent.chat")
+@patch("praisonaiagents.agent.agent.Agent.achat")
 @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
 def test_usd_cap_halts_run(mock_stage, mock_chat):
     """Cumulative cost crossing max_budget_usd stops with BUDGET_EXHAUSTED."""
@@ -116,7 +116,7 @@ def test_usd_cap_halts_run(mock_stage, mock_chat):
 # Enforcement — tokens
 # ---------------------------------------------------------------------------
 
-@patch("praisonaiagents.agent.agent.Agent.chat")
+@patch("praisonaiagents.agent.agent.Agent.achat")
 @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
 def test_token_cap_halts_run(mock_stage, mock_chat):
     """Cumulative tokens crossing max_tokens stops with BUDGET_EXHAUSTED."""
@@ -141,7 +141,7 @@ def test_token_cap_halts_run(mock_stage, mock_chat):
 # Pause is recoverable
 # ---------------------------------------------------------------------------
 
-@patch("praisonaiagents.agent.agent.Agent.chat")
+@patch("praisonaiagents.agent.agent.Agent.achat")
 @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
 def test_budget_pause_is_recoverable(mock_stage, mock_chat):
     """budget_action='pause' returns paused status with the partial output."""
@@ -180,7 +180,7 @@ def test_budget_pause_is_recoverable(mock_stage, mock_chat):
 # No cap = unlimited
 # ---------------------------------------------------------------------------
 
-@patch("praisonaiagents.agent.agent.Agent.chat")
+@patch("praisonaiagents.agent.agent.Agent.achat")
 @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
 def test_no_cap_is_unlimited(mock_stage, mock_chat):
     """Caps unset → no early budget stop even with high spend."""
@@ -198,7 +198,7 @@ def test_no_cap_is_unlimited(mock_stage, mock_chat):
 # Coexistence with turn cap
 # ---------------------------------------------------------------------------
 
-@patch("praisonaiagents.agent.agent.Agent.chat")
+@patch("praisonaiagents.agent.agent.Agent.achat")
 @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
 def test_turn_cap_wins_when_it_trips_first(mock_stage, mock_chat):
     """If spend never crosses the cap, the turn cap still bounds the run."""
@@ -274,7 +274,7 @@ def test_config_from_dict_rejects_invalid_budget():
 # Agent reuse: prior lifetime spend must NOT count against a new run (reviewer P1)
 # ---------------------------------------------------------------------------
 
-@patch("praisonaiagents.agent.agent.Agent.chat")
+@patch("praisonaiagents.agent.agent.Agent.achat")
 @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
 def test_prior_spend_does_not_trip_new_run(mock_stage, mock_chat):
     """A reused Agent with high lifetime spend must not instantly exhaust.

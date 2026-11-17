@@ -169,7 +169,7 @@ class TestRunAutonomousStillWorks:
         """run_autonomous() should still work when called explicitly."""
         from praisonaiagents import Agent
         
-        with patch.object(Agent, 'chat') as mock_chat:
+        with patch.object(Agent, 'achat') as mock_chat:
             mock_chat.return_value = "Task completed successfully"
             
             agent = Agent(

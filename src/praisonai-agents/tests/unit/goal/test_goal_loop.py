@@ -172,7 +172,7 @@ class TestGoalLoopGate:
         agent = _make_agent()
         verdicts = iter([("continue", "not yet"), ("done", "goal met")])
 
-        with patch.object(agent, "chat", side_effect=_unique_chat()), \
+        with patch.object(agent, "achat", side_effect=_unique_chat()), \
              patch("praisonaiagents.goal.judge.judge_goal",
                    side_effect=lambda *a, **k: next(verdicts)):
             result = agent.run_goal("do the task", goal="finish it", max_turns=10)
@@ -192,7 +192,7 @@ class TestGoalLoopGate:
             seen_prompts.append(prompt)
             return f"still working {counter['n']}"
 
-        with patch.object(agent, "chat", side_effect=fake_chat), \
+        with patch.object(agent, "achat", side_effect=fake_chat), \
              patch("praisonaiagents.goal.judge.judge_goal",
                    side_effect=lambda *a, **k: next(verdicts)):
             result = agent.run_goal("task", goal="g", max_turns=10)
@@ -204,7 +204,7 @@ class TestGoalLoopGate:
 
     def test_budget_exhaust_pauses_recoverably(self):
         agent = _make_agent()
-        with patch.object(agent, "chat", side_effect=_unique_chat()), \
+        with patch.object(agent, "achat", side_effect=_unique_chat()), \
              patch("praisonaiagents.goal.judge.judge_goal",
                    return_value=("continue", "never done")):
             result = agent.run_goal("task", goal="g", max_turns=3)
@@ -217,7 +217,7 @@ class TestGoalLoopGate:
     def test_judge_failopen_continue_then_budget(self):
         agent = _make_agent()
         # judge_goal itself fails open to ("continue", "judge unavailable")
-        with patch.object(agent, "chat", side_effect=_unique_chat()), \
+        with patch.object(agent, "achat", side_effect=_unique_chat()), \
              patch("praisonaiagents.goal.judge.judge_goal",
                    return_value=("continue", "judge unavailable")):
             result = agent.run_goal("task", goal="g", max_turns=2)
@@ -225,7 +225,7 @@ class TestGoalLoopGate:
 
     def test_consecutive_parse_failures_autopause(self):
         agent = _make_agent()
-        with patch.object(agent, "chat", side_effect=_unique_chat()), \
+        with patch.object(agent, "achat", side_effect=_unique_chat()), \
              patch("praisonaiagents.goal.judge.judge_goal",
                    return_value=("continue", "judge response unparseable")):
             result = agent.run_goal("task", goal="g", max_turns=20)
@@ -236,7 +236,7 @@ class TestGoalLoopGate:
     def test_no_goal_is_unchanged(self):
         """Without a goal loop, run_autonomous is unaffected by the gate."""
         agent = _make_agent()
-        with patch.object(agent, "chat",
+        with patch.object(agent, "achat",
                           return_value="Task completed successfully."):
             result = agent.run_autonomous("do it", max_iterations=5)
         # falls through to existing heuristic termination (not goal_met)
@@ -258,7 +258,7 @@ class TestConstraintViolation:
             constraints=["do not touch CHANGELOG.md"],
         )
         # Simulate a judge that respects constraints: constraint violated → continue
-        with patch.object(agent, "chat", side_effect=_unique_chat()), \
+        with patch.object(agent, "achat", side_effect=_unique_chat()), \
              patch("praisonaiagents.goal.judge.judge_goal",
                    return_value=("continue", "constraint violated")):
             result = agent.run_goal("task", goal="g", criteria=criteria, max_turns=2)
@@ -329,7 +329,7 @@ class TestAsyncGoalGate:
 
     def test_run_until_with_goal_delegates(self):
         agent = _make_agent()
-        with patch.object(agent, "chat", side_effect=_unique_chat()), \
+        with patch.object(agent, "achat", side_effect=_unique_chat()), \
              patch("praisonaiagents.goal.judge.judge_goal",
                    return_value=("done", "met")):
             result = agent.run_until("task", goal="reach the goal", max_iterations=5)

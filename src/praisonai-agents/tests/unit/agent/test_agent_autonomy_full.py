@@ -144,7 +144,7 @@ class TestAgentRunAutonomous:
         
         agent = Agent(instructions="Test agent", autonomy=True)
         # Mock the LLM to avoid real API calls
-        with patch.object(agent, 'chat', return_value="Done"):
+        with patch.object(agent, 'achat', return_value="Done"):
             result = agent.run_autonomous("Simple task")
         
         assert isinstance(result, AutonomyResult)
@@ -166,7 +166,7 @@ class TestAgentRunAutonomous:
             call_count += 1
             return "Need to continue..."
         
-        with patch.object(agent, 'chat', side_effect=mock_chat):
+        with patch.object(agent, 'achat', side_effect=mock_chat):
             result = agent.run_autonomous("Complex task")
         
         assert result.iterations <= 3
@@ -177,7 +177,7 @@ class TestAgentRunAutonomous:
         
         agent = Agent(instructions="Test agent", autonomy=True)
         
-        with patch.object(agent, 'chat', return_value="Task completed successfully."):
+        with patch.object(agent, 'achat', return_value="Task completed successfully."):
             result = agent.run_autonomous("Simple task")
         
         assert result.success == True
