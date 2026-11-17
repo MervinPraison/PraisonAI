@@ -142,8 +142,9 @@ from ..config.feature_configs import (
 # function-local relative import per construction (#5835).
 from ..config.parse_utils import canonical_preset_key, validate_preset_string
 from ..config.agent_init import (
-    resolve_agent_caching, resolve_agent_hooks, resolve_agent_planning,
-    resolve_agent_reflection, resolve_agent_templates, resolve_agent_web,
+    resolve_agent_caching, resolve_agent_execution, resolve_agent_hooks,
+    resolve_agent_planning, resolve_agent_reflection, resolve_agent_templates,
+    resolve_agent_web,
 )
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
@@ -1286,26 +1287,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # ─────────────────────────────────────────────────────────────────────
         # Resolve EXECUTION param - FAST PATH for common cases
         # ─────────────────────────────────────────────────────────────────────
-        # Fast path: None -> default config (skip resolve() call)
-        if execution is None:
-            _exec_config = ExecutionConfig()
-        elif isinstance(execution, ExecutionConfig):
-            _exec_config = execution
-        elif isinstance(execution, str):
-            preset_value = EXECUTION_PRESETS.get(canonical_preset_key(execution))
-            if preset_value is not None:
-                _exec_config = ExecutionConfig(**preset_value) if isinstance(preset_value, dict) else preset_value
-            else:
-                _exec_config = ExecutionConfig()
-        else:
-            _exec_config = resolve(
-                value=execution,
-                param_name="execution",
-                config_class=ExecutionConfig,
-                presets=EXECUTION_PRESETS,
-                array_mode=ArrayMode.PRESET_OVERRIDE,
-                default=ExecutionConfig(),
-            )
+        # None -> default config; str -> preset (config.agent_init)
+        _exec_config = resolve_agent_execution(execution)
         if _exec_config:
             # Unified step budget: when max_steps is set it governs the LiteLLM
             # loop (LLM.max_iter) too, so both tool-execution loops honour the

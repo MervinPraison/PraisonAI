@@ -10,10 +10,12 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .feature_configs import (
     CachingConfig, HooksConfig, PlanningConfig, ReflectionConfig,
-    TemplateConfig, WebConfig,
+    TemplateConfig, WebConfig, ExecutionConfig,
 )
 from .param_resolver import ArrayMode, resolve
 from .presets import CACHING_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS, WEB_PRESETS
+from .parse_utils import canonical_preset_key
+from .presets import CACHING_PRESETS, EXECUTION_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS
 
 
 def resolve_agent_caching(caching: Any) -> Tuple[Optional[CachingConfig], bool, Optional[bool]]:
@@ -217,3 +219,31 @@ def resolve_agent_web(web: Any, web_search: Optional[bool] = None,
         web_search = False
         web_fetch = False
     return _web_config, web_search, web_fetch, _search_provider, _web_fetch_is_default
+
+
+def resolve_agent_execution(execution: Any) -> Optional[ExecutionConfig]:
+    """``execution=`` -> ``ExecutionConfig`` (or a falsy value, which Agent
+    treats as the defaults).
+
+    ``None`` means the defaults; a string is a preset name, case-insensitive,
+    and an unknown name falls back to the defaults here (Agent validates
+    preset strings earlier); dicts and ``ExecutionConfig`` resolve as before.
+    """
+    # Fast path: None -> default config (skip resolve() call)
+    if execution is None:
+        return ExecutionConfig()
+    if isinstance(execution, ExecutionConfig):
+        return execution
+    if isinstance(execution, str):
+        preset_value = EXECUTION_PRESETS.get(canonical_preset_key(execution))
+        if preset_value is not None:
+            return ExecutionConfig(**preset_value) if isinstance(preset_value, dict) else preset_value
+        return ExecutionConfig()
+    return resolve(
+        value=execution,
+        param_name="execution",
+        config_class=ExecutionConfig,
+        presets=EXECUTION_PRESETS,
+        array_mode=ArrayMode.PRESET_OVERRIDE,
+        default=ExecutionConfig(),
+    )
