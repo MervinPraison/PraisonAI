@@ -196,8 +196,6 @@ F05 = _drift("F-05", "start(stream=True) on an openai/gpt-4o* model uses Chat Co
              "LLM.get_response_stream has no Responses API branch", ("stream", "litellm_responses"))
 F06 = _drift("F-06", "achat() on the litellm Chat Completions route sends the post-tool follow-up twice",
              ("achat", "litellm_chat"))
-F07 = _drift("F-07", "OpenAI-client tool loop records usage for one of the two model calls",
-             ("chat", "openai_client"), ("achat", "openai_client"))
 F08 = _drift("F-08", "start(stream=True) records no token usage or cost on any route", ("stream", "*"))
 F09 = _drift("F-09", "start(stream=True) ignores cancel_token", ("stream", "*"))
 F09_TOOL = _drift("F-09", "start(stream=True) ignores cancel_token", ("stream", "openai_client"))
@@ -328,7 +326,7 @@ def test_token_usage_recorded(stub, mode, route):
     assert (usage["tokens_in"], usage["tokens_out"], usage["llm_calls"]) == (USAGE_IN, USAGE_OUT, 1)
 
 
-@pytest.mark.parametrize("mode,route", _cells(F06, F07, F08))
+@pytest.mark.parametrize("mode,route", _cells(F06, F08))
 def test_token_usage_recorded_for_every_call_in_a_tool_round(stub, mode, route):
     agent = _agent(route, stub, tools=[lookup])
     assert _turn(agent, mode) == "hello"

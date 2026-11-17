@@ -2554,6 +2554,17 @@ Your Role: {self.role}"""
             error_message=str(exc), operation=operation, delay_seconds=delay, attempt=retry_depth,
         )
 
+    def _loop_usage_kwargs(self):
+        """OpenAI-client route: have the tool loop report each earlier call (F-07).
+
+        The loop makes one billed request per tool round; the agent records the
+        final response itself, so the loop reports only the calls before it.
+        The litellm route records every call through ``_llm_usage_sink``.
+        """
+        if getattr(self, "_using_custom_llm", False):
+            return {}
+        return {"usage_callback": lambda response: self._record_llm_usage(*self._extract_llm_usage(response))}
+
     def _extract_llm_usage(self, response, model=None):
         """Return ``(prompt_tokens, completion_tokens, cost_usd)`` for one LLM response priced as ``model``."""
         usage = getattr(response, 'usage', None) if response else None
@@ -3296,6 +3307,7 @@ Your Role: {self.role}"""
                 if stream_callback is None and hasattr(self, 'stream_emitter'):
                     stream_callback = getattr(self.stream_emitter, 'emit', None)
                 final_response = self._unified_dispatcher.chat_completion(
+                    **self._loop_usage_kwargs(),
                     cancel_token=cancel_token,
                     messages=messages,
                     tools=tools,
@@ -3348,6 +3360,7 @@ Your Role: {self.role}"""
             if stream_callback is None and hasattr(self, 'stream_emitter'):
                 stream_callback = getattr(self.stream_emitter, 'emit', None)
             final_response = self._unified_dispatcher.chat_completion(
+                **self._loop_usage_kwargs(),
                 cancel_token=cancel_token,
                 messages=messages,
                 tools=tools,
@@ -3504,6 +3517,7 @@ Your Role: {self.role}"""
             if stream_callback is None and hasattr(self, 'stream_emitter'):
                 stream_callback = getattr(self.stream_emitter, 'emit', None)
             final_response = await dispatcher.achat_completion(
+                **self._loop_usage_kwargs(),
                 cancel_token=cancel_token,
                 messages=messages,
                 tools=tools,
