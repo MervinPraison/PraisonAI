@@ -360,7 +360,11 @@ def _resolve_string(
     # Path as source mode
     if string_mode == "path_as_source":
         if is_path_like(value) and config_class:
-            return config_class(sources=[value])
+            # KnowledgeConfig names the field ``sources``, SkillsConfig ``paths``;
+            # always passing sources= made skills="path" raise (F-22).
+            fields = getattr(config_class, "__dataclass_fields__", {})
+            field = "paths" if "paths" in fields and "sources" not in fields else "sources"
+            return config_class(**{field: [value]})
     
     # LLM model name mode (for planning)
     if string_mode == "llm_model":
