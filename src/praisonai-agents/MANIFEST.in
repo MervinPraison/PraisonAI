@@ -1,0 +1,4 @@
+# The sdist ships the package, not the test suite: tests/ needs the repo's
+# conftest.py and fixtures to run, so a partial copy only breaks (D-13).
+prune tests
+global-exclude *.py[cod] __pycache__
