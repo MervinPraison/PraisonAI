@@ -61,3 +61,23 @@ def test_agent_registers_the_artifact_tools(monkeypatch, tmp_path):
     names = {getattr(t, "__name__", getattr(t, "name", None)) for t in agent.tools}
     assert {"artifact_head", "artifact_tail", "artifact_grep", "artifact_chunk",
             "artifact_load", "artifact_list"} <= names
+
+
+def test_artifact_load_round_trips_and_stays_inside_the_store(tmp_path, monkeypatch):
+    import pathlib
+    from praisonaiagents.context.artifact_store import FileSystemArtifactStore
+    from praisonaiagents.context.artifacts import ArtifactMetadata
+    from praisonaiagents.tools import artifact_tools
+
+    store = FileSystemArtifactStore(base_dir=str(tmp_path / "store"))
+    ref = store.store({"k": 1}, ArtifactMetadata(agent_id="a", run_id="r"))
+    artifact_tools.set_artifact_store(store)
+    assert artifact_tools.artifact_load(ref.path) == {"k": 1}
+
+    outside = tmp_path / "secret.json"
+    outside.write_text('{"artifact_id": "leak"}')
+    read = []
+    real = pathlib.Path.read_text
+    monkeypatch.setattr(pathlib.Path, "read_text", lambda self, *a, **k: read.append(self) or real(self, *a, **k))
+    assert artifact_tools.artifact_load(str(outside)).startswith("Error")
+    assert outside not in read
