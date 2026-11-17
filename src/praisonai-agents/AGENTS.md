@@ -306,7 +306,7 @@ grep -r "class.*Protocol" praisonaiagents/ --include="*.py"
 dependencies = [
     "pydantic>=2.10.0",    # Type validation
     "rich",                # Terminal UI
-    "openai>=2.0.0",       # OpenAI client
+    "openai>=1.68.2",      # OpenAI client
     "posthog>=3.0.0",      # Telemetry
     "aiohttp>=3.8.0"       # Async HTTP
 ]
@@ -513,7 +513,7 @@ from praisonaiagents import Agent, MemoryConfig, HooksConfig
 agent = Agent(
     name="assistant",
     llm="gpt-4o-mini",
-    memory=MemoryConfig(provider="chroma", use_long_term=True),
+    memory=MemoryConfig(backend="chroma"),
     hooks=HooksConfig(on_tool_call=my_tool_logger, middleware=[my_validator]),
     guardrail=my_guardrail
 )
