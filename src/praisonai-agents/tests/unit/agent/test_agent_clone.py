@@ -147,10 +147,21 @@ class TestAgentDeepCopy:
         assert clone1 is not clone2
         assert clone1._Agent__cache_lock is not clone2._Agent__cache_lock
 
-    def test_clone_preserves_ownership_for_plugin_enabled_after_source(self):
+    def test_clone_preserves_ownership_for_plugin_enabled_after_source(self, monkeypatch):
         """A clone keeps ownership for tools merged after the source was built."""
+        import praisonaiagents.plugins as plugins_module
         from praisonaiagents.plugins.manager import get_plugin_manager
         from praisonaiagents.plugins.plugin import Plugin, PluginInfo
+
+        # Agent() enables plugins from config once per process. Config discovery
+        # walks up from the working directory, so a checkout under $HOME finds
+        # ~/.praisonai/config.toml; a "[plugins] enabled = [...]" allow-list
+        # there disables this test's plugins. CI has no such file.
+        monkeypatch.setattr(plugins_module, "_auto_enable_attempted", True)
+        # An earlier Agent() in this process may already have applied that
+        # allow-list to the shared manager; clear it for this test.
+        manager = get_plugin_manager()
+        monkeypatch.setattr(manager, "_registration_allow_list", None)
 
         suffix = uuid.uuid4().hex
         source_name = f"clone_owner_source_{suffix}"
@@ -178,7 +189,6 @@ class TestAgentDeepCopy:
             def get_tools(self):
                 return [late_tool]
 
-        manager = get_plugin_manager()
         assert manager.register(SourcePlugin())
         try:
             source = self._make_agent()
