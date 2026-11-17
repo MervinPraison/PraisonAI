@@ -606,7 +606,6 @@ Return empty arrays if nothing is found for a category."""
             }
             
         except Exception as e:
-            import logging
             logger.warning(f"Failed to extract learnings: {e}")
             return {"persona": [], "insights": [], "patterns": [], "improvements": [], "stored": {}, "error": str(e)}
     
@@ -714,6 +713,5 @@ Return empty arrays if nothing is found for a category."""
             }
             
         except Exception as e:
-            import logging
             logger.warning(f"Failed to extract learnings: {e}")
             return {"persona": [], "insights": [], "patterns": [], "improvements": [], "stored": {}, "error": str(e)}
