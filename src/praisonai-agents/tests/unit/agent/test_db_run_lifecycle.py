@@ -318,6 +318,12 @@ def test_async_adapter_callbacks_restore_history_and_finish_run(recorded_agent, 
     assert agent._current_run_id is None
 
 
+# Upper bounds only: a healthy run takes milliseconds. 3 s was too tight for a
+# loaded CI runner, where the first achat() (imports, loop start) failed to
+# reach the db hook in time (red CI on #6470).
+_BOUND = 30
+
+
 def test_first_async_calls_from_different_loops_initialize_once(recorded_agent, monkeypatch):
     agent, db = recorded_agent
     entered, second_waiting, release = threading.Event(), threading.Event(), threading.Event()
@@ -325,7 +331,7 @@ def test_first_async_calls_from_different_loops_initialize_once(recorded_agent, 
     async def load(**kwargs):
         db.sessions.append(kwargs)
         entered.set()
-        assert await asyncio.to_thread(release.wait, 5)
+        assert await asyncio.to_thread(release.wait, _BOUND)
         return []
 
     async def respond(**kwargs):
@@ -338,19 +344,19 @@ def test_first_async_calls_from_different_loops_initialize_once(recorded_agent, 
         async def scenario():
             if second:
                 asyncio.get_running_loop().call_soon(second_waiting.set)
-            return await asyncio.wait_for(agent.achat("question"), timeout=3)
+            return await asyncio.wait_for(agent.achat("question"), timeout=_BOUND)
 
         return asyncio.run(scenario(), debug=True)
 
     with ThreadPoolExecutor(max_workers=2) as pool:
         first = pool.submit(run)
         try:
-            assert entered.wait(3)
+            assert entered.wait(_BOUND)
             second = pool.submit(run, True)
-            assert second_waiting.wait(3)
+            assert second_waiting.wait(_BOUND)
         finally:
             release.set()
-        assert first.result(timeout=5) == second.result(timeout=5) == "answer"
+        assert first.result(timeout=_BOUND) == second.result(timeout=_BOUND) == "answer"
     assert len(db.sessions) == 1
     assert len(db.starts) == len(db.ends) == 2
 
