@@ -23,7 +23,7 @@ Methods:
 
 Types:
 ```python
-from praisonaiagents import Agent, AutoAgents, AutoRagAgent, ContextAgent, DeepResearchAgent, ImageAgent, PlanningAgent, PraisonAIAgents, PromptExpanderAgent, QueryRewriterAgent, create_context_agent
+from praisonaiagents import Agent, Agents, AutoAgents, AutoRagAgent, ContextAgent, DeepResearchAgent, ImageAgent, PlanningAgent, PraisonAIAgents, PromptExpanderAgent, QueryRewriterAgent, create_context_agent
 ```
 
 Methods:
@@ -93,6 +93,59 @@ Methods:
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">total_cost</a>() -> float</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">undo</a>() -> bool</code>
 * <code title="class Agent">Agent.<a href="./src/praisonai-agents/praisonaiagents/agent/agent.py">where_does_it_run</a>() -> str</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">aannounce_completion</a>(agent_id: str, task_id: str, result: Any, success: bool = True, error: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> None</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">add_task</a>(task)</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">aexecute_task</a>(task_id)</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">announce_completion</a>(agent_id: str, task_id: str, result: Any, success: bool = True, error: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> None</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">append_to_state</a>(key: str, value: Any, max_length: Optional[int] = None) -> List[Any]</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">arun_all_tasks</a>()</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">arun_task</a>(task_id)</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">aspawn_sub_agent</a>(agent: Agent, task: Any, completion_callback: Optional[Callable[[SubAgentCompletionEvent], Any]] = None, metadata: Optional[Dict[str, Any]] = None) -> SpawnedSubAgent</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">astart</a>(content = None, return_dict = False, **kwargs)</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">astart_for_each</a>(inputs, **kwargs)</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">await_for_completions</a>(timeout: Optional[float] = None, agent_ids: Optional[List[str]] = None) -> List[SubAgentCompletionEvent]</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">clean_json_output</a>(output: str) -> str</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">clear_state</a>() -> None</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">close</a>() -> None</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">context_manager</a>()</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">current_plan</a>()</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">default_completion_checker</a>(task, agent_output)</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">delete_state</a>(key: str) -> bool</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">display_token_usage</a>()</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">execute_task</a>(task_id)</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_agent_details</a>(agent_name)</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_all_state</a>() -> Dict[str, Any]</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_all_tasks_status</a>()</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_detailed_token_report</a>() -> Dict[str, Any]</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_plan_markdown</a>() -> str</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_spawned_agents</a>() -> List[SpawnedSubAgent]</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_state</a>(key: str, default: Any = None) -> Any</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_task_details</a>(task_id)</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_task_result</a>(task_id, tasks = None)</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_task_status</a>(task_id)</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_todo_markdown</a>() -> str</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">get_token_usage_summary</a>() -> Dict[str, Any]</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">has_state</a>(key: str) -> bool</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">increment_state</a>(key: str, amount: float = 1, default: float = 0) -> float</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">launch</a>(path: str = '/agents', port: int = 8000, host: str = '127.0.0.1', debug: bool = False, protocol: str = 'http')</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">restore_session_state</a>(session_id: str) -> bool</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">run</a>(content = None, return_dict = False, **kwargs)</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">run_all_tasks</a>()</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">run_task</a>(task_id)</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">save_output_to_file</a>(task, task_output)</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">save_session_state</a>(session_id: str, include_memory: bool = True) -> bool</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">set_state</a>(key: str, value: Any) -> None</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">spawn_sub_agent</a>(agent: Agent, task: Any, completion_callback: Optional[Callable[[SubAgentCompletionEvent], Any]] = None, metadata: Optional[Dict[str, Any]] = None) -> SpawnedSubAgent</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">start</a>(content = None, return_dict = False, output = None, **kwargs)</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">start_for_each</a>(inputs, **kwargs)</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">stream_emitter</a>()</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">to_graph</a>() -> Dict[str, Any]</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">to_mermaid</a>() -> str</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">todo_list</a>()</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">update_plan_step_status</a>(step_id: str, status: str) -> bool</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">update_state</a>(updates: Dict) -> None</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">wait_for_completions</a>(timeout: Optional[float] = None, agent_ids: Optional[List[str]] = None) -> List[SubAgentCompletionEvent]</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">where_does_it_run</a>() -> str</code>
 * <code title="class AutoAgents">AutoAgents.<a href="./src/praisonai-agents/praisonaiagents/agents/autoagents.py">astart</a>()</code>
 * <code title="class AutoAgents">AutoAgents.<a href="./src/praisonai-agents/praisonaiagents/agents/autoagents.py">start</a>()</code>
 * <code title="class AutoRagAgent">AutoRagAgent.<a href="./src/praisonai-agents/praisonaiagents/agents/auto_rag_agent.py">achat</a>(message: str, **kwargs) -> str</code>
