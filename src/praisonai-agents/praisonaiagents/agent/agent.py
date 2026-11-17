@@ -141,7 +141,7 @@ from ..config.feature_configs import (
 # Already loaded by the imports above; hoisted so __init__ does not pay a
 # function-local relative import per construction (#5835).
 from ..config.parse_utils import canonical_preset_key, validate_preset_string
-from ..config.agent_init import resolve_agent_caching, resolve_agent_templates
+from ..config.agent_init import resolve_agent_caching, resolve_agent_planning, resolve_agent_templates
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
 # Single source of truth defined in config.feature_configs and imported here
@@ -1753,36 +1753,12 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # ─────────────────────────────────────────────────────────────────────
         # Resolve PLANNING param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        # Fast path: None/False -> no planning (skip resolve() call)
-        if planning is None or planning is False:
-            _planning_config = None
-        elif planning is True:
-            _planning_config = PlanningConfig()
-        elif isinstance(planning, PlanningConfig):
-            _planning_config = planning
-        else:
-            _planning_config = resolve(
-                value=planning,
-                param_name="planning",
-                config_class=PlanningConfig,
-                presets=PLANNING_PRESETS,
-                string_mode="llm_model",
-                array_mode=ArrayMode.PRESET_OVERRIDE,
-                default=None,
-            )
-        
-        if _planning_config is not None:
-            if isinstance(_planning_config, PlanningConfig):
-                planning = True
-                planning_tools = _planning_config.tools
-                planning_reasoning = _planning_config.reasoning
-                plan_mode = _planning_config.read_only
-            else:
-                planning = bool(_planning_config)
-        elif planning is True:
-            pass  # Keep as True
-        else:
-            planning = False
+        # None/False -> no planning; only the values it sets change (config.agent_init)
+        _planning_config, _planning_set = resolve_agent_planning(planning)
+        planning = _planning_set.get("planning", planning)
+        planning_tools = _planning_set.get("planning_tools", planning_tools)
+        planning_reasoning = _planning_set.get("planning_reasoning", planning_reasoning)
+        plan_mode = _planning_set.get("plan_mode", plan_mode)
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve REFLECTION param - FAST PATH
