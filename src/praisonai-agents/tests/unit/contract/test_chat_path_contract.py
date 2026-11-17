@@ -194,8 +194,6 @@ def _cells(*drifts):
 
 F05 = _drift("F-05", "start(stream=True) on an openai/gpt-4o* model uses Chat Completions; "
              "LLM.get_response_stream has no Responses API branch", ("stream", "litellm_responses"))
-F06 = _drift("F-06", "achat() on the litellm Chat Completions route sends the post-tool follow-up twice",
-             ("achat", "litellm_chat"))
 F07 = _drift("F-07", "OpenAI-client tool loop records usage for one of the two model calls",
              ("chat", "openai_client"), ("achat", "openai_client"))
 F08 = _drift("F-08", "start(stream=True) records no token usage or cost on any route", ("stream", "*"))
@@ -263,7 +261,7 @@ def test_route_reaches_its_endpoint(stub, mode, route):
     assert all(bool(r.get("stream")) == (mode == "stream") for _, r in REQUESTS)
 
 
-@pytest.mark.parametrize("mode,route", _cells(F06))
+@pytest.mark.parametrize("mode,route", _cells())
 def test_tool_round_costs_two_model_calls(stub, mode, route):
     """One tool call: the request that asks for it, then one follow-up. No more."""
     agent = _agent(route, stub, tools=[lookup])
@@ -326,7 +324,7 @@ def test_token_usage_recorded(stub, mode, route):
     assert (usage["tokens_in"], usage["tokens_out"], usage["llm_calls"]) == (USAGE_IN, USAGE_OUT, 1)
 
 
-@pytest.mark.parametrize("mode,route", _cells(F06, F07, F08))
+@pytest.mark.parametrize("mode,route", _cells(F07, F08))
 def test_token_usage_recorded_for_every_call_in_a_tool_round(stub, mode, route):
     agent = _agent(route, stub, tools=[lookup])
     assert _turn(agent, mode) == "hello"

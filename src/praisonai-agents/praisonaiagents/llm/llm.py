@@ -6453,6 +6453,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Get response after tool calls
                     response_text = ""
+                    # This round's tool calls are answered; only the follow-up
+                    # below decides whether there is another round. A stale
+                    # value re-sent the same follow-up a second time (F-06).
+                    tool_calls = None
                     
                     # If no special handling was needed
                     if reasoning_steps:
@@ -6527,9 +6531,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             # If the response also contains new tool_calls, treat this as a
                             # tool-calling round rather than a final answer (Anthropic pattern)
                             _next_tool_calls = resp["choices"][0]["message"].get("tool_calls") or []
-                            if _next_tool_calls:
-                                tool_calls = _next_tool_calls
+                            tool_calls = _next_tool_calls or None
                         elif verbose:
+                            _stream_tool_calls = []
                             async for chunk in await self._acompletion_with_retry(
                                 **self._build_completion_params(
                                     messages=messages,
@@ -6546,6 +6550,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     response_text += content
                                     print("\033[K", end="\r")
                                     print(f"Reflecting... {time.time() - start_time:.1f}s", end="\r")
+                                # tools are sent, so text plus a new tool call is another round
+                                if chunk and chunk.choices and chunk.choices[0].delta:
+                                    _stream_tool_calls = self._process_tool_calls_from_stream(
+                                        chunk.choices[0].delta, _stream_tool_calls)
+                            tool_calls = _stream_tool_calls or None
                         else:
                             response_text = ""
                             async for chunk in await self._acompletion_with_retry(
@@ -6578,7 +6587,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Check if the LLM provided a final answer alongside the tool calls
                     # If response_text contains substantive content, treat it as the final answer
-                    if response_text and len(response_text.strip()) > 10 and not tool_calls:
+                    # The length floor is for Ollama's sequential-tool handling only;
+                    # elsewhere a short answer ("hello") was asked for again (F-06).
+                    if response_text and not tool_calls and (
+                            not self._is_ollama_provider() or len(response_text.strip()) > 10):
                         # LLM provided a final answer after tool execution with no further tool calls
                         final_response_text = response_text.strip()
                         break
