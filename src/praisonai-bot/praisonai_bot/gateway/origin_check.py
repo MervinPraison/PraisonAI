@@ -9,8 +9,10 @@ This is a security feature and lives in the wrapper layer.
 
 from __future__ import annotations
 
-import ipaddress
 from typing import List, Optional
+
+# One implementation, in core (G-21); re-exported so old imports keep working.
+from praisonaiagents.gateway.protocols import is_loopback  # noqa: F401
 
 
 def check_origin(origin: Optional[str], allowed_origins: List[str], bind_host: str) -> bool:
@@ -44,32 +46,6 @@ def check_origin(origin: Optional[str], allowed_origins: List[str], bind_host: s
     
     # Check if origin is in the allowlist or wildcard is present
     return origin in allowed_origins or "*" in allowed_origins
-
-
-def is_loopback(host: str) -> bool:
-    """Check if a host is a loopback address.
-    
-    Args:
-        host: The host address to check
-        
-    Returns:
-        True if the host is a loopback address, False otherwise
-    """
-    if not host:
-        return False
-    
-    # Check common loopback names
-    if host in ("localhost", "127.0.0.1", "::1"):
-        return True
-    
-    try:
-        # Parse as IP address and check if it's loopback
-        ip = ipaddress.ip_address(host)
-        return ip.is_loopback
-    except ValueError:
-        # Not a valid IP address - assume it's a hostname
-        # Only localhost is considered loopback for hostnames
-        return host == "localhost"
 
 
 class GatewayStartupError(Exception):
