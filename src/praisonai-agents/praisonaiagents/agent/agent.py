@@ -143,6 +143,7 @@ from ..config.feature_configs import (
 from ..config.parse_utils import canonical_preset_key, validate_preset_string
 from ..config.agent_init import (
     resolve_agent_caching, resolve_agent_planning, resolve_agent_reflection, resolve_agent_templates,
+    resolve_agent_web,
 )
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
@@ -1909,41 +1910,9 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # ─────────────────────────────────────────────────────────────────────
         # Resolve WEB param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        # ``web=True`` or a dict that does not mention fetch asks for defaults,
-        # not for fetch specifically (X-14); see the model check below.
-        _web_fetch_is_default = web is True or (isinstance(web, dict) and "fetch" not in web)
-        # Fast path: None/False -> no web (skip resolve() call)
-        if web is None or web is False:
-            _web_config = None
-        elif web is True:
-            _web_config = WebConfig()
-        elif isinstance(web, WebConfig):
-            _web_config = web
-        else:
-            _web_config = resolve(
-                value=web,
-                param_name="web",
-                config_class=WebConfig,
-                presets=WEB_PRESETS,
-                array_mode=ArrayMode.PRESET_OVERRIDE,
-                default=None,
-            )
-        
-        _search_provider = "duckduckgo"
-        if _web_config is not None:
-            if isinstance(_web_config, WebConfig):
-                web_search = _web_config.search
-                web_fetch = _web_config.fetch
-                _search_provider = str(getattr(_web_config.search_provider, "value", _web_config.search_provider) or "duckduckgo").lower()
-            else:
-                web_search = bool(_web_config)
-                web_fetch = bool(_web_config)
-        elif web is True:
-            web_search = True
-            web_fetch = True
-        elif web is False:
-            web_search = False
-            web_fetch = False
+        # None/False -> no web; True -> defaults (config.agent_init)
+        (_web_config, web_search, web_fetch, _search_provider,
+         _web_fetch_is_default) = resolve_agent_web(web, web_search, web_fetch)
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve TOOL_SEARCH param
