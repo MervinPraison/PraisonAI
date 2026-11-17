@@ -8,9 +8,12 @@ defaults (for example ``resolve_caching(None)`` returns ``None``).
 
 from typing import Any, Dict, Optional, Tuple
 
-from .feature_configs import CachingConfig, PlanningConfig, ReflectionConfig, TemplateConfig
+from .feature_configs import CachingConfig, OutputConfig, PlanningConfig, ReflectionConfig, TemplateConfig
 from .param_resolver import ArrayMode, resolve
-from .presets import CACHING_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS
+from .parse_utils import canonical_preset_key
+from .presets import (
+    CACHING_PRESETS, DEFAULT_OUTPUT_MODE, OUTPUT_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS,
+)
 
 
 def resolve_agent_caching(caching: Any) -> Tuple[Optional[CachingConfig], bool, Optional[bool]]:
@@ -123,3 +126,73 @@ def resolve_agent_reflection(reflection: Any) -> Tuple[Optional[ReflectionConfig
     if reflection is False:
         return config, {"self_reflect": False}
     return config, {}
+
+
+# File extensions that indicate a file path (for output parameter detection)
+_FILE_EXTENSIONS = frozenset({'.txt', '.md', '.json', '.yaml', '.yml', '.html', '.csv', '.log', '.xml', '.rst'})
+
+def _is_file_path(value: str) -> bool:
+    """Check if a string looks like a file path (not a preset name).
+    
+    Used to detect when output="path/to/file.txt" should be treated as
+    output_file instead of a preset name.
+    
+    Args:
+        value: String to check
+        
+    Returns:
+        True if the string looks like a file path
+    """
+    # Contains path separator
+    if '/' in value or '\\' in value:
+        return True
+    # Ends with common file extension
+    lower = value.lower()
+    for ext in _FILE_EXTENSIONS:
+        if lower.endswith(ext):
+            return True
+    return False
+
+
+def resolve_agent_output(output: Any, env_output: Optional[str]) -> Tuple[Any, bool]:
+    """``output=`` -> ``(config, has_explicit_output)``.
+
+    DEFAULT: "silent" mode (zero overhead, fastest performance). ``env_output``
+    is the ``PRAISONAI_OUTPUT`` value, used only when ``output`` is ``None``.
+    A string is a preset name (case-insensitive) or, if it looks like a file
+    path, the ``output_file``.
+    """
+    # Fast path: None -> silent defaults (use cached env var)
+    if output is None:
+        if env_output and env_output in OUTPUT_PRESETS:
+            output = env_output
+        else:
+            output = DEFAULT_OUTPUT_MODE
+        _has_explicit_output = False
+    else:
+        _has_explicit_output = True
+    
+    # Fast path: string preset lookup (most common case)
+    if isinstance(output, str):
+        output_lower = canonical_preset_key(output)
+        preset_value = OUTPUT_PRESETS.get(output_lower)
+        if preset_value is not None:
+            _output_config = OutputConfig(**preset_value) if isinstance(preset_value, dict) else preset_value
+        elif _is_file_path(output):
+            # String looks like a file path - use as output_file
+            _output_config = OutputConfig(output_file=output)
+        else:
+            _output_config = OutputConfig()  # Default silent
+    elif isinstance(output, OutputConfig):
+        _output_config = output
+    else:
+        # Complex case: use full resolver
+        _output_config = resolve(
+            value=output,
+            param_name="output",
+            config_class=OutputConfig,
+            presets=OUTPUT_PRESETS,
+            array_mode=ArrayMode.PRESET_OVERRIDE,
+            default=OutputConfig(),
+        )
+    return _output_config, _has_explicit_output
