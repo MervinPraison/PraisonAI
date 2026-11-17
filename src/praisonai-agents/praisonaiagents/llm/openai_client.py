@@ -2634,6 +2634,9 @@ class OpenAIClient:
                     cost=None,
                     latency_ms=(time.time() - iteration_start_time) * 1000
                 )
+                # The agent records nothing on None; report the earlier billed call.
+                if usage_callback is not None and _unreported_usage is not None:
+                    usage_callback(_unreported_usage)
                 return None
 
             # Record usage for THIS billed completion. Every tool-loop iteration
