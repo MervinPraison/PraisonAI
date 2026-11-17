@@ -151,6 +151,7 @@ class TestAgentDeepCopy:
         """A clone keeps ownership for tools merged after the source was built."""
         import praisonaiagents.plugins as plugins_module
         from praisonaiagents.plugins.manager import get_plugin_manager
+        from praisonaiagents.plugins.plugin import Plugin, PluginInfo
 
         # Agent() enables plugins from config once per process. Config discovery
         # walks up from the working directory, so a checkout under $HOME finds
@@ -159,9 +160,8 @@ class TestAgentDeepCopy:
         monkeypatch.setattr(plugins_module, "_auto_enable_attempted", True)
         # An earlier Agent() in this process may already have applied that
         # allow-list to the shared manager; clear it for this test.
-        _manager = get_plugin_manager()
-        monkeypatch.setattr(_manager, "_registration_allow_list", None, raising=False)
-        from praisonaiagents.plugins.plugin import Plugin, PluginInfo
+        manager = get_plugin_manager()
+        monkeypatch.setattr(manager, "_registration_allow_list", None)
 
         suffix = uuid.uuid4().hex
         source_name = f"clone_owner_source_{suffix}"
@@ -189,7 +189,6 @@ class TestAgentDeepCopy:
             def get_tools(self):
                 return [late_tool]
 
-        manager = get_plugin_manager()
         assert manager.register(SourcePlugin())
         try:
             source = self._make_agent()
