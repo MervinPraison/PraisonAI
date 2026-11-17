@@ -34,7 +34,7 @@ def test_start_verbose_composed_callbacks_forward_all_arguments(monkeypatch):
 
     monkeypatch.setattr(team, "run_all_tasks", fake_run_all_tasks)
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr("praisonaiagents.agents.agents.logging.debug", lambda msg: debug_messages.append(str(msg)))
+    monkeypatch.setattr("praisonaiagents.agents.agents.logger.debug", lambda msg, *a, **k: debug_messages.append(str(msg)))
 
     team.start(output="verbose")
 

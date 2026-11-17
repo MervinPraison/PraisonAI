@@ -957,7 +957,7 @@ class AgentTeam(SpawnAnnounceProtocol):
         }
         _set = [k for k, v in _unwired.items() if v]
         if _set:
-            logging.warning(
+            logger.warning(
                 f"AgentTeam received {_set} but does not yet apply them at the team "
                 "level; pass these to individual Agent(...) instances instead."
             )
@@ -2839,7 +2839,7 @@ class AgentTeam(SpawnAnnounceProtocol):
                     # Show working spinner
                     console.print(f"[bold yellow]Working...[/]  {agent_name} generating response...")
                 except Exception as e:
-                    logging.debug(f"Error in verbose task start callback: {e}")
+                    logger.debug(f"Error in verbose task start callback: {e}")
             
             def verbose_task_complete_callback(task, task_output):
                 try:
@@ -2861,7 +2861,7 @@ class AgentTeam(SpawnAnnounceProtocol):
                         ))
                     console.print()
                 except Exception as e:
-                    logging.debug(f"Error in verbose task complete callback: {e}")
+                    logger.debug(f"Error in verbose task complete callback: {e}")
             
             # Set callbacks for verbose display (compose with existing callbacks)
             original_on_task_start = self.on_task_start
@@ -2871,23 +2871,23 @@ class AgentTeam(SpawnAnnounceProtocol):
                 try:
                     verbose_task_start_callback(task, task_id)
                 except Exception as e:
-                    logging.debug(f"Error in verbose task start callback: {e}")
+                    logger.debug(f"Error in verbose task start callback: {e}")
                 if original_on_task_start:
                     try:
                         original_on_task_start(task, task_id)
                     except Exception as e:
-                        logging.debug(f"Error in original task start callback: {e}")
+                        logger.debug(f"Error in original task start callback: {e}")
             
             def composed_on_task_complete(task, task_output):
                 try:
                     verbose_task_complete_callback(task, task_output)
                 except Exception as e:
-                    logging.debug(f"Error in verbose task complete callback: {e}")
+                    logger.debug(f"Error in verbose task complete callback: {e}")
                 if original_on_task_complete:
                     try:
                         original_on_task_complete(task, task_output)
                     except Exception as e:
-                        logging.debug(f"Error in original task complete callback: {e}")
+                        logger.debug(f"Error in original task complete callback: {e}")
             
             self.on_task_start = composed_on_task_start
             self.on_task_complete = composed_on_task_complete
@@ -2925,9 +2925,9 @@ class AgentTeam(SpawnAnnounceProtocol):
             try:
                 self.display_token_usage()
             except (ImportError, AttributeError) as e:
-                logging.debug(f"Could not auto-display token usage: {e}")
+                logger.debug(f"Could not auto-display token usage: {e}")
             except Exception as e:
-                logging.debug(f"Unexpected error in token metrics display: {e}")
+                logger.debug(f"Unexpected error in token metrics display: {e}")
         
         # When planning ran, results live in the executed plan-step tasks
         # (self.tasks is restored to the user's original set for reuse).
@@ -3517,7 +3517,7 @@ class AgentTeam(SpawnAnnounceProtocol):
                         # and safe -- but task outputs are NOT, because matching
                         # them by position across a changed task set would skip
                         # the wrong work.
-                        logging.warning(
+                        logger.warning(
                             "Team session %s was saved against a different task set; "
                             "shared state restored but task outputs were not, so no "
                             "task will be wrongly skipped. Re-run from the start, or "
@@ -3795,7 +3795,7 @@ class AgentTeam(SpawnAnnounceProtocol):
             # Use centralized server registry
 
             if not self.agents:
-                logging.warning("No agents to launch for HTTP mode. Add agents to the Agents instance first.")
+                logger.warning("No agents to launch for HTTP mode. Add agents to the Agents instance first.")
                 return
                 
             # Try to import FastAPI dependencies - lazy loading
@@ -3816,7 +3816,7 @@ class AgentTeam(SpawnAnnounceProtocol):
                 # Check which specific module is missing
                 missing_module = str(e).split("No module named '")[-1].rstrip("'")
                 display_error(f"Missing dependency: {missing_module}. Required for launch() method with HTTP mode.")
-                logging.error(f"Missing dependency: {missing_module}. Required for launch() method with HTTP mode.")
+                logger.error(f"Missing dependency: {missing_module}. Required for launch() method with HTTP mode.")
                 print(f"\nTo add API capabilities, install the required dependencies:")
                 print(f"pip install {missing_module}")
                 print("\nOr install all API dependencies with:")
@@ -3860,9 +3860,9 @@ class AgentTeam(SpawnAnnounceProtocol):
             endpoint_id = str(uuid.uuid4())
             path, original_path = _server_registry.reserve_route(port, path, endpoint_id)
             if original_path is not None:
-                logging.warning(f"Path '{original_path}' is already registered on port {port}. Please use a different path.")
+                logger.warning(f"Path '{original_path}' is already registered on port {port}. Please use a different path.")
                 print(f"⚠️ Warning: Path '{original_path}' is already registered on port {port}.")
-                logging.warning(f"Using '{path}' instead of '{original_path}'")
+                logger.warning(f"Using '{path}' instead of '{original_path}'")
                 print(f"🔄 Using '{path}' instead")
             
             # Define the endpoint handler
@@ -3914,7 +3914,7 @@ class AgentTeam(SpawnAnnounceProtocol):
                             # Use this response as input to the next agent
                             current_input = response
                         except Exception as e:
-                            logging.error(f"Error with agent {agent_instance.display_name}: {str(e)}", exc_info=True)
+                            logger.error(f"Error with agent {agent_instance.display_name}: {str(e)}", exc_info=True)
                             results.append({
                                 "agent": agent_instance.display_name,
                                 "error": str(e)
@@ -3932,7 +3932,7 @@ class AgentTeam(SpawnAnnounceProtocol):
                         "final_response": current_input
                     }
                 except Exception as e:
-                    logging.error(f"Error processing query: {str(e)}", exc_info=True)
+                    logger.error(f"Error processing query: {str(e)}", exc_info=True)
                     return JSONResponse(
                         status_code=500,
                         content={"error": f"Error processing query: {str(e)}"}
@@ -3990,7 +3990,7 @@ class AgentTeam(SpawnAnnounceProtocol):
                                 "response": response
                             }
                         except Exception as e:
-                            logging.error(f"Error with agent {agent.display_name}: {str(e)}", exc_info=True)
+                            logger.error(f"Error with agent {agent.display_name}: {str(e)}", exc_info=True)
                             return JSONResponse(
                                 status_code=500,
                                 content={"error": f"Agent error: {str(e)}"}
@@ -4018,7 +4018,7 @@ class AgentTeam(SpawnAnnounceProtocol):
 
         elif protocol == "mcp":
             if not self.agents:
-                logging.warning("No agents to launch for MCP mode. Add agents to the Agents instance first.")
+                logger.warning("No agents to launch for MCP mode. Add agents to the Agents instance first.")
                 return
 
             # Delegate to the praisonai-mcp agent adapter so multi-agent MCP
@@ -4038,7 +4038,7 @@ class AgentTeam(SpawnAnnounceProtocol):
                 return serve_agents(self.agents, host=host, port=port)
             except ImportError:
                 display_error("MCP serving requires the 'praisonai-mcp' package.")
-                logging.error("MCP serving requires the 'praisonai-mcp' package.")
+                logger.error("MCP serving requires the 'praisonai-mcp' package.")
                 print("\nTo add MCP capabilities, install: pip install praisonai-mcp")
                 return None
         else:

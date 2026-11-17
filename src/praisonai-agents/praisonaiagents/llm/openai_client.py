@@ -24,6 +24,8 @@ from ..errors import ToolExecutionError
 from ..model_harness.guard import check_model_request
 from ..tools.call_executor import _durable_iteration_kwargs
 
+logger = logging.getLogger(__name__)
+
 # Graceful "wrap-up" instruction injected when the step budget is nearly
 # exhausted, so the model produces a coherent final answer instead of being
 # hard-cut. Shared by both tool-execution loops for consistent behaviour.
@@ -78,7 +80,7 @@ def _handle_native_deferred_result(
 
         resolver.register_if_absent(tool_result.handle_id, _reinject)
     except Exception as e:  # noqa: BLE001 — registration must never break the turn
-        logging.debug("Native deferred registration skipped (non-fatal): %s", e)
+        logger.debug("Native deferred registration skipped (non-fatal): %s", e)
     return tool_result.note
 
 # Lazy imports for optional dependencies
@@ -748,35 +750,35 @@ class OpenAIClient:
             # they carry no 'function' block. Forward them untouched, allowlisted
             # by type so a genuinely malformed tool is still dropped.
             if isinstance(tool, dict) and is_hosted_tool(tool):
-                logging.debug(f"Forwarding provider-hosted tool: {tool.get('type')}")
+                logger.debug(f"Forwarding provider-hosted tool: {tool.get('type')}")
                 formatted_tools.append(tool)
             # Check if the tool is already in OpenAI format
             elif isinstance(tool, dict) and 'type' in tool and tool['type'] == 'function':
                 if 'function' in tool and isinstance(tool['function'], dict) and 'name' in tool['function']:
-                    logging.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
+                    logger.debug(f"Using pre-formatted OpenAI tool: {tool['function']['name']}")
                     # Fix array schemas in the tool parameters
                     fixed_tool = tool.copy()
                     if 'parameters' in fixed_tool['function']:
                         fixed_tool['function']['parameters'] = self._fix_array_schemas(fixed_tool['function']['parameters'])
                     formatted_tools.append(fixed_tool)
                 else:
-                    logging.debug("Skipping malformed OpenAI tool: missing function or name")
+                    logger.debug("Skipping malformed OpenAI tool: missing function or name")
             # Handle lists of tools
             elif isinstance(tool, list):
                 for subtool in tool:
                     if isinstance(subtool, dict) and is_hosted_tool(subtool):
-                        logging.debug(f"Forwarding provider-hosted tool from list: {subtool.get('type')}")
+                        logger.debug(f"Forwarding provider-hosted tool from list: {subtool.get('type')}")
                         formatted_tools.append(subtool)
                     elif isinstance(subtool, dict) and 'type' in subtool and subtool['type'] == 'function':
                         if 'function' in subtool and isinstance(subtool['function'], dict) and 'name' in subtool['function']:
-                            logging.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
+                            logger.debug(f"Using pre-formatted OpenAI tool from list: {subtool['function']['name']}")
                             # Fix array schemas in the tool parameters
                             fixed_tool = subtool.copy()
                             if 'parameters' in fixed_tool['function']:
                                 fixed_tool['function']['parameters'] = self._fix_array_schemas(fixed_tool['function']['parameters'])
                             formatted_tools.append(fixed_tool)
                         else:
-                            logging.debug("Skipping malformed OpenAI tool in list: missing function or name")
+                            logger.debug("Skipping malformed OpenAI tool in list: missing function or name")
             elif callable(tool):
                 tool_def = self._generate_tool_definition(tool)
                 if tool_def:
@@ -790,19 +792,19 @@ class OpenAIClient:
                 tool_name = next(iter(tool.keys()))
                 gemini_internal_tools = {'googleSearch', 'urlContext', 'codeExecution'}
                 if tool_name in gemini_internal_tools:
-                    logging.debug(f"Using Gemini internal tool: {tool_name}")
+                    logger.debug(f"Using Gemini internal tool: {tool_name}")
                     formatted_tools.append(tool)
                 else:
-                    logging.debug(f"Skipping unknown tool: {tool_name}")
+                    logger.debug(f"Skipping unknown tool: {tool_name}")
             else:
-                logging.debug(f"Skipping tool of unsupported type: {type(tool)}")
+                logger.debug(f"Skipping tool of unsupported type: {type(tool)}")
                 
         # Validate JSON serialization before returning
         if formatted_tools:
             try:
                 json.dumps(formatted_tools)  # Validate serialization
             except (TypeError, ValueError) as e:
-                logging.error(f"Tools are not JSON serializable: {e}")
+                logger.error(f"Tools are not JSON serializable: {e}")
                 return None
         
         # Cache the result
@@ -1239,7 +1241,7 @@ class OpenAIClient:
             from ..tools.schema import build_tool_definition
             return build_tool_definition(func)
         except Exception as e:
-            logging.error(f"Error generating tool definition: {e}")
+            logger.error(f"Error generating tool definition: {e}")
             return None
     
     def _generate_tool_definition_from_name(self, function_name: str) -> Optional[Dict]:
@@ -1257,7 +1259,7 @@ class OpenAIClient:
             # key (alias-safe), then normalise array schemas for strict providers.
             tool_def = registry.get_tool_definition(function_name)
             if tool_def is None:
-                logging.debug(
+                logger.debug(
                     f"Tool '{function_name}' not found or unavailable in registry"
                 )
                 return None
@@ -1275,7 +1277,7 @@ class OpenAIClient:
         except Exception:
             # Keep the tool loop resilient (a single bad tool must not break the
             # whole request), but preserve the traceback for diagnosis.
-            logging.error(
+            logger.error(
                 f"Error generating tool definition from name '{function_name}'",
                 exc_info=True,
             )
@@ -1434,7 +1436,7 @@ class OpenAIClient:
                             # Log TTFT on first token
                             if not ttft_logged:
                                 ttft_ms = (last_content_time - request_start_perf) * 1000
-                                logging.debug(f"TTFT (Time To First Token): {ttft_ms:.0f}ms")
+                                logger.debug(f"TTFT (Time To First Token): {ttft_ms:.0f}ms")
                                 ttft_logged = True
                             
                             # Emit FIRST_TOKEN on first content
@@ -1508,7 +1510,7 @@ class OpenAIClient:
                         # Log TTFT on first token
                         if not ttft_logged:
                             ttft_ms = (last_content_time - request_start_perf) * 1000
-                            logging.debug(f"TTFT (Time To First Token): {ttft_ms:.0f}ms")
+                            logger.debug(f"TTFT (Time To First Token): {ttft_ms:.0f}ms")
                             ttft_logged = True
                         
                         if _emit and not first_token_emitted:
@@ -2219,7 +2221,7 @@ class OpenAIClient:
                                     # Log TTFT on first token
                                     if not ttft_logged:
                                         ttft_ms = (time.perf_counter() - request_start_perf) * 1000
-                                        logging.debug(f"TTFT (Time To First Token): {ttft_ms:.0f}ms")
+                                        logger.debug(f"TTFT (Time To First Token): {ttft_ms:.0f}ms")
                                         ttft_logged = True
                                     full_response_text += chunk.choices[0].delta.content
                                     live.update(display_fn(full_response_text, start_time))
@@ -2341,7 +2343,7 @@ class OpenAIClient:
                     # the whole run (matches chat_completion_with_tools_stream).
                     function_name, arguments, _tool_call_id, err = _extract_tool_call_name_and_args(tool_call)
                     if err is not None:
-                        logging.warning(f"Failed to parse tool call arguments: {err}")
+                        logger.warning(f"Failed to parse tool call arguments: {err}")
                         messages.append({
                             "role": "tool",
                             "tool_call_id": _tool_call_id,
@@ -2368,7 +2370,7 @@ class OpenAIClient:
                     except ToolExecutionError:
                         raise
                     except Exception as tool_error:
-                        logging.warning(f"Tool '{function_name}' failed: {tool_error}")
+                        logger.warning(f"Tool '{function_name}' failed: {tool_error}")
                         tool_result = {"error": str(tool_error)}
                     # Parity with the LiteLLM loop: register a deferred handle so
                     # its eventual background value is re-injected, not lost.
@@ -2737,7 +2739,7 @@ class OpenAIClient:
                     except ToolExecutionError:
                         raise
                     except Exception as tool_error:
-                        logging.warning(f"Tool '{name}' failed: {tool_error}")
+                        logger.warning(f"Tool '{name}' failed: {tool_error}")
                         return {"error": str(tool_error)}
 
                 if _native_batch_parallel_ok(parallel_tool_calls, _specs):
@@ -2761,7 +2763,7 @@ class OpenAIClient:
 
                 for tool_call, function_name, arguments, _tool_call_id, err in _parsed:
                     if err is not None:
-                        logging.warning(f"Failed to parse tool call arguments: {err}")
+                        logger.warning(f"Failed to parse tool call arguments: {err}")
                         messages.append({
                             "role": "tool",
                             "tool_call_id": _tool_call_id,

@@ -17,6 +17,8 @@ from ..main import display_instruction, display_tool_call, display_interaction
 import json
 import sys
 
+logger = logging.getLogger(__name__)
+
 
 def __getattr__(name):
     """Lazily expose selected llm symbols as module attributes.
@@ -441,7 +443,7 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
                 if not is_valid:
                     last_error = error_msg
                     if attempt < max_retries - 1:
-                        logging.warning(f"Configuration validation failed (attempt {attempt + 1}/{max_retries}): {error_msg}")
+                        logger.warning(f"Configuration validation failed (attempt {attempt + 1}/{max_retries}): {error_msg}")
                         continue
                     else:
                         raise ValueError(f"Configuration validation failed after {max_retries} attempts: {error_msg}")
@@ -450,7 +452,7 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
                 if len(config.agents) > self.max_agents:
                     config.agents = config.agents[:self.max_agents]
                 elif len(config.agents) < self.max_agents:
-                    logging.warning(f"Generated {len(config.agents)} agents, expected {self.max_agents}")
+                    logger.warning(f"Generated {len(config.agents)} agents, expected {self.max_agents}")
                 
                 return config
                 
@@ -460,10 +462,10 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
             except Exception as e:
                 last_error = str(e)
                 if attempt < max_retries - 1:
-                    logging.warning(f"Error generating configuration (attempt {attempt + 1}/{max_retries}): {e}")
+                    logger.warning(f"Error generating configuration (attempt {attempt + 1}/{max_retries}): {e}")
                     continue
                 else:
-                    logging.error(f"Error generating configuration after {max_retries} attempts: {e}")
+                    logger.error(f"Error generating configuration after {max_retries} attempts: {e}")
                     raise
         
         # This should never be reached due to the raise statements above

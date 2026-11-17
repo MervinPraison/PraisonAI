@@ -8,6 +8,8 @@ from typing import List, Optional, Dict, Any, Union, Literal, Type
 from pydantic import BaseModel, ConfigDict
 import asyncio
 
+logger = logging.getLogger(__name__)
+
 def _rich():
     """Lazy-load Rich display classes (cached by sys.modules after first call)."""
     from rich.console import Console
@@ -179,7 +181,7 @@ def execute_sync_callback(display_type: str, **kwargs):
         try:
             callback(**_filter_callback_kwargs(callback, kwargs))
         except Exception:
-            logging.exception("Display callback for %r failed; ignored", display_type)
+            logger.exception("Display callback for %r failed; ignored", display_type)
 
 async def execute_callback(display_type: str, **kwargs):
     """Execute both sync and async callbacks for a given display type.
@@ -200,18 +202,18 @@ async def execute_callback(display_type: str, **kwargs):
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, lambda: sync_callback(**supported_kwargs))
         except Exception:
-            logging.exception("Display callback for %r failed; ignored", display_type)
+            logger.exception("Display callback for %r failed; ignored", display_type)
     
     if async_callback:
         try:
             await async_callback(**_filter_callback_kwargs(async_callback, kwargs))
         except Exception:
-            logging.exception("Async display callback for %r failed; ignored", display_type)
+            logger.exception("Async display callback for %r failed; ignored", display_type)
 
 def _clean_display_content(content: str, max_length: int = 20000) -> str:
     """Helper function to clean and truncate content for display."""
     if not content or not str(content).strip():
-        logging.debug(f"Empty content received in _clean_display_content: {repr(content)}")
+        logger.debug(f"Empty content received in _clean_display_content: {repr(content)}")
         return ""
         
     content = str(content)
@@ -429,12 +431,12 @@ def display_tool_call(message: str, console=None, tool_name: str = None, tool_in
         elapsed_time: Time taken for tool execution in seconds
         success: Whether the tool call succeeded
     """
-    logging.debug(f"display_tool_call called with message: {repr(message)}")
+    logger.debug(f"display_tool_call called with message: {repr(message)}")
     if not message or not message.strip():
-        logging.debug("Empty message in display_tool_call, returning early")
+        logger.debug("Empty message in display_tool_call, returning early")
         return
     message = _clean_display_content(str(message))
-    logging.debug(f"Cleaned message in display_tool_call: {repr(message)}")
+    logger.debug(f"Cleaned message in display_tool_call: {repr(message)}")
     
     # Execute synchronous callbacks (always, even when console is None)
     execute_sync_callback('tool_call', message=message, tool_name=tool_name, tool_input=tool_input, tool_output=tool_output)
@@ -497,7 +499,7 @@ def display_error(message: str, console=None):
 
 def display_generating(content: str = "", start_time: Optional[float] = None):
     if not content or not str(content).strip():
-        logging.debug("Empty content in display_generating, returning early")
+        logger.debug("Empty content in display_generating, returning early")
         return None
 
     elapsed_str = ""
@@ -662,15 +664,15 @@ async def adisplay_instruction(message: str, console=None, agent_name: str = Non
 
 async def adisplay_tool_call(message: str, console=None):
     """Async version of display_tool_call."""
-    logging.debug(f"adisplay_tool_call called with message: {repr(message)}")
+    logger.debug(f"adisplay_tool_call called with message: {repr(message)}")
     if not message or not message.strip():
-        logging.debug("Empty message in adisplay_tool_call, returning early")
+        logger.debug("Empty message in adisplay_tool_call, returning early")
         return
     Console, Panel, Text, _Md = _rich()
     if console is None:
         console = Console()
     message = _clean_display_content(str(message))
-    logging.debug(f"Cleaned message in adisplay_tool_call: {repr(message)}")
+    logger.debug(f"Cleaned message in adisplay_tool_call: {repr(message)}")
     
     # Execute callbacks
     await execute_callback('tool_call', message=message)
@@ -696,7 +698,7 @@ async def adisplay_error(message: str, console=None):
 async def adisplay_generating(content: str = "", start_time: Optional[float] = None):
     """Async version of display_generating."""
     if not content or not str(content).strip():
-        logging.debug("Empty content in adisplay_generating, returning early")
+        logger.debug("Empty content in adisplay_generating, returning early")
         return None
 
     elapsed_str = ""

@@ -349,7 +349,7 @@ class TestAutoAgents:
         with patch.object(AutoAgents, '_create_agents_and_tasks') as mock_create, \
              patch.object(AutoAgents, '_display_agents_and_tasks') as mock_display, \
              patch('praisonaiagents.agents.agents.Agents.__init__') as mock_super_init, \
-             patch('logging.warning') as mock_warning:
+             patch('praisonaiagents.agents.autoagents.logger.warning') as mock_warning:
             
             # Mock the return value of _create_agents_and_tasks
             mock_create.return_value = ([], [])  # Empty agents and tasks lists
@@ -507,7 +507,7 @@ class TestAutoAgents:
         with patch.object(AutoAgents, '_create_agents_and_tasks') as mock_create, \
              patch.object(AutoAgents, '_display_agents_and_tasks') as mock_display, \
              patch('praisonaiagents.agents.agents.Agents.__init__') as mock_super_init, \
-             patch('logging.warning') as mock_warning:
+             patch('praisonaiagents.agents.autoagents.logger.warning') as mock_warning:
             
             # Mock the return value of _create_agents_and_tasks
             mock_agents = [Mock()]
