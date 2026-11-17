@@ -6533,6 +6533,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             _next_tool_calls = resp["choices"][0]["message"].get("tool_calls") or []
                             tool_calls = _next_tool_calls or None
                         elif verbose:
+                            _stream_tool_calls = []
                             async for chunk in await self._acompletion_with_retry(
                                 **self._build_completion_params(
                                     messages=messages,
@@ -6549,6 +6550,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                     response_text += content
                                     print("\033[K", end="\r")
                                     print(f"Reflecting... {time.time() - start_time:.1f}s", end="\r")
+                                # tools are sent, so text plus a new tool call is another round
+                                if chunk and chunk.choices and chunk.choices[0].delta:
+                                    _stream_tool_calls = self._process_tool_calls_from_stream(
+                                        chunk.choices[0].delta, _stream_tool_calls)
+                            tool_calls = _stream_tool_calls or None
                         else:
                             response_text = ""
                             async for chunk in await self._acompletion_with_retry(
