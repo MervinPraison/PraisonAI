@@ -1,7 +1,6 @@
 """G-30 (steering): one copy of a helper llm.py, openai_client.py and tool_execution.py shared (G-30)."""
 
 from pathlib import Path
-from types import SimpleNamespace
 
 import praisonaiagents
 from praisonaiagents.llm import _helpers
