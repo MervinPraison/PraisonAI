@@ -117,24 +117,10 @@ from ..config.feature_configs import (
 # function-local relative import per construction (#5835).
 from ..config.parse_utils import canonical_preset_key, validate_preset_string
 from ..config.agent_init import (
-    resolve_agent_caching, resolve_agent_hooks, resolve_agent_planning, resolve_agent_reflection,
-    resolve_agent_templates,
-    resolve_agent_caching, resolve_agent_planning, resolve_agent_reflection, resolve_agent_templates,
-    resolve_agent_web,
-    resolve_agent_caching, resolve_agent_execution, resolve_agent_planning, resolve_agent_reflection,
-    resolve_agent_templates,
-    resolve_agent_caching, resolve_agent_history, resolve_agent_planning, resolve_agent_reflection,
-    resolve_agent_templates,
-    resolve_agent_caching, resolve_agent_learn, resolve_agent_planning, resolve_agent_reflection,
-    resolve_agent_templates,
-    resolve_agent_caching, resolve_agent_memory, resolve_agent_planning, resolve_agent_reflection,
-    resolve_agent_templates,
-    resolve_agent_caching, resolve_agent_knowledge, resolve_agent_planning, resolve_agent_reflection,
-    resolve_agent_templates,
-    _is_file_path, resolve_agent_caching, resolve_agent_output, resolve_agent_planning,
-    resolve_agent_reflection, resolve_agent_templates,
-    resolve_agent_caching, resolve_agent_guardrails, resolve_agent_planning, resolve_agent_reflection,
-    resolve_agent_templates,
+    _is_file_path, resolve_agent_caching, resolve_agent_execution, resolve_agent_guardrails,
+    resolve_agent_history, resolve_agent_hooks, resolve_agent_knowledge, resolve_agent_learn,
+    resolve_agent_memory, resolve_agent_output, resolve_agent_planning, resolve_agent_reflection,
+    resolve_agent_templates, resolve_agent_web,
 )
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
