@@ -6457,6 +6457,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # below decides whether there is another round. A stale
                     # value re-sent the same follow-up a second time (F-06).
                     tool_calls = None
+                    # A tool may have cancelled the turn: stop before the
+                    # follow-up model call, as the sync loop does (F-14).
+                    if _is_cancelled():
+                        reason = _cancel_reason()
+                        logging.debug(f"Async LLM tool loop cancelled after tool dispatch: {reason}")
+                        return _prepare_return_value(f"Task interrupted: {reason}")
                     
                     # If no special handling was needed
                     if reasoning_steps:
