@@ -708,10 +708,16 @@ class OpenAIClient:
             if isinstance(prompt, str):
                 prompt = prompt + "\nReturn ONLY a valid JSON object. No other text or explanation."
             elif isinstance(prompt, list):
-                # Create a copy to avoid modifying the original
-                prompt = prompt.copy()
+                # Copy the parts, not just the list: the items are the caller's
+                # own dicts, so editing them wrote the instruction into the
+                # caller's prompt and appended it again on every later turn
+                # that reused that prompt.
+                prompt = [
+                    dict(item) if isinstance(item, dict) else item
+                    for item in prompt
+                ]
                 for item in prompt:
-                    if item.get("type") == "text":
+                    if isinstance(item, dict) and item.get("type") == "text":
                         item["text"] = item["text"] + "\nReturn ONLY a valid JSON object. No other text or explanation."
                         break
         
