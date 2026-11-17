@@ -87,6 +87,4 @@ def resolve_agent_planning(planning: Any) -> Tuple[Optional[PlanningConfig], Dic
             return config, {"planning": True, "planning_tools": config.tools,
                             "planning_reasoning": config.reasoning, "plan_mode": config.read_only}
         return config, {"planning": bool(config)}
-    if planning is True:
-        return config, {}
     return config, {"planning": False}
