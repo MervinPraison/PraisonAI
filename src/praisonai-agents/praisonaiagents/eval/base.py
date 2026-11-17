@@ -102,6 +102,16 @@ class BaseEvaluator(ABC):
         """
         return self.run(**kwargs)
     
+    async def _run_sync_with_async_hooks(self, print_summary: bool = False) -> Any:
+        """Shared body of the evaluators' ``run_async``: the async hooks around
+        the sync ``run()``, then the optional summary."""
+        await self.async_before_run()
+        result = self.run(print_summary=False)
+        await self.async_after_run(result)
+        if print_summary:
+            result.print_summary()
+        return result
+
     def _save_result(self, result: Any) -> None:
         """
         Save evaluation result to file.
