@@ -21,6 +21,7 @@ import random
 from typing import List, Optional, Any, Dict, Union, TYPE_CHECKING
 from ..errors import ToolExecutionError
 from ..config.feature_configs import DEFAULT_TOOL_OUTPUT_LIMIT
+from ..llm._helpers import tool_parse_error_message  # noqa: F401 - re-exported for chat_mixin
 
 logger = logging.getLogger(__name__)
 
@@ -220,9 +221,6 @@ class _CallableGuardrailAdapter:
 def tool_arguments_parse_failed(arguments) -> bool:
     """True when tool-call arguments could not be parsed (vs. legitimately empty)."""
     return arguments is _TOOL_ARGUMENTS_PARSE_FAILED
-
-
-from ..llm._helpers import tool_parse_error_message  # noqa: E402,F401 - re-exported here
 
 
 if TYPE_CHECKING:

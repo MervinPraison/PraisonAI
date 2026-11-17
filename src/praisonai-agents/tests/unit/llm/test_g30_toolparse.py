@@ -1,12 +1,6 @@
 """G-30 (toolparse): one copy of a helper llm.py, openai_client.py and tool_execution.py shared (G-30)."""
 
-from pathlib import Path
-from types import SimpleNamespace
-
-import praisonaiagents
 from praisonaiagents.llm import _helpers
-
-PKG = Path(praisonaiagents.__file__).parent
 
 
 def test_tool_parse_error_message_is_one_function():
