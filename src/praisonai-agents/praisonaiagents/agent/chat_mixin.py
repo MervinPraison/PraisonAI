@@ -6260,6 +6260,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     # is paired with its prompt on resume (Issue #5407).
                     self._persist_message("user", normalized_content)
                 
+                # (emitter, start) of an llm_request with no llm_response yet,
+                # so a failed stream still closes its trace pair (F-11).
+                _open_llm_call = None
                 try:
                     # Check if OpenAI client is available
                     if self._openai_client is None:
@@ -6329,7 +6332,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         self.name, messages_count=len(messages), tokens_used=0,
                         model=self.llm if isinstance(self.llm, str) else None, messages=messages,
                     )
-                    completion = self._openai_client.sync_client.chat.completions.create(**completion_args)
+                    _open_llm_call = (_stream_trace, request_start_perf)
+                    completion =self._openai_client.sync_client.chat.completions.create(**completion_args)
                     
                     # Emit HEADERS_RECEIVED event
                     self.stream_emitter.emit(StreamEvent(
@@ -6413,6 +6417,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         duration_ms=(time_module.perf_counter() - request_start_perf) * 1000,
                         response_content=response_text,
                     )
+                    _open_llm_call = None
                     
                     # Handle any tool calls that were accumulated
                     if tool_calls_data:
@@ -6627,6 +6632,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             model=self.llm if isinstance(self.llm, str) else None,
                             messages=followup_args['messages'],
                         )
+                        _open_llm_call = (_stream_trace, _followup_started)
                         for followup_chunk in self._openai_client.sync_client.chat.completions.create(
                             **followup_args
                         ):
@@ -6657,6 +6663,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             duration_ms=(time_module.perf_counter() - _followup_started) * 1000,
                             response_content=followup_text,
                         )
+                        _open_llm_call = None
                         if followup_text:
                             self._append_to_chat_history(
                                 {"role": "assistant", "content": followup_text}
@@ -6697,6 +6704,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     self._rollback_chat_history_to(chat_history_length)
                     raise
                 except Exception as e:
+                    if _open_llm_call is not None:
+                        _trace, _started = _open_llm_call
+                        _open_llm_call = None
+                        _trace.llm_response(
+                            self.name,
+                            duration_ms=(time_module.perf_counter() - _started) * 1000,
+                            finish_reason="error",
+                            response_content=str(e),
+                        )
                     # Rollback chat history on error
                     self._rollback_chat_history_to(chat_history_length)
                     logger.error(f"OpenAI streaming error: {e}")

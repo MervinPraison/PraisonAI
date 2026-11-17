@@ -318,6 +318,24 @@ def test_trace_events_emitted(stub, mode, route):
     assert E.LLM_RESPONSE in types
 
 
+def test_failed_stream_pairs_llm_request_with_error_response(stub):
+    from praisonaiagents.trace.context_events import (
+        ContextEventType as E, ContextListSink, ContextTraceEmitter, trace_context)
+    STATE["fail"] = True
+    sink = ContextListSink()
+    agent = _agent("openai_client", stub)
+    with trace_context(ContextTraceEmitter(sink=sink, session_id="s", enabled=True)):
+        try:
+            _turn(agent, "stream")
+        except Exception:
+            pass  # the fallback chat() also gets the 401; only the trace matters here
+    events = sink.get_events()
+    requests = [e for e in events if e.event_type == E.LLM_REQUEST]
+    responses = [e for e in events if e.event_type == E.LLM_RESPONSE]
+    assert requests and len(requests) == len(responses)
+    assert responses[0].data.get("finish_reason") == "error"
+
+
 @pytest.mark.parametrize("mode,route", _cells(F08))
 def test_token_usage_recorded(stub, mode, route):
     agent = _agent(route, stub)
