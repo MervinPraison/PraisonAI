@@ -142,7 +142,8 @@ from ..config.feature_configs import (
 # function-local relative import per construction (#5835).
 from ..config.parse_utils import canonical_preset_key, validate_preset_string
 from ..config.agent_init import (
-    resolve_agent_caching, resolve_agent_planning, resolve_agent_reflection, resolve_agent_templates,
+    resolve_agent_caching, resolve_agent_history, resolve_agent_planning, resolve_agent_reflection,
+    resolve_agent_templates,
 )
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
@@ -1592,68 +1593,10 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Resolve HISTORY from MemoryConfig - FAST PATH
         # History is enabled via memory="history" preset or MemoryConfig(history=True)
         # ─────────────────────────────────────────────────────────────────────
-        _history_enabled = False
-        _history_limit = 10
-        _history_session_id = None
-        
-        # Check if memory config has history settings
-        if _memory_config is not None and isinstance(_memory_config, MemoryConfig):
-            if _memory_config.history:
-                _history_enabled = True
-                _history_limit = _memory_config.history_limit
-                # Use explicit session_id from MemoryConfig if provided
-                if _memory_config.session_id:
-                    _history_session_id = _memory_config.session_id
-        
-        # Use auto_save session if no explicit session and history is enabled
-        if _history_enabled and _history_session_id is None and auto_save:
-            _history_session_id = auto_save
-        
-        # Auto-generate session_id when history=True but no session_id set
-        # This ensures _init_session_store() can create the store
-        if _history_enabled and session_id is None and _history_session_id is not None:
-            session_id = _history_session_id
-        elif _history_enabled and session_id is None and _history_session_id is None:
-            import hashlib as _hl
-            import os as _os
-            _name = name or "agent"
-            # Workspace-scoped id so same-named agents in different projects don't
-            # collide (Issue #3154). Opt out with PRAISONAI_GLOBAL_SESSIONS=true for
-            # name-only global continuity.
-            _global_scope = _os.environ.get("PRAISONAI_GLOBAL_SESSIONS", "").lower() in ("1", "true", "yes")
-            if _global_scope:
-                _workspace_id = "global"
-            else:
-                from ..session.workspace import workspace_id as _wid
-                _workspace_id = _wid()
-            _workspace_hash = _hl.sha256(f"{_workspace_id}:{_name}".encode()).hexdigest()[:8]
-            _new_id = f"history_{_workspace_hash}"
-            # Backward-compat ids (resolution order: name-only sha256, then md5)
-            _name_sha_id = f"history_{_hl.sha256(_name.encode()).hexdigest()[:8]}"
-            _name_md5_id = f"history_{_hl.md5(_name.encode()).hexdigest()[:8]}"
-            # Resolve the migration lookup against the SAME directory the session
-            # store uses at runtime, so a custom PRAISONAI_HOME is honoured (the
-            # store reads from get_sessions_dir()). Fall back to the default path
-            # only if that helper is unavailable.
-            try:
-                from ..paths import get_sessions_dir as _get_sessions_dir
-                _session_dir = str(_get_sessions_dir())
-            except Exception:
-                _session_dir = _os.path.join(_os.path.expanduser("~"), ".praisonai", "sessions")
-            # Prefer an existing workspace-scoped session. Legacy (pre-workspace)
-            # name-only files are only adopted in global scope: doing so in a
-            # workspace-scoped run would silently share Project A's history with a
-            # same-named agent in Project B (Issue #3154). Global scope is the
-            # explicit opt-in for that name-only continuity.
-            if _os.path.exists(_os.path.join(_session_dir, f"{_new_id}.json")):
-                session_id = _new_id
-            elif _global_scope and _os.path.exists(_os.path.join(_session_dir, f"{_name_sha_id}.json")):
-                session_id = _name_sha_id  # preserve existing history
-            elif _global_scope and _os.path.exists(_os.path.join(_session_dir, f"{_name_md5_id}.json")):
-                session_id = _name_md5_id  # preserve existing history
-            else:
-                session_id = _new_id
-            _history_session_id = session_id
+        # history=True picks the session id: MemoryConfig.session_id, auto_save,
+        # session_id=, or a workspace-scoped generated id (config.agent_init)
+        _history_enabled, _history_limit, _history_session_id, session_id = resolve_agent_history(
+            _memory_config, session_id, auto_save, name)
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve KNOWLEDGE param - FAST PATH
