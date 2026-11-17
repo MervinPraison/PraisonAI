@@ -20,6 +20,8 @@ import logging
 from ..approval import require_approval
 from . import _file_locks
 
+logger = logging.getLogger(__name__)
+
 # Default cap on the number of lines returned by a single ``read_file`` call
 # when no explicit ``limit`` is given.  Keeps an unbounded whole-file read from
 # silently blowing the context budget; the model is told how to page for more.
@@ -223,7 +225,7 @@ class FileTools:
             return body
         except Exception as e:
             error_msg = f"Error reading file {filepath}: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return error_msg
 
     @require_approval(risk_level="high")
@@ -270,12 +272,12 @@ class FileTools:
                         try:
                             current = self._content_hash(safe_path, encoding)
                         except Exception as e:
-                            logging.error(
+                            logger.error(
                                 "Refusing to write %s: could not verify staleness: %s",
                                 filepath, e)
                             return False
                         if current != recorded:
-                            logging.error(
+                            logger.error(
                                 "Refusing to write %s: file changed since it was "
                                 "read - re-read before writing (or pass force=True)",
                                 filepath)
@@ -295,7 +297,7 @@ class FileTools:
             return True
         except Exception as e:
             error_msg = f"Error writing to file {filepath}: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return False
 
     def list_files(self, directory: str, pattern: Optional[str] = None) -> List[Dict[str, Union[str, int]]]:
@@ -338,7 +340,7 @@ class FileTools:
             return result
         except Exception as e:
             error_msg = f"Error listing files in {directory}: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return [{'error': error_msg}]
 
     def get_file_info(self, filepath: str) -> Dict[str, Union[str, int]]:
@@ -372,7 +374,7 @@ class FileTools:
             }
         except Exception as e:
             error_msg = f"Error getting file info for {filepath}: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {'error': error_msg}
 
     @require_approval(risk_level="high")
@@ -399,7 +401,7 @@ class FileTools:
             return True
         except Exception as e:
             error_msg = f"Error copying file from {src} to {dst}: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return False
 
     @require_approval(risk_level="high")
@@ -426,7 +428,7 @@ class FileTools:
             return True
         except Exception as e:
             error_msg = f"Error moving file from {src} to {dst}: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return False
 
     @require_approval(risk_level="high")
@@ -449,7 +451,7 @@ class FileTools:
             return True
         except Exception as e:
             error_msg = f"Error deleting file {filepath}: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return False
 
     @require_approval(risk_level="medium")
@@ -555,7 +557,7 @@ class FileTools:
             
         except Exception as e:
             error_msg = f"Error downloading {url}: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {
                 "success": False,
                 "path": "",

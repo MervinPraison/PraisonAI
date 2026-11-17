@@ -20,6 +20,8 @@ import threading
 from typing import Dict, List, Optional, Union
 from ..approval import require_approval
 
+logger = logging.getLogger(__name__)
+
 # Minimum grace period (seconds) always granted for stdout/stderr reader threads
 # to flush already-written output after the process exits, even when the command
 # consumed nearly all of its timeout budget.
@@ -245,7 +247,7 @@ class ShellTools:
                 if not os.path.isdir(cwd):
                     # Fallback: try home directory, then current working directory
                     fallback = os.path.expanduser("~") if os.path.isdir(os.path.expanduser("~")) else os.getcwd()
-                    logging.warning(f"Working directory '{cwd}' does not exist, using '{fallback}'")
+                    logger.warning(f"Working directory '{cwd}' does not exist, using '{fallback}'")
                     cwd = fallback
 
             if run_in_background:
@@ -342,7 +344,7 @@ class ShellTools:
             # gets mistaken for a command failure. The type name plus a
             # traceback makes the difference visible at a glance.
             error_msg = f"Error executing command: {type(e).__name__}: {e}"
-            logging.error(error_msg, exc_info=True)
+            logger.error(error_msg, exc_info=True)
             return {
                 'stdout': '',
                 'stderr': error_msg,
@@ -495,7 +497,7 @@ class ShellTools:
                 if entry["process"].poll() is None:
                     self._terminate_background(entry["process"])
             except Exception as exc:
-                logging.debug("Failed to stop background command: %s", exc, exc_info=True)
+                logger.debug("Failed to stop background command: %s", exc, exc_info=True)
 
     def _current_cancel_event(self):
         """Return the agent's cooperative cancellation Event, if any.
@@ -587,7 +589,7 @@ class ShellTools:
                     metadata={"stream": stream_name},
                 ))
             except Exception as exc:  # never break command execution on a progress failure
-                logging.debug("Tool progress emission failed: %s", exc, exc_info=True)
+                logger.debug("Tool progress emission failed: %s", exc, exc_info=True)
 
         stdout_chunks: List[str] = []
         stderr_chunks: List[str] = []
@@ -607,12 +609,12 @@ class ShellTools:
                 # error path reports it instead of silently returning a partial
                 # prefix as if the command had succeeded.
                 read_errors.append(exc)
-                logging.debug("Error reading %s stream: %s", stream_name, exc, exc_info=True)
+                logger.debug("Error reading %s stream: %s", stream_name, exc, exc_info=True)
             finally:
                 try:
                     stream.close()
                 except Exception as exc:
-                    logging.debug("Failed to close %s stream: %s", stream_name, exc, exc_info=True)
+                    logger.debug("Failed to close %s stream: %s", stream_name, exc, exc_info=True)
 
         t_out = threading.Thread(target=_pump, args=(process.stdout, stdout_chunks, "stdout"), daemon=True)
         t_err = threading.Thread(target=_pump, args=(process.stderr, stderr_chunks, "stderr"), daemon=True)
@@ -744,7 +746,7 @@ class ShellTools:
             return processes
         except Exception as e:
             error_msg = f"Error listing processes: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return []
     
     @require_approval(risk_level="critical")
@@ -792,7 +794,7 @@ class ShellTools:
             }
         except Exception as e:
             error_msg = f"Error killing process: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {
                 'success': False,
                 'message': error_msg
@@ -839,7 +841,7 @@ class ShellTools:
             }
         except Exception as e:
             error_msg = f"Error getting system info: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {}
 
 _shell_tools = ShellTools()

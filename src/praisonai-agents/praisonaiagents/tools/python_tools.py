@@ -23,6 +23,8 @@ import sys
 from ..approval import require_approval
 from ..sandbox.protocols import ResourceLimits
 
+logger = logging.getLogger(__name__)
+
 def _safe_getattr(obj, name, *default):
     """getattr wrapper that blocks access to dunder attributes."""
     if type(name) is not str:
@@ -341,7 +343,7 @@ if __name__ == "__main__":
         if os.name == "posix":
             preexec_fn = _make_resource_preexec(limits)
         else:
-            logging.warning(
+            logger.warning(
                 "Code sandbox: resource limits (memory/CPU/process/file caps) "
                 "are only enforced on POSIX; on this platform only the "
                 "wall-clock timeout applies."
@@ -701,7 +703,7 @@ def _execute_code_direct(
 
         except Exception as e:
             error_msg = f"Error executing code: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {
                 'result': None,
                 'stdout': stdout_buffer.getvalue(),
@@ -711,7 +713,7 @@ def _execute_code_direct(
 
     except Exception as e:
         error_msg = f"Error executing code: {str(e)}"
-        logging.error(error_msg)
+        logger.error(error_msg)
         return {
             'result': None,
             'stdout': '',
@@ -823,7 +825,7 @@ class PythonTools:
             return analysis
         except Exception as e:
             error_msg = f"Error analyzing code: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return None
 
     def format_code(
@@ -845,7 +847,7 @@ class PythonTools:
         try:
             if util.find_spec(style) is None:
                 error_msg = f"{style} package is not available. Please install it using: pip install {style}"
-                logging.error(error_msg)
+                logger.error(error_msg)
                 return None
 
             if style == 'black':
@@ -866,7 +868,7 @@ class PythonTools:
                 )
         except Exception as e:
             error_msg = f"Error formatting code: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return None
 
     def lint_code(
@@ -884,7 +886,7 @@ class PythonTools:
         try:
             if util.find_spec('pylint') is None:
                 error_msg = "pylint package is not available. Please install it using: pip install pylint"
-                logging.error(error_msg)
+                logger.error(error_msg)
                 return None
 
             # Import pylint only when needed
@@ -943,7 +945,7 @@ class PythonTools:
             return results
         except Exception as e:
             error_msg = f"Error linting code: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return {
                 'errors': [],
                 'warnings': [],
@@ -977,7 +979,7 @@ class PythonTools:
             return output.getvalue()
         except Exception as e:
             error_msg = f"Error disassembling code: {str(e)}"
-            logging.error(error_msg)
+            logger.error(error_msg)
             return None
 
 

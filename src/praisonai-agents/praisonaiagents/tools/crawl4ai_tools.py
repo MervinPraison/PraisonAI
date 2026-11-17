@@ -28,6 +28,8 @@ from praisonaiagents._logging import get_logger
 import asyncio
 from importlib import util
 
+logger = logging.getLogger(__name__)
+
 def _is_safe_crawl_url(url: str) -> bool:
     """Return True when *url* passes SSRF checks for crawling.
 
@@ -500,7 +502,7 @@ async def crawl4ai(
     """
     is_available, error = _check_crawl4ai_available()
     if not is_available:
-        logging.error(error)
+        logger.error(error)
         return {"error": error, "success": False}
     
     tools = Crawl4AITools()
@@ -534,7 +536,7 @@ async def crawl4ai_many(
     """
     is_available, error = _check_crawl4ai_available()
     if not is_available:
-        logging.error(error)
+        logger.error(error)
         return [{"error": error, "success": False}]
     
     tools = Crawl4AITools()
@@ -573,7 +575,7 @@ async def crawl4ai_extract(
     """
     is_available, error = _check_crawl4ai_available()
     if not is_available:
-        logging.error(error)
+        logger.error(error)
         return {"error": error, "success": False}
     
     tools = Crawl4AITools()
@@ -612,7 +614,7 @@ async def crawl4ai_llm_extract(
     """
     is_available, error = _check_crawl4ai_available()
     if not is_available:
-        logging.error(error)
+        logger.error(error)
         return {"error": error, "success": False}
     
     tools = Crawl4AITools()
