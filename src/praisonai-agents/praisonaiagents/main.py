@@ -3,6 +3,7 @@ import time
 import json
 import logging
 import threading
+import contextvars
 from praisonaiagents._logging import get_logger
 from typing import List, Optional, Dict, Any, Union, Literal, Type
 from pydantic import BaseModel, ConfigDict
@@ -165,6 +166,12 @@ def _filter_callback_kwargs(callback, kwargs):
         return kwargs
     return {k: v for k, v in kwargs.items() if k in sig.parameters}
 
+# A verbose terminal run shows its own tool calls in its status line. It sets this
+# for the run's thread instead of swapping the process-global 'tool_call' entry,
+# which bled between concurrent agents and could drop the user's callback (G-23).
+_tool_call_override: "contextvars.ContextVar" = contextvars.ContextVar("praisonai_tool_call_override", default=None)
+
+
 def execute_sync_callback(display_type: str, **kwargs):
     """Execute synchronous callback for a given display type without displaying anything.
     
@@ -175,8 +182,10 @@ def execute_sync_callback(display_type: str, **kwargs):
         display_type (str): Type of display event
         **kwargs: Arguments to pass to the callback function
     """
-    with _callbacks_lock:
-        callback = sync_display_callbacks.get(display_type)
+    callback = _tool_call_override.get() if display_type == 'tool_call' else None
+    if callback is None:
+        with _callbacks_lock:
+            callback = sync_display_callbacks.get(display_type)
     
     if callback:
         try:
