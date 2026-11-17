@@ -30,6 +30,7 @@ from ..model_harness.guard import check_model_request
 # Gap 2: Tool call execution imports
 from ..tools.call_executor import ToolCall, create_tool_call_executor
 from ..tools.schema import build_tool_definition
+from ._helpers import inject_steering
 
 logger = get_logger(__name__)
 
@@ -3339,14 +3340,7 @@ Respond with ONLY a valid JSON tool call in this format:
             return getattr(cancel_token, "reason", None) or "user"
 
         def _inject_steering(msgs) -> None:
-            if steering_drain is None:
-                return
-            try:
-                for note in (steering_drain() or []):
-                    if note:
-                        msgs.append({"role": "user", "content": f"[steering] {note}"})
-            except Exception as _steer_err:
-                logging.debug(f"Steering drain failed (ignored): {_steer_err}")
+            inject_steering(msgs, steering_drain)
 
         # Variable to store final response for token usage extraction
         _final_llm_response = None
@@ -5770,14 +5764,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             return getattr(cancel_token, "reason", None) or "user"
 
         def _inject_steering(msgs) -> None:
-            if steering_drain is None:
-                return
-            try:
-                for note in (steering_drain() or []):
-                    if note:
-                        msgs.append({"role": "user", "content": f"[steering] {note}"})
-            except Exception as _steer_err:
-                logging.debug(f"Steering drain failed (ignored): {_steer_err}")
+            inject_steering(msgs, steering_drain)
 
         async def _dispatch_tool_batch(dispatch_specs, iteration_index):
             """Run a batch of (function_name, arguments, tool_call_id) dispatches.

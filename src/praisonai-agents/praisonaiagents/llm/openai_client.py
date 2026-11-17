@@ -10,6 +10,7 @@ import base64
 import logging
 import mimetypes
 from praisonaiagents._logging import get_logger
+from ._helpers import inject_steering
 import time
 import json
 import asyncio
@@ -2122,14 +2123,7 @@ class OpenAIClient:
             return cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()
 
         def _inject_steering(msgs) -> None:
-            if steering_drain is None:
-                return
-            try:
-                for note in (steering_drain() or []):
-                    if note:
-                        msgs.append({"role": "user", "content": f"[steering] {note}"})
-            except Exception:
-                pass
+            inject_steering(msgs, steering_drain)
 
         # Work on a local copy so the tool-loop mutations (assistant/tool
         # turns and the graceful wrap-up control message) never leak back into
@@ -2490,14 +2484,7 @@ class OpenAIClient:
             return cancel_token is not None and getattr(cancel_token, "is_set", lambda: False)()
 
         def _inject_steering(msgs) -> None:
-            if steering_drain is None:
-                return
-            try:
-                for note in (steering_drain() or []):
-                    if note:
-                        msgs.append({"role": "user", "content": f"[steering] {note}"})
-            except Exception:
-                pass
+            inject_steering(msgs, steering_drain)
 
         # Work on a local copy so the tool-loop mutations (assistant/tool
         # turns and the graceful wrap-up control message) never leak back into
