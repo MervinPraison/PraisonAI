@@ -144,7 +144,7 @@ class TestGateBlocksCompletion:
             counter["n"] += 1
             return f"used a tool and did work step {counter['n']} " + "x" * 200
 
-        with patch.object(agent, "chat", side_effect=fake_chat):
+        with patch.object(agent, "achat", side_effect=fake_chat):
             result = agent.run_autonomous("do it", max_iterations=3)
 
         assert result.success is False
@@ -171,7 +171,7 @@ class TestGateBlocksCompletion:
                 flag.write_text("ok")
             return f"progress {counter['n']} " + "y" * 200
 
-        with patch.object(agent, "chat", side_effect=fake_chat), \
+        with patch.object(agent, "achat", side_effect=fake_chat), \
              patch.object(agent, "get_recommended_stage", return_value="autonomous"):
             result = agent.run_autonomous("do it", max_iterations=10)
 
@@ -192,7 +192,7 @@ class TestGateBlocksCompletion:
                 agent.add_verification(FileCheckHook(name="late", path=str(missing)))
             return f"work {counter['n']} " + "z" * 200
 
-        with patch.object(agent, "chat", side_effect=fake_chat):
+        with patch.object(agent, "achat", side_effect=fake_chat):
             result = agent.run_autonomous("do it", max_iterations=3)
 
         # Now blocked by the late-added hook → cannot finish successfully.
@@ -201,7 +201,7 @@ class TestGateBlocksCompletion:
 
     def test_no_hooks_unchanged(self):
         agent = _make_agent()
-        with patch.object(agent, "chat",
+        with patch.object(agent, "achat",
                           side_effect=lambda p: "used tool " + "q" * 200):
             result = agent.run_autonomous("do it", max_iterations=5)
         # Behaviour is unchanged for agents without verification hooks: the
@@ -226,7 +226,7 @@ class TestGoalLoopEvidence:
 
         counter = {"n": 0}
 
-        with patch.object(agent, "chat",
+        with patch.object(agent, "achat",
                           side_effect=lambda p: f"step {counter.__setitem__('n', counter['n'] + 1) or counter['n']}"), \
              patch("praisonaiagents.goal.judge.judge_goal", side_effect=fake_judge):
             result = agent.run_goal("task", goal="g", max_turns=2)
@@ -246,7 +246,7 @@ class TestGoalLoopEvidence:
             seen["block"] = k.get("verification_block")
             return ("done", "met")
 
-        with patch.object(agent, "chat", side_effect=lambda pr: "did it"), \
+        with patch.object(agent, "achat", side_effect=lambda pr: "did it"), \
              patch("praisonaiagents.goal.judge.judge_goal", side_effect=fake_judge):
             result = agent.run_goal("task", goal="g", max_turns=5)
 
@@ -282,7 +282,7 @@ class TestGoalLoopEvidence:
             prompts.append(pr)
             return "trying"
 
-        with patch.object(agent, "chat", side_effect=fake_chat), \
+        with patch.object(agent, "achat", side_effect=fake_chat), \
              patch("praisonaiagents.goal.judge.judge_goal",
                    side_effect=lambda *a, **k: ("done", "met")):
             result = agent.run_goal("task", goal="g", max_turns=2)

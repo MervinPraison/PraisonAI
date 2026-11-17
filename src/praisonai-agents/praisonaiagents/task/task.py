@@ -44,6 +44,17 @@ class Task:
             loop_over="items",
             loop_var="item"
         )
+
+    Grouped settings (each replaces several flat parameters, which keep working):
+        output=TaskOutputConfig(file=, json_model=, pydantic_model=, variable=)
+        execution=TaskExecutionConfig(async_exec=, quality_check=, rerun=, max_retries=, on_error=)
+        routing=TaskRoutingConfig(next_steps=, branches=)
+        context=TaskContextConfig(from_steps=, retain_full=)
+    (from ``praisonaiagents.workflows.workflow_configs``).
+
+    Runtime state: ``status``, ``result``, ``id``, ``retry_count`` and
+    ``loop_state`` are set by the framework while the task runs. They are
+    accepted for backward compatibility; leave them at their defaults.
     """
     def __init__(
         self,

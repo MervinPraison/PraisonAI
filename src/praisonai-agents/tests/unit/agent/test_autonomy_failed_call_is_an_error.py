@@ -49,3 +49,32 @@ def test_a_real_answer_still_completes(mode, monkeypatch):
     run = agent.run_autonomous("go", max_iterations=3) if mode == "sync" \
         else asyncio.run(agent.run_autonomous_async("go", max_iterations=3))
     assert (run.success, run.completion_reason, run.output) == (True, "goal", "done")
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+def test_spend_cap_hit_before_the_failed_call_keeps_budget_result(mode, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "x")
+    agent = _agent(mode)
+    agent.autonomy_config["max_tokens"] = 10
+    spend = iter([(0.0, 0), (0.0, 50)])
+    monkeypatch.setattr(agent, "_run_spend", lambda: next(spend, (0.0, 50)))
+    run = agent.run_autonomous("go", max_iterations=3) if mode == "sync" \
+        else asyncio.run(agent.run_autonomous_async("go", max_iterations=3))
+    assert (run.success, run.completion_reason) == (False, "budget_exhausted")
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+def test_none_without_an_error_does_not_blame_the_model(mode, monkeypatch):
+    # e.g. a BEFORE_AGENT hook blocked the turn: chat() returns None, no _last_error.
+    monkeypatch.setenv("OPENAI_API_KEY", "x")
+    agent = Agent(name="a", instructions="hi", autonomy=True)
+    agent.chat = lambda p, **kw: None
+
+    async def achat(p, **kw):
+        return None
+
+    agent.achat = achat
+    run = agent.run_autonomous("go", max_iterations=3) if mode == "sync" \
+        else asyncio.run(agent.run_autonomous_async("go", max_iterations=3))
+    assert (run.success, run.completion_reason) == (False, "error")
+    assert "model" not in run.error

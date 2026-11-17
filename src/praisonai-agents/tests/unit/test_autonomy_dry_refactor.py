@@ -40,12 +40,12 @@ class TestDoomLoopFiring:
         # Mock chat to return the same response every time
         # Avoid any completion keywords (done, finished, completed, etc.)
         call_count = 0
-        def mock_chat(prompt, **kwargs):
+        async def mock_chat(prompt, **kwargs):
             nonlocal call_count
             call_count += 1
             return "Still working on analysis of the codebase..."
 
-        agent.chat = mock_chat
+        agent.achat = mock_chat
 
         result = agent.run_autonomous("First refactor the auth module, then test it step by step")
 
@@ -69,14 +69,14 @@ class TestDoomLoopFiring:
         )
 
         call_count = 0
-        def mock_chat(prompt, **kwargs):
+        async def mock_chat(prompt, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count >= 3:
                 return "Task completed successfully"
             return f"Working on step {call_count}..."
 
-        agent.chat = mock_chat
+        agent.achat = mock_chat
 
         # Use multi-step prompt to trigger autonomous stage
         result = agent.run_autonomous("First analyze, then implement the changes step by step")
@@ -104,13 +104,13 @@ class TestDoomLoopFiring:
         agent._record_action = tracking_record
 
         call_count = 0
-        def mock_chat(prompt, **kwargs):
+        async def mock_chat(prompt, **kwargs):
             nonlocal call_count
             call_count += 1
             # Avoid completion keywords so loop runs all iterations
             return f"Still processing step {call_count} of the refactoring..."
 
-        agent.chat = mock_chat
+        agent.achat = mock_chat
 
         # Use multi-step prompt for autonomous stage
         agent.run_autonomous("First refactor, then implement step by step")
@@ -288,14 +288,14 @@ class TestConfigFidelity:
         )
 
         call_count = 0
-        def mock_chat(prompt, **kwargs):
+        async def mock_chat(prompt, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count >= 2:
                 return "Task completed"
             return "Still analyzing the codebase..."
 
-        agent.chat = mock_chat
+        agent.achat = mock_chat
 
         result = agent.run_autonomous("First, refactor, and then implement step by step")
         # When observe=True, ObservabilityHooks should be wired and collect events
@@ -320,13 +320,13 @@ class TestConfigFidelity:
         )
 
         call_count = 0
-        def mock_chat(prompt, **kwargs):
+        async def mock_chat(prompt, **kwargs):
             nonlocal call_count
             call_count += 1
             # Never signal completion so escalation can occur
             return f"Still working iteration {call_count}..."
 
-        agent.chat = mock_chat
+        agent.achat = mock_chat
 
         result = agent.run_autonomous("Build something complex")
 
@@ -518,14 +518,14 @@ class TestIntegrationSmoke:
         )
 
         call_count = 0
-        def mock_chat(prompt, **kwargs):
+        async def mock_chat(prompt, **kwargs):
             nonlocal call_count
             call_count += 1
             if call_count >= 2:
                 return "All done! <promise>COMPLETE</promise>"
             return "Working on it..."
 
-        agent.chat = mock_chat
+        agent.achat = mock_chat
 
         # Multi-step prompt to trigger autonomous stage (not direct)
         result = agent.run_autonomous(

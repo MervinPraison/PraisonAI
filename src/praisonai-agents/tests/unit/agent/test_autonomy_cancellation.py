@@ -94,7 +94,7 @@ def test_sync_keyboard_interrupt_still_returns_result(monkeypatch):
     def interrupted(*args, **kwargs):
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(agent, "chat", interrupted)
+    monkeypatch.setattr(agent, "achat", interrupted)
     result = agent.run_autonomous("say hi")
     assert result.completion_reason == "cancelled"
     assert result.success is False

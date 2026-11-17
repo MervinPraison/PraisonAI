@@ -51,7 +51,7 @@ class TestCompletionDetection:
             autonomy={"max_iterations": 5, "auto_escalate": False},
         )
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
     def test_done_as_word_triggers_completion(self, mock_stage, mock_chat):
         """'done' as a standalone word should trigger completion."""
@@ -61,7 +61,7 @@ class TestCompletionDetection:
         assert result.success is True
         assert result.completion_reason == "goal"
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
     def test_not_done_yet_does_not_trigger(self, mock_stage, mock_chat):
         """'not done yet' should NOT trigger completion — negation."""
@@ -73,7 +73,7 @@ class TestCompletionDetection:
         # Should take 2 iterations, not 1
         assert result.iterations >= 2
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
     def test_abandoned_does_not_trigger_done(self, mock_stage, mock_chat):
         """'abandoned' contains 'done' as substring but should NOT trigger."""
@@ -83,7 +83,7 @@ class TestCompletionDetection:
         assert result.success is True
         assert result.iterations >= 2
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
     def test_condoned_does_not_trigger_done(self, mock_stage, mock_chat):
         """'condoned' contains 'done' as substring but should NOT trigger."""
@@ -93,7 +93,7 @@ class TestCompletionDetection:
         assert result.success is True
         assert result.iterations >= 2
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
     def test_task_completed_triggers(self, mock_stage, mock_chat):
         """'task completed' should trigger completion."""
@@ -103,7 +103,7 @@ class TestCompletionDetection:
         assert result.success is True
         assert result.completion_reason == "goal"
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
     def test_finished_as_word_triggers(self, mock_stage, mock_chat):
         """'finished' as standalone word should trigger."""
@@ -113,7 +113,7 @@ class TestCompletionDetection:
         assert result.success is True
         assert result.completion_reason == "goal"
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
     def test_unfinished_does_not_trigger(self, mock_stage, mock_chat):
         """'unfinished' contains 'finished' but should NOT trigger."""
@@ -123,7 +123,7 @@ class TestCompletionDetection:
         assert result.success is True
         assert result.iterations >= 2
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
     def test_all_done_triggers(self, mock_stage, mock_chat):
         """'all done' should trigger completion."""
@@ -152,7 +152,7 @@ class TestDoomLoopRecovery:
             },
         )
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
     def test_doom_loop_retry_different_continues(self, mock_stage, mock_chat):
         """First doom loop detection should retry with different approach, not abort."""
@@ -168,7 +168,7 @@ class TestDoomLoopRecovery:
         # Should NOT immediately abort at first doom loop; recovery retries
         assert result.success is True or result.iterations > 2
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
     def test_doom_loop_eventually_aborts(self, mock_stage, mock_chat):
         """After exhausting recovery attempts, should abort."""
@@ -186,7 +186,7 @@ class TestDoomLoopRecovery:
             f"Expected doom_loop or needs_help but got {result.completion_reason}"
         )
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
     def test_doom_loop_recovery_emits_observability(self, mock_stage, mock_chat):
         """Recovery actions should emit observability events when observe=True."""
@@ -462,7 +462,7 @@ class TestAutonomySignalDeprecation:
 class TestCancellationSupport:
     """Tests for cancellation support in autonomous loop."""
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
     def test_keyboard_interrupt_returns_cancelled(self, mock_stage, mock_chat):
         """KeyboardInterrupt during chat should return cancelled result."""
@@ -505,7 +505,7 @@ class TestCancellationSupport:
 class TestDeescalation:
     """Tests for de-escalation when task becomes simpler."""
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="planned")
     def test_deescalation_on_consecutive_success(self, mock_stage, mock_chat):
         """Stage should de-escalate after consecutive successes if enabled."""
@@ -654,7 +654,7 @@ class TestNoToolCallTermination:
         config.update(autonomy_overrides)
         return Agent(instructions="Test agent", autonomy=config)
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
     def test_no_tool_calls_completes_after_consecutive_turns(self, mock_stage, mock_chat):
         """When model makes no tool calls for 2+ consecutive turns, should complete."""
@@ -673,7 +673,7 @@ class TestNoToolCallTermination:
         # Should take at least 2 iterations (first is allowed, second confirms)
         assert result.iterations >= 2
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
     def test_tool_calls_prevent_premature_completion(self, mock_stage, mock_chat):
         """When tools are called, should NOT trigger no_tool_calls completion."""
@@ -692,7 +692,7 @@ class TestNoToolCallTermination:
         # Should complete via keyword, not no_tool_calls
         assert result.completion_reason == "goal"
 
-    @patch("praisonaiagents.agent.agent.Agent.chat")
+    @patch("praisonaiagents.agent.agent.Agent.achat")
     @patch("praisonaiagents.agent.agent.Agent.get_recommended_stage", return_value="heuristic")
     def test_first_iteration_no_tools_does_not_terminate(self, mock_stage, mock_chat):
         """First iteration without tools should NOT terminate — model might be planning."""

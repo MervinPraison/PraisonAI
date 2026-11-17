@@ -95,31 +95,6 @@ def _get_stream_emitter():
                 _stream_emitter_class = StreamEventEmitter
     return _stream_emitter_class
 
-# File extensions that indicate a file path (for output parameter detection)
-_FILE_EXTENSIONS = frozenset({'.txt', '.md', '.json', '.yaml', '.yml', '.html', '.csv', '.log', '.xml', '.rst'})
-
-def _is_file_path(value: str) -> bool:
-    """Check if a string looks like a file path (not a preset name).
-    
-    Used to detect when output="path/to/file.txt" should be treated as
-    output_file instead of a preset name.
-    
-    Args:
-        value: String to check
-        
-    Returns:
-        True if the string looks like a file path
-    """
-    # Contains path separator
-    if '/' in value or '\\' in value:
-        return True
-    # Ends with common file extension
-    lower = value.lower()
-    for ext in _FILE_EXTENSIONS:
-        if lower.endswith(ext):
-            return True
-    return False
-
 # ============================================================================
 # Performance: Module-level imports for param resolution (moved from __init__)
 # These imports are lightweight and avoid per-Agent import overhead
@@ -142,7 +117,10 @@ from ..config.feature_configs import (
 # function-local relative import per construction (#5835).
 from ..config.parse_utils import canonical_preset_key, validate_preset_string
 from ..config.agent_init import (
-    resolve_agent_caching, resolve_agent_planning, resolve_agent_reflection, resolve_agent_templates,
+    _is_file_path, resolve_agent_caching, resolve_agent_execution, resolve_agent_guardrails,
+    resolve_agent_history, resolve_agent_hooks, resolve_agent_knowledge, resolve_agent_learn,
+    resolve_agent_memory, resolve_agent_output, resolve_agent_planning, resolve_agent_reflection,
+    resolve_agent_templates, resolve_agent_web,
 )
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
@@ -918,6 +896,22 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                     "streaming moved into output=; use "
                     "output=OutputConfig(stream=True)."
                 ),
+                # The other flat kwargs that were grouped into config objects
+                # (D-05): each names where the setting lives now.
+                "markdown": "moved into output=; use output=OutputConfig(markdown=True).",
+                "metrics": "moved into output=; use output=OutputConfig(metrics=True).",
+                "self_reflect": "moved into reflection=; use reflection=True (or reflection=ReflectionConfig(...)).",
+                "max_reflect": "moved into reflection=; use reflection=ReflectionConfig(max_iterations=...).",
+                "min_reflect": "moved into reflection=; use reflection=ReflectionConfig(min_iterations=...).",
+                "system_template": "moved into templates=; use templates=TemplateConfig(system=...).",
+                "cache": "moved into caching=; use caching=True or False (or caching=CachingConfig(enabled=...)).",
+                "web_search": "moved into web=; use web=True (or web=WebConfig(search=True, fetch=False)).",
+                "max_iter": "moved into execution=; use execution=ExecutionConfig(max_iter=...).",
+                "temperature": (
+                    "set it on the model; use model={'model': 'gpt-4o-mini', 'temperature': ...} "
+                    "(or pass temperature= to chat())."
+                ),
+                "max_tokens": "set it on the model; use model={'model': 'gpt-4o-mini', 'max_tokens': ...}.",
                 # Same migration, different container: these two were flat
                 # kwargs before they were grouped into tool_config. Without a
                 # hint the user gets a bare "unexpected keyword argument" and
@@ -1153,40 +1147,10 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Resolve OUTPUT param - FAST PATH for common cases
         # DEFAULT: "silent" mode (zero overhead, fastest performance)
         # ─────────────────────────────────────────────────────────────────────
-        # Fast path: None -> silent defaults (use cached env var)
-        if output is None:
-            env_output = Agent._get_env_output_mode()
-            if env_output and env_output in OUTPUT_PRESETS:
-                output = env_output
-            else:
-                output = DEFAULT_OUTPUT_MODE
-            _has_explicit_output = False
-        else:
-            _has_explicit_output = True
-        
-        # Fast path: string preset lookup (most common case)
-        if isinstance(output, str):
-            output_lower = canonical_preset_key(output)
-            preset_value = OUTPUT_PRESETS.get(output_lower)
-            if preset_value is not None:
-                _output_config = OutputConfig(**preset_value) if isinstance(preset_value, dict) else preset_value
-            elif _is_file_path(output):
-                # String looks like a file path - use as output_file
-                _output_config = OutputConfig(output_file=output)
-            else:
-                _output_config = OutputConfig()  # Default silent
-        elif isinstance(output, OutputConfig):
-            _output_config = output
-        else:
-            # Complex case: use full resolver
-            _output_config = resolve(
-                value=output,
-                param_name="output",
-                config_class=OutputConfig,
-                presets=OUTPUT_PRESETS,
-                array_mode=ArrayMode.PRESET_OVERRIDE,
-                default=OutputConfig(),
-            )
+        # None -> PRAISONAI_OUTPUT or silent defaults; str -> preset or file path
+        # (config.agent_init)
+        _output_config, _has_explicit_output = resolve_agent_output(
+            output, Agent._get_env_output_mode() if output is None else None)
         if _output_config:
             verbose = _output_config.verbose
             markdown = _output_config.markdown
@@ -1285,26 +1249,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # ─────────────────────────────────────────────────────────────────────
         # Resolve EXECUTION param - FAST PATH for common cases
         # ─────────────────────────────────────────────────────────────────────
-        # Fast path: None -> default config (skip resolve() call)
-        if execution is None:
-            _exec_config = ExecutionConfig()
-        elif isinstance(execution, ExecutionConfig):
-            _exec_config = execution
-        elif isinstance(execution, str):
-            preset_value = EXECUTION_PRESETS.get(canonical_preset_key(execution))
-            if preset_value is not None:
-                _exec_config = ExecutionConfig(**preset_value) if isinstance(preset_value, dict) else preset_value
-            else:
-                _exec_config = ExecutionConfig()
-        else:
-            _exec_config = resolve(
-                value=execution,
-                param_name="execution",
-                config_class=ExecutionConfig,
-                presets=EXECUTION_PRESETS,
-                array_mode=ArrayMode.PRESET_OVERRIDE,
-                default=ExecutionConfig(),
-            )
+        # None -> default config; str -> preset (config.agent_init)
+        _exec_config = resolve_agent_execution(execution)
         if _exec_config:
             # Unified step budget: when max_steps is set it governs the LiteLLM
             # loop (LLM.max_iter) too, so both tool-execution loops honour the
@@ -1350,45 +1296,9 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # ─────────────────────────────────────────────────────────────────────
         # Resolve HOOKS param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        _hooks_list = []
-        step_callback = None
-        # Fast path: None -> no hooks (skip resolve() call)
-        if hooks is None:
-            _hooks_config = None
-        elif isinstance(hooks, list):
-            _hooks_config = hooks  # Passthrough list directly
-        elif isinstance(hooks, HooksConfig):
-            _hooks_config = hooks
-        else:
-            _hooks_config = resolve(
-                value=hooks,
-                param_name="hooks",
-                config_class=HooksConfig,
-                array_mode=ArrayMode.PASSTHROUGH,
-                default=None,
-            )
-        # Per-agent event-hook registry (isolates BEFORE_TOOL/AFTER_AGENT/...
-        # hooks so they never fire on unrelated agents sharing the default
-        # registry). A bare HookRegistry passed as ``hooks=`` still works too.
-        _hooks_registry = None
-        if _hooks_config is not None:
-            if isinstance(_hooks_config, list):
-                _hooks_list = _hooks_config
-            elif isinstance(_hooks_config, HooksConfig):
-                step_callback = _hooks_config.on_step
-                _hooks_list = list(_hooks_config.middleware or [])
-                _hooks_registry = getattr(_hooks_config, "registry", None)
-                # Route on_step / on_tool_call onto the SAME middleware chain
-                # that already powers ``hooks=[...]`` (MiddlewareManager). Both
-                # keys used to be stored-and-never-called, so the TypeError that
-                # advertises them ("Valid keys: on_step, on_tool_call,
-                # middleware") promised behaviour that did not exist.
-                if _hooks_config.on_step is not None or _hooks_config.on_tool_call is not None:
-                    from ..hooks.middleware import as_step_hook, as_tool_call_hook
-                    if _hooks_config.on_step is not None:
-                        _hooks_list.append(as_step_hook(_hooks_config.on_step))
-                    if _hooks_config.on_tool_call is not None:
-                        _hooks_list.append(as_tool_call_hook(_hooks_config.on_tool_call))
+        # None -> no hooks; list passthrough; HooksConfig on_step/on_tool_call
+        # join the middleware chain (config.agent_init)
+        _hooks_config, _hooks_list, step_callback, _hooks_registry = resolve_agent_hooks(hooks)
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve SKILLS param - FAST PATH
@@ -1398,8 +1308,9 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Fast path: None -> no skills (skip resolve() call)
         if skills is None:
             _skills_config = None
-        elif isinstance(skills, list):
-            _skills_config = SkillsConfig(paths=skills)
+        elif isinstance(skills, (list, str)):
+            # A single string ('./dir', 'name', '@bundle') is a one-item list.
+            _skills_config = SkillsConfig(paths=[skills] if isinstance(skills, str) else skills)
         elif isinstance(skills, SkillsConfig):
             _skills_config = skills
         else:
@@ -1423,28 +1334,9 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # ─────────────────────────────────────────────────────────────────────
         # Resolve MEMORY param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        # Fast path: None/False -> no memory (skip resolve() call)
-        if memory is None or memory is False:
-            _memory_config = None
-        elif memory is True:
-            _memory_config = MemoryConfig()
-        elif isinstance(memory, MemoryConfig):
-            _memory_config = memory
-        elif hasattr(memory, 'search') and hasattr(memory, 'add'):
-            _memory_config = memory  # Memory instance passthrough
-        elif hasattr(memory, 'database_url'):
-            _memory_config = memory  # db() instance passthrough
-        else:
-            _memory_config = resolve(
-                value=memory,
-                param_name="memory",
-                config_class=MemoryConfig,
-                presets=MEMORY_PRESETS,
-                url_schemes=MEMORY_URL_SCHEMES,
-                instance_check=lambda v: (hasattr(v, 'search') and hasattr(v, 'add')) or hasattr(v, 'database_url'),
-                array_mode=ArrayMode.SINGLE_OR_LIST,
-                default=None,
-            )
+        # None/False -> no memory; True -> defaults; live backends pass through
+        # (config.agent_init)
+        _memory_config = resolve_agent_memory(memory)
         
         # Persist the resolved memory config so clone_for_channel() can forward
         # (and isolate) it per channel. Without this, clones would receive no
@@ -1513,244 +1405,26 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Resolve LEARN param - FAST PATH (top-level, peer to memory)
         # learn= is a first-class citizen, independent of memory=
         # ─────────────────────────────────────────────────────────────────────
-        _learn_config = None
-        
-        # Top-level learn= takes precedence over memory.learn
-        if learn is not None:
-            # Explicit top-level learn= param
-            if learn is False:
-                _learn_config = None
-            elif learn is True:
-                # learn=True is a coordinated posture (Issue #4864): enable
-                # AGENTIC extraction AND a conversational-aware nudge cadence in
-                # one switch, so an always-on companion bot actually learns.
-                # nudge_min_tool_iters=0 lets a chat-only turn (no tool calls)
-                # still nudge; auto_memory is turned on below so durable facts
-                # are captured on every turn, not just tool-using ones.
-                from ..memory.learn.protocols import LearnMode
-                _learn_config = LearnConfig(
-                    mode=LearnMode.AGENTIC,
-                    nudge_interval=10,
-                    nudge_min_tool_iters=0,
-                )
-            elif isinstance(learn, LearnConfig):
-                _learn_config = learn
-            elif isinstance(learn, dict):
-                _learn_config = LearnConfig(**learn)
-            elif isinstance(learn, str):
-                # String mode: "disabled", "agentic", "propose".
-                # Normalise case/whitespace so this branch agrees with the
-                # closed-set validation in _validate_preset_params (which
-                # already accepted "AGENTIC"/" agentic "); otherwise a validated
-                # value would fall through to the else and silently disable.
-                from ..memory.learn.protocols import LearnMode
-                _learn_mode = learn.strip().lower()
-                if _learn_mode == "disabled":
-                    _learn_config = None
-                elif _learn_mode == "agentic":
-                    _learn_config = LearnConfig(mode=LearnMode.AGENTIC)
-                elif _learn_mode == "propose":
-                    _learn_config = LearnConfig(mode=LearnMode.PROPOSE)
-                else:
-                    # Unknown string mode, disable learning
-                    _learn_config = None
-            else:
-                logger.warning(
-                    "Unsupported learn= value %r; expected bool, dict, or LearnConfig. "
-                    "Learning disabled.", learn
-                )
-                _learn_config = None
-        elif _memory_config is not None and isinstance(_memory_config, MemoryConfig):
-            # Fallback to memory.learn for backward compatibility
-            if _memory_config.learn:
-                if _memory_config.learn is True:
-                    # learn=True shorthand enables AGENTIC mode
-                    from ..memory.learn.protocols import LearnMode
-                    _learn_config = LearnConfig(mode=LearnMode.AGENTIC)
-                elif isinstance(_memory_config.learn, LearnConfig):
-                    _learn_config = _memory_config.learn
-                elif isinstance(_memory_config.learn, dict):
-                    _learn_config = LearnConfig(**_memory_config.learn)
-        
-        # If learn is enabled but memory is not, we need to enable memory for learn to work
-        if _learn_config is not None and memory is None:
-            # Enable minimal memory for learn to work
-            memory = {"learn": _learn_config.to_dict() if hasattr(_learn_config, 'to_dict') else _learn_config}
-        elif _learn_config is not None and isinstance(memory, dict):
-            # Merge learn config into memory dict
-            memory["learn"] = _learn_config.to_dict() if hasattr(_learn_config, 'to_dict') else _learn_config
-
-        # Coordinated learn posture (Issue #4864): the ``learn=True`` shorthand
-        # turns on conversational fact extraction too, so an always-on companion
-        # accrues durable persona/preferences from plain chat — not just from
-        # tool-using turns. Only defaults it on when the caller did not set
-        # auto_memory explicitly (via MemoryConfig), so an explicit choice wins.
-        if learn is True and auto_memory is None:
-            auto_memory = True
+        # Top-level learn= wins over memory.learn; enables memory if needed
+        # (config.agent_init)
+        _learn_config, memory, auto_memory = resolve_agent_learn(learn, _memory_config, memory, auto_memory)
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve HISTORY from MemoryConfig - FAST PATH
         # History is enabled via memory="history" preset or MemoryConfig(history=True)
         # ─────────────────────────────────────────────────────────────────────
-        _history_enabled = False
-        _history_limit = 10
-        _history_session_id = None
-        
-        # Check if memory config has history settings
-        if _memory_config is not None and isinstance(_memory_config, MemoryConfig):
-            if _memory_config.history:
-                _history_enabled = True
-                _history_limit = _memory_config.history_limit
-                # Use explicit session_id from MemoryConfig if provided
-                if _memory_config.session_id:
-                    _history_session_id = _memory_config.session_id
-        
-        # Use auto_save session if no explicit session and history is enabled
-        if _history_enabled and _history_session_id is None and auto_save:
-            _history_session_id = auto_save
-        
-        # Auto-generate session_id when history=True but no session_id set
-        # This ensures _init_session_store() can create the store
-        if _history_enabled and session_id is None and _history_session_id is not None:
-            session_id = _history_session_id
-        elif _history_enabled and session_id is None and _history_session_id is None:
-            import hashlib as _hl
-            import os as _os
-            _name = name or "agent"
-            # Workspace-scoped id so same-named agents in different projects don't
-            # collide (Issue #3154). Opt out with PRAISONAI_GLOBAL_SESSIONS=true for
-            # name-only global continuity.
-            _global_scope = _os.environ.get("PRAISONAI_GLOBAL_SESSIONS", "").lower() in ("1", "true", "yes")
-            if _global_scope:
-                _workspace_id = "global"
-            else:
-                from ..session.workspace import workspace_id as _wid
-                _workspace_id = _wid()
-            _workspace_hash = _hl.sha256(f"{_workspace_id}:{_name}".encode()).hexdigest()[:8]
-            _new_id = f"history_{_workspace_hash}"
-            # Backward-compat ids (resolution order: name-only sha256, then md5)
-            _name_sha_id = f"history_{_hl.sha256(_name.encode()).hexdigest()[:8]}"
-            _name_md5_id = f"history_{_hl.md5(_name.encode()).hexdigest()[:8]}"
-            # Resolve the migration lookup against the SAME directory the session
-            # store uses at runtime, so a custom PRAISONAI_HOME is honoured (the
-            # store reads from get_sessions_dir()). Fall back to the default path
-            # only if that helper is unavailable.
-            try:
-                from ..paths import get_sessions_dir as _get_sessions_dir
-                _session_dir = str(_get_sessions_dir())
-            except Exception:
-                _session_dir = _os.path.join(_os.path.expanduser("~"), ".praisonai", "sessions")
-            # Prefer an existing workspace-scoped session. Legacy (pre-workspace)
-            # name-only files are only adopted in global scope: doing so in a
-            # workspace-scoped run would silently share Project A's history with a
-            # same-named agent in Project B (Issue #3154). Global scope is the
-            # explicit opt-in for that name-only continuity.
-            if _os.path.exists(_os.path.join(_session_dir, f"{_new_id}.json")):
-                session_id = _new_id
-            elif _global_scope and _os.path.exists(_os.path.join(_session_dir, f"{_name_sha_id}.json")):
-                session_id = _name_sha_id  # preserve existing history
-            elif _global_scope and _os.path.exists(_os.path.join(_session_dir, f"{_name_md5_id}.json")):
-                session_id = _name_md5_id  # preserve existing history
-            else:
-                session_id = _new_id
-            _history_session_id = session_id
+        # history=True picks the session id: MemoryConfig.session_id, auto_save,
+        # session_id=, or a workspace-scoped generated id (config.agent_init)
+        _history_enabled, _history_limit, _history_session_id, session_id = resolve_agent_history(
+            _memory_config, session_id, auto_save, name)
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve KNOWLEDGE param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        retrieval_config = None
-        embedder_config = None
-        
-        # Fast path: None/False -> no knowledge (skip resolve() call)
-        if knowledge is None or knowledge is False:
-            _knowledge_config = None
-        elif knowledge is True:
-            _knowledge_config = KnowledgeConfig()
-        elif isinstance(knowledge, KnowledgeConfig):
-            _knowledge_config = knowledge
-        elif isinstance(knowledge, list):
-            _knowledge_config = KnowledgeConfig(sources=knowledge)
-        elif hasattr(knowledge, 'search') and hasattr(knowledge, 'add'):
-            _knowledge_config = knowledge  # Knowledge instance passthrough
-        else:
-            _knowledge_config = resolve(
-                value=knowledge,
-                param_name="knowledge",
-                config_class=KnowledgeConfig,
-                instance_check=lambda v: hasattr(v, 'search') and hasattr(v, 'add'),
-                array_mode=ArrayMode.SOURCES_WITH_CONFIG,
-                string_mode="path_as_source",
-                default=None,
-            )
-        
-        if _knowledge_config is not None:
-            if hasattr(_knowledge_config, 'search') and hasattr(_knowledge_config, 'add'):
-                # Knowledge instance - pass through
-                knowledge = _knowledge_config
-            elif isinstance(_knowledge_config, KnowledgeConfig):
-                embedder_config = _knowledge_config.embedder_config
-                # Every declared field is forwarded. Previously only top_k /
-                # rerank survived: 'threshold' was spelled 'min_score' by
-                # RetrievalConfig.from_dict, 'rerank_model' had no field at
-                # all, and chunking + vector_store were never forwarded, so
-                # those settings were silently inert.
-                _chunker = _knowledge_config.chunker or {}
-                _strategy = _knowledge_config.chunking_strategy
-                _strategy = getattr(_strategy, 'value', _strategy)
-                _vector_store = _knowledge_config.vector_store or {}
-                retrieval_config = {
-                    'enabled': _knowledge_config.auto_retrieve,
-                    'top_k': _knowledge_config.retrieval_k,
-                    'min_score': _knowledge_config.retrieval_threshold,
-                    'rerank': _knowledge_config.rerank,
-                    'rerank_model': _knowledge_config.rerank_model,
-                    'chunking_strategy': _chunker.get('type', _strategy),
-                    'chunk_size': _chunker.get('chunk_size', _knowledge_config.chunk_size),
-                    'chunk_overlap': _chunker.get(
-                        'chunk_overlap', _knowledge_config.chunk_overlap),
-                }
-                if _vector_store:
-                    _vs = dict(_vector_store)
-                    _vs_provider = _vs.pop('provider', None)
-                    if _vs_provider:
-                        retrieval_config['vector_store_provider'] = _vs_provider
-                    _vs_inner = _vs.pop('config', None)
-                    if isinstance(_vs_inner, dict):
-                        _vs.update(_vs_inner)
-                    if 'collection_name' in _vs:
-                        retrieval_config['collection_name'] = _vs.pop('collection_name')
-                    if 'path' in _vs:
-                        retrieval_config['persist_path'] = _vs.pop('path')
-                    if _vs:
-                        retrieval_config['vector_store_config'] = _vs
-                # Forward embedder settings so they reach Knowledge (mem0).
-                # embedder is a provider shorthand (e.g. "gemini"); embedder_config
-                # is the full mem0 embedder dict. Only override when explicitly set.
-                if _knowledge_config.embedder and _knowledge_config.embedder != "openai":
-                    retrieval_config.setdefault('embedder_provider', _knowledge_config.embedder)
-                if _knowledge_config.embedder_config:
-                    retrieval_config.setdefault('embedder_config', _knowledge_config.embedder_config)
-                # `config=` is an escape hatch for keys the dataclass does not
-                # model. It now overrides the resolved values instead of
-                # replacing the whole dict, which silently reset retrieval_k.
-                if _knowledge_config.config:
-                    retrieval_config.update(_knowledge_config.config)
-                knowledge = _knowledge_config.sources if _knowledge_config.sources else None
-            elif isinstance(_knowledge_config, list):
-                knowledge = _knowledge_config
-        elif knowledge is False:
-            knowledge = None
-
-        # Explicit retrieval_config= (the RAG tuning surface shown in the docs
-        # and docstring examples) is merged on top of whatever the knowledge=
-        # param derived. A dict overrides the derived keys; a RetrievalConfig
-        # instance (or when no knowledge= was given) replaces it wholesale so
-        # the downstream RetrievalConfig resolver (below) receives it unchanged.
-        if _user_retrieval_config is not None:
-            if isinstance(_user_retrieval_config, dict) and isinstance(retrieval_config, dict):
-                retrieval_config.update(_user_retrieval_config)
-            else:
-                retrieval_config = _user_retrieval_config
+        # None/False -> no knowledge; KnowledgeConfig -> retrieval settings dict,
+        # with retrieval_config= merged on top (config.agent_init)
+        _knowledge_config, knowledge, retrieval_config, embedder_config = resolve_agent_knowledge(
+            knowledge, _user_retrieval_config)
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve PLANNING param - FAST PATH
@@ -1776,129 +1450,10 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # ─────────────────────────────────────────────────────────────────────
         # Resolve GUARDRAILS param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        # Fail loud instead of silently ignoring policy-string guardrails. The
-        # documented `guardrails=["policy:strict", ...]` shorthand has no
-        # enforcement path wired up, so accepting it silently would run with zero
-        # enforcement — a "safe by default" violation. Checked before resolution
-        # so the clear message wins over the generic resolver's error. Direct
-        # users to the working `Agent(policy=PolicyEngine(...))` param.
-        if isinstance(guardrails, (list, tuple)):
-            from ..config.parse_utils import is_policy_string
-            _policy_strs = [g for g in guardrails if isinstance(g, str) and is_policy_string(g)]
-            if _policy_strs:
-                raise ValueError(
-                    f"Policy-string guardrails {_policy_strs} are not enforced. "
-                    "Use Agent(policy=PolicyEngine(...)) for tool policy enforcement, "
-                    "or pass a validator via guardrails=... / GuardrailConfig(validator=...)."
-                )
-
-        # Apply [defaults].guardrails from config when not explicitly provided,
-        # mirroring the memory/web/caching/etc. resolution above so a config-wide
-        # guardrail safety net is actually honoured instead of silently ignored.
-        if guardrails is None:
-            guardrails = apply_config_defaults("guardrails", None, GuardrailConfig)
-
-        # Fast path: None/False -> no guardrails (skip resolve() call)
-        if guardrails is None or guardrails is False:
-            _guardrails_config = None
-        elif callable(guardrails) and not isinstance(guardrails, type):
-            _guardrails_config = guardrails  # Callable passthrough
-        elif isinstance(guardrails, GuardrailConfig):
-            _guardrails_config = guardrails
-        elif isinstance(guardrails, str):
-            # String could be LLM prompt - passthrough for later processing
-            _guardrails_config = guardrails
-        else:
-            # A protocol-conforming guardrail *object* (validate_input /
-            # validate_output / validate_tool_call) is not ``callable()``, so it
-            # used to fall straight through to the resolver, which returns None
-            # for an unknown object - the validator was silently discarded and
-            # the agent ran with zero enforcement. Adapt it into a
-            # ``GuardrailChain``, which is callable (so it satisfies the existing
-            # guardrail runner) and forwards every protocol method.
-            from ..guardrails.protocols import is_guardrail_object
-            if is_guardrail_object(guardrails):
-                from ..guardrails import GuardrailChain
-                _guardrails_config = GuardrailChain([guardrails])
-            elif isinstance(guardrails, (list, tuple)) and any(
-                is_guardrail_object(g) for g in guardrails
-            ):
-                _bad = [g for g in guardrails if not is_guardrail_object(g)]
-                if _bad:
-                    raise TypeError(
-                        "guardrails=[...] may not mix guardrail objects with "
-                        f"{[type(g).__name__ for g in _bad]}. Every item must implement "
-                        "validate_input/validate_output/validate_tool_call, or wrap the "
-                        "list yourself with GuardrailChain([...])."
-                    )
-                from ..guardrails import GuardrailChain
-                _guardrails_config = GuardrailChain(list(guardrails))
-            else:
-                from ..config.param_resolver import resolve_guardrails as _resolve_guardrails
-                _guardrails_config = _resolve_guardrails(
-                    value=guardrails,
-                    config_class=GuardrailConfig,
-                )
-        
-        # Same fail-loud guard for GuardrailConfig.policy/.policies passed
-        # directly — those fields are never consumed downstream, so silently
-        # accepting them would also run with zero enforcement.
-        if isinstance(_guardrails_config, GuardrailConfig) and (
-            _guardrails_config.policy is not None or _guardrails_config.policies
-        ):
-            raise ValueError(
-                "GuardrailConfig.policy/.policies are not enforced. "
-                "Use Agent(policy=PolicyEngine(...)) for tool policy enforcement, "
-                "or pass a validator via GuardrailConfig(validator=...)."
-            )
-        # GuardrailConfig.on_fail has a single implemented policy (retry, then
-        # return the blocked message); refuse "skip"/"raise" rather than
-        # silently behaving as "retry".
-        if isinstance(_guardrails_config, GuardrailConfig) and (
-            getattr(_guardrails_config.on_fail, "value", _guardrails_config.on_fail) != "retry"
-        ):
-            raise ValueError(
-                f"GuardrailConfig.on_fail={_guardrails_config.on_fail!r} is not supported; "
-                "only 'retry' is implemented. Remove on_fail, or handle a blocked "
-                "response via Agent.last_guardrail_error."
-            )
-
-        # Fail loud when the value could not be turned into an enforceable
-        # guardrail, instead of storing something that never runs. Silently
-        # dropping a validator the caller explicitly asked for is a "safe by
-        # default" violation, same rationale as the policy-string guard above.
-        # An empty list/tuple resolves to None (no validator was actually
-        # supplied), which the resolver already treated as a no-op on main -
-        # keep that backward-compatible instead of raising on an empty opt-in.
-        _is_empty_guardrails = (
-            isinstance(guardrails, (list, tuple)) and len(guardrails) == 0
-        )
-        if (
-            guardrails is not None
-            and guardrails is not False
-            and not _is_empty_guardrails
-            and not (
-                callable(_guardrails_config)
-                or isinstance(_guardrails_config, (GuardrailConfig, str))
-            )
-        ):
-            raise TypeError(
-                f"guardrails={guardrails!r} (type {type(guardrails).__name__}) is not a "
-                "supported guardrail. Pass a validator callable taking one TaskOutput, an "
-                "object implementing validate_input/validate_output/validate_tool_call, a "
-                "list of such objects, a GuardrailConfig, or a string LLM-validation prompt."
-            )
-
-        if _guardrails_config is not None:
-            if callable(_guardrails_config) and not isinstance(_guardrails_config, type):
-                # Callable validator function
-                guardrail = _guardrails_config
-            elif isinstance(_guardrails_config, GuardrailConfig):
-                guardrail = _guardrails_config.validator or _guardrails_config.llm_validator
-                max_guardrail_retries = _guardrails_config.max_retries
-            elif isinstance(_guardrails_config, str):
-                # LLM validator prompt
-                guardrail = _guardrails_config
+        # Fail-loud checks, config defaults, callables, objects, GuardrailConfig
+        # and LLM prompt strings (config.agent_init)
+        _guardrails_config, guardrail, max_guardrail_retries = resolve_agent_guardrails(
+            guardrails, guardrail, max_guardrail_retries)
 
         # Persist the resolved value so clone_for_channel() can forward it.
         # Without this the attribute never exists, its getattr(..., None) in
@@ -1909,41 +1464,9 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # ─────────────────────────────────────────────────────────────────────
         # Resolve WEB param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        # ``web=True`` or a dict that does not mention fetch asks for defaults,
-        # not for fetch specifically (X-14); see the model check below.
-        _web_fetch_is_default = web is True or (isinstance(web, dict) and "fetch" not in web)
-        # Fast path: None/False -> no web (skip resolve() call)
-        if web is None or web is False:
-            _web_config = None
-        elif web is True:
-            _web_config = WebConfig()
-        elif isinstance(web, WebConfig):
-            _web_config = web
-        else:
-            _web_config = resolve(
-                value=web,
-                param_name="web",
-                config_class=WebConfig,
-                presets=WEB_PRESETS,
-                array_mode=ArrayMode.PRESET_OVERRIDE,
-                default=None,
-            )
-        
-        _search_provider = "duckduckgo"
-        if _web_config is not None:
-            if isinstance(_web_config, WebConfig):
-                web_search = _web_config.search
-                web_fetch = _web_config.fetch
-                _search_provider = str(getattr(_web_config.search_provider, "value", _web_config.search_provider) or "duckduckgo").lower()
-            else:
-                web_search = bool(_web_config)
-                web_fetch = bool(_web_config)
-        elif web is True:
-            web_search = True
-            web_fetch = True
-        elif web is False:
-            web_search = False
-            web_fetch = False
+        # None/False -> no web; True -> defaults (config.agent_init)
+        (_web_config, web_search, web_fetch, _search_provider,
+         _web_fetch_is_default) = resolve_agent_web(web, web_search, web_fetch)
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve TOOL_SEARCH param
@@ -4808,475 +4331,35 @@ Summary:"""
             if result.success:
                 print(result.output)
         """
-        from .autonomy import AutonomyResult, _timeout_result
-        import time as time_module
-        from datetime import datetime, timezone
-        
+        from ..utils.async_bridge import run_coroutine_on_thread_loop
+        from .autonomy import AutonomyResult
+
+        # One autonomy loop (G-17): the sync entry point runs the async one.
+        # Kept here: the sync error message, and Ctrl-C returning the partial
+        # result worded "Task cancelled by user" instead of raising.
         if not self.autonomy_enabled:
             raise ValueError(
                 "Autonomy must be enabled to use run_autonomous(). "
                 "Create agent with autonomy=True or autonomy={...}"
             )
-        
-        self._take_pre_autonomous_snapshot()
-
-        start_time = time_module.time()
-        started_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-        iterations = 0
-        actions_taken = []
-        # Spend baseline: snapshot lifetime spend so the budget cap measures
-        # only THIS run (reused Agents keep prior chat/run spend in the counters).
-        spend_baseline = self._run_spend()
-        
-        # Get config values
-        config_max_iter = self.autonomy_config.get("max_iterations", 20)
-        effective_max_iter = max_iterations if max_iterations is not None else config_max_iter
-        
-        # Get completion_promise from config if not provided as param
-        effective_promise = completion_promise
-        if effective_promise is None:
-            effective_promise = self.autonomy_config.get("completion_promise")
-        # The promise is the only success signal, so tell the model about it
-        # unless the caller already did (e.g. the `loop` CLI instructions).
-        _promise_tag = f"<promise>{effective_promise}</promise>"
-        if effective_promise and _promise_tag not in prompt and _promise_tag not in (self.instructions or ""):
-            prompt = f"{prompt}\n\nWhen the task is fully complete, include {_promise_tag} in your response."
-        
-        # Get clear_context from config if not explicitly set
-        effective_clear_context = clear_context
-        if not clear_context:
-            effective_clear_context = self.autonomy_config.get("clear_context", False)
-        
-        # Analyze prompt and get recommended stage
-        stage = self.get_recommended_stage(prompt)
-        
-        # Reset doom loop tracker for new task
-        self._reset_doom_loop()
-        # Clear any stale loop-warning latch/nudge from a previous run.
-        self._reset_loop_warnings()
-        
-        # P3/G2: Import callback helper for autonomy events
-        from ..main import execute_sync_callback
-        
+        # Cleared before the loop starts so an early Ctrl-C never returns a
+        # previous run's partial result.
+        self._last_autonomy_result = None
         try:
-            # Execute the autonomous loop
-            while iterations < effective_max_iter:
-                iterations += 1
-                
-                # P3/G2: Emit autonomy_iteration callback for CLI visibility
-                execute_sync_callback('autonomy_iteration',
-                    iteration=iterations,
-                    max_iterations=effective_max_iter,
-                    stage=stage
-                )
-                
-                # Check timeout
-                _timed_out = _timeout_result(
-                    timeout_seconds, iterations, stage, actions_taken, start_time, started_at)
-                if _timed_out is not None:
-                    return _timed_out
-                
-                # G2: Check for interrupt request (cooperative cancellation) - sync version
-                if self.interrupt_controller and self.interrupt_controller.is_set():
-                    reason = self.interrupt_controller.reason or "unknown"
-                    return AutonomyResult(
-                        success=False,
-                        output=f"Task interrupted: {reason}",
-                        completion_reason="interrupted",
-                        iterations=iterations,
-                        stage=stage,
-                        actions=actions_taken,
-                        duration_seconds=time_module.time() - start_time,
-                        started_at=started_at,
-                    )
-                
-                # Execute one turn using the agent's chat method
-                # Always use the original prompt (prompt re-injection)
-                # Reset per-turn tool count for no-tool-call detection
-                self._autonomy_turn_tool_count = 0
-                # Reset the per-turn warning latch and inject any queued nudge.
-                turn_prompt = self._consume_self_correction(prompt)
-                try:
-                    with _deadline_scope(timeout_seconds and timeout_seconds - (time_module.time() - start_time)):
-                        response = self.chat(turn_prompt)
-                except Exception as e:
-                    # The run deadline cancels an overrunning turn; report it as a timeout.
-                    # A budget stop keeps its typed budget_exhausted result when a cap applies.
-                    return _timeout_result(
-                        timeout_seconds, iterations, stage, actions_taken, start_time, started_at
-                    ) or (isinstance(e, BudgetExceededError) and self._autonomy_budget_result(
-                        iterations, stage, actions_taken, start_time, started_at,
-                        "", spend_baseline
-                    )) or AutonomyResult(
-                        success=False,
-                        output=str(e),
-                        completion_reason="error",
-                        iterations=iterations,
-                        stage=stage,
-                        actions=actions_taken,
-                        duration_seconds=time_module.time() - start_time,
-                        error=str(e),
-                        started_at=started_at,
-                    )
-                
-                # A turn that overran the run deadline or max_execution_time
-                # must not count as progress.
-                _timed_out = _timeout_result(
-                    timeout_seconds, iterations, stage, actions_taken, start_time, started_at,
-                    turn_timed_out=getattr(self, "_last_stop_reason", None) == "timeout")
-                if _timed_out is not None:
-                    return _timed_out
-                
-                if response is None:
-                    # chat()/achat() return None when the model call failed; that
-                    # is not an answer (F-21). The error is on _last_error.
-                    _err = str(getattr(self, "_last_error", None) or "the model call failed")
-                    return AutonomyResult(
-                        success=False,
-                        output=_err,
-                        completion_reason="error",
-                        iterations=iterations,
-                        stage=stage,
-                        actions=actions_taken,
-                        duration_seconds=time_module.time() - start_time,
-                        error=_err,
-                        started_at=started_at,
-                    )
-                response_str = str(response)
-                
-                # Spend kill-switch: halt if cumulative cost/tokens exceed cap.
-                # Zero overhead when no cap is set (returns None immediately).
-                _budget_result = self._autonomy_budget_result(
-                    iterations, stage, actions_taken, start_time, started_at,
-                    response_str, spend_baseline
-                )
-                if _budget_result is not None:
-                    execute_sync_callback('autonomy_complete',
-                        completion_reason=_budget_result.completion_reason,
-                        iterations=iterations,
-                        duration_seconds=time_module.time() - start_time
-                    )
-                    return _budget_result
-                
-                # Record response text for content streaming loop detection
-                if self._doom_loop_tracker is not None:
-                    self._doom_loop_tracker.record_response(response_str)
-                
-                # Record the action for doom loop tracking (G1 fix: was missing).
-                # The result-aware tool-loop detector (name+args+result-hash,
-                # ping-pong) now owns per-tool-call loop detection in the
-                # tool-execution path; DoomLoopDetector is kept for the
-                # content-loop/"chanting" and time checks it does uniquely.
-                # Derive a REAL success signal instead of the old hard-coded True
-                # (which made the failure-streak detector impossible to fire).
-                iteration_success = not self._response_indicates_failure(response_str)
-                self._record_action(
-                    "chat",
-                    {"response_hash": hash(response_str[:500])},
-                    response_str[:200],
-                    iteration_success,
-                )
-                
-                # Check doom loop AFTER recording action so detector sees
-                # the current iteration's fingerprint (repositioned from top
-                # of loop for correct detection timing).
-                if self._is_doom_loop():
-                    recovery = self._get_doom_recovery()
-                    
-                    # P3/G2: Emit doom loop callback for CLI visibility
-                    execute_sync_callback('autonomy_doom_loop',
-                        iteration=iterations,
-                        recovery_action=recovery
-                    )
-                    
-                    obs = getattr(self, '_observability_hooks', None)
-                    if obs is not None:
-                        from ..escalation.observability import EventType as _EvtType
-                        obs.emit(_EvtType.STEP_END, {
-                            "doom_loop": True,
-                            "recovery_action": recovery,
-                            "iteration": iterations,
-                        })
-                    if recovery == "retry_different":
-                        prompt = prompt + "\n\n[System: Previous approach repeated. Try a completely different strategy.]"
-                        if self._doom_loop_tracker is not None:
-                            self._doom_loop_tracker.clear_actions()
-                        self._consecutive_no_tool_turns = 0
-                        self._doom_recovery_active = True
-                        continue
-                    elif recovery == "escalate_model":
-                        prompt = prompt + "\n\n[System: You are stuck in a loop. CRITICAL: Check that all tool argument names exactly match the function signature. Do NOT add '=' to argument names. Use only the documented parameter names.]"
-                        if self._doom_loop_tracker is not None:
-                            self._doom_loop_tracker.clear_actions()
-                        self._consecutive_no_tool_turns = 0
-                        self._doom_recovery_active = True
-                        continue
-                    elif recovery == "request_help":
-                        return AutonomyResult(
-                            success=False,
-                            output="Task needs human guidance (doom loop recovery exhausted)",
-                            completion_reason="needs_help",
-                            iterations=iterations,
-                            stage=stage,
-                            actions=actions_taken,
-                            duration_seconds=time_module.time() - start_time,
-                            started_at=started_at,
-                        )
-                    else:
-                        return AutonomyResult(
-                            success=False,
-                            output="Task stopped due to repeated actions (doom loop)",
-                            completion_reason="doom_loop",
-                            iterations=iterations,
-                            stage=stage,
-                            actions=actions_taken,
-                            duration_seconds=time_module.time() - start_time,
-                            started_at=started_at,
-                        )
-                
-                # Record for action history
-                actions_taken.append({
-                    "iteration": iterations,
-                    "response": response_str[:500],
-                })
-                
-                # Observability logging via ObservabilityHooks (G-UNUSED-2 fix)
-                obs = getattr(self, '_observability_hooks', None)
-                if obs is not None:
-                    from ..escalation.observability import EventType as _EvtType
-                    obs.increment_step()
-                    obs.emit(_EvtType.STEP_END, {
-                        "iteration": iterations,
-                        "stage": stage,
-                        "response_len": len(response_str),
-                        "agent_name": getattr(self, 'name', None),
-                    })
-                elif self.autonomy_config.get("observe"):
-                    get_logger(__name__).info(
-                        f"[autonomy] iteration={iterations} stage={stage} "
-                        f"response_len={len(response_str)}"
-                    )
-                
-                # Auto-save session after each iteration (memory integration)
-                self._auto_save_session()
-
-                # ─────────────────────────────────────────────────────────────
-                # GOAL COMPLETION JUDGE (opt-in): when a goal loop is active,
-                # an independent judge gates termination on the goal's
-                # acceptance criteria instead of the keyword/promise heuristics.
-                # When no goal is set, this is a no-op (behaviour unchanged).
-                # ─────────────────────────────────────────────────────────────
-                _goal_gate = self._goal_gate(response_str)
-                if _goal_gate is not None:
-                    _outcome, _reason = _goal_gate
-                    if _outcome == "done":
-                        return AutonomyResult(
-                            success=True, output=response_str,
-                            completion_reason="goal_met", iterations=iterations,
-                            stage=stage, actions=actions_taken,
-                            duration_seconds=time_module.time() - start_time,
-                            started_at=started_at,
-                        )
-                    if _outcome == "budget_paused":
-                        return AutonomyResult(
-                            success=False, output=response_str,
-                            completion_reason="budget_paused",
-                            iterations=iterations, stage=stage,
-                            actions=actions_taken,
-                            duration_seconds=time_module.time() - start_time,
-                            started_at=started_at,
-                        )
-                    prompt = self._goal_continuation_prompt(self._goal_state)
-                    continue
-
-                # ─────────────────────────────────────────────────────────────
-                # VERIFICATION GATE (opt-in): before any success signal below
-                # can finalise the run, all blocking verification hooks must
-                # pass. On failure, feed captured stdout/stderr back and keep
-                # iterating (never-passing checks end at max_iterations).
-                # No-op when no verification hooks are configured.
-                # ─────────────────────────────────────────────────────────────
-                _gate_feedback = self._verification_gate(response_str, iterations)
-                if _gate_feedback is not None:
-                    prompt = _gate_feedback
-                    continue
-
-                # ─────────────────────────────────────────────────────────────
-                # TOOL-CALL COMPLETION: If the model used tools this turn AND
-                # produced a substantive response, the inner loop completed
-                # the task naturally (model stopped calling tools = done).
-                # This is the same signal the CLI/wrapper path trusts.
-                # ─────────────────────────────────────────────────────────────
-                if not effective_promise and self._autonomy_turn_tool_count > 0 and len(response_str) > 100:
-                    # P3/G2: Emit completion callback
-                    execute_sync_callback('autonomy_complete',
-                        completion_reason="tool_completion",
-                        iterations=iterations,
-                        duration_seconds=time_module.time() - start_time
-                    )
-                    return AutonomyResult(
-                        success=True,
-                        output=response_str,
-                        completion_reason="tool_completion",
-                        iterations=iterations,
-                        stage=stage,
-                        actions=actions_taken,
-                        duration_seconds=time_module.time() - start_time,
-                        started_at=started_at,
-                    )
-                
-                # Auto-escalate stage if stuck (G11 fix: wire auto_escalate)
-                if (self.autonomy_config.get("auto_escalate")
-                        and iterations > 1
-                        and stage in ("direct", "heuristic")):
-                    stage_order = ["direct", "heuristic", "planned", "autonomous"]
-                    idx = stage_order.index(stage) if stage in stage_order else 0
-                    if idx < len(stage_order) - 1:
-                        prev_stage = stage
-                        stage = stage_order[idx + 1]
-                        
-                        # P3/G2: Emit stage change callback for CLI visibility
-                        execute_sync_callback('autonomy_stage_change',
-                            from_stage=prev_stage,
-                            to_stage=stage
-                        )
-                        
-                        if obs is not None:
-                            obs.emit(_EvtType.STAGE_ESCALATE, {"from": prev_stage, "to": stage})
-                
-                # Completion promise: when configured, it is the only success signal
-                # (heuristic exits above/below are skipped in promise mode)
-                if effective_promise:
-                    promise_tag = f"<promise>{effective_promise}</promise>"
-                    if promise_tag in response_str:
-                        # P3/G2: Emit completion callback
-                        execute_sync_callback('autonomy_complete',
-                            completion_reason="promise",
-                            iterations=iterations,
-                            duration_seconds=time_module.time() - start_time
-                        )
-                        return AutonomyResult(
-                            success=True,
-                            output=response_str,
-                            completion_reason="promise",
-                            iterations=iterations,
-                            stage=stage,
-                            actions=actions_taken,
-                            duration_seconds=time_module.time() - start_time,
-                            started_at=started_at,
-                        )
-                
-                # Check for keyword-based completion signals (word-boundary, G-COMPLETION-1 fix)
-                if not effective_promise and self._is_completion_signal(response_str):
-                    # P3/G2: Emit completion callback
-                    execute_sync_callback('autonomy_complete',
-                        completion_reason="goal",
-                        iterations=iterations,
-                        duration_seconds=time_module.time() - start_time
-                    )
-                    return AutonomyResult(
-                        success=True,
-                        output=response_str,
-                        completion_reason="goal",
-                        iterations=iterations,
-                        stage=stage,
-                        actions=actions_taken,
-                        duration_seconds=time_module.time() - start_time,
-                        started_at=started_at,
-                    )
-                
-                # For DIRECT stage, complete after first response
-                if not effective_promise and stage == "direct":
-                    # P3/G2: Emit completion callback
-                    execute_sync_callback('autonomy_complete',
-                        completion_reason="goal",
-                        iterations=iterations,
-                        duration_seconds=time_module.time() - start_time
-                    )
-                    return AutonomyResult(
-                        success=True,
-                        output=response_str,
-                        completion_reason="goal",
-                        iterations=iterations,
-                        stage=stage,
-                        actions=actions_taken,
-                        duration_seconds=time_module.time() - start_time,
-                        started_at=started_at,
-                    )
-                
-                # Clear context between iterations if enabled
-                if effective_clear_context:
-                    self.clear_history()
-                
-                # No-tool-call termination: if model makes no tool calls for 2+
-                # consecutive turns, treat as completion signal.
-                # Skip first iteration (model may be planning).
-                # Suppressed when doom recovery is active — once a doom loop
-                # is detected, no_tool_calls (a success exit) should not fire;
-                # the doom loop system manages termination instead.
-                if (not effective_promise and self._autonomy_turn_tool_count == 0 and iterations > 1
-                        and not self._doom_recovery_active):
-                    self._consecutive_no_tool_turns += 1
-                    if self._consecutive_no_tool_turns >= 2:
-                        execute_sync_callback('autonomy_complete',
-                            completion_reason="no_tool_calls",
-                            iterations=iterations,
-                            duration_seconds=time_module.time() - start_time
-                        )
-                        return AutonomyResult(
-                            success=True,
-                            output=response_str,
-                            completion_reason="no_tool_calls",
-                            iterations=iterations,
-                            stage=stage,
-                            actions=actions_taken,
-                            duration_seconds=time_module.time() - start_time,
-                            started_at=started_at,
-                        )
-                else:
-                    self._consecutive_no_tool_turns = 0
-            
-            # Max iterations reached
-            # P3/G2: Emit completion callback for max iterations
-            execute_sync_callback('autonomy_complete',
-                completion_reason="max_iterations",
-                iterations=iterations,
-                duration_seconds=time_module.time() - start_time
+            result = run_coroutine_on_thread_loop(
+                self.run_autonomous_async(
+                    prompt, max_iterations=max_iterations, timeout_seconds=timeout_seconds,
+                    completion_promise=completion_promise, clear_context=clear_context,
+                ),
+                timeout=None,  # the loop enforces timeout_seconds itself
             )
-            return AutonomyResult(
-                success=False,
-                output="Max iterations reached",
-                completion_reason="max_iterations",
-                iterations=iterations,
-                stage=stage,
-                actions=actions_taken,
-                duration_seconds=time_module.time() - start_time,
-                started_at=started_at,
-            )
-        
         except KeyboardInterrupt:
-            return AutonomyResult(
-                success=False,
-                output="Task cancelled by user",
-                completion_reason="cancelled",
-                iterations=iterations,
-                stage=stage,
-                actions=actions_taken,
-                duration_seconds=time_module.time() - start_time,
-                started_at=started_at,
-            )
-        except Exception as e:
-            return AutonomyResult(
-                success=False,
-                output=str(e),
-                completion_reason="error",
-                iterations=iterations,
-                stage=stage,
-                actions=actions_taken,
-                duration_seconds=time_module.time() - start_time,
-                error=str(e),
-                started_at=started_at,
-            )
+            result = getattr(self, "_last_autonomy_result", None)
+            if result is None:
+                raise
+        if isinstance(result, AutonomyResult) and result.completion_reason == "cancelled":
+            result.output = "Task cancelled by user"
+        return result
     
     def _take_pre_autonomous_snapshot(self) -> None:
         """Take the pre-run file snapshot for an autonomous run, if enabled.
@@ -5473,10 +4556,14 @@ Summary:"""
                     return _timed_out
                 
                 if response is None:
-                    # chat()/achat() return None when the model call failed; that
-                    # is not an answer (F-21). The error is on _last_error.
-                    _err = str(getattr(self, "_last_error", None) or "the model call failed")
-                    return AutonomyResult(
+                    # chat()/achat() return None when the model call failed (error on
+                    # _last_error) or a BEFORE_AGENT hook blocked the turn; neither is
+                    # an answer (F-21). A spend cap hit first keeps its budget result.
+                    _err = str(getattr(self, "_last_error", None) or "the turn produced no response")
+                    return self._autonomy_budget_result(
+                        iterations, stage, actions_taken, start_time, started_at,
+                        "", spend_baseline
+                    ) or AutonomyResult(
                         success=False,
                         output=_err,
                         completion_reason="error",

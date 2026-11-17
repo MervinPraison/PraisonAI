@@ -32,7 +32,8 @@ def _runs(idempotent, message="boom", max_attempts=3):
     def charge_card(amount: str) -> str:
         """Charge a customer's card."""
         calls.append(amount)
-        raise RuntimeError(message)
+        # D-03: only a timeout or connection error is retried, so the tool raises one.
+        raise ConnectionError(message)
 
     if idempotent is not None:
         charge_card.idempotent = idempotent
@@ -85,7 +86,8 @@ def _runs_restart_safe(restart_safe, message="boom", max_attempts=3):
     def charge_card(amount: str) -> str:
         """Charge a customer's card."""
         calls.append(amount)
-        raise RuntimeError(message)
+        # D-03: only a timeout or connection error is retried, so the tool raises one.
+        raise ConnectionError(message)
 
     cfg = ToolConfig(retry_policy=RetryPolicy(max_attempts=max_attempts,
                                               initial_delay_ms=0))
@@ -130,7 +132,7 @@ def test_base_tool_restart_safe_false_is_not_retried():
 
         def run(self, amount: str) -> str:
             calls.append(amount)
-            raise RuntimeError("boom")
+            raise ConnectionError("boom")
 
     agent = Agent(instructions="x", tools=[ChargeCard()], tool_config=FAST)
     try:
