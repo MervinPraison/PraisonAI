@@ -6,9 +6,9 @@ infix because ``config.resolve_<param>`` already exists with different
 defaults (for example ``resolve_caching(None)`` returns ``None``).
 """
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-from .feature_configs import CachingConfig, PlanningConfig, ReflectionConfig, TemplateConfig
+from .feature_configs import CachingConfig, HooksConfig, PlanningConfig, ReflectionConfig, TemplateConfig
 from .param_resolver import ArrayMode, resolve
 from .presets import CACHING_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS
 
@@ -123,3 +123,47 @@ def resolve_agent_reflection(reflection: Any) -> Tuple[Optional[ReflectionConfig
     if reflection is False:
         return config, {"self_reflect": False}
     return config, {}
+
+
+def resolve_agent_hooks(hooks: Any) -> Tuple[Any, List[Any], Optional[Any], Optional[Any]]:
+    """``hooks=`` -> ``(config, hooks_list, step_callback, registry)``.
+
+    ``None`` means no hooks; a list passes through; a ``HooksConfig`` (or a
+    dict resolved into one) gives its middleware, with ``on_step`` /
+    ``on_tool_call`` appended to the same chain. ``registry`` is a
+    ``HooksConfig``'s ``registry`` attribute, if it has one.
+    """
+    if hooks is None:
+        config = None
+    elif isinstance(hooks, (list, HooksConfig)):
+        config = hooks
+    else:
+        config = resolve(
+            value=hooks,
+            param_name="hooks",
+            config_class=HooksConfig,
+            array_mode=ArrayMode.PASSTHROUGH,
+            default=None,
+        )
+    hooks_list, step_callback, registry = [], None, None
+    # Per-agent event-hook registry (isolates BEFORE_TOOL/AFTER_AGENT/...
+    # hooks so they never fire on unrelated agents sharing the default
+    # registry). A bare HookRegistry passed as ``hooks=`` still works too.
+    if isinstance(config, list):
+        hooks_list = config
+    elif isinstance(config, HooksConfig):
+        step_callback = config.on_step
+        hooks_list = list(config.middleware or [])
+        registry = getattr(config, "registry", None)
+        # Route on_step / on_tool_call onto the SAME middleware chain
+        # that already powers ``hooks=[...]`` (MiddlewareManager). Both
+        # keys used to be stored-and-never-called, so the TypeError that
+        # advertises them ("Valid keys: on_step, on_tool_call,
+        # middleware") promised behaviour that did not exist.
+        if config.on_step is not None or config.on_tool_call is not None:
+            from ..hooks.middleware import as_step_hook, as_tool_call_hook
+            if config.on_step is not None:
+                hooks_list.append(as_step_hook(config.on_step))
+            if config.on_tool_call is not None:
+                hooks_list.append(as_tool_call_hook(config.on_tool_call))
+    return config, hooks_list, step_callback, registry
