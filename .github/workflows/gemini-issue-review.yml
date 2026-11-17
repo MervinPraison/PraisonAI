@@ -148,7 +148,7 @@ jobs:
             **Solution:** Added proper prompt handling after each tool call in the Ollama model integration.
             
             **Changes Made:**
-            - Modified `src/praisonai-agents/ollama-sequential.py`
+            - Modified `src/praisonai-agents/scratch/legacy-root/ollama-sequential.py`
             - Added continuation prompts for multi-step tool execution
             
             **Pull Request:** https://github.com/MervinPraison/PraisonAI/pull/856
