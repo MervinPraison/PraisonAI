@@ -199,8 +199,6 @@ F06 = _drift("F-06", "achat() on the litellm Chat Completions route sends the po
 F07 = _drift("F-07", "OpenAI-client tool loop records usage for one of the two model calls",
              ("chat", "openai_client"), ("achat", "openai_client"))
 F08 = _drift("F-08", "start(stream=True) records no token usage or cost on any route", ("stream", "*"))
-F09 = _drift("F-09", "start(stream=True) ignores cancel_token", ("stream", "*"))
-F09_TOOL = _drift("F-09", "start(stream=True) ignores cancel_token", ("stream", "openai_client"))
 F10 = _drift("F-10", "OpenAI-client stream fails on a chunk with no choices and resends the turn unstreamed",
              ("stream", "openai_client"))
 F11 = _drift("F-11", "OpenAI-client stream emits no llm_request/llm_response trace events",
@@ -357,7 +355,7 @@ def test_deferred_tool_result_registered(stub, mode, route):
         resolver.cancel(handle)
 
 
-@pytest.mark.parametrize("mode,route", _cells(F09))
+@pytest.mark.parametrize("mode,route", _cells())
 def test_cancel_token_set_before_turn_stops_it(stub, mode, route):
     token = threading.Event()
     token.set()
@@ -369,7 +367,7 @@ def test_cancel_token_set_before_turn_stops_it(stub, mode, route):
     assert REQUESTS == []
 
 
-@pytest.mark.parametrize("mode,route", _cells(F09_TOOL, F14))
+@pytest.mark.parametrize("mode,route", _cells(F14))
 def test_cancel_during_tool_stops_the_loop(stub, mode, route):
     token = threading.Event()
 
