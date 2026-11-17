@@ -2013,10 +2013,12 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 default=None,
             )
         
+        _search_provider = "duckduckgo"
         if _web_config is not None:
             if isinstance(_web_config, WebConfig):
                 web_search = _web_config.search
                 web_fetch = _web_config.fetch
+                _search_provider = str(getattr(_web_config.search_provider, "value", _web_config.search_provider) or "duckduckgo").lower()
             else:
                 web_search = bool(_web_config)
                 web_fetch = bool(_web_config)
@@ -2779,12 +2781,27 @@ Your Role: {self.role}
         
         # Handle web_search fallback: inject DuckDuckGo tool for unsupported models
         if web_search and not self._model_supports_web_search():
-            from ..tools.duckduckgo_tools import internet_search
-            # Check if internet_search is not already in tools
             tool_names = [getattr(t, '__name__', str(t)) for t in self.tools]
-            if 'internet_search' not in tool_names and 'duckduckgo' not in tool_names:
-                self.tools.append(internet_search)
-                logging.info("Model does not support native web search. Added DuckDuckGo fallback tool.")
+            # The preset's provider picks the tool (X-01). Only Tavily has a
+            # built-in tool besides DuckDuckGo; anything else keeps DuckDuckGo
+            # and says so, so a build that works today still works.
+            if _search_provider == "tavily":
+                from ..tools import tavily_tools
+                _ok, _why = tavily_tools._check_tavily_available()
+                if _ok:
+                    if 'tavily_search' not in tool_names:
+                        self.tools.append(tavily_tools.tavily_search)
+                    _search_provider = None
+                else:
+                    logging.warning(f"Agent {self.name!r}: web search provider 'tavily' is not usable ({_why}); using DuckDuckGo.")
+            elif _search_provider != "duckduckgo":
+                logging.warning(f"Agent {self.name!r}: web search provider {_search_provider!r} has no built-in "
+                                "search tool; using DuckDuckGo. Built-in providers: 'duckduckgo', 'tavily'.")
+            if _search_provider is not None:
+                from ..tools.duckduckgo_tools import internet_search
+                if 'internet_search' not in tool_names and 'duckduckgo' not in tool_names:
+                    self.tools.append(internet_search)
+                    logging.info("Model does not support native web search. Added DuckDuckGo fallback tool.")
         
         # Raise error if web_fetch is explicitly enabled but model doesn't support it
         # Web fetch is only supported by Anthropic/Claude models
