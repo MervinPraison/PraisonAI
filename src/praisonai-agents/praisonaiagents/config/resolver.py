@@ -25,6 +25,7 @@ Usage:
 """
 
 import os
+import threading
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
@@ -180,6 +181,9 @@ class ConfigRegistry:
     _entries: Dict[str, ConfigEntry] = {}
     _aliases: Dict[str, str] = {}  # alias -> canonical key mapping
     _provider = EnvironmentConfigProvider()
+    # Writers hold the lock; readers iterate a snapshot, so a registration from
+    # another thread cannot break an iteration in progress (G-23).
+    _lock = threading.RLock()
     
     @classmethod
     def register(
@@ -207,11 +211,10 @@ class ConfigRegistry:
             validation=validation,
         )
         
-        self._entries[key] = entry
-        
-        # Register aliases
-        for alias in entry.aliases:
-            self._aliases[alias] = key
+        with self._lock:
+            self._entries[key] = entry
+            for alias in entry.aliases:
+                self._aliases[alias] = key
         
         return entry
     
@@ -232,7 +235,8 @@ class ConfigRegistry:
     @classmethod
     def list_entries(cls, scope: Optional[ConfigScope] = None) -> List[ConfigEntry]:
         """List all registered configuration entries."""
-        entries = list(cls._entries.values())
+        with cls._lock:
+            entries = list(cls._entries.values())
         if scope:
             entries = [e for e in entries if e.scope == scope]
         return entries
@@ -241,7 +245,9 @@ class ConfigRegistry:
     def get_unknown_env_vars(cls) -> Set[str]:
         """Get environment variables that are not registered."""
         all_env_vars = set(os.environ.keys())
-        registered_vars = {entry.env_var for entry in cls._entries.values()}
+        with cls._lock:
+            snapshot = list(cls._entries.values())
+        registered_vars = {entry.env_var for entry in snapshot}
         
         # Filter out common system env vars
         system_vars = {
@@ -261,8 +267,9 @@ class ConfigRegistry:
     @classmethod
     def clear(cls) -> None:
         """Clear all registered entries (for testing)."""
-        cls._entries.clear()
-        cls._aliases.clear()
+        with cls._lock:
+            cls._entries.clear()
+            cls._aliases.clear()
         cls._provider.clear_cache()
 
 
