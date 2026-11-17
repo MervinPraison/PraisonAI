@@ -22,6 +22,8 @@ from dataclasses import dataclass
 
 from .base import BaseTool
 
+logger = logging.getLogger(__name__)
+
 # Lazy load entry_points to reduce import time
 _entry_points = None
 
@@ -83,7 +85,7 @@ class ToolEntry:
             try:
                 return self.schema_override(base_schema)
             except Exception as e:
-                logging.warning(f"Dynamic schema override failed for tool '{self.name}': {e}")
+                logger.warning(f"Dynamic schema override failed for tool '{self.name}': {e}")
                 return base_schema
 
         return base_schema
@@ -166,7 +168,7 @@ class ToolRegistry:
             # Check for existing tool
             existing = self._tools.get(tool_name)
             if existing is not None and not overwrite:
-                logging.debug(f"Tool '{tool_name}' already registered, skipping")
+                logger.debug(f"Tool '{tool_name}' already registered, skipping")
                 return
 
             # Replacing a different tool instance under the same name must not
@@ -186,11 +188,11 @@ class ToolRegistry:
             )
             
             self._tools[tool_name] = entry
-            logging.debug(f"Registered tool: {tool_name}")
+            logger.debug(f"Registered tool: {tool_name}")
             if dynamic_schema_overrides:
-                logging.debug(f"Tool '{tool_name}' has dynamic schema override function")
+                logger.debug(f"Tool '{tool_name}' has dynamic schema override function")
             if trust_level:
-                logging.debug(f"Tool '{tool_name}' has trust level: {trust_level}")
+                logger.debug(f"Tool '{tool_name}' has trust level: {trust_level}")
     
     def unregister(self, name: str) -> bool:
         """Remove a tool from the registry.
@@ -283,10 +285,10 @@ class ToolRegistry:
                         is_available, reason = entry.tool.check_availability()
                         if not is_available:
                             if reason:
-                                logging.debug(f"Tool '{entry.name}' unavailable: {reason}")
+                                logger.debug(f"Tool '{entry.name}' unavailable: {reason}")
                             continue
                     except Exception as e:
-                        logging.warning(f"Availability check failed for tool '{entry.name}': {e}")
+                        logger.warning(f"Availability check failed for tool '{entry.name}': {e}")
                         continue
                 
                 # Deny = hide: drop tools the permission resolver rejects so the
@@ -296,17 +298,17 @@ class ToolRegistry:
                 if permission_resolver is not None:
                     try:
                         if not permission_resolver(entry.name):
-                            logging.debug(f"Tool '{entry.name}' hidden by permission policy")
+                            logger.debug(f"Tool '{entry.name}' hidden by permission policy")
                             continue
                     except Exception as e:
-                        logging.warning(f"Permission resolver failed for tool '{entry.name}': {e}")
+                        logger.warning(f"Permission resolver failed for tool '{entry.name}': {e}")
                 
                 # Get schema with dynamic overrides applied
                 try:
                     schema = entry.schema
                     definitions.append(schema)
                 except Exception as e:
-                    logging.error(f"Failed to get schema for tool '{entry.name}': {e}")
+                    logger.error(f"Failed to get schema for tool '{entry.name}': {e}")
                     continue
             
             return definitions
@@ -332,7 +334,7 @@ class ToolRegistry:
             try:
                 schema = entry.schema
             except Exception as e:
-                logging.error(f"Failed to get schema for tool '{name}': {e}")
+                logger.error(f"Failed to get schema for tool '{name}': {e}")
                 return None
         # Force the advertised name to the requested registry key (copy so we
         # never mutate a cached override result).
@@ -396,7 +398,7 @@ class ToolRegistry:
                             self._availability_last_success[registered_name] = current_time
                             available.append(entry.tool)
                         elif reason:
-                            logging.debug(f"Tool '{registered_name}' unavailable: {reason}")
+                            logger.debug(f"Tool '{registered_name}' unavailable: {reason}")
                     except Exception as e:
                         # A probe exception is inherently flaky (daemon busy, import
                         # hiccup, network blip). Within the grace window of a recent
@@ -404,13 +406,13 @@ class ToolRegistry:
                         # so a single transient failure can't strip a healthy tool.
                         last_ok = self._availability_last_success.get(registered_name)
                         if last_ok is not None and (current_time - last_ok) < self._availability_grace:
-                            logging.debug(
+                            logger.debug(
                                 f"Availability check failed for tool '{registered_name}' "
                                 f"but serving last-good within grace window: {e}"
                             )
                             available.append(entry.tool)
                         else:
-                            logging.warning(f"Availability check failed for tool '{registered_name}': {e}")
+                            logger.warning(f"Availability check failed for tool '{registered_name}': {e}")
                             # Sustained failure - cache as unavailable
                             self._availability_cache[registered_name] = (False, current_time)
                 else:
@@ -444,13 +446,13 @@ class ToolRegistry:
             return sorted(filtered_tools)
             
         except ImportError:
-            logging.warning("ALLOWED_TOOLS filter not available, returning all tools")
+            logger.warning("ALLOWED_TOOLS filter not available, returning all tools")
             return self.list_tools()
         except ValueError:
             # Preserve strict ALLOWED_TOOLS semantics (e.g., CI unknown tools, empty value)
             raise
         except Exception as e:
-            logging.error("Error applying ALLOWED_TOOLS filter: %s", e)
+            logger.error("Error applying ALLOWED_TOOLS filter: %s", e)
             # Fallback to all tools on error
             return self.list_tools()
     
@@ -522,7 +524,7 @@ class ToolRegistry:
                         elif callable(tool_class_or_func):
                             self.register(tool_class_or_func, name=ep.name)
                         else:
-                            logging.warning(f"Entry point '{ep.name}' is not a valid tool")
+                            logger.warning(f"Entry point '{ep.name}' is not a valid tool")
                             continue
 
                         if is_alias:
@@ -537,9 +539,9 @@ class ToolRegistry:
 
                         seen.add(ep.name)
                         count += 1
-                        logging.info(f"Discovered plugin tool: {ep.name}")
+                        logger.info(f"Discovered plugin tool: {ep.name}")
                     except Exception as e:
-                        logging.warning(f"Failed to load plugin '{ep.name}': {e}")
+                        logger.warning(f"Failed to load plugin '{ep.name}': {e}")
 
             self._discovered = True
             return count
@@ -559,10 +561,10 @@ class ToolRegistry:
             loaded = discover_and_load_plugins(plugin_dirs=None, include_defaults=True)
             return len(loaded)
         except ImportError:
-            logging.debug("Plugin discovery module not available")
+            logger.debug("Plugin discovery module not available")
             return 0
         except Exception as e:
-            logging.warning(f"Error discovering single-file plugins: {e}")
+            logger.warning(f"Error discovering single-file plugins: {e}")
             return 0
     
     def get_trust_level(self, name: str) -> Optional[str]:

@@ -22,6 +22,8 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
+logger = logging.getLogger(__name__)
+
 __all__ = ["get_spill_dir", "spill", "bounded_with_pointer"]
 
 _SPILL_SUBDIR = "praisonai_tool_output"
@@ -66,7 +68,7 @@ def get_spill_dir(spill_dir: Optional[str] = None) -> Path:
     except OSError as exc:
         # Target a genuinely different location instead of retrying the same
         # path (which would fail identically, e.g. a file already occupies it).
-        logging.warning(
+        logger.warning(
             "Spill dir %s unavailable (%s); using a fresh temp directory.",
             path, exc,
         )
@@ -105,7 +107,7 @@ def spill(output: str, kind: str = "output", spill_dir: Optional[str] = None) ->
         _PROCESS_SPILL_FILES.add(artifact)
         return artifact
     except OSError as exc:
-        logging.warning("Failed to spill tool output to artifact: %s", exc)
+        logger.warning("Failed to spill tool output to artifact: %s", exc)
         return None
 
 

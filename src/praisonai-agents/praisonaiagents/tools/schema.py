@@ -24,6 +24,8 @@ import types
 import weakref
 from typing import Any, Union, Literal, get_origin, get_args, get_type_hints, Callable, Dict, Optional, Set, Tuple
 
+logger = logging.getLogger(__name__)
+
 
 def annotation_to_json_schema(annotation: Any) -> dict:
     """Convert Python type annotation to JSON Schema format.
@@ -350,7 +352,7 @@ def build_parameters_schema(
             prop_schema = annotation_to_json_schema(param_type)
         except Exception as e:
             # Log but continue - allow partial schemas
-            logging.debug(f"Could not generate schema for {func_name}.{param_name}: {e}")
+            logger.debug(f"Could not generate schema for {func_name}.{param_name}: {e}")
             # Default to string type for parameters that fail schema generation
             prop_schema = {"type": "string"}
         
@@ -456,7 +458,7 @@ def build_tool_definition(
         try:
             prop_schema = annotation_to_json_schema(annotation)
         except Exception as e:
-            logging.warning(f"Could not generate schema for {function_name}.{name}: {e}")
+            logger.warning(f"Could not generate schema for {function_name}.{name}: {e}")
             prop_schema = {"type": "string"}
 
         if name in param_descriptions:

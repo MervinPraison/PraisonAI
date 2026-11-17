@@ -48,6 +48,8 @@ from typing import Any, Callable, Dict, Optional, Union, get_type_hints
 from .base import BaseTool
 from .schema import build_parameters_schema
 
+logger = logging.getLogger(__name__)
+
 # Valid human-approval risk levels, mirroring approval.RiskLevel. A misspelled
 # level (e.g. "critial") must be rejected rather than silently registered, since
 # critical-only policy checks compare against the exact "critical" string.
@@ -197,7 +199,7 @@ class FunctionTool(BaseTool):
             hints = get_type_hints(func) if hasattr(func, '__annotations__') else {}
         except (ValueError, NameError, Exception) as e:
             # Handle built-ins, forward references, and other signature/type issues
-            logging.debug(f"Could not generate schema for {func.__name__}: {e}")
+            logger.debug(f"Could not generate schema for {func.__name__}: {e}")
             return {"type": "object", "properties": {}, "required": []}
         
         # Use the new shared helper with a predicate for injected parameters
@@ -226,7 +228,7 @@ class FunctionTool(BaseTool):
         try:
             return self._to_model_output(result)
         except Exception as e:
-            logging.warning(f"to_model_output failed for tool '{self.name}': {e}")
+            logger.warning(f"to_model_output failed for tool '{self.name}': {e}")
             return None
 
     def _signature_target(self) -> Callable:
@@ -252,7 +254,7 @@ class FunctionTool(BaseTool):
             try:
                 return self._availability()
             except Exception as e:
-                logging.warning(f"Tool {self.name} availability check failed: {e}")
+                logger.warning(f"Tool {self.name} availability check failed: {e}")
                 return False, f"Availability check failed: {e}"
         # Default: always available if no check function provided
         return True, ""
@@ -403,26 +405,26 @@ def tool(
             tool_instance.validate()
             tool_instance.validate_schema_roundtrip()
         except Exception as e:
-            logging.warning(f"Tool validation warning for {tool_instance.name}: {e}")
+            logger.warning(f"Tool validation warning for {tool_instance.name}: {e}")
         
         # Register with global registry if available
         # Note: Don't pass dynamic_schema_overrides again since FunctionTool already handles it
         try:
-            logging.debug(f"Attempting to import registry for tool {tool_instance.name}")
+            logger.debug(f"Attempting to import registry for tool {tool_instance.name}")
             from praisonaiagents.tools.registry import get_registry
-            logging.debug("Successfully imported get_registry")
+            logger.debug("Successfully imported get_registry")
             registry = get_registry()
-            logging.debug(f"Got registry: {registry}, type: {type(registry)}")
+            logger.debug(f"Got registry: {registry}, type: {type(registry)}")
             if registry:
-                logging.debug(f"Registering tool {tool_instance.name}")
+                logger.debug(f"Registering tool {tool_instance.name}")
                 registry.register(tool_instance)
-                logging.debug(f"Tool {tool_instance.name} registered successfully")
+                logger.debug(f"Tool {tool_instance.name} registered successfully")
             else:
-                logging.warning(f"Registry is None for tool {tool_instance.name}")
+                logger.warning(f"Registry is None for tool {tool_instance.name}")
         except ImportError as e:
-            logging.warning(f"Import error during registration: {e}")
+            logger.warning(f"Import error during registration: {e}")
         except Exception as e:
-            logging.warning(f"Failed to register tool {tool_instance.name}: {e}")
+            logger.warning(f"Failed to register tool {tool_instance.name}: {e}")
         
         return tool_instance
     
@@ -478,7 +480,7 @@ def _schema_from_function(func: Callable) -> Dict[str, Any]:
         hints = get_type_hints(func) if hasattr(func, '__annotations__') else {}
     except (ValueError, NameError, Exception) as e:
         # Handle built-ins, forward references, and other signature/type issues
-        logging.debug(f"Could not generate schema for {name}: {e}")
+        logger.debug(f"Could not generate schema for {name}: {e}")
         return {
             "type": "function",
             "function": {
