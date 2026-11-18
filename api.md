@@ -729,9 +729,9 @@ Methods:
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/config/parse_utils.py">parse_policy_string</a>(value: str) -> tuple</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/config/param_resolver.py">resolve</a>(value: Any, param_name: str, config_class: Optional[Type] = None, presets: Optional[Dict[str, Any]] = None, default: Any = None, instance_check: Optional[Callable[[Any], bool]] = None, url_schemes: Optional[Dict[str, str]] = None, array_mode: Optional[str] = None, string_mode: Optional[str] = None) -> Any</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/config/param_resolver.py">resolve_autonomy</a>(value: Any, config_class: Type) -> Any</code>
-* <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/config/param_resolver.py">resolve_caching</a>(value: Any, config_class: Type) -> Any</code>
+* <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/config/param_resolver.py">resolve_caching</a>(value: Any, config_class: Type, default: Any = None) -> Any</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/config/param_resolver.py">resolve_context</a>(value: Any, config_class: Type) -> Any</code>
-* <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/config/param_resolver.py">resolve_execution</a>(value: Any, config_class: Type) -> Any</code>
+* <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/config/param_resolver.py">resolve_execution</a>(value: Any, config_class: Type, default: Any = None) -> Any</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/config/param_resolver.py">resolve_guardrail_policies</a>(policies: list, config_class: Type) -> Any</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/config/param_resolver.py">resolve_guardrails</a>(value: Any, config_class: Type) -> Any</code>
 * <code title="function">praisonaiagents.<a href="./src/praisonai-agents/praisonaiagents/config/param_resolver.py">resolve_hooks</a>(value: Any, config_class: Optional[Type] = None) -> Any</code>
