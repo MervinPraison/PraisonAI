@@ -8,6 +8,7 @@ Provides both legacy API (classify_error) and new structured classification
 (classify_llm_error) with explicit recovery routing hints.
 """
 
+import errno as _errno
 import re
 import math
 import random
@@ -142,6 +143,41 @@ def _is_connection_refused(exc: BaseException, _depth: int = 0) -> bool:
         group = getattr(exc, "exceptions", None)
         if isinstance(group, (list, tuple)) and group:
             return all(_is_connection_refused(e, _depth + 1) for e in group)
+        exc, seen = exc.__cause__ or exc.__context__, seen + 1
+    return False
+
+
+# The request could not leave this host (DNS failure, no route): no provider saw
+# it, so retrying for longer than the general budget is safe (#6636). Refused
+# connections and mid-response resets are deliberately not listed here.
+_UNREACHABLE_ERRNOS = frozenset({
+    getattr(_errno, name) for name in ("ENETUNREACH", "EHOSTUNREACH", "ENETDOWN")
+    if hasattr(_errno, name)
+})
+_UNREACHABLE_TEXT = re.compile(
+    r"temporary failure in name resolution|name or service not known|"
+    r"nodename nor servname|getaddrinfo failed|enotfound|eai_again|"
+    r"network is unreachable|no route to host|enetunreach|ehostunreach",
+    re.IGNORECASE,
+)
+
+
+def _is_unreachable(exc: BaseException, _depth: int = 0) -> bool:
+    """True if the request failed before reaching any server (DNS / no route)."""
+    seen = 0
+    while exc is not None and seen < 8 and _depth < 4:
+        if type(exc).__name__ == "gaierror":
+            return True
+        if isinstance(exc, OSError) and exc.errno in _UNREACHABLE_ERRNOS:
+            return True
+        # An error with a status code is a server's answer, except litellm's
+        # APIConnectionError, which carries a synthetic 500.
+        if (getattr(exc, "status_code", None) is None
+                or type(exc).__name__ == "APIConnectionError") and _UNREACHABLE_TEXT.search(str(exc)):
+            return True
+        group = getattr(exc, "exceptions", None)
+        if isinstance(group, (list, tuple)) and group:
+            return all(_is_unreachable(e, _depth + 1) for e in group)
         exc, seen = exc.__cause__ or exc.__context__, seen + 1
     return False
 

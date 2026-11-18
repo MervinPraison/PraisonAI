@@ -828,7 +828,10 @@ Respond with ONLY a valid JSON tool call in this format:
         # Fixed delay applies only when explicitly configured; otherwise use jitter.
         self._retry_delay = extra_settings.get('retry_delay', 60)
         self._retry_delay_explicit = 'retry_delay' in extra_settings
-        
+        # Seconds to keep retrying a request that never left the host (DNS
+        # failure, no route) without using max_retries (#6636). 0 disables.
+        self._network_retry_budget = extra_settings.get('network_retry_budget', 300)
+
         # Subscription auth
         self._auth_provider_id = auth
         self._cached_subscription_creds = None  # SubscriptionCredentials | None
@@ -1705,6 +1708,26 @@ Respond with ONLY a valid JSON tool call in this format:
         should_raise = decision.action == "surface_error" or not can_retry
         return should_raise, category, retry_delay, error_str, kwargs, active_profile
 
+    def _unreachable_retry_delay(self, error, state: Dict[str, float]) -> Optional[float]:
+        """Wait before retrying a request that never reached a server, or None.
+
+        Such a request ran nowhere, so it gets its own time budget
+        (``network_retry_budget``, 2s doubling to 30s gaps) instead of using
+        ``max_retries`` (#6636). None means: handle it with the general policy.
+        With auth profiles configured, rotating to another one is preferred.
+        """
+        if not self._network_retry_budget or self._failover_manager:
+            return None
+        from .error_classifier import _is_unreachable
+        if not _is_unreachable(error):
+            return None
+        now = time.monotonic()
+        deadline = state.setdefault("deadline", now + self._network_retry_budget)
+        if now >= deadline:
+            return None
+        state["n"] = state.get("n", 0) + 1
+        return min(2.0 * 2 ** (state["n"] - 1), 30.0, deadline - now)
+
     def _call_with_retry(self, func, *args, **kwargs):
         """Call a function with automatic retry on rate limit errors and failover support.
 
@@ -1727,7 +1750,9 @@ Respond with ONLY a valid JSON tool call in this format:
         # actually rotates instead of pinning its construction-time profile.
         active_profile, kwargs = self._select_active_profile(kwargs)
 
-        for attempt in range(self._max_retries + 1):
+        network_state: Dict[str, float] = {}
+        attempt = 0
+        while attempt <= self._max_retries:
             try:
                 # Apply rate limiter before the call if configured
                 if self._rate_limiter is not None:
@@ -1746,6 +1771,15 @@ Respond with ONLY a valid JSON tool call in this format:
 
             except Exception as e:
                 last_error = e
+
+                # Never reached a server: own time budget, not max_retries (#6636).
+                network_delay = self._unreachable_retry_delay(e, network_state)
+                if network_delay is not None:
+                    logger.warning(
+                        f"network unreachable ({str(e)[:120]}), retrying in {network_delay:.1f}s..."
+                    )
+                    time.sleep(network_delay)
+                    continue
 
                 # Blocking credential refresh runs inline in the sync path.
                 refreshed_creds = None
@@ -1785,6 +1819,7 @@ Respond with ONLY a valid JSON tool call in this format:
                         self._rate_limiter.wait_for_retry(retry_delay)
                     else:
                         time.sleep(retry_delay)
+                    attempt += 1
                 else:
                     logger.error(f"Rate limit exceeded after {self._max_retries + 1} attempts")
                     raise
@@ -1813,7 +1848,9 @@ Respond with ONLY a valid JSON tool call in this format:
         # actually rotates instead of pinning its construction-time profile.
         active_profile, kwargs = self._select_active_profile(kwargs)
 
-        for attempt in range(self._max_retries + 1):
+        network_state: Dict[str, float] = {}
+        attempt = 0
+        while attempt <= self._max_retries:
             try:
                 # Apply rate limiter before the call if configured
                 if self._rate_limiter is not None:
@@ -1832,6 +1869,15 @@ Respond with ONLY a valid JSON tool call in this format:
 
             except Exception as e:
                 last_error = e
+
+                # Never reached a server: own time budget, not max_retries (#6636).
+                network_delay = self._unreachable_retry_delay(e, network_state)
+                if network_delay is not None:
+                    logger.warning(
+                        f"network unreachable ({str(e)[:120]}), retrying in {network_delay:.1f}s..."
+                    )
+                    await asyncio.sleep(network_delay)
+                    continue
 
                 # Offload the blocking credential refresh to a thread so it
                 # never blocks the event loop in the async path.
@@ -1877,6 +1923,7 @@ Respond with ONLY a valid JSON tool call in this format:
                         await self._rate_limiter.wait_for_retry_async(retry_delay)
                     else:
                         await asyncio.sleep(retry_delay)
+                    attempt += 1
                 else:
                     logger.error(f"Rate limit exceeded after {self._max_retries + 1} attempts")
                     raise
