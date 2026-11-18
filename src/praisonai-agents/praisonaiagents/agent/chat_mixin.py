@@ -1114,8 +1114,10 @@ Your Role: {self.role}"""
             if hasattr(schema_model, "model_validate"):
                 try:
                     return schema_model.model_validate(parsed)
-                except Exception:
-                    logger.debug("%s.model_validate failed on parsed output", getattr(schema_model, "__name__", schema_model), exc_info=True)
+                except Exception as exc:
+                    # Type only: validation errors echo the rejected (possibly private) values.
+                    logger.debug("%s.model_validate failed on parsed output (%s)",
+                                 getattr(schema_model, "__name__", schema_model), type(exc).__name__)
         return self._coerce_structured_output(response_text, schema_model)
 
     def _coerce_structured_output(self, response_text, schema_model):
@@ -1139,13 +1141,15 @@ Your Role: {self.role}"""
         def _try_validate(payload: str):
             try:
                 return schema_model.model_validate_json(payload)
-            except Exception:
-                logger.debug("%s.model_validate_json failed", getattr(schema_model, "__name__", schema_model), exc_info=True)
+            except Exception as exc:
+                logger.debug("%s.model_validate_json failed (%s)",
+                             getattr(schema_model, "__name__", schema_model), type(exc).__name__)
             if hasattr(schema_model, "model_validate"):
                 try:
                     return schema_model.model_validate(json.loads(payload))
-                except Exception:
-                    logger.debug("%s.model_validate failed on decoded JSON", getattr(schema_model, "__name__", schema_model), exc_info=True)
+                except Exception as exc:
+                    logger.debug("%s.model_validate failed on decoded JSON (%s)",
+                                 getattr(schema_model, "__name__", schema_model), type(exc).__name__)
             return None
 
         validated = _try_validate(candidate)

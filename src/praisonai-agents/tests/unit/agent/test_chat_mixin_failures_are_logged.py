@@ -49,3 +49,18 @@ def test_failing_tool_call_resolver_is_logged_and_field_used(agent, caplog):
     with caplog.at_level(logging.DEBUG, logger=cm.logger.name):
         assert agent._resolve_max_tool_calls(10) == 4
     assert _records(caplog, "resolved_max_tool_calls() failed")
+
+
+def test_structured_validation_failure_logs_no_reply_values(agent, caplog):
+    from pydantic import BaseModel
+
+    class Reply(BaseModel):
+        count: int
+
+    secret = "private-customer-4111111111111111"
+    with caplog.at_level(logging.DEBUG, logger=cm.logger.name):
+        result = agent._coerce_structured_output('{"count": "%s"}' % secret, Reply)
+    assert result == '{"count": "%s"}' % secret
+    msgs = [r for r in caplog.records if "model_validate" in r.getMessage()]
+    assert msgs and all(r.exc_info is None for r in msgs)
+    assert secret not in caplog.text
