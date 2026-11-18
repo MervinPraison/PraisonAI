@@ -343,17 +343,23 @@ class TestZeroOverhead:
     
     def test_record_timing_overhead(self):
         """record_timing should be fast when disabled."""
+        import timeit
         from praisonaiagents.profiling import Profiler
-        
+
         Profiler.disable()
-        
-        start = time.perf_counter()
-        for _ in range(10000):
-            Profiler.record_timing("test", 100.0)
-        elapsed = (time.perf_counter() - start) * 1000
-        
-        # Should complete 10k calls in under 50ms when disabled (conservative for CI)
-        assert elapsed < 50, f"record_timing took {elapsed}ms for 10k calls"
+
+        # Best of 20 batches (timeit also pauses GC): a batch that gets
+        # descheduled on a loaded machine no longer fails the test, while a
+        # real slowdown in the disabled path shows up in every batch.
+        best = min(timeit.repeat(
+            'record_timing("test", 100.0)',
+            globals={"record_timing": Profiler.record_timing},
+            number=1000,
+            repeat=20,
+        )) * 1000
+
+        # Same budget as before: 5us per call (50ms per 10k calls)
+        assert best < 5, f"record_timing took {best:.2f}ms for 1k calls (best of 20)"
     
     def test_phase_context_overhead(self):
         """phase context manager should be fast when disabled."""
