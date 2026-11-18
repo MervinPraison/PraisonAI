@@ -116,10 +116,12 @@ from ..config.feature_configs import (
 # function-local relative import per construction (#5835).
 from ..config.parse_utils import canonical_preset_key, validate_preset_string
 from ..config.agent_init import (
-    _is_file_path, resolve_agent_caching, resolve_agent_execution, resolve_agent_guardrails,
-    resolve_agent_history, resolve_agent_hooks, resolve_agent_knowledge, resolve_agent_learn,
-    resolve_agent_memory, resolve_agent_model, resolve_agent_output, resolve_agent_planning,
-    resolve_agent_reflection, resolve_agent_skills, resolve_agent_templates, resolve_agent_web,
+    _is_file_path, provider_llm_params, resolve_agent_caching, resolve_agent_execution,
+    resolve_agent_guardrails, resolve_agent_history, resolve_agent_hooks, resolve_agent_knowledge,
+    resolve_agent_learn, resolve_agent_llm_init_params, resolve_agent_llm_options,
+    resolve_agent_local, resolve_agent_memory, resolve_agent_model, resolve_agent_output,
+    resolve_agent_planning, resolve_agent_reflection, resolve_agent_skills, resolve_agent_templates,
+    resolve_agent_web,
 )
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
@@ -1638,117 +1640,21 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         self.api_key = api_key
         self.auth = auth
 
-        # Resolve Agent(retry=...) into LLM init kwargs so the custom-LLM path
-        # (any "provider/model", dict, or base_url config) honours it, instead of
-        # falling back to LLM's hardcoded max_retries=3. self._retry_config is
-        # normalized later (after these branches), so derive the values here from
-        # the raw `retry` argument to forward them into _llm_init_params.
-        _retry_init_params = {}
-        if isinstance(retry, RetryBackoffConfig):
-            _retry_init_params = {'max_retries': retry.max_retries}
-        elif isinstance(retry, dict):
-            _rc = RetryBackoffConfig(**retry)
-            _retry_init_params = {'max_retries': _rc.max_retries}
-        elif retry is False:
-            _retry_init_params = {'max_retries': 0}
-
-        # Connection/execution options that every LLM construction branch
-        # forwards. Kept so a container default applied after construction
-        # (_apply_default_llm) builds the same LLM the constructor would have.
-        self._llm_option_kwargs = {
-            'metrics': metrics,
-            'max_iter': max_iter,
-            'web_search': web_search,
-            'web_fetch': web_fetch,
-            'prompt_caching': prompt_caching,
-            'claude_memory': claude_memory,
-            **_retry_init_params,
-        }
-        # Forward the unified reasoning-effort control to every LLM-construction
-        # branch (Issue #4452). Only set when provided so unset stays a no-op and
-        # older dict/string branches that don't spread these kwargs are unaffected.
-        if reasoning_effort is not None:
-            self._llm_option_kwargs['reasoning_effort'] = reasoning_effort
+        # retry= / reasoning_effort= -> the option kwargs every LLM construction
+        # branch forwards (kept for _apply_default_llm), plus the retry kwargs.
+        self._llm_option_kwargs = resolve_agent_llm_options(
+            retry, reasoning_effort, metrics=metrics, max_iter=max_iter, web_search=web_search,
+            web_fetch=web_fetch, prompt_caching=prompt_caching, claude_memory=claude_memory)
 
         # Local-runtime descriptor: llm="local" (or "local:<engine>/<model>").
-        # Opt-in only -- discovery never fires for any other spec, so a fully
-        # configured agent pays nothing. Resolved here into a concrete
-        # provider/model so the normal LLM path handles it unchanged.
+        # Opt-in only -- discovery never fires for any other spec. Resolved into
+        # a concrete provider/model, endpoint and (for memory/knowledge) a local
+        # embedder, so the normal LLM path handles it unchanged.
         if isinstance(llm, str) and (llm == "local" or llm.startswith("local:")):
-            from ..local import LocalEngine as _LocalEngine
-            from ..local import resolve as _resolve_local
-            _spec = llm[len("local:"):] if llm.startswith("local:") else None
-            _target = _resolve_local(_spec or None)
-            llm = _target.litellm_model
-            if base_url is None:
-                # Ollama's litellm provider builds its own /api paths from the
-                # server root, so it takes base_url. Every other local engine
-                # speaks OpenAI and serves under /v1 -- handing it the bare root
-                # sent chat to /chat/completions, which a real LM Studio, vLLM
-                # or llama-server answers with 404.
-                base_url = (_target.base_url
-                            if _target.engine is _LocalEngine.OLLAMA
-                            else _target.openai_base_url)
-            if api_key is None:
-                api_key = _target.api_key
-            self._local_target = _target
-
-            # Keep a local agent local end to end. Without this, chat went to
-            # the local server while knowledge/memory embedded against OpenAI --
-            # sending the user's documents AND their queries off the machine
-            # with no warning, which defeats the entire point of asking for a
-            # local model. Only fills a gap: an explicit embedder always wins.
-            _wants_embeddings = (retrieval_config is not None
-                                 or embedder_config is not None
-                                 or memory not in (None, False))
-            # retrieval_config may be a dict (knowledge=-derived or user dict) or a
-            # RetrievalConfig instance (passed explicitly); read embedder_config
-            # from either shape without assuming .get() exists.
-            _rc_embedder = (
-                retrieval_config.get('embedder_config')
-                if isinstance(retrieval_config, dict)
-                else getattr(retrieval_config, 'embedder_config', None))
-            if _wants_embeddings and not embedder_config and not _rc_embedder:
-                from ..local import (local_embedder_config as _local_embedder,
-                                     select_embedding_model as _select_embed)
-                _embed_model = _select_embed(
-                    getattr(_d, 'models', ()) if (_d := Agent._local_discovery(_target)) else (),
-                    getattr(_d, 'model_meta', ()) if _d else ())
-                if _embed_model:
-                    embedder_config = _local_embedder(
-                        _target.engine, _target.base_url, _embed_model)
-                    # Carry the real vector width. local/ is a dependency sink
-                    # and cannot import the dimension table, so the caller
-                    # supplies it: a store created at the wrong width either
-                    # rejects every write or silently corrupts the index.
-                    # A width the server *measured* (already in the config) is
-                    # authoritative and must win over the static table. The
-                    # table only fills a genuine gap, and even then never with
-                    # the generic default: a guessed width is worse than letting
-                    # the store infer one from the first vector.
-                    _cfg = embedder_config.setdefault("config", {})
-                    if not _cfg.get("embedding_dims"):
-                        try:
-                            from ..embedding.dimensions import (
-                                DEFAULT_DIMENSION, get_dimensions)
-                            _dims = get_dimensions(_embed_model)
-                            if _dims and _dims != DEFAULT_DIMENSION:
-                                _cfg["embedding_dims"] = _dims
-                        except Exception:  # noqa: BLE001 -- a missing width must not break setup
-                            pass
-                    if isinstance(retrieval_config, dict):
-                        retrieval_config.setdefault('embedder_config', embedder_config)
-                    elif retrieval_config is not None and getattr(
-                            retrieval_config, 'embedder_config', None) is None:
-                        retrieval_config.embedder_config = embedder_config
-                else:
-                    logger.warning(
-                        "llm=%r resolved a local model, but %s serves no embedding "
-                        "model, so knowledge/memory would embed against a remote "
-                        "provider -- sending your documents off this machine. "
-                        "Pull one (e.g. `ollama pull nomic-embed-text`) or set an "
-                        "explicit embedder to silence this.",
-                        llm, _target.base_url)
+            (llm, base_url, api_key, embedder_config,
+             self._local_target) = resolve_agent_local(
+                llm, base_url, api_key, retrieval_config, embedder_config, memory,
+                Agent._local_discovery)
 
         # Panel (multi-model) descriptor: "panel:<name>" or {"provider": "panel"}.
         # Resolved lazily into a PanelLLM; composes with the normal tool loop.
@@ -1808,72 +1714,14 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 )
                 if v is not None
             }
-        # If base_url is provided, defer custom LLM instance creation
-        elif base_url:
-            if isinstance(llm, dict):
-                llm_config = llm.copy()
-                llm_config['base_url'] = base_url
-                if api_key:
-                    llm_config['api_key'] = api_key
-                if auth:
-                    llm_config['auth'] = auth
-                llm_config['metrics'] = metrics
-                llm_config['max_iter'] = max_iter
-                if _retry_init_params and 'max_retries' not in llm_config:
-                    llm_config.update(_retry_init_params)
-                self._llm_init_params = llm_config
-                self.llm = llm.get('model', Agent._get_default_model())
-            else:
-                model_name = llm or Agent._get_default_model()
-                self._llm_init_params = {
-                    'model': model_name,
-                    'base_url': base_url,
-                    'api_key': api_key,
-                    'auth': auth,
-                    'metrics': metrics,
-                    'max_iter': max_iter,
-                    'web_search': web_search,
-                    'web_fetch': web_fetch,
-                    'prompt_caching': prompt_caching,
-                    'claude_memory': claude_memory,
-                    **_retry_init_params,
-                }
-                self.llm = model_name
+        # base_url=, a dict with "model", or "provider/model": build the LLM from
+        # settings (deferred; the instance is created on first use).
+        elif (_resolved := resolve_agent_llm_init_params(
+                llm, base_url, api_key, auth, self._llm_option_kwargs,
+                Agent._get_default_model)) is not None:
+            self.llm, self._llm_init_params = _resolved
             self._using_custom_llm = True
-        # If the user passes a dictionary (for advanced configuration)
-        elif isinstance(llm, dict) and "model" in llm:
-            llm_config = llm.copy()
-            if api_key and 'api_key' not in llm_config:
-                llm_config['api_key'] = api_key
-            if auth and 'auth' not in llm_config:
-                llm_config['auth'] = auth
-            llm_config['metrics'] = metrics
-            llm_config['max_iter'] = max_iter
-            if _retry_init_params and 'max_retries' not in llm_config:
-                llm_config.update(_retry_init_params)
-            self._llm_init_params = llm_config
-            self._using_custom_llm = True
-            self.llm = llm_config.get('model', Agent._get_default_model())
-        # If the user passes a string with a slash (provider/model) — defer LiteLLM import
-        elif isinstance(llm, str) and "/" in llm:
-            llm_params = {'model': llm}
-            if api_key:
-                llm_params['api_key'] = api_key
-            if auth:
-                llm_params['auth'] = auth
-            llm_params['metrics'] = metrics
-            llm_params['web_search'] = web_search
-            llm_params['web_fetch'] = web_fetch
-            llm_params['prompt_caching'] = prompt_caching
-            llm_params['claude_memory'] = claude_memory
-            llm_params['max_iter'] = max_iter
-            if _retry_init_params:
-                llm_params.update(_retry_init_params)
-            self._llm_init_params = llm_params
-            self._using_custom_llm = True
-            self.llm = llm
-            
-            if tools:
+            if tools and not base_url and isinstance(llm, str):  # "provider/model"
                 logger.debug(f"Tools passed to Agent with custom LLM: {tools}")
                 self.tools = tools
         # Otherwise, fall back to OpenAI environment/name (cached for performance)
@@ -1928,20 +1776,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 # (which injects the resolved OAuth credentials), so a bare
                 # model name plus auth= must still build an LLM instance rather
                 # than falling through to the plain OpenAI client.
-                llm_params = {'model': model_name}
-                if api_key:
-                    llm_params['api_key'] = api_key
-                if auth:
-                    llm_params['auth'] = auth
-                llm_params['metrics'] = metrics
-                llm_params['web_search'] = web_search
-                llm_params['web_fetch'] = web_fetch
-                llm_params['prompt_caching'] = prompt_caching
-                llm_params['claude_memory'] = claude_memory
-                llm_params['max_iter'] = max_iter
-                if _retry_init_params:
-                    llm_params.update(_retry_init_params)
-                self._llm_init_params = llm_params
+                self._llm_init_params = provider_llm_params(
+                    model_name, api_key, auth, self._llm_option_kwargs)
                 self._using_custom_llm = True
             self.llm = model_name
 
@@ -1972,9 +1808,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         
         # Handle toolsets parameter - resolve named toolset groups
         if toolsets:
+            # Bound before the try: if the toolsets import fails, the except
+            # clauses below must still be able to name ToolResolutionError.
+            from ..tools.resolver import ToolResolutionError
             try:
                 from ..toolsets import resolve_toolsets_for_model
-                from ..tools.resolver import ToolResolutionError
                 # Advertise the model-family's preferred edit primitive first
                 # (e.g. apply_patch for Claude, edit_file for GPT). Unknown /
                 # non-string models fall back to the byte-for-byte default order.

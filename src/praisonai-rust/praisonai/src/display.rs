@@ -595,6 +595,12 @@ pub fn callback_count(display_type: DisplayType) -> usize {
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Mutex;
+
+    // The callback registry is process-global and cargo runs tests in parallel:
+    // without this, one test's clear_all_callbacks() can wipe the other's
+    // registration mid-test (seen in CI: test_callback_registration failing).
+    static REGISTRY_LOCK: Mutex<()> = Mutex::new(());
 
     #[test]
     fn test_display_event_builder() {
@@ -634,6 +640,7 @@ mod tests {
 
     #[test]
     fn test_callback_registration() {
+        let _guard = REGISTRY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         // Clear any existing callbacks first
         clear_all_callbacks();
 
@@ -657,6 +664,7 @@ mod tests {
 
     #[test]
     fn test_approval_decision() {
+        let _guard = REGISTRY_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         clear_all_callbacks();
 
         // Without callback, should deny

@@ -800,3 +800,161 @@ def resolve_agent_model(
         else:
             llm = model  # model= takes precedence
     return llm, fallback_models, base_url, api_key, auth, auth_profiles
+
+
+def resolve_agent_llm_options(
+    retry: Any, reasoning_effort: Optional[str], **options: Any,
+) -> Dict[str, Any]:
+    """``retry=`` / ``reasoning_effort=`` -> the option kwargs every LLM construction forwards.
+
+    *options* plus ``max_retries`` for a ``RetryBackoffConfig``, a dict
+    (validated through ``RetryBackoffConfig``) or ``False`` (0), so the
+    custom-LLM path honours ``retry=`` instead of LLM's own default, plus
+    ``reasoning_effort`` only when given.
+    """
+    from ..agent.retry_utils import RetryBackoffConfig
+
+    retry_init_params: Dict[str, Any] = {}
+    if isinstance(retry, RetryBackoffConfig):
+        retry_init_params = {'max_retries': retry.max_retries}
+    elif isinstance(retry, dict):
+        retry_init_params = {'max_retries': RetryBackoffConfig(**retry).max_retries}
+    elif retry is False:
+        retry_init_params = {'max_retries': 0}
+
+    option_kwargs = {**options, **retry_init_params}
+    if reasoning_effort is not None:
+        option_kwargs['reasoning_effort'] = reasoning_effort
+    return option_kwargs
+
+
+def resolve_agent_local(
+    llm: str, base_url: Any, api_key: Any, retrieval_config: Any, embedder_config: Any,
+    memory: Any, discover: Any,
+) -> Tuple[str, Any, Any, Any, Any]:
+    """``llm="local"`` / ``"local:<engine>/<model>"`` ->
+    ``(llm, base_url, api_key, embedder_config, target)``.
+
+    Resolves the local target, fills ``base_url`` (Ollama takes the server
+    root; every other engine its OpenAI ``/v1`` URL) and ``api_key`` only where
+    the caller left them ``None``. When memory or knowledge will embed and no
+    embedder is set, picks an embedding model the server serves (via
+    ``discover(target)``) so documents stay on the machine, carries its vector
+    width, and sets it on ``retrieval_config`` (updated in place) too; if none
+    is served it warns instead. An explicit embedder always wins.
+    """
+    from ..local import LocalEngine, resolve as resolve_local
+
+    spec = llm[len("local:"):] if llm.startswith("local:") else None
+    target = resolve_local(spec or None)
+    llm = target.litellm_model
+    if base_url is None:
+        # Ollama's litellm provider builds its own /api paths from the server
+        # root. Every other local engine speaks OpenAI under /v1: the bare root
+        # sent chat to /chat/completions, which they answer with 404.
+        base_url = (target.base_url if target.engine is LocalEngine.OLLAMA
+                    else target.openai_base_url)
+    if api_key is None:
+        api_key = target.api_key
+
+    # Keep a local agent local end to end: without this, knowledge/memory
+    # embedded against OpenAI, sending documents and queries off the machine.
+    wants_embeddings = (retrieval_config is not None or embedder_config is not None
+                        or memory not in (None, False))
+    # retrieval_config may be a dict or a RetrievalConfig instance.
+    rc_embedder = (retrieval_config.get('embedder_config') if isinstance(retrieval_config, dict)
+                   else getattr(retrieval_config, 'embedder_config', None))
+    if wants_embeddings and not embedder_config and not rc_embedder:
+        from ..local import local_embedder_config, select_embedding_model
+        discovery = discover(target)
+        embed_model = select_embedding_model(
+            getattr(discovery, 'models', ()) if discovery else (),
+            getattr(discovery, 'model_meta', ()) if discovery else ())
+        if embed_model:
+            embedder_config = local_embedder_config(target.engine, target.base_url, embed_model)
+            # Carry the real vector width (local/ cannot import the dimension
+            # table). A width the server measured wins; the table only fills a
+            # gap, and never with the generic default: a guessed width is worse
+            # than letting the store infer one from the first vector.
+            cfg = embedder_config.setdefault("config", {})
+            if not cfg.get("embedding_dims"):
+                try:
+                    from ..embedding.dimensions import DEFAULT_DIMENSION, get_dimensions
+                    dims = get_dimensions(embed_model)
+                    if dims and dims != DEFAULT_DIMENSION:
+                        cfg["embedding_dims"] = dims
+                except Exception:  # noqa: BLE001 -- a missing width must not break setup
+                    logger.debug("No vector width for %r; the store infers it", embed_model,
+                                 exc_info=True)
+            if isinstance(retrieval_config, dict):
+                retrieval_config.setdefault('embedder_config', embedder_config)
+            elif retrieval_config is not None and getattr(
+                    retrieval_config, 'embedder_config', None) is None:
+                retrieval_config.embedder_config = embedder_config
+        else:
+            logger.warning(
+                "llm=%r resolved a local model, but %s serves no embedding "
+                "model, so knowledge/memory would embed against a remote "
+                "provider -- sending your documents off this machine. "
+                "Pull one (e.g. `ollama pull nomic-embed-text`) or set an "
+                "explicit embedder to silence this.",
+                llm, target.base_url)
+    return llm, base_url, api_key, embedder_config, target
+
+
+def provider_llm_params(model: str, api_key: Any, auth: Any, options: Dict[str, Any]) -> Dict[str, Any]:
+    """LLM settings for a provider-routed model: the model, ``api_key`` and
+    ``auth`` when set, and every option kwarg (``resolve_agent_llm_options``)."""
+    params: Dict[str, Any] = {'model': model}
+    if api_key:
+        params['api_key'] = api_key
+    if auth:
+        params['auth'] = auth
+    params.update(options)
+    return params
+
+
+def resolve_agent_llm_init_params(
+    llm: Any, base_url: Any, api_key: Any, auth: Any, options: Dict[str, Any], default_model: Any,
+) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """``(model_name, llm_init_params)`` for the routes that build an LLM from
+    settings: ``base_url=`` set, a dict with ``"model"``, or ``"provider/model"``.
+    ``None`` for any other ``llm=`` (the caller's plain OpenAI default).
+
+    The routes differ on purpose: a dict is forwarded with only ``metrics`` and
+    ``max_iter`` added; with ``base_url=`` an explicit ``api_key`` replaces the
+    dict's own, without it the dict's own wins; ``retry=`` never overrides a
+    dict's ``max_retries``. *default_model* is called only when no model is named.
+    """
+    retry = {'max_retries': options['max_retries']} if 'max_retries' in options else {}
+
+    def _from_dict(config: Dict[str, Any]) -> Dict[str, Any]:
+        config['metrics'] = options['metrics']
+        config['max_iter'] = options['max_iter']
+        if retry and 'max_retries' not in config:
+            config.update(retry)
+        return config
+
+    if base_url:
+        if isinstance(llm, dict):
+            config = llm.copy()
+            config['base_url'] = base_url
+            if api_key:
+                config['api_key'] = api_key
+            if auth:
+                config['auth'] = auth
+            return llm.get('model', default_model()), _from_dict(config)
+        model_name = llm or default_model()
+        return model_name, {'model': model_name, 'base_url': base_url, 'api_key': api_key,
+                            'auth': auth, **options}
+    if isinstance(llm, dict) and "model" in llm:
+        config = llm.copy()
+        if api_key and 'api_key' not in config:
+            config['api_key'] = api_key
+        if auth and 'auth' not in config:
+            config['auth'] = auth
+        config = _from_dict(config)
+        return config.get('model', default_model()), config
+    if isinstance(llm, str) and "/" in llm:
+        return llm, provider_llm_params(llm, api_key, auth, options)
+    return None
