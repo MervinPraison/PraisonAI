@@ -448,7 +448,14 @@ class AgentScheduler(_BaseAgentScheduler):
                 # Timeouts and generic failures share the same backoff path so a
                 # retry storm always honours a cooldown and stop() can preempt it.
                 logger.error(f"Agent execution failed on attempt {attempt + 1}: {e}")
-                
+
+                if attempt < max_retries - 1 and not self._rerun_is_replay_safe():
+                    logger.error(
+                        "Not retrying: the agent has an effectful tool "
+                        "(restart_safe=False) that may already have run"
+                    )
+                    break
+
                 if attempt < max_retries - 1:
                     wait_time = backoff_delay(attempt, initial=30.0, cap=300.0)
                     logger.debug(f"Waiting {wait_time}s before retry...")

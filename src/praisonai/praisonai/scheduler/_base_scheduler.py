@@ -381,6 +381,33 @@ class _BaseAgentScheduler:
                     self._delivery_lock_obj = lock
         return lock
 
+    def _rerun_is_replay_safe(self) -> bool:
+        """Whether a failed run may be re-executed from the top (Issue #6639).
+
+        A scheduler retry re-runs the *whole* task, so if the agent carries a
+        tool that explicitly declares itself effectful (``restart_safe=False``
+        or ``idempotent=False`` — the existing core replay-safety contract) the
+        failed attempt may already have sent the email / placed the order, and
+        re-running would duplicate it. Such runs are surfaced as failures
+        instead of silently retried. Undeclared tools keep the old behaviour;
+        mark an idempotent tool ``restart_safe=True`` to keep it retryable.
+        """
+        agent = getattr(self, "agent", None)
+        members = getattr(agent, "agents", None)
+        agents = [agent] + (list(members) if isinstance(members, (list, tuple)) else [])
+        for member in agents:
+            tools = getattr(member, "tools", None)
+            if not isinstance(tools, (list, tuple)):
+                continue
+            for tool in tools:
+                for attr in ("idempotent", "restart_safe"):
+                    declared = getattr(tool, attr, None)
+                    if isinstance(declared, bool):
+                        if not declared:
+                            return False
+                        break
+        return True
+
     def _should_suppress_delivery(self, text: str) -> bool:
         """Return True when a run's whole output is an exact silence marker.
 

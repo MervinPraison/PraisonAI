@@ -512,6 +512,12 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
             except asyncio.TimeoutError as e:
                 last_exc = e
                 logger.error(f"Async execution timeout on attempt {attempt + 1}: {e}")
+                if attempt < max_retries - 1 and not self._rerun_is_replay_safe():
+                    logger.error(
+                        "Not retrying: the agent has an effectful tool "
+                        "(restart_safe=False) that may already have run"
+                    )
+                    break
                 if attempt < max_retries - 1:
                     wait_time = backoff_delay(attempt)
                     logger.info(f"Waiting {wait_time}s before async retry after timeout...")
@@ -520,7 +526,12 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
             except Exception as e:
                 last_exc = e
                 logger.error(f"Async agent execution failed on attempt {attempt + 1}: {e}")
-                
+                if attempt < max_retries - 1 and not self._rerun_is_replay_safe():
+                    logger.error(
+                        "Not retrying: the agent has an effectful tool "
+                        "(restart_safe=False) that may already have run"
+                    )
+                    break
                 if attempt < max_retries - 1:
                     wait_time = backoff_delay(attempt)
                     logger.info(f"Waiting {wait_time}s before async retry...")
