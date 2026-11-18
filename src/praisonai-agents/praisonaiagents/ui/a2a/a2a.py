@@ -5,6 +5,7 @@ Exposes PraisonAI Agents via the A2A (Agent2Agent) protocol.
 """
 
 import asyncio
+import secrets
 from praisonaiagents._logging import get_logger
 from typing import Dict, List, Optional, TYPE_CHECKING
 
@@ -123,7 +124,7 @@ class A2A:
             )
         return self._agent_card
     
-    def serve(self, host: str = "0.0.0.0", port: int = 8000):
+    def serve(self, host: str = "127.0.0.1", port: int = 8000):
         """
         Start a standalone A2A server.
         
@@ -132,11 +133,21 @@ class A2A:
         create your own FastAPI app and use get_router().
         
         Args:
-            host: Host to bind to (default: 0.0.0.0)
+            host: Host to bind to (default: 127.0.0.1). A non-loopback host
+                without ``auth_token`` uses ``PRAISONAI_LAUNCH_AUTH_TOKEN`` or
+                a generated token that is printed once, like ``Agent.launch()``.
             port: Port to bind to (default: 8000)
         """
         import uvicorn
         from fastapi import FastAPI
+
+        if self.auth_token is None and host not in ("127.0.0.1", "::1", "localhost"):
+            from praisonaiagents.agent.launch_security import launch_auth_token, resolve_launch_host
+
+            resolve_launch_host(host)
+            self.auth_token = launch_auth_token()
+            self._router = None
+            self._agent_card = None
         
         app = FastAPI(title=self.name, version=self.version)
         app.include_router(self.get_router())
@@ -168,7 +179,7 @@ class A2A:
             if authorization is None:
                 raise HTTPException(status_code=401, detail="Authorization required")
             parts = authorization.split(" ", 1)
-            if len(parts) != 2 or parts[0].lower() != "bearer" or parts[1] != self.auth_token:
+            if len(parts) != 2 or parts[0].lower() != "bearer" or not secrets.compare_digest(parts[1], self.auth_token):
                 raise HTTPException(status_code=401, detail="Invalid token")
         
         # Agent Card endpoint (well-known URI)
