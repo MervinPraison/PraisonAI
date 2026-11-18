@@ -628,8 +628,8 @@ class ContextManager:
         for callback in self._snapshot_callbacks:
             try:
                 callback(hook_data)
-            except Exception:
-                pass  # Don't let callbacks break the flow
+            except Exception:  # Don't let callbacks break the flow
+                logger.debug("Snapshot callback %r failed", callback, exc_info=True)
         
         return hook_data
     
