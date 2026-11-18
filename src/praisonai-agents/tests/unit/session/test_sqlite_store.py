@@ -21,6 +21,14 @@ def tmp_dir():
         yield d
 
 
+@pytest.fixture(autouse=True)
+def _own_state_dir(tmp_path, monkeypatch):
+    # The spill dir lives under the state root, not session_dir. Without this,
+    # a developer's real ~/.praisonai/state/session_spill is listed on load and
+    # test_get_by_gateway_session_no_scan fails on that machine only.
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path / "home"))
+
+
 def _seed(store, session_id, messages, **top):
     from praisonaiagents.session.store import SessionData, SessionMessage
 
