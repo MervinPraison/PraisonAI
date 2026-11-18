@@ -47,8 +47,19 @@ Simpler than competitors • Type-safe • Zero-cost abstractions • Blazing fa
 │       │       ├── llm/          # LLM provider trait
 │       │       ├── memory/       # Memory adapters
 │       │       ├── workflows/    # AgentTeam, AgentFlow
+│       │       ├── mcp/, rag/, knowledge/, embedding/
+│       │       ├── hooks/, guardrails/, policy/, sandbox/
+│       │       ├── session/, context/, streaming/, trace/, telemetry/
+│       │       ├── agents/, task/, handoff/, planning/, skills/, plugins/
+│       │       ├── bots/, gateway/, bus/, conditions/, eval/, failover/,
+│       │       │   protocols/, thinking/
+│       │       ├── parity/       # Python-parity surface (config loader, param resolver, …)
+│       │       ├── specialized_agents.rs
+│       │       ├── presets.rs    # Config presets
+│       │       ├── display.rs
 │       │       ├── config.rs     # Configuration structs
 │       │       └── error.rs      # Error types
+│       │   └── tests/integration_tests.rs
 │       │
 │       ├── praisonai-derive/     # Proc-macro crate
 │       │   ├── Cargo.toml
@@ -97,13 +108,24 @@ Simpler than competitors • Type-safe • Zero-cost abstractions • Blazing fa
 
 | Module | Lines | Purpose |
 |--------|-------|---------|
-| `agent/` | ~280 | Agent struct, AgentBuilder, execution loop |
-| `tools/` | ~251 | Tool trait, ToolRegistry, ToolResult, FunctionTool |
-| `llm/` | ~361 | LlmProvider trait, OpenAiProvider, Message, Role |
-| `memory/` | ~150 | Memory trait, InMemoryAdapter, conversation history |
-| `workflows/` | ~461 | AgentTeam, AgentFlow, Route, Parallel, Loop, Repeat |
-| `config.rs` | ~228 | MemoryConfig, HooksConfig, OutputConfig, ExecutionConfig |
-| `error.rs` | ~100 | Error enum with thiserror |
+| `agent/` | ~530 | Agent struct, AgentBuilder, execution loop |
+| `tools/` | ~250 | Tool trait, ToolRegistry, ToolResult, FunctionTool |
+| `llm/` | ~520 | LlmProvider trait, OpenAiProvider, Message, Role |
+| `memory/` | ~270 | Memory trait, InMemoryAdapter, conversation history |
+| `workflows/` | ~460 | AgentTeam, AgentFlow, Route, Parallel, Loop, Repeat |
+| `knowledge/` | ~1,100 | Knowledge types |
+| `rag/` | ~830 | RAG types |
+| `mcp/` | ~820 | MCP transport and security config |
+| `guardrails/` | ~770 | Guardrails |
+| `session/` | ~630 | Sessions |
+| `hooks/` | ~610 | Hooks |
+| `parity/` | ~5,900 | Python-parity surface |
+| `specialized_agents.rs` | ~1,100 | Specialized agent types |
+| `presets.rs` | ~1,100 | Config presets |
+| `config.rs` | ~1,240 | MemoryConfig, HooksConfig, OutputConfig, ExecutionConfig |
+| `error.rs` | ~140 | Error enum with thiserror |
+
+The crate is about 32,000 lines (snapshot 2026-11). Refresh with `wc -l praisonai/src/<module>/*.rs`.
 
 ### 3.2 Trait-Driven Design
 
@@ -836,14 +858,13 @@ cargo test test_agent_builder
 ### 10.2 Test Structure
 
 ```
-praisonai/src/
-├── agent/
-│   ├── mod.rs
-│   └── builder.rs
-├── config.rs       # Inline tests with #[cfg(test)]
-└── tools/
-    └── mod.rs      # Inline tests
+praisonai/src/<module>/mod.rs     # Inline tests with #[cfg(test)], next to the code
+praisonai/src/config.rs           # Inline tests
+praisonai/tests/integration_tests.rs   # Integration tests
+praisonai/examples/real_agent_test.rs  # Real LLM run (needs OPENAI_API_KEY)
 ```
+
+There is no Rust job in CI. Run `cargo test`, `cargo fmt --check` and `cargo clippy` locally before every PR.
 
 ### 10.3 Example Test
 
@@ -921,11 +942,7 @@ cargo publish -p praisonai-cli
 
 ### 11.3 Version Bumping
 
-When releasing, update version in ALL crate Cargo.toml files and their cross-references:
-- `Cargo.toml` (workspace)
-- `praisonai/Cargo.toml`
-- `praisonai-derive/Cargo.toml`
-- `praisonai-cli/Cargo.toml`
+The version lives once, in `[workspace.package]` of the workspace `Cargo.toml` (currently `0.2.0`); the three crates use `version.workspace = true`. When releasing, bump it there and update the version of the `praisonai` and `praisonai-derive` dependencies wherever a crate names them.
 
 ---
 
@@ -1100,9 +1117,11 @@ Current implementation status tracked in `FEATURE_PARITY_TRACKER.json`.
 | ExecutionConfig | ✅ Complete | Max iterations, timeout, stream |
 | OutputConfig | ✅ Complete | Silent, verbose, json, file |
 | CLI | ✅ Complete | chat, run, prompt commands |
-| MCP Support | 🔲 Planned | |
-| RAG/Knowledge | 🔲 Planned | |
-| Specialized Agents | 🔲 Planned | Audio, Video, Vision |
+| MCP Support | 🟡 Types present | `mcp/`; behaviour not verified against Python |
+| RAG/Knowledge | 🟡 Types present | `rag/`, `knowledge/`; behaviour not verified against Python |
+| Specialized Agents | 🟡 Types present | `specialized_agents.rs`; behaviour not verified against Python |
+
+`PARITY.md` (generated) reports 66.3% parity, 146 gaps. It measures only whether a symbol of the same name is exported, not whether it works: an exported item that returns "not yet implemented" still counts. Do not mark a feature ✅ Complete here without a test that runs it.
 
 ---
 
@@ -1111,9 +1130,9 @@ Current implementation status tracked in `FEATURE_PARITY_TRACKER.json`.
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `OPENAI_API_KEY` | OpenAI API authentication | Required |
-| `PRAISONAI_MODEL` | Default model | `gpt-4o-mini` |
-| `PRAISONAI_LOG` | Log level | `info` |
 | `RUST_LOG` | Tracing log filter | - |
+
+The model is set in code or with the CLI `--model` flag. The crate reads no `PRAISONAI_*` environment variable.
 
 ---
 
