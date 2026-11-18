@@ -568,8 +568,8 @@ def resolve_output(value: Any, config_class: Type) -> Any:
     )
 
 
-def resolve_execution(value: Any, config_class: Type) -> Any:
-    """Resolve execution parameter."""
+def resolve_execution(value: Any, config_class: Type, default: Any = None) -> Any:
+    """Resolve execution parameter; *default* is returned for ``None`` or an unrecognised type."""
     from .presets import EXECUTION_PRESETS
     
     return resolve(
@@ -578,6 +578,7 @@ def resolve_execution(value: Any, config_class: Type) -> Any:
         config_class=config_class,
         presets=EXECUTION_PRESETS,
         array_mode=ArrayMode.PRESET_OVERRIDE,
+        default=default,
     )
 
 
@@ -648,8 +649,8 @@ def resolve_autonomy(value: Any, config_class: Type) -> Any:
     )
 
 
-def resolve_caching(value: Any, config_class: Type) -> Any:
-    """Resolve caching parameter."""
+def resolve_caching(value: Any, config_class: Type, default: Any = None) -> Any:
+    """Resolve caching parameter; *default* is returned for ``None`` or an unrecognised type."""
     from .presets import CACHING_PRESETS
     
     return resolve(
@@ -657,6 +658,7 @@ def resolve_caching(value: Any, config_class: Type) -> Any:
         param_name="caching",
         config_class=config_class,
         presets=CACHING_PRESETS,
+        default=default,
     )
 
 
