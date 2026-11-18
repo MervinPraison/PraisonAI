@@ -105,40 +105,42 @@ cd src/praisonai-ts && npm install && npm run build && npm test
 
 ```
 src/
-├── agent/              # Core Agent implementations (20 files)
+├── agent/              # Agent implementations
 │   ├── simple.ts       # Main Agent class
 │   ├── audio.ts        # AudioAgent
 │   ├── video.ts        # VideoAgent
 │   ├── vision.ts       # VisionAgent
 │   ├── code.ts         # CodeAgent
 │   ├── research.ts     # DeepResearchAgent
+│   ├── context.ts      # ContextAgent
 │   ├── handoff.ts      # Agent handoff system
 │   └── router.ts       # RouterAgent
 │
-├── tools/              # Tool SDK (27 files)
+├── tools/              # Tool SDK
 │   ├── decorator.ts    # Tool function & FunctionTool class
-│   ├── registry.ts     # Tool registry with middleware
-│   ├── tools.ts        # Tools facade (40+ built-ins)
-│   └── builtins/       # Built-in tools (13 modules)
+│   ├── registry/       # Tool registry with middleware
+│   ├── tools.ts        # Tools facade (built-ins)
+│   └── builtins/       # Built-in tool modules
 │
-├── workflows/          # Workflow engine (4 files)
+├── workflows/          # Workflow engine
 │   ├── index.ts        # Workflow, Task, Pipeline
 │   ├── loop.ts         # Loop pattern
 │   └── repeat.ts       # Repeat pattern
 │
-├── memory/             # Memory systems (7 files)
+├── memory/             # Memory systems
 │   ├── memory.ts       # Base Memory class
 │   ├── auto-memory.ts  # AutoMemory with auto-detection
 │   ├── file-memory.ts  # FileMemory for persistence
 │   └── rules-manager.ts # Rules management
 │
-├── hooks/              # Hooks & middleware (4 files)
+├── hooks/              # Hooks & middleware
 │   ├── manager.ts      # HookManager
 │   ├── callbacks.ts    # Callbacks system
 │   └── workflow-hooks.ts # Workflow-specific hooks
 │
-├── llm/                # LLM providers (18 files)
+├── llm/                # LLM providers
 │   ├── openai.ts       # OpenAI client
+│   ├── default-model.ts # Provider default models (byte-identical to Python)
 │   ├── providers/      # Provider implementations
 │   │   ├── ai-sdk/     # Vercel AI SDK integration
 │   │   ├── anthropic.ts
@@ -146,50 +148,58 @@ src/
 │   │   └── openai.ts
 │   └── backend-resolver.ts # Automatic backend selection
 │
-├── knowledge/          # Knowledge & RAG (10 files)
+├── knowledge/          # Knowledge & RAG
 │   ├── knowledge.ts    # Knowledge base
 │   ├── rag.ts          # RAG implementation
 │   ├── graph-rag.ts    # Graph-based RAG
 │   └── query-engine.ts # Query processing
 │
-├── mcp/                # Model Context Protocol (5 files)
+├── mcp/                # Model Context Protocol
 │   ├── index.ts        # MCP client
 │   ├── server.ts       # MCP server
 │   ├── session.ts      # Session management
 │   └── transports.ts   # Transport layer (stdio, SSE, WebSocket)
 │
-├── observability/      # Observability adapters (21 files)
+├── observability/      # Observability adapters
 │   ├── adapters/       # External integrations
 │   │   └── external/   # Langfuse, LangSmith, Helicone, etc.
 │   └── types.ts        # Trace types
 │
-├── eval/               # Evaluation framework (4 files)
+├── eval/               # Evaluation framework
 │   ├── judge.ts        # LLM-based evaluation
 │   ├── base.ts         # Evaluator base
 │   └── results.ts      # Results handling
 │
-├── guardrails/         # Input/output guardrails (2 files)
-├── session/            # Session management (5 files)
-├── context/            # Context optimization (5 files)
-├── telemetry/          # Telemetry collection (3 files)
-├── integrations/       # External integrations (15 files)
+├── guardrails/         # Input/output guardrails
+├── session/            # Session management
+├── context/            # Context optimization
+├── telemetry/          # Telemetry collection
+├── integrations/       # External integrations
 │   ├── computer-use.ts # Computer Use
 │   ├── postgres.ts     # PostgreSQL
 │   ├── slack.ts        # Slack
 │   └── voice/          # Voice integrations
 │
-├── ai/                 # AI SDK helpers (19 files)
+├── ai/                 # AI SDK helpers
 │   ├── generate-text.ts
 │   ├── generate-object.ts
 │   ├── generate-image.ts
 │   └── speech.ts
 │
-├── cli/                # CLI (78 files)
-│   ├── commands/       # 51 command modules
-│   └── features/       # 16 feature modules
+├── cli/                # CLI
+│   ├── spec/           # CLI spec: the list of commands and flags
+│   ├── commands/       # One module per command
+│   ├── features/       # Feature modules
+│   └── output/, runtime/, config/
 │
-└── index.ts            # Main exports (938 lines)
+├── (Python-parity modules) approval/, bots/, gateway/, runtime/, skills/,
+│   escalation/, goal/, planning/, plugins/, process/, rag/, db/, compute/,
+│   managed/, model-harness/, os/, frameworks/, trace/, task/, utils/, …
+│
+└── index.ts            # Main exports
 ```
+
+File counts are left out on purpose; they go stale. Count with `find src/<dir> -name '*.ts' | wc -l`.
 
 ---
 
@@ -408,9 +418,11 @@ const agent = new Agent({
 | Provider | Config Key | Models |
 |----------|------------|--------|
 | **OpenAI** | `openai/gpt-4o-mini` | gpt-4o, gpt-4o-mini, gpt-4-turbo |
-| **Anthropic** | `anthropic/claude-3-opus` | claude-3-opus, claude-3-sonnet, claude-3-haiku |
-| **Google** | `google/gemini-1.5-pro` | gemini-1.5-pro, gemini-1.5-flash |
+| **Anthropic** | `anthropic/claude-3-5-sonnet-latest` | Any Anthropic model id |
+| **Google** | `google/gemini-1.5-flash` | Any Gemini model id |
 | **AI SDK** | via peer dependency | All AI SDK providers |
+
+With no `llm` set, the default model follows the first API key found, in the order in `src/llm/default-model.ts` (`PROVIDER_DEFAULT_MODELS`, kept byte-identical to Python). Final fallback: `gpt-4o-mini`.
 
 ### 6.2 Backend Resolution
 
@@ -686,26 +698,29 @@ const text = await audioAgent.transcribe(audioBuffer);
 # Install globally
 npm install -g praisonai
 
-# Run agent
-praisonai-ts agent run --prompt "Hello"
+# Chat with an agent
+praisonai-ts chat "Hello"
 
 # Multi-agent
-praisonai-ts agents run --config agents.yaml
+praisonai-ts agents run "Research and summarise AI news"
 
-# Start server
-praisonai-ts serve --port 8000
+# List every command
+praisonai-ts help
 ```
 
 ### 14.2 Command Categories
 
 | Category | Commands |
 |----------|----------|
-| **Agent** | `agent run`, `agent chat` |
-| **Multi-Agent** | `agents run`, `agents config` |
-| **Tools** | `tools list`, `tools install` |
-| **Memory** | `memory list`, `memory clear` |
-| **MCP** | `mcp connect`, `mcp list` |
-| **Server** | `serve`, `gateway` |
+| **Agent** | `chat`, `run`, `agent`, `auto`, `research`, `interactive` |
+| **Multi-Agent** | `agents run`, `workflow`, `flow`, `handoff`, `router` |
+| **Tools** | `tools list`, `tools info`, `skills list`, `skills discover` |
+| **Memory** | `memory list`, `memory add`, `memory search`, `memory clear`, `session`, `knowledge` |
+| **MCP** | `mcp list`, `mcp add`, `mcp remove`, `mcp start`, `mcp stop` |
+| **Quality** | `eval accuracy`, `eval performance`, `eval reliability`, `guardrail check`, `benchmark` |
+| **Models** | `providers`, `llm providers`, `llm test`, `llm validate`, `embed`, `image` |
+
+The source of truth is `src/cli/spec/cli-spec.ts` (`COMMANDS`). There is no `serve` or `gateway` command in the TypeScript CLI.
 
 ---
 
@@ -717,7 +732,12 @@ praisonai-ts serve --port 8000
 tests/
 ├── unit/              # Unit tests
 ├── integration/       # Integration tests
-└── development/       # Development test scripts
+├── cli/               # CLI tests
+├── tools/             # Tool tests
+├── live/              # Real provider calls (opt-in)
+├── development/       # Development test scripts
+├── fixtures/, helpers/, __mocks__/
+└── jest.setup.ts
 ```
 
 ### 15.2 Run Tests
@@ -743,8 +763,8 @@ npm test -- tests/unit/agent.test.ts
 {
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
-    "axios": "^1.7.9",
-    "dotenv": "^16.4.7",
+    "axios": "1.8.4",
+    "fast-xml-parser": "^4.5.1",
     "openai": "^4.81.0"
   }
 }
@@ -758,6 +778,7 @@ npm test -- tests/unit/agent.test.ts
     "@ai-sdk/anthropic": ">=1.0.0",
     "@ai-sdk/google": ">=1.0.0",
     "@ai-sdk/openai": ">=1.0.0",
+    "@ai-sdk/openai-compatible": ">=1.0.0",
     "ai": ">=4.0.0"
   }
 }
@@ -768,12 +789,20 @@ npm test -- tests/unit/agent.test.ts
 ```json
 {
   "optionalDependencies": {
+    "@airweave/sdk": ">=0.1.0",
     "@mendable/firecrawl-js": ">=1.0.0",
+    "bedrock-agentcore": ">=0.1.0",
     "better-sqlite3": "^12.6.2",
-    "bedrock-agentcore": ">=0.1.0"
+    "boxen": "^7.1.1",
+    "chalk": "^4.1.2",
+    "cli-table3": "^0.6.3",
+    "figlet": "^1.7.0",
+    "ora": "^5.4.1"
   }
 }
 ```
+
+`package.json` is the source of truth; update this section when it changes. Node `>=18`.
 
 ---
 
@@ -869,9 +898,9 @@ Every feature implemented must have a corresponding CLI representation:
 
 | Feature | API | CLI Equivalent |
 |---------|-----|----------------|
-| Chat | `agent.chat(prompt)` | `praisonai-ts agent chat` |
+| Chat | `agent.chat(prompt)` | `praisonai-ts chat` |
 | Multi-agent | `team.start(task)` | `praisonai-ts agents run` |
-| Server | `createServer()` | `praisonai-ts serve` |
+| Memory | `memory.search(query)` | `praisonai-ts memory search` |
 
 ---
 
@@ -882,6 +911,8 @@ For every feature/change, verify:
 - [ ] **Tests pass**: `npm test`
 - [ ] **TypeScript compiles**: `npm run build`
 - [ ] **Lint clean**: `npm run lint`
+- [ ] **Package shape**: `npm run verify:dist` after a build; `npm run check:examples` when examples change
+- [ ] **Parity gates pass** (§25): exports, signatures, behaviour
 - [ ] **No heavy imports at top-level**: Check lazy loading
 - [ ] **Async-safe**: Proper Promise handling
 - [ ] **Multi-agent safe**: No shared mutable state
@@ -995,6 +1026,23 @@ This TypeScript SDK maintains feature parity with the Python SDK:
 | `Memory` | `Memory`, `FileMemory` | Same concepts |
 | `Hooks` | `HookManager` | Same events |
 | `Knowledge` | `Knowledge`, `RAG` | Same features |
+
+### 25.1 Parity gates (CI: `.github/workflows/parity-gate.yml`)
+
+Three generated reports, each stricter than the last. Do not edit them by hand.
+
+| Report | Question it answers | Check locally (from the repo root) |
+|--------|---------------------|-------------------------------------|
+| `PARITY.md`, `FEATURE_PARITY_TRACKER.json` | Is the name exported? | `python3 src/praisonai/scripts/generate_parity_tracker.py --check` |
+| `SIGNATURE_PARITY.md`, `signature-parity.json` | Does each Python parameter exist, with the same required-ness and default? | `python3 -m praisonai._dev.parity.signatures --check` |
+| `BEHAVIOUR_PARITY.md`, `behaviour-parity.json` | Is an accepted option acted on? The count may only go down. | `python3 -m praisonai._dev.parity.behaviour --check` |
+
+Rules:
+
+- Use the same name as Python (camelCase of the snake_case name). Add an alias only when Python has one.
+- Do not accept an option and ignore it. If it cannot be honoured yet, record it in the `UNHONOURED_OPTIONS` ledger so the behaviour gate counts it.
+- A default that differs from Python is a bug unless the signature rules file records the reason.
+- Regenerate the reports in the same PR as the change (`--write` instead of `--check`).
 
 ---
 
