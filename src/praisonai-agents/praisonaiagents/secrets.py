@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Dict, Optional, Protocol, Union, runtime_checkable
+import logging
 import os
 import threading
 
@@ -49,6 +50,8 @@ __all__ = [
     "has_sentinel",
     "EgressGuardProtocol",
 ]
+
+logger = logging.getLogger(__name__)
 
 # Valid built-in secret sources. ``exec`` runs a command whose stdout is the
 # secret (e.g. a secret-manager CLI); it is opt-in and never runs for plaintext.
@@ -365,7 +368,8 @@ def redact_outbound(text: str) -> str:
     try:
         text = _get_credential_shape_re().sub(_REDACTED, text)
     except Exception:  # pragma: no cover — never block delivery on a regex bug
-        pass
+        logger.debug("Credential-shape redaction failed; only registered secrets "
+                     "were masked", exc_info=True)
     return text
 
 

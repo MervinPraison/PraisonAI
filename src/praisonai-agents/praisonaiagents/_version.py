@@ -47,7 +47,9 @@ def get_version() -> str:
         from importlib.metadata import version as dist_version
         return dist_version(_DIST_NAME)
     except Exception:  # PackageNotFoundError or broken metadata
-        pass
+        import logging
+        logging.getLogger(__name__).debug(
+            "Could not read %s distribution metadata", _DIST_NAME, exc_info=True)
     import warnings
     warnings.warn(
         "Could not determine praisonaiagents version from pyproject.toml or "
