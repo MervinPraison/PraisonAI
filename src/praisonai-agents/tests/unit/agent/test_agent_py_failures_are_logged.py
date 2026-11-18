@@ -31,7 +31,10 @@ def test_only_known_silent_handlers_remain():
         if (isinstance(n, ast.ExceptHandler) and len(n.body) == 1 and isinstance(n.body[0], ast.Pass)
                 and (n.type is None or getattr(n.type, "id", None) in ("Exception", "BaseException"))):
             silent.append([f.name for f in funcs if f.lineno <= n.lineno <= f.end_lineno][-1])
-    assert sorted(silent) == ["__init__", "_cleanup_server_registrations"]
+    # __init__'s block moves out with T-05 step 2c (and is converted there), so
+    # allow it to be gone; nothing beyond these two may be silent.
+    assert set(silent) <= {"__init__", "_cleanup_server_registrations"}
+    assert "_cleanup_server_registrations" in silent
 
 
 def test_clone_memory_fallbacks_are_logged_and_memory_shared(agent, caplog):
