@@ -35,6 +35,7 @@ Part shapes emitted (OpenAI/LiteLLM chat-completions style):
 - text/degraded/withheld -> ``{"type": "text", "text": "[Attachment: ...] ..."}``
 """
 
+from ..errors import PraisonAIError
 import base64
 import logging
 import os
@@ -56,7 +57,7 @@ __all__ = [
 ]
 
 
-class AttachmentError(ValueError):
+class AttachmentError(ValueError, PraisonAIError):
     """Raised when an attachment cannot be turned into a model content part.
 
     Subclasses ``ValueError`` so existing ``except ValueError`` handlers around

@@ -8,6 +8,7 @@ Resolution order (first match wins):
 
 from __future__ import annotations
 
+from ..errors import PraisonAIError
 import difflib
 import importlib.util
 import logging
@@ -19,7 +20,7 @@ logger = logging.getLogger(__name__)
 _praisonai_tools_available: Optional[bool] = None
 
 
-class ToolResolutionError(ValueError):
+class ToolResolutionError(ValueError, PraisonAIError):
     """Raised in strict mode when one or more tool names cannot be resolved."""
 
     def __init__(self, unknown: List[str], suggestions: Dict[str, List[str]]):

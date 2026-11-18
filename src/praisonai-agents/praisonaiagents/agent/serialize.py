@@ -27,6 +27,7 @@ a known limit of v1, named here rather than hidden, in the same spirit as
 ``tools_resolvable``.
 """
 
+from ..errors import PraisonAIError
 from typing import Any, Callable, Dict, List, Optional
 
 __all__ = [
@@ -69,7 +70,7 @@ def _constructor_fields(agent_cls: type) -> set:
     return {f for f in _AGENT_FIELDS if f in params}
 
 
-class SerializationError(ValueError):
+class SerializationError(ValueError, PraisonAIError):
     """Raised when a config cannot be exported or rebuilt."""
 
 
