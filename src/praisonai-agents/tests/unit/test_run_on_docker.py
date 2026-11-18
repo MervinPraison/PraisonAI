@@ -46,7 +46,8 @@ def _docker_backend_missing():
             "(.github/actions/install-monorepo-packages); CI runs these tests")
 
 
-pytestmark = pytest.mark.skipif(_docker_backend_missing() is not None, reason=str(_docker_backend_missing()))
+_DOCKER_BACKEND_MISSING = _docker_backend_missing()
+pytestmark = pytest.mark.skipif(_DOCKER_BACKEND_MISSING is not None, reason=str(_DOCKER_BACKEND_MISSING))
 
 
 def _docker_running() -> bool:
