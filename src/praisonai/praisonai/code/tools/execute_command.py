@@ -86,7 +86,8 @@ def execute_command(
         workspace: Workspace root (for security validation)
         timeout: Command timeout in seconds
         capture_output: Whether to capture stdout/stderr
-        shell: DEPRECATED - shell=True is no longer supported for security reasons
+        shell: Unsupported. Passing shell=True returns an error result
+            (success=False) and runs nothing; on Windows use ``cmd /c <builtin>``.
         env: Additional environment variables
         allow_dangerous: Allow execution of known dangerous commands
         
@@ -200,7 +201,11 @@ def execute_command(
             # For security reasons, shell=True is no longer supported
             return {
                 'success': False,
-                'error': "shell=True is no longer supported for security reasons. Use shell=False (default) with direct command execution.",
+                'error': (
+                    "shell=True is no longer supported for security reasons. "
+                    "Drop the shell argument (default shell=False) and invoke the executable "
+                    "directly; on Windows, run cmd.exe builtins as 'cmd /c <command>'."
+                ),
                 'command': command,
                 'exit_code': -1,
                 'stdout': '',

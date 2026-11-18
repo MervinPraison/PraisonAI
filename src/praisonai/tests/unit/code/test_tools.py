@@ -477,7 +477,18 @@ class TestExecuteCommand:
             
             assert result['success'] is True
             assert temp_dir in result['stdout'] or os.path.basename(temp_dir) in result['stdout']
-    
+
+    def test_shell_true_rejected_with_migration_hint(self):
+        """shell=True stays rejected (security) and the error says how to migrate."""
+        from praisonai.code.tools.execute_command import execute_command
+
+        result = execute_command("echo x", shell=True)
+
+        assert result['success'] is False
+        assert result['exit_code'] == -1
+        assert "no longer supported" in result['error']
+        assert "cmd /c" in result['error']
+
     def test_command_failure(self):
         """Test command that fails."""
         from praisonai.code.tools.execute_command import execute_command
