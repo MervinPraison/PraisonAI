@@ -949,7 +949,11 @@ class PluginManager:
                     plugin._wired_into_registry = registry
                     plugin._wired_hook_ids = hook_ids
                 except Exception:
-                    pass
+                    logger.debug(
+                        "Could not record wired hooks on plugin %r; disabling it "
+                        "later will not unregister its %d hooks", name, len(hook_ids),
+                        exc_info=True,
+                    )
         return count
 
     def unwire_from_hook_registry(self, name: str) -> int:
@@ -981,7 +985,7 @@ class PluginManager:
                 plugin._wired_into_registry = None
                 plugin._wired_hook_ids = []
             except Exception:
-                pass
+                logger.debug("Could not clear wired-hook record on plugin %r", name, exc_info=True)
             return removed
 
 
@@ -1097,7 +1101,10 @@ def _write_back(data, attr: str, new_value: dict) -> None:
     try:
         setattr(data, attr, new_value)
     except Exception:
-        pass
+        logger.debug(
+            "Could not write plugin-returned %s back onto %s; the change is dropped",
+            attr, type(data).__name__, exc_info=True,
+        )
 
 
 def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]]:
@@ -1144,7 +1151,10 @@ def _adapt_plugin_hooks(plugin: Plugin) -> Iterator[Tuple["HookEvent", Callable]
             if method_name in declared_values:
                 return True
         except Exception:
-            pass
+            logger.debug(
+                "Could not read declared hooks of plugin %s; checking overrides only",
+                type(plugin).__name__, exc_info=True,
+            )
         own = getattr(type(plugin), method_name, None)
         parent = getattr(base, method_name, None)
         return own is not None and own is not parent
