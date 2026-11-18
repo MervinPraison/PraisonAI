@@ -93,7 +93,8 @@ def test_unreadable_langfuse_env_is_logged_and_auto_returns_none(monkeypatch, tm
     import praisonaiagents.obs as obs_mod
 
     (tmp_path / ".praisonai" / "langfuse.env").mkdir(parents=True)  # open() fails
-    monkeypatch.setenv("HOME", str(tmp_path))
+    # Path.home() reads USERPROFILE on Windows, so pin it directly.
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     for name in _OBS_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
 
