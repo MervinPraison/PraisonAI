@@ -116,11 +116,12 @@ from ..config.feature_configs import (
 # function-local relative import per construction (#5835).
 from ..config.parse_utils import canonical_preset_key, validate_preset_string
 from ..config.agent_init import (
-    _is_file_path, resolve_agent_caching, resolve_agent_execution, resolve_agent_guardrails,
-    resolve_agent_history, resolve_agent_hooks, resolve_agent_knowledge, resolve_agent_learn,
-    resolve_agent_llm_options, resolve_agent_local, resolve_agent_memory, resolve_agent_model,
-    resolve_agent_output, resolve_agent_planning, resolve_agent_reflection, resolve_agent_skills,
-    resolve_agent_templates, resolve_agent_web,
+    _is_file_path, provider_llm_params, resolve_agent_caching, resolve_agent_execution,
+    resolve_agent_guardrails, resolve_agent_history, resolve_agent_hooks, resolve_agent_knowledge,
+    resolve_agent_learn, resolve_agent_llm_init_params, resolve_agent_llm_options,
+    resolve_agent_local, resolve_agent_memory, resolve_agent_model, resolve_agent_output,
+    resolve_agent_planning, resolve_agent_reflection, resolve_agent_skills, resolve_agent_templates,
+    resolve_agent_web,
 )
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
@@ -1641,7 +1642,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
 
         # retry= / reasoning_effort= -> the option kwargs every LLM construction
         # branch forwards (kept for _apply_default_llm), plus the retry kwargs.
-        _retry_init_params, self._llm_option_kwargs = resolve_agent_llm_options(
+        self._llm_option_kwargs = resolve_agent_llm_options(
             retry, reasoning_effort, metrics=metrics, max_iter=max_iter, web_search=web_search,
             web_fetch=web_fetch, prompt_caching=prompt_caching, claude_memory=claude_memory)
 
@@ -1713,72 +1714,14 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 )
                 if v is not None
             }
-        # If base_url is provided, defer custom LLM instance creation
-        elif base_url:
-            if isinstance(llm, dict):
-                llm_config = llm.copy()
-                llm_config['base_url'] = base_url
-                if api_key:
-                    llm_config['api_key'] = api_key
-                if auth:
-                    llm_config['auth'] = auth
-                llm_config['metrics'] = metrics
-                llm_config['max_iter'] = max_iter
-                if _retry_init_params and 'max_retries' not in llm_config:
-                    llm_config.update(_retry_init_params)
-                self._llm_init_params = llm_config
-                self.llm = llm.get('model', Agent._get_default_model())
-            else:
-                model_name = llm or Agent._get_default_model()
-                self._llm_init_params = {
-                    'model': model_name,
-                    'base_url': base_url,
-                    'api_key': api_key,
-                    'auth': auth,
-                    'metrics': metrics,
-                    'max_iter': max_iter,
-                    'web_search': web_search,
-                    'web_fetch': web_fetch,
-                    'prompt_caching': prompt_caching,
-                    'claude_memory': claude_memory,
-                    **_retry_init_params,
-                }
-                self.llm = model_name
+        # base_url=, a dict with "model", or "provider/model": build the LLM from
+        # settings (deferred; the instance is created on first use).
+        elif (_resolved := resolve_agent_llm_init_params(
+                llm, base_url, api_key, auth, self._llm_option_kwargs,
+                Agent._get_default_model)) is not None:
+            self.llm, self._llm_init_params = _resolved
             self._using_custom_llm = True
-        # If the user passes a dictionary (for advanced configuration)
-        elif isinstance(llm, dict) and "model" in llm:
-            llm_config = llm.copy()
-            if api_key and 'api_key' not in llm_config:
-                llm_config['api_key'] = api_key
-            if auth and 'auth' not in llm_config:
-                llm_config['auth'] = auth
-            llm_config['metrics'] = metrics
-            llm_config['max_iter'] = max_iter
-            if _retry_init_params and 'max_retries' not in llm_config:
-                llm_config.update(_retry_init_params)
-            self._llm_init_params = llm_config
-            self._using_custom_llm = True
-            self.llm = llm_config.get('model', Agent._get_default_model())
-        # If the user passes a string with a slash (provider/model) — defer LiteLLM import
-        elif isinstance(llm, str) and "/" in llm:
-            llm_params = {'model': llm}
-            if api_key:
-                llm_params['api_key'] = api_key
-            if auth:
-                llm_params['auth'] = auth
-            llm_params['metrics'] = metrics
-            llm_params['web_search'] = web_search
-            llm_params['web_fetch'] = web_fetch
-            llm_params['prompt_caching'] = prompt_caching
-            llm_params['claude_memory'] = claude_memory
-            llm_params['max_iter'] = max_iter
-            if _retry_init_params:
-                llm_params.update(_retry_init_params)
-            self._llm_init_params = llm_params
-            self._using_custom_llm = True
-            self.llm = llm
-            
-            if tools:
+            if tools and not base_url and isinstance(llm, str):  # "provider/model"
                 logger.debug(f"Tools passed to Agent with custom LLM: {tools}")
                 self.tools = tools
         # Otherwise, fall back to OpenAI environment/name (cached for performance)
@@ -1833,20 +1776,8 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                 # (which injects the resolved OAuth credentials), so a bare
                 # model name plus auth= must still build an LLM instance rather
                 # than falling through to the plain OpenAI client.
-                llm_params = {'model': model_name}
-                if api_key:
-                    llm_params['api_key'] = api_key
-                if auth:
-                    llm_params['auth'] = auth
-                llm_params['metrics'] = metrics
-                llm_params['web_search'] = web_search
-                llm_params['web_fetch'] = web_fetch
-                llm_params['prompt_caching'] = prompt_caching
-                llm_params['claude_memory'] = claude_memory
-                llm_params['max_iter'] = max_iter
-                if _retry_init_params:
-                    llm_params.update(_retry_init_params)
-                self._llm_init_params = llm_params
+                self._llm_init_params = provider_llm_params(
+                    model_name, api_key, auth, self._llm_option_kwargs)
                 self._using_custom_llm = True
             self.llm = model_name
 

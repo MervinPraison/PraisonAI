@@ -804,13 +804,12 @@ def resolve_agent_model(
 
 def resolve_agent_llm_options(
     retry: Any, reasoning_effort: Optional[str], **options: Any,
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-    """``retry=`` / ``reasoning_effort=`` -> ``(retry_init_params, option_kwargs)``.
+) -> Dict[str, Any]:
+    """``retry=`` / ``reasoning_effort=`` -> the option kwargs every LLM construction forwards.
 
-    *retry_init_params* is ``{"max_retries": n}`` for a ``RetryBackoffConfig``,
-    a dict (validated through ``RetryBackoffConfig``) or ``False`` (0), else
-    empty, so the custom-LLM path honours ``retry=`` instead of LLM's own
-    default. *option_kwargs* is *options* plus those retry kwargs, plus
+    *options* plus ``max_retries`` for a ``RetryBackoffConfig``, a dict
+    (validated through ``RetryBackoffConfig``) or ``False`` (0), so the
+    custom-LLM path honours ``retry=`` instead of LLM's own default, plus
     ``reasoning_effort`` only when given.
     """
     from ..agent.retry_utils import RetryBackoffConfig
@@ -826,7 +825,7 @@ def resolve_agent_llm_options(
     option_kwargs = {**options, **retry_init_params}
     if reasoning_effort is not None:
         option_kwargs['reasoning_effort'] = reasoning_effort
-    return retry_init_params, option_kwargs
+    return option_kwargs
 
 
 def resolve_agent_local(
@@ -901,3 +900,61 @@ def resolve_agent_local(
                 "explicit embedder to silence this.",
                 llm, target.base_url)
     return llm, base_url, api_key, embedder_config, target
+
+
+def provider_llm_params(model: str, api_key: Any, auth: Any, options: Dict[str, Any]) -> Dict[str, Any]:
+    """LLM settings for a provider-routed model: the model, ``api_key`` and
+    ``auth`` when set, and every option kwarg (``resolve_agent_llm_options``)."""
+    params: Dict[str, Any] = {'model': model}
+    if api_key:
+        params['api_key'] = api_key
+    if auth:
+        params['auth'] = auth
+    params.update(options)
+    return params
+
+
+def resolve_agent_llm_init_params(
+    llm: Any, base_url: Any, api_key: Any, auth: Any, options: Dict[str, Any], default_model: Any,
+) -> Optional[Tuple[str, Dict[str, Any]]]:
+    """``(model_name, llm_init_params)`` for the routes that build an LLM from
+    settings: ``base_url=`` set, a dict with ``"model"``, or ``"provider/model"``.
+    ``None`` for any other ``llm=`` (the caller's plain OpenAI default).
+
+    The routes differ on purpose: a dict is forwarded with only ``metrics`` and
+    ``max_iter`` added; with ``base_url=`` an explicit ``api_key`` replaces the
+    dict's own, without it the dict's own wins; ``retry=`` never overrides a
+    dict's ``max_retries``. *default_model* is called only when no model is named.
+    """
+    retry = {'max_retries': options['max_retries']} if 'max_retries' in options else {}
+
+    def _from_dict(config: Dict[str, Any]) -> Dict[str, Any]:
+        config['metrics'] = options['metrics']
+        config['max_iter'] = options['max_iter']
+        if retry and 'max_retries' not in config:
+            config.update(retry)
+        return config
+
+    if base_url:
+        if isinstance(llm, dict):
+            config = llm.copy()
+            config['base_url'] = base_url
+            if api_key:
+                config['api_key'] = api_key
+            if auth:
+                config['auth'] = auth
+            return llm.get('model', default_model()), _from_dict(config)
+        model_name = llm or default_model()
+        return model_name, {'model': model_name, 'base_url': base_url, 'api_key': api_key,
+                            'auth': auth, **options}
+    if isinstance(llm, dict) and "model" in llm:
+        config = llm.copy()
+        if api_key and 'api_key' not in config:
+            config['api_key'] = api_key
+        if auth and 'auth' not in config:
+            config['auth'] = auth
+        config = _from_dict(config)
+        return config.get('model', default_model()), config
+    if isinstance(llm, str) and "/" in llm:
+        return llm, provider_llm_params(llm, api_key, auth, options)
+    return None
