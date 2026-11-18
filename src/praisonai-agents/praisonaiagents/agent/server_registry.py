@@ -135,7 +135,7 @@ class _AgentServerRegistry:
                         exc_info=True,
                     )
 
-    def start_server_if_needed(self, port: int, host: str = "0.0.0.0", **kwargs) -> bool:  # noqa: S104
+    def start_server_if_needed(self, port: int, host: str = "127.0.0.1", **kwargs) -> bool:
         """Start server with proper readiness signaling. Returns True if server was started.
 
         Readiness is signalled only *after* uvicorn has actually bound the
