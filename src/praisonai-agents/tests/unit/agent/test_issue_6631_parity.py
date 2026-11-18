@@ -10,11 +10,21 @@ import json
 
 import pytest
 
-litellm = pytest.importorskip("litellm")
+pytest.importorskip("litellm")
 
 from praisonaiagents import Agent, AgentTeam, MemoryConfig, Task  # noqa: E402
 
 LLM = "anthropic/claude-3-5-sonnet-20240620"
+
+
+def _litellm():
+    """The litellm module LLM will import now.
+
+    Other tests evict ``litellm`` from sys.modules, so a module-level binding
+    can go stale and stubbing it would let the real client run.
+    """
+    import litellm
+    return litellm
 
 
 def _resp(content=None, tool=None):
@@ -24,7 +34,7 @@ def _resp(content=None, tool=None):
             "id": "c1", "type": "function",
             "function": {"name": tool[0], "arguments": json.dumps(tool[1])},
         }]
-    return litellm.ModelResponse(choices=[{"message": msg, "finish_reason": "tool_calls" if tool else "stop"}])
+    return _litellm().ModelResponse(choices=[{"message": msg, "finish_reason": "tool_calls" if tool else "stop"}])
 
 
 @pytest.fixture
@@ -42,8 +52,9 @@ def scripted(monkeypatch):
             calls.append(kw)
             return next(it)
 
-        monkeypatch.setattr(litellm, "completion", f)
-        monkeypatch.setattr(litellm, "acompletion", af)
+        mod = _litellm()
+        monkeypatch.setattr(mod, "completion", f)
+        monkeypatch.setattr(mod, "acompletion", af)
         return calls
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "x")
@@ -122,7 +133,7 @@ def history_agent(tmp_path, monkeypatch):
         def f(messages, *args, **kw):
             requests.append([m["content"] for m in messages if m["role"] != "system"])
             last = [m for m in messages if m["role"] == "user"][-1]["content"]
-            return litellm.ModelResponse(choices=[{"message": {"role": "assistant", "content": f"ans-{last}"}, "finish_reason": "stop"}])
+            return _litellm().ModelResponse(choices=[{"message": {"role": "assistant", "content": f"ans-{last}"}, "finish_reason": "stop"}])
 
         async def af(messages, *args, **kw):
             return f(messages)
