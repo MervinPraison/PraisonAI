@@ -22,6 +22,35 @@ from praisonaiagents.agent.execution_location import describe
 from praisonaiagents.agent.placement import managed_runtimes, tool_places
 
 
+def _wrapper_mismatch():
+    """Why the installed `praisonai` wrapper is not this checkout's, or None.
+
+    `run_on="docker"` resolves through the wrapper's backend registry. A stale
+    wrapper from PyPI in the same environment has no docker backend, and 20 of
+    these tests then fail for a reason that is not in this code (T-02). CI
+    installs the wrapper from this checkout, so the versions match and every
+    test runs there.
+    """
+    import re
+    from pathlib import Path
+
+    src = Path(__file__).resolve().parents[3] / "praisonai" / "praisonai" / "version.py"
+    if not src.is_file():
+        return None  # not a monorepo checkout: nothing to compare against
+    wanted = re.search(r'__version__\s*=\s*"([^"]+)"', src.read_text()).group(1)
+    try:  # the module that will actually be imported, not package metadata
+        from praisonai.version import __version__ as installed
+    except ImportError:
+        return f"needs the praisonai wrapper {wanted} from this checkout; it is not installed"
+    if installed != wanted:
+        return (f"installed praisonai {installed} is not this checkout's {wanted}; "
+                "install src/praisonai (see .github/actions/install-monorepo-packages)")
+    return None
+
+
+pytestmark = pytest.mark.skipif(_wrapper_mismatch() is not None, reason=str(_wrapper_mismatch()))
+
+
 def _docker_running() -> bool:
     """Ask the PRODUCT whether docker is usable, not a probe of our own.
 
