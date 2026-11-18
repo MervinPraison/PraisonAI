@@ -234,7 +234,10 @@ class GoalLoopMixin:
             try:
                 await asyncio.shield(task)
             except Exception:
-                pass
+                logger.debug(
+                    "Goal gate failed while the run was being cancelled",
+                    exc_info=True,
+                )
             raise
 
     # -- public API ------------------------------------------------------------
