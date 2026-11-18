@@ -1956,7 +1956,10 @@ Write the complete compiled report:"""
                         near = difflib.get_close_matches(function_name, available, n=1, cutoff=0.5)
                         suggestion = near[0] if near else None
                     except Exception:
-                        pass
+                        logger.debug(
+                            "Could not compute a closest-match hint for tool %r",
+                            function_name, exc_info=True,
+                        )
                     hint = f" Did you mean '{suggestion}'?" if suggestion else ""
                     error_msg = f"Tool '{function_name}' not found.{hint} Available tools: {available}"
                     logger.error(error_msg)
@@ -2334,7 +2337,11 @@ Write the complete compiled report:"""
                     except Exception:
                         # Trust module unavailable (partial install) must not
                         # abort tool execution; fall through with the raw result.
-                        pass
+                        logger.debug(
+                            "Could not apply the external-content fence to tool %r; "
+                            "passing its result through unfenced",
+                            function_name, exc_info=True,
+                        )
 
                 # Cap the result before it re-enters the context — the same
                 # helper and order as the sync path (after guardrails, before
