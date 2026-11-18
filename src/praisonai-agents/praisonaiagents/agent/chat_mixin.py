@@ -1214,6 +1214,10 @@ Your Role: {self.role}"""
         """
         if not self._history_enabled or self._session_store is None:
             return []
+        if self._history_session_id == self._session_id:
+            # The persisting session is already restored into chat_history by
+            # _init_session_store; injecting it again would send it twice.
+            return []
         try:
             # Prefer compacted working history (summary + tail) on resume when a
             # compaction checkpoint exists (Issue #2741); falls back to raw chat
@@ -4410,7 +4414,7 @@ Your Role: {self.role}"""
 
                     # Apply guardrail validation for custom LLM response
                     try:
-                        validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=processed_history)
+                        validated_response = self._apply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id, cancel_token=cancel_token, messages=[{"role": "system", "content": system_prompt_for_llm}] + list(processed_history) if system_prompt_for_llm else processed_history)
                         # Commit only the approved reply (never the rejected one).
                         self._commit_assistant_reply(validated_response)
                         # Coerce into the requested Pydantic model so callers
@@ -4873,6 +4877,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if self._db is not None:
                 await self._ainit_db_session()
                 await self._astart_run(prompt if isinstance(prompt, str) else str(prompt))
+            elif not self._session_store_initialized:
+                # Parity with sync chat(): restore/persist the JSON session
+                # store (blocking file I/O, so off the event loop).
+                await asyncio.to_thread(self._init_session_store)
             _scope_token = self._enter_turn_tool_scope(tools)
             try:
                 result = await self._achat_impl(
@@ -5091,13 +5099,14 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     )
 
                 try:
+                    _custom_system_prompt = self._build_system_prompt(
+                        tools,
+                        memory_prefetch_context=memory_prefetch_context,
+                    )
                     # C1 - per-call seed forwarding (async path)  
                     llm_kwargs = {
                         'prompt': prompt,
-                        'system_prompt': self._build_system_prompt(
-                            tools,
-                            memory_prefetch_context=memory_prefetch_context,
-                        ),
+                        'system_prompt': _custom_system_prompt,
                         'chat_history': self._history_before_turn(effective_history, normalized_content),
                         'temperature': temperature,
                         'tools': tools,
@@ -5157,7 +5166,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     
                     # Apply guardrail validation for custom LLM response
                     try:
-                        validated_response = await self._aapply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id, messages=effective_history)
+                        validated_response = await self._aapply_guardrail_with_retry(response_text, prompt, temperature, tools, task_name, task_description, task_id, messages=[{"role": "system", "content": _custom_system_prompt}] + list(effective_history) if _custom_system_prompt else effective_history)
                         # Commit + persist only the approved reply (matches sync chat()).
                         await self._acommit_assistant_reply(validated_response)
                         # Coerce into the requested Pydantic model so callers
