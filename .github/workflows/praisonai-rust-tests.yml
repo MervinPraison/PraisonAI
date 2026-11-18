@@ -1,0 +1,41 @@
+# Does praisonai-rust still pass its own tests?
+#
+# The workspace has ~500 tests (inline #[cfg(test)] modules plus
+# praisonai/tests/) and until now nothing in CI ran them; AGENTS.md told
+# contributors to run `cargo test` by hand. Narrow like praisonai-ts-tests.yml:
+# runs only when the Rust workspace changes and asserts that its tests pass.
+name: praisonai-rust tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/praisonai-rust/**'
+      - '.github/workflows/praisonai-rust-tests.yml'
+  pull_request:
+    paths:
+      - 'src/praisonai-rust/**'
+      - '.github/workflows/praisonai-rust-tests.yml'
+
+concurrency:
+  group: praisonai-rust-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: cargo test
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        working-directory: src/praisonai-rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src/praisonai-rust
+      - name: Tests
+        run: cargo test --workspace
