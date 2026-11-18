@@ -23,6 +23,7 @@ a second representation would be a second thing to keep correct.
 import json
 from typing import Any, Dict, Optional
 
+from ..errors import PraisonAIError
 from .journal import VALID_KINDS, JournalEvent, RunJournal
 
 __all__ = [
@@ -39,7 +40,7 @@ __all__ = [
 PORTABLE_RUN_VERSION = 1
 
 
-class PortableRunError(RuntimeError):
+class PortableRunError(RuntimeError, PraisonAIError):
     """Raised when a run cannot be exported or imported."""
 
 

@@ -6,8 +6,8 @@ to minimize import time when LLM functionality is not immediately needed.
 """
 import os
 
-# Ensure litellm telemetry is disabled before any imports
-os.environ["LITELLM_TELEMETRY"] = "False"
+# Ensure litellm telemetry is disabled before any imports, unless the host chose (T-07)
+os.environ.setdefault("LITELLM_TELEMETRY", "False")
 
 # Apply litellm/httpx env defaults only once the LLM layer is actually used
 # (not on `import praisonaiagents`).

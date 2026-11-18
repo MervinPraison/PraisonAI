@@ -24,6 +24,8 @@ import tempfile
 from typing import Optional, Tuple
 from urllib.parse import unquote, urlparse
 
+from ..errors import PraisonAIError
+
 __all__ = [
     "CLOUD_SCHEMES",
     "CloudSourceError",
@@ -35,7 +37,7 @@ __all__ = [
 CLOUD_SCHEMES = ("s3", "gs", "gcs", "az", "abfs")
 
 
-class CloudSourceError(RuntimeError):
+class CloudSourceError(RuntimeError, PraisonAIError):
     """Raised when a cloud source cannot be resolved."""
 
 

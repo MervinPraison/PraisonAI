@@ -20,6 +20,7 @@ every dataset tool already speak, so a task set is portable in and the training
 file is portable out.
 """
 
+from ..errors import PraisonAIError
 import json
 import os
 from typing import Any, Dict, Iterator, List, Optional, Tuple
@@ -33,7 +34,7 @@ __all__ = [
 ]
 
 
-class DatasetError(ValueError):
+class DatasetError(ValueError, PraisonAIError):
     """Raised when a dataset file cannot be read or written."""
 
 

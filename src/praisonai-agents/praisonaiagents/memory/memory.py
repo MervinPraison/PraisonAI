@@ -20,8 +20,8 @@ from .adapters.sqlite_adapter import SqliteMemoryAdapter
 from .adapters.factories import sanitize_chroma_metadata
 from ..llm.model_providers import default_auxiliary_model
 
-# Disable litellm telemetry before any imports
-os.environ["LITELLM_TELEMETRY"] = "False"
+# Disable litellm telemetry before any imports, unless the host chose (T-07)
+os.environ.setdefault("LITELLM_TELEMETRY", "False")
 
 # Set up logger using centralized logging utility
 logger = get_logger(__name__, extra_data={"subsystem": "memory"})

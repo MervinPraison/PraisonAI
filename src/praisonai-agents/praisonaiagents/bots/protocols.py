@@ -11,6 +11,7 @@ Backward-compatible imports: ``from praisonai.bots import Bot`` via wrapper shim
 
 from __future__ import annotations
 
+from ..errors import PraisonAIError
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -335,7 +336,7 @@ class WebhookVerifierProtocol(Protocol):
         ...
 
 
-class GatewayAdapterContractError(TypeError):
+class GatewayAdapterContractError(TypeError, PraisonAIError):
     """Raised when a channel adapter cannot receive the gateway runtime seams.
 
     The gateway wires four reliability seams into every channel adapter —
