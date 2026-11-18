@@ -299,7 +299,7 @@ class SharedCompute:
             # later ensure_tools_placed) can see it is already bound.
             try:
                 agent._tools_sandbox = self
-            except Exception:  # pragma: no cover - exotic agent objects
+            except Exception:  # exotic agent objects
                 logger.debug(
                     "[shared_compute] could not mark %r as attached; a nested attach may repeat",
                     getattr(agent, "name", type(agent).__name__), exc_info=True,

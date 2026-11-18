@@ -48,7 +48,7 @@ def sandbox_only_names() -> tuple:
         registry = get_sandbox_registry()
         registry = registry.default() if isinstance(registry, type) else registry
         names |= {str(n).lower() for n in registry.list_all_names()}
-    except Exception:  # pragma: no cover - discovery must never break resolution
+    except Exception:  # discovery must never break resolution
         logger.debug(
             "Could not list sandbox registry backends; tools_run_on= only sees %s",
             ", ".join(_SANDBOX_ONLY_FLOOR), exc_info=True,

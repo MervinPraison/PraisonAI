@@ -81,7 +81,7 @@ def _entry_point_providers() -> dict:
 
         for ep in entry_points(group="praisonai.compute"):
             found[ep.name.lower()] = ep
-    except Exception:  # pragma: no cover - discovery must never break resolution
+    except Exception:  # discovery must never break resolution
         logger.debug("Could not list praisonai.compute entry points", exc_info=True)
     return found
 
