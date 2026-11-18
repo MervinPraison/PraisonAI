@@ -31,10 +31,12 @@ What it does NOT do, stated plainly rather than discovered later:
 import json
 from typing import Any, Dict, List, Optional
 
+from ..errors import PraisonAIError
+
 __all__ = ["EncryptedSessionStore", "SessionEncryptionError", "generate_session_key"]
 
 
-class SessionEncryptionError(RuntimeError):
+class SessionEncryptionError(RuntimeError, PraisonAIError):
     """Raised when encryption cannot be performed or undone."""
 
 
