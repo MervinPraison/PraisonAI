@@ -4324,7 +4324,7 @@ class AgentTeam(SpawnAnnounceProtocol):
                     metadata={"plan": self._todo_list.to_markdown()}
                 ))
         except Exception:
-            pass
+            logger.debug("Could not emit plan_created trace event", exc_info=True)
         
         # Step 4: Create proper Task objects from plan steps
         console.print("\n[bold blue]🚀 EXECUTION PHASE[/bold blue]\n")
@@ -4489,7 +4489,7 @@ class AgentTeam(SpawnAnnounceProtocol):
                     metadata={"plan": self._todo_list.to_markdown()}
                 ))
         except Exception:
-            pass
+            logger.debug("Could not emit plan_created trace event", exc_info=True)
 
         original_tasks = self.tasks.copy()
         self._build_plan_tasks(plan, original_tasks)

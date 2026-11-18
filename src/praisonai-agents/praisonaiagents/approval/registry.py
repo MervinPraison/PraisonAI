@@ -494,7 +494,10 @@ class ApprovalRegistry:
                 with self._scope_lock:
                     self._session_scoped_targets.add((session_key, target))
             except Exception:  # noqa: BLE001
-                pass
+                logger.debug(
+                    "Could not record in-memory fallback approval for tool '%s'",
+                    tool_name, exc_info=True,
+                )
             return
         try:
             from ..permissions import PermissionManager
@@ -586,7 +589,10 @@ class ApprovalRegistry:
                 if len(remaining) != len(approved):
                     self._approved_context.set(remaining)
         except Exception:  # noqa: BLE001 — cache eviction is best-effort
-            pass
+            logger.debug(
+                "Could not evict approval cache keys for scope %s",
+                scope_id, exc_info=True,
+            )
 
     def set_yaml_approved_tools(self, tools: List[str]) -> contextvars.Token:
         return self._yaml_approved_tools.set(set(tools))
