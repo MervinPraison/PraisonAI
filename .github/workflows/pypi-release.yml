@@ -146,6 +146,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write  # MCP Registry login (github-oidc); no secret needed
 
 concurrency:
   group: pypi-release
@@ -1219,6 +1220,29 @@ jobs:
             sleep "$INTERVAL"
           done
 
+      # The registry checks that the PyPI release exists, so this runs after
+      # the wait. A registry outage must not fail a release that already shipped.
+      - name: Publish to MCP Registry
+        if: >-
+          inputs.dry_run != true &&
+          inputs.skip_wrapper != true &&
+          steps.pypi_exists.outputs.skip_wrapper != 'true'
+        continue-on-error: true
+        working-directory: src/praisonai
+        env:
+          MCP_PUBLISHER_VERSION: v1.8.7
+          MCP_PUBLISHER_SHA256: 00b21004149a4ce66f0782508ae4a2bce67d1bea395a8da0bd8028159fb59579
+        run: |
+          set -euo pipefail
+          grep -q "\"version\": \"${{ steps.versions.outputs.wrapper_version }}\"" server.json \
+            || { echo "server.json was not bumped"; exit 1; }
+          curl -fsSL -o /tmp/mcp-publisher.tgz \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          echo "${MCP_PUBLISHER_SHA256}  /tmp/mcp-publisher.tgz" | sha256sum -c -
+          tar -xzf /tmp/mcp-publisher.tgz -C /tmp mcp-publisher
+          /tmp/mcp-publisher login github-oidc
+          /tmp/mcp-publisher publish
+
       # Actually probes PyPI — previously this step only echoed checkmarks
       # from the input flags, so it "verified" publishes that never happened.
       - name: Verify PyPI versions
@@ -1269,6 +1293,7 @@ jobs:
               src/praisonai/uv.lock \
               src/praisonai/README.md \
               src/praisonai/praisonai.rb \
+              src/praisonai/server.json \
               src/praisonai-deploy/praisonai_deploy/docker.py \
               docker/ 2>/dev/null || true
           fi

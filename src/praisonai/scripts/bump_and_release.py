@@ -280,7 +280,20 @@ def bump_version(
         [(r'v[0-9]+\.[0-9]+\.[0-9]+', f'v{new_version}')],
         root
     )
-    
+
+    # 4b. MCP Registry manifest (server and package version) and the pin
+    # example in the Docker guide; both drifted when they were bumped by hand.
+    print("\n🧩 MCP Registry manifest and Docker guide:")
+    update_file(
+        praisonai_dir / "server.json",
+        [(r'"version": "[0-9][^"]*"', f'"version": "{new_version}"')],
+        root
+    )
+    readme_patterns = [(r'"praisonai==[0-9.]+"', f'"praisonai=={new_version}"')]
+    if agents_version:
+        readme_patterns.append((r'"praisonaiagents==[0-9.]+"', f'"praisonaiagents=={agents_version}"'))
+    update_file(root / "docker/README.md", readme_patterns, root)
+
     # 5. Update praisonaiagents dependency if specified
     if agents_version:
         print(f"\n📦 Updating praisonaiagents dependency to {agents_version}:")
@@ -584,6 +597,8 @@ def release(version: str, use_frozen_lock: bool = False, no_add_all: bool = Fals
         "docker/Dockerfile.dev", 
         "docker/Dockerfile.ui",
         "src/praisonai/praisonai.rb",
+        "src/praisonai/server.json",
+        "docker/README.md",
         "src/praisonai/pyproject.toml",
         "src/praisonai/uv.lock",
         "src/praisonai/README.md",
