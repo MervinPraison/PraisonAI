@@ -147,6 +147,18 @@ class TestAG2Import:
 # Single-agent flow (mocked)
 # ---------------------------------------------------------------------------
 
+# framework='ag2' cannot run: AG2Adapter is a stub (implemented = False) here and
+# in praisonai-frameworks, and AgentsGenerator._run_ag2/_run_autogen are gone.
+# The error tells users to "pip install praisonai-frameworks[ag2]"; that does not help.
+_AG2_GONE = pytest.mark.xfail(
+    strict=True,
+    raises=(AttributeError, ImportError, SystemExit),
+    reason="framework='ag2' unimplemented; AgentsGenerator._run_ag2 removed "
+    "(#6661)",
+)
+
+
+@_AG2_GONE
 class TestAG2SingleAgentFlow:
 
     @pytest.mark.integration
@@ -275,6 +287,7 @@ class TestAG2SingleAgentFlow:
 # Multi-agent GroupChat flow (mocked)
 # ---------------------------------------------------------------------------
 
+@_AG2_GONE
 class TestAG2MultiAgentGroupChatFlow:
 
     @pytest.mark.integration
@@ -384,6 +397,7 @@ class TestAG2MultiAgentGroupChatFlow:
 # Backward-compatibility: existing autogen/crewai paths unaffected
 # ---------------------------------------------------------------------------
 
+@_AG2_GONE
 class TestAG2BackwardCompatibility:
 
     @pytest.mark.integration
