@@ -154,7 +154,7 @@ _AG2_GONE = pytest.mark.xfail(
     strict=True,
     raises=(AttributeError, ImportError, SystemExit),
     reason="framework='ag2' unimplemented; AgentsGenerator._run_ag2 removed "
-    "(issue to be filed)",
+    "(#6661)",
 )
 
 

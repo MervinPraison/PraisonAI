@@ -42,7 +42,7 @@ os.environ.setdefault('OPENAI_MODEL_NAME', 'gpt-4o-mini')
 _SCHEMA_REJECTED = pytest.mark.xfail(
     strict=True,
     raises=openai.BadRequestError,
-    reason="OpenAI rejects AutoGenerator response_format schema (issue to be filed)",
+    reason="OpenAI rejects AutoGenerator response_format schema (#6662)",
 )
 
 
