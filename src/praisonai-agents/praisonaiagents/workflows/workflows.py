@@ -4973,9 +4973,10 @@ CONCISE SUMMARY:"""
             try:
                 from agent_recipes import get_template_path
                 recipe_path = get_template_path(recipe_name)
-            except Exception:
+            except Exception as e:
                 # agent_recipes not installed, or it does not ship this name
                 # (it raises ValueError): try a local path (T-10).
+                logger.debug("agent_recipes lookup for %r failed: %s", recipe_name, e)
                 recipe_path = None
             if not recipe_path:
                 from pathlib import Path
