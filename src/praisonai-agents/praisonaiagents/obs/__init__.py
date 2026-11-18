@@ -22,7 +22,10 @@ Alternative (explicit provider - call before creating the agent):
 
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 from dataclasses import dataclass, field
+import logging
 import time
+
+_logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -216,8 +219,8 @@ class _LazyObsModule:
                             if not os.environ.get(key):
                                 os.environ[key] = value
             except Exception:
-                # Silently fail if config file can't be read
-                pass
+                # Never fail auto-detection on an unreadable config file.
+                _logger.debug("Could not load %s", config_file, exc_info=True)
         
         # Check for common provider env vars
         provider_env_map = {
