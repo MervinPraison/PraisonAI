@@ -121,7 +121,7 @@ from ..config.agent_init import (
     resolve_agent_learn, resolve_agent_llm_init_params, resolve_agent_llm_options,
     resolve_agent_local, resolve_agent_memory, resolve_agent_model, resolve_agent_output,
     resolve_agent_planning, resolve_agent_reflection, resolve_agent_skills, resolve_agent_templates,
-    resolve_agent_web,
+    resolve_agent_tools, resolve_agent_web,
 )
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
@@ -1791,59 +1791,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Store fallback models for resilience (defensive copy to avoid external mutations)
         self.fallback_models = list(fallback_models) if fallback_models else []
         
-        # Handle tools parameter - ensure it's always a list
-        if callable(tools):
-            # If a single function/callable is passed, wrap it in a list
-            self.tools = [tools]
-        elif isinstance(tools, str):
-            # Single tool name string - resolve from registry
-            self.tools = self._resolve_tool_names([tools])
-        elif isinstance(tools, (list, tuple)):
-            # Resolve tool-name strings PER ELEMENT. An all-or-nothing `all(...)`
-            # test silently left every name unresolved as soon as one callable
-            # was present, so `tools=[my_tool, 'read_file']` dropped 'read_file'.
-            self.tools = self._resolve_tools_list(tools)
-        else:
-            self.tools = tools or []
-        
-        # Handle toolsets parameter - resolve named toolset groups
-        if toolsets:
-            # Bound before the try: if the toolsets import fails, the except
-            # clauses below must still be able to name ToolResolutionError.
-            from ..tools.resolver import ToolResolutionError
-            try:
-                from ..toolsets import resolve_toolsets_for_model
-                # Advertise the model-family's preferred edit primitive first
-                # (e.g. apply_patch for Claude, edit_file for GPT). Unknown /
-                # non-string models fall back to the byte-for-byte default order.
-                model_id = self.llm if isinstance(self.llm, str) else None
-                toolset_tool_names = resolve_toolsets_for_model(toolsets, model_id)
-                # Remove duplicates with existing tools
-                existing_tool_names = set()
-                for tool in self.tools:
-                    name = getattr(tool, 'name', getattr(tool, '__name__', str(tool)))
-                    existing_tool_names.add(name)
-                
-                unique_tool_names = [name for name in toolset_tool_names if name not in existing_tool_names]
-                toolset_tools = self._resolve_tool_names(unique_tool_names)
-                self.tools.extend(toolset_tools)
-                logger.debug(f"Resolved toolsets {toolsets} to {len(toolset_tools)} tools: {[getattr(t, '__name__', str(t)) for t in toolset_tools]}")
-            except ToolResolutionError:
-                # Preserve the typed error (with .unknown / .suggestions) so
-                # strict-mode callers get the same self-correcting contract as
-                # the direct tools= path instead of a flattened ValueError.
-                raise
-            except (ValueError, KeyError) as e:
-                raise ValueError(
-                    f"Agent '{getattr(self, 'display_name', 'unknown')}' failed to resolve toolsets {toolsets}: {e}. "
-                    "Verify names with praisonaiagents.toolsets.list_toolsets()."
-                ) from e
-            except ImportError as e:
-                raise ImportError(
-                    f"Agent '{getattr(self, 'display_name', 'unknown')}' failed to import toolsets module: {e}. "
-                    "Ensure praisonaiagents is properly installed."
-                ) from e
-        
+        # tools= / toolsets= -> the tool list (names resolved, toolsets merged).
+        self.tools = resolve_agent_tools(
+            tools, toolsets, self.llm, getattr(self, 'display_name', 'unknown'),
+            self._resolve_tool_names, self._resolve_tools_list)
+
         # Inject default tools for autonomy mode (after self.tools is initialized)
         # ONLY inject if caller didn't provide tools - avoid duplicates with CLI/wrapper tools
         if self.autonomy_enabled and hasattr(self, '_autonomy_config_obj'):
