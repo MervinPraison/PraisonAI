@@ -493,13 +493,13 @@ class WebSocketMCPClient:
             if hasattr(self, '_session_context') and self._session_context:
                 await self._session_context.__aexit__(None, None, None)
         except Exception:
-            pass
+            logger.debug("WebSocket MCP: session context exit failed", exc_info=True)
         
         try:
             if self.transport:
                 await self.transport.close()
         except Exception:
-            pass
+            logger.debug("WebSocket MCP: transport close failed", exc_info=True)
     
     def close(self, wait: bool = True):
         """Synchronous cleanup. ``wait=False`` only schedules it (finalizers)."""

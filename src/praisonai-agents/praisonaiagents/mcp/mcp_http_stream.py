@@ -653,7 +653,7 @@ class HTTPStreamMCPClient:
             try:
                 await session_context.__aexit__(None, None, None)
             except Exception:
-                pass
+                logger.debug("HTTP-stream MCP: session context exit failed", exc_info=True)
             self._session_context = None
             self.session = None
 
@@ -662,7 +662,7 @@ class HTTPStreamMCPClient:
             try:
                 await streams_context.__aexit__(None, None, None)
             except Exception:
-                pass
+                logger.debug("HTTP-stream MCP: streams context exit failed", exc_info=True)
             self._streams_context = None
 
     async def aclose(self):
