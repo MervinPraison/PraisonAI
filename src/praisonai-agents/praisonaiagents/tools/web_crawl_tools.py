@@ -346,7 +346,8 @@ def _html_to_markdown(html: str, base_url: Optional[str] = None) -> tuple:
                 try:
                     href = urllib.parse.urljoin(base_url, href)
                 except Exception:
-                    pass
+                    logger.debug("Could not resolve link %r against %r",
+                                 href, base_url, exc_info=True)
             # Escape characters that would prematurely terminate a Markdown link
             # target so the destination stays intact.
             return href.replace(" ", "%20").replace("(", "%28").replace(")", "%29")
