@@ -278,7 +278,10 @@ def _get_handoff_seed_lock(agent: 'Agent') -> 'DualLock':
                     # Target can't hold the attribute (e.g. __slots__). Return a
                     # transient lock; correctness for that exotic case is no
                     # worse than before, and the common path is fully guarded.
-                    pass
+                    logger.debug(
+                        "Could not store handoff seed lock on %s; using a transient lock",
+                        type(agent).__name__, exc_info=True,
+                    )
     return lock
 
 

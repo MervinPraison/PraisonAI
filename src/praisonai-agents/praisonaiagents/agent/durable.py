@@ -6,6 +6,7 @@ import asyncio
 import contextvars
 import inspect
 import json
+import logging
 import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from uuid import uuid4
@@ -20,6 +21,8 @@ from ..runtime.journal import (
     KIND_VERIFICATION,
     RunJournal,
 )
+
+logger = logging.getLogger(__name__)
 
 
 _active_durable_run: contextvars.ContextVar[Optional["DurableRunContext"]] = (
@@ -420,7 +423,10 @@ class DurableRunContext:
                         JournalEvent(self.run_id, seq, KIND_VERIFICATION, payload)
                     )
                 except Exception:  # pragma: no cover - journalling is best-effort
-                    pass
+                    logger.debug(
+                        "Could not journal verification event for run %s (seq %s)",
+                        self.run_id, seq, exc_info=True,
+                    )
 
     def wrap_sync(self, execute_tool_fn: Optional[Callable]) -> Optional[Callable]:
         if execute_tool_fn is None:

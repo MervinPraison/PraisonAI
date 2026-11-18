@@ -17,7 +17,10 @@ problem this module exists to fix.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Dict, Optional
+
+logger = logging.getLogger(__name__)
 
 # Provider name -> how a human would say it out loud.
 _PLACE_WORDS = {
@@ -102,7 +105,7 @@ def say_place(name: Any, *, via: str = "sandbox") -> str:
         if declared:
             return declared
     except Exception:
-        pass
+        logger.debug("Could not read a contributed display name for %r", key, exc_info=True)
     return str(name)
 
 
@@ -124,7 +127,10 @@ def _backend_places(backend: Any) -> Optional[Dict[str, str]]:
                 where = say_place(declared)
                 return {"thinks_on": where, "tools_run_on": where}
         except Exception:
-            pass
+            logger.debug(
+                "Could not check backend provider %r against managed runtimes",
+                declared, exc_info=True,
+            )
 
     cls = type(backend).__name__
     # Hosted runtimes move the entire turn off this machine.
@@ -176,7 +182,9 @@ def describe(obj: Any, *, shared: bool = False) -> Dict[str, str]:
                 getattr(sandbox_config, "sandbox_type", None)
             )
     except Exception:  # pragma: no cover - description must never break callers
-        pass
+        logger.debug(
+            "Could not fully describe where %s runs", type(obj).__name__, exc_info=True,
+        )
     return places
 
 
