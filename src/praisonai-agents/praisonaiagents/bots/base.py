@@ -52,6 +52,7 @@ from __future__ import annotations
 from ..errors import PraisonAIError
 import asyncio
 import contextlib
+import logging
 import re
 import time
 from abc import ABC, abstractmethod
@@ -60,6 +61,8 @@ from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Union
 
 from .protocols import HealthResult, PlatformCapabilities, ProbeResult
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "SendErrorKind",
@@ -849,7 +852,10 @@ class BasePlatformAdapter(ABC):
             try:
                 await self.send_typing(chat_id)
             except Exception:
-                pass
+                logger.debug(
+                    "Typing indicator failed for chat %s; delivering anyway",
+                    chat_id, exc_info=True,
+                )
 
         if isinstance(content, str):
             formatted = self.format_message(content)
