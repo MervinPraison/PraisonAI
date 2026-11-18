@@ -26,10 +26,13 @@ imports and is trivially testable.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, time
 from enum import Enum
 from typing import Optional, Set
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "NotificationCategory",
@@ -208,5 +211,6 @@ def _localised_time(now: Optional[datetime], tz_name: str) -> time:
 
             now = now.astimezone(ZoneInfo(tz_name))
         except Exception:
-            pass
+            logger.debug("Unknown time zone %r; using the naive time", tz_name,
+                         exc_info=True)
     return now.timetz().replace(tzinfo=None) if now.tzinfo else now.time()

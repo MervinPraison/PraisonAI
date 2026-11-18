@@ -49,11 +49,14 @@ from __future__ import annotations
 
 import itertools
 import json
+import logging
 import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 from ..llm.llm import LLM
+
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "ScriptedModelError",
@@ -554,7 +557,8 @@ class ScriptedModel(LLM):
             try:
                 self._track_token_usage(response, self.model)
             except Exception:  # pragma: no cover - accounting must never fail a test
-                pass
+                logger.debug("Scripted token accounting failed for model %s", self.model,
+                             exc_info=True)
         return response
 
     async def _acompletion_with_retry(self, **completion_params: Any) -> Any:
@@ -568,7 +572,8 @@ class ScriptedModel(LLM):
             try:
                 self._track_token_usage(response, self.model)
             except Exception:  # pragma: no cover - accounting must never fail a test
-                pass
+                logger.debug("Scripted token accounting failed for model %s", self.model,
+                             exc_info=True)
         return response
 
     async def _astream_chunks(self, reply: ScriptedReply) -> Any:
