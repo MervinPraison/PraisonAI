@@ -228,19 +228,19 @@ def _isolated_agent_copy(agent: Any) -> Any:
         try:
             clone.agent_id = str(uuid.uuid4())
         except Exception:
-            pass
+            logger.debug("Could not give the attempt copy a fresh agent_id", exc_info=True)
     if hasattr(clone, "_session_id"):
         try:
             clone._session_id = str(uuid.uuid4())
         except Exception:
-            pass
+            logger.debug("Could not give the attempt copy a fresh session id", exc_info=True)
 
     # Independent chat history: rebind to a *new* list so appends during the
     # attempt never mutate the caller's shared list (a shallow copy shares it).
     try:
         clone.chat_history = list(getattr(agent, "chat_history", None) or [])
     except Exception:
-        pass
+        logger.debug("Could not give the attempt copy its own chat history; attempts may share it", exc_info=True)
 
     # Give the clone its own cache object rather than clearing the shared one,
     # so wiping per-attempt state cannot evict the original agent's cache.
@@ -249,7 +249,7 @@ def _isolated_agent_copy(agent: Any) -> Any:
         try:
             clone._system_prompt_cache = {}
         except Exception:
-            pass
+            logger.debug("Could not give the attempt copy its own system prompt cache", exc_info=True)
 
     # Sever memory/knowledge writes for the attempt (measurement must not mutate stores).
     for attr in ("memory", "knowledge"):
@@ -257,7 +257,7 @@ def _isolated_agent_copy(agent: Any) -> Any:
             try:
                 setattr(clone, attr, None)
             except Exception:
-                pass
+                logger.debug("Could not detach %s from the attempt copy; the attempt may write to it", attr, exc_info=True)
 
     return clone
 

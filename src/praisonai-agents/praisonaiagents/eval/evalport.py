@@ -34,11 +34,14 @@ Example:
     >>> pkg2.name == pkg.name
     True
 """
+import logging
 import uuid
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from .package import EvalCase, EvalPackage, EvalReport
+
+logger = logging.getLogger(__name__)
 
 # EvalPort spec version the emitted documents conform to (semver, per spec).
 EVALPORT_SPEC_VERSION = "1.0.0-rc.5"
@@ -212,7 +215,7 @@ def _runner_info() -> Dict[str, str]:
 
         runner["version"] = version("praisonaiagents")
     except Exception:
-        pass
+        logger.debug("Could not read the praisonaiagents version for the EvalPort runner", exc_info=True)
     return runner
 
 
