@@ -5825,9 +5825,7 @@ class WebSocketGateway:
     def _evict_persisted_session(self, session_id: str) -> bool:
         """Remove ``session_id`` from memory **only after** its transcript is durable.
 
-        Unlike ``close_session(persist=True)`` — which best-effort persists but
-        still drops the in-memory session even when the store write fails — this
-        enactor refuses to evict a session whose final snapshot could not be
+        This enactor refuses to evict a session whose final snapshot could not be
         persisted. Under memory pressure the live session may hold the only copy
         of recent messages/events, so a failed persist must leave it in memory
         (no data loss) rather than count it as safely shed. ``add_message``
@@ -6950,32 +6948,37 @@ class WebSocketGateway:
             persist: Whether to persist the session for later resumption (default: True)
         
         Returns:
-            True if session was closed, False if not found
+            True if session was closed, False if not found or persistence failed
         """
         session = self._sessions.get(session_id)
         if not session:
             return False
         
-        session.close()
-        
         # Persist session state before removing from memory if configured
         if persist and self._session_store:
             try:
                 # Save final session state
-                self._session_store.add_message(
+                snapshot = session.to_dict()
+                snapshot["is_active"] = False
+                saved = self._session_store.add_message(
                     session_id=session_id,
                     role="system",
                     content="Session closed",
-                    metadata={"session_data": session.to_dict()},
+                    metadata={"session_data": snapshot},
                 )
+                if saved is False:
+                    logger.warning("Failed to persist session state on close; session retained")
+                    return False
                 # Set TTL for session cleanup
                 resume_window = self.config.session_config.resume_window
                 self._session_ttls[session_id] = time.time() + resume_window
                 logger.info(f"Session {session_id} persisted, resumable for {resume_window}s")
             except Exception as e:
                 logger.warning(f"Failed to persist session state on close: {e}")
+                return False
         
         # Remove from active sessions
+        session.close()
         self._sessions.pop(session_id, None)
         self._drop_session_observers(session_id)
         
