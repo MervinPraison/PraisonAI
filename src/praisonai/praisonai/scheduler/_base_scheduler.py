@@ -395,8 +395,21 @@ class _BaseAgentScheduler:
         agent = getattr(self, "agent", None)
         members = getattr(agent, "agents", None)
         agents = [agent] + (list(members) if isinstance(members, (list, tuple)) else [])
-        for member in agents:
-            tools = getattr(member, "tools", None)
+        tool_lists = [getattr(member, "tools", None) for member in agents]
+        # Team tasks hand their own ``Task.tools`` to the member at call time.
+        tasks = getattr(agent, "tasks", None)
+        if isinstance(tasks, dict):
+            tasks = list(tasks.values())
+        if isinstance(tasks, (list, tuple)):
+            tool_lists += [getattr(task, "tools", None) for task in tasks]
+        # Registry-only tools are reachable under ToolConfig(allow_global_tools=True).
+        if any(getattr(member, "_allow_global_tools", False) is True for member in agents):
+            try:
+                from praisonaiagents.tools.registry import get_registry
+                tool_lists.append(list(get_registry().get_all().values()))
+            except Exception:
+                pass
+        for tools in tool_lists:
             if not isinstance(tools, (list, tuple)):
                 continue
             for tool in tools:

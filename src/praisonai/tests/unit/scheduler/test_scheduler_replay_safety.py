@@ -87,3 +87,42 @@ def test_async_undeclared_tools_still_retry():
 
     asyncio.run(run())
     assert agent.start.call_count == 3
+
+
+def test_effectful_task_tool_blocks_rerun():
+    task = Mock()
+    task.tools = [_tool("place_order", restart_safe=False)]
+    team = _agent()
+    team.agents = [Mock(tools=[])]
+    team.tasks = {0: task}
+    _run_sync(team)
+    assert team.start.call_count == 1
+
+
+def test_effectful_global_registry_tool_blocks_rerun():
+    agent = _agent()
+    agent._allow_global_tools = True
+    registry = Mock()
+    registry.get_all.return_value = {"wire": _tool("wire", restart_safe=False)}
+    with patch("praisonaiagents.tools.registry.get_registry", return_value=registry):
+        _run_sync(agent)
+    assert agent.start.call_count == 1
+
+
+def test_global_registry_ignored_when_not_enabled():
+    agent = _agent()
+    agent._allow_global_tools = False
+    registry = Mock()
+    registry.get_all.return_value = {"wire": _tool("wire", restart_safe=False)}
+    with patch("praisonaiagents.tools.registry.get_registry", return_value=registry):
+        _run_sync(agent)
+    assert agent.start.call_count == 3
+
+
+def test_failure_message_reports_actual_attempts():
+    agent = _agent(_tool("send_email", restart_safe=False))
+    on_failure = Mock()
+    scheduler = AgentScheduler(agent, "task", on_failure=on_failure)
+    with patch.object(scheduler._stop_event, "wait", return_value=False):
+        scheduler._execute_with_retry(3)
+    on_failure.assert_called_once_with("Failed after 1 attempts")
