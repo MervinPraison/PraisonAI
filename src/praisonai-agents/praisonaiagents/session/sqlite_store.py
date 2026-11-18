@@ -23,7 +23,7 @@ Usage::
     from praisonaiagents.session import SqliteSessionStore
 
     store = SqliteSessionStore(db_path="~/.praisonai/sessions.db")
-    agent = Agent(..., session_store=store)  # opt-in; Default stays fallback
+    store.add_message("s1", "user", "billing migration")
 
     store.search("billing migration")  # bounded index lookup + anchored hits
 """

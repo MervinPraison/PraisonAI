@@ -882,6 +882,8 @@ class BotSessionManager:
             self._last_reset[storage_key] = time.monotonic()
             return []
         
+        if storage_key in self._histories and storage_key not in self._flushed:
+            return list(self._histories[storage_key])
         if self._store is not None:
             key = self._session_key(user_id, **route)
             try:
@@ -952,16 +954,22 @@ class BotSessionManager:
             key = self._session_key(user_id, **route)
             try:
                 if hasattr(self._store, "set_chat_history"):
-                    self._store.set_chat_history(key, history)
+                    if self._store.set_chat_history(key, history) is False:
+                        logger.warning("Failed to persist session to store: write returned False")
+                        return
                 else:
-                    self._store.clear_session(key)
+                    if self._store.clear_session(key) is False:
+                        logger.warning("Failed to persist session to store: clear returned False")
+                        return
                     for msg in history:
-                        self._store.add_message(
+                        if self._store.add_message(
                             key,
                             msg.get("role", "user"),
                             msg.get("content", ""),
                             msg.get("metadata"),
-                        )
+                        ) is False:
+                            logger.warning("Failed to persist session to store: write returned False")
+                            return
             except Exception as e:
                 logger.warning("Failed to persist session to store: %s", e)
             else:
@@ -2457,6 +2465,8 @@ class BotSessionManager:
         :meth:`warm_sessions` / :meth:`get_user_ids` — no user-id resolution is
         applied here, so the caller controls exactly which session moves.
         """
+        if storage_key in self._histories and storage_key not in self._flushed:
+            return list(self._histories[storage_key])
         if self._store is not None:
             try:
                 history = self._store.get_chat_history(self._persist_key(storage_key))
@@ -2485,20 +2495,25 @@ class BotSessionManager:
             self._flushed.discard(storage_key)
             try:
                 if hasattr(self._store, "set_chat_history"):
-                    self._store.set_chat_history(key, history)
+                    saved = self._store.set_chat_history(key, history) is not False
                 else:
-                    self._store.clear_session(key)
+                    saved = self._store.clear_session(key) is not False
                     for msg in history:
-                        self._store.add_message(
+                        if not saved:
+                            break
+                        saved = self._store.add_message(
                             key,
                             msg.get("role", "user"),
                             msg.get("content", ""),
                             msg.get("metadata"),
-                        )
+                        ) is not False
             except Exception as e:  # pragma: no cover — defensive
                 logger.warning("seed_history store write failed: %s", e)
             else:
-                self._flushed.add(storage_key)
+                if saved:
+                    self._flushed.add(storage_key)
+                else:
+                    logger.warning("seed_history store write returned False")
         self._last_active[storage_key] = time.monotonic()
 
 
