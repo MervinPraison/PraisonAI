@@ -40,7 +40,7 @@ def _load_gitignore_patterns(root_path: str) -> Set[str]:
                     if line and not line.startswith('#'):
                         patterns.add(line)
         except Exception:
-            pass
+            logger.debug("Could not read %s", gitignore_path, exc_info=True)
     
     # Also check for .praisonignore
     praisonignore_path = Path(root_path) / ".praisonignore"
@@ -52,7 +52,7 @@ def _load_gitignore_patterns(root_path: str) -> Set[str]:
                     if line and not line.startswith('#'):
                         patterns.add(line)
         except Exception:
-            pass
+            logger.debug("Could not read %s", praisonignore_path, exc_info=True)
     
     return patterns
 
