@@ -306,9 +306,15 @@ class ConfigYamlScheduleStore(_ScheduleStoreQueries):
                                 fh.seek(0)
                                 msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
                             except Exception:  # pragma: no cover
-                                pass
+                                logger.debug(
+                                    "Could not release Windows file lock %s; closing it instead",
+                                    self._lock_path, exc_info=True,
+                                )
                 except Exception:  # pragma: no cover - defensive
-                    pass
+                    logger.debug(
+                        "Could not release file lock %s; closing it instead",
+                        self._lock_path, exc_info=True,
+                    )
                 fh.close()
 
     def _reload_locked(self) -> None:
