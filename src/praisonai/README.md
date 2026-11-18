@@ -188,7 +188,7 @@ The full `praisonai` package, with the CLI, bots, dashboard and integrations:
 ```
 
 <p align="center">
-  <img src=".github/images/dashboard.png" alt="PraisonAI Dashboard" width="800" />
+  <img src=".github/images/ui/claw-desktop-light.webp" alt="PraisonAI Claw dashboard in the Chat + Canvas layout: the chat on the left with a comparison table and a Python script the agent wrote, and the canvas on the right showing the table above the script" width="800" />
 </p>
 
 <div align="center">
@@ -480,7 +480,7 @@ Start simple with the core SDK, or expand to full visual builders and dashboards
 *   💻 **PraisonAI CLI (`praisonai`)**: For terminal-based developers. `pip install praisonai`
 *   🦞 **Claw Dashboard**: Connect agents directly to Telegram, Slack, or Discord. `pip install "praisonai[claw]"`
 *   🔗 **Flow Visual Builder**: Drag-and-drop workflow creation. `pip install "praisonai[flow]"`
-*   🤖 **PraisonAI UI**: Clean chat interface. `pip install "praisonai[ui]"`
+*   🤖 **PraisonAI UI**: Chat with a canvas for the tables and code your agents write. `pip install "praisonai[ui]"`
 
 ### JavaScript SDK
 
@@ -745,7 +745,7 @@ Copy `.env.example` to `.env` and configure the following variables:
 | `OPENAI_API_KEY` | Yes | OpenAI API key for all LLM calls |
 | `TAVILY_API_KEY` | Yes (Claw) | Tavily key for the built-in web-search tool. Get one free at https://app.tavily.com |
 
-Open **http://localhost:8082** — the dashboard comes with 13 built-in pages: Chat, Agents, Memory, Knowledge, Channels, Guardrails, Cron, and more. Add messaging channels directly from the UI.
+Open **http://localhost:8082** — the dashboard opens in **Chat + Canvas**: the chat on the left, and the tables, code and files your agents write on a canvas beside it (sort, copy, download, compare versions). Every other page (Agents, Memory, Knowledge, Channels, Guardrails, Cron, and more) is in the sidebar or the command palette (⌘K). Add messaging channels directly from the UI.
 
 > 📖 [Full Claw docs](https://praison.ai/docs/concepts/claw) — platform tokens, CLI options, Docker, and YAML agent mode
 
@@ -762,14 +762,28 @@ Open **http://localhost:7861** — use the **Agent** and **Agent Team** componen
 
 > 📖 [Full Flow docs](https://praison.ai/docs/concepts/agentflow) — visual agent building, component reference, and deployment
 
-### 8. PraisonAI UI 🤖 (Clean Chat)
+### 8. PraisonAI UI 🤖 (Chat + Canvas)
 
-Lightweight chat interface for your AI agents.
+Chat with your AI agents; the tables and code they write open on a canvas beside the chat.
 
 ```bash
 pip install "praisonai[ui]"
-praisonai ui
+praisonai ui            # chat           → http://localhost:8081
+praisonai ui agents     # YAML agents
+praisonai ui bot        # bot interface
+praisonai ui realtime   # realtime voice
 ```
+
+<p align="center">
+  <img src=".github/images/ui/ui-desktop-dark.webp" alt="praisonai ui in dark mode: the chat on the left and the canvas with the comparison table and the benchmark script on the right" width="800" />
+</p>
+
+- **Layout:** Chat + Canvas by default. Pick another for one run with `AIUI_LAYOUT=chat` (no canvas), `workbench`, `command`, `guided` or `mission`, or switch from the command palette (⌘K).
+- **Look:** light and dark follow the toggle in the top bar; ⌘K → **Switch look: Pro** swaps the Paper look for the plain one.
+- **Stop:** the Stop button cancels the agent's reply. A reply that sends nothing for 10 minutes is cancelled too (`AIUI_REPLY_IDLE_TIMEOUT`, in seconds; `0` turns it off).
+- **Uploads:** request bodies are capped at 25 MiB (`AIUI_MAX_BODY_MB`; `0` turns it off).
+- **Data:** chats and settings live in `~/.praisonaiui` (set `AIUI_DATA_DIR` to move them, e.g. to a mounted volume).
+- An existing `~/.praisonai/claw/app.py` from an older install keeps aiui's own default layout (Chat, no canvas); delete it to get the new default app, or add `layout="chat-canvas"` to its `configure_host(...)` call.
 
 </details>
 
