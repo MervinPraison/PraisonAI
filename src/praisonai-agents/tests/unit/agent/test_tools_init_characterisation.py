@@ -165,12 +165,12 @@ def test_toolset_strict_unknown_tool_keeps_typed_error(monkeypatch):
     assert exc.value.unknown == ["nope_tool"]
 
 
-def test_toolsets_module_import_failure_current_behaviour(monkeypatch):
-    # Pinned as-is: the import fails before ToolResolutionError is bound, so the
-    # ``except ToolResolutionError`` clause raises UnboundLocalError and the
-    # ImportError wrapper below it is unreachable. Update if the move fixes it.
+def test_toolsets_module_import_failure_raises_import_error(monkeypatch):
+    # The ImportError wrapper is reachable: ToolResolutionError is bound before
+    # the try (it used to be imported after the failing line, so the except
+    # clause raised UnboundLocalError instead).
     monkeypatch.setitem(sys.modules, "praisonaiagents.toolsets", None)
-    with pytest.raises(UnboundLocalError, match="ToolResolutionError"):
+    with pytest.raises(ImportError, match="failed to import toolsets module"):
         make(toolsets=["safe"])
 
 
