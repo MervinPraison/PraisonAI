@@ -34,6 +34,6 @@ app = build_ui_app(UIPreset(
         {"label": "Settings", "message": "Configure voice settings", "icon": "⚙️"},
         {"label": "Help", "message": "How do I use voice commands?", "icon": "❓"},
     ],
-    welcome="🎤 Welcome to PraisonAI Realtime Voice! Click the microphone button to start talking.",
+    welcome="🎤 Welcome to PraisonAI Realtime Voice! Type a message below to start the conversation.",
     realtime_manager=realtime_manager,
 ))

@@ -774,15 +774,17 @@ praisonai ui realtime   # realtime voice
 ```
 
 <p align="center">
-  <img src=".github/images/ui/ui-desktop-dark.webp" alt="praisonai ui in dark mode: the chat on the left and the canvas with the comparison table and the benchmark script on the right" width="800" />
+  <img src=".github/images/ui/ui-welcome-desktop-light.webp" alt="praisonai ui opening a new chat: the PraisonAI Chat title, the app's welcome greeting under it, four starter prompts and the message box" width="400" />
+  <img src=".github/images/ui/ui-desktop-dark.webp" alt="praisonai ui in dark mode: the chat on the left and the canvas with the comparison table and the benchmark script on the right" width="400" />
 </p>
 
+- **Welcome:** each app greets you in the new-chat hero, in every layout. Set the text with `UIPreset(welcome=...)` or your own `@aiui.welcome` handler.
 - **Layout:** Chat + Canvas by default. Pick another for one run with `AIUI_LAYOUT=chat` (no canvas), `workbench`, `command`, `guided` or `mission`, or switch from the command palette (⌘K).
 - **Look:** light and dark follow the toggle in the top bar; ⌘K → **Switch look: Pro** swaps the Paper look for the plain one.
 - **Stop:** the Stop button cancels the agent's reply. A reply that sends nothing for 10 minutes is cancelled too (`AIUI_REPLY_IDLE_TIMEOUT`, in seconds; `0` turns it off).
 - **Uploads:** request bodies are capped at 25 MiB (`AIUI_MAX_BODY_MB`; `0` turns it off).
 - **Data:** chat history is saved by PraisonAI under `~/.praisonai/sessions` (set `PRAISONAI_HOME` to move it); the UI's own settings live in `~/.praisonaiui` (set `AIUI_DATA_DIR` to move them). To keep both on a mounted volume, set both variables.
-- An existing `~/.praisonai/claw/app.py` from an older install keeps aiui's own default layout (Chat, no canvas); delete it to get the new default app, or add `layout="chat-canvas"` to its `configure_host(...)` call.
+- An existing `~/.praisonai/claw/app.py` from an older install keeps aiui's own default layout (Chat, no canvas) and has no welcome greeting; delete it to get the new default app, or add `layout="chat-canvas"` to its `configure_host(...)` call.
 
 </details>
 
