@@ -251,7 +251,6 @@ class CheckpointService:
             ("feature.manyFiles", "true"),
             ("index.version", "4"),
             ("core.untrackedCache", "true"),
-            ("core.fsmonitor", "true"),
         ]
         for key, value in settings:
             try:
@@ -332,8 +331,15 @@ class CheckpointService:
         # `maintenance run --auto` after commits: it holds maintenance.lock in
         # the shadow dir and races delete_all(). Passed per-command so shadow
         # repos created by older versions are covered too.
+        # The user's git settings must not reach this internal repo (T-06):
+        # core.fsmonitor starts a daemon that keeps our stdout pipe open (every
+        # command then hit the 30 s timeout on macOS/Windows), commit.gpgsign
+        # makes commits try to sign, and a global core.hooksPath runs the
+        # user's hooks. The hooks path points at a directory that never exists.
         cmd = [
             "git", "-c", "maintenance.auto=false", "-c", "gc.autoDetach=false",
+            "-c", "core.fsmonitor=false", "-c", "commit.gpgsign=false",
+            "-c", f"core.hooksPath={os.path.join(self.git_dir, 'no-hooks')}",
             f"--git-dir={self.git_dir}", f"--work-tree={self.config.workspace_dir}",
         ]
         cmd.extend(args)
