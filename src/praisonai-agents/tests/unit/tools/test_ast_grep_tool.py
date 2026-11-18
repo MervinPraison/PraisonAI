@@ -274,9 +274,13 @@ class TestAstGrepToolReceiptAndConfinement:
                 mock_run.assert_not_called()
                 assert "outside the workspace" in result
 
-    def test_search_output_is_capped(self):
+    def test_search_output_is_capped(self, tmp_path, monkeypatch):
         """A huge match dump must be bounded before it floods the context."""
         from praisonaiagents.tools.ast_grep_tool import ast_grep_search, _MAX_OUTPUT_SIZE
+
+        # The overflow spills into <cwd>/.praisonai_tool_output; keep it out of
+        # the checkout (T-09).
+        monkeypatch.chdir(tmp_path)
 
         with patch('praisonaiagents.tools.ast_grep_tool.is_ast_grep_available') as mock_avail:
             mock_avail.return_value = True

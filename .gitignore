@@ -123,3 +123,5 @@ jobs/*
 # Android Studio (how: .github/workflows/mobile-platforms.yml). Several GB.
 .android-sdk/
 .worktrees/
+# Tool-output overflow files written into the workspace (T-09)
+.praisonai_tool_output/
