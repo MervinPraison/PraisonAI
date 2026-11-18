@@ -1390,7 +1390,7 @@ Provide a JSON with the structure:
 
         if not start_task:
             start_task = list(self.tasks.values())[0]
-            logging.info("No start task marked, using first task")
+            logger.info("No start task marked, using first task")
 
         # If loop type and no input_file, default to tasks.csv
         if start_task and start_task.task_type == "loop" and not start_task.input_file:
@@ -1412,9 +1412,9 @@ Provide a JSON with the structure:
                     parent_loop_task.status = "completed"
                     parent_loop_task._subtasks_created = True
                     start_task = next((t for t in subtasks if t.is_start), subtasks[0])
-                    logging.info(f"Created {len(subtasks)} tasks from: {parent_input_file}")
+                    logger.info(f"Created {len(subtasks)} tasks from: {parent_input_file}")
             except Exception as e:
-                logging.error(f"Failed to read file tasks: {e}")
+                logger.error(f"Failed to read file tasks: {e}")
 
         # end of start task handling
         current_task = start_task
@@ -1430,22 +1430,22 @@ Provide a JSON with the structure:
             if self.workflow_timeout is not None:
                 elapsed = time.monotonic() - workflow_start
                 if elapsed > self.workflow_timeout:
-                    logging.warning(f"Workflow timeout ({self.workflow_timeout}s) exceeded after {elapsed:.1f}s, ending workflow.")
+                    logger.warning(f"Workflow timeout ({self.workflow_timeout}s) exceeded after {elapsed:.1f}s, ending workflow.")
                     self.workflow_cancelled = True
                     break
 
             # ADDED: Check workflow finished flag at the start of each cycle
             if self.workflow_finished:
-                logging.info("Workflow finished early as all tasks are completed.")
+                logger.info("Workflow finished early as all tasks are completed.")
                 break
                 
             # ADDED: Check workflow cancellation flag
             if self.workflow_cancelled:
-                logging.warning("Workflow has been cancelled, stopping task execution.")
+                logger.warning("Workflow has been cancelled, stopping task execution.")
                 break
 
             # Add task summary at start of each cycle
-            logging.debug(f"""
+            logger.debug(f"""
 === Workflow Cycle {current_iter} Summary ===
 Total tasks: {len(self.tasks)}
 Outstanding tasks: {sum(1 for t in self.tasks.values() if t.status != "completed")}
@@ -1486,12 +1486,12 @@ Tasks by type:
                             first_subtask = next((t for t in subtasks if t.is_start), subtasks[0])
                             current_task.next_tasks = [first_subtask.name]
                             current_task._subtasks_created = True
-                            logging.info(f"Created {len(subtasks)} tasks from: {current_task.input_file} for loop task {current_task.name}")
+                            logger.info(f"Created {len(subtasks)} tasks from: {current_task.input_file} for loop task {current_task.name}")
                     except Exception as e:
-                        logging.error(f"Failed to read file tasks for loop task {current_task.name}: {e}")
+                        logger.error(f"Failed to read file tasks for loop task {current_task.name}: {e}")
 
             task_id = current_task.id
-            logging.debug(f"""
+            logger.debug(f"""
 === Task Execution Details ===
 Current task: {current_task.name}
 Type: {current_task.task_type}
@@ -1510,7 +1510,7 @@ Description length: {len(current_task.description)}
 
             # Skip execution for loop tasks, only process their subtasks
             if current_task.task_type == "loop":
-                logging.debug(f"""
+                logger.debug(f"""
 === Loop Task Details ===
 Name: {current_task.name}
 ID: {current_task.id}
@@ -1528,7 +1528,7 @@ Input file: {getattr(current_task, 'input_file', None)}
                         if t.name.startswith(current_task.name + "_")
                     ]
 
-                    logging.debug(f"""
+                    logger.debug(f"""
 === Subtask Status Check ===
 Total subtasks: {len(subtasks)}
 Completed: {sum(1 for st in subtasks if st.status == "completed")}
@@ -1536,7 +1536,7 @@ Pending: {sum(1 for st in subtasks if st.status != "completed")}
                     """)
 
                     for st in subtasks:
-                        logging.debug(f"""
+                        logger.debug(f"""
 Subtask: {st.name}
 - Status: {st.status}
 - Next tasks: {st.next_tasks}
@@ -1544,11 +1544,11 @@ Subtask: {st.name}
                         """)
 
                     if subtasks and all(st.status == "completed" for st in subtasks):
-                        logging.debug(f"=== All {len(subtasks)} subtasks completed for {current_task.name} ===")
+                        logger.debug(f"=== All {len(subtasks)} subtasks completed for {current_task.name} ===")
 
                         # Mark loop task completed and move to next task
                         current_task.status = "completed"
-                        logging.debug(f"Loop {current_task.name} marked as completed")
+                        logger.debug(f"Loop {current_task.name} marked as completed")
 
                         # Set result for loop task when all subtasks complete
                         if not current_task.result:
@@ -1576,7 +1576,7 @@ Subtask: {st.name}
                             next_task = self._task_by_name(task_value)
                             if next_task:
                                 next_task.status = "not started"  # Reset status to allow execution
-                                logging.debug(f"Routing to {next_task.name} based on decision: {decision_str}")
+                                logger.debug(f"Routing to {next_task.name} based on decision: {decision_str}")
                                 self._set_workflow_finished_sync(False)
                                 current_task = next_task
                                 # Ensure the task is yielded for execution
@@ -1585,21 +1585,21 @@ Subtask: {st.name}
                                     visited_tasks.add(current_task.id)
                             else:
                                 # End workflow if no valid next task found
-                                logging.info(f"No valid next task found for decision: {decision_str}")
+                                logger.info(f"No valid next task found for decision: {decision_str}")
                                 self._set_workflow_finished_sync(True)
                                 current_task = None
                                 break
                 else:
-                    logging.debug(f"No subtasks created yet for {current_task.name}")
+                    logger.debug(f"No subtasks created yet for {current_task.name}")
                     # Create subtasks if needed
                     if current_task.input_file:
                         self._create_loop_subtasks(current_task)
                         current_task._subtasks_created = True
-                        logging.debug(f"Created subtasks from {current_task.input_file}")
+                        logger.debug(f"Created subtasks from {current_task.input_file}")
                     else:
                         # No input file, mark as done
                         current_task.status = "completed"
-                        logging.debug(f"No input file, marking {current_task.name} as completed")
+                        logger.debug(f"No input file, marking {current_task.name} as completed")
                         if current_task.next_tasks:
                             next_task_name = current_task.next_tasks[0]
                             next_task = self._task_by_name(next_task_name)
@@ -1608,9 +1608,9 @@ Subtask: {st.name}
                             current_task = None
             else:
                 # Execute non-loop task
-                logging.debug(f"=== Executing non-loop task: {current_task.name} (id: {task_id}) ===")
-                logging.debug(f"Task status: {current_task.status}")
-                logging.debug(f"Task next_tasks: {current_task.next_tasks}")
+                logger.debug(f"=== Executing non-loop task: {current_task.name} (id: {task_id}) ===")
+                logger.debug(f"Task status: {current_task.status}")
+                logger.debug(f"Task next_tasks: {current_task.next_tasks}")
                 yield task_id
                 visited_tasks.add(task_id)
 
@@ -1619,7 +1619,7 @@ Subtask: {st.name}
                     t.task_type == "loop" and current_task.name.startswith(t.name + "_")
                     for t in self.tasks.values()
                 ):
-                    logging.info(f"Task {current_task.name} has no next tasks, ending workflow")
+                    logger.info(f"Task {current_task.name} has no next tasks, ending workflow")
                     self._set_workflow_finished_sync(True)
                     current_task = None
                     break
@@ -1629,23 +1629,23 @@ Subtask: {st.name}
                 # Never reset loop tasks, decision tasks, or their subtasks if rerun is False
                 subtask_name = self.tasks[task_id].name
                 task_to_check = self.tasks[task_id]
-                logging.debug(f"=== Checking reset for completed task: {subtask_name} ===")
-                logging.debug(f"Task type: {task_to_check.task_type}")
-                logging.debug(f"Task status before reset check: {task_to_check.status}")
-                logging.debug(f"Task rerun: {getattr(task_to_check, 'rerun', True)}") # default to True if not set
-                logging.debug(f"Task async_execution: {task_to_check.async_execution}")
+                logger.debug(f"=== Checking reset for completed task: {subtask_name} ===")
+                logger.debug(f"Task type: {task_to_check.task_type}")
+                logger.debug(f"Task status before reset check: {task_to_check.status}")
+                logger.debug(f"Task rerun: {getattr(task_to_check, 'rerun', True)}") # default to True if not set
+                logger.debug(f"Task async_execution: {task_to_check.async_execution}")
 
                 if (getattr(task_to_check, 'rerun', True) and # Corrected condition - reset only if rerun is True (or default True)
                     task_to_check.task_type != "loop" and # Removed "decision" from exclusion
                     not any(t.task_type == "loop" and subtask_name.startswith(t.name + "_")
                            for t in self.tasks.values()) and
                     not task_to_check.async_execution):  # Don't reset async parallel tasks
-                    logging.debug(f"=== Resetting non-loop, non-decision, non-parallel task {subtask_name} to 'not started' ===")
+                    logger.debug(f"=== Resetting non-loop, non-decision, non-parallel task {subtask_name} to 'not started' ===")
                     self.tasks[task_id].status = "not started"
-                    logging.debug(f"Task status after reset: {self.tasks[task_id].status}")
+                    logger.debug(f"Task status after reset: {self.tasks[task_id].status}")
                 else:
-                    logging.debug(f"=== Skipping reset for loop/decision/subtask/parallel or rerun=False: {subtask_name} ===")
-                    logging.debug(f"Keeping status as: {self.tasks[task_id].status}")
+                    logger.debug(f"=== Skipping reset for loop/decision/subtask/parallel or rerun=False: {subtask_name} ===")
+                    logger.debug(f"Keeping status as: {self.tasks[task_id].status}")
 
 
 
@@ -1664,7 +1664,7 @@ Subtask: {st.name}
                         target_tasks = current_task.condition.get(decision_str, [])
                         # Handle all forms of exit conditions
                         if not target_tasks or target_tasks == "exit" or (isinstance(target_tasks, list) and (not target_tasks or target_tasks[0] == "exit")):
-                            logging.info(f"Workflow exit condition met on decision: {decision_str}")
+                            logger.info(f"Workflow exit condition met on decision: {decision_str}")
                             self._set_workflow_finished_sync(True)
                             current_task = None
                             break
@@ -1694,9 +1694,9 @@ Subtask: {st.name}
                                             'validation_details': current_task.result.raw,
                                         })
                                         next_task.validation_feedback = feedback
-                                        logging.debug(f"Added validation feedback to {next_task.name}: {feedback['validation_response']} (validated task: {feedback.get('validated_task', 'None')})")
+                                        logger.debug(f"Added validation feedback to {next_task.name}: {feedback['validation_response']} (validated task: {feedback.get('validated_task', 'None')})")
                                 
-                                logging.debug(f"Routing to {next_task.name} based on decision: {decision_str} (outcome: {validation_outcome.status})")
+                                logger.debug(f"Routing to {next_task.name} based on decision: {decision_str} (outcome: {validation_outcome.status})")
                                 # Don't mark workflow as finished when following condition path
                                 self._set_workflow_finished_sync(False)
 
@@ -1729,7 +1729,7 @@ Subtask: {st.name}
                         next_task.next_tasks[0] in self.tasks and 
                         next_task.name in self.tasks[next_task.next_tasks[0]].previous_tasks):
                         self._set_workflow_finished_sync(False)
-                    logging.debug(f"Following next_tasks to {next_task.name}")
+                    logger.debug(f"Following next_tasks to {next_task.name}")
 
             current_task = next_task
             if not current_task and not when_routing_exhausted:
@@ -1738,7 +1738,7 @@ Subtask: {st.name}
 
             if not current_task:
                 # Add final workflow summary
-                logging.debug(f"""
+                logger.debug(f"""
 === Final Workflow Summary ===
 Total tasks processed: {len(self.tasks)}
 Final status:
@@ -1757,11 +1757,11 @@ Total iterations: {current_iter}
 Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
                 """)
 
-                logging.info("Workflow execution completed")
+                logger.info("Workflow execution completed")
                 break
 
             # Add completion logging
-            logging.debug(f"""
+            logger.debug(f"""
 === Task Completion ===
 Task: {current_task.name}
 Final status: {current_task.status}
@@ -1796,7 +1796,7 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
 
     def hierarchical(self):
         """Synchronous version of hierarchical method"""
-        logging.debug(f"Starting hierarchical task execution with {len(self.tasks)} tasks")
+        logger.debug(f"Starting hierarchical task execution with {len(self.tasks)} tasks")
         manager_agent = Agent(
             name="Manager",
             role="Project manager",
@@ -1814,7 +1814,7 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
             agent=manager_agent
         )
         manager_task_id = yield manager_task
-        logging.info(f"Created manager task with ID {manager_task_id}")
+        logger.info(f"Created manager task with ID {manager_task_id}")
         self._synthetic_manager_task_ids.add(manager_task_id)
 
         # Exclude every synthetic manager this Process has injected — not just the
@@ -1839,7 +1839,7 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
             if tid not in excluded_task_ids and tk.status == "completed"
         }
         completed_count = len(counted_task_ids)
-        logging.info(f"Need to complete {total_tasks} tasks (excluding manager task)")
+        logger.info(f"Need to complete {total_tasks} tasks (excluding manager task)")
         
         # Track invalid selection attempts and error context
         invalid_selection_attempts = 0
@@ -1859,7 +1859,7 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
         while completed_count < total_tasks:
             current_iter += 1
             if current_iter > self.max_iter:
-                logging.info(f"Max iteration limit {self.max_iter} reached, ending hierarchical process.")
+                logger.info(f"Max iteration limit {self.max_iter} reached, ending hierarchical process.")
                 break
             tasks_summary = []
             for tid, tk in self.tasks.items():
@@ -1873,7 +1873,7 @@ Workflow Finished: {self.workflow_finished} # ADDED: Workflow Finished Status
                     "agent": tk.agent.name if tk.agent else "No agent"
                 }
                 tasks_summary.append(task_info)
-                logging.info(f"Task {tid} status: {task_info}")
+                logger.info(f"Task {tid} status: {task_info}")
 
             manager_prompt = f"""
 Here is the current status of all tasks except yours (manager_task):
@@ -1888,24 +1888,24 @@ Provide a JSON with the structure:
 """ + error_context
 
             try:
-                logging.info("Requesting manager instructions...")
+                logger.info("Requesting manager instructions...")
                 parsed_instructions = self._get_manager_instructions_with_fallback(
                     manager_task, manager_prompt, ManagerInstructions
                 )
-                logging.info(f"Manager instructions: {parsed_instructions}")
+                logger.info(f"Manager instructions: {parsed_instructions}")
             except Exception as e:
                 display_error(f"Manager parse error: {e}")
-                logging.error(f"Manager parse error: {str(e)}", exc_info=True)
+                logger.error(f"Manager parse error: {str(e)}", exc_info=True)
                 break
 
             selected_task_id = parsed_instructions.task_id
             selected_agent_name = parsed_instructions.agent_name
             action = parsed_instructions.action
 
-            logging.info(f"Manager selected task_id={selected_task_id}, agent={selected_agent_name}, action={action}")
+            logger.info(f"Manager selected task_id={selected_task_id}, agent={selected_agent_name}, action={action}")
 
             if action.lower() == "stop":
-                logging.info("Manager decided to stop task execution")
+                logger.info("Manager decided to stop task execution")
                 break
 
             selected_task = self.tasks.get(selected_task_id)
@@ -1917,7 +1917,7 @@ Provide a JSON with the structure:
                 # Re-prompt with the delegable IDs only.
                 invalid_selection_attempts += 1
                 if invalid_selection_attempts > MAX_INVALID_SELECTIONS:
-                    logging.error(
+                    logger.error(
                         f"Manager produced {invalid_selection_attempts} invalid task selections; aborting."
                     )
                     break
@@ -1925,7 +1925,7 @@ Provide a JSON with the structure:
                 valid_task_ids = [
                     tid for tid in self.tasks if tid not in excluded_task_ids
                 ]
-                logging.warning(
+                logger.warning(
                     f"Manager selected invalid task_id={selected_task_id} "
                     f"(attempt {invalid_selection_attempts}/{MAX_INVALID_SELECTIONS}); valid IDs: {valid_task_ids}"
                 )
@@ -1945,7 +1945,7 @@ Provide a JSON with the structure:
             for a in self.agents:
                 if a.name == selected_agent_name:
                     selected_task.agent = a
-                    logging.info(f"Changed agent for task {selected_task_id} from {original_agent} to {selected_agent_name}")
+                    logger.info(f"Changed agent for task {selected_task_id} from {original_agent} to {selected_agent_name}")
                     break
 
             # A task whose internal retries are exhausted lands in "failed" — a
@@ -1955,7 +1955,7 @@ Provide a JSON with the structure:
             if self.tasks[selected_task_id].status == "failed":
                 failed_reselect_counts[selected_task_id] = failed_reselect_counts.get(selected_task_id, 0) + 1
                 if failed_reselect_counts[selected_task_id] > MAX_TASK_RESELECTIONS:
-                    logging.error(
+                    logger.error(
                         f"Task {selected_task_id} failed {failed_reselect_counts[selected_task_id]} times; "
                         f"excluding from further delegation."
                     )
@@ -1966,10 +1966,10 @@ Provide a JSON with the structure:
                     continue
 
             if self.tasks[selected_task_id].status != "completed":
-                logging.info(f"Starting execution of task {selected_task_id}")
+                logger.info(f"Starting execution of task {selected_task_id}")
                 self._trace_delegate(selected_task_id, tasks_summary)
                 yield selected_task_id
-                logging.info(f"Finished execution of task {selected_task_id}, status: {self.tasks[selected_task_id].status}")
+                logger.info(f"Finished execution of task {selected_task_id}, status: {self.tasks[selected_task_id].status}")
                 # Count a task toward completion only the first time it actually
                 # transitions to "completed" (tracked by id). Counting on every
                 # status check would double-count a task the manager re-selects
@@ -1982,9 +1982,9 @@ Provide a JSON with the structure:
                 ):
                     counted_task_ids.add(selected_task_id)
                     completed_count += 1
-                    logging.info(f"Task {selected_task_id} completed. Total completed: {completed_count}/{total_tasks}")
+                    logger.info(f"Task {selected_task_id} completed. Total completed: {completed_count}/{total_tasks}")
             else:
-                logging.warning(f"Manager re-selected already-completed task {selected_task_id}; ignoring re-selection.")
+                logger.warning(f"Manager re-selected already-completed task {selected_task_id}; ignoring re-selection.")
 
         # Distinguish genuine completion from a bounded early exit (max_iter,
         # repeated invalid selections, manager "stop", or manager failure). Only
@@ -1993,11 +1993,11 @@ Provide a JSON with the structure:
         if completed_count >= total_tasks:
             self.tasks[manager_task.id].status = "completed"
             if self.verbose >= 1:
-                logging.info("All tasks completed under manager supervision.")
+                logger.info("All tasks completed under manager supervision.")
         else:
             self.tasks[manager_task.id].status = "failed"
-            logging.warning(
+            logger.warning(
                 f"Hierarchical process ended with {completed_count}/{total_tasks} tasks completed; "
                 f"some tasks were not executed."
             )
-        logging.info("Hierarchical task execution finished")
+        logger.info("Hierarchical task execution finished")
