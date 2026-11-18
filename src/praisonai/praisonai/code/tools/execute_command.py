@@ -87,7 +87,7 @@ def execute_command(
         timeout: Command timeout in seconds
         capture_output: Whether to capture stdout/stderr
         shell: Unsupported. Passing shell=True returns an error result
-            (success=False) and runs nothing; on Windows use ``cmd /c <builtin>``.
+            (success=False) and runs nothing; invoke the executable directly.
         env: Additional environment variables
         allow_dangerous: Allow execution of known dangerous commands
         
@@ -204,7 +204,7 @@ def execute_command(
                 'error': (
                     "shell=True is no longer supported for security reasons. "
                     "Drop the shell argument (default shell=False) and invoke the executable "
-                    "directly; on Windows, run cmd.exe builtins as 'cmd /c <command>'."
+                    "directly, one command per call."
                 ),
                 'command': command,
                 'exit_code': -1,
