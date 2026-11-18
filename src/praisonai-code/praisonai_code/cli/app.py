@@ -333,6 +333,22 @@ from praisonai_code._mcp_bridge import mcp_package_available
 from praisonai_code._deploy_bridge import deploy_package_available
 
 
+def _install_hint_command(name: str, package: str) -> click.Command:
+    """A stand-in for a command whose package is not installed: one line, exit 1."""
+
+    def _hint() -> None:
+        typer.echo(f"`praisonai {name}` needs {package}: pip install {package}", err=True)
+        raise SystemExit(1)
+
+    return click.Command(
+        name,
+        callback=_hint,
+        help=f"Requires {package} (pip install {package})",
+        add_help_option=False,
+        context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+    )
+
+
 class LazyCommandGroup(TyperGroup):
     """Click Group that lazily loads subcommands from registry."""
     
@@ -432,7 +448,9 @@ class LazyCommandGroup(TyperGroup):
             if name in _BROWSER_RESIDENT_COMMANDS and not browser_package_available():
                 return None
             if name in _MCP_RESIDENT_COMMANDS and not mcp_package_available():
-                return None
+                # Still hidden from --help, but typed by name it says what to
+                # install instead of "No such command".
+                return _install_hint_command(name, "praisonai-mcp")
             if name in _WRAPPER_RESIDENT_COMMANDS and not wrapper_available():
                 return None
             try:
