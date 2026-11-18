@@ -11,10 +11,13 @@ Protocol-driven design following AGENTS.md:
 - Fail-closed behavior for unknown runtime IDs
 """
 
+import logging
 import threading
 from typing import Protocol, Dict, Callable, Any, Optional, List, runtime_checkable
 from dataclasses import dataclass
 from .protocols import AgentRuntimeProtocol
+
+logger = logging.getLogger(__name__)
 
 
 # Registry entry dataclass from main
@@ -419,8 +422,8 @@ def _discover_entry_point_runtimes() -> None:
         # entry_points not available in older Python versions
         pass
     except Exception:
-        # Ignore discovery errors - plugins are optional
-        pass
+        # Discovery errors must not break import - plugins are optional.
+        logger.debug("praisonai.runtimes entry-point discovery failed", exc_info=True)
 
 
 # Initialize on module load

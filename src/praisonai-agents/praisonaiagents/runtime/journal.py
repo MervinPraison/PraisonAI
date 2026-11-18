@@ -440,4 +440,4 @@ class RunJournal:
             try:
                 self._conn.close()
             except Exception:  # pragma: no cover - defensive
-                pass
+                logger.debug("Run journal close failed", exc_info=True)
