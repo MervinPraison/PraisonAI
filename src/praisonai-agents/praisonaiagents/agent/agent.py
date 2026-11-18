@@ -1808,9 +1808,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         
         # Handle toolsets parameter - resolve named toolset groups
         if toolsets:
+            # Bound before the try: if the toolsets import fails, the except
+            # clauses below must still be able to name ToolResolutionError.
+            from ..tools.resolver import ToolResolutionError
             try:
                 from ..toolsets import resolve_toolsets_for_model
-                from ..tools.resolver import ToolResolutionError
                 # Advertise the model-family's preferred edit primitive first
                 # (e.g. apply_patch for Claude, edit_file for GPT). Unknown /
                 # non-string models fall back to the byte-for-byte default order.
