@@ -35,10 +35,10 @@ def test_a2a_serve_defaults_to_loopback_without_token():
 
 
 def test_a2a_serve_public_host_requires_token():
+    a2a = _a2a()  # skips when fastapi is not installed
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
-    a2a = _a2a()
     a2a.get_router()  # a router cached before serve() must not stay open
     with patch("uvicorn.run") as run:
         a2a.serve(host="0.0.0.0")
