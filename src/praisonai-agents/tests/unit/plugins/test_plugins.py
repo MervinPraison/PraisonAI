@@ -8,6 +8,9 @@ import shutil
 import tempfile
 import uuid
 
+import pytest
+
+from praisonaiagents.config.loader import clear_config_cache
 from praisonaiagents.plugins.plugin import (
     Plugin,
     PluginHook,
@@ -18,6 +21,17 @@ from praisonaiagents.plugins.manager import (
     PluginManager,
     get_plugin_manager,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_developer_config(tmp_path, monkeypatch):
+    # A developer's ~/.praisonai/config.toml with [plugins] enabled=[...] is
+    # found by the global lookup and by the upward walk from a cwd under $HOME.
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path / "home"))
+    monkeypatch.chdir(tmp_path)
+    clear_config_cache()
+    yield
+    clear_config_cache()
 
 
 class TestPluginHook:
