@@ -110,7 +110,7 @@ from ..config.feature_configs import (
     PlanningConfig, ReflectionConfig, RulesConfig, GuardrailConfig, WebConfig,
     TemplateConfig, CachingConfig, HooksConfig, SkillsConfig,
     DEFAULT_TOOL_OUTPUT_LIMIT,
-    LearnConfig, LLMConfig, ToolConfig, resolve_tools,
+    LearnConfig, ToolConfig, resolve_tools,
 )
 # Already loaded by the imports above; hoisted so __init__ does not pay a
 # function-local relative import per construction (#5835).
@@ -118,8 +118,8 @@ from ..config.parse_utils import canonical_preset_key, validate_preset_string
 from ..config.agent_init import (
     _is_file_path, resolve_agent_caching, resolve_agent_execution, resolve_agent_guardrails,
     resolve_agent_history, resolve_agent_hooks, resolve_agent_knowledge, resolve_agent_learn,
-    resolve_agent_memory, resolve_agent_output, resolve_agent_planning, resolve_agent_reflection,
-    resolve_agent_skills, resolve_agent_templates, resolve_agent_web,
+    resolve_agent_memory, resolve_agent_model, resolve_agent_output, resolve_agent_planning,
+    resolve_agent_reflection, resolve_agent_skills, resolve_agent_templates, resolve_agent_web,
 )
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
@@ -1591,53 +1591,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Seed from clone_for_channel()'s forwarded list (if any); an explicit
         # LLMConfig(fallback_models=[...]) on llm=/model= still takes precedence.
         fallback_models = _cloned_fallback_models  # Initialize for internal use
+        # llm=/model=/LLMConfig -> concrete values; refuses both, warns on llm=.
         # LLMConfig.auth_profiles wins over a manager forwarded by a clone.
-        _auth_profiles = None
-
-        # One rule for the alias pair: passing both is refused, everywhere.
-        from ..utils.model_alias import resolve_model_alias
-        resolve_model_alias(llm, model, type(self).__name__)
-
-        # Check if llm is an LLMConfig object
-        if isinstance(llm, LLMConfig):
-            # Extract values from LLMConfig
-            llm_config_obj = llm
-            llm = llm_config_obj.model
-            fallback_models = llm_config_obj.fallback_models
-            if base_url is None:
-                base_url = llm_config_obj.base_url
-            if api_key is None:
-                api_key = llm_config_obj.api_key
-            if auth is None:
-                auth = llm_config_obj.auth
-            _auth_profiles = llm_config_obj.auth_profiles
-        elif llm is not None and model is None:
-            warn_deprecated_param(
-                "llm",
-                since="1.0.0",
-                removal="2.0.0", 
-                alternative="use 'model' instead. Example: Agent(model='gpt-4o-mini')",
-                stacklevel=3
-            )
-        
-        # model= is the preferred parameter (no warning)
-        if model is not None:
-            # Check if model is an LLMConfig object
-            if isinstance(model, LLMConfig):
-                # Extract values from LLMConfig (same as llm handling)
-                llm = model.model
-                if fallback_models is None:
-                    fallback_models = model.fallback_models
-                if base_url is None:
-                    base_url = model.base_url
-                if api_key is None:
-                    api_key = model.api_key
-                if auth is None:
-                    auth = model.auth
-                if _auth_profiles is None:
-                    _auth_profiles = model.auth_profiles
-            else:
-                llm = model  # model= takes precedence
+        (llm, fallback_models, base_url, api_key, auth,
+         _auth_profiles) = resolve_agent_model(
+            llm, model, base_url, api_key, auth, fallback_models, type(self).__name__)
 
         if _auth_profiles is not None:
             from ..llm.failover import manager_from_auth_profiles

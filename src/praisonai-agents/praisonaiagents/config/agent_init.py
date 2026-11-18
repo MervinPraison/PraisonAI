@@ -10,8 +10,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from .._logging import get_logger
 from .feature_configs import (
-    CachingConfig, ExecutionConfig, GuardrailConfig, HooksConfig, KnowledgeConfig, LearnConfig, MemoryConfig,
-    OutputConfig, PlanningConfig, ReflectionConfig, SkillsConfig, TemplateConfig, WebConfig,
+    CachingConfig, ExecutionConfig, GuardrailConfig, HooksConfig, KnowledgeConfig, LearnConfig, LLMConfig,
+    MemoryConfig, OutputConfig, PlanningConfig, ReflectionConfig, SkillsConfig, TemplateConfig, WebConfig,
 )
 from .param_resolver import ArrayMode, resolve
 from .parse_utils import canonical_preset_key
@@ -790,3 +790,57 @@ def resolve_agent_skills(skills: Any) -> Tuple[Any, Any, Any, bool]:
         elif isinstance(_skills_config, list):
             _skills = _skills_config
     return _skills_config, _skills, skills_dirs, _skills_auto_discover
+
+
+def resolve_agent_model(
+    llm: Any, model: Any, base_url: Any, api_key: Any, auth: Any, fallback_models: Any, owner: str,
+) -> Tuple[Any, Any, Any, Any, Any, Any]:
+    """``llm=`` / ``model=`` -> ``(llm, fallback_models, base_url, api_key, auth, auth_profiles)``.
+
+    Passing both is refused. ``model=`` wins over ``llm=``. An ``LLMConfig`` on
+    either supplies the model and fills ``base_url``/``api_key``/``auth`` only
+    where the caller left them ``None``; on ``llm=`` its ``fallback_models``
+    always replace the incoming ones, on ``model=`` only fill a gap. A plain
+    ``llm=`` warns once (``DeprecationWarning`` at the caller of ``Agent(...)``).
+    """
+    from ..utils.model_alias import resolve_model_alias
+    resolve_model_alias(llm, model, owner)
+
+    auth_profiles = None
+    if isinstance(llm, LLMConfig):
+        llm_config_obj = llm
+        llm = llm_config_obj.model
+        fallback_models = llm_config_obj.fallback_models
+        if base_url is None:
+            base_url = llm_config_obj.base_url
+        if api_key is None:
+            api_key = llm_config_obj.api_key
+        if auth is None:
+            auth = llm_config_obj.auth
+        auth_profiles = llm_config_obj.auth_profiles
+    elif llm is not None and model is None:
+        from ..utils.deprecation import warn_deprecated_param
+        warn_deprecated_param(
+            "llm",
+            since="1.0.0",
+            removal="2.0.0",
+            alternative="use 'model' instead. Example: Agent(model='gpt-4o-mini')",
+            stacklevel=4,  # warn_deprecated_param -> here -> Agent.__init__ -> caller
+        )
+
+    if model is not None:
+        if isinstance(model, LLMConfig):
+            llm = model.model
+            if fallback_models is None:
+                fallback_models = model.fallback_models
+            if base_url is None:
+                base_url = model.base_url
+            if api_key is None:
+                api_key = model.api_key
+            if auth is None:
+                auth = model.auth
+            if auth_profiles is None:
+                auth_profiles = model.auth_profiles
+        else:
+            llm = model  # model= takes precedence
+    return llm, fallback_models, base_url, api_key, auth, auth_profiles
