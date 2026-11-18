@@ -179,6 +179,28 @@ class MiniMaxImageTests(unittest.TestCase):
                 self.assertEqual(Path(result["path"]).read_bytes(), image)
                 self.assertEqual(result["data_url"], "data:image/png;base64," + encoded)
 
+    def test_h3_http_failures_expose_image_or_request_errors(self):
+        cases = [
+            ({"error": {"message": "no image generated"}, "padding": "x" * 500,
+              "data": [{"error": {"message": "output image failed content safety check"}}]},
+             "output image failed content safety check"),
+            ({"error": {"message": "invalid prompt"}}, "invalid prompt"),
+        ]
+        for payload, expected in cases:
+            body = io.BytesIO(json.dumps(payload).encode())
+            error = media.urllib.error.HTTPError("https://example.com", 422, "Rejected", {}, body)
+            with self.subTest(expected=expected), patch("media.urllib.request.urlopen", side_effect=error) as request:
+                with self.assertRaisesRegex(RuntimeError, expected):
+                    self.sup.generate_image("a lighthouse", settings={}, model="minimax/MiniMax-H3-Image")
+                request.assert_called_once()
+
+    def test_h3_timeout_reports_unknown_outcome_without_repeating_request(self):
+        for error in (TimeoutError(), media.urllib.error.URLError(TimeoutError())):
+            with self.subTest(error=error), patch("media.urllib.request.urlopen", side_effect=error) as request:
+                with self.assertRaisesRegex(RuntimeError, "outcome is unknown"):
+                    self.sup.generate_image("a lighthouse", settings={}, model="minimax/MiniMax-H3-Image")
+                request.assert_called_once()
+
     def test_h3_per_image_error_is_reported_without_retry_or_save(self):
         payload = {"data": [{"error": {"code": "1027", "message": "image rejected"}}]}
         with patch("media.urllib.request.urlopen", return_value=io.BytesIO(json.dumps(payload).encode())) as request:

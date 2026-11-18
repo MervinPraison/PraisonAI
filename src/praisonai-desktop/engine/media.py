@@ -139,8 +139,27 @@ class MediaSupervisor:
             with urllib.request.urlopen(req, timeout=600 if is_h3 else 120) as resp:
                 payload = json.loads(resp.read().decode())
         except urllib.error.HTTPError as exc:
-            detail = exc.read().decode()[:400]
-            raise RuntimeError(detail or str(exc)) from exc
+            detail = exc.read().decode(errors="replace")
+            if is_h3:
+                try:
+                    error_body = json.loads(detail)
+                except ValueError:
+                    error_body = None
+                if isinstance(error_body, dict):
+                    errors = error_body.get("data")
+                    item = errors[0] if isinstance(errors, list) and errors else None
+                    for error in (item.get("error") if isinstance(item, dict) else None, error_body.get("error")):
+                        if isinstance(error, dict) and isinstance(error.get("message"), str) and error["message"]:
+                            detail = error["message"]
+                            break
+            raise RuntimeError(detail[:400] or str(exc)) from exc
+        except (TimeoutError, urllib.error.URLError) as exc:
+            if is_h3 and isinstance(getattr(exc, "reason", exc), TimeoutError):
+                raise RuntimeError(
+                    "MiniMax H3 timed out. The outcome is unknown. Generation may still "
+                    "complete and be charged. Sending another request may incur another charge."
+                ) from exc
+            raise
 
         if model == MINIMAX_IMAGE_MODEL:
             status = payload.get("base_resp") if isinstance(payload, dict) else None
