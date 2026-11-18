@@ -16,6 +16,7 @@ import shutil
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import typer
 
@@ -143,6 +144,12 @@ def connect(
         raise typer.BadParameter("--tools/--agents scope the local server; scope a remote one where it is served")
     spec = (cat.ServerSpec(url=url, env=tuple(env or ())) if url
             else cat.local_spec(scope, agents, env))
+
+    if url and urlparse(url).hostname in ("localhost", "127.0.0.1", "::1"):
+        cloud = [c.label for c in (_targets(clients, all_, home) or cat.CLIENTS) if c.cloud]
+        if cloud:
+            _console(stderr=True).print(f"[yellow]{', '.join(cloud)} connect from their vendor's cloud and cannot "
+                                        "reach localhost: give them a public https URL (a tunnel works).[/]")
 
     if print_only:
         targets = _targets(clients, all_, home) or [c for c in cat.CLIENTS]

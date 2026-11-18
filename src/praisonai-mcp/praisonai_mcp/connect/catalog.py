@@ -117,8 +117,8 @@ class Client:
     shape: str = "mcpServers"
     env_ref: Optional[str] = None
     remote: Optional[str] = "url"
-    deeplink: Optional[str] = None  # cursor | vscode | vscode-insiders | kiro | lmstudio | trae
-    cli: Optional[str] = None  # claude | codex | gemini | copilot | code
+    deeplink: Optional[str] = None  # cursor | vscode(-insiders) | kiro | lmstudio | trae | goose | raycast | claude-connector
+    cli: Optional[str] = None  # claude | codex | gemini | copilot | code | opencode | cline | amp
     apps: Tuple[str, ...] = ()
     bins: Tuple[str, ...] = ()
     dirs: Tuple[str, ...] = ()
@@ -127,6 +127,8 @@ class Client:
     note: str = ""
     #: Most tools the client takes (TRAE 40 in all, VS Code 128 per request).
     max_tools: Optional[int] = None
+    #: Connects from the vendor's cloud: needs a public https URL, never localhost.
+    cloud: bool = False
 
 
 _COPILOT = ".copilot/mcp-config.json"
@@ -169,11 +171,12 @@ CLIENTS: Tuple[Client, ...] = (
             "linux": ".config/Claude/claude_desktop_config.json",
             "win32": "AppData/Roaming/Claude/claude_desktop_config.json",
         },
-        remote=None, apps=("Claude.app",),
+        remote=None, deeplink="claude-connector", cloud=True, apps=("Claude.app",),
         dirs=("Library/Application Support/Claude", ".config/Claude", "AppData/Roaming/Claude"),
         download="https://claude.ai/download",
         docs="https://modelcontextprotocol.io/docs/develop/connect-local-servers",
-        note="Restart Claude Desktop to load the server.",
+        note="Restart Claude Desktop to load the server. A remote server is added as a claude.ai "
+             "connector instead; it reaches the server from Anthropic's cloud, so it needs a public https URL.",
     ),
     Client(
         "zed", "Zed", "editor",
@@ -209,12 +212,12 @@ CLIENTS: Tuple[Client, ...] = (
         docs="https://junie.jetbrains.com/docs/junie-cli-mcp-configuration.html",
     ),
     Client(
-        "cline", "Cline", "editor", ".cline/data/settings/cline_mcp_settings.json", remote=None,
-        bins=("cline",), dirs=(".cline",),
+        "cline", "Cline", "editor", ".cline/data/settings/cline_mcp_settings.json", remote="cline",
+        cli="cline", bins=("cline",), dirs=(".cline",),
         download="https://cline.bot", docs="https://docs.cline.bot/mcp/configuring-mcp-servers",
     ),
     Client(
-        "continue", "Continue", "editor", ".continue/config.yaml", shape="continue", remote=None,
+        "continue", "Continue", "editor", ".continue/mcpServers/praisonai.json", remote="http",
         dirs=(".continue",), download="https://continue.dev",
         docs="https://github.com/continuedev/continue/blob/main/docs/reference.mdx",
     ),
@@ -224,8 +227,8 @@ CLIENTS: Tuple[Client, ...] = (
         download="https://claude.com/product/claude-code", docs="https://code.claude.com/docs/en/mcp",
     ),
     Client(
-        "codex", "Codex CLI", "terminal", ".codex/config.toml", shape="codex", cli="codex",
-        bins=("codex",), dirs=(".codex",), download="https://developers.openai.com/codex/cli",
+        "codex", "Codex", "terminal", ".codex/config.toml", shape="codex", cli="codex",
+        apps=("Codex.app", "ChatGPT.app"), bins=("codex",), dirs=(".codex",), download="https://developers.openai.com/codex/cli",
         docs="https://learn.chatgpt.com/docs/extend/mcp?surface=cli",
     ),
     Client(
@@ -241,16 +244,33 @@ CLIENTS: Tuple[Client, ...] = (
     ),
     Client(
         "opencode", "OpenCode", "terminal", ".config/opencode/opencode.json", shape="opencode",
-        env_ref="{env:%s}", remote="remote", bins=("opencode",), dirs=(".config/opencode",),
+        env_ref="{env:%s}", remote="remote", cli="opencode", bins=("opencode",), dirs=(".config/opencode",),
         download="https://opencode.ai", docs="https://opencode.ai/docs/mcp-servers/",
     ),
     Client(
         "goose", "Goose", "other",
         {"darwin": ".config/goose/config.yaml", "linux": ".config/goose/config.yaml",
          "win32": "AppData/Roaming/Block/goose/config/config.yaml"},
-        shape="goose", remote=None, apps=("Goose.app",), bins=("goose",), dirs=(".config/goose",),
+        shape="goose", remote="goose", deeplink="goose", apps=("Goose.app",), bins=("goose",),
+        dirs=(".config/goose",),
         download="https://block.github.io/goose/docs/getting-started/installation",
         docs="https://goose-docs.ai/docs/guides/config-files",
+    ),
+    Client(
+        "amp", "Amp", "terminal", ".config/amp/settings.json", shape="amp", env_ref="${%s}", cli="amp",
+        bins=("amp",), dirs=(".config/amp",), download="https://ampcode.com",
+        docs="https://ampcode.com/docs/customize/mcp",
+    ),
+    Client(
+        "raycast", "Raycast", "other", deeplink="raycast", remote=None, apps=("Raycast.app",),
+        download="https://www.raycast.com", docs="https://manual.raycast.com/v1/model-context-protocol",
+        note="Raycast → Install Server also fills itself from this JSON on the clipboard.",
+    ),
+    Client(
+        "chatgpt", "ChatGPT", "other", cloud=True,
+        download="https://chatgpt.com", docs="https://platform.openai.com/docs/guides/developer-mode",
+        note="Settings → Apps & Connectors → Create (developer mode). ChatGPT connects from OpenAI's "
+             "cloud: the URL must be public https (a tunnel works), never localhost.",
     ),
     Client(
         "lm-studio", "LM Studio", "other", ".lmstudio/mcp.json", deeplink="lmstudio",
@@ -275,7 +295,8 @@ SEEN_AS: Tuple[Tuple[str, str], ...] = (
     ("windsurf", "windsurf"), ("devin", "windsurf"), ("zed", "zed"), ("kiro", "kiro"),
     ("antigravity", "antigravity"), ("trae", "trae"), ("junie", "junie"), ("cline", "cline"), ("continue", "continue"),
     ("codex", "codex"), ("gemini", "gemini-cli"), ("copilot", "copilot-cli"),
-    ("opencode", "opencode"), ("goose", "goose"), ("lm studio", "lm-studio"),
+    ("opencode", "opencode"), ("goose", "goose"), ("amp", "amp"), ("raycast", "raycast"),
+    ("chatgpt", "chatgpt"), ("openai-mcp", "chatgpt"), ("lm studio", "lm-studio"),
     ("lmstudio", "lm-studio"),
 )
 
@@ -320,29 +341,36 @@ def entry(client: Client, spec: ServerSpec) -> Any:
     env = env_values(client, spec)
     shape = client.shape
     if spec.url:
+        if client.id == "chatgpt":
+            return {"name": spec.name, "url": spec.url}
         if not client.remote:
             raise ValueError(f"{client.label} only runs local servers; drop --url.")
         if shape == "opencode":
-            return {"type": "remote", "url": spec.url}
+            return {"type": "remote", "url": spec.url, "enabled": True}
+        if client.remote == "cline":  # no type means SSE in Cline
+            return {"type": "streamableHttp", "url": spec.url}
+        if client.remote == "goose":
+            return {"type": "streamable_http", "name": spec.name, "enabled": True, "uri": spec.url,
+                    "envs": {}, "env_keys": [], "headers": {}, "timeout": 300}
         if client.remote == "http":
             return {"type": "http", "url": spec.url}
         if client.remote == "devin":
             return {"url": spec.url, "transport": "http"}
         return {client.remote: spec.url}
+    if client.cloud and client.path is None:
+        raise ValueError(f"{client.label} reaches servers from its cloud: serve over HTTP at a public https URL.")
     args = list(spec.args)
     if shape == "codex":
         out: Dict[str, Any] = {"command": spec.command, "args": args}
         if spec.env:
             out["env_vars"] = list(spec.env)
         return out
-    if shape == "opencode":
-        out = {"type": "local", "command": spec.argv}
+    if shape == "opencode":  # the V1 shape, which V2 also reads
+        out = {"type": "local", "command": spec.argv, "enabled": True}
         return {**out, "environment": env} if env else out
     if shape == "goose":
         return {"type": "stdio", "name": spec.name, "enabled": True, "cmd": spec.command,
                 "args": args, "envs": {}, "env_keys": list(spec.env), "timeout": 300}
-    if shape == "continue":
-        return {"name": spec.name, "type": "stdio", "command": spec.command, "args": args}
     out = {"command": spec.command, "args": args}
     if shape == "copilot":
         out = {"type": "stdio", **out, "tools": ["*"]}
@@ -357,7 +385,8 @@ def container_key(client: Client) -> Tuple[str, ...]:
     """Where the servers map (or list) sits in the file."""
     return {
         "zed": ("context_servers",),
-        "opencode": ("mcp", "servers"),
+        "opencode": ("mcp",),
+        "amp": ("amp.mcpServers",),
         "codex": ("mcp_servers",),
         "goose": ("extensions",),
     }.get(client.shape, ("mcpServers",))
@@ -368,6 +397,23 @@ def deeplink(client: Client, spec: ServerSpec) -> Optional[str]:
     kind = client.deeplink
     if not kind:
         return None
+    if kind == "claude-connector":  # remote only; syncs to Desktop, mobile and Claude Code
+        if not spec.url:
+            return None
+        return "https://claude.ai/customize/connectors?" + urlencode(
+            {"modal": "add-custom-connector", "connectorName": spec.name, "connectorUrl": spec.url}
+        )
+    if kind == "goose":
+        if spec.url:
+            return "goose://extension?" + urlencode(
+                {"url": spec.url, "type": "streamable_http", "id": spec.name, "name": spec.name}
+            )
+        return None  # a stdio link may only run npx/uvx/docker/…: the config file is written instead
+    if kind == "raycast":
+        if spec.url:
+            return None
+        cfg = {"name": spec.name, "type": "stdio", "command": spec.command, "args": list(spec.args)}
+        return "raycast://mcp/install?" + quote(json.dumps(cfg, separators=(",", ":")), safe="")
     body = entry(client, spec)
     compact = json.dumps(body, separators=(",", ":"))
     b64 = base64.b64encode(compact.encode()).decode()
@@ -412,6 +458,12 @@ def command(client: Client, spec: ServerSpec) -> Optional[str]:
             return q(["code", "--add-mcp", json.dumps(_vscode_editor_entry(spec))])
         if kind == "gemini":
             return q(["gemini", "mcp", "add", "--scope", "user", "--transport", "http", spec.name, spec.url])
+        if kind in ("codex", "opencode"):
+            return q([kind, "mcp", "add", spec.name, "--url", spec.url])
+        if kind == "cline":
+            return q(["cline", "mcp", "add", spec.name, spec.url, "--transport", "http", "--yes"])
+        if kind == "amp":
+            return q(["amp", "mcp", "add", spec.name, spec.url])
         return None
     envs: List[str] = []
     if kind == "claude":
@@ -424,8 +476,12 @@ def command(client: Client, spec: ServerSpec) -> Optional[str]:
         return q(["codex", "mcp", "add", spec.name, "--", *spec.argv])
     if kind == "gemini":
         return q(["gemini", "mcp", "add", "--scope", "user", spec.name, *spec.argv])
-    if kind == "copilot":
-        return q(["copilot", "mcp", "add", spec.name, "--", *spec.argv])
+    if kind in ("copilot", "amp"):
+        return q([kind, "mcp", "add", spec.name, "--", *spec.argv])
+    if kind == "cline":
+        return q(["cline", "mcp", "add", spec.name, "--yes", "--", *spec.argv])
+    if kind == "opencode":
+        return q(["opencode", "mcp", "add", spec.name, "--global", "--", *spec.argv])
     if kind == "code":
         return q(["code", "--add-mcp", json.dumps(_vscode_editor_entry(spec))])
     return None
@@ -442,8 +498,9 @@ def snippet(client: Client, spec: ServerSpec) -> str:
     if fmt == "yaml":
         import yaml
 
-        doc = {"mcpServers": [body]} if client.shape == "continue" else {"extensions": {spec.name: body}}
-        return yaml.safe_dump(doc, sort_keys=False)
+        return yaml.safe_dump({"extensions": {spec.name: body}}, sort_keys=False)
+    if client.id == "chatgpt":
+        return f"Name: {spec.name}\nMCP server URL: {spec.url}\nAuthentication: OAuth (or none)"
     doc: Dict[str, Any] = {spec.name: body}
     for key in reversed(container_key(client)):
         doc = {key: doc}
@@ -454,11 +511,17 @@ def export_catalog(spec: ServerSpec, home: Optional[Path] = None) -> List[Dict[s
     """Every client as plain JSON: what PraisonAIUI's Connect page renders."""
     home = home or Path.home()
     rows = []
-    for c in CLIENTS:
+    def safe(fn, c):
         try:
-            link, cmd, text = deeplink(c, spec), command(c, spec), snippet(c, spec)
-        except ValueError as exc:  # a local-only client asked for a URL server
-            link, cmd, text = None, None, str(exc)
+            return fn(c, spec)
+        except ValueError as exc:  # e.g. a local-only client asked for a URL server
+            return exc
+
+    for c in CLIENTS:
+        link, cmd, text = (safe(fn, c) for fn in (deeplink, command, snippet))
+        link = None if isinstance(link, ValueError) else link
+        cmd = None if isinstance(cmd, ValueError) else cmd
+        text = str(text)
         path = config_path(c, home)
         rows.append({
             "id": c.id, "label": c.label, "group": c.group,
@@ -466,5 +529,6 @@ def export_catalog(spec: ServerSpec, home: Optional[Path] = None) -> List[Dict[s
             "config_path": str(path) if path else None,
             "env_reference": bool(c.env_ref) or c.shape == "codex",
             "download": c.download, "docs": c.docs, "note": c.note, "max_tools": c.max_tools,
+            "cloud": c.cloud,
         })
     return rows

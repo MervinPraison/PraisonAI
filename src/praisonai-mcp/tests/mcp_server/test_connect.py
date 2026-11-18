@@ -53,7 +53,8 @@ def test_every_client_renders_without_secret_values(client, monkeypatch):
     spec = cat.local_spec(env=["OPENAI_API_KEY"])
     blob = json.dumps(cat.export_catalog(spec, Path("/h")))
     assert SECRET not in blob
-    assert cat.snippet(client, spec)
+    row = next(r for r in json.loads(blob) if r["id"] == client.id)
+    assert row["snippet"] and row["label"] == client.label
 
 
 def test_env_references_use_each_clients_syntax():
@@ -114,9 +115,19 @@ def test_remote_url_entries_and_local_only_clients():
     assert cat.entry(cat.get_client("zed"), spec) == {"url": spec.url}
     assert cat.entry(cat.get_client("vscode"), spec) == {"type": "http", "url": spec.url}
     with pytest.raises(ValueError):
-        cat.entry(cat.get_client("claude-desktop"), spec)
+        cat.entry(cat.get_client("claude-desktop"), spec)  # stdio only: the connector link instead
+    assert cat.entry(cat.get_client("cline"), spec) == {"type": "streamableHttp", "url": spec.url}
+    assert cat.entry(cat.get_client("goose"), spec)["uri"] == spec.url
+    assert cat.command(cat.get_client("codex"), spec) == "codex mcp add praisonai --url https://agents.example.com/mcp"
     rows = {r["id"]: r for r in cat.export_catalog(spec, Path("/h"))}
-    assert rows["claude-desktop"]["deeplink"] is None and "local" in rows["claude-desktop"]["snippet"]
+    claude = parse_qs(urlparse(rows["claude-desktop"]["deeplink"]).query)
+    assert claude["connectorUrl"] == [spec.url] and rows["claude-desktop"]["cloud"]
+    assert rows["chatgpt"]["cloud"] and spec.url in rows["chatgpt"]["snippet"]
+    local = {r["id"]: r for r in cat.export_catalog(SPEC, Path("/h"))}
+    assert local["claude-desktop"]["deeplink"] is None and "public https" in local["chatgpt"]["snippet"]
+    assert local["raycast"]["deeplink"].startswith("raycast://mcp/install?%7B")
+    assert local["goose"]["deeplink"] is None  # a stdio goose:// link may only run npx/uvx/…
+    assert json.loads((cat.snippet(cat.get_client("opencode"), SPEC)))["mcp"]["praisonai"]["enabled"] is True
 
 
 def test_local_spec_scopes_through_server_args(tmp_path):
@@ -177,8 +188,8 @@ def test_toml_keeps_comments_and_other_tables(home):
     assert path.read_text() == original
 
 
-def test_yaml_clients(home):
-    for cid in ("continue", "goose"):
+def test_yaml_and_dedicated_file_clients(home):
+    for cid in ("continue", "goose", "amp", "opencode"):
         c = cat.get_client(cid)
         config_io.apply(config_io.plan_write(c, SPEC, home))
         assert config_io.read_entry(c, home, "praisonai")

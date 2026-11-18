@@ -152,7 +152,7 @@ def _servers(data: Dict[str, Any], client: Client, create: bool) -> Any:
         if key not in node:
             if not create:
                 return None
-            node[key] = [] if client.shape == "continue" else {}
+            node[key] = {}
         node = node[key]
     return node
 
@@ -195,8 +195,6 @@ def read_entry(client: Client, home: Path, name: str) -> Optional[Any]:
         except json.JSONDecodeError:
             return None
     servers = _servers(data, client, create=False)
-    if isinstance(servers, list):
-        return next((s for s in servers if isinstance(s, dict) and s.get("name") == name), None)
     return servers.get(name) if isinstance(servers, dict) else None
 
 
@@ -211,14 +209,9 @@ def plan_write(client: Client, spec: ServerSpec, home: Path) -> Plan:
         return Plan(client, path, before, (rest + "\n\n" if rest else "") + toml_block(spec.name, body))
     data = _load_yaml(before, path) if fmt == "yaml" else _load_json(before, path, fmt == "jsonc")
     servers = _servers(data, client, create=True)
-    if isinstance(servers, list):
-        idx = next((i for i, s in enumerate(servers) if isinstance(s, dict) and s.get("name") == spec.name), None)
-        if idx is None:
-            servers.append(body)
-        else:
-            servers[idx] = body
-    else:
-        servers[spec.name] = body
+    if not isinstance(servers, dict):
+        raise ConfigError(f"Unexpected value at {'.'.join(container_key(client))} in {path}.")
+    servers[spec.name] = body
     after = _dump(data, fmt)
     if before is not None and _same(before, after, fmt):
         after = before  # semantically equal: keep the user's formatting
@@ -236,11 +229,7 @@ def plan_remove(client: Client, home: Path, name: str) -> Optional[Plan]:
         rest, _ = _toml_split(before, name)
         return Plan(client, path, before, rest.rstrip("\n") + "\n" if rest.strip() else "")
     data = _load_yaml(before, path) if fmt == "yaml" else _load_json(before, path, fmt == "jsonc")
-    servers = _servers(data, client, create=False)
-    if isinstance(servers, list):
-        servers[:] = [s for s in servers if not (isinstance(s, dict) and s.get("name") == name)]
-    else:
-        servers.pop(name, None)
+    _servers(data, client, create=False).pop(name, None)
     return Plan(client, path, before, _dump(data, fmt))
 
 
