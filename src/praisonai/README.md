@@ -128,7 +128,6 @@ The TypeScript and JavaScript SDK has its own guide at [praison.ai/docs/js](http
 
 ## The company
 
-- **Who:** Praison AI Limited in Cambridge, UK, building PraisonAI since September 2023. Co-founders Mervin Praison (CEO), Leebana Smith (COO) and Karthick Subramanian (CBO). [About us](https://praison.ai/about/)
 - **What we're building:** the task handover above, as a self-hosted product on top of this framework. It is in early access, and we are taking on our first design partners.
 - **Why now:** highly regulated teams want AI but can't send customer data to outside models, and from 6 January 2027 OpenAI takes no new self-serve fine-tuning jobs.
 - **How it fits together:** the framework stays free and MIT-licensed, and brings developers in. Regulated teams license the handover to run inside their own walls.
