@@ -1939,7 +1939,7 @@ class OpenAIClient:
                 metadata={"provider": "openai", "stream": False},
             )
         except Exception:
-            pass
+            logger.debug("Token usage tracking failed for model %s", model, exc_info=True)
 
     def create_completion(
         self,
