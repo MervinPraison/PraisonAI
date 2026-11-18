@@ -152,7 +152,10 @@ class Heartbeat:
             if sched.every_seconds:
                 return float(sched.every_seconds)
         except (ImportError, Exception):
-            pass
+            logger.debug(
+                "Scheduler parser could not read heartbeat schedule %r; "
+                "using keyword fallback", schedule, exc_info=True,
+            )
 
         # Fallback keyword resolution
         keywords = {
