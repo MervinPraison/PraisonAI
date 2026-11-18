@@ -1,5 +1,7 @@
 """Tests for skill inline shell substitution."""
 
+import pytest
+
 from praisonaiagents.skills.shell_render import render_shell_blocks
 
 
@@ -17,14 +19,23 @@ class TestDisabledByDefault:
 
 
 class TestEnabledExecution:
+    @pytest.fixture(autouse=True)
+    def _empty_home(self, tmp_path, monkeypatch):
+        # Commands run under ``bash -lc``, which sources the developer's
+        # ~/.bash_profile / ~/.profile. That can take seconds on its own and
+        # pushed ``echo`` past the timeout under load. An empty HOME keeps the
+        # test about the command, not about the machine's login profile.
+        monkeypatch.setenv("HOME", str(tmp_path))
+        monkeypatch.delenv("BASH_ENV", raising=False)
+
     def test_inline_backtick_is_executed(self):
         body = "Answer: !`echo 42`"
-        out = render_shell_blocks(body, enabled=True, timeout=5)
+        out = render_shell_blocks(body, enabled=True, timeout=30)
         assert "Answer: 42" in out
 
     def test_fenced_block_executed(self):
         body = "```!\necho start\necho end\n```"
-        out = render_shell_blocks(body, enabled=True, timeout=5)
+        out = render_shell_blocks(body, enabled=True, timeout=30)
         assert "start" in out and "end" in out
         assert "```!" not in out
 
