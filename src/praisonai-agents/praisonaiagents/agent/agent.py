@@ -6573,6 +6573,26 @@ Answer:"""
         # Fall back to simple backoff if no execution config
         return 1.0 * (2.0 ** (retry_count - 1))
 
+    @staticmethod
+    def _completion_text(response) -> str:
+        """Text of a completion in any shape the retry paths return.
+
+        The native path yields an OpenAI ``ChatCompletion`` object, while the
+        custom-LLM path (``LiteLLMAdapter``) yields a plain ``{"choices": ...}``
+        dict and some paths a bare string.
+        """
+        if isinstance(response, str):
+            return response
+        choices = response.get("choices") if isinstance(response, dict) else getattr(response, "choices", None)
+        if not choices:
+            raise Exception("Failed to generate retry response")
+        first = choices[0]
+        msg = first.get("message") if isinstance(first, dict) else getattr(first, "message", None)
+        if msg is None:
+            raise Exception("Failed to generate retry response")
+        content = msg.get("content") if isinstance(msg, dict) else getattr(msg, "content", None)
+        return content or ""
+
     def _apply_guardrail_with_retry(self, response_text, prompt, temperature=1.0, tools=None, task_name=None, task_description=None, task_id=None, cancel_token=None, messages=None, response_format=None):
         """Apply guardrail validation with retry logic (sync version).
 
@@ -6635,11 +6655,7 @@ Answer:"""
                 # consumes deltas, so streaming here only costs a failed
                 # sync-adapter attempt and an ERROR log before falling back.
                 response = self._chat_completion(list(retry_messages), temperature, tools, stream=False, task_name=task_name, task_description=task_description, task_id=task_id, cancel_token=cancel_token, response_format=response_format)
-                if response and response.choices:
-                    content = response.choices[0].message.content
-                    current_response = content.strip() if content else ""
-                else:
-                    raise Exception("Failed to generate retry response")
+                current_response = self._completion_text(response).strip()
             except Exception as e:
                 logger.error(f"Agent {self.name}: Error during guardrail retry: {e}")
                 raise Exception(f"Agent {self.name} guardrail retry failed: {e}")
@@ -6710,13 +6726,7 @@ Answer:"""
                 # setting, which would make the retry stream when nothing reads
                 # the deltas.
                 response = await self._execute_unified_achat_completion(list(retry_messages), temperature, tools, stream=False, task_name=task_name, task_description=task_description, task_id=task_id, response_format=response_format)
-                if response and hasattr(response, 'choices') and response.choices:
-                    content = response.choices[0].message.content
-                    current_response = content.strip() if content else ""
-                elif isinstance(response, str):
-                    current_response = response.strip()
-                else:
-                    raise Exception("Failed to generate retry response")
+                current_response = self._completion_text(response).strip()
             except Exception as e:
                 logger.error(f"Agent {self.name}: Error during guardrail retry: {e}")
                 raise Exception(f"Agent {self.name} guardrail retry failed: {e}")

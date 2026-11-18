@@ -3637,7 +3637,7 @@ class ToolExecutionMixin:
         registry: a guardrail must come from the tool this agent was actually
         given, never from a same-named tool registered elsewhere.
         """
-        candidates = tools if tools is not None else getattr(self, "tools", None)
+        candidates = tools if tools is not None else self._dispatch_tools()
         if not isinstance(candidates, (list, tuple)):
             return None
         for tool_obj in candidates:
@@ -3932,7 +3932,7 @@ class ToolExecutionMixin:
         # Try to find the function in the agent's tools list first
         func = None
         plugin_owners = getattr(self, "_plugin_tool_owners", None)
-        for tool in self.tools if isinstance(self.tools, (list, tuple)) else []:
+        for tool in self._dispatch_tools():
             if plugin_owners and not self._is_plugin_tool_active(tool):
                 continue
             # Check for BaseTool instances (plugin system)
@@ -4193,12 +4193,17 @@ class ToolExecutionMixin:
             if name:
                 yield name, tool
 
+        turn = self._turn_scope_tools()
+        for tool in turn:
+            if self._is_plugin_tool_active(tool):
+                yield from _expand(tool)
         tools = self.tools
         if MCP is not None and isinstance(tools, MCP):
-            yield from _expand(tools)
+            if not any(tools is t for t in turn):
+                yield from _expand(tools)
             return
         for tool in tools if isinstance(tools, (list, tuple)) else []:
-            if not self._is_plugin_tool_active(tool):
+            if not self._is_plugin_tool_active(tool) or any(tool is t for t in turn):
                 continue
             yield from _expand(tool)
 
@@ -4269,6 +4274,16 @@ class ToolExecutionMixin:
                     if hasattr(mcp_tool, 'name') and mcp_tool.name == func_name:
                         return True, mcp_instance.runner.call_tool(func_name, args)
             return False, None
+
+        # Per-turn ``tools=`` take precedence (same order as _dispatch_tools):
+        # a same-named per-turn callable must win over the agent's MCP tool.
+        for tool in self._turn_scope_tools():
+            if isinstance(tool, MCP):
+                found, result = _execute_mcp_tool(tool, function_name, arguments)
+                if found:
+                    return True, result
+            elif function_name in (getattr(tool, "name", None), getattr(tool, "__name__", None)):
+                return False, None  # native dispatch runs the per-turn tool
 
         if isinstance(self.tools, MCP):
             found, result = _execute_mcp_tool(self.tools, function_name, arguments)
@@ -4360,7 +4375,30 @@ class ToolExecutionMixin:
         """Bind the per-turn ``tools=`` allow-set for dispatch; ``None`` = inherit."""
         if tools is None:
             return None
-        return _turn_tool_scope.set((self, self._turn_tool_names(tools)))
+        objs = tuple(
+            t for t in (tools if isinstance(tools, (list, tuple)) else [tools])
+            if not isinstance(t, (str, dict))
+        )
+        return _turn_tool_scope.set((self, self._turn_tool_names(tools), objs))
+
+    def _turn_scope_tools(self):
+        """Tool objects passed for the current turn via ``tools=`` (empty when none)."""
+        scope = _turn_tool_scope.get()
+        if scope is None or scope[0] is not self or len(scope) < 3:
+            return ()
+        return scope[2]
+
+    def _dispatch_tools(self):
+        """Tools resolvable this turn: per-turn ``tools=`` first, then the agent's own.
+
+        ``Task(tools=...)`` / ``chat(tools=...)`` are advertised to the model, so
+        they must also be dispatchable even when absent from ``Agent(tools=...)``.
+        """
+        own = list(self.tools) if isinstance(self.tools, (list, tuple)) else []
+        turn = self._turn_scope_tools()
+        if not turn:
+            return own
+        return list(turn) + [t for t in own if not any(t is x for x in turn)]
 
     @staticmethod
     def _exit_turn_tool_scope(token):

@@ -30,6 +30,12 @@ _active_turn_owned: "contextvars.ContextVar[Optional[list]]" = contextvars.Conte
 # ran on another thread that never entered this block's context). Guarded by
 # _live_turns_lock because turns on different threads mutate it concurrently.
 _live_turn_owners: "Dict[int, list]" = {}
+
+# Agents currently inside an ``ephemeral()`` block in this context. Persistence
+# is skipped for them so ephemeral turns never reach the DB / session store.
+_ephemeral_agents: "contextvars.ContextVar[tuple]" = contextvars.ContextVar(
+    "praisonai_ephemeral_agents", default=()
+)
 _live_turns_lock = threading.Lock()
 _auto_memory_init_lock = threading.Lock()
 
@@ -440,15 +446,21 @@ class MemoryMixin:
         with self._history_lock:
             snapshot_ids = {id(m) for m in self.chat_history}
 
+        eph_token = _ephemeral_agents.set(_ephemeral_agents.get() + (self,))
         try:
             yield
         finally:
+            _ephemeral_agents.reset(eph_token)
             live_ids = _live_turn_message_ids()
             keep_ids = snapshot_ids | live_ids
             with self._history_lock:
                 self.chat_history[:] = [
                     m for m in self.chat_history if id(m) in keep_ids
                 ]
+
+    def _is_ephemeral(self) -> bool:
+        """True while this agent is inside an ``ephemeral()`` block."""
+        return any(a is self for a in _ephemeral_agents.get())
 
     def _init_db_session(self):
         """Initialize DB session if db adapter is provided (lazy, first chat only)."""
@@ -596,7 +608,16 @@ class MemoryMixin:
         """
         if self._session_store_initialized:
             return
-        
+        # Serialize first-turn restore: concurrent achat() calls run this in
+        # separate threads and could otherwise both prepend the saved history.
+        # Shares the (re-entrant) DB-session init lock; the two paths are exclusive.
+        with self._get_db_session_init_lock().sync():
+            self._init_session_store_locked()
+
+    def _init_session_store_locked(self):
+        if self._session_store_initialized:
+            return
+
         # Only initialize if session_id is provided and no DB adapter
         if self._session_id is None or self._db is not None:
             self._session_store_initialized = True
@@ -622,10 +643,15 @@ class MemoryMixin:
             # working history (summary + retained tail) when a compaction
             # checkpoint exists so resume is cheap and won't overflow context
             # (Issue #2741). Falls back to raw chat history for backward compat.
+            # Honour history_limit at restore: with memory="history" this is the
+            # only place the persisting session's past turns enter the request.
+            # (kwarg only when set: custom stores may not accept max_messages).
+            limit = self._history_limit if getattr(self, "_history_enabled", False) else None
+            kw = {"max_messages": limit} if limit else {}
             if hasattr(self._session_store, "get_working_history"):
-                history = self._session_store.get_working_history(self._session_id)
+                history = self._session_store.get_working_history(self._session_id, **kw)
             else:
-                history = self._session_store.get_chat_history(self._session_id)
+                history = self._session_store.get_chat_history(self._session_id, **kw)
             if not history and info_saved is False:
                 raise OSError("session could not be read")
             if history:
@@ -764,6 +790,8 @@ class MemoryMixin:
             tool_call_id: Optional id linking a ``role="tool"`` result turn to
                 the assistant tool call it answers (Issue #3089).
         """
+        if self._is_ephemeral():
+            return  # ephemeral() turns are never permanently stored
         # Try DB adapter first
         if self._db is not None:
             try:
@@ -865,7 +893,7 @@ class MemoryMixin:
         """
         store = getattr(self, "_session_store", None)
         session_id = getattr(self, "_session_id", None)
-        if store is None or session_id is None:
+        if store is None or session_id is None or self._is_ephemeral():
             return
         upsert = getattr(store, "upsert_partial_assistant_message", None)
         if upsert is None:
@@ -894,6 +922,8 @@ class MemoryMixin:
         store = getattr(self, "_session_store", None)
         session_id = getattr(self, "_session_id", None)
         self._partial_persist_last = 0.0
+        if self._is_ephemeral():
+            return  # ephemeral() turns are never permanently stored
         if store is not None and session_id is not None:
             upsert = getattr(store, "upsert_partial_assistant_message", None)
             if upsert is not None:
@@ -1228,7 +1258,7 @@ class MemoryMixin:
         Issue 1 FIX: Track last saved index to avoid duplicate insertion when
         called multiple times in the same session.
         """
-        if not self.auto_save:
+        if not self.auto_save or self._is_ephemeral():
             return
         
         # Serialize the whole read-modify-write of _auto_save_last_index. This
