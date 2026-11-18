@@ -492,7 +492,8 @@ def create_subagent_tool(
                     except Exception:
                         # The matching JobInfo below carries failure or
                         # cancellation details for this exact future.
-                        pass
+                        logger.debug("Background subagent job %s raised", job_id,
+                                     exc_info=True)
             else:
                 info = job_manager.get_job_info(job_id)
         except KeyError:
