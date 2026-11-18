@@ -403,9 +403,18 @@ jobs:
   # OPENAI LIVE TESTS - Real OpenAI API calls
   # Only runs if OPENAI_API_KEY secret is set
   # Safe for forks (skips gracefully if no key)
+  # Billed: nightly, manual dispatch, and PRs labelled `run-live` only.
+  # Running on every PR push (about 60 runs a day) emptied the key's credit.
+  # To run on a PR: add the label, then push a commit (a re-run keeps the old
+  # label list), or dispatch this workflow on the PR branch.
   # ============================================
   openai-live:
     needs: smoke
+    if: >-
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'run-live'))
     runs-on: ubuntu-latest
     timeout-minutes: 8
     # This job always runs but steps are conditional on secret availability
