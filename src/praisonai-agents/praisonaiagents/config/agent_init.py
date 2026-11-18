@@ -800,3 +800,30 @@ def resolve_agent_model(
         else:
             llm = model  # model= takes precedence
     return llm, fallback_models, base_url, api_key, auth, auth_profiles
+
+
+def resolve_agent_llm_options(
+    retry: Any, reasoning_effort: Optional[str], **options: Any,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """``retry=`` / ``reasoning_effort=`` -> ``(retry_init_params, option_kwargs)``.
+
+    *retry_init_params* is ``{"max_retries": n}`` for a ``RetryBackoffConfig``,
+    a dict (validated through ``RetryBackoffConfig``) or ``False`` (0), else
+    empty, so the custom-LLM path honours ``retry=`` instead of LLM's own
+    default. *option_kwargs* is *options* plus those retry kwargs, plus
+    ``reasoning_effort`` only when given.
+    """
+    from ..agent.retry_utils import RetryBackoffConfig
+
+    retry_init_params: Dict[str, Any] = {}
+    if isinstance(retry, RetryBackoffConfig):
+        retry_init_params = {'max_retries': retry.max_retries}
+    elif isinstance(retry, dict):
+        retry_init_params = {'max_retries': RetryBackoffConfig(**retry).max_retries}
+    elif retry is False:
+        retry_init_params = {'max_retries': 0}
+
+    option_kwargs = {**options, **retry_init_params}
+    if reasoning_effort is not None:
+        option_kwargs['reasoning_effort'] = reasoning_effort
+    return retry_init_params, option_kwargs

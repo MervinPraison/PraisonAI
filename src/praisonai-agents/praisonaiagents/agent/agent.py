@@ -118,8 +118,9 @@ from ..config.parse_utils import canonical_preset_key, validate_preset_string
 from ..config.agent_init import (
     _is_file_path, resolve_agent_caching, resolve_agent_execution, resolve_agent_guardrails,
     resolve_agent_history, resolve_agent_hooks, resolve_agent_knowledge, resolve_agent_learn,
-    resolve_agent_memory, resolve_agent_model, resolve_agent_output, resolve_agent_planning,
-    resolve_agent_reflection, resolve_agent_skills, resolve_agent_templates, resolve_agent_web,
+    resolve_agent_llm_options, resolve_agent_memory, resolve_agent_model, resolve_agent_output,
+    resolve_agent_planning, resolve_agent_reflection, resolve_agent_skills, resolve_agent_templates,
+    resolve_agent_web,
 )
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
@@ -1638,37 +1639,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         self.api_key = api_key
         self.auth = auth
 
-        # Resolve Agent(retry=...) into LLM init kwargs so the custom-LLM path
-        # (any "provider/model", dict, or base_url config) honours it, instead of
-        # falling back to LLM's hardcoded max_retries=3. self._retry_config is
-        # normalized later (after these branches), so derive the values here from
-        # the raw `retry` argument to forward them into _llm_init_params.
-        _retry_init_params = {}
-        if isinstance(retry, RetryBackoffConfig):
-            _retry_init_params = {'max_retries': retry.max_retries}
-        elif isinstance(retry, dict):
-            _rc = RetryBackoffConfig(**retry)
-            _retry_init_params = {'max_retries': _rc.max_retries}
-        elif retry is False:
-            _retry_init_params = {'max_retries': 0}
-
-        # Connection/execution options that every LLM construction branch
-        # forwards. Kept so a container default applied after construction
-        # (_apply_default_llm) builds the same LLM the constructor would have.
-        self._llm_option_kwargs = {
-            'metrics': metrics,
-            'max_iter': max_iter,
-            'web_search': web_search,
-            'web_fetch': web_fetch,
-            'prompt_caching': prompt_caching,
-            'claude_memory': claude_memory,
-            **_retry_init_params,
-        }
-        # Forward the unified reasoning-effort control to every LLM-construction
-        # branch (Issue #4452). Only set when provided so unset stays a no-op and
-        # older dict/string branches that don't spread these kwargs are unaffected.
-        if reasoning_effort is not None:
-            self._llm_option_kwargs['reasoning_effort'] = reasoning_effort
+        # retry= / reasoning_effort= -> the option kwargs every LLM construction
+        # branch forwards (kept for _apply_default_llm), plus the retry kwargs.
+        _retry_init_params, self._llm_option_kwargs = resolve_agent_llm_options(
+            retry, reasoning_effort, metrics=metrics, max_iter=max_iter, web_search=web_search,
+            web_fetch=web_fetch, prompt_caching=prompt_caching, claude_memory=claude_memory)
 
         # Local-runtime descriptor: llm="local" (or "local:<engine>/<model>").
         # Opt-in only -- discovery never fires for any other spec, so a fully
