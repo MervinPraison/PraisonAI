@@ -215,7 +215,8 @@ class LSPClient:
             await self._send_request("shutdown", None)
             await self._send_notification("exit", None)
         except Exception:
-            pass
+            logger.debug("LSP shutdown request failed for %s", self.config.command,
+                         exc_info=True)
         
         if self._reader_task:
             self._reader_task.cancel()

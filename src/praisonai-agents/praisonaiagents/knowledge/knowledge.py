@@ -358,7 +358,8 @@ class Knowledge:
             elif event_type == "add":
                 emitter.knowledge_add(agent_name, source, chunk_count, metadata)
         except Exception:
-            pass  # Silent fail - tracing should never break knowledge operations
+            # Tracing must never break knowledge operations.
+            logger.debug("Knowledge %s trace event failed", event_type, exc_info=True)
 
     def store(self, content, user_id=None, agent_id=None, run_id=None, metadata=None, is_content=False):
         """Store a memory.

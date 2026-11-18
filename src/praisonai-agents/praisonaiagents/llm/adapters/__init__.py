@@ -703,7 +703,7 @@ def load_provider_entry_points() -> None:
                 continue
             _provider_adapters[name] = adapter
     except Exception:  # pragma: no cover - discovery must never break resolution
-        pass
+        _logger.debug("praisonai.providers entry-point discovery failed", exc_info=True)
 
 
 def get_provider_adapter(name: str) -> LLMProviderAdapterProtocol:
