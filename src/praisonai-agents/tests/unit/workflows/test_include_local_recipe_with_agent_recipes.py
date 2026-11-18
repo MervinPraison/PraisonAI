@@ -41,3 +41,19 @@ def test_missing_recipe_still_says_recipe_not_found(agent_recipes_installed):
     res = Workflow(name="o", steps=[include("does-not-exist-t10")]).run("go")
     assert res["status"] == "failed"
     assert "Recipe not found: does-not-exist-t10" in res["error"]
+
+
+def test_other_agent_recipes_errors_are_not_hidden(monkeypatch, tmp_path):
+    # Only "not installed" (ImportError) and "not shipped" (ValueError) fall
+    # back to a local path; a real fault in agent_recipes must surface.
+    fake = types.ModuleType("agent_recipes")
+
+    def get_template_path(name):
+        raise RuntimeError("agent_recipes index is corrupt")
+
+    fake.get_template_path = get_template_path
+    monkeypatch.setitem(sys.modules, "agent_recipes", fake)
+    monkeypatch.chdir(tmp_path)
+    res = Workflow(name="o", steps=[include("anything")]).run("go")
+    assert res["status"] == "failed"
+    assert "agent_recipes index is corrupt" in str(res)
