@@ -84,14 +84,16 @@ def _available_tool_names() -> List[str]:
 
         names.update(get_registry().list_tools())
     except Exception:
-        pass
+        logger.debug("Tool suggestions: could not list registry tools",
+                     exc_info=True)
 
     try:
         from . import TOOL_MAPPINGS
 
         names.update(TOOL_MAPPINGS.keys())
     except Exception:
-        pass
+        logger.debug("Tool suggestions: could not read built-in tool names",
+                     exc_info=True)
 
     global _praisonai_tools_available
     if _praisonai_tools_available is None:
@@ -102,7 +104,8 @@ def _available_tool_names() -> List[str]:
 
             names.update(getattr(praisonai_tools, "__all__", []) or [])
         except Exception:
-            pass
+            logger.debug("Tool suggestions: could not read praisonai_tools "
+                         "names", exc_info=True)
 
     return sorted(names)
 

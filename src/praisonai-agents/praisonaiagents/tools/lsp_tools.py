@@ -245,7 +245,8 @@ def _run_lsp(language: str, coro_factory, open_path: Optional[str] = None):
                 try:
                     await client.close_document(open_path)
                 except Exception:
-                    pass
+                    logger.debug("Could not close %s on the %s language server",
+                                 open_path, language, exc_info=True)
             await client.stop()
 
     try:

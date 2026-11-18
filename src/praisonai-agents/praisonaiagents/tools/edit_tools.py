@@ -364,7 +364,9 @@ class EditTools:
                 try:
                     await client.close_document(safe_path)
                 except Exception:
-                    pass
+                    logger.debug("Could not close %s on the %s language server "
+                                 "after diagnostics", safe_path, language,
+                                 exc_info=True)
                 await client.stop()
 
         try:
