@@ -22,33 +22,31 @@ from praisonaiagents.agent.execution_location import describe
 from praisonaiagents.agent.placement import managed_runtimes, tool_places
 
 
-def _wrapper_mismatch():
-    """Why the installed `praisonai` wrapper is not this checkout's, or None.
+def _docker_backend_missing():
+    """Why `run_on="docker"` cannot resolve in this environment, or None.
 
-    `run_on="docker"` resolves through the wrapper's backend registry. A stale
-    wrapper from PyPI in the same environment has no docker backend, and 20 of
-    these tests then fail for a reason that is not in this code (T-02). CI
-    installs the wrapper from this checkout, so the versions match and every
-    test runs there.
+    `run_on="docker"` resolves through the wrapper's backend registry, which
+    the sibling packages fill. On a developer machine a stale PyPI `praisonai`,
+    or the checkout's wrapper put on sys.path without its siblings (several bot
+    tests do that), has no docker backend, and 20 of these tests then fail for
+    a reason outside this code (T-02). In CI the monorepo is installed whole,
+    so there this never skips: a registry that loses docker must fail loudly.
     """
-    import re
-    from pathlib import Path
+    import os
 
-    src = Path(__file__).resolve().parents[3] / "praisonai" / "praisonai" / "version.py"
-    if not src.is_file():
-        return None  # not a monorepo checkout: nothing to compare against
-    wanted = re.search(r'__version__\s*=\s*"([^"]+)"', src.read_text()).group(1)
-    try:  # the module that will actually be imported, not package metadata
-        from praisonai.version import __version__ as installed
+    if os.environ.get("CI") or "docker" in managed_runtimes():
+        return None
+    try:
+        import praisonai
+        from praisonai.version import __version__
     except ImportError:
-        return f"needs the praisonai wrapper {wanted} from this checkout; it is not installed"
-    if installed != wanted:
-        return (f"installed praisonai {installed} is not this checkout's {wanted}; "
-                "install src/praisonai (see .github/actions/install-monorepo-packages)")
-    return None
+        return "the praisonai wrapper is not installed; run_on='docker' needs it"
+    return (f"the importable praisonai wrapper ({__version__}, {os.path.dirname(praisonai.__file__)}) "
+            "registers no docker backend: stale or partial install. Install the monorepo "
+            "(.github/actions/install-monorepo-packages); CI runs these tests")
 
 
-pytestmark = pytest.mark.skipif(_wrapper_mismatch() is not None, reason=str(_wrapper_mismatch()))
+pytestmark = pytest.mark.skipif(_docker_backend_missing() is not None, reason=str(_docker_backend_missing()))
 
 
 def _docker_running() -> bool:
