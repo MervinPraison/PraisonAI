@@ -29,6 +29,11 @@ def main(argv: list[str] | None = None) -> None:
         from praisonai_mcp.mcp_server.cli import handle_mcp_command
 
         raise SystemExit(handle_mcp_command(args))
+    if args[0] == "connect":
+        from praisonai_mcp.cli.commands.connect import app as connect_app
+
+        connect_app(args=args[1:], prog_name="praisonai-mcp connect")
+        return
     from praisonai_mcp.cli.app import app
 
     app(args=args, prog_name="praisonai-mcp")

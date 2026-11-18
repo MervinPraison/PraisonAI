@@ -162,6 +162,7 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "validate": ("praisonai.cli.commands.validate", "app", "Validate YAML configuration files"),
     "acp": (".commands.acp", "app", "Agent Client Protocol server"),
     "mcp": ("praisonai_mcp.cli.commands.mcp", "app", "MCP server management"),
+    "connect": ("praisonai_mcp.cli.commands.connect", "app", "Connect editors and agents (Cursor, Claude, Codex…) to PraisonAI"),
     "serve": (".commands.serve", "app", "API server management"),
     "daemon": (".commands.daemon", "app", "Warm local runtime (keeps MCP/provider clients hot)"),
     "attach": (".commands.attach", "app", "Attach to a live session on the warm runtime"),
@@ -311,6 +312,7 @@ _BROWSER_RESIDENT_COMMANDS = frozenset({
 # C12: MCP server commands implemented in ``praisonai_mcp.cli.commands.*``.
 _MCP_RESIDENT_COMMANDS = frozenset({
     "mcp",
+    "connect",
 })
 
 # Backward-compatible alias (C7.1 name).
