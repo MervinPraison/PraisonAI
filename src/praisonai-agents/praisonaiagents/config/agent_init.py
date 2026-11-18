@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from .._logging import get_logger
 from .feature_configs import (
     CachingConfig, ExecutionConfig, GuardrailConfig, HooksConfig, KnowledgeConfig, LearnConfig, MemoryConfig,
-    OutputConfig, PlanningConfig, ReflectionConfig, TemplateConfig, WebConfig,
+    OutputConfig, PlanningConfig, ReflectionConfig, SkillsConfig, TemplateConfig, WebConfig,
 )
 from .param_resolver import ArrayMode, resolve
 from .parse_utils import canonical_preset_key
@@ -753,3 +753,40 @@ def resolve_agent_guardrails(guardrails: Any, guardrail: Any, max_guardrail_retr
             # LLM validator prompt
             guardrail = _guardrails_config
     return _guardrails_config, guardrail, max_guardrail_retries
+
+
+def resolve_agent_skills(skills: Any) -> Tuple[Any, Any, Any, bool]:
+    """``skills=`` -> ``(config, paths, dirs, auto_discover)``.
+
+    ``None`` means no skills (skips ``resolve()``). A list, or a single string
+    (``'./dir'``, ``'name'``, ``'@bundle'``) as a one-item list, becomes
+    ``SkillsConfig(paths=...)``.
+    """
+    _skills = None
+    skills_dirs = None
+    # Fast path: None -> no skills (skip resolve() call)
+    if skills is None:
+        _skills_config = None
+    elif isinstance(skills, (list, str)):
+        # A single string ('./dir', 'name', '@bundle') is a one-item list.
+        _skills_config = SkillsConfig(paths=[skills] if isinstance(skills, str) else skills)
+    elif isinstance(skills, SkillsConfig):
+        _skills_config = skills
+    else:
+        _skills_config = resolve(
+            value=skills,
+            param_name="skills",
+            config_class=SkillsConfig,
+            array_mode=ArrayMode.SOURCES,
+            string_mode="path_as_source",
+            default=None,
+        )
+    _skills_auto_discover = False
+    if _skills_config is not None:
+        if isinstance(_skills_config, SkillsConfig):
+            _skills = _skills_config.paths
+            skills_dirs = _skills_config.dirs
+            _skills_auto_discover = bool(_skills_config.auto_discover)
+        elif isinstance(_skills_config, list):
+            _skills = _skills_config
+    return _skills_config, _skills, skills_dirs, _skills_auto_discover

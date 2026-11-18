@@ -99,7 +99,6 @@ def _get_stream_emitter():
 # Performance: Module-level imports for param resolution (moved from __init__)
 # These imports are lightweight and avoid per-Agent import overhead
 # ============================================================================
-from ..config.param_resolver import resolve, ArrayMode
 from ..config.presets import (
     OUTPUT_PRESETS, EXECUTION_PRESETS, MEMORY_PRESETS, MEMORY_URL_SCHEMES,
     WEB_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS, CACHING_PRESETS,
@@ -120,7 +119,7 @@ from ..config.agent_init import (
     _is_file_path, resolve_agent_caching, resolve_agent_execution, resolve_agent_guardrails,
     resolve_agent_history, resolve_agent_hooks, resolve_agent_knowledge, resolve_agent_learn,
     resolve_agent_memory, resolve_agent_output, resolve_agent_planning, resolve_agent_reflection,
-    resolve_agent_templates, resolve_agent_web,
+    resolve_agent_skills, resolve_agent_templates, resolve_agent_web,
 )
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
@@ -1303,33 +1302,9 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # ─────────────────────────────────────────────────────────────────────
         # Resolve SKILLS param - FAST PATH
         # ─────────────────────────────────────────────────────────────────────
-        _skills = None
-        skills_dirs = None
-        # Fast path: None -> no skills (skip resolve() call)
-        if skills is None:
-            _skills_config = None
-        elif isinstance(skills, (list, str)):
-            # A single string ('./dir', 'name', '@bundle') is a one-item list.
-            _skills_config = SkillsConfig(paths=[skills] if isinstance(skills, str) else skills)
-        elif isinstance(skills, SkillsConfig):
-            _skills_config = skills
-        else:
-            _skills_config = resolve(
-                value=skills,
-                param_name="skills",
-                config_class=SkillsConfig,
-                array_mode=ArrayMode.SOURCES,
-                string_mode="path_as_source",
-                default=None,
-            )
-        _skills_auto_discover = False
-        if _skills_config is not None:
-            if isinstance(_skills_config, SkillsConfig):
-                _skills = _skills_config.paths
-                skills_dirs = _skills_config.dirs
-                _skills_auto_discover = bool(_skills_config.auto_discover)
-            elif isinstance(_skills_config, list):
-                _skills = _skills_config
+        # None -> no skills; list or single string -> SkillsConfig(paths=...)
+        # (config.agent_init)
+        _skills_config, _skills, skills_dirs, _skills_auto_discover = resolve_agent_skills(skills)
         
         # ─────────────────────────────────────────────────────────────────────
         # Resolve MEMORY param - FAST PATH
