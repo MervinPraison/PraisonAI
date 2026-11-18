@@ -782,7 +782,7 @@ praisonai ui realtime   # realtime voice
 - **Look:** light and dark follow the toggle in the top bar; ⌘K → **Switch look: Pro** swaps the Paper look for the plain one.
 - **Stop:** the Stop button cancels the agent's reply. A reply that sends nothing for 10 minutes is cancelled too (`AIUI_REPLY_IDLE_TIMEOUT`, in seconds; `0` turns it off).
 - **Uploads:** request bodies are capped at 25 MiB (`AIUI_MAX_BODY_MB`; `0` turns it off).
-- **Data:** chats and settings live in `~/.praisonaiui` (set `AIUI_DATA_DIR` to move them, e.g. to a mounted volume).
+- **Data:** chat history is saved by PraisonAI under `~/.praisonai/sessions` (set `PRAISONAI_HOME` to move it); the UI's own settings live in `~/.praisonaiui` (set `AIUI_DATA_DIR` to move them). To keep both on a mounted volume, set both variables.
 - An existing `~/.praisonai/claw/app.py` from an older install keeps aiui's own default layout (Chat, no canvas); delete it to get the new default app, or add `layout="chat-canvas"` to its `configure_host(...)` call.
 
 </details>
