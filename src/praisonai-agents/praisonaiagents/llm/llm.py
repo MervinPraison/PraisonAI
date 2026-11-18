@@ -106,7 +106,8 @@ def _replay_observe(span: Dict[str, Any], response: Any, chunk: bool) -> None:
             if isinstance(content, str) and content:
                 span["content"].append(content)
     except Exception:
-        pass  # Tracing must never break a model call.
+        # Tracing must never break a model call.
+        logger.debug("Replay tracing could not read a model response", exc_info=True)
 
 
 def _replay_llm_end(span: Optional[Dict[str, Any]], error: Optional[BaseException] = None) -> None:
@@ -147,7 +148,7 @@ def _replay_stream_result(span: Dict[str, Any], result: Any) -> None:
         if final is not None:
             span["usage"] = getattr(final, "usage", None)
     except Exception:
-        pass
+        logger.debug("Replay tracing could not read a stream result", exc_info=True)
     _replay_llm_end(span)
 
 
@@ -950,7 +951,7 @@ Respond with ONLY a valid JSON tool call in this format:
                 if provider_prefix in _provider_adapters:
                     return provider_prefix
             except Exception:  # noqa: BLE001 - detection must never raise
-                pass
+                logger.debug("Provider adapter discovery failed for %r", provider_prefix, exc_info=True)
 
         # Use existing robust Ollama detection logic first
         if self._is_ollama_provider():
@@ -2255,7 +2256,7 @@ Respond with ONLY a valid JSON tool call in this format:
             if session_id:
                 return str(session_id)
         except Exception:
-            pass
+            logger.debug("Could not read the trace session id for Ollama correlation", exc_info=True)
         # A stable per-LLM fallback still lets interleaved debug logs be grouped.
         return f"llm:{id(self):x}"
 
@@ -3864,7 +3865,7 @@ Respond with ONLY a valid JSON tool call in this format:
                             from ._cost import calculate_cost
                             llm_cost = calculate_cost(final_response, model=self.model)
                         except Exception:
-                            pass
+                            logger.debug("Cost calculation failed for %s; reporting no cost", self.model, exc_info=True)
                         
                         _get_display_functions()['execute_sync_callback'](
                             'llm_end',
@@ -4199,7 +4200,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                     from ..output.editor import is_editor_output_enabled
                                     _use_silent_stream = is_editor_output_enabled()
                                 except Exception:
-                                    pass
+                                    logger.debug("Could not check editor output mode; streaming normally", exc_info=True)
 
                                 if _use_silent_stream:
                                     # Silent streaming: no display, just accumulate
@@ -7976,7 +7977,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             if isinstance(text, str) and text:
                 span["content"].append(text)
         except Exception:
-            pass  # Tracing must never break a model call.
+            # Tracing must never break a model call.
+            logger.debug("Replay tracing could not read a Responses API result", exc_info=True)
 
     def _call_responses_api_impl(self, **params) -> Any:
         """
