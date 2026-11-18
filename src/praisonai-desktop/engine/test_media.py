@@ -153,6 +153,40 @@ class MiniMaxImageTests(unittest.TestCase):
     def test_catalog_contains_image_model(self):
         self.assertIn(media.MINIMAX_IMAGE_MODEL, self.sup.capabilities()["image_models"])
 
+    def test_h3_regional_requests_save_inline_png(self):
+        image = b"generated-png"
+        encoded = base64.b64encode(image).decode()
+        for region, host, model in [
+            ("global_en", "api.minimax.io", "MiniMax-H3-Image"),
+            ("cn_zh", "api.minimax.cn", "MiniMax-H3-Image-Highspeed"),
+        ]:
+            model_id = f"minimax/{model}"
+            self.assertIn(model_id, self.sup.capabilities()["image_models"])
+            response = io.BytesIO(json.dumps({"data": [{"b64_json": encoded}]}).encode())
+            with self.subTest(region=region), patch.dict(os.environ, {"MINIMAX_IMAGE_REGION": region}), patch(
+                "media.urllib.request.urlopen", return_value=response,
+            ) as request:
+                result = self.sup.generate_image("a lighthouse", settings={}, model=model_id, size="2720x1536")
+                request.assert_called_once()
+                req = request.call_args.args[0]
+                self.assertEqual(req.full_url, f"https://{host}/v1/images/generations")
+                self.assertEqual(req.get_header("Authorization"), "Bearer test-key")
+                self.assertGreaterEqual(request.call_args.kwargs["timeout"], 600)
+                self.assertEqual(json.loads(req.data), {
+                    "model": model, "prompt": "a lighthouse", "size": "2720x1536",
+                    "n": 1, "response_format": "b64_json", "output_format": "png",
+                })
+                self.assertEqual(Path(result["path"]).read_bytes(), image)
+                self.assertEqual(result["data_url"], "data:image/png;base64," + encoded)
+
+    def test_h3_per_image_error_is_reported_without_retry_or_save(self):
+        payload = {"data": [{"error": {"code": "1027", "message": "image rejected"}}]}
+        with patch("media.urllib.request.urlopen", return_value=io.BytesIO(json.dumps(payload).encode())) as request:
+            with self.assertRaisesRegex(RuntimeError, "image rejected"):
+                self.sup.generate_image("a lighthouse", settings={}, model="minimax/MiniMax-H3-Image")
+            request.assert_called_once()
+        self.assertEqual(list((self.sup.out / "images").iterdir()), [])
+
     def test_regional_requests_save_images_and_map_dimensions(self):
         image = b"generated-image"
         for region, endpoint in media.MINIMAX_IMAGE_ENDPOINTS.items():

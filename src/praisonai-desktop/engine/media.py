@@ -13,6 +13,11 @@ import uuid
 OUTPUT_ROOT = "media-output"
 
 MINIMAX_IMAGE_MODEL = "minimax/image-01"
+MINIMAX_H3_IMAGE_MODELS = ("minimax/MiniMax-H3-Image", "minimax/MiniMax-H3-Image-Highspeed")
+MINIMAX_H3_IMAGE_ENDPOINTS = {
+    "global_en": "https://api.minimax.io/v1/images/generations",
+    "cn_zh": "https://api.minimax.cn/v1/images/generations",
+}
 MINIMAX_IMAGE_ENDPOINTS = {
     "global_en": "https://api.minimax.io/v1/image_generation",
     "cn_zh": "https://api.minimaxi.com/v1/image_generation",
@@ -81,7 +86,7 @@ class MediaSupervisor:
 
         return {
             "image": True,
-            "image_models": ["dall-e-3", "dall-e-2", MINIMAX_IMAGE_MODEL],
+            "image_models": ["dall-e-3", "dall-e-2", MINIMAX_IMAGE_MODEL, *MINIMAX_H3_IMAGE_MODELS],
             "video": bool(os.environ.get("REPLICATE_API_TOKEN") or os.environ.get("REPLICATE_API_KEY")),
             "video_models": self.list_video_models(),
             "video_hint": (
@@ -110,8 +115,8 @@ class MediaSupervisor:
         prompt = (prompt or "").strip()
         if not prompt:
             raise ValueError("prompt is required")
-        is_minimax = model.startswith("minimax/")
-        if is_minimax:
+        is_h3 = model in MINIMAX_H3_IMAGE_MODELS
+        if model.startswith("minimax/"):
             req = self._minimax_image_request(prompt, model=model, size=size)
         else:
             api_key = self._openai_key(settings)
@@ -131,13 +136,13 @@ class MediaSupervisor:
                 },
             )
         try:
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with urllib.request.urlopen(req, timeout=600 if is_h3 else 120) as resp:
                 payload = json.loads(resp.read().decode())
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode()[:400]
             raise RuntimeError(detail or str(exc)) from exc
 
-        if is_minimax:
+        if model == MINIMAX_IMAGE_MODEL:
             status = payload.get("base_resp") if isinstance(payload, dict) else None
             if not isinstance(status, dict) or status.get("status_code") != 0:
                 msg = status.get("status_msg") if isinstance(status, dict) else None
@@ -152,7 +157,12 @@ class MediaSupervisor:
             if not url and not b64:
                 raise RuntimeError("MiniMax image generation returned no images")
         else:
-            item = (payload.get("data") or [{}])[0]
+            items = payload.get("data") if isinstance(payload, dict) else None
+            if not isinstance(items, list) or not items or not isinstance(items[0], dict):
+                raise RuntimeError("image API returned no image data")
+            item = items[0]
+            if isinstance(item.get("error"), dict):
+                raise RuntimeError(item["error"].get("message") or "image generation failed")
             url = item.get("url")
             b64 = item.get("b64_json")
         file_id = f"img_{int(time.time())}_{uuid.uuid4().hex[:8]}"
@@ -186,7 +196,7 @@ class MediaSupervisor:
     ) -> urllib.request.Request:
         import os
 
-        if model != MINIMAX_IMAGE_MODEL:
+        if model != MINIMAX_IMAGE_MODEL and model not in MINIMAX_H3_IMAGE_MODELS:
             raise ValueError(f"Unknown MiniMax image model: {model!r}")
         api_key = str(os.environ.get("MINIMAX_API_KEY") or "").strip()
         if not api_key:
@@ -206,25 +216,23 @@ class MediaSupervisor:
         region = str(os.environ.get("MINIMAX_IMAGE_REGION") or "global_en").strip()
         if region not in MINIMAX_IMAGE_ENDPOINTS:
             raise ValueError("MINIMAX_IMAGE_REGION must be global_en or cn_zh")
-        try:
-            width, height = (int(part) for part in size.split("x"))
-        except (ValueError, AttributeError) as exc:
-            raise ValueError("MiniMax image size must be WIDTHxHEIGHT") from exc
-        if any(value < 512 or value > 2048 or value % 8 for value in (width, height)):
-            raise ValueError("MiniMax image dimensions must be 512-2048 and divisible by 8")
-        body = json.dumps(
-            {
-                "model": model.split("/", 1)[1],
-                "prompt": prompt,
-                "width": width,
-                "height": height,
-                "n": 1,
-                "response_format": "url",
-            }
-        ).encode()
+        payload = {"model": model.split("/", 1)[1], "prompt": prompt, "n": 1}
+        if model in MINIMAX_H3_IMAGE_MODELS:
+            # The desktop saves and previews PNGs. Request the matching bytes inline.
+            payload.update(size=size, response_format="b64_json", output_format="png")
+            endpoint = MINIMAX_H3_IMAGE_ENDPOINTS[region]
+        else:
+            try:
+                width, height = (int(part) for part in size.split("x"))
+            except (ValueError, AttributeError) as exc:
+                raise ValueError("MiniMax image size must be WIDTHxHEIGHT") from exc
+            if any(value < 512 or value > 2048 or value % 8 for value in (width, height)):
+                raise ValueError("MiniMax image dimensions must be 512-2048 and divisible by 8")
+            payload.update(width=width, height=height, response_format="url")
+            endpoint = MINIMAX_IMAGE_ENDPOINTS[region]
         return urllib.request.Request(
-            MINIMAX_IMAGE_ENDPOINTS[region],
-            data=body,
+            endpoint,
+            data=json.dumps(payload).encode(),
             method="POST",
             headers={
                 "Authorization": f"Bearer {api_key}",
