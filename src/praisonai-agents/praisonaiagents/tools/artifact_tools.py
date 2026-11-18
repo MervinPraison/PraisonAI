@@ -207,7 +207,9 @@ def artifact_load(
             if p.suffix == ".artifact" and meta_path.exists():
                 meta = json.loads(meta_path.read_text())
         except Exception:
-            pass
+            logger.debug("artifact_load: could not read metadata for %s; "
+                         "loading without mime type and checksum",
+                         artifact_path, exc_info=True)
         
         # Create ref with actual metadata
         ref = ArtifactRef(
