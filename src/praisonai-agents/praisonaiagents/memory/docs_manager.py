@@ -143,7 +143,7 @@ class DocsManager:
                         remaining = "".join(lines[end + 1:]).strip()
                 except Exception:
                     # If YAML parsing fails, use content as-is
-                    pass
+                    logger.debug("Could not parse doc frontmatter; its metadata is ignored", exc_info=True)
                 break
         
         return frontmatter, remaining

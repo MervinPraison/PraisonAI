@@ -397,7 +397,7 @@ class ChromaMemoryAdapter:
         try:
             self.client.delete_collection(name=self.collection_name)
         except Exception:
-            pass
+            logger.debug("Could not delete Chroma collection %r before reset", self.collection_name, exc_info=True)
         self.collection = self.client.create_collection(
             name=self.collection_name,
             metadata={"hnsw:space": "cosine"}
@@ -503,7 +503,8 @@ class MongoDBMemoryAdapter:
             self.short_collection.create_index([("created_at", -1), ("metadata.quality", -1)])
             self.long_collection.create_index([("created_at", -1), ("metadata.quality", -1)])
         except Exception:
-            pass  # Indexes might already exist
+            # Indexes might already exist; if not, text search will fail later.
+            logger.debug("Could not create MongoDB memory indexes", exc_info=True)
     
     def _store(self, collection, text: str, memory_type: str,
                metadata: Optional[Dict[str, Any]] = None) -> str:
@@ -565,7 +566,7 @@ class MongoDBMemoryAdapter:
                             "score": doc.get("score", 1.0)
                         })
                 except Exception:
-                    pass  # Fall back to text search
+                    logger.debug("MongoDB vector search failed; falling back to text search", exc_info=True)
         
         # Fallback to text search
         if not results:
