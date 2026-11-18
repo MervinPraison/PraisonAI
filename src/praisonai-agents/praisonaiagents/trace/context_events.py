@@ -21,6 +21,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, Generator, List, Optional, Protocol, runtime_checkable
 import json
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 CONTEXT_SCHEMA_VERSION = "1.1"
@@ -690,7 +693,8 @@ class ContextTraceEmitter:
                 self._sink.emit(event)
             except Exception:
                 # Tracing should never crash agent execution
-                pass
+                logger.debug("Context trace sink failed to emit %s", event.event_type,
+                             exc_info=True)
     
     def set_branch(self, branch_id: str) -> None:
         """Set current branch context for parallel execution tracking.

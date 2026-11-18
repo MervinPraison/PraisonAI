@@ -522,7 +522,8 @@ class Task:
                     from ..config.loader import get_small_model
                     llm = get_small_model(primary_model=llm, fallback=llm) or llm
                 except Exception:
-                    pass
+                    logger.debug("small_model lookup failed; guardrail uses %s", llm,
+                                 exc_info=True)
             self._guardrail_fn = LLMGuardrail(description=self.guardrail, llm=llm)
         else:
             raise ValueError("Guardrail must be either a callable or a string description")

@@ -11,7 +11,7 @@ from pathlib import Path
 
 import praisonaiagents
 
-CEILING = 214  # main 849f1f6442, 2026-11-18
+CEILING = 210  # fix/T-08-misc-runtime, 2026-11-18
 
 
 def _silent_handlers():
