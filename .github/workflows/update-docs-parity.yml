@@ -18,6 +18,13 @@ on:
 permissions:
   contents: write
 
+# Overlapping runs regenerate the same DOCS_PARITY.md files, so the later run's
+# rebase would conflict on every retry. Queue runs instead; each one checks out
+# main when it starts, after the previous run has pushed.
+concurrency:
+  group: update-docs-parity
+  cancel-in-progress: false
+
 jobs:
   update-docs-parity:
     runs-on: ubuntu-latest
@@ -27,6 +34,9 @@ jobs:
       uses: actions/checkout@v4
       with:
         ref: main
+        # main only accepts direct pushes from repository admins (ruleset), so the
+        # commit below pushes as the maintainer PAT, not GITHUB_TOKEN.
+        token: ${{ secrets.GH_TOKEN }}
         persist-credentials: true
         fetch-depth: 0
 
@@ -68,13 +78,23 @@ jobs:
 
     - name: Commit and push changes to praisonai-package
       if: steps.check_changes.outputs.changes == 'true'
-      uses: stefanzweifel/git-auto-commit-action@v5
-      with:
-        commit_message: "docs: auto-update documentation parity trackers [skip ci]"
-        file_pattern: 'src/praisonai-agents/DOCS_PARITY.md src/praisonai-ts/DOCS_PARITY.md src/praisonai-rust/DOCS_PARITY.md'
-        commit_user_name: "MervinPraison"
-        commit_user_email: "454862+MervinPraison@users.noreply.github.com"
-        commit_author: "MervinPraison <454862+MervinPraison@users.noreply.github.com>"
+      # main moves while this runs (update-parity-tracker.yml commits on the same
+      # push, and batch merges land together), so rebase onto the latest main and
+      # retry instead of failing with a non-fast-forward rejection.
+      run: |
+        git config user.name "MervinPraison"
+        git config user.email "454862+MervinPraison@users.noreply.github.com"
+        git add src/praisonai-agents/DOCS_PARITY.md src/praisonai-ts/DOCS_PARITY.md src/praisonai-rust/DOCS_PARITY.md
+        git commit -m "docs: auto-update documentation parity trackers [skip ci]"
+        for attempt in 1 2 3 4 5; do
+          if git pull --rebase --autostash origin main && git push origin HEAD:main; then
+            exit 0
+          fi
+          git rebase --abort 2>/dev/null || true
+          echo "Push attempt $attempt failed; retrying"
+          sleep $((attempt * 5))
+        done
+        exit 1
 
     - name: Commit and push changes to PraisonAIDocs
       if: steps.check_changes.outputs.changes == 'true' && steps.checkout_docs.outcome == 'success'
