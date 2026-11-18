@@ -30,6 +30,14 @@ def _no_developer_config(tmp_path, monkeypatch):
     monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path / "home"))
     monkeypatch.chdir(tmp_path)
     clear_config_cache()
+    # Plugin auto-enable runs once per process: the first Agent built by any
+    # earlier test may already have applied that config. Start from scratch.
+    import praisonaiagents.plugins as plugins_mod
+    import praisonaiagents.plugins.manager as manager_mod
+    monkeypatch.setattr(plugins_mod, "_auto_enable_attempted", False)
+    monkeypatch.setattr(plugins_mod, "_plugins_enabled", False)
+    monkeypatch.setattr(plugins_mod, "_enabled_plugin_names", None)
+    monkeypatch.setattr(manager_mod, "_default_manager", None)
     yield
     clear_config_cache()
 
