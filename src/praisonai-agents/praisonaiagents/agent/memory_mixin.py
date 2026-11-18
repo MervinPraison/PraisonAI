@@ -608,7 +608,16 @@ class MemoryMixin:
         """
         if self._session_store_initialized:
             return
-        
+        # Serialize first-turn restore: concurrent achat() calls run this in
+        # separate threads and could otherwise both prepend the saved history.
+        # Shares the (re-entrant) DB-session init lock; the two paths are exclusive.
+        with self._get_db_session_init_lock().sync():
+            self._init_session_store_locked()
+
+    def _init_session_store_locked(self):
+        if self._session_store_initialized:
+            return
+
         # Only initialize if session_id is provided and no DB adapter
         if self._session_id is None or self._db is not None:
             self._session_store_initialized = True
@@ -913,6 +922,8 @@ class MemoryMixin:
         store = getattr(self, "_session_store", None)
         session_id = getattr(self, "_session_id", None)
         self._partial_persist_last = 0.0
+        if self._is_ephemeral():
+            return  # ephemeral() turns are never permanently stored
         if store is not None and session_id is not None:
             upsert = getattr(store, "upsert_partial_assistant_message", None)
             if upsert is not None:
@@ -1247,7 +1258,7 @@ class MemoryMixin:
         Issue 1 FIX: Track last saved index to avoid duplicate insertion when
         called multiple times in the same session.
         """
-        if not self.auto_save:
+        if not self.auto_save or self._is_ephemeral():
             return
         
         # Serialize the whole read-modify-write of _auto_save_last_index. This

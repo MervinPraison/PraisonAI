@@ -4275,6 +4275,16 @@ class ToolExecutionMixin:
                         return True, mcp_instance.runner.call_tool(func_name, args)
             return False, None
 
+        # Per-turn ``tools=`` take precedence (same order as _dispatch_tools):
+        # a same-named per-turn callable must win over the agent's MCP tool.
+        for tool in self._turn_scope_tools():
+            if isinstance(tool, MCP):
+                found, result = _execute_mcp_tool(tool, function_name, arguments)
+                if found:
+                    return True, result
+            elif function_name in (getattr(tool, "name", None), getattr(tool, "__name__", None)):
+                return False, None  # native dispatch runs the per-turn tool
+
         if isinstance(self.tools, MCP):
             found, result = _execute_mcp_tool(self.tools, function_name, arguments)
             if found:

@@ -165,3 +165,37 @@ def test_ephemeral_not_persisted(history_agent):
     a.chat("B")
     assert "SECRET" not in requests[-1]
     assert [m["content"] for m in store.get_chat_history("e")] == ["A", "ans-A", "B", "ans-B"]
+
+
+def test_ephemeral_skips_finalize_and_auto_save(history_agent):
+    make, _, store = history_agent
+    a = make("f")
+    a.chat("A")
+    a.auto_save = "f-auto"
+    a._auto_save_last_index = len(a.chat_history)
+    with a.ephemeral():
+        a.chat_history.append({"role": "user", "content": "SECRET"})
+        a._finalize_assistant_turn("SECRET-REPLY")  # streamed-turn finalize path
+        a._auto_save_session()  # start() auto-save path
+    contents = [m["content"] for sid in ("f", "f-auto") for m in store.get_chat_history(sid)]
+    assert "SECRET" not in contents and "SECRET-REPLY" not in contents
+
+
+def test_per_turn_tool_beats_agent_mcp_tool(monkeypatch):
+    from types import SimpleNamespace as NS
+    from praisonaiagents.agent import tool_execution
+
+    class FakeMCP:
+        def __init__(self):
+            self.runner = NS(tools=[NS(name="get_weather")], call_tool=lambda n, a: "mcp")
+
+    monkeypatch.setattr(tool_execution, "_loaded_mcp_class", lambda: FakeMCP)
+    RAN.clear()
+    a = Agent(name="M", instructions="x", llm="gpt-4o-mini", output="silent", tools=[FakeMCP()])
+    assert a._resolve_mcp_tool_result("get_weather", {"city": "X"}) == (True, "mcp")
+    token = a._enter_turn_tool_scope([get_weather])
+    try:
+        assert a._resolve_mcp_tool_result("get_weather", {"city": "X"}) == (False, None)
+        assert a._find_declared_tool("get_weather") is get_weather
+    finally:
+        a._exit_turn_tool_scope(token)
