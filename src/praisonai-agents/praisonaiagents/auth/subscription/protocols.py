@@ -1,6 +1,7 @@
 """Subscription-auth protocol — what every provider must implement."""
 from __future__ import annotations
 
+from ...errors import PraisonAIError
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional, Protocol, runtime_checkable
 
@@ -37,5 +38,5 @@ class SubscriptionAuthProtocol(Protocol):
         ...
 
 
-class AuthError(RuntimeError):
+class AuthError(RuntimeError, PraisonAIError):
     """Raised when subscription credentials cannot be resolved."""

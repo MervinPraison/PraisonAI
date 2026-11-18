@@ -49,6 +49,7 @@ Example::
 
 from __future__ import annotations
 
+from ..errors import PraisonAIError
 import asyncio
 import contextlib
 import re
@@ -73,7 +74,7 @@ __all__ = [
 ]
 
 
-class CapabilityContractError(RuntimeError):
+class CapabilityContractError(RuntimeError, PraisonAIError):
     """A declared ``supports_*`` capability has no backing implementation.
 
     Raised once, early — when an adapter is built/registered — so a
