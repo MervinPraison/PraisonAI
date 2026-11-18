@@ -705,7 +705,7 @@ class ToolExecutionMixin:
             if not has_registered_plugins():
                 return
         except Exception:  # pragma: no cover - defensive plugin boundary
-            pass
+            logger.debug("Plugin fast-path check failed; scanning plugins", exc_info=True)
         try:
             from ..plugins import get_plugin_manager
 
@@ -840,7 +840,7 @@ class ToolExecutionMixin:
             if not has_registered_plugins():
                 return
         except Exception:  # pragma: no cover - defensive plugin boundary
-            pass
+            logger.debug("Plugin fast-path check failed; scanning plugins", exc_info=True)
         try:
             from ..plugins import get_plugin_manager
 
@@ -943,7 +943,7 @@ class ToolExecutionMixin:
                                         )
                                         continue
                                 except Exception:  # pragma: no cover
-                                    pass
+                                    logger.debug("Could not look up existing policy %r", rule_name, exc_info=True)
                             if rule_name is not None and rule_name in existing:
                                 logger.warning(
                                     "Skipping duplicate plugin policy %r.",
@@ -1982,7 +1982,7 @@ class ToolExecutionMixin:
                 except Exception:
                     # Trust module unavailable (partial/broken install) must not
                     # abort tool execution; fall through with the raw result.
-                    pass
+                    logger.debug("Could not fence the model-facing view of %r", function_name, exc_info=True)
             
             # Apply tool output truncation to prevent context overflow
             # Uses context manager budget if enabled, otherwise applies default limit
@@ -2698,7 +2698,7 @@ class ToolExecutionMixin:
                             decision, scope_id,
                         )
                     except Exception:  # noqa: BLE001 - bookkeeping only
-                        pass
+                        logger.debug("Could not persist approval decision for %r", tool_name, exc_info=True)
                     return decision
 
                 if is_async:
@@ -3476,7 +3476,7 @@ class ToolExecutionMixin:
                 weakref.finalize(self, self._remove_circuit_breaker, breaker_name)
             )
         except Exception:
-            pass
+            logger.debug("Could not register circuit-breaker finalizer for %r", breaker_name, exc_info=True)
 
     def _get_tool_circuit_breaker(self, function_name):
         """Return this agent's circuit breaker for *function_name*, or None.
@@ -4102,7 +4102,7 @@ class ToolExecutionMixin:
             near = difflib.get_close_matches(function_name, available, n=1, cutoff=0.5)
             suggestion = near[0] if near else None
         except Exception:
-            pass
+            logger.debug("Could not suggest a tool name for %r", function_name, exc_info=True)
         hint = f" Did you mean '{suggestion}'?" if suggestion else ""
         error_msg = (
             f"Tool '{function_name}' not found.{hint} "
@@ -4147,7 +4147,7 @@ class ToolExecutionMixin:
             if compact is not None:
                 return compact
         except Exception:
-            pass
+            logger.debug("resolve_model_output failed for %r; using the full result", function_name, exc_info=True)
 
         # Unwrap to the raw output value so the hook receives the same payload
         # BaseTool.safe_run passes (the ``output`` channel), keeping one contract.
@@ -4166,7 +4166,7 @@ class ToolExecutionMixin:
                         )
                 return None
         except Exception:
-            pass
+            logger.debug("Model-facing view lookup failed for %r; using the full result", function_name, exc_info=True)
         return None
 
     def _iter_active_named_tools(self):
@@ -4187,7 +4187,7 @@ class ToolExecutionMixin:
                         if sub_name:
                             yield sub_name, sub
                 except Exception:
-                    pass
+                    logger.debug("Could not expand tool %r into sub-tools", tool, exc_info=True)
                 return
             name = self._get_tool_display_name(tool)
             if name:
@@ -4385,7 +4385,7 @@ class ToolExecutionMixin:
                         if sub_name:
                             names.add(sub_name)
                 except Exception:
-                    pass
+                    logger.debug("Could not expand tool %r into sub-tools", tool, exc_info=True)
             else:
                 name = self._get_tool_display_name(tool)
                 if name:
@@ -4718,7 +4718,7 @@ class ToolExecutionMixin:
                     if isinstance(explicit, bool):
                         return not explicit
             except Exception:
-                pass
+                logger.debug("Registry lookup for %r failed; using the default", tool_name, exc_info=True)
         return False
 
     def _is_tool_idempotent(self, tool_name):
@@ -4756,7 +4756,7 @@ class ToolExecutionMixin:
                 if isinstance(explicit, bool):
                     return explicit
             except Exception:
-                pass
+                logger.debug("Registry lookup for %r failed; using the default", tool_name, exc_info=True)
         try:
             from ..escalation.loop_guard import IDEMPOTENT_TOOLS, MUTATING_TOOLS
         except Exception:
