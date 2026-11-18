@@ -116,7 +116,8 @@ from ..config.feature_configs import (
 # function-local relative import per construction (#5835).
 from ..config.parse_utils import canonical_preset_key, validate_preset_string
 from ..config.agent_init import (
-    _is_file_path, provider_llm_params, resolve_agent_caching, resolve_agent_execution,
+    _is_file_path, provider_llm_params, resolve_agent_approval, resolve_agent_caching,
+    resolve_agent_execution,
     resolve_agent_guardrails, resolve_agent_history, resolve_agent_hooks, resolve_agent_knowledge,
     resolve_agent_learn, resolve_agent_llm_init_params, resolve_agent_llm_options,
     resolve_agent_local, resolve_agent_memory, resolve_agent_model, resolve_agent_output,
@@ -2071,145 +2072,21 @@ Your Role: {self.role}
         # object = custom backend (dangerous tools only),
         # ApprovalConfig = full control (all_tools, timeout, etc.)
         # str = permission preset ("safe", "read_only", "full")
-        from ..approval.protocols import ApprovalConfig
         # Persist the approval kwarg exactly as given: it round-trips through the
         # constructor (str | bool | ApprovalConfig | dict | backend object).
         # clone_for_channel() reads this; without it the attribute never exists
         # and every served clone loses its approval policy.
         self._approval_config = approval
-        self._perm_deny = frozenset()  # Permission tier deny set (empty = no denials)
         self._perm_allow = None        # Permission tier allow set (None = allow all)
         # Optional pattern-based PermissionManager (rules from
         # .praisonai/permissions/, YAML or Python). When attached, its ``deny``
         # rules both hide tools from the advertised schema and block them at
         # call time (native + MCP, uniformly). None = no pattern rules consulted.
         self._permission_manager = None
-        # Optional Claude-Code-parity PermissionMode (bypass/plan/dont_ask/…).
-        # None = normal rule flow. Consulted at tool-call approval time.
-        self._permission_mode = None
-        if isinstance(approval, str) and approval not in ('True', 'False'):
-            # One string entry point for "how much the agent may do":
-            #   • deny-set presets — "safe"/"read_only"/"full"/"off"/"default"
-            #   • PermissionMode presets — "plan"/"bypass"/"accept_edits"/
-            #     "dont_ask" (+ aliases like "yolo", "auto_edit", "reject").
-            # Deny-set presets are matched first so their exact behaviour is
-            # unchanged; anything else falls through to the canonical
-            # PermissionMode resolver, so all spellings share one model.
-            from ..approval.registry import PERMISSION_PRESETS
-            # Normalise -/_ too so "read-only" hits the deny-set preset instead
-            # of falling through to PermissionMode.resolve (which returns None
-            # for deny-set names), which would silently produce an EMPTY deny
-            # set — the exact read-only-sandbox bypass this validation prevents.
-            preset_deny = PERMISSION_PRESETS.get(
-                approval.strip().lower().replace("-", "_")
-            )
-            self._approval_backend = None
-            self._approve_all_tools = False
-            self._approval_timeout = 0
-            self._approval_permissions = None
-            if preset_deny is not None:
-                self._perm_deny = preset_deny
-            else:
-                # Not a deny-set preset — try the canonical PermissionMode
-                # presets (plan/bypass/accept_edits/dont_ask + aliases).
-                from ..permissions.rules import PermissionMode
-                self._permission_mode = PermissionMode.resolve(approval)
-                # Unknown string with no mode → treat as no approval.
-        elif approval is True:
-            from ..approval.backends import AutoApproveBackend
-            self._approval_backend = AutoApproveBackend()
-            self._approve_all_tools = False
-            self._approval_timeout = 0  # 0 = use backend default
-            self._approval_permissions = None
-        elif approval is False or approval is None:
-            self._approval_backend = None
-            self._approve_all_tools = False
-            self._approval_timeout = 0
-            self._approval_permissions = None
-            # No explicit approval kwarg — honour PRAISONAI_TOOL_SAFETY.
-            # Default preset "default" blocks only destructive ops
-            # (delete_*, execute_command, execute_code, kill_process, move/copy)
-            # while leaving read / create / edit tools fully auto-approved.
-            # Users who want the pre-4.6.27 "trust everything" behaviour
-            # export PRAISONAI_TOOL_SAFETY=off. This adds zero Agent kwargs.
-            _raw_safety_env = os.environ.get("PRAISONAI_TOOL_SAFETY")
-            _safety_env = (_raw_safety_env or "").strip().lower()
-            _bypass_safety = _safety_env in ("off", "full", "none", "0", "false")
-            if not _bypass_safety:
-                from ..approval.registry import PERMISSION_PRESETS
-                _resolved_safety_env = _safety_env or "default"
-                _preset_deny = PERMISSION_PRESETS.get(_resolved_safety_env)
-                if _preset_deny is None and _safety_env:
-                    # Unknown env value - fall back to safe default and log warning
-                    # (logging is already imported at module level; a local `import logging`
-                    # here would shadow it and cause UnboundLocalError on earlier uses
-                    # inside __init__ such as the custom-LLM tools branch.)
-                    logging.getLogger(__name__).warning(
-                        "Unknown PRAISONAI_TOOL_SAFETY value %r; falling back to 'default' preset.",
-                        _raw_safety_env,
-                    )
-                    _resolved_safety_env = "default"
-                    _preset_deny = PERMISSION_PRESETS.get(_resolved_safety_env)
-
-                # Safe-by-default ask: when no approval kwarg was supplied
-                # (``approval is None``) and we are attached to an interactive
-                # terminal, route dangerous built-in tools (shell exec, file
-                # writes, etc.) through an interactive approval prompt instead
-                # of silently hard-denying them. This makes a fresh, un-flagged
-                # agent safe *and* usable — the user is asked once per dangerous
-                # call and can allow/deny.
-                #
-                # In non-interactive contexts (pipes, CI) — or when the user
-                # explicitly passed ``approval=False`` to opt out of prompting —
-                # we keep the existing deny-by-default preset so dangerous tools
-                # never execute unattended without an explicit policy. The full
-                # bypass remains ``PRAISONAI_TOOL_SAFETY=off`` / ``approval="bypass"``.
-                if approval is None and self._is_interactive_session():
-                    from ..approval.backends import ConsoleBackend
-                    self._approval_backend = ConsoleBackend()
-                    # Leave _perm_deny empty so dangerous tools reach the backend
-                    # (which classifies them via DEFAULT_DANGEROUS_TOOLS) and the
-                    # user is prompted to allow/deny rather than auto-denied.
-                elif _preset_deny is not None:
-                    self._perm_deny = _preset_deny
-        elif isinstance(approval, ApprovalConfig):
-            self._approval_backend = approval.backend
-            self._approve_all_tools = approval.all_tools
-            self._approval_timeout = approval.timeout  # None = indefinite, 0 = backend default
-            # Store permissions if provided (for CI-safe declarative policies)
-            self._approval_permissions = getattr(approval, 'permissions', None)
-            self._permission_mode = getattr(approval, 'permission_mode', None)
-            # Configuring approval must never be a WEAKER posture than passing
-            # nothing. When no declarative ``permissions`` policy is supplied,
-            # fall back to the same env-driven default deny set the bare
-            # ``approval is None`` path uses, so e.g. ``ApprovalConfig(timeout=30)``
-            # keeps the default denials (execute_command, delete_file, …) instead
-            # of silently dropping all of them. ``is None`` (not falsiness) so an
-            # explicit empty policy (``permissions={}``) is still an intentional
-            # policy that owns denial — only a genuinely absent policy inherits
-            # the env-driven default deny set.
-            if self._approval_permissions is None:
-                self._perm_deny = self._resolve_default_deny_set()
-        elif isinstance(approval, dict):
-            # Dict config: convert to ApprovalConfig
-            approval_config = ApprovalConfig(**approval)
-            self._approval_backend = approval_config.backend
-            self._approve_all_tools = approval_config.all_tools
-            self._approval_timeout = approval_config.timeout
-            self._approval_permissions = getattr(approval_config, 'permissions', None)
-            self._permission_mode = getattr(approval_config, 'permission_mode', None)
-            # See the ApprovalConfig branch above: never weaken the default
-            # posture just because a config object was passed. ``is None`` so an
-            # explicit empty policy (``approval={"permissions": {}}``) still owns
-            # denial rather than inheriting the default deny set.
-            if self._approval_permissions is None:
-                self._perm_deny = self._resolve_default_deny_set()
-        else:
-            # Plain backend object — dangerous tools only, backend default timeout
-            self._approval_backend = approval
-            self._approve_all_tools = False
-            self._approval_timeout = 0
-            self._approval_permissions = None
+        (self._approval_backend, self._approve_all_tools, self._approval_timeout,
+         self._approval_permissions, self._perm_deny,
+         self._permission_mode) = resolve_agent_approval(
+            approval, self._is_interactive_session, self._resolve_default_deny_set)
         
         # X-13: the caller turned code execution on, but the active tool-safety
         # policy keeps execute_code from the model. The policy stays; say so once.
