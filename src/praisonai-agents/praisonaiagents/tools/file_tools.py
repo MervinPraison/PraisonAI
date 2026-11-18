@@ -180,7 +180,10 @@ class FileTools:
                     _file_locks.record_read_hash(
                         safe_path, self._content_hash(safe_path, encoding))
                 except Exception:
-                    pass
+                    logger.debug(
+                        "read_file: could not record read hash for %s; a later "
+                        "write will skip the stale-file check", safe_path,
+                        exc_info=True)
 
             # Fast path: preserve the exact legacy shape when the caller asks
             # for raw content of the whole file (no window requested).
@@ -293,7 +296,10 @@ class FileTools:
                     _file_locks.record_read_hash(
                         safe_path, self._content_hash(safe_path, encoding))
                 except Exception:
-                    pass
+                    logger.debug(
+                        "write_file: could not record content hash for %s; a "
+                        "later write may be wrongly flagged stale", safe_path,
+                        exc_info=True)
             return True
         except Exception as e:
             error_msg = f"Error writing to file {filepath}: {str(e)}"

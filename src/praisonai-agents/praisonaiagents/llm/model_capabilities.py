@@ -25,9 +25,12 @@ Sources:
 - https://docs.litellm.ai/docs/completion/prompt_caching
 """
 
+import logging
 from functools import lru_cache
 
 from ._litellm_loader import get_litellm as _get_litellm
+
+logger = logging.getLogger(__name__)
 
 
 def _base_model_name(model_name: str) -> str:
@@ -193,7 +196,7 @@ def supports_structured_outputs(model_name: str) -> bool:
         if hasattr(litellm, 'supports_response_schema'):
             return litellm.supports_response_schema(model=model_name)
     except Exception:
-        pass
+        logger.debug("supports_structured_outputs(%r): litellm lookup failed", model_name, exc_info=True)
 
     # litellm is installed but the helper is missing or raised: keep litellm
     # authoritative (return False) rather than overriding it with the heuristic.
@@ -227,7 +230,7 @@ def supports_function_calling(model_name: str) -> bool:
         if hasattr(litellm, 'supports_function_calling'):
             return litellm.supports_function_calling(model=model_name)
     except Exception:
-        pass
+        logger.debug("supports_function_calling(%r): litellm lookup failed", model_name, exc_info=True)
 
     if litellm is not None:
         return False
@@ -259,7 +262,7 @@ def supports_parallel_function_calling(model_name: str) -> bool:
         if hasattr(litellm, 'supports_parallel_function_calling'):
             return litellm.supports_parallel_function_calling(model=model_name)
     except Exception:
-        pass
+        logger.debug("supports_parallel_function_calling(%r): litellm lookup failed", model_name, exc_info=True)
 
     if litellm is not None:
         return False
@@ -319,7 +322,7 @@ def supports_web_search(model_name: str) -> bool:
         if hasattr(litellm, 'supports_web_search'):
             return litellm.supports_web_search(model=model_name)
     except Exception:
-        pass
+        logger.debug("supports_web_search(%r): litellm lookup failed", model_name, exc_info=True)
 
     if litellm is not None:
         return False
@@ -359,7 +362,7 @@ def supports_prompt_caching(model_name: str) -> bool:
         if hasattr(litellm, 'utils') and hasattr(litellm.utils, 'supports_prompt_caching'):
             return litellm.utils.supports_prompt_caching(model=model_name)
     except Exception:
-        pass
+        logger.debug("supports_prompt_caching(%r): litellm lookup failed", model_name, exc_info=True)
 
     if litellm is not None:
         return False
@@ -384,7 +387,7 @@ def supports_vision(model_name: str) -> bool:
         if hasattr(litellm, "supports_vision"):
             return litellm.supports_vision(model=model_name)
     except Exception:
-        pass
+        logger.debug("supports_vision(%r): litellm lookup failed", model_name, exc_info=True)
 
     if litellm is not None:
         return False
@@ -414,7 +417,7 @@ def supports_pdf_input(model_name: str) -> bool:
         if fn is not None:
             return fn(model=model_name)
     except Exception:
-        pass
+        logger.debug("supports_pdf_input(%r): litellm lookup failed", model_name, exc_info=True)
 
     if litellm is not None:
         return False
@@ -442,7 +445,7 @@ def supports_audio_input(model_name: str) -> bool:
         if fn is not None:
             return fn(model=model_name)
     except Exception:
-        pass
+        logger.debug("supports_audio_input(%r): litellm lookup failed", model_name, exc_info=True)
 
     if litellm is not None:
         return False
@@ -546,7 +549,7 @@ def is_reasoning_model(model_name: str) -> bool:
             if litellm.supports_reasoning(model=model_name):
                 return True
     except Exception:
-        pass
+        logger.debug("is_reasoning_model(%r): litellm lookup failed", model_name, exc_info=True)
 
     # Fallback prefix match for reasoning-class models (strip provider prefix)
     model = model_name.split('/')[-1].lower()
@@ -602,7 +605,7 @@ def max_output_tokens(model_name: str):
                 if out is not None:
                     return out
         except Exception:
-            pass
+            logger.debug("max_output_tokens(%r): litellm lookup failed", model_name, exc_info=True)
 
     # Fallback: the model_cost registry the context budgeter reads directly,
     # which resolves several names get_model_info raises on (e.g. bare
@@ -617,7 +620,7 @@ def max_output_tokens(model_name: str):
             if info:
                 return _coerce_output_token_limit(info.get("max_output_tokens"))
     except Exception:
-        pass
+        logger.debug("max_output_tokens(%r): litellm lookup failed", model_name, exc_info=True)
 
     return None
 

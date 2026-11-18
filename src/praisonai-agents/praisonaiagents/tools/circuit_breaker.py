@@ -7,6 +7,7 @@ Following the protocol-driven architecture from AGENTS.md.
 """
 
 import asyncio
+import logging
 import time
 import threading
 from abc import ABC, abstractmethod
@@ -14,6 +15,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional, Protocol, runtime_checkable, Union
 from concurrent.futures import Future
+
+logger = logging.getLogger(__name__)
 
 
 class CircuitState(str, Enum):
@@ -388,7 +391,8 @@ class CircuitBreaker:
                         break
                     except Exception:
                         # Ignore health check errors
-                        pass
+                        logger.debug("Circuit %r: health check raised; circuit "
+                                     "stays open", self.name, exc_info=True)
             finally:
                 # Clear our own reference so a future OPEN can restart probing.
                 # Only clear if the stored task is still us (a concurrent

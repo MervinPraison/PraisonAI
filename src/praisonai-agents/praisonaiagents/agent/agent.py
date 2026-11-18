@@ -110,7 +110,7 @@ from ..config.feature_configs import (
     PlanningConfig, ReflectionConfig, RulesConfig, GuardrailConfig, WebConfig,
     TemplateConfig, CachingConfig, HooksConfig, SkillsConfig,
     DEFAULT_TOOL_OUTPUT_LIMIT,
-    LearnConfig, LLMConfig, ToolConfig, resolve_tools,
+    LearnConfig, ToolConfig, resolve_tools,
 )
 # Already loaded by the imports above; hoisted so __init__ does not pay a
 # function-local relative import per construction (#5835).
@@ -118,8 +118,8 @@ from ..config.parse_utils import canonical_preset_key, validate_preset_string
 from ..config.agent_init import (
     _is_file_path, resolve_agent_caching, resolve_agent_execution, resolve_agent_guardrails,
     resolve_agent_history, resolve_agent_hooks, resolve_agent_knowledge, resolve_agent_learn,
-    resolve_agent_memory, resolve_agent_output, resolve_agent_planning, resolve_agent_reflection,
-    resolve_agent_skills, resolve_agent_templates, resolve_agent_web,
+    resolve_agent_memory, resolve_agent_model, resolve_agent_output, resolve_agent_planning,
+    resolve_agent_reflection, resolve_agent_skills, resolve_agent_templates, resolve_agent_web,
 )
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
@@ -187,7 +187,7 @@ def _validate_preset_params(params):
 
 if TYPE_CHECKING:
     from ..approval.protocols import ApprovalConfig, ApprovalProtocol
-    from ..config.feature_configs import LearnConfig, MemoryConfig, ToolConfig
+    from ..config.feature_configs import LearnConfig, MemoryConfig, RuntimeConfig, ToolConfig
     from ..context.models import ContextConfig
     from ..context.manager import ContextManager
     from ..knowledge.knowledge import Knowledge
@@ -199,6 +199,11 @@ if TYPE_CHECKING:
     from ..eval.results import EvaluationLoopResult
     from ..tools.retry import RetryPolicy
     from ..skills.protocols import SkillReviewProtocol
+    from ..runtime.config import AgentRuntimeConfig
+    from ..sandbox.config import SandboxConfig
+    from ..tools.tool_search import ToolSearchConfig
+    from .placement import ManagedRuntime, ToolPlace
+    from .protocols import MessageSteeringProtocol
 
 # Import structured error from central errors module
 from ..errors import BudgetExceededError
@@ -395,7 +400,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             try:
                 inst._agent_history_append = self._append_to_chat_history
             except Exception:
-                pass
+                logger.debug("Could not wire deferred history callback onto %s", type(inst).__name__, exc_info=True)
 
     def _ensure_llm_instance(self):
         """Lazy-create LLM instance from deferred init params (avoids import at Agent())."""
@@ -1586,53 +1591,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Seed from clone_for_channel()'s forwarded list (if any); an explicit
         # LLMConfig(fallback_models=[...]) on llm=/model= still takes precedence.
         fallback_models = _cloned_fallback_models  # Initialize for internal use
+        # llm=/model=/LLMConfig -> concrete values; refuses both, warns on llm=.
         # LLMConfig.auth_profiles wins over a manager forwarded by a clone.
-        _auth_profiles = None
-
-        # One rule for the alias pair: passing both is refused, everywhere.
-        from ..utils.model_alias import resolve_model_alias
-        resolve_model_alias(llm, model, type(self).__name__)
-
-        # Check if llm is an LLMConfig object
-        if isinstance(llm, LLMConfig):
-            # Extract values from LLMConfig
-            llm_config_obj = llm
-            llm = llm_config_obj.model
-            fallback_models = llm_config_obj.fallback_models
-            if base_url is None:
-                base_url = llm_config_obj.base_url
-            if api_key is None:
-                api_key = llm_config_obj.api_key
-            if auth is None:
-                auth = llm_config_obj.auth
-            _auth_profiles = llm_config_obj.auth_profiles
-        elif llm is not None and model is None:
-            warn_deprecated_param(
-                "llm",
-                since="1.0.0",
-                removal="2.0.0", 
-                alternative="use 'model' instead. Example: Agent(model='gpt-4o-mini')",
-                stacklevel=3
-            )
-        
-        # model= is the preferred parameter (no warning)
-        if model is not None:
-            # Check if model is an LLMConfig object
-            if isinstance(model, LLMConfig):
-                # Extract values from LLMConfig (same as llm handling)
-                llm = model.model
-                if fallback_models is None:
-                    fallback_models = model.fallback_models
-                if base_url is None:
-                    base_url = model.base_url
-                if api_key is None:
-                    api_key = model.api_key
-                if auth is None:
-                    auth = model.auth
-                if _auth_profiles is None:
-                    _auth_profiles = model.auth_profiles
-            else:
-                llm = model  # model= takes precedence
+        (llm, fallback_models, base_url, api_key, auth,
+         _auth_profiles) = resolve_agent_model(
+            llm, model, base_url, api_key, auth, fallback_models, type(self).__name__)
 
         if _auth_profiles is not None:
             from ..llm.failover import manager_from_auth_profiles
@@ -2853,7 +2816,7 @@ Your Role: {self.role}
             import copy
             return copy.deepcopy(mem_inst)
         except Exception:
-            pass
+            logger.debug("deepcopy of %s failed; trying a fresh instance", type(mem_inst).__name__, exc_info=True)
         # deepcopy failed (e.g. thread-locals/connections). Re-instantiate the same
         # backend type from its stored config so each clone gets its own store.
         try:
@@ -2861,7 +2824,7 @@ Your Role: {self.role}
             if cfg is not None:
                 return type(mem_inst)(cfg)
         except Exception:
-            pass
+            logger.debug("Could not build a fresh %s for the clone", type(mem_inst).__name__, exc_info=True)
         logger.warning(
             "clone_for_channel: could not isolate the live memory backend; clones "
             "will share it. Pass memory via MemoryConfig/db() for per-channel isolation."
@@ -3203,7 +3166,7 @@ Your Role: {self.role}
                 from ..thinking.effort import normalize_effort
                 value = normalize_effort(value)
             except Exception:
-                pass
+                logger.debug("normalize_effort(%r) failed; using the value as given", value, exc_info=True)
         self._reasoning_effort = value
         # Keep the live LLM-init params in sync so a post-construction change
         # still reaches the request pipeline (mirrors thinking_budget aliasing).
@@ -3219,7 +3182,7 @@ Your Role: {self.role}
             try:
                 instance.reasoning_effort = value
             except Exception:
-                pass
+                logger.debug("Could not set reasoning_effort on %s; the backend keeps its own", type(instance).__name__, exc_info=True)
 
     @property
     def total_cost(self) -> float:
@@ -3784,7 +3747,7 @@ Summary:"""
                     try:
                         scoped_registry.register(t)
                     except Exception:
-                        pass
+                        logger.debug("Could not register %r for code execution", getattr(t, "__name__", getattr(t, "name", t)), exc_info=True)
 
         # Gate every code-mode tool call through the SAME PolicyEngine,
         # permission deny-rules and per-tool ``input_guardrails`` the direct
@@ -5216,7 +5179,7 @@ Summary:"""
                 self._verification_journal_payloads(results)
             )
         except Exception:  # pragma: no cover - journalling is best-effort
-            pass
+            logger.debug("Could not record the verification journal", exc_info=True)
 
     def get_available_tools(self) -> List[Any]:
         """
@@ -5351,7 +5314,7 @@ Summary:"""
                 try:
                     setattr(self, cache_attr, None)
                 except Exception:
-                    pass
+                    logger.debug("Could not clear %s", cache_attr, exc_info=True)
         return self.tools
 
     def list_mcp_servers(self) -> List[str]:
@@ -6310,7 +6273,7 @@ Answer:"""
                     from ..config.loader import get_small_model
                     llm = get_small_model(primary_model=llm, fallback=llm) or llm
                 except Exception:
-                    pass
+                    logger.debug("Small-model lookup for the guardrail failed; using %s", llm, exc_info=True)
             self._guardrail_fn = LLMGuardrail(description=self.guardrail, llm=llm)
             # A string guardrail is an output-quality validator. Although the
             # resulting LLMGuardrail also exposes ``validate_input`` (via

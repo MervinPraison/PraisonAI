@@ -5,9 +5,12 @@ Allocates token budgets across context segments based on model limits.
 """
 
 import functools
+import logging
 import sys
 from typing import Dict, Any, Optional
 from .models import BudgetAllocation
+
+logger = logging.getLogger(__name__)
 
 
 # Model token limits (context window sizes)
@@ -82,7 +85,7 @@ def _bundled_model_cost() -> Dict[str, Any]:
                 with open(path, encoding="utf-8") as fh:
                     return json.load(fh)
     except Exception:
-        pass
+        logger.debug("Could not read litellm's bundled model data", exc_info=True)
     return {}
 
 
@@ -143,7 +146,7 @@ def get_model_limit(model: str) -> int:
         if probed:
             return probed
     except Exception:  # noqa: BLE001 -- budgeting must never fail on a lookup
-        pass
+        logger.debug("Local context-window lookup failed for %s", model, exc_info=True)
 
     # Prefer data-driven lookup via litellm (context window = max_input_tokens)
     info = _litellm_model_info(model)

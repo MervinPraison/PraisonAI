@@ -223,7 +223,10 @@ class SqliteEventLog(EventLogProtocol):
                     try:
                         self._conn.execute("ROLLBACK")
                     except Exception:  # pragma: no cover - defensive
-                        pass
+                        logger.debug(
+                            "SqliteEventLog.append rollback failed for session %s",
+                            session_id, exc_info=True,
+                        )
                     raise
         except Exception as exc:  # best-effort: never break the originating turn
             logger.debug("SqliteEventLog.append skipped: %s", exc)
@@ -292,7 +295,9 @@ class SqliteEventLog(EventLogProtocol):
             try:
                 self._conn.close()
             except Exception:  # pragma: no cover - defensive
-                pass
+                logger.debug(
+                    "Could not close event log %s", self._db_path, exc_info=True,
+                )
 
     # ── helpers ───────────────────────────────────────────────────────
 

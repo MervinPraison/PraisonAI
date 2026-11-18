@@ -69,3 +69,31 @@ def test_unknown_execution_preset_is_rejected_before_the_agent_resolver():
     assert A.resolve_agent_execution("bogus") == FC.ExecutionConfig()
     with pytest.raises(ValueError):
         Agent(name="x", instructions="y", execution="bogus")
+
+
+@pytest.mark.parametrize("value", [5, 1.5, object()])
+@pytest.mark.parametrize("name,config_class", [("caching", FC.CachingConfig), ("execution", FC.ExecutionConfig)])
+def test_unrecognised_type_falls_back_to_the_agent_default(name, config_class, value):
+    # The Agent resolver passes its default down for a value resolve() does not
+    # recognise; the generic resolver keeps returning None for it unless asked.
+    generic, agent, _ = PAIRS[name]
+    assert generic(value) is None
+    assert agent(value) == config_class()
+    assert getattr(P, f"resolve_{name}")(value, config_class, default=config_class()) == config_class()
+
+
+def test_agent_resolvers_delegate_to_param_resolver(monkeypatch):
+    # One body per parameter: resolve_agent_<param> calls resolve_<param> for
+    # anything its fast paths do not handle (T-04 step 2).
+    calls = []
+    for name in ("planning", "reflection", "web", "caching", "memory", "execution"):
+        real = getattr(P, f"resolve_{name}")
+        monkeypatch.setattr(A, f"resolve_{name}",
+                            lambda *a, _n=name, _r=real, **k: calls.append(_n) or _r(*a, **k))
+    A.resolve_agent_planning({"reasoning": True})
+    A.resolve_agent_reflection({"max_iterations": 2})
+    A.resolve_agent_web({"search": False})
+    A.resolve_agent_caching({"enabled": False})
+    A.resolve_agent_memory({"backend": "file"})
+    A.resolve_agent_execution({"max_iter": 3})
+    assert calls == ["planning", "reflection", "web", "caching", "memory", "execution"]

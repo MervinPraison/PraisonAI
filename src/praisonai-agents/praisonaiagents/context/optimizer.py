@@ -416,7 +416,8 @@ class SummarizeOptimizer(BaseOptimizer):
                 return self.llm_summarize_fn(messages, self.max_summary_tokens)
             except Exception:
                 # Fallback to truncation on error
-                pass
+                logger.debug("LLM summary of %d messages failed; using truncation",
+                             len(messages), exc_info=True)
         
         # Fallback: Create truncated summary
         summary_parts = []
@@ -516,7 +517,8 @@ class SummarizeToolOutputsOptimizer(BaseOptimizer):
                             continue
                     except Exception:
                         # Fallback to original on error
-                        pass
+                        logger.debug("LLM summary of %s output (%d chars) failed; keeping original",
+                                     tool_name, len(content), exc_info=True)
             
             result.append(msg)
         

@@ -14,6 +14,7 @@ from __future__ import annotations
 from ..errors import PraisonAIError
 import base64
 import hashlib
+import logging
 import math
 import time
 import uuid
@@ -44,6 +45,8 @@ from typing import (
     Union,
     runtime_checkable,
 )
+
+logger = logging.getLogger(__name__)
 
 # Gateway protocol versioning constants
 GATEWAY_PROTOCOL_VERSION = 1
@@ -6388,7 +6391,10 @@ class PersistentRestartLoopGuard(RestartLoopGuard):
         try:
             self._store.save_events(list(self._events))
         except Exception:
-            pass
+            logger.debug(
+                "Could not persist %d restart timestamps; the crash-loop breaker "
+                "keeps them in memory only", len(self._events), exc_info=True,
+            )
 
     def record(self, now: float) -> bool:
         """Record a restart at wall-clock ``now`` and flush to the store.

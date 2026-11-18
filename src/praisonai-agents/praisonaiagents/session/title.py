@@ -6,8 +6,11 @@ exchange in a conversation. Uses a lightweight model for fast generation.
 """
 
 import asyncio
+import logging
 from typing import Optional
 from ..llm.model_providers import default_auxiliary_model
+
+logger = logging.getLogger(__name__)
 
 __all__ = ["generate_title", "generate_title_async"]
 
@@ -31,7 +34,8 @@ def _resolve_small_model(llm_model: Optional[str], primary_model: Optional[str])
         if resolved:
             return resolved
     except Exception:
-        pass
+        logger.debug("Could not read small_model from config; using %s",
+                     primary_model or default_small_model, exc_info=True)
     return primary_model or default_small_model
 
 
@@ -156,14 +160,15 @@ Return ONLY the title text, no quotes, no explanation."""
             pass
         except Exception:
             # Any other LLM error
-            pass
+            logger.debug("Title LLM call to %s failed; using fallback title",
+                         resolved_model, exc_info=True)
             
     except ImportError:
         # LLM module not available
         pass
     except Exception:
         # Unexpected error
-        pass
+        logger.debug("Title generation failed; using fallback title", exc_info=True)
     
     return fallback_title
 

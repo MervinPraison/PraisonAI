@@ -191,7 +191,10 @@ class SqliteBackgroundJobStore:
             try:
                 self._conn.close()
             except Exception:  # pragma: no cover - defensive
-                pass
+                logger.debug(
+                    "Could not close background job store %s", self._db_path,
+                    exc_info=True,
+                )
 
     # ── helpers ───────────────────────────────────────────────────────
 

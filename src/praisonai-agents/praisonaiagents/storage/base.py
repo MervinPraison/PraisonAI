@@ -112,7 +112,7 @@ class FileLock:
                     try:
                         self.lock_path.unlink()
                     except Exception:
-                        pass
+                        logger.debug("Could not remove stale lock %s", self.lock_path, exc_info=True)
                     continue
                 time.sleep(0.01)
 
@@ -125,11 +125,11 @@ class FileLock:
         if self._fd is not None:
             try:
                 os.close(self._fd)
-            except Exception:
+            except OSError:
                 pass
         try:
             self.lock_path.unlink()
-        except Exception:
+        except OSError:
             pass
         return False
 
@@ -296,7 +296,7 @@ class BaseJSONStore:
             try:
                 if 'temp_path' in locals():
                     os.remove(temp_path)
-            except Exception:
+            except OSError:
                 pass
             raise
     
@@ -408,13 +408,13 @@ def list_json_sessions(
                             elif "items" in data:
                                 info.item_count = len(data["items"])
                     except Exception:
-                        pass
+                        logger.debug("Could not count items in %s", file_path, exc_info=True)
                 elif suffix == ".jsonl":
                     try:
                         with open(file_path, "r", encoding="utf-8") as f:
                             info.item_count = sum(1 for _ in f)
                     except Exception:
-                        pass
+                        logger.debug("Could not count lines in %s", file_path, exc_info=True)
                 
                 sessions.append(info)
             except Exception as e:
@@ -463,7 +463,7 @@ def cleanup_old_sessions(
                 session.path.unlink()
                 deleted += 1
             except Exception:
-                pass
+                logger.debug("Could not delete old session %s", session.path, exc_info=True)
     
     # Check total size and delete oldest if needed
     remaining = [s for s in sessions if s.path.exists()]
@@ -478,7 +478,7 @@ def cleanup_old_sessions(
                 total_size_mb -= session.size_bytes / (1024 * 1024)
                 deleted += 1
             except Exception:
-                pass
+                logger.debug("Could not delete session %s to free space", session.path, exc_info=True)
     
     return deleted
 

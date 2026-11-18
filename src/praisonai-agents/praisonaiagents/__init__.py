@@ -773,10 +773,13 @@ def _init_telemetry():
             try:
                 _telemetry.track_feature_usage("package_import")
             except Exception:
-                pass
+                import logging
+                logging.getLogger(__name__).debug(
+                    "Telemetry package_import tracking failed", exc_info=True)
     except Exception:
-        # Silently fail if there are any issues - never break user applications
-        pass
+        # Never break user applications, but leave a trace of why telemetry is off.
+        import logging
+        logging.getLogger(__name__).debug("Telemetry initialization failed", exc_info=True)
 
 
 # Only initialize telemetry if explicitly enabled

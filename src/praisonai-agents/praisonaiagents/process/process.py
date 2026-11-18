@@ -398,7 +398,8 @@ class Process:
             try:
                 context.update(result.to_dict())
             except Exception:
-                pass
+                logger.debug("Task %r result.to_dict() failed; routing on raw output only",
+                             getattr(current_task, "name", None), exc_info=True)
             context["previous_output"] = getattr(result, "raw", "")
         return context
 

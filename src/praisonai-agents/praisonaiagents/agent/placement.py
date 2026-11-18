@@ -26,7 +26,10 @@ naming the parameter the user actually wanted, not a silent fallback.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Literal, NamedTuple, Optional, Union
+
+logger = logging.getLogger(__name__)
 
 # Runtimes that can host an entire agent loop. Resolved from the wrapper's
 # entry-point registry when it is installed so third-party backends work with
@@ -55,7 +58,10 @@ def managed_runtimes() -> tuple:
         if names:
             return tuple(sorted(set(names) | set(_FALLBACK_MANAGED)))
     except Exception:
-        pass
+        logger.debug(
+            "Backend registry unavailable; run_on= accepts only %s",
+            _FALLBACK_MANAGED, exc_info=True,
+        )
     return _FALLBACK_MANAGED
 
 

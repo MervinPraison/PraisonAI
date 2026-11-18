@@ -26,9 +26,12 @@ attribute is found in ``__dict__`` first) and the sandbox's ``getattr`` guard
 therefore keep all state in a closure that is unreachable from any attribute.
 """
 
+import logging
 from typing import Any, Callable, Dict, Iterable, Optional, Protocol, runtime_checkable
 
 from .registry import ToolRegistry, get_registry
+
+logger = logging.getLogger(__name__)
 
 
 @runtime_checkable
@@ -576,7 +579,8 @@ def _pump_bridge(process, allowed, registry, timeout, max_output_size, policy_ho
                 else:
                     captured_stdout.append(line)
         except Exception:  # pragma: no cover - defensive
-            pass
+            logger.debug("Isolated code bridge stopped reading child output "
+                         "early", exc_info=True)
 
     driver = threading.Thread(target=_drive, daemon=True)
     driver.start()
@@ -588,13 +592,15 @@ def _pump_bridge(process, allowed, registry, timeout, max_output_size, policy_ho
             process.stdout.close()
             process.stdin.close()
         except Exception:
-            pass
+            logger.debug("Could not close pipes of timed-out isolated child",
+                         exc_info=True)
         # Reap the killed child so repeated timeouts cannot leak zombie
         # processes on POSIX until an external reaper collects them.
         try:
             process.wait(timeout=1)
         except Exception:
-            pass
+            logger.debug("Timed-out isolated child %s was not reaped",
+                         process.pid, exc_info=True)
         return {
             "result": None,
             "stdout": "",

@@ -8,11 +8,14 @@ from typing import Dict, List, Any, Optional, Literal, Tuple
 from pathlib import Path
 from datetime import datetime
 import json
+import logging
 import re
 
 from .models import (
     ContextSnapshot, ContextLedger, BudgetAllocation, MonitorConfig, ContextSegment
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _format_pct(value: float) -> str:
@@ -233,7 +236,7 @@ def load_ignore_patterns(base_dir: str = ".") -> Tuple[List[str], List[str]]:
                 if line and not line.startswith('#'):
                     ignore_patterns.append(line)
         except Exception:
-            pass
+            logger.debug("Could not read %s", ignore_file, exc_info=True)
     
     # Load .praisoninclude
     include_file = base / ".praisoninclude"
@@ -245,7 +248,7 @@ def load_ignore_patterns(base_dir: str = ".") -> Tuple[List[str], List[str]]:
                 if line and not line.startswith('#'):
                     include_patterns.append(line)
         except Exception:
-            pass
+            logger.debug("Could not read %s", include_file, exc_info=True)
     
     return ignore_patterns, include_patterns
 

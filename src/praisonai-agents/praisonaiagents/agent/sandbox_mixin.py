@@ -292,5 +292,8 @@ class SandboxMixin:
             try:
                 _t._praison_sandbox_tool = True
             except Exception:  # pragma: no cover - tool object may be immutable
-                pass
+                logger.debug(
+                    "Could not tag sandbox tool %s as framework-generated",
+                    getattr(_t, "__name__", type(_t).__name__), exc_info=True,
+                )
         return generated

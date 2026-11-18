@@ -214,7 +214,7 @@ class SqliteMemoryAdapter:
                 try:
                     old.close()
                 except Exception:
-                    pass
+                    logger.debug("Could not close a SQLite memory connection left by a finished thread", exc_info=True)
 
     def store_short_term(
         self, 

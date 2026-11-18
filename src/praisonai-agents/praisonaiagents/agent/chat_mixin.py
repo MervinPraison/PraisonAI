@@ -587,7 +587,7 @@ class ChatMixin:
                     resolved = int(resolver())
                     used_resolver = True
                 except Exception:
-                    pass
+                    logger.debug("resolved_max_steps() failed; using max_steps as set", exc_info=True)
             if not used_resolver:
                 max_steps = getattr(execution, "max_steps", None)
                 if max_steps is not None:
@@ -611,7 +611,7 @@ class ChatMixin:
                 try:
                     return int(resolver())
                 except Exception:
-                    pass
+                    logger.debug("resolved_max_tool_calls() failed; using max_tool_calls_per_turn", exc_info=True)
             return int(getattr(execution, "max_tool_calls_per_turn", default))
         return default
 
@@ -1115,7 +1115,7 @@ Your Role: {self.role}"""
                 try:
                     return schema_model.model_validate(parsed)
                 except Exception:
-                    pass
+                    logger.debug("%s.model_validate failed on parsed output", getattr(schema_model, "__name__", schema_model), exc_info=True)
         return self._coerce_structured_output(response_text, schema_model)
 
     def _coerce_structured_output(self, response_text, schema_model):
@@ -1140,12 +1140,12 @@ Your Role: {self.role}"""
             try:
                 return schema_model.model_validate_json(payload)
             except Exception:
-                pass
+                logger.debug("%s.model_validate_json failed", getattr(schema_model, "__name__", schema_model), exc_info=True)
             if hasattr(schema_model, "model_validate"):
                 try:
                     return schema_model.model_validate(json.loads(payload))
                 except Exception:
-                    pass
+                    logger.debug("%s.model_validate failed on decoded JSON", getattr(schema_model, "__name__", schema_model), exc_info=True)
             return None
 
         validated = _try_validate(candidate)
@@ -2916,7 +2916,7 @@ Your Role: {self.role}"""
                 prompt_tokens = estimate_messages_tokens(messages)
                 context_length = prompt_tokens
             except Exception:
-                pass  # Token estimation failed, continue without counts
+                logger.debug("Token estimation failed; reporting the error without token counts", exc_info=True)
             
             # Classify error with structured recovery hints
             classification = classify_llm_error(
@@ -3104,7 +3104,7 @@ Your Role: {self.role}"""
             prompt_tokens = estimate_messages_tokens(messages)
             context_length = prompt_tokens
         except Exception:
-            pass  # Token estimation failed, continue without counts
+            logger.debug("Token estimation failed; reporting the error without token counts", exc_info=True)
         
         # Classify error with structured recovery hints
         classification = classify_llm_error(
@@ -6883,7 +6883,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             try:
                 fallback_error._praisonai_stream_fallback_exhausted = True
             except Exception:
-                pass
+                logger.debug("Could not mark the stream fallback error as exhausted", exc_info=True)
             raise fallback_error from streaming_error
         finally:
             _stream_traced_agent.reset(_traced)

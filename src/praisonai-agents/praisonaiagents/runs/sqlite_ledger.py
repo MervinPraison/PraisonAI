@@ -260,7 +260,7 @@ class SQLiteRunLedger(RunLedgerProtocol):
             try:
                 self._conn.close()
             except Exception:  # pragma: no cover - defensive
-                pass
+                logger.debug("Run ledger close failed", exc_info=True)
 
     # ── helpers ───────────────────────────────────────────────────────
 

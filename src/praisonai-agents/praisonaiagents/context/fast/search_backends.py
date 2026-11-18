@@ -284,7 +284,7 @@ def _count_files_fast(path: str, limit: int = 1000) -> int:
             if count >= limit:
                 return limit
     except Exception:
-        pass
+        logger.debug("File count under %s stopped early", path, exc_info=True)
     return count
 
 # Threshold for switching from Python to Ripgrep

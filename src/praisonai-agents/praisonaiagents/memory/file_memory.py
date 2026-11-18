@@ -229,7 +229,8 @@ class FileMemory:
             elif event_type == "search":
                 emitter.memory_search(agent_name, query, result_count, memory_type, top_score)
         except Exception:
-            pass  # Silent fail - tracing should never break memory operations
+            # Tracing must never break memory operations.
+            logger.debug("Could not emit memory %s trace event", event_type, exc_info=True)
     
     def _generate_id(self, content: str) -> str:
         """Generate a unique ID for content."""

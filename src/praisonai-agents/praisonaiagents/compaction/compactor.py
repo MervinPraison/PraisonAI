@@ -177,7 +177,10 @@ class ContextCompactor:
                     text, getattr(self.config, "model", None) or "gpt-4"
                 )
             except Exception:
-                pass
+                logger.debug(
+                    "Accurate token count failed for %d chars; using heuristic",
+                    len(text), exc_info=True,
+                )
         from ..context.tokens import estimate_tokens_heuristic
         return estimate_tokens_heuristic(text)
 

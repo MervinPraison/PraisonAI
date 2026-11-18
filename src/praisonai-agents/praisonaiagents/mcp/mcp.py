@@ -91,11 +91,11 @@ class MCPToolRunner(threading.Thread):
                 try:
                     loop.run_until_complete(loop.shutdown_asyncgens())
                 except Exception:
-                    pass
+                    logger.debug("MCP runner: shutdown_asyncgens failed", exc_info=True)
                 try:
                     loop.run_until_complete(loop.shutdown_default_executor())
                 except Exception:
-                    pass
+                    logger.debug("MCP runner: shutdown_default_executor failed", exc_info=True)
                 try:
                     loop.close()
                 finally:
@@ -196,7 +196,7 @@ class MCPToolRunner(threading.Thread):
                 try:
                     item[0].put((False, message), block=False)
                 except Exception:
-                    pass
+                    logger.debug("MCP runner: could not answer a pending request", exc_info=True)
 
     async def _handle_request(self, session, item):
         """Run one queued request on the session and post its result."""

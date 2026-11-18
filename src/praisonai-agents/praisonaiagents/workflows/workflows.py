@@ -2380,7 +2380,8 @@ class AgentFlow:
                         try:
                             self.on_step_error(step.name, e)
                         except Exception:
-                            pass
+                            logger.debug("on_step_error callback failed for step %s", step.name,
+                                         exc_info=True)
                 
                 # Check guardrail if present (guardrails is canonical, guardrail is deprecated)
                 guardrail = getattr(step, 'guardrails', None) or getattr(step, 'guardrail', None)
@@ -4973,7 +4974,7 @@ CONCISE SUMMARY:"""
             try:
                 from agent_recipes import get_template_path
                 recipe_path = get_template_path(recipe_name)
-            except Exception as e:
+            except (ImportError, ValueError) as e:
                 # agent_recipes not installed, or it does not ship this name
                 # (it raises ValueError): try a local path (T-10).
                 logger.debug("agent_recipes lookup for %r failed: %s", recipe_name, e)
