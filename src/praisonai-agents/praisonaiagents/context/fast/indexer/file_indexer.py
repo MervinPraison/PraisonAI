@@ -136,7 +136,7 @@ class FileIndexer:
                             if line and not line.startswith('#'):
                                 self._gitignore_patterns.add(line)
                 except Exception:
-                    pass
+                    logger.debug("Could not read ignore file %s", filepath, exc_info=True)
     
     def _should_ignore(self, path: str, is_dir: bool = False) -> bool:
         """Check if a path should be ignored.
