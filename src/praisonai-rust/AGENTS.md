@@ -864,7 +864,7 @@ praisonai/tests/integration_tests.rs   # Integration tests
 praisonai/examples/real_agent_test.rs  # Real LLM run (needs OPENAI_API_KEY)
 ```
 
-There is no Rust job in CI. Run `cargo test`, `cargo fmt --check` and `cargo clippy` locally before every PR.
+CI runs `cargo test --workspace` on every PR that touches `src/praisonai-rust/` (`.github/workflows/praisonai-rust-tests.yml`). It does not run `cargo fmt --check` or `cargo clippy`; run those locally before every PR.
 
 ### 10.3 Example Test
 
