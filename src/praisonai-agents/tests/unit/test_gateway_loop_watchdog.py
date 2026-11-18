@@ -63,6 +63,7 @@ def _run_loop_for(loop, seconds):
     loop.run_forever()
 
 
+@pytest.mark.perf
 def test_healthy_loop_not_tripped():
     """A responsive loop must never be declared wedged."""
     loop = asyncio.new_event_loop()

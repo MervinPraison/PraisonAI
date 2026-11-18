@@ -8,6 +8,8 @@ These tests define the expected behavior for the context replay feature.
 import json
 import time
 
+import pytest
+
 
 class TestContextEventType:
     """Tests for ContextEventType enum."""
@@ -611,6 +613,7 @@ class TestContextTraceEmitter:
         assert events[0].data["context_passed"]["findings"] == ["result1", "result2"]
 
 
+@pytest.mark.perf
 class TestPerformance:
     """Performance tests for context events module."""
     

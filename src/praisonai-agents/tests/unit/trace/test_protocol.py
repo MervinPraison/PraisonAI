@@ -7,6 +7,8 @@ TDD tests for ActionEvent, TraceSink protocol, and redaction.
 import time
 import json
 
+import pytest
+
 
 class TestActionEvent:
     """Tests for ActionEvent dataclass."""
@@ -417,6 +419,7 @@ class TestActionTraceConfig:
         assert config.file_path == "/tmp/trace.jsonl"
 
 
+@pytest.mark.perf
 class TestPerformance:
     """Performance tests for trace module."""
     
