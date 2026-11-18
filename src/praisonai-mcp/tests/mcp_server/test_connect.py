@@ -79,12 +79,25 @@ def test_vscode_kiro_lmstudio_links():
     vs = cat.deeplink(cat.get_client("vscode"), SPEC)
     assert vs.startswith("vscode:mcp/install?")
     body = json.loads(unquote(vs.split("?", 1)[1]))
+    # The link writes VS Code's editor-format config: ${env:NAME}, no Copilot "tools" key.
     assert body["name"] == "praisonai" and body["type"] == "stdio" and "tools" not in body
+    assert body["env"] == {"OPENAI_API_KEY": "${env:OPENAI_API_KEY}"}
     assert cat.deeplink(cat.get_client("vscode-insiders"), SPEC).startswith("vscode-insiders:mcp/install?")
     kiro = parse_qs(urlparse(cat.deeplink(cat.get_client("kiro"), SPEC)).query)
     assert json.loads(kiro["config"][0])["command"] == "/opt/bin/praisonai-mcp"
     lm = parse_qs(urlparse(cat.deeplink(cat.get_client("lm-studio"), SPEC)).query)
     assert json.loads(base64.b64decode(lm["config"][0]))["args"][0] == "serve"
+    trae = parse_qs(urlparse(cat.deeplink(cat.get_client("trae"), SPEC)).query)
+    assert trae["type"] == ["stdio"] and json.loads(base64.b64decode(trae["config"][0]))["command"]
+
+
+def test_cursor_link_survives_plus_and_respects_the_length_cap():
+    plus = cat.ServerSpec(command="/x", args=(">>>",))  # base64 of this JSON contains "+"
+    link = cat.deeplink(cat.get_client("cursor"), plus)
+    raw = link.split("config=", 1)[1]
+    assert "%2B" in raw and "+" not in raw and json.loads(base64.b64decode(parse_qs(urlparse(link).query)["config"][0]))
+    huge = cat.ServerSpec(command="/x", args=("a" * 9000,))
+    assert cat.deeplink(cat.get_client("cursor"), huge) is None
 
 
 def test_commands_quote_env_references_not_values():
@@ -96,7 +109,9 @@ def test_commands_quote_env_references_not_values():
 def test_remote_url_entries_and_local_only_clients():
     spec = cat.ServerSpec(url="https://agents.example.com/mcp")
     assert cat.entry(cat.get_client("cursor"), spec) == {"url": spec.url}
-    assert cat.entry(cat.get_client("windsurf"), spec) == {"serverUrl": spec.url}
+    assert cat.entry(cat.get_client("windsurf"), spec) == {"url": spec.url, "transport": "http"}
+    assert cat.entry(cat.get_client("antigravity"), spec) == {"serverUrl": spec.url}
+    assert cat.entry(cat.get_client("zed"), spec) == {"url": spec.url}
     assert cat.entry(cat.get_client("vscode"), spec) == {"type": "http", "url": spec.url}
     with pytest.raises(ValueError):
         cat.entry(cat.get_client("claude-desktop"), spec)
@@ -211,6 +226,7 @@ def test_verify_stdio_handshake_counts_paginated_tools(tmp_path):
     script.write_text(FAKE_SERVER)
     result = probe.verify(cat.ServerSpec(command=sys.executable, args=(str(script),)), timeout=20)
     assert result.ok and result.tools == 3 and result.server == "fake"
+    assert result.names == ["a", "x", "b"]
 
 
 def test_verify_reports_a_dead_server(tmp_path):
@@ -286,6 +302,11 @@ def test_connect_writes_verifies_and_never_writes_a_secret(run, home):
     cursor = (home / ".cursor/mcp.json").read_text()
     assert "${env:OPENAI_API_KEY}" in cursor and SECRET not in cursor and "ask_*" in cursor
     assert SECRET not in (home / ".codex/config.toml").read_text()
+
+
+def test_tool_cap_warning(run, home):
+    res = run("trae")
+    assert res.exit_code == 0 and "TRAE uses at most 40 tools" in res.output
 
 
 def test_dry_run_and_print_write_nothing(run, home):

@@ -21,7 +21,7 @@ import tempfile
 import threading
 import time
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -37,6 +37,7 @@ class ProbeResult:
     tools: int = 0
     server: str = ""
     error: str = ""
+    names: List[str] = field(default_factory=list)  # tool names, for scope pickers
 
 
 def _init_msg() -> Dict[str, Any]:
@@ -98,17 +99,18 @@ def _verify_stdio(spec: ServerSpec, timeout: float) -> ProbeResult:
         send(_init_msg())
         info = reply(1).get("serverInfo", {})
         send({"jsonrpc": "2.0", "method": "notifications/initialized"})
-        count, cursor, msg_id = 0, None, 2
+        names: List[str] = []
+        cursor, msg_id = None, 2
         while True:
             send({"jsonrpc": "2.0", "id": msg_id, "method": "tools/list",
                   "params": {"cursor": cursor} if cursor else {}})
             page = reply(msg_id)
-            count += len(page.get("tools", []))
+            names += [str(t.get("name", "")) for t in page.get("tools", [])]
             cursor = page.get("nextCursor")
             msg_id += 1
             if not cursor:
                 break
-        return ProbeResult(True, count, info.get("name", ""))
+        return ProbeResult(True, len(names), info.get("name", ""), names=names)
     finally:
         proc.kill()
         proc.wait(timeout=5)
@@ -142,7 +144,7 @@ def _verify_url(spec: ServerSpec, timeout: float) -> ProbeResult:
     info = post(_init_msg()).get("serverInfo", {})
     post({"jsonrpc": "2.0", "method": "notifications/initialized"})
     tools = post({"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}}).get("tools", [])
-    return ProbeResult(True, len(tools), info.get("name", ""))
+    return ProbeResult(True, len(tools), info.get("name", ""), names=[str(t.get("name", "")) for t in tools])
 
 
 # --------------------------------------------------------------------------- ledger

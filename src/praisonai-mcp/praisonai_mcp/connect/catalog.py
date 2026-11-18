@@ -18,7 +18,7 @@ import os
 import shlex
 import shutil
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 from urllib.parse import quote, urlencode
@@ -117,7 +117,7 @@ class Client:
     shape: str = "mcpServers"
     env_ref: Optional[str] = None
     remote: Optional[str] = "url"
-    deeplink: Optional[str] = None  # cursor | vscode | vscode-insiders | kiro | lmstudio
+    deeplink: Optional[str] = None  # cursor | vscode | vscode-insiders | kiro | lmstudio | trae
     cli: Optional[str] = None  # claude | codex | gemini | copilot | code
     apps: Tuple[str, ...] = ()
     bins: Tuple[str, ...] = ()
@@ -125,7 +125,8 @@ class Client:
     download: str = ""
     docs: str = ""
     note: str = ""
-    extra: Dict[str, Any] = field(default_factory=dict)
+    #: Most tools the client takes (TRAE 40 in all, VS Code 128 per request).
+    max_tools: Optional[int] = None
 
 
 _COPILOT = ".copilot/mcp-config.json"
@@ -140,22 +141,24 @@ CLIENTS: Tuple[Client, ...] = (
     ),
     Client(
         "vscode", "VS Code", "editor", _COPILOT, shape="copilot", env_ref="${%s}",
-        remote="http", deeplink="vscode", cli="code",
+        remote="http", deeplink="vscode", cli="code", max_tools=128,
         apps=("Visual Studio Code.app",), bins=("code",),
         download="https://code.visualstudio.com/download",
         docs="https://code.visualstudio.com/docs/copilot/reference/mcp-configuration",
     ),
     Client(
         "vscode-insiders", "VS Code Insiders", "editor", _COPILOT, shape="copilot",
-        env_ref="${%s}", remote="http", deeplink="vscode-insiders",
+        env_ref="${%s}", remote="http", deeplink="vscode-insiders", max_tools=128,
         apps=("Visual Studio Code - Insiders.app",), bins=("code-insiders",),
         download="https://code.visualstudio.com/insiders/",
         docs="https://code.visualstudio.com/docs/copilot/reference/mcp-configuration",
     ),
     Client(
-        "windsurf", "Windsurf (Devin Desktop)", "editor", ".codeium/windsurf/mcp_config.json",
-        env_ref="${env:%s}", remote="serverUrl",
-        apps=("Devin.app", "Windsurf.app"), bins=("windsurf",), dirs=(".codeium/windsurf",),
+        "windsurf", "Devin Desktop (Windsurf)", "editor",
+        {"darwin": ".config/devin/mcp_config.json", "linux": ".config/devin/mcp_config.json",
+         "win32": "AppData/Roaming/devin/mcp_config.json"},
+        env_ref="${env:%s}", remote="devin",
+        apps=("Devin.app", "Windsurf.app"), bins=("devin", "windsurf"), dirs=(".config/devin", ".codeium/windsurf"),
         download="https://windsurf.com/download",
         docs="https://docs.devin.ai/windsurf/plugins/cascade/mcp.md",
     ),
@@ -173,7 +176,10 @@ CLIENTS: Tuple[Client, ...] = (
         note="Restart Claude Desktop to load the server.",
     ),
     Client(
-        "zed", "Zed", "editor", ".config/zed/settings.json", shape="zed", remote=None,
+        "zed", "Zed", "editor",
+        {"darwin": ".config/zed/settings.json", "linux": ".config/zed/settings.json",
+         "win32": "AppData/Roaming/Zed/settings.json"},
+        shape="zed",
         apps=("Zed.app",), bins=("zed",), dirs=(".config/zed",),
         download="https://zed.dev/download", docs="https://zed.dev/docs/ai/mcp",
     ),
@@ -184,9 +190,23 @@ CLIENTS: Tuple[Client, ...] = (
         note="Kiro expands ${VAR} only for variables approved in its MCP settings.",
     ),
     Client(
-        "antigravity", "Antigravity", "editor", ".gemini/config/mcp_config.json", remote=None,
-        apps=("Antigravity.app",), bins=("agy",), dirs=(".gemini/config",),
+        "antigravity", "Antigravity", "editor", ".gemini/config/mcp_config.json", remote="serverUrl",
+        apps=("Antigravity IDE.app", "Antigravity.app"), bins=("agy",), dirs=(".gemini/config",),
         download="https://antigravity.google/download", docs="https://antigravity.google/docs/mcp",
+    ),
+    Client(
+        "trae", "TRAE", "editor",
+        {"darwin": "Library/Application Support/Trae/User/mcp.json",
+         "linux": ".config/Trae/User/mcp.json", "win32": "AppData/Roaming/Trae/User/mcp.json"},
+        deeplink="trae", max_tools=40, apps=("Trae.app",),
+        dirs=("Library/Application Support/Trae", ".config/Trae", "AppData/Roaming/Trae"),
+        download="https://www.trae.ai/download", docs="https://docs.trae.ai/ide/mcp-server-install-links",
+        note="TRAE reads at most 40 tools across all servers: scope with --tools.",
+    ),
+    Client(
+        "junie", "JetBrains Junie", "editor", ".junie/mcp/mcp.json", bins=("junie",), dirs=(".junie",),
+        download="https://junie.jetbrains.com",
+        docs="https://junie.jetbrains.com/docs/junie-cli-mcp-configuration.html",
     ),
     Client(
         "cline", "Cline", "editor", ".cline/data/settings/cline_mcp_settings.json", remote=None,
@@ -253,7 +273,7 @@ SEEN_AS: Tuple[Tuple[str, str], ...] = (
     ("claude-code", "claude-code"), ("claude", "claude-desktop"), ("cursor", "cursor"),
     ("insiders", "vscode-insiders"), ("visual studio code", "vscode"), ("vscode", "vscode"),
     ("windsurf", "windsurf"), ("devin", "windsurf"), ("zed", "zed"), ("kiro", "kiro"),
-    ("antigravity", "antigravity"), ("cline", "cline"), ("continue", "continue"),
+    ("antigravity", "antigravity"), ("trae", "trae"), ("junie", "junie"), ("cline", "cline"), ("continue", "continue"),
     ("codex", "codex"), ("gemini", "gemini-cli"), ("copilot", "copilot-cli"),
     ("opencode", "opencode"), ("goose", "goose"), ("lm studio", "lm-studio"),
     ("lmstudio", "lm-studio"),
@@ -306,6 +326,8 @@ def entry(client: Client, spec: ServerSpec) -> Any:
             return {"type": "remote", "url": spec.url}
         if client.remote == "http":
             return {"type": "http", "url": spec.url}
+        if client.remote == "devin":
+            return {"url": spec.url, "transport": "http"}
         return {client.remote: spec.url}
     args = list(spec.args)
     if shape == "codex":
@@ -347,22 +369,34 @@ def deeplink(client: Client, spec: ServerSpec) -> Optional[str]:
     if not kind:
         return None
     body = entry(client, spec)
+    compact = json.dumps(body, separators=(",", ":"))
+    b64 = base64.b64encode(compact.encode()).decode()
     if kind == "cursor":
-        b64 = base64.b64encode(json.dumps(body, separators=(",", ":")).encode()).decode()
-        return "cursor://anysphere.cursor-deeplink/mcp/install?" + urlencode(
-            {"name": spec.name, "config": b64}
-        )
+        # urlencode turns "+" into %2B: Cursor's URLSearchParams would read it as a space.
+        link = "cursor://anysphere.cursor-deeplink/mcp/install?" + urlencode({"name": spec.name, "config": b64})
+        return link if len(link) <= 10_000 else None  # Cursor's deep-link cap
     if kind in ("vscode", "vscode-insiders"):
-        body = {"name": spec.name, **{k: v for k, v in body.items() if k != "tools"}}
-        return f"{kind}:mcp/install?" + quote(json.dumps(body, separators=(",", ":")), safe="")
-    if kind == "kiro":
-        return "https://kiro.dev/launch/mcp/add?" + urlencode(
-            {"name": spec.name, "config": json.dumps(body, separators=(",", ":"))}
+        return f"{kind}:mcp/install?" + quote(json.dumps(_vscode_editor_entry(spec), separators=(",", ":")), safe="")
+    if kind == "trae":
+        return "trae://trae.ai-ide/mcp-import?" + urlencode(
+            {"type": "http" if spec.url else "stdio", "name": spec.name, "config": b64}
         )
+    if kind == "kiro":
+        return "https://kiro.dev/launch/mcp/add?" + urlencode({"name": spec.name, "config": compact})
     if kind == "lmstudio":
-        b64 = base64.b64encode(json.dumps(body, separators=(",", ":")).encode()).decode()
         return "lmstudio://add_mcp?" + urlencode({"name": spec.name, "config": b64})
     return None
+
+
+def _vscode_editor_entry(spec: ServerSpec) -> Dict[str, Any]:
+    """VS Code's link and ``code --add-mcp`` write its editor-format config,
+    which spells env references ``${env:NAME}`` (the Copilot file: ``${NAME}``)."""
+    if spec.url:
+        return {"name": spec.name, "type": "http", "url": spec.url}
+    out: Dict[str, Any] = {"name": spec.name, "type": "stdio", "command": spec.command, "args": list(spec.args)}
+    if spec.env:
+        out["env"] = {k: "${env:%s}" % k for k in spec.env}
+    return out
 
 
 def command(client: Client, spec: ServerSpec) -> Optional[str]:
@@ -375,7 +409,7 @@ def command(client: Client, spec: ServerSpec) -> Optional[str]:
         if kind == "claude":
             return q(["claude", "mcp", "add", "--transport", "http", "--scope", "user", spec.name, spec.url])
         if kind == "code":
-            return q(["code", "--add-mcp", json.dumps({"name": spec.name, "type": "http", "url": spec.url})])
+            return q(["code", "--add-mcp", json.dumps(_vscode_editor_entry(spec))])
         if kind == "gemini":
             return q(["gemini", "mcp", "add", "--scope", "user", "--transport", "http", spec.name, spec.url])
         return None
@@ -393,7 +427,7 @@ def command(client: Client, spec: ServerSpec) -> Optional[str]:
     if kind == "copilot":
         return q(["copilot", "mcp", "add", spec.name, "--", *spec.argv])
     if kind == "code":
-        return q(["code", "--add-mcp", json.dumps({"name": spec.name, **entry(client, spec)})])
+        return q(["code", "--add-mcp", json.dumps(_vscode_editor_entry(spec))])
     return None
 
 
@@ -431,6 +465,6 @@ def export_catalog(spec: ServerSpec, home: Optional[Path] = None) -> List[Dict[s
             "deeplink": link, "command": cmd, "snippet": text,
             "config_path": str(path) if path else None,
             "env_reference": bool(c.env_ref) or c.shape == "codex",
-            "download": c.download, "docs": c.docs, "note": c.note,
+            "download": c.download, "docs": c.docs, "note": c.note, "max_tools": c.max_tools,
         })
     return rows

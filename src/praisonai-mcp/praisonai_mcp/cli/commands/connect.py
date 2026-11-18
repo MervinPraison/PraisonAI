@@ -210,6 +210,10 @@ def connect(
         probe_result = probe.verify(spec)
         if probe_result.ok:
             con.print(f"[bold green]{probe_result.tools} tools ready[/] from {probe_result.server or spec.name}.")
+            for client in targets:
+                if client.max_tools and probe_result.tools > client.max_tools:
+                    con.print(f"[yellow]{client.label} uses at most {client.max_tools} tools:[/] "
+                              f"scope with --tools (e.g. --tools 'ask_*').")
         else:
             con.print(f"[red]The server did not answer the MCP handshake:[/] {probe_result.error}")
     if as_json:
