@@ -415,7 +415,7 @@ class SqliteTranscriptStore(DefaultSessionStore):
             except Exception as exc:
                 try:
                     conn.execute("ROLLBACK")
-                except Exception:  # pragma: no cover - rollback best-effort
+                except Exception:  # rollback best-effort
                     logger.debug(
                         "Rollback failed after failing to %s %s; later writes on "
                         "this connection may fail too", error_label, session_id,
