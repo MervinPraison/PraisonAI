@@ -11,6 +11,7 @@ import concurrent.futures
 import queue
 import asyncio
 import contextvars
+import logging
 from contextlib import contextmanager
 
 if TYPE_CHECKING:
@@ -18,6 +19,8 @@ if TYPE_CHECKING:
     from ..agent.agent import Agent
     from ..task.task import Task
     from ..agents.agents import AgentTeam
+
+logger = logging.getLogger(__name__)
 
 # Performance mode flag for auto-instrumentation (define early to avoid NameError)
 _performance_mode_enabled = False
@@ -196,8 +199,8 @@ def _queue_telemetry_event(event_data):
         # Queue is full, drop the event to maintain performance
         pass
     except Exception:
-        # Silently handle any queue errors
-        pass
+        # Never let telemetry break the caller; the event is dropped.
+        logger.debug("Telemetry event could not be queued", exc_info=True)
 
 def instrument_agent(agent: 'Agent', telemetry: Optional['MinimalTelemetry'] = None, performance_mode: bool = False):
     """
@@ -573,7 +576,7 @@ def cleanup_telemetry_resources():
                 except queue.Empty:
                     break
         except Exception:
-            pass
+            logger.debug("Telemetry queue drain failed during cleanup", exc_info=True)
     
     # Shutdown thread pool with configurable timeout
     if _telemetry_executor:

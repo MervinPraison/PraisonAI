@@ -6,8 +6,11 @@ Provides comprehensive tracking with minimal overhead.
 from dataclasses import dataclass, field
 from typing import Dict, Optional, List
 from datetime import datetime
+import logging
 import threading
 from collections import defaultdict
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -206,7 +209,9 @@ class TokenCollector:
                     metadata=metadata,
                 )
             except Exception:
-                pass  # Sink errors must not break token tracking
+                # Sink errors must not break token tracking.
+                logger.debug("Token usage sink failed to persist usage for model %s", model,
+                             exc_info=True)
     
     def get_session_summary(self) -> Dict:
         """Get summary of token usage for the session."""
