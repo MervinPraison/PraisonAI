@@ -62,16 +62,20 @@ class _FrozenPayload:
         object.__setattr__(self, "credentials", None)
 
     def __setattr__(self, key, value):
-        raise AttributeError("frozen")
+        # Like a frozen pydantic model, echo the rejected value in the error.
+        raise AttributeError(f"frozen, input_value={value!r}")
 
 
-def test_write_back_failure_is_logged_and_payload_unchanged(caplog):
+def test_write_back_failure_is_logged_without_leaking_values(caplog):
     data = _FrozenPayload()
     with caplog.at_level(logging.DEBUG, logger=LOGGER):
-        assert _write_back(data, "credentials", {"token": "x"}) is None
+        assert _write_back(data, "credentials", {"token": "s3cr3t"}) is None
     assert data.credentials is None
-    records = _debug_records_with_traceback(caplog)
+    records = [r for r in caplog.records
+               if r.name == LOGGER and r.levelno == logging.DEBUG]
     assert records and "credentials" in records[0].getMessage()
+    assert all(not r.exc_info for r in records)
+    assert "s3cr3t" not in caplog.text
 
 
 class _MarkerRefusingPlugin(Plugin):

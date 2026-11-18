@@ -1100,10 +1100,12 @@ def _write_back(data, attr: str, new_value: dict) -> None:
         return
     try:
         setattr(data, attr, new_value)
-    except Exception:
+    except Exception as exc:
+        # No traceback: some payload types (e.g. frozen pydantic models) put
+        # the rejected value, which may be credentials, in the error text.
         logger.debug(
-            "Could not write plugin-returned %s back onto %s; the change is dropped",
-            attr, type(data).__name__, exc_info=True,
+            "Could not write plugin-returned %s back onto %s (%s); the change is dropped",
+            attr, type(data).__name__, type(exc).__name__,
         )
 
 
