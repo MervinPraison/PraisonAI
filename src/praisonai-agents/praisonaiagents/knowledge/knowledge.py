@@ -58,7 +58,7 @@ class Knowledge:
     def __init__(self, config=None, verbose=None):
         self._config = config
         self._verbose = verbose or 0
-        os.environ['ANONYMIZED_TELEMETRY'] = 'False'  # Chromadb
+        os.environ.setdefault('ANONYMIZED_TELEMETRY', 'False')  # Chromadb; a host value wins (T-07)
         
         # Configure logging levels based on verbose setting
         if not self._verbose:
