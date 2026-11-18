@@ -400,7 +400,7 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             try:
                 inst._agent_history_append = self._append_to_chat_history
             except Exception:
-                pass
+                logger.debug("Could not wire deferred history callback onto %s", type(inst).__name__, exc_info=True)
 
     def _ensure_llm_instance(self):
         """Lazy-create LLM instance from deferred init params (avoids import at Agent())."""
@@ -2816,7 +2816,7 @@ Your Role: {self.role}
             import copy
             return copy.deepcopy(mem_inst)
         except Exception:
-            pass
+            logger.debug("deepcopy of %s failed; trying a fresh instance", type(mem_inst).__name__, exc_info=True)
         # deepcopy failed (e.g. thread-locals/connections). Re-instantiate the same
         # backend type from its stored config so each clone gets its own store.
         try:
@@ -2824,7 +2824,7 @@ Your Role: {self.role}
             if cfg is not None:
                 return type(mem_inst)(cfg)
         except Exception:
-            pass
+            logger.debug("Could not build a fresh %s for the clone", type(mem_inst).__name__, exc_info=True)
         logger.warning(
             "clone_for_channel: could not isolate the live memory backend; clones "
             "will share it. Pass memory via MemoryConfig/db() for per-channel isolation."
@@ -3166,7 +3166,7 @@ Your Role: {self.role}
                 from ..thinking.effort import normalize_effort
                 value = normalize_effort(value)
             except Exception:
-                pass
+                logger.debug("normalize_effort(%r) failed; using the value as given", value, exc_info=True)
         self._reasoning_effort = value
         # Keep the live LLM-init params in sync so a post-construction change
         # still reaches the request pipeline (mirrors thinking_budget aliasing).
@@ -3182,7 +3182,7 @@ Your Role: {self.role}
             try:
                 instance.reasoning_effort = value
             except Exception:
-                pass
+                logger.debug("Could not set reasoning_effort on %s; the backend keeps its own", type(instance).__name__, exc_info=True)
 
     @property
     def total_cost(self) -> float:
@@ -3747,7 +3747,7 @@ Summary:"""
                     try:
                         scoped_registry.register(t)
                     except Exception:
-                        pass
+                        logger.debug("Could not register %r for code execution", getattr(t, "__name__", getattr(t, "name", t)), exc_info=True)
 
         # Gate every code-mode tool call through the SAME PolicyEngine,
         # permission deny-rules and per-tool ``input_guardrails`` the direct
@@ -5179,7 +5179,7 @@ Summary:"""
                 self._verification_journal_payloads(results)
             )
         except Exception:  # pragma: no cover - journalling is best-effort
-            pass
+            logger.debug("Could not record the verification journal", exc_info=True)
 
     def get_available_tools(self) -> List[Any]:
         """
@@ -5314,7 +5314,7 @@ Summary:"""
                 try:
                     setattr(self, cache_attr, None)
                 except Exception:
-                    pass
+                    logger.debug("Could not clear %s", cache_attr, exc_info=True)
         return self.tools
 
     def list_mcp_servers(self) -> List[str]:
@@ -6273,7 +6273,7 @@ Answer:"""
                     from ..config.loader import get_small_model
                     llm = get_small_model(primary_model=llm, fallback=llm) or llm
                 except Exception:
-                    pass
+                    logger.debug("Small-model lookup for the guardrail failed; using %s", llm, exc_info=True)
             self._guardrail_fn = LLMGuardrail(description=self.guardrail, llm=llm)
             # A string guardrail is an output-quality validator. Although the
             # resulting LLMGuardrail also exposes ``validate_input`` (via
