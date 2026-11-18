@@ -28,7 +28,6 @@ Usage::
     from praisonaiagents.session import SqliteTranscriptStore
 
     store = SqliteTranscriptStore(db_path="~/.praisonai/sessions/sessions.db")
-    agent = Agent(..., session_store=store)      # drop-in for DefaultSessionStore
     store.add_message("s1", "user", "hi")        # single-row transactional write
     store.search("refund")                        # decoded transcript scoring
 """
