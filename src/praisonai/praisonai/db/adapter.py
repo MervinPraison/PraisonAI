@@ -692,14 +692,16 @@ class PraisonAIDB:
 
         A persistence layer's contract is preservation: the full tool result is
         kept verbatim so an agent that resumes sees exactly what it did. Shared
-        by both the sync and async paths so they cannot drift.
+        by both the sync and async paths so they cannot drift. Non-JSON-native
+        args (datetime, Path, bytes, UUID, ...) fall back to ``str()`` so the
+        persistence hook never crashes a tool call that succeeded.
         """
         import json
         return json.dumps({
             "tool": tool_name,
             "args": args,
             "result": str(result),
-        })
+        }, default=str)
 
     def on_tool_call(
         self,
