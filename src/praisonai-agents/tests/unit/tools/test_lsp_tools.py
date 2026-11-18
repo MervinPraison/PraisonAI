@@ -209,6 +209,7 @@ def test_uri_display_marks_outside_workspace(tmp_path, monkeypatch):
 # Live pylsp integration (opt-in: only runs when pylsp is installed)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.perf
 @pytest.mark.skipif(shutil.which("pylsp") is None,
                     reason="pylsp language server not installed")
 def test_references_live_pylsp(tmp_path, monkeypatch):
@@ -277,6 +278,7 @@ def test_format_calls_outgoing_empty():
 # Live pylsp integration for call hierarchy (opt-in)
 # ---------------------------------------------------------------------------
 
+@pytest.mark.perf
 @pytest.mark.skipif(shutil.which("pylsp") is None,
                     reason="pylsp language server not installed")
 def test_incoming_calls_live_pylsp(tmp_path, monkeypatch):

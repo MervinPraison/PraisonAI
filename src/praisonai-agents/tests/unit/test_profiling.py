@@ -338,6 +338,7 @@ class TestWarmup:
         assert result['litellm'] > 0 or result['litellm'] == -1
 
 
+@pytest.mark.perf
 class TestZeroOverhead:
     """Test that profiling has zero overhead when disabled."""
     

@@ -97,6 +97,15 @@ def pytest_collection_modifyitems(config, items):
             if "live" in item.keywords:
                 item.add_marker(skip_live)
 
+    # Wall-clock assertions fail whenever other xdist workers load the CPU,
+    # on main too, which teaches everyone to ignore red. They run serially
+    # instead: CI has a dedicated step, locally use ``pytest -m perf``.
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        skip_perf = pytest.mark.skip(reason="Timing test; run serially with: pytest -m perf")
+        for item in items:
+            if "perf" in item.keywords:
+                item.add_marker(skip_perf)
+
     if os.environ.get("PRAISONAI_ALLOW_NETWORK") != "1":
         skip_net = pytest.mark.skip(
             reason="Network tests disabled. Set PRAISONAI_ALLOW_NETWORK=1 to enable."

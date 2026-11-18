@@ -76,6 +76,7 @@ def test_max_execution_time_stops_tool_loop(calls):
     assert calls["n"] < 10
 
 
+@pytest.mark.perf
 def test_max_execution_time_stops_tool_loop_async(calls):
     agent = _agent(execution=ExecutionConfig(max_execution_time=1, max_iter=50))
     t0 = time.time()
