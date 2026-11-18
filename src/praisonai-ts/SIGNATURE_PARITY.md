@@ -46,7 +46,7 @@ This complements `PARITY.md`, which only tracks whether an export exists.
 
 ### `Agent.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:627`
+- Python: `src/praisonai-agents/praisonaiagents/agent/agent.py:632`
 - TypeScript: `src/praisonai-ts/src/agent/simple.ts:197` (ctor `src/praisonai-ts/src/agent/simple.ts:1019`)
 - Counts: 42 python params: 29 exact, 8 camelCase, 2 alias, 3 flattened, 0 missing; 8 mismatches; 8 waived; 14 TS-only of 60
 
@@ -261,7 +261,7 @@ TS-only members: `options`?
 
 ### `Handoff.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/agent/handoff.py:391`
+- Python: `src/praisonai-agents/praisonaiagents/agent/handoff.py:394`
 - TypeScript: `src/praisonai-ts/src/agent/handoff.ts:505` (ctor `src/praisonai-ts/src/agent/handoff.ts:759`)
 - Counts: 7 python params: 2 exact, 2 camelCase, 3 alias, 0 flattened, 0 missing; 2 mismatches; 2 waived; 13 TS-only of 21
 
@@ -279,7 +279,7 @@ TS-only members: `condition`?, `contextPolicy`?, `maxContextTokens`?, `maxContex
 
 ### `LLM.__init__`
 
-- Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:680`
+- Python: `src/praisonai-agents/praisonaiagents/llm/llm.py:681`
 - TypeScript: `src/praisonai-ts/src/llm/index.ts:236` (ctor `src/praisonai-ts/src/llm/index.ts:416`)
 - Counts: 25 python params: 8 exact, 16 camelCase, 1 alias, 0 flattened, 0 missing; 1 mismatches; 1 waived; 1 TS-only of 26
 
