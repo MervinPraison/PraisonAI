@@ -80,6 +80,9 @@ configure_host(
     ],
     agents=_build_praison_agents(),
     modules=["jobs"],
+    # Chat + Canvas: tables and code the agents write open beside the chat.
+    # (`aiui run` alone opens the plain Chat layout.)
+    layout="chat-canvas",
 )
 
 

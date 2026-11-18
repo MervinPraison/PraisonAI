@@ -124,10 +124,11 @@ def configure_host(
     datastore_mod = import_wrapper_module("praisonai.ui._aiui_datastore")
     aiui.set_datastore(datastore_mod.PraisonAISessionDataStore())
     aiui.set_style(style)
-    # style="app" opens in Chat + Canvas (aiui's own default for the app shell,
-    # >= 0.3.159). Only call set_layout for an explicit layout: it overrides the
-    # YAML ``layout:`` key, so calling it with the default would hide the user's
-    # choice. Other layouts: workbench, command, guided, mission.
+    # With no layout, aiui picks: create_app() opens Chat + Canvas, and
+    # ``aiui run`` (aiui >= 0.3.169) opens the plain Chat layout. Only call
+    # set_layout for an explicit layout: it overrides the YAML ``layout:`` key,
+    # so calling it by default would hide the user's choice. Layouts:
+    # chat-canvas, chat, workbench, command, guided, mission.
     if style == "app" and layout and hasattr(aiui, "set_layout"):
         aiui.set_layout(layout)
     aiui.set_branding(title=title, logo=logo)
@@ -311,6 +312,11 @@ class UIPreset:
     agent_factory: Optional[Callable] = None
     realtime_manager: Optional[Any] = None  # For OpenAIRealtimeManager
     agent_loader: Optional[Callable] = None  # For loading agents from YAML
+    # The app shell layout. The bundled UIs run under ``aiui run``, which opens
+    # the plain Chat layout unless the app picks one, so they ask for Chat +
+    # Canvas (tables and code the agent writes open beside the chat). None
+    # leaves the choice to aiui; AIUI_LAYOUT still overrides either.
+    layout: Optional[str] = "chat-canvas"
 
 
 def build_ui_app(preset: UIPreset):
@@ -326,6 +332,7 @@ def build_ui_app(preset: UIPreset):
         page_header=preset.page_header,
         theme=preset.theme,
         agent_kwargs=preset.agent_kwargs,
+        layout=preset.layout,
     )
     
     # Set up starters if provided
