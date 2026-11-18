@@ -118,9 +118,9 @@ from ..config.parse_utils import canonical_preset_key, validate_preset_string
 from ..config.agent_init import (
     _is_file_path, resolve_agent_caching, resolve_agent_execution, resolve_agent_guardrails,
     resolve_agent_history, resolve_agent_hooks, resolve_agent_knowledge, resolve_agent_learn,
-    resolve_agent_llm_options, resolve_agent_memory, resolve_agent_model, resolve_agent_output,
-    resolve_agent_planning, resolve_agent_reflection, resolve_agent_skills, resolve_agent_templates,
-    resolve_agent_web,
+    resolve_agent_llm_options, resolve_agent_local, resolve_agent_memory, resolve_agent_model,
+    resolve_agent_output, resolve_agent_planning, resolve_agent_reflection, resolve_agent_skills,
+    resolve_agent_templates, resolve_agent_web,
 )
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
@@ -1646,84 +1646,14 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
             web_fetch=web_fetch, prompt_caching=prompt_caching, claude_memory=claude_memory)
 
         # Local-runtime descriptor: llm="local" (or "local:<engine>/<model>").
-        # Opt-in only -- discovery never fires for any other spec, so a fully
-        # configured agent pays nothing. Resolved here into a concrete
-        # provider/model so the normal LLM path handles it unchanged.
+        # Opt-in only -- discovery never fires for any other spec. Resolved into
+        # a concrete provider/model, endpoint and (for memory/knowledge) a local
+        # embedder, so the normal LLM path handles it unchanged.
         if isinstance(llm, str) and (llm == "local" or llm.startswith("local:")):
-            from ..local import LocalEngine as _LocalEngine
-            from ..local import resolve as _resolve_local
-            _spec = llm[len("local:"):] if llm.startswith("local:") else None
-            _target = _resolve_local(_spec or None)
-            llm = _target.litellm_model
-            if base_url is None:
-                # Ollama's litellm provider builds its own /api paths from the
-                # server root, so it takes base_url. Every other local engine
-                # speaks OpenAI and serves under /v1 -- handing it the bare root
-                # sent chat to /chat/completions, which a real LM Studio, vLLM
-                # or llama-server answers with 404.
-                base_url = (_target.base_url
-                            if _target.engine is _LocalEngine.OLLAMA
-                            else _target.openai_base_url)
-            if api_key is None:
-                api_key = _target.api_key
-            self._local_target = _target
-
-            # Keep a local agent local end to end. Without this, chat went to
-            # the local server while knowledge/memory embedded against OpenAI --
-            # sending the user's documents AND their queries off the machine
-            # with no warning, which defeats the entire point of asking for a
-            # local model. Only fills a gap: an explicit embedder always wins.
-            _wants_embeddings = (retrieval_config is not None
-                                 or embedder_config is not None
-                                 or memory not in (None, False))
-            # retrieval_config may be a dict (knowledge=-derived or user dict) or a
-            # RetrievalConfig instance (passed explicitly); read embedder_config
-            # from either shape without assuming .get() exists.
-            _rc_embedder = (
-                retrieval_config.get('embedder_config')
-                if isinstance(retrieval_config, dict)
-                else getattr(retrieval_config, 'embedder_config', None))
-            if _wants_embeddings and not embedder_config and not _rc_embedder:
-                from ..local import (local_embedder_config as _local_embedder,
-                                     select_embedding_model as _select_embed)
-                _embed_model = _select_embed(
-                    getattr(_d, 'models', ()) if (_d := Agent._local_discovery(_target)) else (),
-                    getattr(_d, 'model_meta', ()) if _d else ())
-                if _embed_model:
-                    embedder_config = _local_embedder(
-                        _target.engine, _target.base_url, _embed_model)
-                    # Carry the real vector width. local/ is a dependency sink
-                    # and cannot import the dimension table, so the caller
-                    # supplies it: a store created at the wrong width either
-                    # rejects every write or silently corrupts the index.
-                    # A width the server *measured* (already in the config) is
-                    # authoritative and must win over the static table. The
-                    # table only fills a genuine gap, and even then never with
-                    # the generic default: a guessed width is worse than letting
-                    # the store infer one from the first vector.
-                    _cfg = embedder_config.setdefault("config", {})
-                    if not _cfg.get("embedding_dims"):
-                        try:
-                            from ..embedding.dimensions import (
-                                DEFAULT_DIMENSION, get_dimensions)
-                            _dims = get_dimensions(_embed_model)
-                            if _dims and _dims != DEFAULT_DIMENSION:
-                                _cfg["embedding_dims"] = _dims
-                        except Exception:  # noqa: BLE001 -- a missing width must not break setup
-                            pass
-                    if isinstance(retrieval_config, dict):
-                        retrieval_config.setdefault('embedder_config', embedder_config)
-                    elif retrieval_config is not None and getattr(
-                            retrieval_config, 'embedder_config', None) is None:
-                        retrieval_config.embedder_config = embedder_config
-                else:
-                    logger.warning(
-                        "llm=%r resolved a local model, but %s serves no embedding "
-                        "model, so knowledge/memory would embed against a remote "
-                        "provider -- sending your documents off this machine. "
-                        "Pull one (e.g. `ollama pull nomic-embed-text`) or set an "
-                        "explicit embedder to silence this.",
-                        llm, _target.base_url)
+            (llm, base_url, api_key, embedder_config,
+             self._local_target) = resolve_agent_local(
+                llm, base_url, api_key, retrieval_config, embedder_config, memory,
+                Agent._local_discovery)
 
         # Panel (multi-model) descriptor: "panel:<name>" or {"provider": "panel"}.
         # Resolved lazily into a PanelLLM; composes with the normal tool loop.

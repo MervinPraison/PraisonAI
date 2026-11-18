@@ -11,7 +11,7 @@ from pathlib import Path
 
 import praisonaiagents
 
-CEILING = 42  # all T-08 PRs combined (#6600-#6630), 2026-11-18
+CEILING = 41  # T-08 PRs (#6600-#6630) + agent.py __init__ local descriptor (T-05 2c)
 
 
 def _silent_handlers():
