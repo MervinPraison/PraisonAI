@@ -17,77 +17,77 @@ This report compares **Python SDK feature categories** against **Python document
 
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
-| ✅ AGUI | 1 | 2 | 577 |
-| ✅ Agent | 22 | 62 | 19777 |
-| ✅ Agent-to-Agent (A2A) | 1 | 7 | 2996 |
+| ✅ AGUI | 1 | 2 | 640 |
+| ✅ Agent | 22 | 65 | 20381 |
+| ✅ Agent-to-Agent (A2A) | 1 | 7 | 3175 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 701 |
-| ✅ Approval | 1 | 8 | 4164 |
+| ✅ Approval | 1 | 8 | 4227 |
 | ✅ Audio | 2 | 12 | 1000 |
-| ✅ Auto Generation | 5 | 12 | 4003 |
-| ✅ Autonomy | 3 | 7 | 2808 |
-| ✅ Bots | 7 | 39 | 16365 |
+| ✅ Auto Generation | 5 | 12 | 4106 |
+| ✅ Autonomy | 3 | 7 | 3059 |
+| ✅ Bots | 7 | 41 | 17228 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 124 | 39593 |
+| ✅ CLI | 5 | 124 | 39994 |
 | ✅ Chunking | 2 | 2 | 435 |
 | ✅ Citations | 2 | 1 | 202 |
-| ✅ Code Execution | 2 | 14 | 5022 |
+| ✅ Code Execution | 2 | 14 | 5222 |
 | ✅ Conditions | 1 | 3 | 1386 |
-| ✅ Configuration | 3 | 8 | 3350 |
-| ✅ Context Management | 16 | 37 | 14724 |
+| ✅ Configuration | 3 | 8 | 3436 |
+| ✅ Context Management | 16 | 37 | 14759 |
 | ✅ Deep Research | 8 | 2 | 591 |
-| ✅ Display | 6 | 3 | 844 |
+| ✅ Display | 6 | 3 | 848 |
 | ✅ Embeddings | 6 | 23 | 2074 |
-| ✅ Evaluation | 1 | 9 | 3709 |
-| ✅ Events | 1 | 2 | 782 |
-| ✅ Execution | 3 | 4 | 1697 |
+| ✅ Evaluation | 1 | 9 | 3727 |
+| ✅ Events | 1 | 2 | 788 |
+| ✅ Execution | 3 | 5 | 1868 |
 | ✅ Failover | 2 | 1 | 576 |
-| ✅ Files | 2 | 7 | 2376 |
+| ✅ Files | 2 | 7 | 2528 |
 | ✅ Flow | 1 | 3 | 811 |
-| ✅ Gateway | 7 | 103 | 39991 |
-| ✅ Guardrails | 5 | 4 | 2631 |
-| ✅ Handoffs | 11 | 6 | 2812 |
-| ✅ Hooks | 2 | 9 | 5317 |
-| ✅ Image | 1 | 11 | 1346 |
-| ✅ Knowledge | 4 | 20 | 6264 |
-| ✅ LLM | 3 | 15 | 6160 |
-| ✅ Loops | 4 | 5 | 1511 |
-| ✅ MCP | 1 | 64 | 15388 |
-| ✅ Memory | 6 | 21 | 8484 |
+| ✅ Gateway | 7 | 110 | 43032 |
+| ✅ Guardrails | 5 | 5 | 2940 |
+| ✅ Handoffs | 11 | 6 | 2860 |
+| ✅ Hooks | 2 | 9 | 5341 |
+| ✅ Image | 1 | 11 | 1574 |
+| ✅ Knowledge | 4 | 20 | 6295 |
+| ✅ LLM | 3 | 16 | 6513 |
+| ✅ Loops | 4 | 5 | 1600 |
+| ✅ MCP | 1 | 67 | 15750 |
+| ✅ Memory | 6 | 21 | 8633 |
 | ✅ OCR | 2 | 1 | 237 |
-| ✅ Observability | 2 | 23 | 2859 |
+| ✅ Observability | 2 | 23 | 2866 |
 | ✅ Optimizer | 1 | 2 | 794 |
-| ✅ Output | 3 | 6 | 1573 |
+| ✅ Output | 3 | 6 | 1575 |
 | ✅ Parallel Execution | 3 | 2 | 546 |
-| ✅ Planning | 6 | 7 | 1827 |
-| ✅ Plugins | 8 | 5 | 4114 |
+| ✅ Planning | 6 | 7 | 1834 |
+| ✅ Plugins | 8 | 6 | 4615 |
 | ✅ Prompts | 2 | 9 | 2046 |
-| ✅ Providers | 1 | 57 | 8697 |
+| ✅ Providers | 1 | 58 | 8999 |
 | ✅ Query | 1 | 2 | 736 |
-| ✅ RAG | 5 | 15 | 3284 |
+| ✅ RAG | 5 | 15 | 3307 |
 | ✅ Realtime | 2 | 5 | 696 |
-| ✅ Reflection | 3 | 3 | 732 |
-| ✅ Retrieval | 2 | 5 | 1068 |
+| ✅ Reflection | 3 | 3 | 736 |
+| ✅ Retrieval | 2 | 5 | 1105 |
 | ✅ Routing | 1 | 2 | 430 |
-| ✅ Sandbox | 5 | 7 | 3720 |
-| ✅ Security | 1 | 3 | 3655 |
-| ✅ Sessions | 4 | 21 | 8752 |
-| ✅ Skills | 6 | 16 | 6045 |
-| ✅ Tasks | 2 | 8 | 3266 |
-| ✅ Telemetry | 1 | 2 | 660 |
+| ✅ Sandbox | 5 | 7 | 3718 |
+| ✅ Security | 1 | 3 | 3733 |
+| ✅ Sessions | 4 | 22 | 9064 |
+| ✅ Skills | 6 | 16 | 6064 |
+| ✅ Tasks | 2 | 10 | 3593 |
+| ✅ Telemetry | 1 | 2 | 681 |
 | ✅ Templates | 1 | 9 | 1859 |
-| ✅ Tools | 12 | 147 | 45636 |
+| ✅ Tools | 12 | 148 | 46488 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1219 |
-| ✅ Video | 2 | 10 | 1383 |
+| ✅ Video | 2 | 11 | 1458 |
 | ✅ Vision | 2 | 1 | 329 |
-| ✅ Web | 3 | 10 | 2895 |
-| ✅ Workflows | 5 | 21 | 9251 |
+| ✅ Web | 3 | 10 | 2909 |
+| ✅ Workflows | 5 | 22 | 9632 |
 
 ## Documentation Without Features
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Database (44 docs, 8451 lines)
+- ℹ️ Database (44 docs, 8461 lines)
 - ℹ️ Documents (1 docs, 810 lines)
 - ℹ️ Teams (1 docs, 214 lines)
 

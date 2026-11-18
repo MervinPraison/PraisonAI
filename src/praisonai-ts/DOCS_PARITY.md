@@ -47,7 +47,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Failover | 5 | 1 | 160 |
 | ✅ Files | 15 | 1 | 151 |
 | ✅ Flow | 5 | 1 | 164 |
-| ✅ Gateway | 10 | 1 | 401 |
+| ✅ Gateway | 10 | 1 | 452 |
 | ✅ Guardrails | 18 | 3 | 749 |
 | ✅ Handoffs | 16 | 1 | 420 |
 | ✅ Hooks | 8 | 1 | 203 |
@@ -57,7 +57,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ LLM | 29 | 2 | 279 |
 | ✅ Loops | 11 | 1 | 241 |
 | ✅ MCP | 21 | 4 | 927 |
-| ✅ Memory | 24 | 4 | 840 |
+| ✅ Memory | 24 | 4 | 857 |
 | ✅ Middleware | 2 | 1 | 162 |
 | ✅ OCR | 7 | 1 | 253 |
 | ✅ Observability | 12 | 28 | 2692 |
