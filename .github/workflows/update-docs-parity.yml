@@ -18,6 +18,13 @@ on:
 permissions:
   contents: write
 
+# Overlapping runs regenerate the same DOCS_PARITY.md files, so the later run's
+# rebase would conflict on every retry. Queue runs instead; each one checks out
+# main when it starts, after the previous run has pushed.
+concurrency:
+  group: update-docs-parity
+  cancel-in-progress: false
+
 jobs:
   update-docs-parity:
     runs-on: ubuntu-latest
