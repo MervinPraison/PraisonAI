@@ -236,7 +236,7 @@ from praisonaiagents import Agent
 
 # Give your agent a goal, and watch it work.
 agent = Agent(instructions="You are a senior data analyst.")
-agent.start("Analyze the top 3 tech trends of 2026 and format as a markdown table.")
+print(agent.start("Analyze the top 3 tech trends of 2026 and format as a markdown table."))
 ```
 
 ---

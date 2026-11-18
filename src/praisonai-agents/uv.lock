@@ -3162,7 +3162,7 @@ wheels = [
 
 [[package]]
 name = "praisonaiagents"
-version = "1.7.23"
+version = "1.7.24"
 source = { editable = "." }
 dependencies = [
     { name = "aiohttp" },
@@ -3172,6 +3172,8 @@ dependencies = [
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "rich" },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
 ]
 
 [package.optional-dependencies]
@@ -3334,7 +3336,9 @@ requires-dist = [
     { name = "python-multipart", marker = "extra == 'auth'", specifier = ">=0.0.6" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=1.1.0" },
     { name = "typesafe-sdk", marker = "extra == 'decisions'", specifier = ">=0.7.0" },
+    { name = "tzdata", marker = "sys_platform == 'win32'" },
     { name = "uvicorn", marker = "extra == 'api'", specifier = ">=0.34.0" },
     { name = "uvicorn", marker = "extra == 'mcp'", specifier = ">=0.34.0" },
     { name = "uvicorn", marker = "extra == 'os'", specifier = ">=0.34.0" },
@@ -4702,7 +4706,7 @@ name = "sqlalchemy"
 version = "2.0.37"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "greenlet", marker = "(python_full_version < '3.14' and platform_machine == 'AMD64') or (python_full_version < '3.14' and platform_machine == 'WIN32') or (python_full_version < '3.14' and platform_machine == 'aarch64') or (python_full_version < '3.14' and platform_machine == 'amd64') or (python_full_version < '3.14' and platform_machine == 'ppc64le') or (python_full_version < '3.14' and platform_machine == 'win32') or (python_full_version < '3.14' and platform_machine == 'x86_64')" },
+    { name = "greenlet", marker = "python_full_version < '3.14' and (platform_machine == 'AMD64' or platform_machine == 'WIN32' or platform_machine == 'aarch64' or platform_machine == 'amd64' or platform_machine == 'ppc64le' or platform_machine == 'win32' or platform_machine == 'x86_64')" },
     { name = "typing-extensions" },
 ]
 sdist = { url = "https://files.pythonhosted.org/packages/3b/20/93ea2518df4d7a14ebe9ace9ab8bb92aaf7df0072b9007644de74172b06c/sqlalchemy-2.0.37.tar.gz", hash = "sha256:12b28d99a9c14eaf4055810df1001557176716de0167b91026e648e65229bffb", size = 9626249, upload-time = "2025-01-09T22:43:25.981Z" }
