@@ -422,7 +422,7 @@ const agent = new Agent({
 | **Google** | `google/gemini-1.5-flash` | Any Gemini model id |
 | **AI SDK** | via peer dependency | All AI SDK providers |
 
-With no `llm` set, the default model follows the first API key found, in the order in `src/llm/default-model.ts` (`PROVIDER_DEFAULT_MODELS`, kept byte-identical to Python). Final fallback: `gpt-4o-mini`.
+Model precedence: `model` > `llm` > the model from `auth`, then `resolveDefaultModel()` in `src/llm/default-model.ts`. That function checks `OPENAI_MODEL_NAME`, then `PRAISONAI_MODEL`, and only then walks the provider credentials in `PROVIDER_DEFAULT_MODELS` (kept byte-identical to Python), taking the model of the first API key found. Final fallback: `gpt-4o-mini`.
 
 ### 6.2 Backend Resolution
 
@@ -1034,15 +1034,15 @@ Three generated reports, each stricter than the last. Do not edit them by hand.
 | Report | Question it answers | Check locally (from the repo root) |
 |--------|---------------------|-------------------------------------|
 | `PARITY.md`, `FEATURE_PARITY_TRACKER.json` | Is the name exported? | `python3 src/praisonai/scripts/generate_parity_tracker.py --check` |
-| `SIGNATURE_PARITY.md`, `signature-parity.json` | Does each Python parameter exist, with the same required-ness and default? | `python3 -m praisonai._dev.parity.signatures --check` |
-| `BEHAVIOUR_PARITY.md`, `behaviour-parity.json` | Is an accepted option acted on? The count may only go down. | `python3 -m praisonai._dev.parity.behaviour --check` |
+| `SIGNATURE_PARITY.md`, `signature-parity.json` | Does each Python parameter exist, with the same required-ness and default? | `PYTHONPATH=src/praisonai python3 -m praisonai._dev.parity.signatures --check` |
+| `BEHAVIOUR_PARITY.md`, `behaviour-parity.json` | Is an accepted option acted on? The count may only go down. | `PYTHONPATH=src/praisonai python3 -m praisonai._dev.parity.behaviour --check` |
 
 Rules:
 
 - Use the same name as Python (camelCase of the snake_case name). Add an alias only when Python has one.
 - Do not accept an option and ignore it. If it cannot be honoured yet, record it in the `UNHONOURED_OPTIONS` ledger so the behaviour gate counts it.
-- A default that differs from Python is a bug unless the signature rules file records the reason.
-- Regenerate the reports in the same PR as the change (`--write` instead of `--check`).
+- A default that differs from Python is a bug unless it has a waiver, with a reason and owner, in `src/praisonai/praisonai/_dev/parity/signatures/waivers.yaml`. (`rules.yaml` in the same folder only defines normalisation and equivalent representations.)
+- Regenerate the reports in the same PR as the change. The names generator writes when run without flags (`python3 src/praisonai/scripts/generate_parity_tracker.py`); the signature and behaviour modules take `--write` instead of `--check`.
 
 ---
 
