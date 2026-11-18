@@ -456,6 +456,7 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
             self._execution_count += 1
 
         last_exc: Optional[Exception] = None
+        attempts_made = 0
         for attempt in range(max_retries):
             try:
                 logger.info(f"Async attempt {attempt + 1}/{max_retries}")
@@ -512,6 +513,13 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
             except asyncio.TimeoutError as e:
                 last_exc = e
                 logger.error(f"Async execution timeout on attempt {attempt + 1}: {e}")
+                attempts_made = attempt + 1
+                if attempt < max_retries - 1 and not self._rerun_is_replay_safe():
+                    logger.error(
+                        "Not retrying: the agent has an effectful tool "
+                        "(restart_safe=False) that may already have run"
+                    )
+                    break
                 if attempt < max_retries - 1:
                     wait_time = backoff_delay(attempt)
                     logger.info(f"Waiting {wait_time}s before async retry after timeout...")
@@ -520,7 +528,13 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
             except Exception as e:
                 last_exc = e
                 logger.error(f"Async agent execution failed on attempt {attempt + 1}: {e}")
-                
+                attempts_made = attempt + 1
+                if attempt < max_retries - 1 and not self._rerun_is_replay_safe():
+                    logger.error(
+                        "Not retrying: the agent has an effectful tool "
+                        "(restart_safe=False) that may already have run"
+                    )
+                    break
                 if attempt < max_retries - 1:
                     wait_time = backoff_delay(attempt)
                     logger.info(f"Waiting {wait_time}s before async retry...")
@@ -529,11 +543,11 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
         
         async with self._stats_lock:
             self._failure_count += 1
-        logger.error(f"Async agent execution failed after {max_retries} attempts")
+        logger.error(f"Async agent execution failed after {attempts_made} attempts")
         safe_call(
             self.on_failure,
             last_exc if last_exc is not None
-            else RuntimeError(f"Failed after {max_retries} attempts")
+            else RuntimeError(f"Failed after {attempts_made} attempts")
         )
         await asyncio.to_thread(self._update_state_if_daemon)
 
