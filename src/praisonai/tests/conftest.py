@@ -293,6 +293,8 @@ def pytest_runtest_makereport(item, call):
 
 def pytest_report_teststatus(report, config):
     """Add duration to the test status output if it's a call report."""
+    if hasattr(report, 'wasxfail'):
+        return None  # keep pytest's xfailed/xpassed status, not "skipped"
     if report.when == 'call':
         duration = getattr(report, 'duration', 0)
         category, short, verbose = '', '', ''

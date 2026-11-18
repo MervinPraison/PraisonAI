@@ -21,7 +21,7 @@ def test_sync_methods():
     print("Testing synchronous methods...")
     
     # Test basic response
-    llm = LLM(model="gpt-3.5-turbo")
+    llm = LLM(model="gpt-4o-mini")
     
     # Test simple prompt
     print("1. Testing simple prompt...")
@@ -64,7 +64,7 @@ async def test_async_methods():
     print("Testing asynchronous methods...")
     
     # Test basic async response
-    llm = LLM(model="gpt-3.5-turbo")
+    llm = LLM(model="gpt-4o-mini")
     
     # Test simple prompt
     print("1. Testing async simple prompt...")
@@ -106,7 +106,7 @@ def test_edge_cases():
     """Test edge cases and special scenarios"""
     print("Testing edge cases...")
     
-    llm = LLM(model="gpt-3.5-turbo")
+    llm = LLM(model="gpt-4o-mini")
     
     # Test with list prompt (multimodal-style)
     print("1. Testing list-style prompt...")
@@ -118,16 +118,13 @@ def test_edge_cases():
     print(f"   Response: {response}")
     assert response, "Should handle list-style prompts"
     
-    # Test with legacy o1 model (system message should be skipped)
+    # Legacy o1 models reject system messages. o1-mini is deprecated, so check
+    # the message building offline instead of calling it.
     print("2. Testing legacy o1 model handling...")
-    llm_o1 = LLM(model="o1-mini")
-    response = llm_o1.response(
-        prompt="Hello",
-        system_prompt="This should be skipped",
-        verbose=False
+    messages, _ = LLM(model="o1-mini")._build_messages(
+        prompt="Hello", system_prompt="This should be skipped"
     )
-    print(f"   Response: {response[:50]}...")
-    assert response, "Should handle legacy o1 models"
+    assert all(m["role"] != "system" for m in messages), messages
     
     print("✅ Edge cases handled correctly\n")
 

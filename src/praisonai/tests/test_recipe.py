@@ -260,10 +260,10 @@ class TestCLI:
             exit_code = handler.handle(["init", "test-recipe", "-o", tmpdir])
             assert exit_code == 0
             
-            # Check files were created
+            # Check files were created (agents.yaml + tools.py layout)
             recipe_dir = Path(tmpdir) / "test-recipe"
-            assert (recipe_dir / "TEMPLATE.yaml").exists()
-            assert (recipe_dir / "workflow.yaml").exists()
+            assert (recipe_dir / "agents.yaml").exists()
+            assert (recipe_dir / "tools.py").exists()
             assert (recipe_dir / "README.md").exists()
     
     def test_recipe_dry_run(self, cli_runner):

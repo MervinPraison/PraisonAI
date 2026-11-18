@@ -9,6 +9,9 @@ import pytest
 
 pytestmark = pytest.mark.real
 
+# PraisonAI(framework="autogen") exits when AutoGen is missing; skip instead.
+pytest.importorskip("autogen")
+
 
 @pytest.mark.skipif(not os.getenv("OPENAI_API_KEY"), reason="OPENAI_API_KEY required")
 def test_autogen_environment_check():
