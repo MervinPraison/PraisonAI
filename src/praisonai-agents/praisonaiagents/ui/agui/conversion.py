@@ -170,7 +170,7 @@ def validate_state(state: Any, thread_id: str) -> Optional[Dict[str, Any]]:
         try:
             return state.model_dump()
         except Exception:
-            pass
+            logger.debug("model_dump() failed for state %s", type(state).__name__, exc_info=True)
     
     # Try to_dict method
     if hasattr(state, "to_dict") and callable(getattr(state, "to_dict")):
@@ -179,7 +179,7 @@ def validate_state(state: Any, thread_id: str) -> Optional[Dict[str, Any]]:
             if isinstance(result, dict):
                 return result
         except Exception:
-            pass
+            logger.debug("to_dict() failed for state %s", type(state).__name__, exc_info=True)
     
     logger.warning(
         f"State must be a dict, got {type(state).__name__}. "

@@ -2380,7 +2380,8 @@ class AgentFlow:
                         try:
                             self.on_step_error(step.name, e)
                         except Exception:
-                            pass
+                            logger.debug("on_step_error callback failed for step %s", step.name,
+                                         exc_info=True)
                 
                 # Check guardrail if present (guardrails is canonical, guardrail is deprecated)
                 guardrail = getattr(step, 'guardrails', None) or getattr(step, 'guardrail', None)
