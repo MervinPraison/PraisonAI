@@ -1778,6 +1778,17 @@ Respond with ONLY a valid JSON tool call in this format:
                     logger.warning(
                         f"network unreachable ({str(e)[:120]}), retrying in {network_delay:.1f}s..."
                     )
+                    # max_attempts=None: this path is time-budgeted, not counted.
+                    try:
+                        from ..main import execute_sync_callback
+                        execute_sync_callback('retry',
+                            attempt=int(network_state["n"]),
+                            max_attempts=None,
+                            error=str(e)[:200],
+                            retry_in_seconds=network_delay
+                        )
+                    except ImportError:
+                        pass
                     time.sleep(network_delay)
                     continue
 
@@ -1876,6 +1887,17 @@ Respond with ONLY a valid JSON tool call in this format:
                     logger.warning(
                         f"network unreachable ({str(e)[:120]}), retrying in {network_delay:.1f}s..."
                     )
+                    # max_attempts=None: this path is time-budgeted, not counted.
+                    try:
+                        from ..main import execute_callback
+                        await execute_callback('retry',
+                            attempt=int(network_state["n"]),
+                            max_attempts=None,
+                            error=str(e)[:200],
+                            retry_in_seconds=network_delay
+                        )
+                    except ImportError:
+                        pass
                     await asyncio.sleep(network_delay)
                     continue
 
@@ -7519,7 +7541,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Add extra settings for provider-specific parameters (e.g., num_ctx for Ollama)
         if self.extra_settings:
             # Filter out internal parameters that shouldn't be passed to the API
-            filtered_extra_settings = {k: v for k, v in self.extra_settings.items() if k != 'metrics'}
+            filtered_extra_settings = {k: v for k, v in self.extra_settings.items() if k not in ('metrics', 'network_retry_budget')}
             params.update(filtered_extra_settings)
         
         # Inject subscription credentials if auth provider is set
