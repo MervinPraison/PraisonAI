@@ -153,7 +153,7 @@ class PerformanceEvaluator(BaseEvaluator):
             try:
                 import tracemalloc
                 tracemalloc.stop()
-            except Exception:
+            except ImportError:
                 pass
         
         self.after_run(result)
