@@ -51,15 +51,25 @@ Each feature runs 3 ways: **CLI, YAML, Python**.
 │   │   └── pyproject.toml         # Package config
 │   │
 │   ├── praisonai/                 # Wrapper (praisonai)
-│   │   ├── praisonai/             # Bot/channel CLI, integrations, heavy impls
+│   │   ├── praisonai/             # Integrations, serve, dashboard, back-compat shims
 │   │   └── pyproject.toml
 │   │
 │   ├── praisonai-code/            # Agentic terminal CLI (praisonai_code)
 │   │   ├── praisonai_code/        # run, chat, code, runtime, cli_backends
 │   │   └── pyproject.toml
 │   │
-│   └── praisonai-ts/              # TypeScript SDK
-│       └── src/
+│   ├── praisonai-bot/             # Bots, gateway, channel CLI (praisonai_bot)
+│   ├── praisonai-train/           # LLM fine-tuning, agent training (praisonai_train)
+│   ├── praisonai-browser/         # Browser automation (praisonai_browser)
+│   ├── praisonai-mcp/             # MCP server host (praisonai_mcp)
+│   ├── praisonai-sandbox/         # Isolated execution backends (praisonai_sandbox)
+│   ├── praisonai-deploy/          # Deployment providers (praisonai_deploy)
+│   │
+│   ├── praisonai-ts/              # TypeScript SDK (npm: praisonai)
+│   │   └── src/
+│   ├── praisonai-rust/            # Rust SDK — see its own AGENTS.md
+│   ├── praisonai-desktop/         # Desktop app
+│   └── praisonai-mobile/          # Mobile app (React Native + praisonai-ts)
 │
 ├── examples/                      # Main examples directory
 │   ├── python/                # Python examples (primary)
@@ -99,6 +109,9 @@ Each feature runs 3 ways: **CLI, YAML, Python**.
 │ run • chat • code   │ bots • gateway •    │ LLM fine-tune •     │
 │ • doctor            │ BotOS • CLI         │ agent training      │
 ├─────────────────────┴─────────────────────┴─────────────────────┤
+│ praisonai-browser • praisonai-mcp • praisonai-sandbox •         │
+│ praisonai-deploy   (Tier 2 siblings of the three above)         │
+├─────────────────────────────────────────────────────────────────┤
 │                    praisonaiagents (Core SDK)                   │
 │  Protocols • Hooks • Adapters • Base Classes • Decorators       │
 ├─────────────────────────────────────────────────────────────────┤
@@ -128,11 +141,13 @@ The **agentic terminal CLI** (`run`, `chat`, `code`, warm runtime, CLI backends,
 | C4 | `cli/features/*` (158 feature handlers; bot features excepted) |
 | C5 | `cli/main.py`, `app.py`, `configuration/`, `session/`, `utils/`, schema modules |
 
-**Intentionally retained in the wrapper (not shims):**
+**What the wrapper still owns (after C9–C14):**
 
-- **Commands:** `gateway`, `bot`, `pairing`, `identity`, `onboard`, `kanban`, `dashboard`, `claw`
-- **Features:** `gateway`, `bots_cli`, `onboard`, `approval`, `serve`
-- **Domains:** `praisonai.gateway.*`, `praisonai.bots.*`, integrations, endpoints
+- **Commands** (`_WRAPPER_RESIDENT_COMMANDS` in `praisonai_code/cli/app.py`): `dashboard`, `flow`, `n8n`, `replay`, `managed`, `langfuse`, `langextract`, `examples`, `standardise`, `docs`, `schedule`, `batch`, `rag`, `knowledge`, `realtime`, `profile`, `audit`, `app`, `context`, `recipe`, `validate`
+- **Features:** `serve` and the integration features
+- **Domains:** integrations, endpoints, `framework_adapters/`, dashboard
+
+**Moved out of the wrapper; only shims remain there:** `bot`, `gateway`, `pairing`, `identity`, `onboard`, `kanban`, `claw`, `mint_link` (now `praisonai_bot.cli.commands.*`); features `gateway`, `bots_cli`, `onboard`, `approval`; packages `praisonai.bots` and `praisonai.gateway` (`alias_package` → `praisonai_bot`). Fix these in `praisonai-bot`, not in the wrapper shim.
 
 **Backward-compat shim patterns** (old `praisonai.*` paths must keep working):
 
@@ -143,7 +158,7 @@ The **agentic terminal CLI** (`run`, `chat`, `code`, warm runtime, CLI backends,
 | Package `__getattr__` + submodule alias | `runtime/`, `cli_backends/` | Submodules identical; package object differs |
 | `features/__init__.py` `__path__` extension | Extracted features; five bot features stay local | Handler imports via `__getattr__` |
 
-**Typer lazy-load:** `praisonai_code.cli.app._WRAPPER_COMMANDS` lists bot/channel commands that resolve via **`praisonai.cli.commands.*`** (wrapper), not `praisonai_code.cli.commands.*`.
+**Typer lazy-load:** each command name is routed by a resident set in `praisonai_code/cli/app.py` (see §2.4). `_WRAPPER_COMMANDS` is kept as an alias of `_WRAPPER_RESIDENT_COMMANDS`.
 
 **Monorepo bootstrap:** `praisonai._bootstrap.ensure_praisonai_code()` adds sibling `src/praisonai-code` to `sys.path` so `PYTHONPATH=src/praisonai-agents:src/praisonai` works without an explicit code entry.
 
@@ -175,7 +190,7 @@ unittest.mock.patch("praisonai.cli.commands.run.X")   # same module object
 
 **Do not** recreate `src/praisonai/praisonai_code/` — it shadows the real package.
 
-**PyPI publish order:** `praisonaiagents` → `praisonai-code` → `praisonai` (see `src/praisonai/scripts/bump_and_release.py` and `.github/workflows/pypi-release.yml`). Gateway/bots changes release via wrapper only; agentic CLI changes also bump `praisonai-code`.
+**PyPI publish order:** `praisonaiagents` → `praisonai-code` → `praisonai-bot` → `praisonai-train` → `praisonai-browser` → `praisonai-mcp` → `praisonai-sandbox` → `praisonai-deploy` → `praisonai` (see `src/praisonai/scripts/bump_and_release.py` and `.github/workflows/pypi-release.yml`). A change releases with the package that owns the code: gateway/bots changes bump `praisonai-bot`, agentic CLI changes bump `praisonai-code`. A green release run with `dry_run=true` publishes nothing — check PyPI.
 
 #### C6 integration gate (#2519)
 
@@ -213,6 +228,10 @@ and features (capabilities, bots, framework adapters) — use
 | 2 | `praisonai-code` | `run`/`chat`/`code`, Typer, runtime, llm, tool resolution |
 | 2b | `praisonai-bot` | Bots, gateway, channel CLI, OS daemon |
 | 2c | `praisonai-train` | LLM fine-tuning (Unsloth), agent training, `train` CLI |
+| 2d | `praisonai-browser` | Browser automation, `browser` CLI (C11) |
+| 2e | `praisonai-mcp` | MCP server host, `mcp` CLI (C12) |
+| 2f | `praisonai-sandbox` | Isolated execution backends: docker, subprocess, sandlock, remote (C13) |
+| 2g | `praisonai-deploy` | Deployment providers, `deploy` CLI (C14) |
 | 3 | `praisonai` | `framework_adapters/`, capabilities, serve orchestration, dashboard |
 | 1-TS | `praisonai-ts` | TypeScript/JavaScript SDK (`npm: praisonai`); canonical path `src/praisonai-ts/` |
 
@@ -226,7 +245,7 @@ and features (capabilities, bots, framework adapters) — use
 `praisonai_bot.cli.commands.*` (`bot`, `gateway`, `pairing`, …); `_TRAIN_RESIDENT_COMMANDS` loads
 from `praisonai_train.cli.commands.*` (`train`, C10); `_WRAPPER_RESIDENT_COMMANDS` loads from
 `praisonai.cli.commands.*` (`dashboard`, `flow`, …). Commands implemented in `praisonai_code`
-(`serve`, …) stay local; bridge internal wrapper imports.
+(`serve`, …) stay local; bridge internal wrapper imports. `_DEPLOY_RESIDENT_COMMANDS` (`deploy`), `_BROWSER_RESIDENT_COMMANDS` (`browser`) and `_MCP_RESIDENT_COMMANDS` (`mcp`) load from their own packages the same way.
 
 Full boundary doc: [`src/praisonai/tests/C7.1_BOUNDARIES.md`](../praisonai/tests/C7.1_BOUNDARIES.md).
 
@@ -249,33 +268,37 @@ Python guidelines in this file do **not** replace the TypeScript SDK guide. For 
 
 | Module | Size | Purpose |
 |--------|------|---------|
-| `agent/` | 1.7M | Agent class, protocols, handoff, autonomy |
-| `memory/` | 784K | Memory protocols, adapters, file memory |
-| `context/` | 840K | Context management, artifacts, fast context |
-| `tools/` | 816K | Tool SDK, decorators, registry, protocols |
-| `llm/` | 756K | LLM client, model router |
-| `workflows/` | 472K | Workflow engine, patterns (Route, Parallel, Loop) |
-| `mcp/` | 404K | Model Context Protocol integration |
-| `eval/` | 384K | Evaluation framework |
-| `agents/` | 376K | Multi-agent orchestration (AgentTeam, AgentFlow) |
-| `knowledge/` | 300K | Knowledge/RAG protocols, vector stores |
-| `rag/` | 264K | RAG protocols, retriever, reranker |
-| `config/` | 252K | Feature configs (ExecutionConfig, OutputConfig, etc.) |
-| `session/` | 224K | Session management, persistence |
-| `plugins/` | 204K | Plugin manager, registry |
-| `hooks/` | 184K | Hook system, middleware, events |
-| `storage/` | 136K | Storage protocols, adapters |
-| `scheduler/` | 132K | Schedule models, store, parser, runner |
-| `trace/` | 116K | Trace protocols, context events |
-| `approval/` | 92K | Human-in-the-loop approval protocols |
-| `bots/` | 80K | BotOS protocols, config |
-| `policy/` | 76K | Policy engine |
-| `gateway/` | 60K | Gateway protocols |
-| `sandbox/` | 56K | Code execution sandbox |
-| `bus/` | 48K | Event bus |
-| `streaming/` | 44K | Streaming events, callbacks |
-| `conditions/` | 40K | Conditional logic protocols |
-| `db/` | 32K | Database adapter protocols |
+| `agent/` | 2.0M | Agent class, mixins, protocols, handoff, autonomy |
+| `tools/` | 1.1M | Tool SDK, decorators, registry, protocols, legacy bundled tools |
+| `llm/` | 848K | LLM client, adapters, model router, error classifier |
+| `gateway/` | 560K | Gateway protocols and config |
+| `context/` | 552K | Context management, artifacts, fast context |
+| `memory/` | 500K | Memory protocols, adapters, file memory |
+| `workflows/` | 448K | Workflow engine, patterns (Route, Parallel, Loop) |
+| `session/` | 432K | Session management, persistence |
+| `eval/` | 348K | Evaluation framework, CHL evaluators |
+| `bots/` | 304K | BotOS protocols, config |
+| `agents/` | 300K | Multi-agent orchestration (AgentTeam, AgentFlow) |
+| `mcp/` | 296K | Model Context Protocol integration |
+| `knowledge/` | 256K | Knowledge/RAG protocols, vector stores |
+| `config/` | 252K | Feature configs, presets, `agent_init.py` resolvers |
+| `runtime/` | 236K | Turn context, run journal, portable runs |
+| `scheduler/` | 204K | Schedule models, store, parser, runner |
+| `skills/` | 200K | Agent Skills loading and tools |
+| `telemetry/` | 180K | Telemetry (opt-out via env) |
+| `plugins/` | 164K | Plugin manager, registry |
+| `rag/` | 148K | RAG protocols, retriever, reranker |
+| `ui/` | 148K | A2A, AG-UI, A2UI surfaces |
+| `hooks/` | 140K | Hook system, middleware, events |
+| `permissions/` | 120K | Permission modes, allowlists |
+| `process/` | 112K | Task process orchestration |
+| `compaction/` | 108K | Context compaction |
+| `approval/` | 104K | Human-in-the-loop approval protocols |
+| `trace/` | 92K | Trace protocols, context events |
+| `storage/` | 88K | Storage protocols, adapters |
+| `local/` | 84K | Local model runtimes (see the workstream note above) |
+
+Sizes are a snapshot (2026-11, 67 subpackages); refresh with `du -sh praisonaiagents/*/`. Smaller modules (`policy/`, `sandbox/`, `bus/`, `streaming/`, `conditions/`, `db/`, …) are not listed.
 
 ### 3.2 Protocol-First Design
 
@@ -308,19 +331,17 @@ dependencies = [
     "rich",                # Terminal UI
     "openai>=1.68.2",      # OpenAI client
     "posthog>=3.0.0",      # Telemetry
-    "aiohttp>=3.8.0"       # Async HTTP
+    "PyYAML>=6.0",         # YAML agents/workflows
+    "aiohttp>=3.8.0",      # Async HTTP
+    "croniter>=6.0",       # Scheduler: every recurring schedule becomes cron
+    "tomli>=1.1.0; python_version < '3.11'",  # config.toml on 3.10
+    "tzdata; sys_platform == 'win32'",
 ]
-
-# Optional (lazy loaded)
-[project.optional-dependencies]
-memory = ["chromadb>=1.0.0", "litellm>=1.81.0"]
-knowledge = ["mem0ai>=0.1.0", "chromadb>=1.0.0", "markitdown[all]>=0.1.0"]
-mcp = ["mcp>=1.20.0", "fastapi>=0.115.0", "uvicorn>=0.34.0"]
-llm = ["litellm>=1.81.0"]
-api = ["fastapi>=0.115.0", "uvicorn>=0.34.0"]
-auth = ["PyJWT>=2.8.0", "passlib[bcrypt]>=1.7.4"]
-mongodb = ["pymongo>=4.6.3", "motor>=3.4.0"]
 ```
+
+Optional extras (lazy loaded; versions live in `pyproject.toml`, the source of truth): `sandbox`, `mcp`, `parallel-search`, `memory`, `knowledge`, `graph`, `llm`, `decisions`, `api`, `os`, `telemetry`, `mongodb`, `dakera`, `auth`, `autonomy`, `search`, `crawl`, `a2ui`, `all`.
+
+A new required dependency needs a strong reason (a feature that silently does nothing without it); otherwise add an extra.
 
 ---
 
@@ -431,6 +452,16 @@ Observability Hooks:
 - Metrics collection via optional adapters
 ```
 
+**Rules enforced by guard tests (do not weaken the guards):**
+
+| Rule | Guard |
+|------|-------|
+| Every SDK exception also subclasses `PraisonAIError` (`praisonaiagents/errors.py`), keeping its built-in base: `class XError(ValueError, PraisonAIError)` | `tests/unit/test_g25_error_base_*.py` |
+| Log through the module logger (`logger = get_logger(__name__)`); never call the root logger (`logging.info(...)`) | `tests/unit/named_loggers/test_no_root_logger_calls.py` |
+| No new silent `except Exception: pass`; log at debug or narrow the type | `tests/unit/test_silent_except_ratchet.py` (count may only go down) |
+| Importing the SDK must not overwrite the host's environment; use `os.environ.setdefault` | `tests/unit/test_telemetry_env_setdefault.py` |
+| A failed LLM call must surface the same way on every chat path (sync, async, stream) | `tests/unit/contract/test_chat_path_contract.py` |
+
 ### 4.9 Naming Conventions
 
 ```python
@@ -523,6 +554,8 @@ agent = Agent(
 
 Agent parameters are consolidated into Config objects following the pattern:
 `False=disabled, True=defaults, Config=custom`
+
+The resolution of each parameter is a pure function `resolve_agent_<param>()` in `praisonaiagents/config/agent_init.py`. Add or change parameter resolution there, not inline in `Agent.__init__`, and keep the names in the single sorted `from ..config.agent_init import (...)` in `agent/agent.py`.
 
 **Consolidated Parameters (use these):**
 
@@ -675,7 +708,7 @@ agent = Agent(
 **Schedule expression formats:**
 - Keywords: `"hourly"`, `"daily"`, `"weekly"`
 - Intervals: `"*/30m"`, `"*/6h"`, `"*/10s"`
-- Cron: `"cron:0 7 * * *"` (requires optional `croniter`)
+- Cron: `"cron:0 7 * * *"` (`croniter` is a core dependency)
 - One-shot: `"at:2026-03-01T09:00:00"`
 - Relative: `"in 20 minutes"`
 
@@ -806,10 +839,11 @@ def test_new_feature():
 
 ```
 tests/
-├── unit/                  # Fast, isolated tests
+├── unit/                  # Fast, isolated tests (no network, no real keys)
 ├── integration/           # Cross-module tests
-├── e2e/                  # End-to-end tests
-└── fixtures/             # Test data
+├── live/                  # Real provider calls (opt-in)
+├── smoke/                 # Quick end-to-end smoke
+└── fixtures/              # Test data
 ```
 
 ### 9.3 Run Tests
@@ -825,7 +859,24 @@ pytest tests/unit/
 pytest --cov=praisonaiagents tests/
 ```
 
-### 9.4 Real Agentic Test (MANDATORY)
+### 9.4 Test Isolation (MUST)
+
+Most red tests on `main` have been leaked state, not code bugs. A unit test:
+
+- Must pass alone **and** in the full run (`pytest tests/unit -n 6`). Check both.
+- Must not read the developer's machine: set `PRAISONAI_HOME` to `tmp_path`, `monkeypatch.chdir(tmp_path)`, and do not depend on API-key or `OPENAI_BASE_URL` env vars being absent or present.
+- Must not open the network or spend money. The `conftest.py` egress guard blocks unmarked connections; do not bypass it.
+- Must not write into the checkout (no files in cwd).
+- Must restore any global it changes (registries, module caches, warning filters).
+
+Local run that matches review practice:
+
+```bash
+env -u OPENAI_API_BASE -u OPENAI_BASE_URL OPENAI_API_KEY=sk-test PYTHONPATH=. \
+  python -m pytest tests/unit -p no:cacheprovider -n 6 -q
+```
+
+### 9.5 Real Agentic Test (MANDATORY)
 
 Every feature MUST include a real agentic test — not just smoke tests.
 
@@ -860,7 +911,10 @@ For every feature/change:
 - [ ] **Lazy imports**: Heavy deps imported inside functions
 - [ ] **Naming**: Follow conventions (add_*, get_*, XConfig)
 - [ ] **Tests**: TDD — write failing tests first
-- [ ] **Real agentic test**: Agent must call LLM end-to-end (§9.4)
+- [ ] **Real agentic test**: Agent must call LLM end-to-end (§9.5)
+- [ ] **Isolated tests**: pass alone and in the full run; no machine state (§9.4)
+- [ ] **Errors and logs**: `PraisonAIError` base, module logger, no silent except (§4.8)
+- [ ] **No feature removed**: delegate, shim or alias; grep every package before a rename or move
 - [ ] **CLI**: Add corresponding CLI command/option
 - [ ] **YAML**: Ensure YAML config parity with Python API
 - [ ] **Docs**: Update Mintlify documentation
@@ -910,6 +964,9 @@ from praisonaiagents import Workflow, Route, Parallel, Loop
 | Event bus | `praisonaiagents/bus/bus.py` |
 | Workflow engine | `praisonaiagents/workflows/workflows.py` |
 | Policy engine | `praisonaiagents/policy/engine.py` |
+| Agent param resolvers | `praisonaiagents/config/agent_init.py` |
+| Error base class | `praisonaiagents/errors.py` |
+| Chat-path contract tests | `tests/unit/contract/test_chat_path_contract.py` |
 | Scheduler module | `praisonaiagents/scheduler/` |
 | Schedule tools | `praisonaiagents/tools/schedule_tools.py` |
 | Agentic CLI (Typer) | `praisonai_code/cli/app.py` |
@@ -1024,7 +1081,7 @@ Tokens are resolved in order: `explicit token=` > env var > empty string.
 | BotOS class | `praisonai_bot/bots/botos.py` (shim: `praisonai/bots/botos.py`) |
 | Platform registry | `praisonai_bot/bots/_registry.py` |
 | Unit tests | `tests/unit/test_botos_protocol.py` |
-| Integration tests | `tests/unit/test_botos_integration.py` |
+| Integration tests | `tests/integration/test_botos_integration.py` |
 
 ### 12.6 Extending Platforms
 
@@ -1115,7 +1172,7 @@ PraisonAI's reliability engineering rests on three pillars — **C**ontext, **H*
 | Loop convergence | iterations to threshold | ≤ N |
 | Doom-loop safety | guard fires on repeat fixture | required |
 
-> **Evaluator status.** The `ContextEvaluator` / `HarnessEvaluator` / `LoopEvaluator` classes named in the rubric are **planned follow-ups** (PA-CHL-001–004), not yet in the repo. Until they land, the equivalent checks are covered by existing modules:
+> **Evaluator status.** The three evaluators exist: `ContextEvaluator` (`eval/context_eval.py`), `HarnessEvaluator` (`eval/harness_eval.py`) and `LoopEvaluator` (`eval/loop_eval.py`). Supporting modules:
 >
 > - **Context** — `context/tokens.py` and `eval/tokens.py` (`estimate_tokens` / `count_tokens`) for budget; `compaction/compactor.py` (`ContextCompactor`) for compaction/retention.
 > - **Harness** — `runtime/turn_context.py` for turn-context parity; `examples/runtime/example_harness.py` and `tests/` for harness/artifact checks.
