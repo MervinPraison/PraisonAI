@@ -167,6 +167,25 @@ def _no_unmarked_network(request, monkeypatch):
     monkeypatch.setattr(socket.socket, "connect_ex", guarded_connect_ex)
 
 
+def clear_warning_registries():
+    """Clear every loaded module's ``__warningregistry__``.
+
+    Reads the module's own ``__dict__`` and never calls ``getattr``: a lazy
+    module (transformers leaves ~190 behind) answers unknown attributes through
+    a module-level ``__getattr__`` that imports the real module. After one
+    failed optional import, getattr retried it before every later test and each
+    errored at setup -- 500 errors in a full run (T-01).
+    """
+    import sys
+    import types
+
+    for module in list(sys.modules.values()):
+        if isinstance(module, types.ModuleType):
+            registry = module.__dict__.get("__warningregistry__")
+            if registry:
+                registry.clear()
+
+
 @pytest.fixture(autouse=True)
 def _clear_warning_registries():
     """Let a test see a warning an earlier test already triggered.
@@ -182,12 +201,7 @@ def _clear_warning_registries():
     Clearing the registries before each test makes the assertion depend on the
     code under test rather than on what ran before it.
     """
-    import sys
-
-    for module in list(sys.modules.values()):
-        registry = getattr(module, "__warningregistry__", None)
-        if registry:
-            registry.clear()
+    clear_warning_registries()
 
     # praisonaiagents.utils.deprecation keeps its own "warn once per process"
     # set (_warned_params) to keep Agent.__init__ off a hot path. That is the
