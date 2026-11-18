@@ -187,7 +187,7 @@ def _validate_preset_params(params):
 
 if TYPE_CHECKING:
     from ..approval.protocols import ApprovalConfig, ApprovalProtocol
-    from ..config.feature_configs import LearnConfig, MemoryConfig, ToolConfig
+    from ..config.feature_configs import LearnConfig, MemoryConfig, RuntimeConfig, ToolConfig
     from ..context.models import ContextConfig
     from ..context.manager import ContextManager
     from ..knowledge.knowledge import Knowledge
@@ -199,6 +199,11 @@ if TYPE_CHECKING:
     from ..eval.results import EvaluationLoopResult
     from ..tools.retry import RetryPolicy
     from ..skills.protocols import SkillReviewProtocol
+    from ..runtime.config import AgentRuntimeConfig
+    from ..sandbox.config import SandboxConfig
+    from ..tools.tool_search import ToolSearchConfig
+    from .placement import ManagedRuntime, ToolPlace
+    from .protocols import MessageSteeringProtocol
 
 # Import structured error from central errors module
 from ..errors import BudgetExceededError
