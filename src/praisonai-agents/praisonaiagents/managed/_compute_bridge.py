@@ -9,7 +9,10 @@ protocols, so this module resolves a provider by name at call time -- mirroring
 from __future__ import annotations
 
 import importlib
+import logging
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 _INSTALL_HINT = "Remote compute requires: pip install praisonai-sandbox"
 
@@ -79,7 +82,7 @@ def _entry_point_providers() -> dict:
         for ep in entry_points(group="praisonai.compute"):
             found[ep.name.lower()] = ep
     except Exception:  # pragma: no cover - discovery must never break resolution
-        pass
+        logger.debug("Could not list praisonai.compute entry points", exc_info=True)
     return found
 
 
@@ -174,7 +177,7 @@ def _remember_display_name(name: str, entry_point) -> None:
         if isinstance(phrase, str) and phrase:
             _DISPLAY_NAMES[name] = phrase
     except Exception:  # pragma: no cover - naming must never break resolution
-        pass
+        logger.debug("Could not load display name for compute provider %r", name, exc_info=True)
 
 
 def contributed_display_name(name: str):
