@@ -13,12 +13,12 @@ from .feature_configs import (
     CachingConfig, ExecutionConfig, GuardrailConfig, HooksConfig, KnowledgeConfig, LearnConfig, MemoryConfig,
     OutputConfig, PlanningConfig, ReflectionConfig, SkillsConfig, TemplateConfig, WebConfig,
 )
-from .param_resolver import ArrayMode, resolve
-from .parse_utils import canonical_preset_key
-from .presets import (
-    CACHING_PRESETS, DEFAULT_OUTPUT_MODE, EXECUTION_PRESETS, MEMORY_PRESETS, MEMORY_URL_SCHEMES,
-    OUTPUT_PRESETS, PLANNING_PRESETS, REFLECTION_PRESETS, WEB_PRESETS,
+from .param_resolver import (
+    ArrayMode, resolve, resolve_caching, resolve_execution, resolve_memory, resolve_planning,
+    resolve_reflection, resolve_web,
 )
+from .parse_utils import canonical_preset_key
+from .presets import DEFAULT_OUTPUT_MODE, EXECUTION_PRESETS, OUTPUT_PRESETS
 
 logger = get_logger(__name__)
 
@@ -36,13 +36,7 @@ def resolve_agent_caching(caching: Any) -> Tuple[Optional[CachingConfig], bool, 
     elif isinstance(caching, CachingConfig):
         config = caching
     else:
-        config = resolve(
-            value=caching,
-            param_name="caching",
-            config_class=CachingConfig,
-            presets=CACHING_PRESETS,
-            default=CachingConfig(),
-        )
+        config = resolve_caching(caching, CachingConfig, default=CachingConfig())
     if config:
         return config, config.enabled, config.prompt_caching
     if caching is False:
@@ -83,15 +77,7 @@ def resolve_agent_planning(planning: Any) -> Tuple[Optional[PlanningConfig], Dic
     elif isinstance(planning, PlanningConfig):
         config = planning
     else:
-        config = resolve(
-            value=planning,
-            param_name="planning",
-            config_class=PlanningConfig,
-            presets=PLANNING_PRESETS,
-            string_mode="llm_model",
-            array_mode=ArrayMode.PRESET_OVERRIDE,
-            default=None,
-        )
+        config = resolve_planning(planning, PlanningConfig)
     if config is not None:
         if isinstance(config, PlanningConfig):
             return config, {"planning": True, "planning_tools": config.tools,
@@ -114,14 +100,7 @@ def resolve_agent_reflection(reflection: Any) -> Tuple[Optional[ReflectionConfig
     elif isinstance(reflection, ReflectionConfig):
         config = reflection
     else:
-        config = resolve(
-            value=reflection,
-            param_name="reflection",
-            config_class=ReflectionConfig,
-            presets=REFLECTION_PRESETS,
-            array_mode=ArrayMode.PRESET_OVERRIDE,
-            default=None,
-        )
+        config = resolve_reflection(reflection, ReflectionConfig)
     if config is not None:
         if isinstance(config, ReflectionConfig):
             return config, {"self_reflect": True, "min_reflect": config.min_iterations,
@@ -199,14 +178,7 @@ def resolve_agent_web(web: Any, web_search: Optional[bool] = None,
     elif isinstance(web, WebConfig):
         _web_config = web
     else:
-        _web_config = resolve(
-            value=web,
-            param_name="web",
-            config_class=WebConfig,
-            presets=WEB_PRESETS,
-            array_mode=ArrayMode.PRESET_OVERRIDE,
-            default=None,
-        )
+        _web_config = resolve_web(web, WebConfig)
     
     _search_provider = "duckduckgo"
     if _web_config is not None:
@@ -244,14 +216,7 @@ def resolve_agent_execution(execution: Any) -> Optional[ExecutionConfig]:
         if preset_value is not None:
             return ExecutionConfig(**preset_value) if isinstance(preset_value, dict) else preset_value
         return ExecutionConfig()
-    return resolve(
-        value=execution,
-        param_name="execution",
-        config_class=ExecutionConfig,
-        presets=EXECUTION_PRESETS,
-        array_mode=ArrayMode.PRESET_OVERRIDE,
-        default=ExecutionConfig(),
-    )
+    return resolve_execution(execution, ExecutionConfig, default=ExecutionConfig())
 
 
 def resolve_agent_history(memory_config: Any, session_id: Optional[str], auto_save: Any,
@@ -432,16 +397,7 @@ def resolve_agent_memory(memory: Any) -> Any:
         return memory  # Memory instance passthrough
     if hasattr(memory, 'database_url'):
         return memory  # db() instance passthrough
-    return resolve(
-        value=memory,
-        param_name="memory",
-        config_class=MemoryConfig,
-        presets=MEMORY_PRESETS,
-        url_schemes=MEMORY_URL_SCHEMES,
-        instance_check=lambda v: (hasattr(v, 'search') and hasattr(v, 'add')) or hasattr(v, 'database_url'),
-        array_mode=ArrayMode.SINGLE_OR_LIST,
-        default=None,
-    )
+    return resolve_memory(memory, MemoryConfig)
 
 
 def resolve_agent_knowledge(knowledge: Any, user_retrieval_config: Any
