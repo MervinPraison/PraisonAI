@@ -280,6 +280,7 @@ class TestPerformance:
         import subprocess
         import sys
         import time
+        from pathlib import Path
         
         # Run import in subprocess to get clean timing
         start = time.time()
@@ -288,6 +289,7 @@ class TestPerformance:
             capture_output=True,
             timeout=10,
             check=True,
+            cwd=Path(__file__).resolve().parents[2],
         )
         elapsed = time.time() - start
         

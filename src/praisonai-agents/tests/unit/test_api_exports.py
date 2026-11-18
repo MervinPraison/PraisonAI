@@ -257,10 +257,8 @@ class TestImportPerformance:
             cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
         )
         
-        # Handle subprocess errors gracefully
-        if result.returncode != 0 or not result.stdout.strip():
-            # If subprocess failed, skip with informative message
-            pytest.skip(f"Subprocess failed: returncode={result.returncode}, stderr={result.stderr[:200] if result.stderr else 'none'}")
+        assert result.returncode == 0, result.stderr
+        assert result.stdout.strip(), "Import subprocess produced no timing output"
         
         import_time = float(result.stdout.strip())
         # 500ms is realistic for a feature-rich SDK on cold start
