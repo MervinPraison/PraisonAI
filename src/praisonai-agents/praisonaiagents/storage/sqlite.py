@@ -107,7 +107,7 @@ def apply_wal_with_fallback(
     try:
         conn.execute(f"PRAGMA busy_timeout={int(busy_timeout_ms)}")
     except Exception:  # pragma: no cover - busy_timeout is universally supported
-        pass
+        logger.debug("Could not set busy_timeout on %s", path, exc_info=True)
 
     try:
         row = conn.execute("PRAGMA journal_mode=WAL").fetchone()
@@ -116,7 +116,7 @@ def apply_wal_with_fallback(
             try:
                 conn.execute(f"PRAGMA synchronous={sync}")
             except Exception:
-                pass
+                logger.debug("Could not set synchronous=%s on %s", sync, path, exc_info=True)
             return "wal"
     except Exception as exc:
         logger.info(
@@ -147,7 +147,7 @@ def apply_wal_with_fallback(
         # filesystems; NORMAL is only durable under WAL.
         conn.execute("PRAGMA synchronous=FULL")
     except Exception:
-        pass
+        logger.debug("Could not set synchronous=FULL on %s", path, exc_info=True)
     return mode
 
 
@@ -351,7 +351,7 @@ def _repair_via_online_backup(path: str) -> bool:
                 if c is not None:
                     c.close()
             except Exception:
-                pass
+                logger.debug("Could not close connection during repair", exc_info=True)
         try:
             os.remove(snapshot)
         except OSError:
@@ -363,7 +363,7 @@ def _repair_via_online_backup(path: str) -> bool:
                 if c is not None:
                     c.close()
             except Exception:
-                pass
+                logger.debug("Could not close connection during repair", exc_info=True)
 
     # Verify the rebuilt snapshot before promoting it over the canonical file.
     verify = None
@@ -377,7 +377,7 @@ def _repair_via_online_backup(path: str) -> bool:
             if verify is not None:
                 verify.close()
         except Exception:
-            pass
+            logger.debug("Could not close verify connection during repair", exc_info=True)
     if not intact:
         try:
             os.remove(snapshot)
@@ -463,7 +463,7 @@ def _guard_integrity(path: str, *, repair: bool, backup: bool) -> None:
             if probe is not None:
                 probe.close()
         except Exception:
-            pass
+            logger.debug("Could not close integrity probe connection", exc_info=True)
 
     logger.error("SQLite database %s failed integrity check; corrupt.", path)
 

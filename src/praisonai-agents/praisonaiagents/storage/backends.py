@@ -190,7 +190,7 @@ class FileBackend:
                 try:
                     if 'temp_path' in locals():
                         os.remove(temp_path)
-                except Exception:
+                except OSError:
                     pass
                 raise
     
@@ -266,7 +266,7 @@ class FileBackend:
                         self._unreadable_paths.discard(file_path)
                         count += record
                     except Exception:
-                        pass
+                        logger.debug("Could not delete %s while clearing storage", file_path, exc_info=True)
             self._legacy_reads.clear()
         return count
 
