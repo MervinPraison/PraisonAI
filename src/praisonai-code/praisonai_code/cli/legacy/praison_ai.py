@@ -1607,7 +1607,7 @@ class PraisonAI:
             
             
             elif args.command == 'claw':
-                # Claw command - 🦞 PraisonAI Dashboard (full UI)
+                # Claw command - PraisonAI Dashboard (same app as `praisonai dashboard`)
                 # Routes to Typer CLI for claw command (launches AIUI dashboard)
                 from ..app import app as typer_app, register_commands
                 register_commands()
