@@ -20,11 +20,14 @@
  * loudly instead of silently downgrading to local execution.
  */
 
+import { buildChildEnv } from '../../utils/child-env';
+
 /** Python `SandboxConfig` (the subset the Agent needs). */
 export interface SandboxConfig {
   sandboxType: string;
   image: string;
   workingDir: string;
+  /** Child variables; the host env is not inherited beyond {@link buildChildEnv}'s basics. */
   env: Record<string, string>;
   autoCleanup: boolean;
   persistFiles: boolean;
@@ -326,7 +329,7 @@ export function createSubprocessRunner(config: SandboxConfig): SandboxRunner {
           cwd: dir,
           encoding: 'utf8',
           timeout: options.config.timeout * 1000,
-          env: { ...process.env, ...options.config.env },
+          env: buildChildEnv(options.config.env),
         });
         const exitCode = result.status ?? 1;
         return {

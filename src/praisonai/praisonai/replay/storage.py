@@ -122,7 +122,9 @@ def get_trace_path(session_id: str, traces_dir: Optional[Path] = None) -> Path:
     if traces_dir is None:
         traces_dir = get_traces_dir()
     
-    return traces_dir / f"{session_id}.jsonl"
+    from praisonaiagents.utils.safe_path import safe_child
+
+    return safe_child(traces_dir, session_id, ".jsonl")  # one path component
 
 
 def cleanup_old_traces(

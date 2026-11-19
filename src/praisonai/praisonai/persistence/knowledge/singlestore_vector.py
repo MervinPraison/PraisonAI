@@ -10,7 +10,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from .base import KnowledgeStore, KnowledgeDocument, validate_identifier
+from .base import KnowledgeStore, KnowledgeDocument, validate_dimension, validate_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -102,6 +102,7 @@ class SingleStoreVectorKnowledgeStore(KnowledgeStore):
     ) -> None:
         """Create a vector table."""
         validate_identifier(name, name="collection name")
+        validate_dimension(dimension)
         self._init_client()
         
         table_name = f"{self.table_prefix}{name}"

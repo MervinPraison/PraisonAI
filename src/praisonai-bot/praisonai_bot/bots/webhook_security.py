@@ -16,6 +16,7 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 from typing import Iterable, Mapping, Optional, Protocol, Union, runtime_checkable
 
 logger = logging.getLogger(__name__)
@@ -37,8 +38,37 @@ __all__ = [
     "HmacWebhookVerifier",
     "enforce_webhook_verification",
     "verify_hmac",
+    "webhook_bind_host",
     "webhooks_require_verification",
 ]
+
+# An unset ``${VAR}`` left in a config value is not a secret: its text is public.
+_PLACEHOLDER = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*\}")
+
+
+def configured_secret(secret: Union[str, bytes, None]) -> Optional[Union[str, bytes]]:
+    """Return ``secret``, or None when it is empty or an unresolved ``${VAR}``."""
+    if not secret:
+        return None
+    text = secret.decode("utf-8", "ignore") if isinstance(secret, bytes) else str(secret)
+    return None if _PLACEHOLDER.search(text) else secret
+
+
+def webhook_bind_host(secret: Union[str, bytes, None], *, server: str, hint: str) -> str:
+    """Bind host for a webhook receiver, checked by the shared bind guard.
+
+    ``PRAISONAI_WEBHOOK_HOST`` picks the host (default all interfaces, since the
+    platform must reach it); the signing secret is the token, so a keyless
+    receiver binds only to loopback (e.g. behind a tunnel).
+    """
+    from praisonaiagents.agent.launch_security import require_bind_token
+
+    host = os.environ.get("PRAISONAI_WEBHOOK_HOST") or "0.0.0.0"  # noqa: S104
+    require_bind_token(
+        host, configured_secret(secret), server=server,
+        hint=f"{hint}, or set PRAISONAI_WEBHOOK_HOST=127.0.0.1",
+    )
+    return host
 
 
 def webhooks_require_verification() -> bool:
@@ -76,7 +106,7 @@ def verify_hmac(
         constant-time comparison. Fail-closed: a missing secret/signature or an
         unknown ``digest`` algorithm returns False (never raises).
     """
-    if not secret or not signature:
+    if not configured_secret(secret) or not signature:
         return False
 
     secret_bytes = secret.encode() if isinstance(secret, str) else secret

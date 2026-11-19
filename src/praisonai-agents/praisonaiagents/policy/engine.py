@@ -154,6 +154,8 @@ class PolicyEngine:
             return PolicyResult.deny(
                 "No policy matched and strict mode is enabled"
             )
+        if str(self.config.default_action).lower() == "deny":
+            return PolicyResult.deny("No policy matched; default action is deny")
         
         return PolicyResult.allow("No policy matched")
     
@@ -241,7 +243,16 @@ class PolicyEngine:
         }
     
     def load_from_dict(self, data: Dict[str, Any]):
-        """Load policies from a dictionary."""
+        """Load policies from a dictionary.
+
+        ``default_action`` and ``strict_mode`` are read from the top level or
+        from a ``config`` block (the shape ``to_dict`` writes).
+        """
+        settings = {**data, **(data.get("config") or {})}
+        if "default_action" in settings:
+            self.config.default_action = settings["default_action"]
+        if "strict_mode" in settings:
+            self.config.strict_mode = bool(settings["strict_mode"])
         for policy_data in data.get("policies", []):
             policy = Policy.from_dict(policy_data)
             self.add_policy(policy)

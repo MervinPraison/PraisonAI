@@ -95,7 +95,9 @@ class RegistryServer:
         
         auth = headers.get("Authorization", "")
         if auth.startswith("Bearer "):
-            return auth[7:] == self.token
+            from praisonaiagents.agent.launch_security import token_matches
+
+            return token_matches(auth[7:], self.token)
         return False
     
     def _json_response(
@@ -354,7 +356,7 @@ class RegistryServer:
         
         # Get bundle path
         bundle_name = f"{name}-{version}.praison"
-        bundle_path = self.registry.recipes_path / name / version / bundle_name
+        bundle_path = self.registry._recipe_dir(name, version) / bundle_name
         
         if not bundle_path.exists():
             raise RecipeNotFoundError(f"Bundle not found: {name}@{version}")
@@ -600,6 +602,14 @@ def run_server(
         read_only: If True, disable write operations
     """
     from wsgiref.simple_server import make_server, WSGIRequestHandler
+
+    from praisonaiagents.agent.launch_security import require_bind_token
+
+    # A public read-only registry is allowed; a writable one needs --token.
+    require_bind_token(
+        host, token or (read_only and "read-only"),
+        server="praisonai registry serve", hint="Pass --token (or --read-only)",
+    )
     
     # Custom handler to suppress logs unless verbose
     class QuietHandler(WSGIRequestHandler):

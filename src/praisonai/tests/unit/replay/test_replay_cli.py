@@ -255,11 +255,15 @@ def test_view_yaml_runs_it_recorded_live(traces_dir, flow_yaml, fake_aiui):
     assert fake_aiui["url"] == f"http://127.0.0.1:8090/#/replay?run={run_id}&live=1"
 
 
-def test_view_non_loopback_host_warns(traces_dir, fx, fake_aiui):
+def test_view_non_loopback_host_needs_a_token(traces_dir, fx, fake_aiui, monkeypatch):
     fx.write_trace(traces_dir, "run-team01", fx.team_events())
+    monkeypatch.delenv("PRAISONAI_REPLAY_TOKEN", raising=False)
+    result = _invoke("view", "run-team01", "--host", "0.0.0.0")
+    assert result.exit_code == 1
+    assert "PRAISONAI_REPLAY_TOKEN" in result.output and "spawn" not in fake_aiui
+    monkeypatch.setenv("PRAISONAI_REPLAY_TOKEN", "replay-cli-test-token-0123456789")
     result = _invoke("view", "run-team01", "--host", "0.0.0.0")
     assert result.exit_code == 0
-    assert "WARNING" in result.output and "0.0.0.0" in result.output
     assert fake_aiui["url"].startswith("http://127.0.0.1:8090/")
 
 

@@ -142,6 +142,7 @@ class FastContextAgent:
         if tool_name not in tools:
             return {"error": f"Unknown tool: {tool_name}"}
         
+        kwargs["workspace_root"] = self.workspace_path  # model cannot widen it
         try:
             return tools[tool_name](**kwargs)
         except Exception as e:
@@ -178,7 +179,8 @@ class FastContextAgent:
             include_patterns=include_patterns,
             exclude_patterns=exclude_patterns,
             max_results=max_results,
-            context_lines=2
+            context_lines=2,
+            workspace_root=self.workspace_path,
         )
         
         # Convert to FastContextResult format
@@ -293,6 +295,7 @@ Be efficient - use parallel tool calls to explore multiple paths at once."""
                 for tool_call in message.tool_calls[:self.max_parallel]:
                     try:
                         args = json.loads(tool_call.function.arguments)
+                        args["workspace_root"] = self.workspace_path  # pin the root
                         batch.add(tool_call.function.name, **args)
                         tool_call_map[tool_call.id] = len(batch.tasks) - 1
                     except json.JSONDecodeError:

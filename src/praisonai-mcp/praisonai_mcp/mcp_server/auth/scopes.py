@@ -222,6 +222,7 @@ class ScopeRequirement:
 OPERATION_SCOPES: Dict[str, ScopeRequirement] = {
     "tools/list": ScopeRequirement(["tools:read"]),
     "tools/call": ScopeRequirement(["tools:call"]),
+    "tools/search": ScopeRequirement(["tools:read"]),
     "resources/list": ScopeRequirement(["resources:read"]),
     "resources/read": ScopeRequirement(["resources:read"]),
     "resources/subscribe": ScopeRequirement(["resources:subscribe"]),

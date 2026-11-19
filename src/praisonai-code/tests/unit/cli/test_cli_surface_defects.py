@@ -331,6 +331,8 @@ def test_run_server_publishes_the_public_bind_host(monkeypatch):
     monkeypatch.setattr(call_mod, "OPENAI_API_KEY", "sk-test")
     monkeypatch.setattr(call_mod, "setup_public_url", lambda port: "https://example.ngrok.app")
     monkeypatch.delenv("PRAISONAI_CALL_BIND_HOST", raising=False)
+    # A public bind needs CALL_SERVER_TOKEN; without it run_server refuses to start.
+    monkeypatch.setenv("CALL_SERVER_TOKEN", "call-server-test-token-0123456789")
 
     seen = {}
     fake_uvicorn = type("_U", (), {"run": staticmethod(lambda app, **kw: seen.update(kw))})

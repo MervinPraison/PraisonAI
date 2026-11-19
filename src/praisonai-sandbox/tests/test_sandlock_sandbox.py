@@ -93,6 +93,8 @@ class TestSandlockSandbox:
         sandbox = _make_sandbox(mock_sandlock)
 
         limits = ResourceLimits(network_enabled=True)
+        # Both the policy and the limits must allow the network.
+        sandbox.config.security_policy.allow_network = True
         call_kwargs = sandbox._build_sandbox_kwargs(limits)
 
         assert "*:*" in call_kwargs["net_allow"]
@@ -234,7 +236,7 @@ class TestSandlockSandbox:
             )
 
             await sandbox.start()
-            result = await sandbox.execute("import os; os.system('rm -rf /')")
+            result = await sandbox.execute("raise SystemExit(1)")
 
         assert result.status == SandboxStatus.FAILED
         assert "exit code 1" in result.error

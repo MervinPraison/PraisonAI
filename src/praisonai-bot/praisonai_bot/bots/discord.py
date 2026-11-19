@@ -55,7 +55,7 @@ from ._streaming import (
 )
 from ._debounce import InboundDebouncer
 from ._ack import AckReactor
-from ._unknown_user import UnknownUserHandler, BotContext
+from ._unknown_user import BotContext, UnknownUserHandler, is_sender_allowed
 from ._pairing_ui import PairingUIBuilder, PairingCallbackHandler
 from ._outbound_resilience import OutboundResilienceMixin
 from ..gateway.pairing import PairingStore
@@ -1331,6 +1331,10 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         try:
             # Defer the interaction
             await interaction.response.defer()
+            if not is_sender_allowed(
+                self, interaction.user.id, getattr(interaction, "channel_id", "")
+            ):
+                return
             
             # Create interactive context
             from praisonaiagents.bots import InteractiveContext

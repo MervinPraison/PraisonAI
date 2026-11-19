@@ -138,26 +138,31 @@ def test_checkpointing():
     with tempfile.TemporaryDirectory() as tmpdir:
         memory = FileMemory(user_id="checkpoint_test", base_path=f"{tmpdir}/memory")
         
-        # Create a test file
-        test_file = Path(tmpdir) / "code.py"
-        test_file.write_text("def hello():\n    print('Hello')")
+        # Snapshots stay inside the working directory
+        original_cwd = os.getcwd()
+        os.chdir(tmpdir)
+        try:
+            # Create a test file
+            test_file = Path(tmpdir) / "code.py"
+            test_file.write_text("def hello():\n    print('Hello')")
         
-        # Add memory and create checkpoint
-        memory.add_long_term("Original implementation uses hello function")
-        checkpoint_id = memory.create_checkpoint("before_refactor", include_files=[str(test_file)])
-        print(f"Created checkpoint: {checkpoint_id}")
+            # Add memory and create checkpoint
+            memory.add_long_term("Original implementation uses hello function")
+            checkpoint_id = memory.create_checkpoint("before_refactor", include_files=[str(test_file)])
+            print(f"Created checkpoint: {checkpoint_id}")
         
-        # Modify file and memory
-        test_file.write_text("def greet(name):\n    print(f'Hello {name}')")
-        memory.clear_all()
-        memory.add_long_term("Refactored to use greet function")
+            # Modify file and memory
+            test_file.write_text("def greet(name):\n    print(f'Hello {name}')")
+            memory.clear_all()
+            memory.add_long_term("Refactored to use greet function")
         
-        print(f"File after modification: {test_file.read_text()[:30]}...")
+            print(f"File after modification: {test_file.read_text()[:30]}...")
         
-        # Restore checkpoint
-        memory.restore_checkpoint(checkpoint_id, restore_files=True)
-        print(f"File after restore: {test_file.read_text()[:30]}...")
-        
+            # Restore checkpoint
+            memory.restore_checkpoint(checkpoint_id, restore_files=True)
+            print(f"File after restore: {test_file.read_text()[:30]}...")
+        finally:
+            os.chdir(original_cwd)
         # Verify restoration
         assert "hello" in test_file.read_text()
         assert memory.get_stats()["long_term_count"] > 0

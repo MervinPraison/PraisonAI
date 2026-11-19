@@ -402,31 +402,26 @@ def test_resolve_instruction_sources_remote_failure_is_skipped(monkeypatch):
 
 
 def test_fetch_remote_source_bounds_size(monkeypatch):
-    import io
+    import contextlib
 
     import praisonai_bot.integration.context_files as impl
+    from praisonaiagents.tools import url_safety
 
     big = b"X" * (impl._REMOTE_MAX_BYTES + 1000)
 
     class _Resp:
-        def __enter__(self):
-            return self
+        def raise_for_status(self):
+            pass
 
-        def __exit__(self, *a):
-            return False
+        def iter_bytes(self):
+            for i in range(0, len(big), 4096):
+                yield big[i:i + 4096]
 
-        def read(self, n):
-            return big[:n]
-
-    class _Opener:
-        def open(self, url, timeout=0):
-            return _Resp()
-
-    # Bypass the SSRF destination check and stub the opener so no real network
-    # or DNS resolution happens; the assertion is purely about size bounding.
+    # Skip the destination check and stub the pinned fetch so no real
+    # network or DNS resolution happens; the assertion is purely about size.
     monkeypatch.setattr(impl, "_url_is_fetchable", lambda url: True)
     monkeypatch.setattr(
-        "urllib.request.build_opener", lambda *handlers: _Opener()
+        url_safety, "safe_stream", lambda *a, **k: contextlib.nullcontext(_Resp())
     )
     text = impl._fetch_remote_source("https://example.com/rules.md")
     assert text is not None
@@ -448,7 +443,9 @@ def test_fetch_remote_source_blocks_internal_host(monkeypatch):
         raise AssertionError("network fetch should be blocked")
 
     monkeypatch.delenv(impl._ALLOW_LOCAL_URL_ENV, raising=False)
-    monkeypatch.setattr("urllib.request.build_opener", _explode)
+    monkeypatch.setattr(
+        "praisonaiagents.tools.url_safety.safe_stream", _explode
+    )
     assert impl._fetch_remote_source("http://127.0.0.1/rules.md") is None
     assert impl._fetch_remote_source("http://localhost:8080/x") is None
     assert called["opened"] is False

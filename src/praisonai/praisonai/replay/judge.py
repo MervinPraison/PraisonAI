@@ -125,11 +125,11 @@ def _crawl_url_for_judge(url: str) -> str:
     except ImportError:
         # Fallback to basic HTTP fetch
         try:
-            import urllib.request
             import re
-            
-            with urllib.request.urlopen(url, timeout=30) as response:
-                content = response.read().decode('utf-8', errors='ignore')
+            from praisonaiagents.tools.url_safety import safe_fetch
+
+            # URL comes from agent output: address checked, pinned, redirects re-checked.
+            content = safe_fetch(url, timeout=30).text
             
             # Basic HTML to text
             content = re.sub(r'<script[^>]*>.*?</script>', '', content, flags=re.DOTALL | re.IGNORECASE)

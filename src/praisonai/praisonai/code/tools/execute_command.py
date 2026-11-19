@@ -379,6 +379,8 @@ def run_python(
     # newlines, backslashes and quotes are handed to the child Python verbatim,
     # identically on POSIX and Windows.
     import sys
+    from praisonaiagents.tools.shell_tools import build_subprocess_env
+
     python_cmd = sys.executable
     work_dir = cwd or os.getcwd()
 
@@ -389,6 +391,7 @@ def run_python(
             capture_output=True,
             timeout=timeout,
             text=True,
+            env=build_subprocess_env(),  # same scrubbed env as execute_command
         )
         return {
             'success': result.returncode == 0,

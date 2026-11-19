@@ -5,6 +5,8 @@ Provides interactive prompts for tool approval with persistent rules.
 """
 
 import asyncio
+import hashlib
+import logging
 import os
 from typing import Optional, Dict, Any
 
@@ -15,6 +17,27 @@ from praisonaiagents.permissions import (
     PermissionAction,
     PermissionMode,
 )
+
+
+logger = logging.getLogger(__name__)
+
+
+def user_permissions_dir(project_dir: Optional[str] = None) -> str:
+    """Per-project permission store under the user's PraisonAI home.
+
+    Rules and "always" approvals are kept out of the project tree, so a cloned
+    repository cannot ship its own ``.praisonai/permissions`` approvals.
+    """
+    from praisonaiagents.paths import get_permissions_dir
+
+    root = os.path.realpath(project_dir or os.getcwd())
+    if os.path.isdir(os.path.join(root, ".praisonai", "permissions")):
+        logger.warning(
+            "Ignoring %s/.praisonai/permissions: permission rules are read from "
+            "the user store only.", root,
+        )
+    key = hashlib.sha256(root.encode()).hexdigest()[:16]
+    return str(get_permissions_dir() / "projects" / key)
 
 
 class InteractiveCLIApprovalBackend:
@@ -49,8 +72,8 @@ class InteractiveCLIApprovalBackend:
         self.permission_mode = permission_mode
         self.non_interactive = non_interactive
         
-        # Initialize permission manager with project-scoped storage
-        permissions_dir = os.path.join(self.project_dir, ".praisonai", "permissions")
+        # Per-project rules, stored in the user's home (never the project tree)
+        permissions_dir = user_permissions_dir(self.project_dir)
         self.permission_manager = PermissionManager(storage_dir=permissions_dir)
         
         # Load declarative permissions if provided

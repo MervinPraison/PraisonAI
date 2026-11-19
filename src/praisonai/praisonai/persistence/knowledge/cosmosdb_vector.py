@@ -10,7 +10,7 @@ Install: pip install pymongo  # or pip install azure-cosmos
 import logging
 from typing import Any, Dict, List, Optional
 
-from .base import KnowledgeStore, KnowledgeDocument
+from .base import KnowledgeStore, KnowledgeDocument, validate_dimension, validate_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -57,8 +57,9 @@ class CosmosDBVectorKnowledgeStore(KnowledgeStore):
         self.database_name = database
         self.collection_name = collection
         self.index_name = index_name
-        self.embedding_field = embedding_field
-        self.text_field = text_field
+        # Written into SQL API query text as ``c.<field>``.
+        self.embedding_field = validate_identifier(embedding_field, "embedding_field")
+        self.text_field = validate_identifier(text_field, "text_field")
         self.embedding_dim = embedding_dim
         self.api_mode = api_mode
         
@@ -321,6 +322,7 @@ class CosmosDBVectorKnowledgeStore(KnowledgeStore):
         coll = self._db.get_container_client(collection)
         
         # SQL API uses VectorDistance function
+        limit = validate_dimension(limit, name="limit")
         query = f"""
             SELECT TOP {limit} c.id, c.{self.text_field}, c.metadata, c.content_hash, c.created_at,
                    VectorDistance(c.{self.embedding_field}, @embedding) AS score

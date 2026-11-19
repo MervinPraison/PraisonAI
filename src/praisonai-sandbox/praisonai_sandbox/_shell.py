@@ -69,6 +69,36 @@ def strip_heredoc_bodies(command: str) -> str:
     Only the quoted form (``<<'EOF'``) is stripped. An unquoted heredoc still
     undergoes shell expansion, so its contents can execute and must stay in
     scope for the checks.
+
+    Only a live operator counts. ``<<'X'`` inside a comment, inside quotes or
+    in a herestring (``<<<``) opens no heredoc, so the lines after it run; a
+    bare regex stripped them too and hid them from the policy.
     """
-    pattern = re.compile(r"<<'([^']+)'\n.*?\n\1", re.DOTALL)
-    return pattern.sub("<<'HEREDOC'", command)
+    out, i, last, state = [], 0, 0, None
+    while i < len(command):
+        ch = command[i]
+        if state == "#":
+            state = None if ch == "\n" else state
+        elif state:  # inside ', " or $'...'
+            if ch == "\\" and state != "'":
+                i += 1
+            elif ch == state[-1]:
+                state = None
+        elif ch == "\\":
+            i += 1
+        elif ch in "'\"":
+            state = "$'" if ch == "'" and command[i - 1:i] == "$" else ch
+        elif ch == "#" and (i == 0 or command[i - 1] in " \t\n;|&("):
+            state = "#"
+        elif command.startswith("<<'", i) and command[i - 1:i] != "<":
+            match = _HEREDOC.match(command, i)
+            if match:
+                out.append(command[last:i] + "<<'HEREDOC'")
+                i = last = match.end()
+                continue
+        i += 1
+    return "".join(out) + command[last:]
+
+
+# The closing delimiter must stand alone on its line, as the shell requires.
+_HEREDOC = re.compile(r"<<'([^'\n]+)'\n.*?\n\1(?=\n|$)", re.DOTALL)

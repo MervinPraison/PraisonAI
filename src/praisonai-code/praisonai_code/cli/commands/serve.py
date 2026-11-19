@@ -74,7 +74,7 @@ def _validate_mcp_transport(transport: str, output) -> None:
 
 @app.command("start")
 def serve_start(
-    host: str = typer.Option("0.0.0.0", "--host", "-h", help="Host to bind to"),
+    host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host to bind to"),
     port: int = typer.Option(8000, "--port", "-p", help="Port to bind to"),
     agents_file: Optional[str] = typer.Option(None, "--agents", "-a", help="Agents YAML file"),
     reload: bool = typer.Option(False, "--reload", help="Enable auto-reload"),
@@ -815,6 +815,10 @@ def serve_openai(
         _mod = import_wrapper_module('praisonai.cli.features.serve')
         _install_api_key_middleware = getattr(_mod, '_install_api_key_middleware')
         
+        from praisonaiagents.agent.launch_security import require_bind_token
+        from praisonaiagents.agent.origin_guard import guard_loopback_requests
+
+        require_bind_token(host, api_key, server="praisonai serve openai", hint="Pass --api-key")
         output.print_info(f"Starting OpenAI-compatible server on {host}:{port}")
         
         # Create providers
@@ -839,7 +843,7 @@ def serve_openai(
         
         # Start server
         uvicorn.run(
-            app,
+            guard_loopback_requests(app, host),
             host=host,
             port=port,
             reload=reload,

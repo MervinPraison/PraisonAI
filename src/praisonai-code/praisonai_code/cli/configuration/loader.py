@@ -255,10 +255,18 @@ class ConfigLoader:
         merged = DEFAULT_CONFIG.to_dict()
         
         # Load config files in reverse precedence order
+        from praisonaiagents.config.trust import drop_project_trust_keys
+
         config_paths = get_config_paths(self._explicit_root)
+        user_config = get_user_config_path()
         for path in reversed(config_paths):
             try:
                 file_config = _load_toml(path)
+                if path != user_config:  # a project file may not choose a program to run
+                    from praisonaiagents.mcp.trust import drop_untrusted_mcp_config
+                    file_config = drop_untrusted_mcp_config(file_config, str(path))
+                # A project file cannot grant itself trust (user files pass unchanged).
+                file_config = drop_project_trust_keys(file_config, path)
                 merged = _merge_dicts(merged, file_config)
             except Exception:
                 pass  # Skip invalid files

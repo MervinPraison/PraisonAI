@@ -256,6 +256,11 @@ def test_nonwal_continuous_peer_writes_fall_back_to_complete_source_snapshot(sql
         return original(data)
     monkeypatch.setattr(store, "_searchable_messages", observe_scoring)
     if through_tool:
+        from praisonaiagents.tools import session_tools
+
+        # This test is about snapshot consistency, not caller scoping.
+        monkeypatch.setattr(session_tools, "_caller_scope", lambda: ("user_id", "me"))
+        monkeypatch.setattr(session_tools, "_owned", lambda *a: True)
         result = json.loads(SessionTools(store=store).session_search("alpha beta", limit=300))
         assert result["success"] is True
         hits = result["results"]

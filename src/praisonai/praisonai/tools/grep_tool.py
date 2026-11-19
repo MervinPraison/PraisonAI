@@ -118,8 +118,9 @@ def grep_search(
                 
                 filepath = os.path.join(root, filename)
 
-                # Never read protected files (.env, keys, wallets, SDK internals)
-                if is_protected(filepath):
+                # Never read protected files (.env, keys, wallets, SDK internals),
+                # nor a file whose symlink leads out of the workspace
+                if is_protected(filepath) or not _within_workspace(filepath):
                     continue
 
                 # Skip large files

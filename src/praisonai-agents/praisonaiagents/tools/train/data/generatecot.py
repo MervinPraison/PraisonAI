@@ -145,8 +145,15 @@ class GenerateCOT:
         }
         return solution
         
+    @staticmethod
+    def _inside_cwd(filepath: str) -> str:
+        """Dataset files stay inside the working directory (raises ValueError)."""
+        from ...path_safety import resolve_inside
+        return resolve_inside(None, filepath)
+
     def cot_load_answers(self, filepath: str) -> bool:
         try:
+            filepath = self._inside_cwd(filepath)
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             self.qa_pairs.update(data)
@@ -170,6 +177,7 @@ class GenerateCOT:
     ) -> None:
         """Appends current solutions to existing file or creates a new one."""
         try:
+            filepath = self._inside_cwd(filepath)
             self._is_qa_pairs(qa_pairs)  # Validate format
             if qa_pairs:
                 self.qa_pairs.update(qa_pairs)
@@ -205,6 +213,7 @@ class GenerateCOT:
         qa_pairs: Optional[Dict[str, str]] = None
     ) -> None:
         try:
+            filepath = self._inside_cwd(filepath)
             self._is_qa_pairs(qa_pairs)  # Validate format
             if qa_pairs:
                 self.qa_pairs.update(qa_pairs)
@@ -302,6 +311,7 @@ class GenerateCOT:
         Export solutions in Alpaca training format with their full thought process.
         """
         try:
+            filepath = self._inside_cwd(filepath)
             self._is_qa_pairs(qa_pairs)  # Validate format
             if qa_pairs:
                 self.qa_pairs.update(qa_pairs)
@@ -335,6 +345,7 @@ class GenerateCOT:
     ) -> Optional[str]:
         """Export solutions in CSV format."""
         try:
+            filepath = self._inside_cwd(filepath)
             import csv
             self._is_qa_pairs(qa_pairs)  # Validate format
             if qa_pairs:
@@ -363,6 +374,7 @@ class GenerateCOT:
         """Save a single question-answer pair with chain of thought to CSV file."""
         logger.debug(f"Saving QA pair to {filepath}")
         try:
+            filepath = self._inside_cwd(filepath)
             self.qa_pairs[question] = answer
             logger.debug("Added QA pair to internal dictionary")
             
@@ -394,6 +406,7 @@ class GenerateCOT:
     ) -> Optional[str]:
         """Append solutions to CSV file using qa_pairs dictionary."""
         try:
+            filepath = self._inside_cwd(filepath)
             self._is_qa_pairs(qa_pairs)  # Validate format
             if qa_pairs:
                 self.qa_pairs.update(qa_pairs)
@@ -424,6 +437,7 @@ class GenerateCOT:
         """Upload generated solutions to HuggingFace datasets."""
         logger.debug(f"Attempting to upload {filepath} to HuggingFace as {dataset_name}")
         try:
+            filepath = self._inside_cwd(filepath)
             from datasets import Dataset
             import pandas as pd
             

@@ -228,9 +228,9 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "pairing": ("praisonai_bot.cli.commands.pairing", "app", "Manage bot user pairing"),
     "identity": ("praisonai_bot.cli.commands.identity", "app", "Manage cross-platform user identity links"),
     "kanban": ("praisonai_bot.cli.commands.kanban", "app", "Kanban task management"),
-    "claw": ("praisonai_bot.cli.commands.claw", "app", "PraisonAI Dashboard (full UI)"),
+    "claw": ("praisonai_bot.cli.commands.claw", "app", "PraisonAI Dashboard (same app as: praisonai dashboard)"),
     "mint_link": ("praisonai_bot.cli.commands.mint_link", "app", "Generate gateway magic links"),
-    "dashboard": ("praisonai.cli.commands.dashboard", "app", "Unified Dashboard (Flow + Claw + UI)"),
+    "dashboard": ("praisonai.cli.commands.dashboard", "app", "PraisonAI Dashboard: chat, agents, memory, knowledge, cron and more (alias: claw)"),
 
     "browser": ("praisonai_browser.cli.commands.browser", "app", "Browser automation (extension bridge, CDP, Playwright)"),
     "browser-tool": (".commands.browser_tool", "app", "praisonai-tools browser automation (snapshot/click/navigate)"),
@@ -625,7 +625,7 @@ class LazyCommandGroup(TyperGroup):
         @app_group.command(name="app", context_settings={"allow_interspersed_args": False})
         def app_cmd(
             port: int = typer.Option(8000, "--port", "-p", help="Port to listen on"),
-            host: str = typer.Option("0.0.0.0", "--host", "-h", help="Host to bind to"),
+            host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host to bind to (non-loopback needs an API key)"),
             config: str = typer.Option(None, "--config", "-c", help="Path to config file (YAML)"),
             reload: bool = typer.Option(False, "--reload", "-r", help="Enable auto-reload for development"),
             debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode"),

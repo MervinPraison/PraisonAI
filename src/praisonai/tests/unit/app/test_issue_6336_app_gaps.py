@@ -12,7 +12,7 @@ def test_serve_refuses_public_bind_without_api_key(monkeypatch):
 
     monkeypatch.delenv("PRAISONAI_AGENTOS_API_KEY", raising=False)
     app = AgentOS(agents=[], config=AgentOSConfig(host="0.0.0.0"))
-    with patch("uvicorn.run") as run, pytest.raises(RuntimeError, match="API key"):
+    with patch("uvicorn.run") as run, pytest.raises(RuntimeError, match="auth token"):
         app.serve()
     run.assert_not_called()
 
@@ -61,7 +61,7 @@ def test_serve_checks_key_of_cached_app(monkeypatch):
     app = AgentOS(agents=[], config=AgentOSConfig(host="0.0.0.0"))
     app.get_app()  # built without auth
     app.config.api_key = "late"
-    with patch("uvicorn.run") as run, pytest.raises(RuntimeError, match="API key"):
+    with patch("uvicorn.run") as run, pytest.raises(RuntimeError, match="auth token"):
         app.serve()
     run.assert_not_called()
 

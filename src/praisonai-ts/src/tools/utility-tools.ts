@@ -5,6 +5,7 @@
  */
 
 import { randomUUID } from '../utils/uuid';
+import { buildChildEnv } from '../utils/child-env';
 
 /**
  * Tool result
@@ -277,6 +278,7 @@ export async function shell(command: string): Promise<ToolResult<string>> {
             const proc = spawn(cmd, parts.slice(1), {
                 shell: false,
                 timeout: 5000,
+                env: buildChildEnv(),
             });
 
             let stdout = '';

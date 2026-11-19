@@ -466,7 +466,7 @@ def _smtp_read_email(message_id: str) -> str:
         mail, _ = _imap_connect(readonly=True)
         # Search by Message-ID header
         search_id = message_id if message_id.startswith("<") else f"<{message_id}>"
-        status, data = mail.search(None, f'HEADER Message-ID "{search_id}"')
+        status, data = mail.search(None, "HEADER", "Message-ID", _imap_quote(search_id))
         if status != "OK" or not data[0]:
             mail.logout()
             return f"Email not found with Message-ID: {message_id}"
@@ -497,7 +497,7 @@ def _smtp_reply_email(message_id: str, body: str) -> str:
         # Read original email to get sender and subject
         mail, email_addr = _imap_connect(readonly=True)
         search_id = message_id if message_id.startswith("<") else f"<{message_id}>"
-        status, data = mail.search(None, f'HEADER Message-ID "{search_id}"')
+        status, data = mail.search(None, "HEADER", "Message-ID", _imap_quote(search_id))
         if status != "OK" or not data[0]:
             mail.logout()
             return f"Original email not found: {message_id}"
@@ -533,11 +533,20 @@ def _smtp_reply_email(message_id: str, body: str) -> str:
         return f"Failed to reply: {e}"
 
 def _imap_sanitize(value: str) -> str:
-    """Strip characters that break IMAP quoted-string search criteria."""
-    cleaned = value.replace('"', "").replace("\\", "")
-    if any(c in cleaned for c in "\r\n\x00"):
+    """Refuse characters that cannot appear in an IMAP quoted string."""
+    if any(c in value for c in "\r\n\x00"):
         raise ValueError("Invalid IMAP search value")
-    return cleaned
+    return value
+
+
+def _imap_quote(value: str) -> str:
+    """Quote ``value`` as one IMAP quoted string (RFC 3501): escape ``\\`` and ``"``.
+
+    Every caller-supplied value in a SEARCH goes through this helper, so it stays
+    one argument and cannot add search keys or commands.
+    """
+    escaped = _imap_sanitize(value).replace("\\", "\\\\").replace('"', '\\"')
+    return f'"{escaped}"'
 
 
 def _smtp_search_emails(
@@ -552,15 +561,12 @@ def _smtp_search_emails(
         # Build IMAP search criteria
         criteria = []
         if from_addr:
-            criteria.append(f'FROM "{_imap_sanitize(from_addr)}"')
+            criteria += ["FROM", _imap_quote(from_addr)]
         if subject:
-            criteria.append(f'SUBJECT "{_imap_sanitize(subject)}"')
+            criteria += ["SUBJECT", _imap_quote(subject)]
         if query:
-            criteria.append(f'TEXT "{_imap_sanitize(query)}"')
-        if not criteria:
-            criteria.append("ALL")
-        search_str = " ".join(criteria)
-        status, data = mail.search(None, search_str)
+            criteria += ["TEXT", _imap_quote(query)]
+        status, data = mail.search(None, *(criteria or ["ALL"]))
         if status != "OK" or not data[0]:
             mail.logout()
             return "No emails matched the search criteria."
@@ -600,7 +606,7 @@ def _smtp_archive_email(message_id: str) -> str:
         import imaplib
         mail, email_addr = _imap_connect(readonly=False)
         search_id = message_id if message_id.startswith("<") else f"<{message_id}>"
-        status, data = mail.search(None, f'HEADER Message-ID "{search_id}"')
+        status, data = mail.search(None, "HEADER", "Message-ID", _imap_quote(search_id))
         if status != "OK" or not data[0]:
             mail.logout()
             return f"Email not found: {message_id}"

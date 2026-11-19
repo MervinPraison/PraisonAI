@@ -563,9 +563,11 @@ class TemplatesHandler:
                 ts = template.requires.get("tools_sources", [])
                 if ts:
                     tools_sources.extend(_gate_template_tools_sources(ts))
-            # Add CLI --tools-source overrides
-            if tools_sources_override:
-                tools_sources.extend(tools_sources_override)
+            # CLI --tools-source is the operator's own input: local paths load
+            # as explicit overrides, past the template-code opt-in.
+            for source in tools_sources_override:
+                local = Path(source).expanduser()
+                (tools_files if local.is_file() else tools_dirs if local.is_dir() else tools_sources).append(source)
             
             # Always build registry (includes defaults + template sources)
             tool_registry = create_tool_registry_with_overrides(

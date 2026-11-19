@@ -28,6 +28,7 @@ def test_scan_errors_and_empty_query(tmp_path, monkeypatch, method):
     assert store.list_sessions_by_gateway_agent('agent') == []
     assert store.search('hello') == []
     assert store.add_message('one', 'user', 'hello')
+    assert store.set_agent_info('one', user_id='me')
     deny_directory(monkeypatch, store.session_dir)
 
     calls = {
@@ -38,7 +39,13 @@ def test_scan_errors_and_empty_query(tmp_path, monkeypatch, method):
     }
     with pytest.raises(PermissionError, match='session directory unavailable'):
         calls[method]()
-    result = json.loads(tools.session_search(query='hello'))
+    from praisonaiagents.session.context import clear_session_context, set_session_context
+
+    token = set_session_context(user_id='me')  # session_search answers a calling user only
+    try:
+        result = json.loads(tools.session_search(query='hello'))
+    finally:
+        clear_session_context(token)
     assert result['success'] is False
     assert 'session directory unavailable' in result['error']
     assert store.search('  ') == []

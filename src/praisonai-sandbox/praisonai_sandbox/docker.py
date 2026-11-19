@@ -512,26 +512,9 @@ class DockerSandbox:
         directory is bind-mounted into the container, so anything that
         validates a name and then re-opens it can be raced by code inside.
         """
-        from ._compat import makedirs_in_sandbox, open_in_sandbox
+        from ._compat import write_in_sandbox
 
-        path = _sandbox_relative(path)
-
-        if not makedirs_in_sandbox(self._temp_dir, path):
-            return False
-
-        payload = content if isinstance(content, bytes) else content.encode()
-        fd = open_in_sandbox(
-            self._temp_dir, path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC
-        )
-        if fd is None:
-            return False
-        try:
-            with os.fdopen(fd, "wb") as handle:
-                handle.write(payload)
-            return True
-        except OSError as exc:
-            logger.warning("Failed to write %s in sandbox: %s", path, exc)
-            return False
+        return write_in_sandbox(self._temp_dir, _sandbox_relative(path), content)
 
     async def read_file(
         self,
@@ -542,20 +525,9 @@ class DockerSandbox:
         Symlink-proof for the same reason as write_file: a name validated a
         moment ago can point somewhere else by the time it is opened.
         """
-        from ._compat import open_in_sandbox
+        from ._compat import read_in_sandbox
 
-        fd = open_in_sandbox(self._temp_dir, _sandbox_relative(path), os.O_RDONLY)
-        if fd is None:
-            return None
-        try:
-            with os.fdopen(fd, "rb") as handle:
-                raw = handle.read()
-        except OSError:
-            return None
-        try:
-            return raw.decode()
-        except UnicodeDecodeError:
-            return raw
+        return read_in_sandbox(self._temp_dir, _sandbox_relative(path))
 
     async def list_files(
         self,

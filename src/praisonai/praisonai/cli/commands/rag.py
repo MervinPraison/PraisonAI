@@ -12,6 +12,8 @@ All commands support --profile for performance profiling using the existing
 praisonai profile infrastructure.
 """
 
+import os
+
 import typer
 from typing import Optional, List
 from pathlib import Path
@@ -570,6 +572,10 @@ def rag_serve(
     profile: bool = typer.Option(False, "--profile", help="Enable performance profiling"),
     profile_out: Optional[Path] = typer.Option(None, "--profile-out", help="Save profile to JSON file"),
     profile_top: int = typer.Option(20, "--profile-top", help="Top N items in profile"),
+    api_key: Optional[str] = typer.Option(
+        None, "--api-key", envvar="PRAISONAI_SERVE_API_KEY",
+        help="API key required on every route but /health (needed for a non-loopback host)",
+    ),
 ):
     """
     Start RAG microservice API.
@@ -854,7 +860,17 @@ def rag_serve(
                 profile_data["rerank"] = rerank
                 profile_data["openai_compat"] = openai_compat
             
-            uvicorn.run(api, host=host, port=port)
+            from praisonaiagents.agent.launch_security import require_bind_token
+            from praisonaiagents.agent.origin_guard import guard_loopback_requests
+
+            if not isinstance(api_key, str):  # called as a function (praisonai serve rag)
+                api_key = os.environ.get("PRAISONAI_SERVE_API_KEY")
+            require_bind_token(host, api_key, server="praisonai rag serve", hint="Pass --api-key")
+            if api_key:
+                from praisonai._api_auth import build_api_key_middleware
+
+                api.add_middleware(build_api_key_middleware(api_key, {"/health"}))
+            uvicorn.run(guard_loopback_requests(api, host), host=host, port=port)
             
         except ImportError as e:
             console.print(f"[red]Error:[/red] Missing dependency: {e}")

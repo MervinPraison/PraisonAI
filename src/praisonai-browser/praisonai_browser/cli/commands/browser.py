@@ -56,7 +56,7 @@ def _bridge_unreachable_message(port: int = 8765) -> str:
 @app.command("start")
 def start_server(
     port: int = typer.Option(8765, "--port", "-p", help="Port to listen on"),
-    host: str = typer.Option("0.0.0.0", "--host", "-H", help="Host to bind to"),
+    host: str = typer.Option("127.0.0.1", "--host", "-H", help="Host to bind to"),
     model: str = typer.Option("gpt-4o-mini", "--model", "-m", help="LLM model to use"),
     max_steps: int = typer.Option(20, "--max-steps", help="Maximum steps per session"),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose logging"),

@@ -58,13 +58,13 @@ class TestBuildPermissionTarget:
     def test_apply_patch_stays_tool_scoped(self):
         # ``apply_patch`` takes ``patch`` (multi-file patch text), not a single
         # path, so it must NOT collapse to a path target that could silently
-        # cover unrelated files on reuse — it stays ``tool:apply_patch``.
-        from praisonaiagents.approval.utils import build_permission_target
+        # cover unrelated files on reuse — it stays tool-scoped, pinned to the
+        # exact patch text.
+        from praisonaiagents.approval.utils import build_permission_target, hash_tool_args
 
-        target = build_permission_target(
-            "apply_patch", {"patch": "*** Begin Patch\n*** Update File: a/b.py"}
-        )
-        assert target == "tool:apply_patch"
+        args = {"patch": "*** Begin Patch\n*** Update File: a/b.py"}
+        target = build_permission_target("apply_patch", args)
+        assert target == f"tool:apply_patch:{hash_tool_args(args)}"
 
     def test_move_file_uses_src_path(self):
         # ``move_file``/``copy_file`` take ``src``/``dst`` — the grant must pin

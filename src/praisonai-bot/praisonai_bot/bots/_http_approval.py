@@ -100,7 +100,14 @@ class HTTPApproval(DurableApprovalMixin):
             return
 
         from aiohttp import web
+        from praisonaiagents.agent.launch_security import require_bind_token
 
+        # The per-approval token exists only with an allowlist; without one any
+        # visitor may decide, so only a loopback bind is allowed.
+        require_bind_token(
+            self._host, "per-approval" if self._allowed_approvers is not None else None,
+            server="HTTPApproval", hint="Pass allowed_approvers=[...] (or HTTP_APPROVERS)",
+        )
         app = web.Application()
         app.router.add_get("/approve/{request_id}", self._handle_page)
         app.router.add_post("/approve/{request_id}/decide", self._handle_decide)

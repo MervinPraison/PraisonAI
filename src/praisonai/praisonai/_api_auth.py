@@ -44,3 +44,25 @@ def build_api_key_middleware(api_key: str, public_paths: Optional[Iterable[str]]
             return await call_next(request)
 
     return _APIKeyMiddleware
+
+
+def guard_browser_app(app: Any, host: str, token: Optional[str], *, server: str, token_env: str) -> Any:
+    """The shared bind rule for a browser-facing server (dashboard, Replay).
+
+    Loopback binds run keyless and answer only same-site, loopback-named
+    requests. Any other bind needs ``token`` (else ``ValueError``), and every
+    request must carry it: ``?token=`` once (then a cookie) or a Bearer header
+    when PraisonAI UI is installed, a Bearer/``X-API-Key`` header otherwise.
+    """
+    from praisonaiagents.agent.launch_security import require_bind_token
+    from praisonaiagents.agent.origin_guard import guard_loopback_requests
+
+    token = require_bind_token(host, token, server=server, hint=f"Set {token_env}")
+    if token:
+        try:
+            from praisonaiui.auth import TokenQueryMiddleware
+        except ImportError:
+            app = build_api_key_middleware(token, {"/health"})(app)
+        else:
+            app = TokenQueryMiddleware(app, expected_token=token)
+    return guard_loopback_requests(app, host)

@@ -280,17 +280,11 @@ class URLReader:
         """Load content from a URL."""
         from praisonaiagents.knowledge.readers import Document
         
+        from praisonaiagents.tools.url_safety import safe_fetch
+
         try:
-            import httpx
-        except ImportError:
-            try:
-                import requests as httpx
-            except ImportError:
-                logger.error("httpx or requests required for URL reading")
-                return []
-        
-        try:
-            response = httpx.get(source, timeout=30, follow_redirects=True)
+            # Pinned to the checked address; every redirect hop re-checked.
+            response = safe_fetch(source, timeout=30)
             response.raise_for_status()
             content = response.text
             

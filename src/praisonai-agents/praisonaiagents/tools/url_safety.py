@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import ipaddress
 import os
 import socket
 import urllib.parse
 from typing import FrozenSet, Optional, Set
+
+from ..errors import PraisonAIError
 
 
 def _env_allowlist() -> Set[str]:
@@ -67,40 +70,92 @@ def is_safe_http_url(
     ranges.
     """
     try:
-        parsed = urllib.parse.urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            return False
-        hostname = parsed.hostname
-        if not hostname:
-            return False
-        if allow_local is None:
-            allow_local = os.environ.get("ALLOW_LOCAL_CRAWL") == "true"
-        if allow_local:
-            return True
-        # Reject before resolving: getaddrinfo's answer for these is not
-        # necessarily the address the HTTP client will connect to.
-        if is_ambiguous_numeric_host(hostname):
-            return False
-        is_allowlisted = hostname.lower() in allowlist
-        for info in socket.getaddrinfo(hostname, None):
-            ip = ipaddress.ip_address(info[4][0])
-            if ip.is_loopback:
-                if is_allowlisted:
-                    continue
-                return False
-            if (
-                # is_global also catches shared/CGNAT space (100.64.0.0/10,
-                # e.g. Alibaba Cloud metadata), which is_private misses.
-                not ip.is_global
-                or ip.is_private
-                or ip.is_link_local
-                or ip.is_multicast
-                or ip.is_unspecified
-            ):
-                return False
+        _pin(url, allowlist, allow_local)
         return True
-    except (socket.gaierror, ValueError, OSError):
+    except UnsafeURLError:
         return False
+
+
+class UnsafeURLError(ValueError, PraisonAIError):
+    """An outbound URL was refused by the SSRF guard."""
+
+
+def is_blocked_ip(ip, loopback_ok: bool = False) -> bool:
+    """True for a non-global or multicast address, also as IPv4 inside IPv6 (mapped, 6to4, NAT64, compat)."""
+    ips = [ip] + [a for a in (getattr(ip, "ipv4_mapped", None), getattr(ip, "sixtofour", None)) if a]
+    if ip.version == 6 and (ip in ipaddress.ip_network("64:ff9b::/96") or 1 < int(ip) < 2 ** 32):
+        ips.append(ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF))
+    return any(not (a.is_loopback and loopback_ok) and (not a.is_global or a.is_multicast) for a in ips)
+
+
+_ip_blocked = is_blocked_ip  # private alias kept for existing callers and tests
+
+
+def _pin(url: str, allowlist: FrozenSet[str], allow_local: Optional[bool]):
+    """Resolve *url* once, check every address, return ``(dial_url, authority, host)``.
+    ``dial_url`` names the checked IP so the connection cannot be rebound."""
+    try:
+        if any(c in url for c in "\\\r\n\t"):
+            raise ValueError("backslash or control character")
+        parts = urllib.parse.urlsplit(url)
+        host, port = parts.hostname, parts.port or (443 if parts.scheme == "https" else 80)
+        if parts.scheme not in ("http", "https") or not host or is_ambiguous_numeric_host(host):
+            raise ValueError("only http(s) URLs with a plain host")
+        ips = [ipaddress.ip_address(i[4][0].split("%")[0])
+               for i in socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)]
+    except (OSError, TypeError, ValueError) as exc:
+        raise UnsafeURLError(f"URL blocked: {url!r} ({exc})") from None
+    if allow_local is None:  # documented local-development opt-out
+        allow_local = os.environ.get("ALLOW_LOCAL_CRAWL") == "true"
+    if not ips or (not allow_local and any(_ip_blocked(ip, host.lower() in allowlist) for ip in ips)):
+        raise UnsafeURLError(f"URL blocked: {host} resolves to a private or internal address")
+    dial = f"[{ips[0]}]" if ips[0].version == 6 else str(ips[0])
+    target = urllib.parse.urlunsplit((parts.scheme, f"{dial}:{port}", parts.path or "/", parts.query, ""))
+    return target, parts.netloc.rpartition("@")[2], host
+
+
+@contextlib.contextmanager
+def safe_stream(url: str, *, method: str = "GET", headers: Optional[dict] = None, allowlist: FrozenSet[str] = frozenset(),
+                allow_local: Optional[bool] = None, max_redirects: int = 5, **kwargs):
+    """Yield a streamed ``httpx.Response`` for an untrusted *url* (SSRF-safe).
+
+    Every hop is checked by :func:`_pin` and dialled at the checked IP; GET
+    redirects are re-checked and drop credentials on a host change.
+    ``ALLOW_LOCAL_CRAWL=true`` lifts the address check for local development.
+    """
+    import httpx
+
+    client_kw = {k: kwargs.pop(k) for k in ("timeout", "verify") if k in kwargs}
+    headers = dict(headers or {})
+    for _ in range(max_redirects + 1):
+        target, authority, host = _pin(url, allowlist, allow_local)
+        with httpx.Client(follow_redirects=False, **client_kw) as client:
+            request = client.build_request(method, target, headers={**headers, "Host": authority},
+                                           extensions={"sni_hostname": host}, **kwargs)
+            response = client.send(request, stream=True)
+            try:
+                location = response.headers.get("location")
+                if not (response.is_redirect and location and method in ("GET", "HEAD")):
+                    request.url = httpx.URL(url)
+                    yield response
+                    return
+            finally:
+                response.close()
+        url = urllib.parse.urljoin(url, location)
+        if urllib.parse.urlsplit(url).hostname != host:
+            headers = {k: v for k, v in headers.items() if k.lower() not in ("authorization", "cookie")}
+    raise UnsafeURLError(f"Too many redirects: {url}")
+
+
+def safe_fetch(url: str, **kwargs):
+    """:func:`safe_stream`, returning the fully read ``httpx.Response``."""
+    with safe_stream(url, **kwargs) as response:
+        response.read()
+    return response
+
+
+def searxng_allowlist() -> FrozenSet[str]:
+    return frozenset(_env_allowlist() | {"localhost", "127.0.0.1", "::1"})
 
 
 def validate_searxng_url(url: str) -> Optional[str]:
@@ -111,7 +166,6 @@ def validate_searxng_url(url: str) -> Optional[str]:
     """
     if not url:
         return None
-    allowlist = frozenset(_env_allowlist() | {"localhost", "127.0.0.1", "::1"})
-    if not is_safe_http_url(url, allowlist=allowlist):
+    if not is_safe_http_url(url, allowlist=searxng_allowlist()):
         return None
     return url

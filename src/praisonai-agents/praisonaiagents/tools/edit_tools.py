@@ -13,6 +13,7 @@ import difflib
 from typing import List, Optional, Tuple
 from ..approval import require_approval
 from . import _file_locks
+from .path_safety import is_within_root
 
 logger = logging.getLogger(__name__)
 
@@ -1588,7 +1589,9 @@ class EditTools:
             search_pattern = os.path.join(safe_dir, "**", file_pattern)
             
             for filepath in glob.glob(search_pattern, recursive=True):
-                if os.path.isfile(filepath):
+                # realpath first: the glob result may hold "link/.." segments
+                filepath = os.path.realpath(filepath)
+                if os.path.isfile(filepath) and is_within_root(filepath, safe_dir):
                     try:
                         with open(filepath, 'r', encoding='utf-8') as f:
                             lines = f.readlines()

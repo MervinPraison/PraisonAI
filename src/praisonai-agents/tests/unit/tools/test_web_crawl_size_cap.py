@@ -1,9 +1,5 @@
 """web_crawl's httpx path must not buffer bodies past its byte cap (#5969)."""
 
-import io
-import sys
-import urllib.request
-
 import pytest
 
 from praisonaiagents.tools import web_crawl_tools as w
@@ -21,7 +17,11 @@ def mock_client(monkeypatch):
             return real_client(*args, **kwargs)
 
         monkeypatch.setattr(httpx, "Client", client)
-        monkeypatch.setattr(w, "_is_safe_crawl_url", lambda url: True)
+        # Hermetic DNS: example.com answers a public address.
+        monkeypatch.setattr(
+            "socket.getaddrinfo",
+            lambda host, port=0, *a, **k: [(2, 1, 6, "", ("93.184.216.34", port or 0))],
+        )
 
     return install
 
@@ -61,26 +61,3 @@ def test_redirect_is_followed_and_small_page_unchanged(mock_client):
     assert result["title"] == "T"
     assert result["content"] == "# Hi"
 
-
-def test_urllib_fallback_reads_only_up_to_cap(monkeypatch):
-    reads = []
-
-    class Resp(io.BytesIO):
-        def read(self, size=-1):
-            reads.append(size)
-            return super().read(size)
-
-    monkeypatch.setitem(sys.modules, "httpx", None)  # force ImportError
-    monkeypatch.setattr(w, "_is_safe_crawl_url", lambda url: True)
-    body = b"<html><h1>Hi</h1>" + b"a" * (w._MAX_CRAWL_BYTES * 2) + b"</html>"
-
-    class Opener:
-        def open(self, url, timeout=None):
-            return Resp(body)
-
-    monkeypatch.setattr(urllib.request, "build_opener", lambda *handlers: Opener())
-
-    result = w._crawl_with_httpx(["http://example.com/"])[0]
-
-    assert reads == [w._MAX_CRAWL_BYTES]
-    assert result["content"].startswith("# Hi")

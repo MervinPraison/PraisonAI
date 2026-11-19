@@ -366,13 +366,21 @@ class WebhookBot:
 
         self._runner = web.AppRunner(app)
         await self._runner.setup()
-        self._site = web.TCPSite(self._runner, "0.0.0.0", bind_port)
+        from praisonai_bot.bots.webhook_security import webhook_bind_host
+
+        verifier = self._verifier
+        host = webhook_bind_host(
+            None if verifier is None else getattr(verifier, "_secret", "custom"),
+            server="Webhook channel", hint="Configure verify: {hmac: {secret: ...}}",
+        )
+        self._site = web.TCPSite(self._runner, host, bind_port)
         await self._site.start()
 
         self._is_running = True
         self._started_at = time.time()
         logger.info(
-            "Webhook channel listening on http://0.0.0.0:%s%s",
+            "Webhook channel listening on http://%s:%s%s",
+            host,
             bind_port,
             self._path,
         )

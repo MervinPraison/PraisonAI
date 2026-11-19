@@ -1,7 +1,7 @@
-"""PraisonAI Clean Chat UI — minimal chat interface.
+"""PraisonAI Chat UI — the dashboard's pages around one chat agent.
 
 Loaded by ``praisonai ui`` → ``aiui run app.py``.
-Clean chat without sidebar navigation.
+Same sidebar pages as ``praisonai dashboard`` (DASHBOARD_PAGES).
 
 Requires: pip install "praisonai[ui]"
 Set OPENAI_API_KEY before running.
@@ -11,7 +11,7 @@ Run:
 """
 
 import os
-from praisonai.integration.host_app import UIPreset, build_ui_app
+from praisonai.integration.host_app import DASHBOARD_PAGES, UIPreset, build_ui_app
 
 # Custom agent factory for chat with external tools
 def create_chat_agent(settings):
@@ -35,9 +35,7 @@ def create_chat_agent(settings):
 app = build_ui_app(UIPreset(
     title="PraisonAI Chat",
     logo="🤖",
-    pages=["chat"],
-    sidebar=False,
-    page_header=False,
+    pages=DASHBOARD_PAGES,
     theme={"preset": "blue", "dark_mode": True, "radius": "lg"},
     agent_kwargs={
         "name": "PraisonAI",

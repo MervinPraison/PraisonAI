@@ -176,3 +176,40 @@ def makedirs_in_sandbox(temp_dir: str | None, path: str) -> bool:
                 os.close(fd)
             except OSError:
                 pass
+
+
+def write_in_sandbox(temp_dir: str | None, path: str, content) -> bool:
+    """Write *content* to *path* inside *temp_dir* without following any symlink.
+
+    The sandboxed code shares the directory, so a name checked and then opened
+    can be swapped for a symlink in between. The write goes through the open
+    descriptor, never the name.
+    """
+    if not makedirs_in_sandbox(temp_dir, path):
+        return False
+    fd = open_in_sandbox(temp_dir, path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+    if fd is None:
+        return False
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content if isinstance(content, bytes) else content.encode())
+        return True
+    except OSError as exc:
+        logger.warning("Failed to write %s in sandbox: %s", path, exc)
+        return False
+
+
+def read_in_sandbox(temp_dir: str | None, path: str):
+    """Read *path* inside *temp_dir* (text, or bytes when not UTF-8); None if refused."""
+    fd = open_in_sandbox(temp_dir, path, os.O_RDONLY)
+    if fd is None:
+        return None
+    try:
+        with os.fdopen(fd, "rb") as handle:
+            raw = handle.read()
+    except OSError:
+        return None
+    try:
+        return raw.decode()
+    except UnicodeDecodeError:
+        return raw

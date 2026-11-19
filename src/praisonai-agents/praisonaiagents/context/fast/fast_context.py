@@ -275,7 +275,8 @@ class FastContext:
         matches = glob_search(
             self.workspace_path,
             pattern,
-            max_results=max_results
+            max_results=max_results,
+            workspace_root=self.workspace_path,
         )
         
         for match in matches:
@@ -318,7 +319,8 @@ class FastContext:
             full_path,
             start_line=start_line,
             end_line=end_line,
-            context_lines=context_lines
+            context_lines=context_lines,
+            workspace_root=self.workspace_path,
         )
         
         if result["success"]:

@@ -16,6 +16,7 @@ import fnmatch
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Set
 from praisonaiagents._logging import get_logger
+from praisonaiagents.tools.path_safety import is_within_root, resolve_inside, resolve_within_root
 
 logger = get_logger(__name__)
 
@@ -132,7 +133,8 @@ def grep_search(
     exclude_patterns: Optional[List[str]] = None,
     max_results: int = 100,
     context_lines: int = 0,
-    respect_gitignore: bool = True
+    respect_gitignore: bool = True,
+    workspace_root: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Search for pattern in files.
     
@@ -151,8 +153,13 @@ def grep_search(
         List of match dictionaries with path, line_number, content, context
     """
     results = []
-    search_path = os.path.abspath(search_path)
-    
+    root = workspace_root or os.getcwd()
+    try:
+        search_path = resolve_inside(root, search_path)
+    except ValueError as e:
+        logger.warning(str(e))
+        return []
+
     # Compile pattern
     if is_regex:
         flags = 0 if case_sensitive else re.IGNORECASE
@@ -177,16 +184,18 @@ def grep_search(
         files_to_search = [search_path]
     else:
         files_to_search = []
-        for root, dirs, files in os.walk(search_path):
+        for dirpath, dirs, files in os.walk(search_path):
             # Filter directories in-place to skip ignored ones
             if respect_gitignore:
                 dirs[:] = [d for d in dirs if not _should_ignore(
-                    os.path.join(root, d), search_path, gitignore_patterns
+                    os.path.join(dirpath, d), search_path, gitignore_patterns
                 )]
             
             for filename in files:
-                filepath = os.path.join(root, filename)
-                
+                filepath = os.path.join(dirpath, filename)
+                if os.path.islink(filepath) and not is_within_root(filepath, root):
+                    continue
+
                 # Check gitignore
                 if respect_gitignore and _should_ignore(filepath, search_path, gitignore_patterns):
                     continue
@@ -250,7 +259,8 @@ def glob_search(
     pattern: str,
     max_results: int = 100,
     include_dirs: bool = False,
-    respect_gitignore: bool = True
+    respect_gitignore: bool = True,
+    workspace_root: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Search for files matching glob pattern.
     
@@ -265,8 +275,13 @@ def glob_search(
         List of file info dictionaries with path, size, is_dir
     """
     results = []
-    search_path = os.path.abspath(search_path)
-    
+    workspace_root = workspace_root or os.getcwd()
+    try:
+        search_path = resolve_inside(workspace_root, search_path)
+    except ValueError as e:
+        logger.warning(str(e))
+        return []
+
     # Load gitignore patterns
     gitignore_patterns = set()
     if respect_gitignore:
@@ -279,7 +294,9 @@ def glob_search(
         for match in root.glob(pattern):
             if len(results) >= max_results:
                 break
-            
+            if not is_within_root(str(match), workspace_root):
+                continue
+
             # Check gitignore
             if respect_gitignore and _should_ignore(str(match), search_path, gitignore_patterns):
                 continue
@@ -328,8 +345,6 @@ def read_file(
     Returns:
         Dictionary with content, line info, and metadata
     """
-    from praisonaiagents.tools.path_safety import resolve_within_root
-
     safe_path = resolve_within_root(filepath, workspace_root or os.getcwd())
     if safe_path is None:
         return {
@@ -406,7 +421,8 @@ def list_directory(
     max_depth: int = 10,
     max_entries: int = 500,
     include_hidden: bool = False,
-    respect_gitignore: bool = True
+    respect_gitignore: bool = True,
+    workspace_root: Optional[str] = None,
 ) -> Dict[str, Any]:
     """List directory contents.
     
@@ -421,8 +437,12 @@ def list_directory(
     Returns:
         Dictionary with entries list and metadata
     """
-    dir_path = os.path.abspath(dir_path)
-    
+    workspace_root = workspace_root or os.getcwd()
+    try:
+        dir_path = resolve_inside(workspace_root, dir_path)
+    except ValueError as e:
+        return {"success": False, "error": str(e), "path": dir_path}
+
     if not os.path.exists(dir_path):
         return {
             "success": False,
@@ -475,7 +495,7 @@ def list_directory(
                     continue
                 
                 # Recurse into directories
-                if recursive and entry.is_dir():
+                if recursive and entry.is_dir() and is_within_root(entry.path, workspace_root):
                     _list_dir(entry.path, depth + 1)
         except PermissionError:
             pass

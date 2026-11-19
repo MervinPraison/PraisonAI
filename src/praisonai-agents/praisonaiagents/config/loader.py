@@ -399,13 +399,15 @@ def _load_config() -> Dict[str, Any]:
     if not config_paths:
         return {}
 
+    from .trust import drop_project_trust_keys  # project files cannot grant trust (SECURITY.md)
+
     # Fast path: a single file needs no merge and matches prior behaviour.
     if len(config_paths) == 1:
-        return _parse_config_file(config_paths[0])
+        return drop_project_trust_keys(_parse_config_file(config_paths[0]), config_paths[0])
 
     merged: Dict[str, Any] = {}
     for config_path in config_paths:
-        merged = _deep_merge(merged, _parse_config_file(config_path))
+        merged = _deep_merge(merged, drop_project_trust_keys(_parse_config_file(config_path), config_path))
     return merged
 
 
