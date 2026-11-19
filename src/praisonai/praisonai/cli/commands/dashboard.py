@@ -217,7 +217,7 @@ def _load_bundled_dashboard_app():
 
 def _run_aiui_dashboard(port: int, host: str, console) -> bool:
     """Run the aiui dashboard in-process via the bundled preset (Pattern B)."""
-    console.print("[bold green]🦞 Starting aiui Dashboard (Pattern B host)...[/bold green]")
+    console.print("[bold green]🦅 Starting aiui Dashboard (Pattern B host)...[/bold green]")
 
     try:
         import uvicorn
@@ -420,7 +420,7 @@ def _generate_dashboard_html(host: str = "localhost") -> str:
             </div>
             
             <div class="card">
-                <h2>🦞 Claw Dashboard</h2>
+                <h2>🦅 PraisonAI Dashboard</h2>
                 <p>Full-featured dashboard with agents, memory, knowledge, and integrations.</p>
                 <a href="#" onclick="openService('claw', 8082)" class="btn primary">Launch Dashboard</a>
                 <span id="claw-status" class="status stopped">Stopped</span>
