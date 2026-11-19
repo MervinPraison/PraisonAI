@@ -22,6 +22,8 @@ praisonaiagents → praisonai-code + praisonai-bot + praisonai-train + praisonai
 |------|-------|
 | `praisonai_mcp/mcp_server/` | Server, registry, transports, auth, adapters |
 | `praisonai_mcp/cli/commands/mcp.py` | Typer MCP config + management |
+| `praisonai_mcp/cli/commands/connect.py` | `praisonai connect`: write/remove/verify MCP client configs |
+| `praisonai_mcp/connect/` | Client catalog, config writers, handshake probe, connections ledger |
 | `praisonai_mcp/_wrapper_bridge.py` | Lazy wrapper capabilities/recipe (deploy via `praisonai.deploy` shim → `praisonai-deploy`) |
 
 Console script: `praisonai-mcp = praisonai_mcp.__main__:main`

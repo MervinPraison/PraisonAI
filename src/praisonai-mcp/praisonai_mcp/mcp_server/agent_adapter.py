@@ -72,6 +72,18 @@ class _SessionStore:
             return list(self._sessions.keys())
 
 
+def load_agents_file(path: str) -> List[Any]:
+    """The agents an ``agents.yaml`` defines (``agents:`` or ``roles:``)."""
+    from praisonaiagents.workflows.yaml_parser import YAMLWorkflowParser
+
+    parser = YAMLWorkflowParser()
+    parser.parse_file(path)
+    agents = list(getattr(parser, "_agents", {}).values())
+    if not agents:
+        raise ValueError(f"{path} defines no agents")
+    return agents
+
+
 def register_agents(server: Any, agents: List[Any]) -> None:
     """Register ``agents`` as MCP tools on ``server``'s tool registry.
 
