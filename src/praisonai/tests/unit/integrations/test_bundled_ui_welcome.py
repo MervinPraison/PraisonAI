@@ -44,3 +44,19 @@ def test_claw_app_registers_a_welcome():
         for d in node.decorator_list
     ]
     assert "aiui.welcome" in decorated
+
+
+def test_realtime_ui_turns_on_the_composer_microphone():
+    """aiui >= 0.3.172 ships the manager in praisonaiui.features.realtime.
+
+    The app imported ``praisonaiui.realtime``, which never existed, so the
+    ImportError left realtime_manager as None and the microphone stayed off.
+    """
+    src = (Path(praisonai.__file__).parent / "ui_realtime" / "default_app.py").read_text(encoding="utf-8")
+    assert "from praisonaiui.features.realtime import OpenAIRealtimeManager" in src
+    assert "from praisonaiui.realtime import" not in src
+
+
+def test_claw_lists_the_connect_page():
+    src = (Path(praisonai_bot.__file__).parent / "claw" / "default_app.py").read_text(encoding="utf-8")
+    assert '"connect"' in src
