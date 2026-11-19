@@ -7,6 +7,7 @@ Usage:
     praisonai ui --app my-chat.py   # Custom app file
 """
 
+import hashlib
 import sys
 from pathlib import Path
 from typing import Optional
@@ -40,6 +41,57 @@ def _resolve_bundled_default_app(default_app_name: str) -> Optional[Path]:
     return wrapper_path / default_app_name / "default_app.py"
 
 
+# First line of every copy we write: the sha256 of the rest of the file, so an
+# untouched copy can be told apart from one the user edited.
+_STAMP = "# praisonai-default-app sha256="
+# sha256[:16] of every ui_*/default_app.py shipped before copies were stamped.
+_SHIPPED = frozenset({
+    "10c4a61df56a5cbf",
+    "1f7e4ab5e9d240c5",
+    "45e4f37ecb08fe6a",
+    "577b554be2d92c73",
+    "5c2b778e207eafa7",
+    "6808392fc180d31a",
+    "8dcb4c9ab3c89d9c",
+    "98baa6684c096592",
+    "b9d53764ea495554",
+    "c7fd2a667daf6a34",
+    "d60e7b64c6969606",
+    "de261b2f9f8aa43e",
+    "e3e11ffd30b9eeb2",
+    "f01947f507547615",
+    "f9d7f5e8018c9140",
+    "fa7b0c6151c81c7f",
+})
+
+
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _sync_default_app(bundled: Path, target: Path) -> str:
+    """Create or refresh the user's copy of a bundled app; never overwrite an edited one.
+
+    Returns "created", "updated", "current" or "edited". Same rules as
+    praisonai_bot.cli.commands.claw (that package cannot import this one).
+    """
+    text = bundled.read_text(encoding="utf-8")
+    stamped = f"{_STAMP}{_sha(text)}\n{text}"
+    if not target.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(stamped, encoding="utf-8")
+        return "created"
+    old = target.read_text(encoding="utf-8")
+    if old == stamped:
+        return "current"
+    first, _, body = old.partition("\n")
+    untouched = (first == f"{_STAMP}{_sha(body)}") or _sha(old)[:16] in _SHIPPED
+    if not untouched:
+        return "edited"
+    target.write_text(stamped, encoding="utf-8")
+    return "updated"
+
+
 def _launch_aiui_app(
     app_dir: str,
     default_app_name: str,
@@ -67,26 +119,27 @@ def _launch_aiui_app(
             print(f"\033[91mERROR: App file not found: {app_file}\033[0m")
             sys.exit(1)
     else:
-        ui_dir = Path.home() / ".praisonai" / app_dir
-        default_app = ui_dir / "app.py"
-        
-        # Ensure default app exists
-        if not default_app.exists():
-            ui_dir.mkdir(parents=True, exist_ok=True)
-            # Bundled ui_*/default_app.py assets ship in the praisonai wrapper,
-            # not in praisonai_code — resolve against the installed wrapper.
-            bundled = _resolve_bundled_default_app(default_app_name)
-            if bundled is None or not bundled.exists():
+        default_app = Path.home() / ".praisonai" / app_dir / "app.py"
+        # Bundled ui_*/default_app.py assets ship in the praisonai wrapper,
+        # not in praisonai_code — resolve against the installed wrapper.
+        bundled = _resolve_bundled_default_app(default_app_name)
+        if bundled is None or not bundled.exists():
+            if not default_app.exists():
                 print(
                     "\033[91mERROR: Bundled default_app.py not found. "
                     'Install with:\n  pip install "praisonai[ui]"\033[0m'
                 )
                 sys.exit(1)
-            default_app.write_text(
-            bundled.read_text(encoding="utf-8"), encoding="utf-8"
-             )
-            print(f"   ✓ Created default {ui_name} config: {default_app}")
-        
+        else:
+            state = _sync_default_app(bundled, default_app)
+            if state == "created":
+                print(f"   ✓ Created default {ui_name} config: {default_app}")
+            elif state == "updated":
+                print(f"   ✓ Updated {default_app} to the latest default")
+            elif state == "edited":
+                print(f"   Using your edited {default_app}. A newer default is at {bundled};"
+                      " delete your copy to get it.")
+
         resolved = default_app
 
     # 3. Launch via aiui run, in this interpreter: a bare "aiui" from PATH can be a
