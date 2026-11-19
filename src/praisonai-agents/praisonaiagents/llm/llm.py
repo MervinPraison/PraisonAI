@@ -1302,8 +1302,13 @@ Respond with ONLY a valid JSON tool call in this format:
         if error_kind in ("auth_permanent", "billing") and self._failover_manager and attempt <= max_retries:
             return FailoverDecision(action="rotate_profile", reason=error_kind, backoff_ms=0, is_retryable=True)
 
+        # The process is shutting down (e.g. Ctrl-C mid-call): every retry
+        # fails the same way and only delays exit.
+        from .error_classifier import is_shutdown_error
+        shutting_down = is_shutdown_error(error)
+
         # Non-retryable errors (includes billing errors)
-        if error_kind in ["auth_permanent", "model_not_found", "format_error", "billing"]:
+        if shutting_down or error_kind in ["auth_permanent", "model_not_found", "format_error", "billing"]:
             return FailoverDecision(
                 action="surface_error",
                 reason=error_kind,
@@ -4683,7 +4688,9 @@ Respond with ONLY a valid JSON tool call in this format:
                 except (LLMResponseError, ToolExecutionError, BudgetExceededError):
                     raise
                 except Exception as e:
-                    logger.error(f"Error in LLM iteration {iteration_count}: {e}")
+                    from .error_classifier import is_shutdown_error
+                    (logger.debug if is_shutdown_error(e) else logger.error)(
+                        f"Error in LLM iteration {iteration_count}: {e}")
                     # Don't swallow the failure and return an empty string as if
                     # the call succeeded. Re-raise as a distinguishable exception
                     # so the caller (e.g. Agent.chat) can surface the real error.
