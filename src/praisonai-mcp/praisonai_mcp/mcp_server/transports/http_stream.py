@@ -52,6 +52,7 @@ class HTTPStreamTransport:
         response_mode: str = "batch",
         resumability_enabled: bool = True,
         event_history_duration: int = 300,
+        oauth: Optional[Any] = None,
     ):
         """
         Initialize HTTP Stream transport.
@@ -99,6 +100,11 @@ class HTTPStreamTransport:
         # scope enforcement is driven off the same code path. When neither is
         # provided, auth (and scope enforcement) is disabled — "allow all".
         self.api_key_auth = api_key_auth
+        # The built-in authorization server (auth/server.py) validates its own
+        # bearer tokens through the same interface as an APIKeyAuth.
+        self.oauth = oauth
+        if self.api_key_auth is None and oauth is not None:
+            self.api_key_auth = oauth
         if self.api_key_auth is None and api_key:
             from ..auth.api_key import APIKeyAuth
             self.api_key_auth = APIKeyAuth(allow_env_key=False)
@@ -210,7 +216,10 @@ class HTTPStreamTransport:
             auth_header = request.headers.get("Authorization", "")
             is_valid, api_key = self.api_key_auth.validate_header(auth_header)
             if not is_valid:
-                return JSONResponse({"error": "Unauthorized"}, status_code=401), None
+                # Point MCP clients at the sign-in (RFC 9728 resource_metadata).
+                challenge = getattr(self.api_key_auth, "www_authenticate", None)
+                headers = {"WWW-Authenticate": challenge("invalid_token" if auth_header else None)} if challenge else None
+                return JSONResponse({"error": "Unauthorized"}, status_code=401, headers=headers), None
 
             # api_key is None only for the env-key path, which is wildcard by
             # construction. For a resolved key, honor its configured scopes
@@ -445,6 +454,10 @@ class HTTPStreamTransport:
             Route("/health", health, methods=["GET"]),
             Route("/", root, methods=["GET"]),
         ]
+        if self.oauth is not None:
+            from ..auth.routes import build_routes
+
+            routes += build_routes(self.oauth, self.endpoint)
         
         # Create middleware
         middleware = [
@@ -453,6 +466,7 @@ class HTTPStreamTransport:
                 allow_origins=self.cors_origins,
                 allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
                 allow_headers=["Authorization", "Content-Type", "Origin", "Accept", "Mcp-Session-Id", "Last-Event-Id"],
+                expose_headers=["WWW-Authenticate", "Mcp-Session-Id"],
             ),
         ]
         
