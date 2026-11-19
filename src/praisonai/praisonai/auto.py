@@ -10,7 +10,7 @@ This module uses FULL LAZY LOADING for all heavy dependencies:
 
 This ensures minimal import-time overhead.
 """
-from typing import Any, Awaitable, Dict, List, Optional, Type, TypeVar
+from typing import Any, Awaitable, Dict, List, Optional, Type, TypeVar, Union
 import os
 import json
 import re
@@ -1070,6 +1070,26 @@ class BaseAutoGenerator:
 # Pydantic Models for Structured Output - Lazy Loaded
 # =============================================================================
 
+def _index_named_items(
+    items: Union[Dict[str, Any], List[Dict[str, Any]]], *, value_key: Optional[str] = None
+) -> Dict[str, Any]:
+    """Restore keyed YAML data from strict-provider named lists.
+
+    Accept legacy mappings from registered providers without changing them.
+    Reject duplicate IDs instead of silently dropping generated entries.
+    """
+    if isinstance(items, dict):
+        return items
+    indexed = {}
+    for item in items:
+        value = dict(item)
+        item_id = value.pop('id')
+        if item_id in indexed:
+            raise ValueError(f"Duplicate generated ID: {item_id!r}")
+        indexed[item_id] = value[value_key] if value_key else value
+    return indexed
+
+
 def _get_team_models():
     """Get team structure models, creating them on first use."""
 
@@ -1092,6 +1112,20 @@ def _get_team_models():
         class TeamStructure(BaseModel):
             """Structure for multi-agent team."""
             roles: Dict[str, RoleDetails]
+
+        class NamedTask(TaskDetails):
+            id: str
+
+        class NamedRole(BaseModel):
+            id: str
+            role: str
+            goal: str
+            backstory: str
+            tasks: List[NamedTask]
+            tools: List[str]
+
+        class TeamOutput(BaseModel):
+            roles: List[NamedRole]
 
         class SingleAgentStructure(BaseModel):
             """Structure for single-agent generation (Anthropic's 'start simple' principle)."""
@@ -1120,6 +1154,7 @@ def _get_team_models():
             "TaskDetails": TaskDetails,
             "RoleDetails": RoleDetails,
             "TeamStructure": TeamStructure,
+            "TeamOutput": TeamOutput,
             "SingleAgentStructure": SingleAgentStructure,
             "PatternRecommendation": PatternRecommendation,
             "ValidationGate": ValidationGate,
@@ -1246,14 +1281,20 @@ class AutoGenerator(BaseAutoGenerator):
         path while keeping merge/save/path-resolution logic in one place.
         """
         response = await self._structured_completion_async(
-            response_model=_get_team_models()['TeamStructure'],
+            response_model=_get_team_models()['TeamOutput'],
             messages=[
-                {"role": "system", "content": "You are a helpful assistant designed to output complex team structures."},
+                {"role": "system", "content": (
+                    "Design a team. Return roles and their tasks as lists, each item "
+                    "with a unique id; the keyed examples describe the resulting YAML."
+                )},
                 {"role": "user", "content": self.get_user_content()}
             ],
             is_async=is_async,
         )
         json_data = json.loads(response.model_dump_json())
+        json_data['roles'] = _index_named_items(json_data['roles'])
+        for role in json_data['roles'].values():
+            role['tasks'] = _index_named_items(role['tasks'])
         # Off-loop the blocking merge/YAML-dump/fsync so a running event loop
         # (e.g. under `praisonai serve`) is not parked; mirrors the run path's
         # asyncio.to_thread offload in AgentsGenerator._aload_config.
@@ -1630,6 +1671,10 @@ def _get_workflow_models():
     thread-safe optional-dep loading) so exception caching and ``lazy_reset``
     semantics match ``_get_team_models`` instead of drifting.
     """
+    # lazy_get uses a shared non-reentrant lock: resolve the team model before
+    # entering the workflow factory so a cold workflow import cannot deadlock.
+    validation_gate = _get_team_models()['ValidationGate']
+
     def _create():
         from pydantic import BaseModel
 
@@ -1665,7 +1710,37 @@ def _get_workflow_models():
             steps: List[Dict]  # Can be agent steps, route, parallel, etc.
             gates: Optional[List[Any]] = None  # Optional validation gates, ValidationGate type resolved at runtime
 
+        class NamedAgent(WorkflowAgentDetails):
+            id: str
+
+        class NamedRoute(BaseModel):
+            id: str
+            targets: List[str]
+
+        class RouteOutput(BaseModel):
+            name: str
+            route: List[NamedRoute]
+
+        class LoopDetails(BaseModel):
+            agent: str
+            action: str
+            condition: str
+            max_iterations: int
+            feedback_to: Optional[str] = None
+
+        class LoopOutput(BaseModel):
+            name: str
+            loop: LoopDetails
+
+        class WorkflowOutput(BaseModel):
+            name: str
+            description: str
+            agents: List[NamedAgent]
+            steps: List[Union[WorkflowStepDetails, RouteOutput, WorkflowParallelDetails, LoopOutput]]
+            gates: Optional[List[validation_gate]] = None
+
         return {
+            'WorkflowOutput': WorkflowOutput,
             'WorkflowStepDetails': WorkflowStepDetails,
             'WorkflowRouteDetails': WorkflowRouteDetails,
             'WorkflowParallelDetails': WorkflowParallelDetails,
@@ -1852,15 +1927,23 @@ Respond with:
         logic in one place.
         """
         response = await self._structured_completion_async(
-            response_model=_get_workflow_models()['WorkflowStructure'],
+            response_model=_get_workflow_models()['WorkflowOutput'],
             messages=[
-                {"role": "system", "content": "You are a helpful assistant that designs workflow structures."},
+                {"role": "system", "content": (
+                    "Design a workflow. Return agents as a list with unique id fields; "
+                    "routes as lists of {id, targets}. Steps must reference agent IDs, "
+                    "never display names. The keyed examples describe the resulting YAML."
+                )},
                 {"role": "user", "content": self._get_prompt(pattern)}
             ],
             is_async=is_async,
         )
         
-        json_data = json.loads(response.model_dump_json())
+        json_data = json.loads(response.model_dump_json(exclude_none=True))
+        json_data['agents'] = _index_named_items(json_data['agents'])
+        for step in json_data['steps']:
+            if isinstance(step.get('route'), list):
+                step['route'] = _index_named_items(step['route'], value_key='targets')
 
         # Off-loop the blocking merge/read + YAML-dump/fsync so a running event
         # loop (e.g. under `praisonai serve`) is not parked; mirrors the run
