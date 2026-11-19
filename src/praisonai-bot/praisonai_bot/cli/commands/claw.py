@@ -1,10 +1,12 @@
 """
-Claw command — launch the PraisonAI 🦞 Dashboard.
+Claw command — launch the PraisonAI 🦅 Dashboard.
+
+``praisonai dashboard`` is the main name; ``praisonai claw`` opens the same app.
 
 Usage:
-    praisonai claw                # Dashboard on :8082
-    praisonai claw --port 9000    # Custom port
-    praisonai claw --app my.py    # Custom app file
+    praisonai dashboard                # Dashboard on :8082 (or: praisonai claw)
+    praisonai dashboard --port 9000    # Custom port
+    praisonai dashboard --app my.py    # Custom app file
 """
 
 import sys
@@ -20,7 +22,7 @@ import typer
 # text registered in praisonai_code/cli/app.py, so it reintroduced one
 # whenever praisonai-bot is installed. Runtime output below is
 # unaffected -- only the help surface has to survive cp1252.
-app = typer.Typer(help="PraisonAI Dashboard (full UI)")
+app = typer.Typer(help="PraisonAI Dashboard (same app as: praisonai dashboard)")
 
 CLAW_DIR = Path.home() / ".praisonai" / "claw"
 DEFAULT_APP = CLAW_DIR / "app.py"
@@ -62,15 +64,15 @@ def claw(
     reload: bool = typer.Option(False, "--reload", "-r", help="Enable auto-reload"),
 ):
     """
-    Launch the PraisonAI 🦞 Dashboard.
+    Launch the PraisonAI 🦅 Dashboard (same app as ``praisonai dashboard``).
 
     Starts the AIUI dashboard with chat, agents, memory, knowledge,
     channels, cron, guardrails, and more.
 
     Examples:
-        praisonai claw
-        praisonai claw --port 9000
-        praisonai claw --app my-dashboard.py
+        praisonai dashboard          # or: praisonai claw
+        praisonai dashboard --port 9000
+        praisonai dashboard --app my-dashboard.py
     """
     if ctx.invoked_subcommand is not None:
         return
@@ -82,7 +84,7 @@ def claw(
             raise ImportError
     except ImportError:
         print("\n\033[91mERROR: PraisonAI Dashboard (aiui) is not installed.\033[0m")
-        print('\nInstall with:\n  pip install "praisonai[claw]"\n')
+        print('\nInstall with:\n  pip install "praisonai[dashboard]"\n')
         sys.exit(1)
 
     # 2. Resolve app file
@@ -94,14 +96,16 @@ def claw(
     else:
         resolved = _ensure_default_app()
 
-    # 3. Launch via aiui run
+    # 3. Launch via aiui run, in this interpreter: a bare "aiui" from PATH can be a
+    # different install (another venv or an old global copy) without praisonai_bot.
     import subprocess
 
-    cmd = ["aiui", "run", str(resolved), "--port", str(port), "--host", host]
+    cmd = [sys.executable, "-m", "praisonaiui.cli", "run", str(resolved),
+           "--port", str(port), "--host", host]
     if reload:
         cmd.append("--reload")
 
-    print(f"\n🦞 PraisonAI Dashboard starting at http://{host}:{port}")
+    print(f"\n🦅 PraisonAI Dashboard starting at http://{host}:{port}")
     print(f"   App: {resolved}")
     # Warn if the user has opted into LAN exposure. The dashboard has no
     # built-in auth at the URL layer (see AuthConfig in praisonaiui), so
@@ -117,12 +121,5 @@ def claw(
 
     try:
         subprocess.run(cmd, check=True)
-    except FileNotFoundError:
-        # Fallback: python -m praisonaiui.cli
-        cmd = [sys.executable, "-m", "praisonaiui.cli", "run", str(resolved),
-               "--port", str(port), "--host", host]
-        if reload:
-            cmd.append("--reload")
-        subprocess.run(cmd, check=True)
     except KeyboardInterrupt:
-        print("\n🦞 Dashboard stopped.")
+        print("\n🦅 Dashboard stopped.")
