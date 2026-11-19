@@ -75,6 +75,7 @@ configure_host(
         "kanban",        # ADD
         "jobs-board",    # ADD
         "config",
+        "connect",       # connect editors and agents to the MCP server (aiui >= 0.3.172)
         "logs",
         "debug",
     ],
