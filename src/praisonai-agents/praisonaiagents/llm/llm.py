@@ -1302,8 +1302,12 @@ Respond with ONLY a valid JSON tool call in this format:
         if error_kind in ("auth_permanent", "billing") and self._failover_manager and attempt <= max_retries:
             return FailoverDecision(action="rotate_profile", reason=error_kind, backoff_ms=0, is_retryable=True)
 
+        # The process is shutting down (e.g. Ctrl-C mid-call): every retry
+        # fails the same way and only delays exit.
+        shutting_down = "cannot schedule new futures after" in str(error)
+
         # Non-retryable errors (includes billing errors)
-        if error_kind in ["auth_permanent", "model_not_found", "format_error", "billing"]:
+        if shutting_down or error_kind in ["auth_permanent", "model_not_found", "format_error", "billing"]:
             return FailoverDecision(
                 action="surface_error",
                 reason=error_kind,
