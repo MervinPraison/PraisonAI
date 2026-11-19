@@ -29,7 +29,7 @@ gateway = [
     "redis>=5.0.0",
 ]
 bot = [
-    "python-telegram-bot>=20.0",
+    "python-telegram-bot[webhooks]>=20.0",
     "discord.py>=2.0.0",
     "slack_sdk>=3.0.0",
     "slack-bolt>=1.18.0",
