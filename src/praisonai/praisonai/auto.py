@@ -1090,6 +1090,20 @@ def _index_named_items(
     return indexed
 
 
+def _restore_workflow_steps(value: Any) -> Any:
+    """Restore route maps through nested loop, branch and parallel steps."""
+    if isinstance(value, list):
+        return [_restore_workflow_steps(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _index_named_items(item, value_key='targets')
+            if key == 'route' and isinstance(item, list)
+            else _restore_workflow_steps(item)
+            for key, item in value.items()
+        }
+    return value
+
+
 def _get_team_models():
     """Get team structure models, creating them on first use."""
 
@@ -1676,7 +1690,7 @@ def _get_workflow_models():
     validation_gate = _get_team_models()['ValidationGate']
 
     def _create():
-        from pydantic import BaseModel
+        from pydantic import BaseModel, Field
 
         class WorkflowStepDetails(BaseModel):
             """Details for a workflow step."""
@@ -1717,26 +1731,72 @@ def _get_workflow_models():
             id: str
             targets: List[str]
 
-        class RouteOutput(BaseModel):
-            name: str
-            route: List[NamedRoute]
-
-        class LoopDetails(BaseModel):
-            agent: str
-            action: str
-            condition: str
-            max_iterations: int
-            feedback_to: Optional[str] = None
-
         class LoopOutput(BaseModel):
-            name: str
-            loop: LoopDetails
+            model_config = {'extra': 'forbid'}
+            over: Optional[Union[str, List[Union[str, int, float, bool]]]] = None
+            from_csv: Optional[str] = None
+            from_file: Optional[str] = None
+            var_name: Optional[str] = None
+            parallel: Optional[bool] = None
+            context: Optional[str] = None
+            max_workers: Optional[Union[int, str]] = None
+            step: Optional[str] = None
+            steps: Optional[List['StepOutput']] = None
+
+        class RepeatOutput(BaseModel):
+            model_config = {'extra': 'forbid'}
+            until: str
+            max_iterations: int = 5
+
+        class IncludeOutput(BaseModel):
+            model_config = {'extra': 'forbid'}
+            recipe: str
+            input: Optional[str] = None
+
+        class IfOutput(BaseModel):
+            model_config = {'extra': 'forbid'}
+            condition: str
+            then: List['StepOutput']
+            otherwise: Optional[List['StepOutput']] = Field(default=None, alias='else')
+
+        class StepOutput(BaseModel):
+            # Reject unsupported options instead of silently discarding them.
+            model_config = {'extra': 'forbid'}
+            name: Optional[str] = None
+            agent: Optional[str] = None
+            action: Optional[str] = None
+            expected_output: Optional[str] = None
+            output_file: Optional[str] = None
+            output_json: Optional[str] = None
+            output_pydantic: Optional[str] = None
+            output_variable: Optional[str] = None
+            context: Optional[Union[str, List[str]]] = None
+            guardrail: Optional[str] = None
+            callback: Optional[str] = None
+            max_retries: Optional[int] = None
+            create_directory: Optional[bool] = None
+            async_execution: Optional[bool] = None
+            skip_on_failure: Optional[bool] = None
+            retry_delay: Optional[float] = None
+            on_failure: Optional[str] = None
+            route: Optional[List[NamedRoute]] = None
+            parallel: Optional[List['StepOutput']] = None
+            loop: Optional[LoopOutput] = None
+            repeat: Optional[RepeatOutput] = None
+            include: Optional[Union[str, IncludeOutput]] = None
+            branching: Optional[IfOutput] = Field(default=None, alias='if')
+            step: Optional[Union[str, 'StepOutput']] = None
+            steps: Optional[List['StepOutput']] = None
+
+        namespace = {'StepOutput': StepOutput}
+        for model in (LoopOutput, IfOutput, StepOutput):
+            model.model_rebuild(_types_namespace=namespace)
 
         class WorkflowOutput(BaseModel):
             name: str
             description: str
             agents: List[NamedAgent]
-            steps: List[Union[WorkflowStepDetails, RouteOutput, WorkflowParallelDetails, LoopOutput]]
+            steps: List[StepOutput]
             gates: Optional[List[validation_gate]] = None
 
         return {
@@ -1939,11 +1999,9 @@ Respond with:
             is_async=is_async,
         )
         
-        json_data = json.loads(response.model_dump_json(exclude_none=True))
+        json_data = json.loads(response.model_dump_json(exclude_none=True, by_alias=True))
         json_data['agents'] = _index_named_items(json_data['agents'])
-        for step in json_data['steps']:
-            if isinstance(step.get('route'), list):
-                step['route'] = _index_named_items(step['route'], value_key='targets')
+        json_data['steps'] = _restore_workflow_steps(json_data['steps'])
 
         # Off-loop the blocking merge/read + YAML-dump/fsync so a running event
         # loop (e.g. under `praisonai serve`) is not parked; mirrors the run
@@ -2181,12 +2239,9 @@ Example structure:
   },
   "steps": [
     {"agent": "generator", "action": "Generate initial content for: {{input}}"},
-    {"name": "evaluation_loop", "loop": {
-      "agent": "evaluator",
-      "action": "Evaluate the generated content",
-      "condition": "output does not contain 'APPROVED'",
-      "max_iterations": 3,
-      "feedback_to": "generator"
+    {"name": "evaluation_loop", "agent": "evaluator",
+     "action": "Evaluate the generated content", "repeat": {
+      "until": "APPROVED", "max_iterations": 3
     }},
     {"agent": "generator", "action": "Finalize content based on all feedback"}
   ]

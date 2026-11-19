@@ -97,23 +97,103 @@ async def test_team_strict_schema_preserves_named_yaml(
 @pytest.mark.offline
 @pytest.mark.parametrize("asynchronous", [False, True])
 @pytest.mark.parametrize(
-    "steps",
+    ("steps", "expected"),
     [
-        [{"agent": "greeter", "action": "Greet"}],
-        [{"name": "select", "route": [{"id": "default", "targets": ["greeter"]}]}],
-        [{"name": "both", "parallel": [{"agent": "greeter", "action": "Greet"}]}],
-        [
-            {
-                "name": "retry",
-                "loop": {
+        (
+            [{"agent": "greeter", "action": "Greet"}],
+            [{"agent": "greeter", "action": "Greet"}],
+        ),
+        (
+            [{"name": "select", "route": [{"id": "default", "targets": ["greeter"]}]}],
+            [{"name": "select", "route": {"default": ["greeter"]}}],
+        ),
+        (
+            [{"name": "both", "parallel": [{"agent": "greeter", "action": "Greet"}]}],
+            [{"name": "both", "parallel": [{"agent": "greeter", "action": "Greet"}]}],
+        ),
+        (
+            [
+                {
+                    "name": "retry",
                     "agent": "greeter",
                     "action": "Greet",
-                    "condition": "not approved",
-                    "max_iterations": 3,
-                    "feedback_to": "greeter",
-                },
-            }
-        ],
+                    "loop": {"over": "items"},
+                }
+            ],
+            [
+                {
+                    "name": "retry",
+                    "agent": "greeter",
+                    "action": "Greet",
+                    "loop": {"over": "items"},
+                }
+            ],
+        ),
+        (
+            [
+                {
+                    "agent": "greeter",
+                    "action": "Greet",
+                    "repeat": {"until": "approved", "max_iterations": 3},
+                }
+            ],
+            [
+                {
+                    "agent": "greeter",
+                    "action": "Greet",
+                    "repeat": {"until": "approved", "max_iterations": 3},
+                }
+            ],
+        ),
+        (
+            [
+                {
+                    "if": {
+                        "condition": "approved",
+                        "then": [{"agent": "greeter", "action": "Greet"}],
+                        "else": [{"agent": "greeter", "action": "Retry"}],
+                    }
+                }
+            ],
+            [
+                {
+                    "if": {
+                        "condition": "approved",
+                        "then": [{"agent": "greeter", "action": "Greet"}],
+                        "else": [{"agent": "greeter", "action": "Retry"}],
+                    }
+                }
+            ],
+        ),
+        ([{"include": "greeting-recipe"}], [{"include": "greeting-recipe"}]),
+        (
+            [
+                {
+                    "loop": {"over": "items"},
+                    "steps": [{"agent": "greeter", "action": "Greet"}],
+                }
+            ],
+            [
+                {
+                    "loop": {"over": "items"},
+                    "steps": [{"agent": "greeter", "action": "Greet"}],
+                }
+            ],
+        ),
+        (
+            [
+                {
+                    "loop": {"over": "items"},
+                    "steps": [{"route": [{"id": "default", "targets": ["greeter"]}]}],
+                }
+            ],
+            [
+                {
+                    "loop": {"over": "items"},
+                    "steps": [{"route": {"default": ["greeter"]}}],
+                }
+            ],
+        ),
     ],
 )
 async def test_workflow_strict_schema_preserves_patterns(
@@ -121,6 +201,7 @@ async def test_workflow_strict_schema_preserves_patterns(
     monkeypatch: pytest.MonkeyPatch,
     asynchronous: bool,
     steps: list[dict[str, Any]],
+    expected: list[dict[str, Any]],
 ) -> None:
     target = tmp_path / "workflow.yaml"
     generator = WorkflowAutoGenerator(
@@ -166,10 +247,11 @@ async def test_workflow_strict_schema_preserves_patterns(
             "instructions": "Say hello",
         }
     }
-    expected = json.loads(json.dumps(steps))
-    if "route" in expected[0]:
-        expected[0]["route"] = {"default": ["greeter"]}
     assert data["steps"] == expected
+    from praisonaiagents.workflows.yaml_parser import YAMLWorkflowParser
+
+    workflow = YAMLWorkflowParser().parse_file(target)
+    assert len(workflow.steps) == len(expected)
 
 
 @pytest.mark.offline
@@ -225,3 +307,70 @@ def test_workflow_model_is_available_in_a_cold_process() -> None:
         timeout=10,
     )
     assert json.loads(result.stdout)["agents"] == {}
+
+
+@pytest.mark.offline
+@pytest.mark.parametrize("unknown", [False, True])
+async def test_generated_step_options_reach_the_yaml_parser(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unknown: bool
+) -> None:
+    from praisonaiagents.workflows.yaml_parser import YAMLWorkflowParser
+
+    target = tmp_path / "workflow.yaml"
+    generator = WorkflowAutoGenerator(
+        topic="Write report",
+        workflow_file=str(target),
+        framework="praisonai",
+        config_list=[{"model": "test-model", "api_key": "test-key"}],
+    )
+    options = {
+        "agent": "writer",
+        "action": "Write",
+        "name": "report",
+        "output_file": "report.md",
+        "context": ["research"],
+        "guardrail": "Check the report",
+        "max_retries": 2,
+        "create_directory": False,
+        "async_execution": False,
+        "output_variable": "report_result",
+        "skip_on_failure": False,
+        "retry_delay": 0,
+    }
+    payload = {
+        "name": "Report",
+        "description": "Write",
+        "agents": [
+            {
+                "id": "writer",
+                "name": "Writer",
+                "role": "Writer",
+                "goal": "Write",
+                "instructions": "Write",
+                "tools": [],
+            }
+        ],
+        "steps": [options],
+    }
+
+    async def complete(*, response_model: type[BaseModel], **kwargs: Any) -> BaseModel:
+        assert_closed_schema(to_strict_json_schema(response_model))
+        return response_model.model_validate(payload)
+
+    monkeypatch.setattr(generator, "_structured_completion_async", complete)
+    monkeypatch.setattr(generator, "_get_prompt", lambda pattern: "Write")
+    monkeypatch.setattr(generator, "_dangerous_tool_names", lambda: set())
+    if unknown:
+        options["unsupported_option"] = "must not disappear"
+        with pytest.raises(ValueError):
+            await generator.agenerate()
+        assert not target.exists()
+        return
+    await generator.agenerate()
+    assert yaml.safe_load(target.read_text())["steps"] == [options]
+    parser = YAMLWorkflowParser()
+    parser.parse_file(target)
+    agent = parser._agents["writer"]
+    assert agent._yaml_output_file == "report.md"
+    assert agent._yaml_context == ["research"]
+    assert agent._yaml_guardrail == "Check the report"
