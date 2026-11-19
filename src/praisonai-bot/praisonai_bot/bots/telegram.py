@@ -1505,12 +1505,25 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._monitor = ConnectionMonitor(platform="telegram", policy=TELEGRAM_BACKOFF)
         
         if self.config.is_webhook_mode:
-            await self._application.run_webhook(
-                listen="0.0.0.0",
-                port=8443,
-                url_path=self.config.webhook_path,
-                webhook_url=f"{self.config.webhook_url}{self.config.webhook_path}",
-            )
+            self._stop_event = asyncio.Event()
+            try:
+                await self._application.initialize()
+                await self._application.updater.start_webhook(
+                    listen="0.0.0.0",
+                    port=self.config.webhook_port,
+                    url_path=self.config.webhook_path,
+                    webhook_url=f"{self.config.webhook_url}{self.config.webhook_path}",
+                )
+                await self._application.start()
+                await self._stop_event.wait()
+            finally:
+                for cleanup in (self._application.updater.stop,
+                                self._application.stop, self._application.shutdown):
+                    try:
+                        await cleanup()
+                    except Exception as cleanup_error:
+                        logger.debug("Telegram cleanup: %s", cleanup_error)
+                self._is_running = False
         else:
             # Resilient polling loop with exponential backoff.
             # Single-instance enforcement (Issue #5094): Telegram allows only
