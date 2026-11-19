@@ -1,4 +1,4 @@
-"""Shared authorisation + bind guard for the ``launch()`` serving paths.
+"""Shared authorisation + bind guard for ``launch()`` and every SDK server.
 
 Both ``Agent.launch()`` (``agent/execution_mixin.py``) and
 ``PraisonAIAgents.launch()`` (``agents/agents.py``) expose a prompt-execution
@@ -11,14 +11,17 @@ Stdlib only — no heavy imports, no new public params.
 
 from __future__ import annotations
 
+import hmac
 import os
 import secrets as _secrets
 from typing import Optional
 
 __all__ = [
     "launch_auth_token",
+    "token_matches",
     "authorise_launch_request",
     "resolve_launch_host",
+    "require_bind_token",
 ]
 
 # Hosts that are safe to serve keyless on: loopback only.
@@ -35,6 +38,17 @@ def launch_auth_token() -> Optional[str]:
     return os.environ.get("PRAISONAI_LAUNCH_AUTH_TOKEN")
 
 
+def token_matches(supplied: Optional[str], expected: Optional[str]) -> bool:
+    """Constant-time token check shared by every SDK server.
+
+    Compares UTF-8 bytes so non-ASCII input cannot raise; a missing or empty
+    value on either side never matches.
+    """
+    if not supplied or not expected:
+        return False
+    return hmac.compare_digest(str(supplied).encode("utf-8"), str(expected).encode("utf-8"))
+
+
 def authorise_launch_request(request) -> bool:
     """Return True if the request carries the configured bearer token.
 
@@ -45,14 +59,54 @@ def authorise_launch_request(request) -> bool:
     if not token:
         return True
     auth = request.headers.get("Authorization", "")
-    if auth.startswith("Bearer ") and _secrets.compare_digest(auth[7:], token):
+    if auth.startswith("Bearer ") and token_matches(auth[7:], token):
         return True
-    supplied = request.headers.get("X-Auth-Token", "")
-    return bool(supplied) and _secrets.compare_digest(supplied, token)
+    return token_matches(request.headers.get("X-Auth-Token"), token)
 
 
 def _is_loopback(host: str) -> bool:
-    return host in _LOOPBACK_HOSTS
+    if host in _LOOPBACK_HOSTS:
+        return True
+    import ipaddress
+
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def require_bind_token(
+    host: str,
+    token: Optional[str],
+    *,
+    server: str,
+    hint: str,
+    generate_into: Optional[str] = None,
+) -> Optional[str]:
+    """The one bind guard every network server calls before it binds.
+
+    Loopback binds may run keyless. A non-loopback bind needs ``token``; when
+    it is missing the guard either raises ``ValueError`` (default) or, if
+    ``generate_into`` names an env var, mints the process token, exports it
+    there, prints it once and returns it. Returns the token to enforce.
+    """
+    if token or _is_loopback(host):
+        return token
+    if generate_into is None:
+        raise ValueError(
+            f"{server} refuses to bind non-loopback host {host!r} without an "
+            f"auth token. {hint}, or bind to 127.0.0.1."
+        )
+    global _GENERATED_TOKEN
+    if _GENERATED_TOKEN is None:
+        _GENERATED_TOKEN = _secrets.token_urlsafe(32)
+    os.environ[generate_into] = _GENERATED_TOKEN
+    print(
+        f"🔐 {server} bound to non-loopback host {host!r} without "
+        f"{generate_into} set. Generated a one-time bearer token "
+        f"(set {generate_into} to override): {_GENERATED_TOKEN}"
+    )
+    return _GENERATED_TOKEN
 
 
 def resolve_launch_host(host: str) -> str:
@@ -73,16 +127,9 @@ def resolve_launch_host(host: str) -> str:
     one, so a later launch cannot invalidate an already-running endpoint's
     clients.
     """
-    if launch_auth_token() or _is_loopback(host):
-        return host
-
-    global _GENERATED_TOKEN
-    if _GENERATED_TOKEN is None:
-        _GENERATED_TOKEN = _secrets.token_urlsafe(32)
-        print(
-            f"🔐 launch() bound to non-loopback host {host!r} without "
-            f"PRAISONAI_LAUNCH_AUTH_TOKEN set. Generated a one-time bearer token "
-            f"(set PRAISONAI_LAUNCH_AUTH_TOKEN to override): {_GENERATED_TOKEN}"
-        )
-    os.environ["PRAISONAI_LAUNCH_AUTH_TOKEN"] = _GENERATED_TOKEN
+    require_bind_token(
+        host, launch_auth_token(), server="launch()",
+        hint="Set PRAISONAI_LAUNCH_AUTH_TOKEN",
+        generate_into="PRAISONAI_LAUNCH_AUTH_TOKEN",
+    )
     return host

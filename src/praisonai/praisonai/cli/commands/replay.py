@@ -1011,12 +1011,14 @@ def replay_view(
         typer.echo(f"Install with:\n  {_AIUI_INSTALL_HINT}", err=True)
         raise typer.Exit(1)
 
-    if host not in _LOOPBACK_HOSTS:
-        typer.echo(
-            f"WARNING: serving replay on {host} makes your traces (prompts, outputs, tool "
-            "arguments) reachable from the network. Use --host 127.0.0.1 to keep them local.",
-            err=True,
-        )
+    from praisonaiagents.agent.launch_security import require_bind_token
+
+    try:  # shared bind rule; aiui enforces the token (?token= once, then a cookie)
+        token = require_bind_token(host, os.environ.get("PRAISONAI_REPLAY_TOKEN"), server="PraisonAI Replay",
+                                   hint="Set PRAISONAI_REPLAY_TOKEN")
+    except ValueError as e:
+        typer.echo(f"ERROR: {e}", err=True)
+        raise typer.Exit(1)
 
     traces_dir = resolve_traces_dir()
     run_id: Optional[str] = None
@@ -1046,6 +1048,8 @@ def replay_view(
 
     env = os.environ.copy()
     env["PRAISONAI_TRACES_DIR"] = str(Path(traces_dir))
+    if token:
+        env.update(AIUI_URL_TOKEN=token, AIUI_REQUIRE_TOKEN="1")
     url = _replay_url(host, port, run_id, live)
 
     if yaml_file:

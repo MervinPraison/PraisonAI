@@ -7,6 +7,7 @@ Provides functionality to list directory contents with filtering options.
 import os
 from typing import Optional, List, Dict, Any
 
+from ..utils.file_utils import is_path_within_directory
 from ..utils.ignore_utils import (
     should_ignore_path,
     load_gitignore_patterns,
@@ -51,12 +52,21 @@ def list_files(
         >>> for f in result['files']:
         ...     print(f['path'])
     """
-    # Resolve path
+    # Resolve path — default workspace to cwd when unset (fail-closed, as read_file)
+    effective_workspace = workspace if workspace is not None else os.getcwd()
     if workspace and not os.path.isabs(path):
-        abs_path = os.path.abspath(os.path.join(workspace, path))
+        abs_path = os.path.abspath(os.path.join(effective_workspace, path))
     else:
         abs_path = os.path.abspath(path)
-    
+    if not is_path_within_directory(abs_path, effective_workspace):
+        return {
+            'success': False,
+            'error': f"Path '{path}' is outside the workspace",
+            'files': [],
+            'directories': [],
+            'total_count': 0,
+        }
+
     # Check if directory exists
     if not os.path.isdir(abs_path):
         return {

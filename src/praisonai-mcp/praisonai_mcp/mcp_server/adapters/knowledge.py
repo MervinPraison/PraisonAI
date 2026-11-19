@@ -11,6 +11,7 @@ an ``"Error: …"`` string.
 """
 
 import logging
+import os
 
 from ..registry import register_tool
 
@@ -27,7 +28,10 @@ def register_knowledge_tools() -> None:
         """Add a knowledge source (file path, URL, or raw text)."""
         try:
             from praisonaiagents.knowledge import Knowledge
+            from .extended_capabilities import _local_path
 
+            if os.path.exists(os.path.expanduser(source)):
+                source = _local_path(source)  # a server file; raw text and URLs pass
             knowledge = Knowledge()
             knowledge.add(source)
             return f"Knowledge added from {source}"

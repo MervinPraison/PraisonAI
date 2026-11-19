@@ -15,6 +15,7 @@
  */
 
 import { randomUUID } from '../utils/uuid';
+import { requireBindToken, tokenMatches } from '../utils/bind-guard';
 
 /**
  * MCP Tool definition
@@ -411,13 +412,13 @@ export class MCPServer {
 
         const authHeader = req.headers.authorization ?? req.headers['Authorization'];
         if (typeof authHeader === 'string') {
-            if (authHeader.startsWith('Bearer ') && authHeader.slice(7) === this.authToken) {
+            if (authHeader.startsWith('Bearer ') && tokenMatches(authHeader.slice(7), this.authToken)) {
                 return true;
             }
         }
 
         const xAuth = req.headers['x-auth-token'] ?? req.headers['X-Auth-Token'];
-        if (typeof xAuth === 'string' && xAuth === this.authToken) {
+        if (tokenMatches(xAuth, this.authToken)) {
             return true;
         }
 
@@ -427,8 +428,11 @@ export class MCPServer {
     /**
      * Start HTTP transport
      */
-    async startHttp(port: number): Promise<void> {
+    async startHttp(port: number, host: string = '127.0.0.1'): Promise<void> {
         if (this.running) return;
+        requireBindToken(host, this.authToken, {
+            server: 'MCPServer HTTP', hint: 'Set authToken (or PRAISONAI_MCP_AUTH_TOKEN)',
+        });
 
         // Lazy load http
         const http = await import('http');
@@ -464,10 +468,10 @@ export class MCPServer {
         });
 
         await new Promise<void>((resolve) => {
-            this.httpServer.listen(port, () => {
+            this.httpServer.listen(port, host, () => {
                 this.running = true;
                 if (this.logging) {
-                    console.log(`[MCPServer] HTTP server listening on port ${port}`);
+                    console.log(`[MCPServer] HTTP server listening on ${host}:${port}`);
                 }
                 resolve();
             });
@@ -477,12 +481,12 @@ export class MCPServer {
     /**
      * Start server
      */
-    async start(options?: { port?: number; stdio?: boolean }): Promise<void> {
+    async start(options?: { port?: number; host?: string; stdio?: boolean }): Promise<void> {
         if (options?.stdio) {
             await this.startStdio();
         }
         if (options?.port) {
-            await this.startHttp(options.port);
+            await this.startHttp(options.port, options.host);
         }
     }
 

@@ -30,8 +30,9 @@ class CommandAccessPolicy:
     # policy is configured (admin_users and/or user_allowed_commands set). They
     # remain available to everyone when no policy is configured, so this stays
     # backward-compatible. /learn reads host sources and authors skills that
-    # alter future agent behaviour, so it belongs here.
-    PRIVILEGED_COMMANDS = frozenset({"learn"})
+    # alter future agent behaviour, /undo rolls back files on the host, and
+    # /blueprint and /automations create scheduled jobs, so they belong here.
+    PRIVILEGED_COMMANDS = frozenset({"learn", "undo", "blueprint", "automations"})
     
     def __init__(
         self, 

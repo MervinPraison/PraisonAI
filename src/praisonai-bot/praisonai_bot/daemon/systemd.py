@@ -36,7 +36,8 @@ def _unit_path() -> str:
 def _generate_unit(config_path: str) -> str:
     """Generate a systemd unit file for the bot."""
     python = shutil.which("python3") or shutil.which("python") or sys.executable
-    abs_config = os.path.abspath(config_path)
+    from . import service_config_path
+    abs_config = service_config_path(config_path)
     working_dir = os.path.dirname(abs_config) or os.getcwd()
     from . import stop_timeout_seconds
     stop_timeout = stop_timeout_seconds(abs_config)
@@ -54,7 +55,7 @@ Type=notify
 NotifyAccess=main
 WatchdogSec=30
 WorkingDirectory={working_dir}
-ExecStart={python} -m praisonai_bot gateway start --config {abs_config}
+ExecStart={python} -m praisonai_bot gateway start --config "{abs_config.replace(chr(92), chr(92) * 2)}"
 Restart=on-failure
 RestartSec=5
 SuccessExitStatus=0

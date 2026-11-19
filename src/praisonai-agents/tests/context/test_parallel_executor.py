@@ -10,12 +10,13 @@ from pathlib import Path
 
 
 @pytest.fixture
-def temp_workspace():
+def temp_workspace(monkeypatch):
     """Create a temporary workspace with test files."""
     with tempfile.TemporaryDirectory() as tmpdir:
         # Create some test files
         for i in range(5):
             (Path(tmpdir) / f"file{i}.py").write_text(f"# File {i}\ndef func{i}(): pass")
+        monkeypatch.chdir(tmpdir)  # tools stay inside the cwd by default
         yield tmpdir
 
 

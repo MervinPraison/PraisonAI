@@ -9,7 +9,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from .base import KnowledgeStore, KnowledgeDocument
+from .base import KnowledgeStore, KnowledgeDocument, validate_dimension
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +193,7 @@ class RedisVectorKnowledgeStore(KnowledgeStore):
         index_name = self._index_name(collection)
         query_bytes = np.array(query_embedding, dtype=np.float32).tobytes()
         
+        limit = validate_dimension(limit, name="limit")  # written into the KNN clause
         query_str = f"*=>[KNN {limit} @embedding $vec AS score]"
         
         query = (

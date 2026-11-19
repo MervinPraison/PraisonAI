@@ -358,7 +358,12 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
 
         self._runner = web.AppRunner(app)
         await self._runner.setup()
-        self._site = web.TCPSite(self._runner, "0.0.0.0", self._webhook_port)
+        from praisonai_bot.bots.webhook_security import webhook_bind_host
+
+        host = webhook_bind_host(
+            self._app_secret, server="WhatsApp webhook", hint="Set WHATSAPP_APP_SECRET"
+        )
+        self._site = web.TCPSite(self._runner, host, self._webhook_port)
 
         self._is_running = True
         self._started_at = time.time()
@@ -371,7 +376,7 @@ class WhatsAppBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         )
 
         logger.info(f"WhatsApp webhook server starting on port {self._webhook_port}")
-        logger.info(f"Webhook URL: http://0.0.0.0:{self._webhook_port}{self._webhook_path}")
+        logger.info(f"Webhook URL: http://{host}:{self._webhook_port}{self._webhook_path}")
 
         await self._site.start()
 

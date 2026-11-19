@@ -156,6 +156,10 @@ class MCPConfigManager:
             # Use filename as name if not specified
             if not data.get("name"):
                 data["name"] = file_path.stem
+            if scope == "workspace":  # a project file: it may not choose a program to run
+                from ..mcp.trust import drop_untrusted_mcp_servers
+                if not drop_untrusted_mcp_servers({data["name"]: data}, str(file_path)):
+                    return None
             
             config = MCPConfig.from_dict(data, str(file_path))
             return config
@@ -190,7 +194,7 @@ class MCPConfigManager:
         
         # 2. Load workspace configs (override global)
         workspace_mcp_dir = self.workspace_path / self.MCP_DIR_NAME.replace("/", os.sep)
-        if workspace_mcp_dir.exists():
+        if workspace_mcp_dir.exists() and workspace_mcp_dir.resolve() != self.global_mcp_path.resolve():
             self._load_configs_from_dir(workspace_mcp_dir, "workspace")
         
         self._log(f"Loaded {len(self._configs)} MCP configs total")

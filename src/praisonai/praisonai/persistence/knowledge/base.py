@@ -16,7 +16,12 @@ import hashlib
 _IDENTIFIER_RE = re.compile(r'^[a-zA-Z0-9_]+$')
 
 
-def validate_identifier(value: str, name: str = "identifier") -> str:
+# Couchbase bucket/scope/collection names: letters, digits, ``_ . % -``. None of
+# these can leave the backtick-quoted keyspace path in a N1QL statement.
+COUCHBASE_NAME_RE = re.compile(r'^[A-Za-z0-9_.%-]+$')
+
+
+def validate_identifier(value: str, name: str = "identifier", *, pattern: "re.Pattern[str]" = _IDENTIFIER_RE) -> str:
     """Validate that ``value`` is safe for use as a SQL/CQL identifier.
 
     Knowledge-store backends interpolate collection names directly into
@@ -28,9 +33,9 @@ def validate_identifier(value: str, name: str = "identifier") -> str:
     Mirrors :func:`praisonai.persistence.conversation.base.validate_identifier`
     so both stacks share the same allowlist.
     """
-    if not isinstance(value, str) or not _IDENTIFIER_RE.match(value):
+    if not isinstance(value, str) or not pattern.fullmatch(value):
         raise ValueError(
-            f"{name} must be non-empty and contain only alphanumerics and underscores"
+            f"{name} must be non-empty and match {pattern.pattern}"
         )
     return value
 

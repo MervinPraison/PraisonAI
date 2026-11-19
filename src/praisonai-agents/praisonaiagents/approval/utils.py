@@ -41,7 +41,7 @@ _SHELL_TOOLS = frozenset({
 # so an "always" grant reads naturally (e.g. ``edit:src/app.py``).
 # NOTE: ``apply_patch`` is deliberately absent. It takes ``patch`` (multi-file
 # patch text), not a single path, so there is no stable path to pin a scoped
-# grant to — it falls through to ``tool:apply_patch`` rather than a misleading
+# grant to — it falls through to ``tool:apply_patch:<args-hash>`` rather than a misleading
 # ``edit:<...>`` target that could silently cover unrelated files on reuse.
 _FILE_TOOL_PREFIXES: Dict[str, str] = {
     "edit_file": "edit",
@@ -72,7 +72,6 @@ def build_permission_target(
 
     * shell tools -> ``bash:<command>``
     * file tools  -> ``<edit|write|delete|…>:<path>``
-    * everything else -> ``tool:<tool_name>``
 
     The command identity is preserved verbatim so command-specific rules
     (e.g. ``deny: bash:rm *``) still match. The out-of-workspace boundary is
@@ -82,8 +81,10 @@ def build_permission_target(
     session grant cannot silently authorise out-of-workspace access while a
     command-specific ``deny`` still fires.
 
-    Falls back to ``tool:<tool_name>`` whenever the expected argument is missing
-    so a target is always produced.
+    Any other call -> ``tool:<tool_name>:<args-hash>``, so a reusable
+    "session"/"always" grant covers only calls with the same arguments:
+    approving ``send_email(to=a)`` never approves ``send_email(to=b)``. A call
+    with no arguments keeps the bare ``tool:<tool_name>`` target.
 
     Args:
         tool_name: Name of the tool requesting approval.
@@ -99,7 +100,6 @@ def build_permission_target(
             value = args.get(key)
             if isinstance(value, str) and value.strip():
                 return f"bash:{value.strip()}"
-        return f"tool:{tool_name}"
 
     prefix = _FILE_TOOL_PREFIXES.get(tool_name)
     if prefix is not None:
@@ -107,9 +107,8 @@ def build_permission_target(
             value = args.get(key)
             if isinstance(value, str) and value.strip():
                 return f"{prefix}:{value.strip()}"
-        return f"tool:{tool_name}"
 
-    return f"tool:{tool_name}"
+    return f"tool:{tool_name}:{hash_tool_args(args)}" if args else f"tool:{tool_name}"
 
 
 def build_diff_preview(

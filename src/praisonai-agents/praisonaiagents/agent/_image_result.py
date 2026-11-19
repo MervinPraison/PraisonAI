@@ -58,12 +58,14 @@ class ImageResult:
 
 
 def _download(url: str) -> bytes:
-    import urllib.request
+    from ..tools.url_safety import safe_stream
 
-    if not url.startswith(("https://", "http://")):
-        raise ValueError("Image URL must be http(s)")
-    with urllib.request.urlopen(url, timeout=30) as resp:  # noqa: S310 - scheme checked above
-        data = resp.read(_MAX_DOWNLOAD_BYTES + 1)
-    if len(data) > _MAX_DOWNLOAD_BYTES:
-        raise ValueError("Image exceeds maximum download size")
+    # Provider-returned URL: address checked and pinned, redirects re-checked.
+    with safe_stream(url, timeout=30) as resp:
+        resp.raise_for_status()
+        data = b""
+        for chunk in resp.iter_bytes():
+            data += chunk
+            if len(data) > _MAX_DOWNLOAD_BYTES:
+                raise ValueError("Image exceeds maximum download size")
     return data

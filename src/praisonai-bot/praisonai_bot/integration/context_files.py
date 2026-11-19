@@ -230,30 +230,26 @@ def _url_is_fetchable(url: str) -> bool:
 def _fetch_remote_source(url: str) -> Optional[str]:
     """Fetch a remote instruction source, best-effort and size-bounded.
 
-    Uses the stdlib ``urllib`` (lazily imported) so no heavy dependency is
-    added. Destinations are validated against an SSRF guard (see
-    :func:`_url_is_fetchable`) that rejects private/loopback/link-local hosts,
-    and redirects are re-validated so a public URL cannot bounce to an internal
-    one. A slow, unreachable, or oversized response is handled gracefully:
-    failures return ``None`` (with a warning) so the run continues, and bodies
-    larger than ``_REMOTE_MAX_BYTES`` are truncated with a marker.
+    Destinations are pre-checked by :func:`_url_is_fetchable`, then fetched
+    with ``praisonaiagents.tools.url_safety.safe_stream``, which resolves the
+    host once, connects to that checked address (no DNS-rebinding window) and
+    re-checks every redirect hop. A slow, unreachable, or oversized response
+    is handled gracefully: failures return ``None`` (with a warning) so the run
+    continues, and bodies larger than ``_REMOTE_MAX_BYTES`` are truncated with
+    a marker.
     """
     if not _url_is_fetchable(url):
         return None
+    from praisonaiagents.tools.url_safety import safe_stream
+
     try:
-        import urllib.request
-
-        class _GuardedRedirectHandler(urllib.request.HTTPRedirectHandler):
-            def redirect_request(self, req, fp, code, msg, headers, newurl):
-                if not _url_is_fetchable(newurl):
-                    return None
-                return super().redirect_request(
-                    req, fp, code, msg, headers, newurl
-                )
-
-        opener = urllib.request.build_opener(_GuardedRedirectHandler())
-        with opener.open(url, timeout=_REMOTE_TIMEOUT) as resp:  # nosec B310
-            raw = resp.read(_REMOTE_MAX_BYTES + 1)
+        raw = b""
+        with safe_stream(url, timeout=_REMOTE_TIMEOUT, allow_local=_allow_local_urls()) as resp:
+            resp.raise_for_status()
+            for chunk in resp.iter_bytes():
+                raw += chunk
+                if len(raw) > _REMOTE_MAX_BYTES:
+                    break
     except Exception as exc:  # noqa: BLE001 - best-effort; never block the run
         logger.warning("Skipping remote instruction source %s: %s", url, exc)
         return None

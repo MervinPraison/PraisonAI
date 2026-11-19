@@ -2,6 +2,14 @@
 import os
 import tempfile
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _cwd_is_tempdir(monkeypatch):
+    """workspace_root may only narrow the cwd; these files live in the temp dir."""
+    monkeypatch.chdir(tempfile.gettempdir())
+
 
 class TestMultieditTool:
     """Tests for the multiedit tool."""

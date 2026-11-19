@@ -19,7 +19,9 @@ def resolve_path(path: str, root: Optional[str] = None) -> str:
     candidate = (
         expanded if os.path.isabs(expanded) else os.path.join(base, expanded)
     )
-    return os.path.realpath(os.path.normpath(candidate))
+    # realpath alone: normpath first would fold "link/.." lexically and
+    # check a different file than the one the OS opens.
+    return os.path.realpath(candidate)
 
 
 def resolve_within_root(path: str, root: Optional[str] = None) -> Optional[str]:
@@ -31,6 +33,19 @@ def resolve_within_root(path: str, root: Optional[str] = None) -> Optional[str]:
             return None
     except ValueError:
         return None
+    return resolved
+
+
+def resolve_inside(root: Optional[str], path: str) -> str:
+    """Resolve *path* under *root*, raising ``ValueError`` if it escapes.
+
+    The raising form of :func:`resolve_within_root` for file tools: rejects
+    absolute paths outside *root*, ``..``, ``~`` outside *root*, sibling
+    directories that share *root*'s prefix and symlinks that leave *root*.
+    """
+    resolved = resolve_within_root(os.fspath(path), os.fspath(root) if root else None)
+    if resolved is None:
+        raise ValueError(f"Path is outside the workspace: {path}")
     return resolved
 
 

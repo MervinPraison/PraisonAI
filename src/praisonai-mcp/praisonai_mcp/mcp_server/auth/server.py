@@ -36,7 +36,6 @@ import os
 import secrets
 import threading
 import time
-import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -118,9 +117,16 @@ def fetch_client_metadata(url: str, timeout: float = 5.0) -> Dict[str, Any]:
     """A Client ID Metadata Document (https only, at most 64 KiB)."""
     if urlparse(url).scheme != "https":
         raise ValueError("client_id metadata must be served over https")
-    req = urllib.request.Request(url, headers={"Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - https only
-        doc = json.loads(resp.read(65536).decode("utf-8"))
+    from praisonaiagents.tools.url_safety import safe_stream
+
+    # The connecting client names this URL: resolve once, refuse internal addresses, pin.
+    with safe_stream(url, headers={"Accept": "application/json"}, timeout=timeout) as resp:
+        body = b""
+        for chunk in resp.iter_bytes():
+            body += chunk
+            if len(body) >= 65536:
+                break
+    doc = json.loads(body[:65536].decode("utf-8"))
     if not isinstance(doc, dict) or doc.get("client_id") != url:
         raise ValueError("client_id in the metadata document does not match its URL")
     if not isinstance(doc.get("redirect_uris"), list) or not doc["redirect_uris"]:

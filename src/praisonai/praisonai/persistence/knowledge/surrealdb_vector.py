@@ -8,7 +8,7 @@ Install: pip install surrealdb
 import logging
 from typing import Any, Dict, List, Optional
 
-from .base import KnowledgeStore, KnowledgeDocument, validate_identifier
+from .base import KnowledgeStore, KnowledgeDocument, validate_dimension, validate_identifier
 # Route sync wrappers through run_sync_or_offload so these methods are safe
 # from inside a running loop (FastAPI handler, async test, notebook); a bare
 # run_sync would raise RuntimeError there.
@@ -232,7 +232,9 @@ class SurrealDBVectorKnowledgeStore(KnowledgeStore):
         validate_identifier(collection, "collection")
         
         # SurrealDB vector search query
-        embedding_str = str(query_embedding)
+        # Values written into the query text: numbers only.
+        embedding_str = str([float(x) for x in query_embedding])
+        limit = validate_dimension(limit, name="limit")
         query = f"""
             SELECT *, vector::similarity::cosine(embedding, {embedding_str}) AS score
             FROM {collection}

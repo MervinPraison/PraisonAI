@@ -256,15 +256,15 @@ Follow best practices and coding standards."""
     def _execute_python(self, code: str, **kwargs) -> Dict[str, Any]:
         """Execute Python code."""
         import time
-        from praisonaiagents.tools.python_tools import execute_code
+        from praisonaiagents.tools import python_tools
 
         start_time = time.time()
-        mode = "sandbox" if self._code_config.sandbox else "direct"
-        result = execute_code(
+        # CodeConfig.sandbox is the operator's choice of mode.
+        run = python_tools.execute_code if self._code_config.sandbox else python_tools._execute_code_in_process
+        result = run(
             code,
             timeout=self._code_config.timeout,
             max_output_size=self._code_config.max_output_length,
-            sandbox_mode=mode,
         )
         execution_time = time.time() - start_time
 

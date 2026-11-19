@@ -88,6 +88,8 @@ def test_tool_edit_invalidates_include_cache_without_yaml_edit(tmp_path, monkeyp
     monkeypatch.setattr(YAMLWorkflowParser, "parse_string", parse_string)
     monkeypatch.setitem(sys.modules, "agent_recipes", None)
     monkeypatch.setenv("PRAISONAI_ALLOW_LOCAL_TOOLS", "true")
+    # The included recipe's tools.py sits outside the cwd: that needs the template-tools opt-in.
+    monkeypatch.setenv("PRAISONAI_ALLOW_TEMPLATE_TOOLS", "true")
     flow = AgentFlow(steps=[Parallel(steps=[Include(recipe=str(tmp_path))])], cache=True)
     assert flow.run("same", verbose=False)["output"] == "old"
     tools.write_text("def produce(ctx):\n    return \"new\"\n", encoding="utf-8")

@@ -81,6 +81,19 @@ def get_executor() -> JobExecutor:
     return _executor
 
 
+def _arrived_off_loopback(request) -> bool:
+    """True when the request (or ASGI scope) reached a non-loopback local socket address."""
+    import ipaddress
+
+    server = getattr(request, "scope", request).get("server")
+    try:
+        ip = ipaddress.ip_address(server[0])
+    except (TypeError, ValueError, IndexError):
+        return False  # unix socket or in-process client: no network address
+    ip = getattr(ip, "ipv4_mapped", None) or ip
+    return not ip.is_loopback
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
@@ -161,30 +174,41 @@ def create_app(
         )
 
     jobs_api_key = os.environ.get("PRAISONAI_JOBS_API_KEY")
-    bind_host = os.environ.get("PRAISONAI_JOBS_BIND_HOST", "127.0.0.1")
-    localhost_hosts = {"127.0.0.1", "localhost", "::1"}
-    needs_auth = bind_host not in localhost_hosts
 
-    if needs_auth and not jobs_api_key:
-        import hmac
-        from starlette.middleware.base import BaseHTTPMiddleware
-        from starlette.responses import JSONResponse
-
-        class JobsAuthRequiredMiddleware(BaseHTTPMiddleware):
-            async def dispatch(self, request, call_next):
-                if request.url.path == "/health":
-                    return await call_next(request)
-                return JSONResponse(
-                    {"error": "PRAISONAI_JOBS_API_KEY required for non-localhost binding"},
-                    status_code=401,
-                )
-
-        app.add_middleware(JobsAuthRequiredMiddleware)
-    elif jobs_api_key:
+    if jobs_api_key:
         from praisonai._api_auth import build_api_key_middleware
 
         app.add_middleware(build_api_key_middleware(jobs_api_key, {"/health"}))
     else:
+        from starlette.responses import JSONResponse
+
+        # One keyless rule for start_server() and ``uvicorn ...:create_app
+        # --factory``: answer only when the declared bind is loopback (the
+        # factory declares nothing, so it needs a key or a declared loopback
+        # PRAISONAI_JOBS_BIND_HOST) and the request reached a loopback address.
+        declared = os.environ.get("PRAISONAI_JOBS_BIND_HOST", "")
+        declared_local = declared in ("127.0.0.1", "localhost", "::1")
+
+        class JobsAuthRequiredMiddleware:
+            # Plain ASGI, not BaseHTTPMiddleware: that one runs the endpoint in a
+            # separate task, which stalls background job submission on Python 3.10.
+            def __init__(self, app):
+                self.app = app
+
+            async def __call__(self, scope, receive, send):
+                if scope["type"] == "lifespan" or scope.get("path") == "/health" or (
+                    declared_local and not _arrived_off_loopback(scope)
+                ):
+                    return await self.app(scope, receive, send)
+                if scope["type"] != "http":
+                    return await send({"type": "websocket.close", "code": 1008})
+                await JSONResponse(
+                    {"error": "PRAISONAI_JOBS_API_KEY required (or serve on a declared "
+                              "loopback bind: PRAISONAI_JOBS_BIND_HOST=127.0.0.1)"},
+                    status_code=401,
+                )(scope, receive, send)
+
+        app.add_middleware(JobsAuthRequiredMiddleware)
         logger.warning(
             "Jobs API has no PRAISONAI_JOBS_API_KEY: any local process can submit "
             "jobs to this server. Set PRAISONAI_JOBS_API_KEY on shared hosts."
@@ -242,6 +266,12 @@ def start_server(
     except ImportError:
         raise RuntimeError("uvicorn is required. Install with: pip install uvicorn")
     
+    from praisonaiagents.agent.launch_security import require_bind_token
+
+    require_bind_token(
+        host, os.environ.get("PRAISONAI_JOBS_API_KEY"), server="Jobs API",
+        hint="Set PRAISONAI_JOBS_API_KEY",
+    )
     logger.info(f"Starting PraisonAI Jobs API on {host}:{port}")
     os.environ["PRAISONAI_JOBS_BIND_HOST"] = host
     

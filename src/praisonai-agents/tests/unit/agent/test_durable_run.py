@@ -230,7 +230,7 @@ async def test_async_declared_tool_receives_durable_idempotency_key():
         captured["key"] = idempotency_key
         return "sent"
 
-    agent = Agent(name="agent", instructions="test", tools=[send_email])
+    agent = Agent(name="agent", instructions="test", tools=[send_email], approval=True)
     journal = RunJournal(":memory:")
     journal.open_run("run-1", task="task")
     context = DurableRunContext(journal, "run-1", replaying=False)

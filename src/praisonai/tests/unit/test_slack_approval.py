@@ -397,14 +397,18 @@ class TestApprovalFlowAsync:
         assert replies_calls[0][1]["ts"] == "1234.5678"
 
     def test_falls_back_to_history_if_replies_fails(self):
-        """If conversations.replies fails, falls back to conversations.history."""
+        """In a DM, if conversations.replies fails, falls back to conversations.history.
+
+        A shared channel accepts only thread replies there; see
+        praisonai-bot tests/unit/bots/test_slack_approval_thread_scope.py.
+        """
         from praisonai.bots._slack_approval import SlackApproval
 
-        backend = SlackApproval(token="xoxb-test", channel="C123", timeout=5, poll_interval=0.1)
+        backend = SlackApproval(token="xoxb-test", channel="D123", timeout=5, poll_interval=0.1)
 
         async def mock_api(method, payload, **kwargs):
             if method == "chat.postMessage":
-                return {"ok": True, "ts": "1234.5678", "channel": "C123"}
+                return {"ok": True, "ts": "1234.5678", "channel": "D123"}
             if method == "conversations.replies":
                 return {"ok": False, "error": "method_not_allowed"}
             if method == "conversations.history":

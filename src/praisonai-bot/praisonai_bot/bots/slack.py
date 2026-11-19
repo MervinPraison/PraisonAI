@@ -81,7 +81,7 @@ from ._streaming import (
 )
 from ._debounce import InboundDebouncer
 from ._ack import AckReactor
-from ._unknown_user import UnknownUserHandler, BotContext
+from ._unknown_user import BotContext, UnknownUserHandler, is_sender_allowed
 from ._pairing_ui import PairingUIBuilder, PairingCallbackHandler
 from ._outbound_resilience import OutboundResilienceMixin
 from ..gateway.pairing import PairingStore
@@ -924,6 +924,11 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             @self._app.command(f"/{command}")
             async def handle_command(ack, command_data, respond, cmd=command, hdlr=handler):
                 await ack()
+                if not is_sender_allowed(
+                    self, command_data.get("user_id"), command_data.get("channel_id")
+                ):
+                    await respond("⛔ You are not permitted to use this bot")
+                    return
                 # Per-command authorization for registered slash commands, mirroring
                 # the message-event gate so privileged commands can't bypass policy.
                 if not self._command_policy.can_run(
@@ -961,6 +966,9 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
             # Extract callback data from button value
             callback_data = action.get("value", action.get("action_id", ""))
             if not callback_data:
+                return
+            channel_id = (body.get("channel") or {}).get("id", "")
+            if not is_sender_allowed(self, (body.get("user") or {}).get("id"), channel_id):
                 return
             
             # Create interactive context

@@ -106,6 +106,8 @@ def send_sms(to: str, body: str) -> str:
 
 
 def _agent(*tools, **kwargs):
+    # send_email is approval-gated by default; these tests are about guardrails.
+    kwargs.setdefault("approval", True)
     return Agent(name="Ops", instructions="test", llm="gpt-4o-mini",
                  tools=list(tools), **kwargs)
 

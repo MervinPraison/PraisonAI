@@ -29,7 +29,9 @@ def register_capability_tools() -> None:
     ) -> str:
         """Transcribe audio file to text."""
         transcribe = _cap("transcribe")
-        result = transcribe(audio=file_path, model=model, language=language)
+        from .extended_capabilities import _local_path
+
+        result = transcribe(audio=_local_path(file_path), model=model, language=language)
         return result.text if hasattr(result, "text") else str(result)
     
     @register_tool("praisonai.audio.speech")

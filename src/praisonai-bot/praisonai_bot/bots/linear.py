@@ -199,7 +199,12 @@ class LinearBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         self._runner = web.AppRunner(app)
         await self._runner.setup()
         
-        self._site = web.TCPSite(self._runner, "0.0.0.0", self._webhook_port)
+        from praisonai_bot.bots.webhook_security import webhook_bind_host
+
+        host = webhook_bind_host(
+            self._signing_secret, server="Linear webhook", hint="Set LINEAR_WEBHOOK_SECRET"
+        )
+        self._site = web.TCPSite(self._runner, host, self._webhook_port)
         await self._site.start()
 
         self._is_running = True
@@ -208,7 +213,7 @@ class LinearBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         # Get bot user info
         await self._fetch_bot_user()
         
-        logger.info(f"Linear bot started on http://0.0.0.0:{self._webhook_port}{self._webhook_path}")
+        logger.info(f"Linear bot started on http://{host}:{self._webhook_port}{self._webhook_path}")
 
     async def stop(self) -> None:
         """Stop the Linear webhook server."""

@@ -98,8 +98,10 @@ def register_agent_tools() -> None:
             from praisonai_mcp._wrapper_bridge import wrapper_callable
             AgentsGenerator = wrapper_callable("praisonai.agents_generator", "AgentsGenerator")
             
+            from .extended_capabilities import _local_path
+
             generator = AgentsGenerator(
-                agent_file=file_path,
+                agent_file=_local_path(file_path),
                 framework="praisonai",
                 config_list=[],
             )

@@ -1821,6 +1821,24 @@ def origin_allowed(origin: str) -> bool:
     return (parsed.hostname or "") in ALLOWED_ORIGIN_HOSTS
 
 
+# DNS rebinding: a page on foreign.example re-resolves its own name to
+# 127.0.0.1. Its requests are then same-origin to the page, and a same-origin
+# GET carries no Origin, so origin_allowed() admits it and the page can read
+# the reply. The Host header still names foreign.example and a page cannot
+# change it, so only the engine's own loopback names are accepted.
+LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "[::1]")
+
+
+def host_allowed(host: str) -> bool:
+    """Whether a Host header names a loopback address (any port)."""
+    if not host:
+        return True                      # HTTP/1.0 local client; browsers always send Host
+    name, _, port = host.lower().rpartition(":")
+    if not name or not port.isdigit():   # no port: "localhost", "[::1]"
+        name = host.lower()
+    return name in LOOPBACK_HOSTS
+
+
 class Handler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
 
@@ -1842,15 +1860,16 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "content-type")
 
     def _origin_ok(self) -> bool:
-        """Refuse a browser origin the engine does not recognise.
+        """Refuse a browser origin, or a Host, the engine does not recognise.
 
         Answers the request with 403 and no CORS headers, so the calling page
         cannot read the reply either.
         """
-        if origin_allowed(self.headers.get("Origin") or ""):
+        if (origin_allowed(self.headers.get("Origin") or "")
+                and host_allowed(self.headers.get("Host") or "")):
             return True
         self._drain()
-        body = b'{"error":"origin not allowed"}'
+        body = b'{"error":"origin or host not allowed"}'
         self.send_response(403)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))

@@ -176,9 +176,11 @@ async def _fetch_remote_media(path: str, remote_resolver: Any) -> Optional[str]:
     if not local:
         return None
     try:
-        from ._outbound_media import validate_media_delivery_path
+        from ._outbound_media import OutboundMediaPolicy, validate_media_delivery_path
 
-        return validate_media_delivery_path(local)
+        # The fetched copy lives in the resolver's own cache directory.
+        cache = OutboundMediaPolicy(allow_roots=[os.path.dirname(os.path.abspath(local))])
+        return validate_media_delivery_path(local, policy=cache)
     except Exception:
         logger.warning(
             "Fetched remote media %r rejected by delivery guard; dropping",

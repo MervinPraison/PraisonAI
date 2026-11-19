@@ -48,11 +48,28 @@ class SubprocessSandbox:
         
         Args:
             config: Optional sandbox configuration
+
+        Raises:
+            UnenforceablePolicyError: the policy sets allow_network=False or
+                allow_file_write=False. A plain subprocess shares the host's
+                network and filesystem, so it cannot keep either.
         """
-        self.config = config or SandboxConfig.subprocess()
+        # A plain subprocess shares the host network; the default says so.
+        self.config = config or SandboxConfig(
+            sandbox_type="subprocess", security_policy=SecurityPolicy(allow_network=True))
         self._is_running = False
         self._temp_dir: Optional[str] = None
-    
+        self._require_enforceable()
+
+    def _require_enforceable(self) -> None:
+        from ._enforce import require_enforceable, subprocess_problems
+
+        require_enforceable(
+            "SubprocessSandbox", subprocess_problems(self.config.security_policy),
+            "A plain subprocess shares the host's network and filesystem. For "
+            "untrusted code use an isolating backend (sandbox_type='docker' or "
+            "'sandlock'), or set these fields to True to accept a plain subprocess.")
+
     def _build_child_env(self, policy: SecurityPolicy, overrides: Dict[str, str] | None) -> Dict[str, str]:
         """Construct a minimal, policy-driven env for the child process."""
         # Start with the explicit env from SandboxConfig and the per-call overrides only.
@@ -87,53 +104,12 @@ class SubprocessSandbox:
         self,
         cmd: List[str],
         policy: SecurityPolicy,
+        cwd: Optional[str] = None,
     ) -> Optional[str]:
         """Return an error message when *cmd* violates *policy*."""
-        if not cmd:
-            return "Empty command"
+        from ._policy import screen_command
 
-        from ._shell import strip_heredoc_bodies
-
-        # A quoted heredoc body is file content, not a command. Leaving it in
-        # made write_file() reject any file whose text happened to contain a
-        # blocked pattern.
-        cmd_str = strip_heredoc_bodies(" ".join(cmd))
-        for blocked in policy.blocked_commands:
-            if blocked and blocked in cmd_str:
-                return f"Blocked command pattern: {blocked}"
-
-        if policy.allowed_commands:
-            base_cmd = os.path.basename(cmd[0])
-            allowed = {c.split()[0] for c in policy.allowed_commands}
-            if base_cmd not in allowed and cmd[0] not in policy.allowed_commands:
-                return f"Command not in allowlist: {base_cmd}"
-
-        if not policy.allow_subprocess:
-            shell_bins = {"sh", "bash", "dash", "zsh", "csh", "ksh", "cmd", "powershell"}
-            if os.path.basename(cmd[0]) in shell_bins:
-                return "Subprocess execution is disabled by security policy"
-
-        # Scan the shell payload too: with shell=True the real path lives
-        # inside `sh -c "..."`, where a plain argv walk cannot see it.
-        from ._shell import policy_scan_parts
-
-        for part in policy_scan_parts([strip_heredoc_bodies(c) for c in cmd]):
-            if not part.startswith(("/", "~", ".")):
-                continue
-            expanded = os.path.realpath(os.path.expanduser(part))
-            for blocked_path in policy.blocked_paths:
-                blocked_abs = os.path.realpath(os.path.expanduser(blocked_path))
-                if expanded == blocked_abs or expanded.startswith(blocked_abs + os.sep):
-                    return f"Access to blocked path: {blocked_path}"
-            if policy.allowed_paths:
-                allowed = any(
-                    expanded == os.path.realpath(os.path.expanduser(p))
-                    or expanded.startswith(os.path.realpath(os.path.expanduser(p)) + os.sep)
-                    for p in policy.allowed_paths
-                )
-                if not allowed:
-                    return f"Path not in allowlist: {part}"
-        return None
+        return screen_command(cmd, policy, cwd or self._temp_dir, roots=[self._temp_dir])
     
     def _apply_rlimits(self, limits: ResourceLimits):
         """Apply resource limits via POSIX setrlimit (Linux/macOS only)."""
@@ -236,6 +212,11 @@ class SubprocessSandbox:
         flagged when they are read (a Load) -- `subprocess = 3` or
         `def f(eval): ...` bind a local of the same spelling and are harmless.
         """
+        from ._pyscreen import screen_python
+
+        error = language == "python" and screen_python(code, policy, self._validate_command_against_policy)
+        if error:
+            return error
         blocked = [b for b in (getattr(policy, "blocked_imports", None) or []) if b]
         if not blocked or language != "python":
             return None
@@ -340,8 +321,13 @@ class SubprocessSandbox:
         # Enforce the policy before the code is written or spawned. run_command()
         # has always validated; execute() -- the default backend, and the path
         # SandboxManager.run_code() takes -- validated nothing.
+        self._require_enforceable()
         policy = self.config.security_policy
-        policy_error = self._validate_code_against_policy(code, language, policy)
+        if language == "bash":
+            # A bash script is a command: same screen as run_command().
+            policy_error = self._validate_command_against_policy(["bash", "-c", code], policy)
+        else:  # anything that is not bash runs under the Python interpreter
+            policy_error = self._validate_code_against_policy(code, "python", policy)
         if policy_error:
             return SandboxResult(
                 execution_id=execution_id,
@@ -492,8 +478,10 @@ class SubprocessSandbox:
         from ._shell import build_argv
         cmd = build_argv(command, shell=shell)
 
+        self._require_enforceable()
         policy = self.config.security_policy
-        policy_error = self._validate_command_against_policy(cmd, policy)
+        policy_error = self._validate_command_against_policy(
+            cmd, policy, working_dir or self._temp_dir)
         if policy_error:
             return SandboxResult(
                 execution_id=execution_id,
@@ -583,44 +571,20 @@ class SubprocessSandbox:
         path: str,
         content: Union[str, bytes],
     ) -> bool:
-        """Write a file to the sandbox."""
-        from ._compat import safe_sandbox_path
-        
-        full_path = safe_sandbox_path(self._temp_dir, path)
-        if full_path is None:
-            return False
-        
-        os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        
-        try:
-            mode = "wb" if isinstance(content, bytes) else "w"
-            with open(full_path, mode) as f:
-                f.write(content)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to write file: {e}")
-            return False
-    
+        """Write a file to the sandbox, never following a symlink the sandboxed code made."""
+        from ._compat import write_in_sandbox
+
+        return write_in_sandbox(self._temp_dir, path, content)
+
     async def read_file(
         self,
         path: str,
     ) -> Optional[Union[str, bytes]]:
-        """Read a file from the sandbox."""
-        from ._compat import safe_sandbox_path
-        
-        full_path = safe_sandbox_path(self._temp_dir, path)
-        if full_path is None or not os.path.exists(full_path):
-            return None
-        
-        try:
-            with open(full_path, "r") as f:
-                return f.read()
-        except UnicodeDecodeError:
-            with open(full_path, "rb") as f:
-                return f.read()
-        except Exception:
-            return None
-    
+        """Read a file from the sandbox, never following a symlink the sandboxed code made."""
+        from ._compat import read_in_sandbox
+
+        return read_in_sandbox(self._temp_dir, path)
+
     async def list_files(
         self,
         path: str = "/",

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
 
 from .models import RecipeResult
+from praisonaiagents.utils.safe_path import safe_child
 from praisonai._errors import _WrapperError
 
 try:
@@ -177,6 +178,13 @@ class RunHistory:
                 pass
             raise
     
+    def _run_dir(self, run_id: str) -> Path:
+        """``<runs>/<run_id>``; a run id (or ``trace_name``) is one path component."""
+        try:
+            return safe_child(self.path, run_id)
+        except ValueError as exc:
+            raise RunHistoryError(f"Invalid run id: {run_id!r}") from exc
+
     def store(
         self,
         result: RecipeResult,
@@ -197,7 +205,7 @@ class RunHistory:
             run_id
         """
         run_id = result.run_id
-        run_dir = self.path / run_id
+        run_dir = self._run_dir(run_id)
         run_dir.mkdir(parents=True, exist_ok=True)
         
         # Check data policy
@@ -296,7 +304,7 @@ class RunHistory:
             return run_data
         
         # File-based retrieval
-        run_dir = self.path / run_id
+        run_dir = self._run_dir(run_id)
         if not run_dir.exists():
             raise RunNotFoundError(f"Run not found: {run_id}")
         
@@ -430,7 +438,7 @@ class RunHistory:
             if self._backend is not None:
                 self._backend.delete(f"run:{run_id}")
             else:
-                run_dir = self.path / run_id
+                run_dir = self._run_dir(run_id)
                 if run_dir.exists():
                     shutil.rmtree(run_dir)
 

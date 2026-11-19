@@ -254,6 +254,18 @@ def validate_media_delivery_path(
                 f"Refusing to deliver protected file: {resolved.name}"
             )
 
+    # Containment: the file must resolve inside the workspace (the configured
+    # ``allow_roots``, else the current directory). Names alone cannot be
+    # denylisted completely, so this is the boundary; the lists above are a
+    # second layer.
+    from praisonaiagents.tools.path_safety import resolve_within_root
+
+    roots = policy.allow_roots or [os.getcwd()]
+    if not any(resolve_within_root(str(resolved), root) for root in roots):
+        raise MediaDeliveryError(
+            f"Refusing to deliver a file outside the workspace: {path!r}"
+        )
+
     if not resolved.exists():
         raise MediaDeliveryError(f"Media path not found: {path!r}")
     if not resolved.is_file():

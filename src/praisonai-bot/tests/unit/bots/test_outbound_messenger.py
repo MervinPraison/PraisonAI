@@ -29,6 +29,15 @@ from praisonaiagents.session.context import (
 )
 
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _workspace_is_tmp_path(tmp_path, monkeypatch):
+    # Attachments must sit inside the workspace (the cwd by default).
+    monkeypatch.chdir(tmp_path)
+
+
 def _make_router(home=None, aliases=None):
     """Build a DeliveryRouter over a fake BotOS with one async-send bot."""
     sent = []

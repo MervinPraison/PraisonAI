@@ -127,6 +127,12 @@ class GatewayApiEndpoints:
         # (never request bodies or credentials). Absent header → unchanged.
         self._idem: Dict[str, dict] = {}
         self._idem_max = 1024
+        # API sessions are keyed by a client-chosen X-Session-Id, so cap how
+        # many stay live; the oldest is closed (and stays resumable from the
+        # session store) when a new one would pass the cap.
+        from praisonaiagents.agent.request_limits import BoundedDict
+
+        self._api_sessions = BoundedDict(1000)
 
     # ── client idempotency (Issue #5726) ───────────────────────────────
     @staticmethod
@@ -560,7 +566,22 @@ class GatewayApiEndpoints:
     def _session_for(self, agent_id: str, key: str) -> Any:
         """Get or create a stable session keyed by the API caller."""
         session_id = f"api:{key}:{agent_id}"
-        return self._gw.create_session(agent_id=agent_id, session_id=session_id)
+        session = self._gw.create_session(agent_id=agent_id, session_id=session_id)
+        live = self._api_sessions
+        full = session_id not in live and len(live) >= live.max_items
+        oldest = next(iter(live)) if full else None
+        live[session_id] = agent_id
+        old = self._gw.get_session(oldest) if oldest else None
+        if old is not None and not getattr(old, "_is_executing", False):
+            self._gw.close_session(oldest)
+        # Under a scope policy, bind the session to the API credential so a
+        # WebSocket client with another token cannot resume it.
+        owner = self._rate_key_var.get()
+        cfg = getattr(self._gw, "config", None)
+        if getattr(cfg, "has_scope_policy", False) and getattr(session, "_owner", None) is None \
+                and owner and owner.startswith("token:"):
+            session._owner = owner
+        return session
 
     # Per-request stable identity for the per-user request budget (#6215);
     # inherited by the turn's task/stream context like ``_stream_turn_var``.

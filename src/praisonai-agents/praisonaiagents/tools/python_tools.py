@@ -10,6 +10,7 @@ result = execute_code("print('Hello, World!')")
 """
 
 import logging
+import warnings
 from typing import Dict, List, Optional, Any
 from importlib import util
 import io
@@ -415,39 +416,49 @@ if __name__ == "__main__":
 @require_approval(risk_level="critical")
 def execute_code(
     code: str,
-    globals_dict: Optional[Dict[str, Any]] = None,
-    locals_dict: Optional[Dict[str, Any]] = None,
+    *legacy: Any,
     timeout: int = 30,
     max_output_size: int = 10000,
-    sandbox_mode: str = "sandbox"  # "sandbox" or "direct"
+    **deprecated: Any,
 ) -> Dict[str, Any]:
-    """Execute Python code safely with configurable security levels.
+    """Execute Python code in a subprocess sandbox with resource limits.
 
     Args:
         code: Python code to execute
-        globals_dict: Global variables (ignored in sandbox mode)
-        locals_dict: Local variables (ignored in sandbox mode)
-        timeout: Maximum execution time in seconds
+        timeout: Maximum execution time in seconds (capped by the sandbox limits)
         max_output_size: Maximum output size in characters
-        sandbox_mode: Security mode - "sandbox" (default, subprocess isolation) 
-                     or "direct" (same process, legacy mode)
 
     Returns:
         Dictionary with result, stdout, stderr, and success status
-
-    Security modes:
-        - "sandbox" (RECOMMENDED): Runs in subprocess with resource limits,
-          clean environment, no access to parent process files/env vars
-        - "direct": Legacy mode with restricted builtins (less secure)
     """
-    # Use subprocess sandbox by default (secure)
-    if sandbox_mode == "sandbox":
-        return _execute_code_sandboxed(code, timeout, max_output_size)
-    
-    # Legacy direct execution mode (for backward compatibility)
-    return _execute_code_direct(
-        code, globals_dict, locals_dict, timeout, max_output_size
-    )
+    # How code runs is operator configuration (ExecutionConfig.code_mode). This
+    # function is also a model tool, so no argument may choose a weaker mode.
+    # Older callers passed every parameter positionally, in this order.
+    if len(legacy) > 5:
+        raise TypeError(f"execute_code() takes at most 6 positional arguments ({len(legacy) + 1} given)")
+    given = dict(zip(("globals_dict", "locals_dict", "timeout", "max_output_size", "sandbox_mode"), legacy))
+    timeout = given.pop("timeout", timeout)
+    max_output_size = given.pop("max_output_size", max_output_size)
+    deprecated.update(given)
+    unknown = sorted(set(deprecated) - {"globals_dict", "locals_dict", "sandbox_mode"})
+    if unknown:
+        raise TypeError(f"execute_code() got unexpected keyword argument(s): {unknown}")
+    if any(value not in (None, "sandbox") for value in deprecated.values()):
+        warnings.warn(
+            "execute_code(globals_dict=, locals_dict=, sandbox_mode=) is deprecated and "
+            "ignored: the code always runs in the subprocess sandbox. Choose the mode with "
+            "ExecutionConfig(code_mode=...).", DeprecationWarning, stacklevel=2)
+    return _execute_code_sandboxed(code, timeout, max_output_size)
+
+
+def _execute_code_in_process(code: str, timeout: int = 30, max_output_size: int = 10000) -> Dict[str, Any]:
+    """Run code in this process, for an operator who chose it (``CodeAgent`` with ``sandbox=False``)."""
+    return _execute_code_direct(code, timeout=timeout, max_output_size=max_output_size)
+
+
+# The same "critical" approval as the execute_code tool.
+_execute_code_in_process.__name__ = "execute_code"
+_execute_code_in_process = require_approval(risk_level="critical")(_execute_code_in_process)
 
 
 def execute_code_with_tools(
@@ -1088,7 +1099,7 @@ def build_code_execution_tools(
     knob is not decorative:
 
     * ``"safe"`` (default) — subprocess isolation with resource limits and a
-      clean environment (``execute_code(..., sandbox_mode="sandbox")``). Tools
+      clean environment (:func:`execute_code`). Tools
       are NOT reachable from the code: they live in the parent process.
     * ``"unsafe"`` — same-process execution with restricted builtins, no
       isolation, and the ``allowed_tools`` allow-list injected as callable
@@ -1134,13 +1145,8 @@ def build_code_execution_tools(
             )
         ]
 
-    # Safe mode: bind the configured timeout to the tool the model sees, so a
-    # model call that passes only ``code`` still gets the caller's timeout
-    # rather than execute_code's 30s default. The default timeout returns the
-    # module-level tool unchanged so its identity is preserved for callers.
-    if timeout == 30:
-        return [execute_code]
-
+    # Safe mode: the model gets a tool that takes only ``code``; the timeout
+    # is the caller's, not the model's.
     def execute_code_timed(code: str) -> Dict[str, Any]:
         """Execute Python code in an isolated subprocess and return its output.
 

@@ -311,8 +311,10 @@ def build_sse_security_app(app, security: Optional["SecurityConfig"] = None):
             headers = {k.decode().lower(): v.decode() for k, v in scope.get("headers", [])}
 
             if self._sec.require_auth and self._token:
+                from praisonaiagents.agent.launch_security import token_matches
+
                 auth = headers.get("authorization", "")
-                if not auth.startswith("Bearer ") or auth[7:] != self._token:
+                if not auth.startswith("Bearer ") or not token_matches(auth[7:], self._token):
                     from starlette.responses import JSONResponse
 
                     response = JSONResponse({"error": "Unauthorized"}, status_code=401)

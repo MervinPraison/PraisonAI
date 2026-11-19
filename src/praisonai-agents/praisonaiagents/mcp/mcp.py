@@ -1106,6 +1106,17 @@ class MCP:
                 logger.error(f"Failed to initialize NPX MCP tools: {e}")
             raise RuntimeError(f"Failed to initialize NPX MCP tools: {e}")
     
+    def _tool_permitted(self, name: str) -> bool:
+        """Whether ``allowed_tools``/``disabled_tools`` keep the server tool *name*.
+
+        Applied to the schema sent to the model and to dispatch, so a filtered
+        tool is neither advertised nor callable by name.
+        """
+        allowed = getattr(self, "allowed_tools", None)
+        if allowed:
+            return name in allowed
+        return name not in (getattr(self, "disabled_tools", None) or ())
+
     def _apply_tool_filters(self, raw_tools: List[Any]) -> List[Any]:
         """
         Apply tool filtering based on allowed_tools and disabled_tools.
@@ -1382,6 +1393,9 @@ class MCP:
         from ..llm.schema_utils import fix_array_schemas
         return fix_array_schemas(schema)
     
+    def _permitted_openai_tools(self, tools):
+        return [t for t in tools or [] if self._tool_permitted(t.get("function", {}).get("name", ""))]
+
     def to_openai_tool(self):
         """Convert the MCP tool to an OpenAI-compatible tool definition.
         
@@ -1393,11 +1407,11 @@ class MCP:
         """
         if self.is_sse and hasattr(self, 'sse_client') and self.sse_client.tools:
             # Return all tools from SSE client
-            return self._apply_prefix_to_openai_tools(self.sse_client.to_openai_tools())
+            return self._apply_prefix_to_openai_tools(self._permitted_openai_tools(self.sse_client.to_openai_tools()))
         
         if self.is_http_stream and hasattr(self, 'http_stream_client') and self.http_stream_client.tools:
             # Return all tools from HTTP Stream client
-            return self._apply_prefix_to_openai_tools(self.http_stream_client.to_openai_tools())
+            return self._apply_prefix_to_openai_tools(self._permitted_openai_tools(self.http_stream_client.to_openai_tools()))
             
         # Synthetic resource/prompt tools (if the server advertises them) are
         # captured up front so resource-only servers still expose something.
@@ -1414,6 +1428,8 @@ class MCP:
         # Convert all tools to OpenAI format
         openai_tools = []
         for tool in self.runner.tools:
+            if not self._tool_permitted(tool.name):
+                continue
             # Create OpenAI tool definition
             parameters = {}
             if hasattr(tool, 'inputSchema') and tool.inputSchema:

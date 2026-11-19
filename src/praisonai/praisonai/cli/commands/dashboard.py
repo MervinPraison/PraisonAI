@@ -56,6 +56,16 @@ def _resolve_check_host(host: str) -> str:
     return "127.0.0.1" if host == "0.0.0.0" else host
 
 
+def _guard(app, host: str):
+    """Shared bind rule: a non-loopback host needs PRAISONAI_DASHBOARD_TOKEN."""
+    import os
+
+    from praisonai._api_auth import guard_browser_app
+
+    return guard_browser_app(app, host, os.environ.get("PRAISONAI_DASHBOARD_TOKEN"),
+                             server="praisonai dashboard", token_env="PRAISONAI_DASHBOARD_TOKEN")
+
+
 def _handle_shutdown_signal(signum: int, frame: FrameType | None):
     _cleanup_processes()
     sys.exit(0)
@@ -232,7 +242,7 @@ def _run_aiui_dashboard(port: int, host: str, console) -> bool:
             from praisonai.integration.host_app import build_host_app
             app = build_host_app(pages=["chat", "sessions", "workflows", "hooks", "usage"])
         console.print(f"[green]✓ Starting in-process host on {host}:{port}[/green]")
-        uvicorn.run(app, host=host, port=port, log_level="info")
+        uvicorn.run(_guard(app, host), host=host, port=port, log_level="info")
         return True
     except Exception as e:
         console.print(f"[red]Error running in-process host: {e}[/red]")
@@ -618,6 +628,11 @@ def unified(
 
     from rich.console import Console
     console = Console()
+    try:  # shared bind rule: refuse before starting any service
+        _guard(None, host)
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
     
     # Auto-start services if enabled (before aiui mode)
     if auto_start:
@@ -773,7 +788,7 @@ def unified(
     
     try:
         uvicorn.run(
-            fastapi_app,
+            _guard(fastapi_app, host),
             host=host,
             port=port,
             log_level="info"

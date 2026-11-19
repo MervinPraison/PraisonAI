@@ -71,7 +71,7 @@ def file_tools(tmp_path, monkeypatch):
     "http://0177.0.0.1/x",
 ])
 def test_download_file_uses_shared_ssrf_guard(file_tools, url):
-    with patch("httpx.stream") as stream:
+    with patch.object(url_safety, "safe_stream") as stream:
         result = file_tools.download_file(url, "out.bin")
     assert not result["success"]
     stream.assert_not_called()
@@ -79,7 +79,7 @@ def test_download_file_uses_shared_ssrf_guard(file_tools, url):
 
 def test_download_file_ignores_allow_local_crawl(file_tools, monkeypatch):
     monkeypatch.setenv("ALLOW_LOCAL_CRAWL", "true")
-    with patch("httpx.stream") as stream:
+    with patch.object(url_safety, "safe_stream") as stream:
         result = file_tools.download_file("http://127.0.0.1/x", "out.bin")
     assert not result["success"]
     stream.assert_not_called()
@@ -87,7 +87,7 @@ def test_download_file_ignores_allow_local_crawl(file_tools, monkeypatch):
 
 def test_download_file_fails_closed_on_unresolvable_host(file_tools):
     with patch.object(url_safety.socket, "getaddrinfo", side_effect=socket.gaierror), \
-            patch("httpx.stream") as stream:
+            patch.object(url_safety, "safe_stream") as stream:
         result = file_tools.download_file("http://does-not-resolve.invalid/x", "out.bin")
     assert not result["success"]
     stream.assert_not_called()
@@ -101,7 +101,7 @@ def test_download_file_enforces_byte_cap(file_tools, tmp_path, monkeypatch):
     ctx = MagicMock()
     ctx.__enter__.return_value = response
     with patch.object(url_safety.socket, "getaddrinfo", return_value=_addrinfo("93.184.216.34")), \
-            patch("httpx.stream", return_value=ctx):
+            patch.object(url_safety, "safe_stream", return_value=ctx):
         result = file_tools.download_file("https://example.com/big", "big.bin")
     assert not result["success"]
     assert "exceeds" in result["error"]
@@ -121,7 +121,7 @@ def test_download_file_cap_keeps_existing_file(file_tools, tmp_path, monkeypatch
     monkeypatch.setenv("PRAISONAI_MAX_DOWNLOAD_BYTES", "10000")
     (tmp_path / "keep.bin").write_bytes(b"original")
     with patch.object(url_safety.socket, "getaddrinfo", return_value=_addrinfo("93.184.216.34")), \
-            patch("httpx.stream", return_value=_stream_ctx([b"x" * 8192] * 10)):
+            patch.object(url_safety, "safe_stream", return_value=_stream_ctx([b"x" * 8192] * 10)):
         result = file_tools.download_file("https://example.com/big", "keep.bin")
     assert not result["success"]
     assert (tmp_path / "keep.bin").read_bytes() == b"original"
@@ -131,7 +131,7 @@ def test_download_file_cap_keeps_existing_file(file_tools, tmp_path, monkeypatch
 def test_download_file_success_replaces_destination(file_tools, tmp_path):
     (tmp_path / "out.bin").write_bytes(b"old")
     with patch.object(url_safety.socket, "getaddrinfo", return_value=_addrinfo("93.184.216.34")), \
-            patch("httpx.stream", return_value=_stream_ctx([b"new", b"data"])):
+            patch.object(url_safety, "safe_stream", return_value=_stream_ctx([b"new", b"data"])):
         result = file_tools.download_file("https://example.com/f", "out.bin")
     assert result["success"]
     assert result["size"] == 7

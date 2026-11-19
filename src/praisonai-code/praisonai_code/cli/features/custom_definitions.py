@@ -411,7 +411,9 @@ class CustomDefinitionsDiscovery:
                 # Load YAML agent
                 with open(file_path, 'r') as f:
                     data = yaml.safe_load(f) or {}
-                
+                from praisonaiagents.config.trust import drop_project_trust_keys
+                data = drop_project_trust_keys(data, file_path)
+
                 return CustomAgent(
                     name=name,
                     path=file_path,
@@ -567,8 +569,10 @@ class CustomDefinitionsDiscovery:
             # No frontmatter
             frontmatter = {}
             body = content.strip()
-        
-        return frontmatter, body
+
+        # A project file cannot grant itself shell, approvals or an endpoint.
+        from praisonaiagents.config.trust import drop_project_trust_keys
+        return drop_project_trust_keys(frontmatter, file_path), body
     
     def get_agent(self, name: str) -> Optional[CustomAgent]:
         """Get a discovered agent by name."""
@@ -754,16 +758,13 @@ class TemplateInterpolator:
         def replace_file(match):
             file_path_str = match.group(1)
 
-            if working_dir:
-                root = working_dir.resolve()
-                candidate = (working_dir / file_path_str).resolve()
-                try:
-                    candidate.relative_to(root)
-                except ValueError:
-                    return match.group(0)
-                file_path = candidate
-            else:
-                file_path = Path(file_path_str).resolve()
+            # Inside working_dir, or the cwd when none is given (bot adapters)
+            from praisonaiagents.tools.path_safety import resolve_within_root
+
+            safe = resolve_within_root(file_path_str, str(working_dir) if working_dir else None)
+            if safe is None:
+                return match.group(0)
+            file_path = Path(safe)
             
             # Try to read the file
             try:

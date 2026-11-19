@@ -5,7 +5,6 @@ Exposes PraisonAI Agents via the A2A (Agent2Agent) protocol.
 """
 
 import asyncio
-import secrets
 from praisonaiagents._logging import get_logger
 from typing import Dict, List, Optional, TYPE_CHECKING
 
@@ -141,11 +140,14 @@ class A2A:
         import uvicorn
         from fastapi import FastAPI
 
-        if self.auth_token is None and host not in ("127.0.0.1", "::1", "localhost"):
-            from praisonaiagents.agent.launch_security import launch_auth_token, resolve_launch_host
+        from praisonaiagents.agent.launch_security import launch_auth_token, require_bind_token
 
-            resolve_launch_host(host)
-            self.auth_token = launch_auth_token()
+        token = require_bind_token(
+            host, self.auth_token or launch_auth_token(), server="A2A.serve()",
+            hint="Pass A2A(auth_token=...)", generate_into="PRAISONAI_LAUNCH_AUTH_TOKEN",
+        )
+        if token != self.auth_token:
+            self.auth_token = token
             self._router = None
             self._agent_card = None
         
@@ -178,8 +180,10 @@ class A2A:
                 return  # No auth configured — open access
             if authorization is None:
                 raise HTTPException(status_code=401, detail="Authorization required")
+            from praisonaiagents.agent.launch_security import token_matches
+
             parts = authorization.split(" ", 1)
-            if len(parts) != 2 or parts[0].lower() != "bearer" or not secrets.compare_digest(parts[1], self.auth_token):
+            if len(parts) != 2 or parts[0].lower() != "bearer" or not token_matches(parts[1], self.auth_token):
                 raise HTTPException(status_code=401, detail="Invalid token")
         
         # Agent Card endpoint (well-known URI)

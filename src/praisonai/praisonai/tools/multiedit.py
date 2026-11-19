@@ -45,7 +45,11 @@ def _resolve_safe_path(filepath: str, workspace_root: Optional[str] = None) -> O
     """Resolve filepath within workspace; return None if outside boundary."""
     if ".." in filepath.replace("\\", "/"):
         return None
-    root = os.path.realpath(workspace_root or os.getcwd())
+    cwd = os.path.realpath(os.getcwd())
+    root = os.path.realpath(workspace_root or cwd)
+    # workspace_root is visible to the model, so it may narrow the cwd, never widen it.
+    if not is_path_within_directory(root, cwd):
+        return None
     abs_path = os.path.realpath(os.path.join(root, filepath) if not os.path.isabs(filepath) else filepath)
     if not is_path_within_directory(abs_path, root):
         return None
@@ -68,7 +72,7 @@ def multiedit(
             - new: The replacement text (required)
             - line: Optional line number hint for faster matching
         dry_run: If True, don't actually modify the file.
-        workspace_root: Directory boundary for filepath (defaults to cwd).
+        workspace_root: Directory boundary for filepath (defaults to cwd; must be inside it).
     
     Returns:
         Dict with:

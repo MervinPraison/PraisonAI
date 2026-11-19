@@ -94,8 +94,11 @@ class _FakeHTTP:
     def __exit__(self, *exc):
         return False
 
-    def read(self, n=-1):
-        return self.body if n < 0 else self.body[:n]
+    def raise_for_status(self):
+        pass
+
+    def iter_bytes(self):
+        yield self.body
 
 
 def _url_response(url):
@@ -103,15 +106,15 @@ def _url_response(url):
 
 
 def test_save_downloads_url(agent, tmp_path, monkeypatch):
-    import urllib.request
+    from praisonaiagents.tools import url_safety
 
     seen = {}
 
-    def fake_urlopen(url, timeout=None):
+    def fake_stream(url, timeout=None):
         seen.update(url=url, timeout=timeout)
         return _FakeHTTP(GIF)
 
-    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setattr(url_safety, "safe_stream", fake_stream)
     monkeypatch.setattr(agent, "_litellm", lambda **kw: _url_response("https://example.com/i.gif"))
     agent.generate("cat").save(str(tmp_path / "u.gif"))
     assert (tmp_path / "u.gif").read_bytes() == GIF
@@ -126,11 +129,11 @@ def test_save_rejects_non_http_url(agent, tmp_path, monkeypatch):
 
 
 def test_save_rejects_oversized_download(agent, tmp_path, monkeypatch):
-    import urllib.request
     from praisonaiagents.agent import _image_result
+    from praisonaiagents.tools import url_safety
 
     monkeypatch.setattr(_image_result, "_MAX_DOWNLOAD_BYTES", 4)
-    monkeypatch.setattr(urllib.request, "urlopen", lambda url, timeout=None: _FakeHTTP(b"123456"))
+    monkeypatch.setattr(url_safety, "safe_stream", lambda url, timeout=None: _FakeHTTP(b"123456"))
     monkeypatch.setattr(agent, "_litellm", lambda **kw: _url_response("https://example.com/big.png"))
     with pytest.raises(ValueError, match="maximum"):
         agent.generate("x").save(str(tmp_path / "big.png"))

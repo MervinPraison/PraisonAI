@@ -89,6 +89,15 @@ class BrowserServer:
                     f"Falling back to 127.0.0.1"
                 )
                 host = "127.0.0.1"
+
+        # Remote mode is token-gated: clients off loopback must send ?token=
+        # or ``Authorization: Bearer`` (an Origin header can be forged).
+        from praisonaiagents.agent.launch_security import require_bind_token
+
+        self._token = require_bind_token(
+            host, os.environ.get("PRAISONAI_BROWSER_TOKEN"),
+            server="praisonai-browser server", hint="Set PRAISONAI_BROWSER_TOKEN",
+        )
         
         self.host = host
         self.port = port
@@ -200,6 +209,17 @@ class BrowserServer:
                     "http://127.0.0.1:3000", "http://127.0.0.1:8000"
                 ]
         
+        client_ip = websocket.client.host if websocket.client else None
+        if self._token and client_ip not in ("127.0.0.1", "localhost", "::1"):
+            from praisonaiagents.agent.launch_security import token_matches
+
+            auth = websocket.headers.get("authorization", "")
+            supplied = websocket.query_params.get("token") or (auth[7:] if auth.startswith("Bearer ") else None)
+            if not token_matches(supplied, self._token):
+                logger.warning(f"[SECURITY] Rejecting remote WebSocket without token from {client_ip}")
+                await websocket.close(code=1008)
+                return
+
         origin = websocket.headers.get("origin")
         # CLI clients connect from localhost without an Origin header; extensions
         # always send a chrome-extension:// Origin. Track this to distinguish them.
@@ -1232,7 +1252,7 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="PraisonAI Browser Server")
-    parser.add_argument("--host", default="0.0.0.0", help="Host to bind to")
+    parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
     parser.add_argument("--port", type=int, default=8765, help="Port to listen on")
     parser.add_argument("--model", default="gpt-4o-mini", help="LLM model")
     parser.add_argument("--max-steps", type=int, default=20, help="Max steps per session")

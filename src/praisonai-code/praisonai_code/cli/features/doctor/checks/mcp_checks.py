@@ -24,6 +24,7 @@ def _find_mcp_config() -> dict:
     try:
         from praisonaiagents.paths import get_mcp_dir, get_project_data_dir
         canonical_mcp_dir = get_mcp_dir()
+        user_mcp_config = canonical_mcp_dir / "config.json"
         project_mcp_dir = get_project_data_dir() / "mcp"
         
         locations = [
@@ -37,6 +38,7 @@ def _find_mcp_config() -> dict:
         ]
     except ImportError:
         # Fallback to legacy paths if praisonaiagents not available
+        user_mcp_config = None
         locations = [
             Path.cwd() / ".praisonai" / "mcp" / "config.json",
             Path.cwd() / ".praison" / "mcp.json",
@@ -45,12 +47,21 @@ def _find_mcp_config() -> dict:
             Path.home() / ".config" / "praison" / "mcp.json",
         ]
     
+    user_locations = {
+        Path.home() / ".praison" / "mcp.json",
+        Path.home() / ".config" / "praison" / "mcp.json",
+        user_mcp_config,
+    }
     for loc in locations:
         if loc.exists():
             try:
                 import json
                 with open(loc) as f:
-                    return {"path": str(loc), "config": json.load(f)}
+                    data = json.load(f)
+                if loc not in user_locations and isinstance(data, dict):  # a project file
+                    from praisonaiagents.mcp.trust import drop_untrusted_mcp_servers
+                    data["mcpServers"] = drop_untrusted_mcp_servers(data.get("mcpServers") or {}, str(loc))
+                return {"path": str(loc), "config": data}
             except Exception:
                 pass
     

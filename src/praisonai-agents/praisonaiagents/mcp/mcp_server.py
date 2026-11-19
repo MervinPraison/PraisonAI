@@ -287,20 +287,19 @@ class ToolsMCPServer:
         if host is None:
             host = resolved_config.get_bind_address()
 
-        # A non-loopback bind is never keyless: without a configured token,
-        # generate one, print it once, and require it on every request.
-        if host not in ("127.0.0.1", "::1", "localhost") and not resolved_token:
-            import os
-            import secrets
+        # A non-loopback bind is never keyless: the shared guard mints, exports
+        # and prints a token when none is configured.
+        from praisonaiagents.agent.launch_security import require_bind_token
+
+        token = require_bind_token(
+            host, resolved_token, server="MCP SSE server",
+            hint="Set MCP_SSE_AUTH_TOKEN", generate_into="MCP_SSE_AUTH_TOKEN",
+        )
+        if token != resolved_token:
             from dataclasses import replace
 
-            resolved_token = secrets.token_urlsafe(32)
-            os.environ["MCP_SSE_AUTH_TOKEN"] = resolved_token
+            resolved_token = token
             resolved_config = security = replace(resolved_config, require_auth=True)
-            print(
-                f"🔐 MCP SSE server bound to non-loopback host {host!r} without "
-                f"MCP_SSE_AUTH_TOKEN set. Generated a bearer token: {resolved_token}"
-            )
 
         # Refuse to start an unauthenticated server when auth was requested but
         # no token is available (env var unset/typo'd). Previously the
@@ -339,7 +338,9 @@ class ToolsMCPServer:
             ]
         )
 
-        app = build_sse_security_app(app, security)
+        from praisonaiagents.agent.origin_guard import guard_loopback_requests
+
+        app = guard_loopback_requests(build_sse_security_app(app, security), host)
         print(f"🚀 Starting MCP server '{self.name}' with SSE transport")
         print(f"📡 SSE endpoint: http://{host}:{port}{sse_path}")
         print(f"🛠️  Available tools: {', '.join(self.get_tool_names())}")

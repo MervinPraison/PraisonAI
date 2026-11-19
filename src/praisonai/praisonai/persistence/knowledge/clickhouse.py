@@ -8,7 +8,7 @@ Install: pip install clickhouse-connect
 import logging
 from typing import Any, Dict, List, Optional
 
-from .base import KnowledgeStore, KnowledgeDocument, validate_identifier
+from .base import KnowledgeStore, KnowledgeDocument, validate_dimension, validate_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -159,8 +159,9 @@ class ClickHouseKnowledgeStore(KnowledgeStore):
         """Search for similar documents using cosine distance."""
         table = self._table_name(collection)
         
-        # Convert embedding to string for query
-        embedding_str = "[" + ",".join(map(str, query_embedding)) + "]"
+        # Values written into the query text: numbers only.
+        embedding_str = "[" + ",".join(str(float(x)) for x in query_embedding) + "]"
+        limit = validate_dimension(limit, name="limit")
         
         query = f"""
             SELECT 
@@ -170,7 +171,7 @@ class ClickHouseKnowledgeStore(KnowledgeStore):
         """
         
         if score_threshold:
-            query += f" WHERE 1 - cosineDistance(embedding, {embedding_str}) >= {score_threshold}"
+            query += f" WHERE 1 - cosineDistance(embedding, {embedding_str}) >= {float(score_threshold)}"
         
         query += f" ORDER BY score DESC LIMIT {limit}"
         

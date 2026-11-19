@@ -1328,6 +1328,7 @@ class BotSessionManager:
         _clear_messenger = None
         if self._delivery_router is not None:
             try:
+                from ._outbound_media import OutboundMediaPolicy
                 from ._outbound_messenger import BotOutboundMessenger
                 from .delivery import SessionSource
                 from praisonaiagents.session.context import (
@@ -1360,9 +1361,15 @@ class BotSessionManager:
                 from praisonaiagents.agent.interrupt import InterruptController
 
                 _ic = getattr(agent, "interrupt_controller", None)
+                # Attachments may only come from the agent's workspace.
+                _ws_root = getattr(getattr(agent, "_workspace", None), "root", None)
                 messenger = BotOutboundMessenger(
                     self._delivery_router,
                     origin=origin_source,
+                    media_policy=(
+                        OutboundMediaPolicy(allow_roots=[str(_ws_root)])
+                        if _ws_root else None
+                    ),
                     liveness=(
                         (lambda: not _ic.is_set())
                         if isinstance(_ic, InterruptController)

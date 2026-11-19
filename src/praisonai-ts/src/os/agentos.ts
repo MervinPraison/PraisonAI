@@ -35,7 +35,8 @@
 
 import type { AgentOSProtocol } from './protocols';
 import type { AgentOSConfig } from './config';
-import { DEFAULT_AGENTOS_CONFIG, mergeConfig } from './config';
+import { AGENTOS_BIND, DEFAULT_AGENTOS_CONFIG, mergeConfig } from './config';
+import { requireBindToken, tokenMatches } from '../utils/bind-guard';
 
 // Type imports for Agent, AgentTeam, AgentFlow (avoid circular deps)
 type Agent = {
@@ -210,13 +211,13 @@ export class AgentOS implements AgentOSProtocol {
 
                 const authHeader = req.headers.authorization;
                 if (typeof authHeader === 'string' && authHeader.startsWith('Bearer ')) {
-                    if (authHeader.slice(7) === this.config.apiKey) {
+                    if (tokenMatches(authHeader.slice(7), this.config.apiKey)) {
                         return next();
                     }
                 }
 
                 const xAuth = req.headers['x-auth-token'] ?? req.headers['X-Auth-Token'];
-                if (typeof xAuth === 'string' && xAuth === this.config.apiKey) {
+                if (tokenMatches(xAuth, this.config.apiKey)) {
                     return next();
                 }
 
@@ -353,6 +354,8 @@ export class AgentOS implements AgentOSProtocol {
     } = {}): Promise<void> {
         const host = options.host || this.config.host;
         const port = options.port || this.config.port;
+        // Re-check here: serve({ host }) can differ from the constructor's host.
+        requireBindToken(host, this.config.apiKey, AGENTOS_BIND);
 
         const app = this.getApp();
 
