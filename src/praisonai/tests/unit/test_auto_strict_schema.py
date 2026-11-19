@@ -250,8 +250,11 @@ async def test_workflow_strict_schema_preserves_patterns(
     assert data["steps"] == expected
     from praisonaiagents.workflows.yaml_parser import YAMLWorkflowParser
 
-    workflow = YAMLWorkflowParser().parse_file(target)
+    parser = YAMLWorkflowParser()
+    workflow = parser.parse_file(target)
     assert len(workflow.steps) == len(expected)
+    if "parallel" in expected[0]:
+        assert workflow.steps[0].steps == [parser._agents["greeter"]]
 
 
 @pytest.mark.offline
@@ -374,3 +377,70 @@ async def test_generated_step_options_reach_the_yaml_parser(
     assert agent._yaml_output_file == "report.md"
     assert agent._yaml_context == ["research"]
     assert agent._yaml_guardrail == "Check the report"
+
+
+@pytest.mark.offline
+def test_parallel_rejects_patterns_the_reader_would_drop() -> None:
+    from praisonai.auto import _get_workflow_models
+
+    model = _get_workflow_models()["WorkflowOutput"]
+    with pytest.raises(ValueError):
+        model.model_validate(
+            {
+                "name": "Bad",
+                "description": "Bad",
+                "agents": [],
+                "steps": [
+                    {
+                        "parallel": [
+                            {"route": [{"id": "default", "targets": ["writer"]}]}
+                        ]
+                    }
+                ],
+            }
+        )
+
+
+@pytest.mark.offline
+def test_merging_rewrites_nested_agent_references(tmp_path: Path) -> None:
+    target = tmp_path / "workflow.yaml"
+    old = {"name": "Existing", "agents": {"writer": {"name": "Original"}}, "steps": []}
+    target.write_text(yaml.safe_dump(old))
+    generator = WorkflowAutoGenerator(
+        topic="Write",
+        workflow_file=str(target),
+        framework="praisonai",
+        config_list=[{"model": "test-model", "api_key": "test-key"}],
+    )
+    fresh = {
+        "name": "New",
+        "agents": {"writer": {"name": "New"}},
+        "steps": [
+            {
+                "if": {
+                    "condition": "writer",
+                    "then": [{"agent": "writer"}],
+                    "else": [{"agent": "writer"}],
+                }
+            },
+            {"loop": {"over": "items", "step": "writer"}},
+            {"loop": {"over": "items"}, "step": "writer"},
+            {"loop": {"over": "items"}, "steps": [{"agent": "writer"}]},
+        ],
+    }
+    merged = generator.merge_with_existing_workflow(fresh)
+    assert merged["agents"]["writer"] == {"name": "Original"}
+    assert merged["agents"]["writer_auto_1"] == {"name": "New"}
+    assert merged["steps"] == [
+        {
+            "if": {
+                "condition": "writer",
+                "then": [{"agent": "writer_auto_1"}],
+                "else": [{"agent": "writer_auto_1"}],
+            }
+        },
+        {"loop": {"over": "items", "step": "writer_auto_1"}},
+        {"loop": {"over": "items"}, "step": "writer_auto_1"},
+        {"loop": {"over": "items"}, "steps": [{"agent": "writer_auto_1"}]},
+    ]
+    assert fresh["steps"][0]["if"]["then"][0]["agent"] == "writer"

@@ -1733,7 +1733,7 @@ def _get_workflow_models():
 
         class LoopOutput(BaseModel):
             model_config = {'extra': 'forbid'}
-            over: Optional[Union[str, List[Union[str, int, float, bool]]]] = None
+            over: Optional[str] = None
             from_csv: Optional[str] = None
             from_file: Optional[str] = None
             var_name: Optional[str] = None
@@ -1759,12 +1759,10 @@ def _get_workflow_models():
             then: List['StepOutput']
             otherwise: Optional[List['StepOutput']] = Field(default=None, alias='else')
 
-        class StepOutput(BaseModel):
+        class StepOptions(BaseModel):
             # Reject unsupported options instead of silently discarding them.
             model_config = {'extra': 'forbid'}
             name: Optional[str] = None
-            agent: Optional[str] = None
-            action: Optional[str] = None
             expected_output: Optional[str] = None
             output_file: Optional[str] = None
             output_json: Optional[str] = None
@@ -1779,13 +1777,21 @@ def _get_workflow_models():
             skip_on_failure: Optional[bool] = None
             retry_delay: Optional[float] = None
             on_failure: Optional[str] = None
+
+        class AgentStepOutput(StepOptions):
+            agent: str
+            action: Optional[str] = None
+
+        class StepOutput(StepOptions):
+            agent: Optional[str] = None
+            action: Optional[str] = None
             route: Optional[List[NamedRoute]] = None
-            parallel: Optional[List['StepOutput']] = None
+            parallel: Optional[List[AgentStepOutput]] = None
             loop: Optional[LoopOutput] = None
             repeat: Optional[RepeatOutput] = None
             include: Optional[Union[str, IncludeOutput]] = None
             branching: Optional[IfOutput] = Field(default=None, alias='if')
-            step: Optional[Union[str, 'StepOutput']] = None
+            step: Optional[Union[str, AgentStepOutput]] = None
             steps: Optional[List['StepOutput']] = None
 
         namespace = {'StepOutput': StepOutput}
@@ -2077,7 +2083,7 @@ Respond with:
                 if isinstance(ref, str):
                     step[key] = rename_map.get(ref, ref)
             # Routing/parallel/loop payloads also carry agent refs — recurse.
-            for key in ("parallel", "route", "loop", "branches"):
+            for key in ("parallel", "route", "loop", "branches", "if", "then", "else", "steps", "step"):
                 nested = step.get(key)
                 if nested is None:
                     continue
@@ -2091,6 +2097,8 @@ Respond with:
                         }
                     elif isinstance(nested, list):
                         step[key] = _rewrite_agent_refs(nested, route_target=True)
+                elif key == "step" and isinstance(nested, str):
+                    step[key] = rename_map.get(nested, nested)
                 elif isinstance(nested, list):
                     step[key] = [_rewrite_agent_refs(s) for s in nested]
                 elif isinstance(nested, dict):
@@ -2226,13 +2234,14 @@ Example structure:
 """
         elif pattern == "evaluator-optimizer":
             base_prompt += """
-Create an evaluator-optimizer workflow where one agent generates content and another evaluates it in a loop.
-The generator improves based on evaluator feedback until quality criteria are met.
+Generate content once, evaluate it with bounded retries until APPROVED, then finalize using the feedback.
+The YAML repeat form retries one agent, not a generator/evaluator pair. Do not claim
+feedback-driven regeneration inside the repeat; that requires a Python composite workflow.
 
 Example structure:
 {
   "name": "Evaluator-Optimizer Workflow",
-  "description": "Iterative refinement through generation and evaluation",
+  "description": "Generation, bounded evaluation and finalization",
   "agents": {
     "generator": {"name": "Generator", "role": "Content Generator", "goal": "Generate high-quality content", "instructions": "Create content based on the input. If feedback is provided, improve the content accordingly."},
     "evaluator": {"name": "Evaluator", "role": "Quality Evaluator", "goal": "Evaluate content quality", "instructions": "Evaluate the content on: clarity, accuracy, completeness, and relevance. Score 1-10 for each. If average score < 7, provide specific improvement feedback. If score >= 7, respond with 'APPROVED'."}
