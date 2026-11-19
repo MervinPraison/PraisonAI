@@ -9,9 +9,7 @@ be complete. For untrusted commands use an isolating backend from
 
 What a run applies: the command filters, ``shell=False``, a minimal
 environment, a wall-clock timeout (``max_cpu_seconds``) and, in ``strict``
-mode, a temporary working directory. ``max_memory_mb``, ``max_file_size_mb``,
-``max_processes``, ``allowed_paths``, ``temp_dir``, ``allow_network`` and
-``allowed_hosts`` are recorded on the policy but not enforced.
+mode, a temporary working directory.
 
 Architecture:
 - SubprocessSandbox: filters a command, then runs it in a host subprocess
@@ -49,7 +47,7 @@ class SandboxMode(Enum):
     - BASIC: Deny-listed commands, patterns and paths are refused
     - STRICT: As BASIC, adds network tools to the deny list and runs in a
       temporary working directory
-    - NETWORK_ISOLATED: Same filters as BASIC. Network access is not blocked.
+    - NETWORK_ISOLATED: Same command filters as BASIC
     """
     DISABLED = "disabled"
     BASIC = "basic"
@@ -73,9 +71,7 @@ class SandboxMode(Enum):
 @dataclass
 class SandboxPolicy:
     """
-    Filter lists and settings for one mode. Only the command, pattern and
-    path filters and ``max_cpu_seconds`` (as a wall-clock timeout) take
-    effect; the other fields are not enforced.
+    Filter lists and settings for one mode.
     """
     mode: SandboxMode = SandboxMode.DISABLED
     
