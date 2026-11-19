@@ -1,6 +1,6 @@
 /**
  * CLI command: sandbox
- * Safe command execution with restrictions
+ * Filters a command, then runs it on the host. Not isolation (see SECURITY.md).
  */
 
 import { SandboxExecutor, createSandboxExecutor, CommandValidator, type SandboxMode } from '../features/sandbox-executor';
@@ -83,9 +83,9 @@ async function handleCheck(args: string[], isJson: boolean): Promise<void> {
 async function handleMode(args: string[], isJson: boolean): Promise<void> {
   const modes: Record<SandboxMode, string> = {
     disabled: 'No execution allowed',
-    basic: 'Basic validation, blocks dangerous patterns',
-    strict: 'Minimal environment, restricted PATH',
-    'network-isolated': 'No network access (proxy blocked)'
+    basic: 'Refuses deny-listed commands and patterns; runs on the host',
+    strict: 'As basic, no shell, minimal environment; runs on the host',
+    'network-isolated': 'As basic, refuses network tools, unsets proxies; runs on the host with network access'
   };
 
   if (isJson) {
@@ -101,14 +101,14 @@ async function handleMode(args: string[], isJson: boolean): Promise<void> {
 function showHelp(isJson: boolean): void {
   const help = {
     command: 'sandbox',
-    description: 'Safe command execution with restrictions',
+    description: 'Filter a command, then run it on the host (not isolation; see SECURITY.md)',
     subcommands: {
-      exec: 'Execute a command in sandbox',
+      exec: 'Filter a command, then run it on the host',
       check: 'Check if a command would be allowed',
       mode: 'List available sandbox modes'
     },
     flags: {
-      '--mode': 'Sandbox mode (disabled, basic, strict, network-isolated)',
+      '--mode': 'Filter mode (disabled, basic, strict, network-isolated)',
       '--timeout': 'Execution timeout in ms (default: 30000)',
       '--json': 'Output in JSON format'
     },
@@ -120,7 +120,7 @@ function showHelp(isJson: boolean): void {
     ]
   };
 
-  printPlainHelp(isJson, help, 'Sandbox - Safe command execution', [
+  printPlainHelp(isJson, help, 'Sandbox - command filter (runs on the host)', [
     { label: 'Subcommands:', entries: help.subcommands },
     { label: 'Flags:', entries: help.flags },
     { label: 'Examples:', items: help.examples }
