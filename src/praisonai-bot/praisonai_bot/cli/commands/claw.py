@@ -9,6 +9,7 @@ Usage:
     praisonai dashboard --app my.py    # Custom app file
 """
 
+import hashlib
 import sys
 from pathlib import Path
 from typing import Optional
@@ -28,21 +29,66 @@ CLAW_DIR = Path.home() / ".praisonai" / "claw"
 DEFAULT_APP = CLAW_DIR / "app.py"
 
 
+# First line of every copy we write: the sha256 of the rest of the file, so an
+# untouched copy can be told apart from one the user edited.
+_STAMP = "# praisonai-default-app sha256="
+# sha256[:16] of every default_app.py shipped before copies were stamped.
+_SHIPPED = frozenset({
+    "0f7d102b64e19354",
+    "1bf3cf65bdea6869",
+    "22a2836edefff014",
+    "27b33fc7a2ca881c",
+    "49f12c010797bdb3",
+    "6359f55e85f43c20",
+    "c7c2a42c5dce2aae",
+    "eafe132c37a713fb",
+    "efd0ea4dba9c050c",
+})
+
+
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def _sync_default_app(bundled: Path, target: Path) -> str:
+    """Create or refresh the user's copy of the bundled app; never overwrite an edited one.
+
+    Returns "created", "updated", "current" or "edited".
+    """
+    text = bundled.read_text(encoding="utf-8")
+    stamped = f"{_STAMP}{_sha(text)}\n{text}"
+    if not target.exists():
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(stamped, encoding="utf-8")
+        return "created"
+    old = target.read_text(encoding="utf-8")
+    if old == stamped:
+        return "current"
+    first, _, body = old.partition("\n")
+    untouched = (first == f"{_STAMP}{_sha(body)}") or _sha(old)[:16] in _SHIPPED
+    if not untouched:
+        return "edited"
+    target.write_text(stamped, encoding="utf-8")
+    return "updated"
+
+
 def _ensure_default_app() -> Path:
-    """Copy bundled default_app.py to ~/.praisonai/claw/app.py if missing."""
-    if DEFAULT_APP.exists():
-        return DEFAULT_APP
-
-    CLAW_DIR.mkdir(parents=True, exist_ok=True)
-
-    # Read the bundled default
+    """Keep ~/.praisonai/claw/app.py on the bundled default unless the user edited it."""
     bundled = Path(__file__).parent.parent.parent / "claw" / "default_app.py"
     if not bundled.exists():
-        print(f"[red]ERROR: Bundled default_app.py not found at {bundled}[/red]")
+        if DEFAULT_APP.exists():
+            return DEFAULT_APP
+        print(f"ERROR: Bundled default_app.py not found at {bundled}")
         raise typer.Abort()
 
-    DEFAULT_APP.write_text(bundled.read_text())
-    print(f"   ✓ Created default dashboard config: {DEFAULT_APP}")
+    state = _sync_default_app(bundled, DEFAULT_APP)
+    if state == "created":
+        print(f"   ✓ Created default dashboard config: {DEFAULT_APP}")
+    elif state == "updated":
+        print(f"   ✓ Updated {DEFAULT_APP} to the latest default")
+    elif state == "edited":
+        print(f"   Using your edited {DEFAULT_APP}. A newer default is at {bundled};"
+              " delete your copy to get it.")
     return DEFAULT_APP
 
 
