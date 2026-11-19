@@ -1304,7 +1304,8 @@ Respond with ONLY a valid JSON tool call in this format:
 
         # The process is shutting down (e.g. Ctrl-C mid-call): every retry
         # fails the same way and only delays exit.
-        shutting_down = "cannot schedule new futures after" in str(error)
+        from .error_classifier import is_shutdown_error
+        shutting_down = is_shutdown_error(error)
 
         # Non-retryable errors (includes billing errors)
         if shutting_down or error_kind in ["auth_permanent", "model_not_found", "format_error", "billing"]:
@@ -4687,7 +4688,9 @@ Respond with ONLY a valid JSON tool call in this format:
                 except (LLMResponseError, ToolExecutionError, BudgetExceededError):
                     raise
                 except Exception as e:
-                    logger.error(f"Error in LLM iteration {iteration_count}: {e}")
+                    from .error_classifier import is_shutdown_error
+                    (logger.debug if is_shutdown_error(e) else logger.error)(
+                        f"Error in LLM iteration {iteration_count}: {e}")
                     # Don't swallow the failure and return an empty string as if
                     # the call succeeded. Re-raise as a distinguishable exception
                     # so the caller (e.g. Agent.chat) can surface the real error.

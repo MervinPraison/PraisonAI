@@ -241,6 +241,9 @@ class ChatMixin:
         callers can detect the failure today. Raising instead is a 2.0 decision.
         """
         self._last_error = exc
+        from ..llm.error_classifier import is_shutdown_error
+        if is_shutdown_error(exc):  # cut off by Ctrl-C/exit: nobody is waiting for this turn
+            return None
         # Stable text (no str(exc): request IDs/timestamps would defeat the
         # default once-per-location filter). Under ``-W error`` the warning
         # must not escape or replace the saved error: the contract is None.
