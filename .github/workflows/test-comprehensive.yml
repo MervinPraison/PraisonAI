@@ -70,9 +70,11 @@ jobs:
         fi
 
     - name: Run Comprehensive Test Suite
+      id: comprehensive_tests
       env:
         INPUT_TEST_TYPE: ${{ github.event.inputs.test_type || 'all' }}
       run: |
+        set -euo pipefail
         # Determine test type from input or default to 'all'
         TEST_TYPE="$INPUT_TEST_TYPE"
         
@@ -80,28 +82,28 @@ jobs:
         
         case $TEST_TYPE in
           "unit")
-            cd src/praisonai && python -m pytest tests/unit/ -v --tb=short --disable-warnings --cov=praisonai --cov-report=xml --cov-branch || echo "Some unit tests failed"
+            cd src/praisonai && python -m pytest tests/unit/ -v --tb=short --disable-warnings --cov=praisonai --cov-report=xml --cov-branch
             ;;
           "integration")
-            cd src/praisonai && python -m pytest tests/integration/ -v --tb=short --disable-warnings --cov=praisonai --cov-report=xml --cov-branch || echo "Some integration tests failed"
+            cd src/praisonai && python -m pytest tests/integration/ -v --tb=short --disable-warnings --cov=praisonai --cov-report=xml --cov-branch
             ;;
           "fast")
-            cd src/praisonai && python tests/test_runner.py --pattern fast || echo "Some fast tests failed"
+            cd src/praisonai && python tests/test_runner.py --pattern fast
             ;;
           "performance")
-            cd src/praisonai && python tests/test_runner.py --pattern "performance" || echo "Some performance tests failed"
+            cd src/praisonai && python -m pytest tests/unit/ -k performance -v --tb=short --disable-warnings --timeout=60
             ;;
           "frameworks")
-            cd src/praisonai && python tests/test_runner.py --pattern frameworks || echo "Some framework tests failed"
+            cd src/praisonai && python tests/test_runner.py --pattern frameworks
             ;;
           "autogen")
-            cd src/praisonai && python tests/test_runner.py --pattern autogen || echo "Some autogen tests failed"
+            cd src/praisonai && python tests/test_runner.py --pattern autogen
             ;;
           "crewai")
-            cd src/praisonai && python tests/test_runner.py --pattern crewai || echo "Some crewai tests failed"
+            cd src/praisonai && python tests/test_runner.py --pattern crewai
             ;;
           "all"|*)
-            cd src/praisonai && python tests/test_runner.py --pattern all || echo "Some tests failed"
+            cd src/praisonai && python tests/test_runner.py --pattern all
             ;;
         esac
 
@@ -110,48 +112,17 @@ jobs:
       env:
         INPUT_TEST_TYPE: ${{ github.event.inputs.test_type || 'all' }}
         EVENT_NAME: ${{ github.event_name }}
+        TEST_OUTCOME: ${{ steps.comprehensive_tests.outcome }}
       run: |
         echo "# 📋 Comprehensive Test Report" > comprehensive_report.md
         echo "" >> comprehensive_report.md
         echo "**Python Version:** ${{ matrix.python-version }}" >> comprehensive_report.md
         echo "**Test Type:** $INPUT_TEST_TYPE" >> comprehensive_report.md
         echo "**Trigger:** $EVENT_NAME" >> comprehensive_report.md
-        echo "**Status:** 🟢 All Tests Passed" >> comprehensive_report.md
+        echo "**Test step outcome:** ${TEST_OUTCOME:-not run}" >> comprehensive_report.md
         echo "" >> comprehensive_report.md
         
-        echo "## 🧪 Test Categories Covered:" >> comprehensive_report.md
-        echo "" >> comprehensive_report.md
-        echo "### Unit Tests:" >> comprehensive_report.md
-        echo "- ✅ Core agent functionality" >> comprehensive_report.md
-        echo "- ✅ Async operations" >> comprehensive_report.md
-        echo "- ✅ Tool integrations" >> comprehensive_report.md
-        echo "- ✅ UI components" >> comprehensive_report.md
-        echo "" >> comprehensive_report.md
-        
-        echo "### Integration Tests:" >> comprehensive_report.md
-        echo "- ✅ MCP (Model Context Protocol)" >> comprehensive_report.md
-        echo "- ✅ RAG (Retrieval Augmented Generation)" >> comprehensive_report.md
-        echo "- ✅ Base URL API mapping" >> comprehensive_report.md
-        echo "- ✅ Multi-agent workflows" >> comprehensive_report.md
-        echo "- ✅ AutoGen framework integration" >> comprehensive_report.md
-        echo "- ✅ CrewAI framework integration" >> comprehensive_report.md
-        echo "- 💬 LLM integrations (OpenAI, Anthropic, etc.)" >> comprehensive_report.md
-        echo "- 🖥️ UI frameworks (Gradio, Streamlit)" >> comprehensive_report.md
-        echo "- 📊 Memory and persistence" >> comprehensive_report.md
-        echo "- 🌐 Multi-modal capabilities" >> comprehensive_report.md
-
-        echo "- ✅ AutoGen framework integration" >> comprehensive_report.md
-        echo "- ✅ CrewAI framework integration" >> comprehensive_report.md
-        echo "" >> comprehensive_report.md
-        
-        echo "### Key Features Tested:" >> comprehensive_report.md
-        echo "- 🤖 Agent creation and configuration" >> comprehensive_report.md
-        echo "- 📋 Task management and execution" >> comprehensive_report.md
-        echo "- 🔄 Sync/async workflows" >> comprehensive_report.md
-        echo "- 🛠️ Custom tools and error handling" >> comprehensive_report.md
-        echo "- 🧠 Knowledge bases and RAG" >> comprehensive_report.md
-        echo "- 🔌 MCP server connections" >> comprehensive_report.md
-        echo "- 💬 LLM integrations (OpenAI, Anthropic, etc.)" >> comprehensive_report.md
+        echo "See the test step log for collected, passed, skipped and failed tests." >> comprehensive_report.md
 
     - name: Upload coverage reports to Codecov
       uses: codecov/codecov-action@v5
@@ -186,12 +157,11 @@ jobs:
         echo "# 🎯 Test Matrix Summary" > matrix_summary.md
         echo "" >> matrix_summary.md
         echo "## Python Version Results:" >> matrix_summary.md
-        echo "- Python 3.10: ${{ needs.comprehensive-test.result }}" >> matrix_summary.md  
         echo "- Python 3.11: ${{ needs.comprehensive-test.result }}" >> matrix_summary.md
         echo "" >> matrix_summary.md
         echo "## Overall Status:" >> matrix_summary.md
         if [ "${{ needs.comprehensive-test.result }}" == "success" ]; then
-          echo "✅ **All tests passed across all Python versions!**" >> matrix_summary.md
+          echo "✅ **The comprehensive test job succeeded.**" >> matrix_summary.md
         else
           echo "❌ **Some tests failed. Check individual job logs for details.**" >> matrix_summary.md
         fi
@@ -201,4 +171,4 @@ jobs:
       with:
         name: test-matrix-summary
         path: matrix_summary.md
-        retention-days: 30 
+        retention-days: 30
