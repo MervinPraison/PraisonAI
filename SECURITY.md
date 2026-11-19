@@ -64,14 +64,19 @@ around them is not a vulnerability:
   All three modes run code on the host as the same OS user, either in the
   agent process or in a local subprocess. Restricted builtins, import filters
   and resource limits are guard rails, not isolation.
+  The same holds for `PythonTools` and for inline Python steps in job
+  workflows (`praisonai-code`): they run on the host as the operator.
 - **The TypeScript `codeMode` tool**, which runs code in a Node.js `vm` context.
 - **String-based shell command filters** (allow or deny patterns over a
-  command line).
+  command line). This includes the CLI `SandboxExecutor` in `praisonai-code`
+  and in the TypeScript SDK: all of its modes (`basic`, `strict`,
+  `network-isolated`) check the command text and then run it on the host. The
+  mode names describe which commands are filtered, not isolation.
 
 To run untrusted or model-written code, use an isolating backend from
 [`praisonai-sandbox`](src/praisonai-sandbox/): Docker, Sandlock (Linux), E2B,
-Modal, Daytona or Novita. Its `subprocess` backend runs on the host and is not
-isolation either.
+Modal, Daytona or Novita. Its `subprocess` backend and the `local` compute
+provider (`LocalCompute`) run on the host and are not isolation either.
 
 A way around the guard rails above is a hardening bug. Please open a normal
 public issue for it.
@@ -140,7 +145,7 @@ Response targets:
 
 | Step | Target |
 |------|--------|
-| Acknowledge the report | 3 working days |
+| Acknowledge the report | 2 working days |
 | Decision (accepted, duplicate, out of scope, or more information needed) | 14 days |
 | Fix released for a confirmed high or critical issue | 30 days |
 
