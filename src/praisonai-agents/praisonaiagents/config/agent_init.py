@@ -1100,3 +1100,68 @@ def resolve_agent_llm_init_params(
     if isinstance(llm, str) and "/" in llm:
         return llm, provider_llm_params(llm, api_key, auth, options)
     return None
+
+
+def resolve_agent_tools(
+    tools: Any, toolsets: Optional[List[str]], llm: Any, agent_name: str,
+    resolve_names: Any, resolve_list: Any,
+) -> Any:
+    """``tools=`` / ``toolsets=`` -> the agent's tool list.
+
+    A callable is wrapped in a list; a name string, or the name strings inside a
+    list/tuple (per element), resolve through *resolve_names* / *resolve_list*.
+    Named ``toolsets`` (ordered for the model family of *llm*) add the tools not
+    already present. A ``ToolResolutionError`` propagates unchanged; other
+    resolution or import failures are re-raised naming *agent_name*.
+    """
+    if callable(tools):
+        # If a single function/callable is passed, wrap it in a list
+        resolved = [tools]
+    elif isinstance(tools, str):
+        # Single tool name string - resolve from registry
+        resolved = resolve_names([tools])
+    elif isinstance(tools, (list, tuple)):
+        # Resolve tool-name strings PER ELEMENT. An all-or-nothing `all(...)`
+        # test silently left every name unresolved as soon as one callable
+        # was present, so `tools=[my_tool, 'read_file']` dropped 'read_file'.
+        resolved = resolve_list(tools)
+    else:
+        resolved = tools or []
+
+    if toolsets:
+        # Bound before the try: if the toolsets import fails, the except
+        # clauses below must still be able to name ToolResolutionError.
+        from ..tools.resolver import ToolResolutionError
+        try:
+            from ..toolsets import resolve_toolsets_for_model
+            # Advertise the model-family's preferred edit primitive first
+            # (e.g. apply_patch for Claude, edit_file for GPT). Unknown /
+            # non-string models fall back to the byte-for-byte default order.
+            model_id = llm if isinstance(llm, str) else None
+            toolset_tool_names = resolve_toolsets_for_model(toolsets, model_id)
+            # Remove duplicates with existing tools
+            existing_tool_names = set()
+            for tool in resolved:
+                name = getattr(tool, 'name', getattr(tool, '__name__', str(tool)))
+                existing_tool_names.add(name)
+
+            unique_tool_names = [name for name in toolset_tool_names if name not in existing_tool_names]
+            toolset_tools = resolve_names(unique_tool_names)
+            resolved.extend(toolset_tools)
+            logger.debug(f"Resolved toolsets {toolsets} to {len(toolset_tools)} tools: {[getattr(t, '__name__', str(t)) for t in toolset_tools]}")
+        except ToolResolutionError:
+            # Preserve the typed error (with .unknown / .suggestions) so
+            # strict-mode callers get the same self-correcting contract as
+            # the direct tools= path instead of a flattened ValueError.
+            raise
+        except (ValueError, KeyError) as e:
+            raise ValueError(
+                f"Agent '{agent_name}' failed to resolve toolsets {toolsets}: {e}. "
+                "Verify names with praisonaiagents.toolsets.list_toolsets()."
+            ) from e
+        except ImportError as e:
+            raise ImportError(
+                f"Agent '{agent_name}' failed to import toolsets module: {e}. "
+                "Ensure praisonaiagents is properly installed."
+            ) from e
+    return resolved
