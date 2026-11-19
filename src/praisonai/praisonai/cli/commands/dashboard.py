@@ -13,7 +13,7 @@ import signal
 import json
 from pathlib import Path
 from types import FrameType
-from typing import Set, TextIO
+from typing import Optional, Set, TextIO
 import socket
 import time
 
@@ -554,13 +554,31 @@ def _generate_dashboard_html(host: str = "localhost") -> str:
 @app.callback(invoke_without_command=True)
 def unified(
     ctx: typer.Context,
-    port: int = typer.Option(3000, "--port", "-p", help="Port to run unified dashboard on"),
+    port: Optional[int] = typer.Option(
+        None, "--port", "-p", help="Port (default 8082, the claw dashboard; 3000 with --unified)"
+    ),
     host: str = typer.Option("127.0.0.1", "--host", help="Host to bind to (use 0.0.0.0 to expose remotely)"),
-    auto_start: bool = typer.Option(True, "--auto-start/--no-auto-start", help="Auto-start all services"),
-    aiui: bool = typer.Option(False, "--aiui", help="Use aiui dashboard interface (experimental)"),
+    app_file: Optional[str] = typer.Option(
+        None, "--app", "-a", help="Custom app.py file (default: ~/.praisonai/claw/app.py)"
+    ),
+    reload: bool = typer.Option(False, "--reload", "-r", help="Enable auto-reload"),
+    unified_mode: bool = typer.Option(
+        False, "--unified", help="The older launcher: Flow + Claw + Chat UI on one page at port 3000"
+    ),
+    auto_start: Optional[bool] = typer.Option(
+        None, "--auto-start/--no-auto-start", help="With --unified: auto-start all services (default on)"
+    ),
+    aiui: bool = typer.Option(False, "--aiui", help="With --unified: use the aiui dashboard interface"),
 ):
     """
-    Launch the PraisonAI Unified Dashboard.
+    Launch the PraisonAI Dashboard: the same app as ``praisonai claw``.
+
+    ``praisonai dashboard`` and ``praisonai claw`` open the same full dashboard
+    (chat, agents, skills, memory, knowledge, cron, kanban, Connect and more).
+    ``--unified`` (or the older ``--aiui`` / ``--auto-start`` flags) keeps the
+    older launcher described below.
+
+    Unified launcher (``--unified``):
     
     Pattern B (default with --aiui): in-process ``build_host_app()`` host.
     Pattern C: ``praisonai serve gateway`` or ``run_integrated_gateway()``.
@@ -580,14 +598,24 @@ def unified(
     6. Optionally uses aiui for enhanced dashboard experience
     
     Examples:
-        praisonai dashboard                           # Auto-start all services
-        praisonai dashboard --no-auto-start          # Dashboard only (no auto-start)
-        praisonai dashboard --port 9000 --host 0.0.0.0
-        praisonai dashboard --aiui                   # Use aiui interface (experimental)
+        praisonai dashboard                           # Same as `praisonai claw` (port 8082)
+        praisonai dashboard --port 9000 --app my-dashboard.py
+        praisonai dashboard --unified                 # Flow + Claw + UI, auto-starts services
+        praisonai dashboard --unified --no-auto-start # Unified page only
+        praisonai dashboard --unified --aiui          # Unified, aiui interface
     """
     if ctx.invoked_subcommand is not None:
         return
-    
+
+    if not (unified_mode or aiui or auto_start is not None):
+        # Same as `praisonai claw` (praisonai_bot.cli.commands.claw).
+        from praisonai_bot.cli.commands.claw import claw as _claw
+
+        _claw(ctx, port=port or 8082, host=host, app_file=app_file, reload=reload)
+        return
+    port = port or 3000
+    auto_start = True if auto_start is None else auto_start
+
     from rich.console import Console
     console = Console()
     

@@ -732,7 +732,7 @@ Connect your AI agents to **Telegram, Discord, Slack, WhatsApp** and more — al
 
 ```bash
 pip install "praisonai[claw]"
-praisonai claw
+praisonai claw        # or: praisonai dashboard (the same app)
 ```
 
 #### Required Environment Variables

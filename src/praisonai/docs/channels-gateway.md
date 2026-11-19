@@ -24,7 +24,7 @@ pip install "praisonai[bot]"
 ## CLI
 
 ```bash
-praisonai dashboard --aiui          # Pattern B in-process host
+praisonai dashboard --unified --aiui  # Pattern B in-process host (unified launcher)
 PRAISONAI_HOST_LEGACY=1 praisonai ui  # Legacy @aiui.reply callbacks only
 ```
 
