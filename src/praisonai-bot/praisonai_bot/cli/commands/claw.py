@@ -92,6 +92,41 @@ def _ensure_default_app() -> Path:
     return DEFAULT_APP
 
 
+def _run_server(cmd) -> None:
+    """Run the aiui server and stop it when this process is stopped.
+
+    subprocess.run left the server running when this process got SIGTERM (a
+    service manager, ``kill``, a closed terminal): the orphan kept the port and
+    kept writing its in-memory state to config.yaml. SIGTERM now raises
+    KeyboardInterrupt here, and the server is terminated (killed after 10 s).
+    """
+    import signal
+    import subprocess
+
+    def _on_sigterm(signum, frame):
+        raise KeyboardInterrupt
+
+    proc = subprocess.Popen(cmd)
+    try:
+        previous = signal.signal(signal.SIGTERM, _on_sigterm)
+    except ValueError:  # not the main thread
+        previous = None
+    try:
+        returncode = proc.wait()
+    finally:
+        if previous is not None:
+            signal.signal(signal.SIGTERM, previous)
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+    if returncode:
+        raise subprocess.CalledProcessError(returncode, cmd)
+
+
 @app.callback(invoke_without_command=True)
 def claw(
     ctx: typer.Context,
@@ -144,8 +179,6 @@ def claw(
 
     # 3. Launch via aiui run, in this interpreter: a bare "aiui" from PATH can be a
     # different install (another venv or an old global copy) without praisonai_bot.
-    import subprocess
-
     cmd = [sys.executable, "-m", "praisonaiui.cli", "run", str(resolved),
            "--port", str(port), "--host", host]
     if reload:
@@ -166,6 +199,6 @@ def claw(
     print("")
 
     try:
-        subprocess.run(cmd, check=True)
+        _run_server(cmd)
     except KeyboardInterrupt:
         print("\n🦅 Dashboard stopped.")
