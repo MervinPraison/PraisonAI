@@ -128,11 +128,12 @@ class HTTPStreamTransport:
         else:
             self.allowed_origins = allowed_origins
 
-        if host not in ("127.0.0.1", "localhost", "::1") and self.api_key_auth is None:
-            raise ValueError(
-                "api_key (or api_key_auth) is required when MCP HTTP-stream binds "
-                "to a non-localhost address"
-            )
+        from praisonaiagents.agent.launch_security import require_bind_token
+
+        require_bind_token(
+            host, "api_key_auth" if self.api_key_auth is not None else None,
+            server="MCP HTTP-stream", hint="Pass api_key (or api_key_auth)",
+        )
         
         # Session storage
         self._sessions: Dict[str, Dict[str, Any]] = {}
@@ -149,7 +150,9 @@ class HTTPStreamTransport:
         except ImportError:
             raise ImportError("uvicorn required. Install with: pip install uvicorn")
         
-        app = self._create_app()
+        from praisonaiagents.agent.request_limits import limit_request_body
+
+        app = limit_request_body(self._create_app())
         
         logger.info(f"MCP server '{self.server.name}' starting on http://{self.host}:{self.port}{self.endpoint}")
         

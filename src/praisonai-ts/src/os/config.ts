@@ -13,6 +13,7 @@
  * };
  * ```
  */
+import { requireBindToken } from '../utils/bind-guard';
 
 /**
  * Configuration for AgentOS.
@@ -83,6 +84,9 @@ export const DEFAULT_AGENTOS_CONFIG: Required<Omit<AgentOSConfig, 'metadata'>> &
     metadata: {},
 };
 
+/** Bind-guard labels shared by mergeConfig() and AgentOS.serve(). */
+export const AGENTOS_BIND = { server: 'AgentOS', hint: 'Set apiKey (or PRAISONAI_AGENTOS_API_KEY)' };
+
 /**
  * Merge user config with defaults.
  */
@@ -99,12 +103,7 @@ export function mergeConfig(userConfig?: AgentOSConfig): Required<Omit<AgentOSCo
         },
     };
 
-    const exposedHosts = new Set(['0.0.0.0', '::', '::0']);
-    if (exposedHosts.has(merged.host) && !merged.apiKey) {
-        throw new Error(
-            'AgentOS requires apiKey (or PRAISONAI_AGENTOS_API_KEY) when binding to a network-exposed host'
-        );
-    }
+    requireBindToken(merged.host, merged.apiKey, AGENTOS_BIND);
 
     return merged;
 }

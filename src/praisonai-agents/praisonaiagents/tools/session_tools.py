@@ -36,8 +36,37 @@ def get_active_session_store():
     return get_default_session_store()
 
 
+def _caller_scope() -> Optional[tuple]:
+    """Who is asking: ``("user_id", id)`` when a bot set the user for this turn,
+    else ``("agent_name", name)`` for the calling agent, else ``None``."""
+    from ..session.context import get_session_context
+    from .injected import get_current_state
+
+    user_id = get_session_context().user_id
+    if user_id:
+        return ("user_id", user_id)
+    state = get_current_state()
+    name = state and ((state.metadata or {}).get("agent_name") or state.agent_id)
+    return ("agent_name", name) if name else None
+
+
+def _owned(store, session_id: str, scope: tuple) -> bool:
+    """True when the stored session records the caller's user id / agent name."""
+    get = getattr(store, "get_session", None)
+    try:
+        data = get(session_id) if callable(get) else None
+    except Exception:  # unreadable session: not shown
+        return False
+    return bool(scope[1]) and getattr(data, scope[0], None) == scope[1]
+
+
 class SessionTools:
-    """Tools for cross-session conversation recall."""
+    """Tools for cross-session conversation recall.
+
+    Results are limited to the caller's own sessions: the user id a bot sets in
+    the session context, or, without one, the calling agent's name. A call with
+    neither (outside an agent run) is refused.
+    """
 
     def __init__(self, workspace=None, store=None):
         """Initialize SessionTools.
@@ -81,10 +110,14 @@ class SessionTools:
         """
         try:
             store = self.store
+            scope = _caller_scope()
+            if scope is None:
+                raise PermissionError("session_search runs as an agent tool; no calling user or agent")
+            fetch = max(limit, 1) * 5  # other callers' sessions are filtered out below
 
             if query:  # discovery
-                hits = store.search(query, limit=limit, window=window)
-                results = [h.as_dict() for h in hits]
+                hits = store.search(query, limit=fetch, window=window)
+                results = [h.as_dict() for h in hits if _owned(store, h.session_id, scope)][:limit]
                 return json.dumps(
                     {
                         "success": True,
@@ -98,6 +131,8 @@ class SessionTools:
                 )
 
             if session_id:  # scroll / read
+                if not _owned(store, session_id, scope):
+                    raise PermissionError(f"session {session_id!r} is not one of the caller's sessions")
                 anchor = around_message_id or None
                 messages = store.window(session_id, anchor, window=window)
                 return json.dumps(
@@ -113,8 +148,8 @@ class SessionTools:
                 )
 
             # browse — most recent sessions
-            summaries = store.recent(limit=limit)
-            results = [s.as_dict() for s in summaries]
+            summaries = store.recent(limit=fetch)
+            results = [s.as_dict() for s in summaries if _owned(store, s.session_id, scope)][:limit]
             return json.dumps(
                 {
                     "success": True,

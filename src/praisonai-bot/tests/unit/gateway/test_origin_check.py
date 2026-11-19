@@ -11,22 +11,19 @@ from praisonai_bot.gateway.origin_check import check_origin, is_loopback
 class TestOriginCheck:
     """Test the origin checking functionality."""
 
-    def test_loopback_permissive(self):
-        """Loopback binds should allow any origin."""
-        # IPv4 loopback
-        assert check_origin("http://evil.example", [], "127.0.0.1") is True
-        assert check_origin("https://evil.example", [], "127.0.0.1") is True
-        assert check_origin(None, [], "127.0.0.1") is True
-        
-        # localhost
-        assert check_origin("http://evil.example", [], "localhost") is True
-        assert check_origin("https://evil.example", [], "localhost") is True
-        assert check_origin(None, [], "localhost") is True
-        
-        # IPv6 loopback
-        assert check_origin("http://evil.example", [], "::1") is True
-        assert check_origin("https://evil.example", [], "::1") is True
-        assert check_origin(None, [], "::1") is True
+    def test_loopback_allows_local_pages_and_non_browser_clients(self):
+        """Loopback binds allow no Origin and pages served from this machine.
+
+        A page on another site is refused unless listed: the browser connects
+        from 127.0.0.1 too, so the bind address alone proves nothing.
+        """
+        for host in ("127.0.0.1", "localhost", "::1"):
+            assert check_origin(None, [], host) is True
+            assert check_origin("http://localhost:3000", [], host) is True
+            assert check_origin("http://127.0.0.1:8765", [], host) is True
+            assert check_origin("http://foreign.example", [], host) is False
+            assert check_origin("https://foreign.example", [], host) is False
+            assert check_origin("https://foreign.example", ["https://foreign.example"], host) is True
 
     def test_external_bind_requires_allowed_origins(self):
         """External binds should require allowed_origins configuration."""
@@ -47,15 +44,15 @@ class TestOriginCheck:
         """External binds should reject origins not in the allowlist."""
         allowed = ["https://ui.example.com", "https://localhost:3000"]
         
-        assert check_origin("http://evil.example", allowed, "0.0.0.0") is False
-        assert check_origin("https://evil.example.com", allowed, "0.0.0.0") is False
-        assert check_origin("https://ui.evil.com", allowed, "0.0.0.0") is False
+        assert check_origin("http://foreign.example", allowed, "0.0.0.0") is False
+        assert check_origin("https://foreign.example.com", allowed, "0.0.0.0") is False
+        assert check_origin("https://ui.foreign.com", allowed, "0.0.0.0") is False
 
     def test_wildcard_origin(self):
         """Wildcard in allowed_origins should allow any origin."""
         allowed = ["*"]
         
-        assert check_origin("http://evil.example", allowed, "0.0.0.0") is True
+        assert check_origin("http://foreign.example", allowed, "0.0.0.0") is True
         assert check_origin("https://any.domain.com", allowed, "0.0.0.0") is True
         assert check_origin("file://local", allowed, "0.0.0.0") is True
 
@@ -71,7 +68,7 @@ class TestOriginCheck:
         allowed = ["https://ui.example.com", "*"]
         
         assert check_origin("https://ui.example.com", allowed, "0.0.0.0") is True
-        assert check_origin("http://evil.example", allowed, "0.0.0.0") is True
+        assert check_origin("http://foreign.example", allowed, "0.0.0.0") is True
 
 
 class TestIsLoopback:
@@ -116,11 +113,11 @@ class TestIntegration:
     def test_acceptance_criteria_examples(self):
         """Test the specific examples from the acceptance criteria."""
         # Bad origin on external bind
-        assert check_origin("http://evil.example", ["https://ui.example.com"], "0.0.0.0") is False
+        assert check_origin("http://foreign.example", ["https://ui.example.com"], "0.0.0.0") is False
         
-        # Any origin on loopback
-        assert check_origin("http://evil.example", [], "127.0.0.1") is True
-        assert check_origin("https://anything.com", [], "127.0.0.1") is True
+        # Loopback: a page on another site is refused unless listed
+        assert check_origin("http://foreign.example", [], "127.0.0.1") is False
+        assert check_origin("https://anything.com", ["*"], "127.0.0.1") is True
         
         # External bind without allowed_origins should raise
         with pytest.raises(ValueError):
@@ -145,6 +142,6 @@ class TestIntegration:
         assert check_origin("https://localhost:3000", production_origins, "0.0.0.0") is True
         
         # Invalid origins
-        assert check_origin("https://evil.com", production_origins, "0.0.0.0") is False
+        assert check_origin("https://foreign.com", production_origins, "0.0.0.0") is False
         assert check_origin("http://app.example.com", production_origins, "0.0.0.0") is False  # Wrong protocol
-        assert check_origin("https://app.evil.com", production_origins, "0.0.0.0") is False
+        assert check_origin("https://app.foreign.com", production_origins, "0.0.0.0") is False

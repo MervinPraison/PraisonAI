@@ -110,6 +110,11 @@ def computer_screenshot(path: str = "") -> str:
         message when the backend is unavailable or the write is denied.
     """
     if path:
+        from .path_safety import resolve_inside
+        try:
+            path = resolve_inside(None, path)  # saves stay inside the cwd
+        except ValueError as exc:
+            return f"Action denied: {exc}"
         action = f"screenshot_save({path!r})"
         if not _approve(action):
             return f"Action denied: {action}"

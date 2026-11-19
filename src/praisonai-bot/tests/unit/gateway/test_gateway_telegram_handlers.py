@@ -144,7 +144,8 @@ def test_gateway_registers_adapter_callback_handler_and_wires_backend(fake_ptb):
 
 def test_gateway_tool_approval_tap_resolves_pending_approval(fake_ptb):
     async def run():
-        bot = TelegramBot(token="123:abc", config=BotConfig(token="123:abc"))
+        # The tapper must pass the same allow-list as a message would.
+        bot = TelegramBot(token="123:abc", config=BotConfig(token="123:abc", allowed_users=["999"]))
         backend = MagicMock()
         backend.handle_callback = AsyncMock(return_value=True)
         bot._approval_backend = backend

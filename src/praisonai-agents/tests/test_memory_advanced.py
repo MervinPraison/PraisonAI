@@ -196,8 +196,9 @@ class TestCheckpointing:
         contents = [m.content for m in memory.get_short_term()]
         assert "Original data" in contents
     
-    def test_checkpoint_with_files(self, memory, tmp_path):
+    def test_checkpoint_with_files(self, memory, tmp_path, monkeypatch):
         """Test checkpoint with file snapshots."""
+        monkeypatch.chdir(tmp_path)  # snapshots stay inside the working directory
         # Create a test file
         test_file = tmp_path / "test_file.txt"
         test_file.write_text("Original content")

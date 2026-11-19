@@ -625,7 +625,7 @@ class LazyCommandGroup(TyperGroup):
         @app_group.command(name="app", context_settings={"allow_interspersed_args": False})
         def app_cmd(
             port: int = typer.Option(8000, "--port", "-p", help="Port to listen on"),
-            host: str = typer.Option("0.0.0.0", "--host", "-h", help="Host to bind to"),
+            host: str = typer.Option("127.0.0.1", "--host", "-h", help="Host to bind to (non-loopback needs an API key)"),
             config: str = typer.Option(None, "--config", "-c", help="Path to config file (YAML)"),
             reload: bool = typer.Option(False, "--reload", "-r", help="Enable auto-reload for development"),
             debug: bool = typer.Option(False, "--debug", "-d", help="Enable debug mode"),

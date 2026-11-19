@@ -169,7 +169,8 @@ class TemplateCache:
         
         elif resolved.source == TemplateSource.PACKAGE:
             # package/package_name/template
-            return self.cache_dir / "package" / resolved.path
+            parts = [self._safe_segment(p) for p in resolved.path.split("/")]
+            return self.cache_dir.joinpath("package", *parts)
         
         elif resolved.source == TemplateSource.GITHUB:
             # github/owner/repo/template/ref

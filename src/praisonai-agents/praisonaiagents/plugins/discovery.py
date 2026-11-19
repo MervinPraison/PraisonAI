@@ -221,7 +221,7 @@ def load_plugin(filepath: str) -> Optional[Dict[str, Any]]:
         logger.warning(
             "Refusing to load project plugin %s: set "
             "PRAISONAI_ALLOW_PROJECT_PLUGINS=true (or plugins.allow_project_plugins "
-            "in .praisonai/config.yaml) to enable.",
+            "in ~/.praisonai/config.yaml; a project file cannot set it) to enable.",
             path,
         )
         return None
@@ -385,6 +385,17 @@ def ensure_plugin_dir() -> Path:
     user_dir.mkdir(parents=True, exist_ok=True)
     return user_dir
 
+def _header_value(value: str, field: str) -> str:
+    """Make ``value`` safe inside the template's docstring header.
+
+    Line breaks are refused; ``\\`` and ``"`` are escaped, so a value cannot
+    close the docstring and add code to the generated file.
+    """
+    if any(c in value for c in "\r\n\x00"):
+        raise ValueError(f"Plugin {field} must be a single line")
+    return value.replace("\\", "\\\\").replace('"', '\\"')
+
+
 def get_plugin_template(name: str, description: str = "", author: str = "") -> str:
     """Generate a plugin template with the given metadata.
     
@@ -395,12 +406,18 @@ def get_plugin_template(name: str, description: str = "", author: str = "") -> s
         
     Returns:
         Plugin template as string
+
+    Raises:
+        ValueError: if a value spans lines (it would end the metadata header)
     """
+    name = _header_value(name, "name")
+    description = _header_value(description or "A PraisonAI plugin", "description")
+    author = _header_value(author or "Your Name", "author")
     return f'''"""
 Plugin Name: {name}
-Description: {description or "A PraisonAI plugin"}
+Description: {description}
 Version: 1.0.0
-Author: {author or "Your Name"}
+Author: {author}
 """
 
 from praisonaiagents import tool

@@ -52,6 +52,33 @@ class BotContext:
         self.adapter = adapter
 
 
+def is_sender_allowed(adapter: Any, user_id: Any, channel_id: Any = "") -> bool:
+    """Silent form of the inbound allow-list, for button taps and slash commands.
+
+    Makes the decision the message pipeline makes (channel allow-list,
+    ``allowed_users``, an existing pairing, ``unknown_user_policy="allow"``)
+    without starting a pairing flow, so an interactive callback never reaches
+    further than a message from the same user. The configured owner is always
+    allowed: pairing-approval buttons are sent to the owner's DM.
+    """
+    config = adapter.config
+    uid = str(user_id or "")
+    if not uid:
+        return False
+    owner = getattr(config, "owner_user_id", None)
+    if owner and uid == str(owner):
+        return True
+    if not config.is_channel_allowed(str(channel_id or "")):
+        return False
+    if config.is_explicitly_allowed(uid):
+        return True
+    store = getattr(getattr(adapter, "_bot_context", None), "pairing_store", None)
+    store = store or getattr(adapter, "_pairing_store", None) or PairingStore()
+    if store.is_paired(uid, getattr(adapter, "platform", "")):
+        return True
+    return getattr(config, "unknown_user_policy", "deny") == "allow"
+
+
 class UnknownUserHandler:
     """Handles unknown user messages and orchestrates pairing approval."""
     

@@ -309,12 +309,8 @@ class PermissionAllowlist:
             return True
         if path is None:
             return True
-        for allowed_path in permission.allowed_paths:
-            norm_allowed = os.path.normpath(allowed_path)
-            norm_path = os.path.normpath(path)
-            if norm_path.startswith(norm_allowed):
-                return True
-        return False
+        from ..tools.path_safety import is_within_root
+        return any(is_within_root(path, allowed) for allowed in permission.allowed_paths)
 
     def is_empty(self) -> bool:
         return len(self._tools) == 0

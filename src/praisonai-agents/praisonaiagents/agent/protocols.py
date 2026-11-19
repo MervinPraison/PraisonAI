@@ -259,7 +259,7 @@ class HttpLauncherProtocol(Protocol):
     Example:
         ```python
         class FastAPILauncher:
-            def launch(self, agent, path="/", port=8000, host="0.0.0.0", debug=False):
+            def launch(self, agent, path="/", port=8000, host="127.0.0.1", debug=False):
                 # FastAPI implementation
                 pass
         
@@ -274,7 +274,7 @@ class HttpLauncherProtocol(Protocol):
         agent: Any,
         path: str = "/",
         port: int = 8000,
-        host: str = "0.0.0.0",
+        host: str = "127.0.0.1",
         debug: bool = False
     ) -> None:
         """
@@ -284,7 +284,7 @@ class HttpLauncherProtocol(Protocol):
             agent: The agent instance to serve
             path: API endpoint path (default: '/')
             port: Server port (default: 8000)
-            host: Server host (default: '0.0.0.0')
+            host: Server host (default: '127.0.0.1')
             debug: Enable debug mode (default: False)
         """
         ...
@@ -305,7 +305,7 @@ class McpLauncherProtocol(Protocol):
         agent: Any,
         path: str = "/",
         port: int = 8000,
-        host: str = "0.0.0.0",
+        host: str = "127.0.0.1",
         debug: bool = False
     ) -> None:
         """
@@ -315,7 +315,7 @@ class McpLauncherProtocol(Protocol):
             agent: The agent instance to serve
             path: Base path for MCP endpoints
             port: Server port (default: 8000)
-            host: Server host (default: '0.0.0.0')
+            host: Server host (default: '127.0.0.1')
             debug: Enable debug mode (default: False)
         """
         ...

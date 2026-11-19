@@ -37,6 +37,7 @@ from praisonaiagents.bots import (
 )
 
 from ._session import BotSessionManager
+from ._unknown_user import is_sender_allowed
 from ._email_utils import is_auto_reply, is_blocked_sender
 from ._outbound_resilience import OutboundResilienceMixin
 
@@ -379,6 +380,14 @@ class EmailBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         # Fire message hooks (inbound gate: may drop or redact)
         if self.fire_message_received(message).get("drop"):
             logger.debug("Message dropped by MESSAGE_RECEIVED hook")
+            return
+
+        # The same sender allow-list as every other channel: allowed_users, an
+        # existing pairing, or unknown_user_policy="allow". Email has no
+        # pairing prompt, so an unknown sender is dropped (and logged).
+        sender = message.sender.user_id if message.sender else ""
+        if not is_sender_allowed(self, sender, sender):
+            logger.warning("Dropped email from %s: sender not allowed", sender)
             return
         
         # Check command prefix in subject

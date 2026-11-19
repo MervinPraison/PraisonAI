@@ -199,7 +199,7 @@ class TestListFiles:
             open(os.path.join(temp_dir, "file2.py"), 'w').close()
             os.makedirs(os.path.join(temp_dir, "subdir"))
             
-            result = list_files(temp_dir)
+            result = list_files(temp_dir, workspace=temp_dir)
             
             assert result['success'] is True
             assert len(result['files']) == 2
@@ -216,7 +216,7 @@ class TestListFiles:
             open(os.path.join(temp_dir, "a", "file2.txt"), 'w').close()
             open(os.path.join(temp_dir, "a", "b", "file3.txt"), 'w').close()
             
-            result = list_files(temp_dir, recursive=True)
+            result = list_files(temp_dir, recursive=True, workspace=temp_dir)
             
             assert result['success'] is True
             assert len(result['files']) == 3
@@ -230,7 +230,7 @@ class TestListFiles:
             open(os.path.join(temp_dir, "file2.py"), 'w').close()
             open(os.path.join(temp_dir, "file3.py"), 'w').close()
             
-            result = list_files(temp_dir, extensions=['py'])
+            result = list_files(temp_dir, extensions=['py'], workspace=temp_dir)
             
             assert result['success'] is True
             assert len(result['files']) == 2
@@ -244,7 +244,7 @@ class TestListFiles:
             open(os.path.join(temp_dir, "visible.txt"), 'w').close()
             open(os.path.join(temp_dir, ".hidden"), 'w').close()
             
-            result = list_files(temp_dir, include_hidden=False)
+            result = list_files(temp_dir, include_hidden=False, workspace=temp_dir)
             
             assert result['success'] is True
             assert len(result['files']) == 1
@@ -259,7 +259,7 @@ class TestListFiles:
             for i in range(10):
                 open(os.path.join(temp_dir, f"file{i}.txt"), 'w').close()
             
-            result = list_files(temp_dir, max_files=5)
+            result = list_files(temp_dir, max_files=5, workspace=temp_dir)
             
             assert result['success'] is True
             assert result['total_count'] == 5

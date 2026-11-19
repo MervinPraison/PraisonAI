@@ -102,7 +102,8 @@ class AgentServer:
         Initialize the server.
         
         Args:
-            host: Host to bind to
+            host: Host to bind to (default 127.0.0.1; a non-loopback host
+                requires ``ServerConfig(auth_token=...)``)
             port: Port to bind to
             config: Optional server configuration
         """
@@ -122,10 +123,12 @@ class AgentServer:
         token = self.config.auth_token
         if not token:
             return True
+        from praisonaiagents.agent.launch_security import token_matches
+
         auth = request.headers.get("Authorization", "")
-        if auth.startswith("Bearer ") and auth[7:] == token:
+        if auth.startswith("Bearer ") and token_matches(auth[7:], token):
             return True
-        return request.headers.get("X-Auth-Token") == token
+        return token_matches(request.headers.get("X-Auth-Token"), token)
     
     def _create_app(self):
         """Create the ASGI application."""
@@ -139,6 +142,9 @@ class AgentServer:
             return None
         
         async def health(request):
+            # Liveness probe stays open; details only for authorised callers.
+            if self.config.auth_token and not self._authorise_request(request):
+                return JSONResponse({"status": "ok"})
             return JSONResponse({
                 "status": "ok",
                 "timestamp": time.time(),
@@ -193,6 +199,8 @@ class AgentServer:
                 )
         
         async def info(request):
+            if not self._authorise_request(request):
+                return JSONResponse({"error": "Unauthorized"}, status_code=401)
             return JSONResponse({
                 "name": "PraisonAI Agent Server",
                 "version": "1.0.0",
@@ -260,7 +268,13 @@ class AgentServer:
         if self._running:
             logger.warning("Server already running")
             return
-        
+
+        from praisonaiagents.agent.launch_security import require_bind_token
+
+        require_bind_token(
+            self.host, self.config.auth_token, server="AgentServer",
+            hint="Set ServerConfig(auth_token=...)",
+        )
         self._app = self._create_app()
         if self._app is None:
             logger.error("Failed to create app - missing dependencies")

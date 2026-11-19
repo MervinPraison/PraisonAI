@@ -215,31 +215,33 @@ def test_rules_clear_preserves_project_instruction_files(
 
 
 def test_remote_fetch_pins_to_validated_ip(monkeypatch):
-    """The pinned opener re-validates at connect time (DNS-rebinding guard).
+    """The fetch dials the address it checked (DNS-rebinding guard).
 
-    Simulate a rebind: the up-front check sees a public address, but the
-    connect-time resolution returns a loopback address. The pinned connection
-    must refuse rather than contact the internal address.
+    Simulate a rebind: the up-front check sees a public address, the next
+    resolution returns loopback. The shared pinned fetch must refuse rather
+    than contact the internal address.
     """
+    import socket
+
     from praisonai_code.integration import context_files as ctx
 
+    real = socket.getaddrinfo
     calls = {"n": 0}
 
-    def _rebinding_resolver(host):
-        # First resolution (up-front validation) is public; a later resolution
-        # (connect time) rebinds to loopback -> must be refused.
+    def _rebinding_getaddrinfo(host, port=None, *a, **k):
+        if host != "rebind.example":
+            return real(host, port, *a, **k)
         calls["n"] += 1
-        if calls["n"] == 1:
-            return ["93.184.216.34"]
-        return []
+        ip = "93.184.216.34" if calls["n"] == 1 else "127.0.0.1"
+        return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, int(port or 0)))]
 
-    monkeypatch.setattr(ctx, "_resolve_public_addrs", _rebinding_resolver)
+    monkeypatch.setattr(socket, "getaddrinfo", _rebinding_getaddrinfo)
     monkeypatch.setattr(ctx, "_allow_local_urls", lambda: False)
 
     # Up-front guard passes on the first (public) resolution.
     assert ctx._url_is_fetchable("http://rebind.example/instructions.md")
 
-    # But the pinned connect re-resolves and refuses the rebound address.
+    # The fetch resolves again, sees loopback and refuses.
     result = ctx._fetch_remote_source(
         "http://rebind.example/instructions.md"
     )

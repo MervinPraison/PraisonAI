@@ -332,8 +332,7 @@ def _search_duckduckgo(query: str, max_results: int = 5) -> List[Dict[str, Any]]
 
 def _search_searxng(query: str, max_results: int = 5, searxng_url: Optional[str] = None) -> List[Dict[str, Any]]:
     """Search using SearxNG."""
-    import requests
-    from praisonaiagents.tools.url_safety import validate_searxng_url
+    from praisonaiagents.tools.url_safety import safe_fetch, searxng_allowlist, validate_searxng_url
     
     url = searxng_url or os.environ.get("SEARXNG_URL", "http://localhost:32768/search")
     if validate_searxng_url(url) is None:
@@ -346,7 +345,7 @@ def _search_searxng(query: str, max_results: int = 5, searxng_url: Optional[str]
         'safesearch': '1'
     }
     
-    response = requests.get(url, params=params, timeout=10)
+    response = safe_fetch(url, params=params, timeout=10, allowlist=searxng_allowlist())
     response.raise_for_status()
     
     raw_results = response.json().get('results', [])

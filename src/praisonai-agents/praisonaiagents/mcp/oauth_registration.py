@@ -6,14 +6,14 @@ server's ``registration_endpoint`` so that connecting to a hosted MCP server by
 URL requires no pre-provisioned ``client_id``. The registered client info is
 returned for persistence via :meth:`MCPAuthStorage.set_client_info`.
 
-``requests`` is imported lazily to keep this module additive.
+The request goes through ``oauth_discovery._send`` (pinned, no redirects).
 """
 
 from typing import Any, Dict, List, Optional
 
 from praisonaiagents._logging import get_logger
 
-from .oauth_discovery import _require_https, _require_success
+from .oauth_discovery import _require_success, _send
 
 logger = get_logger("mcp-oauth-registration")
 
@@ -44,9 +44,6 @@ def register_client(
         ValueError: If the endpoint is insecure or the response lacks a
             ``client_id``.
     """
-    _require_https(registration_endpoint)
-    import requests  # lazy import — optional dependency
-
     payload: Dict[str, Any] = {
         "client_name": client_name,
         "redirect_uris": redirect_uris,
@@ -57,13 +54,8 @@ def register_client(
     if scope:
         payload["scope"] = scope
 
-    resp = requests.post(
-        registration_endpoint,
-        json=payload,
-        headers={"Content-Type": "application/json", "Accept": "application/json"},
-        timeout=timeout,
-        allow_redirects=False,  # never re-send credentials to a redirect target
-    )
+    resp = _send("POST", registration_endpoint, timeout, json=payload,
+                 headers={"Content-Type": "application/json", "Accept": "application/json"})
     _require_success(resp)
     client_info = resp.json()
 

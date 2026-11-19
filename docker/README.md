@@ -218,7 +218,7 @@ docker-compose up -d
 ### Version Pinning
 To use specific versions, update the Dockerfile:
 ```dockerfile
-RUN pip install "praisonai==4.7.26" "praisonaiagents==1.7.24"
+RUN pip install "praisonai==4.8.0" "praisonaiagents==1.8.0"
 ```
 
 ## 🌐 Production Deployment

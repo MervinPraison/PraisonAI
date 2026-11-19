@@ -95,8 +95,7 @@ find_shell_syntax = _find_shell_syntax  # public name for other PraisonAI packag
 
 # Credential-looking variable names are withheld from model-driven commands:
 # a gateway serving untrusted chat would otherwise hand `env` / `echo $X` every
-# LLM key, channel token and its own GATEWAY_AUTH_TOKEN. Operators who need one
-# inside a command name it in PRAISONAI_SHELL_ENV_ALLOWLIST (comma-separated).
+# LLM key, channel token and its own GATEWAY_AUTH_TOKEN.
 _SECRET_NAME_PARTS = frozenset({"TOKEN", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "CREDENTIALS", "APIKEY"})
 _ENV_REF = re.compile(r"\$(\w+|\{[^}]*\})")
 _ENV_REF_NT = re.compile(r"\$(\w+|\{[^}]*\})|%(\w+)%")
@@ -107,10 +106,27 @@ def _is_secret_name(name: str) -> bool:
     return upper.endswith("_KEY") or any(part in _SECRET_NAME_PARTS for part in upper.split("_"))
 
 
+# What a model-run command inherits from the parent: only what tools need to
+# start, none of which carries a credential. A denylist of secret-looking
+# names let DATABASE_URL, AWS_ACCESS_KEY_ID or a PAT-in-a-URL through.
+_CHILD_ENV_NAMES = frozenset({
+    "PATH", "HOME", "USER", "LOGNAME", "SHELL", "LANG", "LANGUAGE", "TERM", "COLORTERM",
+    "TMPDIR", "TMP", "TEMP", "TZ", "PWD", "VIRTUAL_ENV", "CONDA_PREFIX", "PYTHONPATH",
+    "SYSTEMROOT", "SYSTEMDRIVE", "COMSPEC", "PATHEXT", "WINDIR", "USERPROFILE",
+    "APPDATA", "LOCALAPPDATA", "PROGRAMFILES", "PROGRAMDATA", "NUMBER_OF_PROCESSORS",
+})
+
+
 def _build_subprocess_env(extra_env: Optional[Dict[str, str]] = None) -> Dict[str, str]:
-    """Parent environment minus secret-looking names, plus explicit *extra_env*."""
+    """Allowlisted parent environment, plus explicit *extra_env*.
+
+    Operators who need another variable inside a command name it in
+    PRAISONAI_SHELL_ENV_ALLOWLIST (comma-separated).
+    """
     allow = {n.strip() for n in os.environ.get("PRAISONAI_SHELL_ENV_ALLOWLIST", "").split(",") if n.strip()}
-    process_env = {k: v for k, v in os.environ.items() if k in allow or not _is_secret_name(k)}
+    process_env = {k: v for k, v in os.environ.items()
+                   if k in allow or ((k.upper() in _CHILD_ENV_NAMES or k.startswith("LC_"))
+                                     and not _is_secret_name(k))}
     if extra_env:
         process_env.update(extra_env)
     return process_env

@@ -12,14 +12,14 @@ dependencies = [
     "rich>=13.7",
     "markdown>=3.5",
     "pyparsing>=3.0.0",
-    "praisonaiagents>=1.7.24",
-    "praisonai-code>=0.1.23",
-    "praisonai-bot>=0.1.23",
-    "praisonai-train>=0.1.23",
-    "praisonai-browser>=0.1.23",
-    "praisonai-mcp>=0.1.26",
-    "praisonai-sandbox>=0.1.23",
-    "praisonai-deploy>=0.1.23",
+    "praisonaiagents>=1.8.0",
+    "praisonai-code>=0.2.0",
+    "praisonai-bot>=0.2.0",
+    "praisonai-train>=0.2.0",
+    "praisonai-browser>=0.2.0",
+    "praisonai-mcp>=0.2.0",
+    "praisonai-sandbox>=0.2.0",
+    "praisonai-deploy>=0.2.0",
     "python-dotenv>=0.19.0",
     "litellm>=1.83.14,<1.106",  # 1.106 imports mcp.types.CacheableResult (mcp>=2.2); we pin mcp<2
     "PyYAML>=6.0",
@@ -280,9 +280,9 @@ cockroachdb = [
 xata = [
     "psycopg2-binary>=2.9.0",
 ]
-claw = [
-    # PraisonAI 🦞 — Full dashboard + bots + memory + knowledge + gateway
-    # Install: pip install "praisonai[claw]"
+dashboard = [
+    # PraisonAI 🦅 Dashboard — full UI + bots + memory + knowledge + gateway
+    # Install: pip install "praisonai[dashboard]"; run: praisonai dashboard
     "aiui[all]>=0.3.172,<0.4",
     "praisonaiagents[all]>=1.5.40",
     "praisonai-bot[gateway,bot]>=0.0.6",
@@ -303,6 +303,8 @@ claw = [
     # n8n integration
     "httpx>=0.27.0",
 ]
+# Same as [dashboard]; kept so existing `pip install "praisonai[claw]"` keeps working.
+claw = ["praisonai[dashboard]"]
 n8n = [
     "httpx>=0.27.0",
 ]

@@ -76,7 +76,7 @@ def _stub_litellm(monkeypatch, seen):
 def _provider_agent(tool):
     return Agent(name="m", instructions="x",
                  llm="anthropic/claude-3-5-sonnet-20240620",
-                 tools=[tool], output="silent")
+                 tools=[tool], output="silent", approval=True)  # send_email is approval-gated
 
 
 def _outcome(call):

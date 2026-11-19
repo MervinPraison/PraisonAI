@@ -65,8 +65,9 @@ def _startup_script_path() -> str:
 
 def _generate_startup_script(config_path: str) -> str:
     """Generate a startup script for the bot."""
+    from . import service_config_path
     python = _python_executable()
-    abs_config = os.path.abspath(config_path)
+    abs_config = service_config_path(config_path)
     
     return f"""@echo off
 REM PraisonAI Bot Startup Script

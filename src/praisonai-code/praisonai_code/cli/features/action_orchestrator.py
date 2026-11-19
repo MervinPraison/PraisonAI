@@ -397,20 +397,24 @@ class ActionOrchestrator:
     async def _apply_step(self, step: ActionStep) -> Optional[Dict[str, Any]]:
         """Apply a single step."""
         workspace = Path(self.runtime.config.workspace).resolve()
-        
+
+        def inside(rel: str) -> Path:
+            from praisonaiagents.tools.path_safety import resolve_within_root
+
+            resolved = resolve_within_root(str(rel), str(workspace))
+            if resolved is None:
+                raise ValueError(f"Path traversal detected: {rel}")
+            return Path(resolved)
+
         if step.action_type == ActionType.FILE_CREATE:
-            target = (workspace / step.target).resolve()
-            if not str(target).startswith(str(workspace)):
-                raise ValueError(f"Path traversal detected: {step.target}")
+            target = inside(step.target)
             target.parent.mkdir(parents=True, exist_ok=True)
             content = step.params.get("content", "")
             target.write_text(content)
             return {"created": str(target), "diff": f"+++ {target}\n+ (new file)"}
         
         elif step.action_type == ActionType.FILE_EDIT:
-            target = (workspace / step.target).resolve()
-            if not str(target).startswith(str(workspace)):
-                raise ValueError(f"Path traversal detected: {step.target}")
+            target = inside(step.target)
             if not target.exists():
                 return None
             
@@ -424,19 +428,15 @@ class ActionOrchestrator:
             }
         
         elif step.action_type == ActionType.FILE_DELETE:
-            target = (workspace / step.target).resolve()
-            if not str(target).startswith(str(workspace)):
-                raise ValueError(f"Path traversal detected: {step.target}")
+            target = inside(step.target)
             if target.exists():
                 target.unlink()
                 return {"deleted": str(target), "diff": f"--- {target}\n- (deleted)"}
             return None
         
         elif step.action_type == ActionType.FILE_RENAME:
-            source = (workspace / step.params.get("source", "")).resolve()
-            dest = (workspace / step.params.get("dest", "")).resolve()
-            if not str(source).startswith(str(workspace)) or not str(dest).startswith(str(workspace)):
-                raise ValueError(f"Path traversal detected in rename operation")
+            source = inside(step.params.get("source", ""))
+            dest = inside(step.params.get("dest", ""))
             if source.exists():
                 source.rename(dest)
                 return {"renamed": f"{source} -> {dest}"}

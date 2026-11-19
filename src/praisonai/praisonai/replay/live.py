@@ -120,19 +120,19 @@ def watch(
         from praisonai.replay import watch
         watch(flow, input="Write about solar sails")
     """
-    import uvicorn
+    import os
 
-    app = replay_app(target, input=input, placeholder=placeholder, title=title)
-    if host not in _LOOPBACK_HOSTS:
-        print(
-            f"WARNING: serving on {host} lets anyone who can reach it read your runs"
-            + (" and start new ones." if target is not None else ".")
-        )
+    import uvicorn
+    from praisonai._api_auth import guard_browser_app
+
+    token = os.environ.get("PRAISONAI_REPLAY_TOKEN")
+    app = guard_browser_app(replay_app(target, input=input, placeholder=placeholder, title=title), host, token,
+                            server="PraisonAI Replay", token_env="PRAISONAI_REPLAY_TOKEN")
     browser_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     if ":" in browser_host and not browser_host.startswith("["):
         browser_host = f"[{browser_host}]"
     url = f"http://{browser_host}:{port}/"
     print(f"PraisonAI Replay: {url}  (Ctrl+C to stop)")
     if open_browser:
-        threading.Timer(1.0, webbrowser.open, [url]).start()
+        threading.Timer(1.0, webbrowser.open, [url + (f"?token={token}" if token else "")]).start()
     uvicorn.run(app, host=host, port=port, log_level="warning")

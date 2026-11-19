@@ -184,7 +184,11 @@ class MCPServer:
 
         requirement = get_operation_scopes(method)
         if requirement is None:
-            return None
+            if method in ("initialize", "ping") or str(method).startswith("notifications/"):
+                return None
+            from .auth.scopes import ScopeRequirement
+
+            requirement = ScopeRequirement(["admin"])  # unmapped methods fail closed
 
         if self._scope_manager is None:
             self._scope_manager = ScopeManager()

@@ -564,39 +564,16 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         Generate a tool definition from a function name by inspecting the function.
         """
         logger.debug(f"Attempting to generate tool definition for: {function_name}")
-        
-        # First try to get the tool definition if it exists
-        tool_def_name = f"{function_name}_definition"
-        tool_def = globals().get(tool_def_name)
-        logger.debug(f"Looking for {tool_def_name} in globals: {tool_def is not None}")
-        
-        if not tool_def:
-            import __main__
-            tool_def = getattr(__main__, tool_def_name, None)
-            logger.debug(f"Looking for {tool_def_name} in __main__: {tool_def is not None}")
-        
-        if tool_def:
-            logger.debug(f"Found tool definition: {tool_def}")
-            return tool_def
 
-        # Try to find the function in the agent's tools list first
+        # Only declared tools: never globals() or __main__, which execution
+        # refuses too (see ToolExecutionMixin._execute_tool_impl).
         func = None
         for tool in self.tools:
             if callable(tool) and getattr(tool, '__name__', '') == function_name:
                 func = tool
                 break
-        
+
         logger.debug(f"Looking for {function_name} in agent tools: {func is not None}")
-        
-        # If not found in tools, try globals and main
-        if not func:
-            func = globals().get(function_name)
-            logger.debug(f"Looking for {function_name} in globals: {func is not None}")
-            
-            if not func:
-                import __main__
-                func = getattr(__main__, function_name, None)
-                logger.debug(f"Looking for {function_name} in __main__: {func is not None}")
 
         if not func or not callable(func):
             logger.debug(f"Function {function_name} not found or not callable")
@@ -2451,6 +2428,10 @@ Your Role: {self.role}
                 object.__setattr__(result, k, threading.Lock())
             elif k == "_approvals_lock":
                 object.__setattr__(result, k, asyncio.Lock())
+            elif k == "_approval_scope_id":
+                # A copy is a separate approval scope, like clone_for_channel:
+                # one user's "this session" grant must not cover another's copy.
+                object.__setattr__(result, k, f"{self.name}:{uuid.uuid4().hex}")
             else:
                 object.__setattr__(result, k, copy.deepcopy(v, memo))
         if rebuild_context_manager:

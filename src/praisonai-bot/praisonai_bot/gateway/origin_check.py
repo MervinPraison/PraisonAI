@@ -29,9 +29,15 @@ def check_origin(origin: Optional[str], allowed_origins: List[str], bind_host: s
     Raises:
         ValueError: If allowed_origins is required but not provided for external bind
     """
-    # Loopback binds are permissive - allow all origins
+    # Loopback bind: clients that send no Origin (CLIs, SDKs) and pages served
+    # from this machine are allowed; a page on any other site must be listed.
     if is_loopback(bind_host):
-        return True
+        # One loopback-name rule for every SDK server (agent/origin_guard.py).
+        from praisonaiagents.agent.origin_guard import is_loopback_request
+
+        if is_loopback_request({"origin": origin}, check_host=False):
+            return True
+        return origin in (allowed_origins or []) or "*" in (allowed_origins or [])
     
     # External binds require explicit allowed_origins
     if not allowed_origins:

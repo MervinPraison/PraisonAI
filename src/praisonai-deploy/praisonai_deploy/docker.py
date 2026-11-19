@@ -7,7 +7,7 @@ import subprocess
 import json
 from typing import Optional, Dict, Tuple
 from pathlib import Path
-from .models import DockerConfig, DeployResult, DeployStatus, DestroyResult, ServiceState
+from .models import IMAGE_REF_RE, DockerConfig, DeployResult, DeployStatus, DestroyResult, ServiceState, check_value
 
 # Gunicorn worker timeout (seconds). Agent LLM workloads (cold import + first
 # model round-trip) routinely exceed Gunicorn's 30s default, causing the worker
@@ -50,6 +50,10 @@ def collect_runtime_env_vars(extra: Optional[Dict[str, str]] = None) -> Dict[str
     return env_vars
 
 
+# The agents file name is written into COPY lines.
+AGENTS_FILE_RE = re.compile(r"[A-Za-z0-9._-]+")
+
+
 def generate_dockerfile(agents_file: str, config: Optional[DockerConfig] = None) -> str:
     """
     Generate Dockerfile for agents.
@@ -64,7 +68,8 @@ def generate_dockerfile(agents_file: str, config: Optional[DockerConfig] = None)
     if config is None:
         config = DockerConfig()
 
-    agents_basename = Path(agents_file).name
+    agents_basename = check_value(Path(agents_file).name, "agents file name", AGENTS_FILE_RE)
+    check_value(config.base_image, "base_image", IMAGE_REF_RE)
     
     # Build expose statements
     expose_lines = "\n".join([f"EXPOSE {port}" for port in config.expose])

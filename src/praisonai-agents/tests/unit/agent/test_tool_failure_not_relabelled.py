@@ -110,7 +110,8 @@ def _agent_with_failing_tool(message, monkeypatch):
         runs.append(to)
         raise RuntimeError(message)
 
-    agent = Agent(name="A", instructions="x", llm="gpt-4o-mini", tools=[send_email])
+    # send_email is approval-gated by default; approve so the tool runs and fails.
+    agent = Agent(name="A", instructions="x", llm="gpt-4o-mini", tools=[send_email], approval=True)
 
     rec = _Recorder([
         _Resp(_Msg(tool_calls=[_ToolCall("c1", "send_email", {"to": "a@b.com"})]),

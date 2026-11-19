@@ -9,7 +9,7 @@ import re
 import struct
 from typing import Any, Dict, List, Optional
 
-from .base import KnowledgeStore, KnowledgeDocument, validate_identifier
+from .base import KnowledgeStore, KnowledgeDocument, validate_dimension, validate_identifier
 from .._valkey_client import create_valkey_client
 
 try:
@@ -219,6 +219,7 @@ class ValkeyVectorKnowledgeStore(KnowledgeStore):
                 a ValkeySearch pre-filter (e.g. {"content_hash": "abc"}).
             score_threshold: Minimum similarity (1 - distance) to include.
         """
+        limit = validate_dimension(limit, name="limit")  # written into the KNN clause
         client = self._get_client()
         index_name = self._index_name(collection)
         packed = struct.pack(f"{len(query_embedding)}f", *query_embedding)

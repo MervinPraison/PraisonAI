@@ -12,8 +12,8 @@ Implements the discovery half of zero-config OAuth for remote MCP servers:
   ``registration_endpoint``.
 
 Network access is HTTPS-only (except loopback) to preserve the SSRF-safe
-posture used elsewhere in the MCP transports. ``requests`` is imported lazily so
-this module stays additive and does not affect import time.
+posture used elsewhere in the MCP transports. Requests go through
+``url_safety.safe_fetch`` (imported lazily), which pins the checked address.
 """
 
 import re
@@ -82,31 +82,31 @@ def parse_www_authenticate(header: Optional[str]) -> Dict[str, str]:
     return params
 
 
+def _send(method: str, url: str, timeout: float, **kwargs: Any) -> Any:
+    """One OAuth HTTP request through the shared SSRF-safe helper.
+
+    The URL must pass :func:`_require_https`. ``safe_fetch`` resolves the host
+    once, checks and pins the address, re-checks every GET redirect hop and
+    never follows a redirect for a POST, so credentials stay on this host.
+    """
+    from ..tools.url_safety import safe_fetch
+
+    _require_https(url)
+    return safe_fetch(url, method=method, timeout=timeout,
+                      allowlist=frozenset(_LOCALHOST_HOSTS), **kwargs)
+
+
 def _get_json(url: str, timeout: float = 10.0, max_redirects: int = 3) -> Dict[str, Any]:
     """Fetch and parse a JSON metadata document over HTTPS.
 
-    Redirects are followed manually and every hop is validated with
-    :func:`_require_https` *before* it is requested, so a redirect cannot
-    reach an internal or plaintext endpoint (SSRF-safe).
+    Every redirect hop is checked before it is requested; the document must
+    come from an HTTPS (or loopback) URL.
     """
-    import requests  # lazy import — optional dependency
-
-    current = url
-    for _ in range(max_redirects + 1):
-        _require_https(current)
-        resp = requests.get(
-            current,
-            headers={"Accept": "application/json"},
-            timeout=timeout,
-            allow_redirects=False,
-        )
-        location = resp.headers.get("Location")
-        if resp.status_code in (301, 302, 303, 307, 308) and location:
-            current = urljoin(current, location)
-            continue
-        resp.raise_for_status()
-        return resp.json()
-    raise ValueError(f"Too many redirects fetching OAuth metadata: {url!r}")
+    resp = _send("GET", url, timeout, max_redirects=max_redirects,
+                 headers={"Accept": "application/json"})
+    _require_https(str(resp.url))
+    resp.raise_for_status()
+    return resp.json()
 
 
 def _wellknown_candidates(server_url: str) -> List[str]:

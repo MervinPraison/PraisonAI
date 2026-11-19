@@ -26,8 +26,10 @@ def test_multiedit_rejects_path_outside_workspace(tmp_path):
     assert "outside workspace" in (result.get("error") or "").lower()
 
 
-def test_multiedit_allows_file_inside_workspace(tmp_path):
+def test_multiedit_allows_file_inside_workspace(tmp_path, monkeypatch):
     from praisonai.tools.multiedit import multiedit
+
+    monkeypatch.chdir(tmp_path)  # workspace_root may only narrow the cwd
 
     f = tmp_path / "file.txt"
     f.write_text("hello")

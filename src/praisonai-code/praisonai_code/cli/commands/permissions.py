@@ -32,9 +32,10 @@ def permissions():
 
 
 def get_project_permissions_dir() -> str:
-    """Get the project-scoped permissions directory."""
-    project_dir = os.getcwd()
-    return os.path.join(project_dir, ".praisonai", "permissions")
+    """Get this project's permissions directory (in the user store)."""
+    from praisonai_code.cli.approval_backend import user_permissions_dir
+
+    return user_permissions_dir(os.getcwd())
 
 
 @permissions.command(name="list")

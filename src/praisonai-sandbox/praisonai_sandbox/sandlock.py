@@ -24,6 +24,9 @@ from praisonaiagents.sandbox import (
 
 logger = logging.getLogger(__name__)
 
+# System directories every sandboxed interpreter may read.
+_READ_ROOTS = ["/usr/lib/python3", "/usr/local/lib/python3", "/lib", "/usr/lib", "/bin", "/usr/bin"]
+
 
 class SandlockSandbox:
     """Sandlock-based sandbox for kernel-level isolated code execution.
@@ -95,6 +98,37 @@ class SandlockSandbox:
                 f"ABI version {abi}.  Use SubprocessSandbox explicitly if "
                 "weaker isolation is acceptable."
             )
+        self._require_enforceable()
+
+    def _require_enforceable(self) -> None:
+        """Landlock grants whole trees: a blocked path inside a granted one is unkeepable."""
+        from ._enforce import require_enforceable
+        from ._policy import _resolve, _within
+
+        policy = self.config.security_policy
+        granted = [_resolve(p) for p in (*_READ_ROOTS, *policy.allowed_paths) if os.path.exists(p)]
+        problems = [f"blocked_paths=[{b!r}] (overlaps {g})" for b in policy.blocked_paths
+                    for g in granted if _within(_resolve(b), g) or _within(g, _resolve(b))]
+        require_enforceable("SandlockSandbox", problems,
+                            "Landlock can only allow whole directories; narrow allowed_paths.")
+
+    def _validate_command_against_policy(self, cmd, policy, cwd=None) -> Optional[str]:
+        from ._policy import screen_command
+
+        return screen_command(cmd, policy, cwd or self._temp_dir, roots=[self._temp_dir])
+
+    def _policy_error(self, cmd: List[str], working_dir: Optional[str]) -> Optional[str]:
+        """Screen *cmd* and confine a caller-chosen working_dir; None when allowed."""
+        from ._policy import _resolve, _within
+        from .subprocess import SubprocessSandbox
+
+        policy = self.config.security_policy
+        roots = [self._temp_dir, *policy.allowed_paths]
+        if working_dir and not any(r and _within(_resolve(working_dir), _resolve(r)) for r in roots):
+            return f"working_dir {working_dir!r} is outside the sandbox and SecurityPolicy.allowed_paths"
+        if cmd[:2] == ["python3", "-c"]:
+            return SubprocessSandbox._validate_code_against_policy(self, cmd[2], "python", policy)
+        return self._validate_command_against_policy(cmd, policy, working_dir)
 
     @property
     def is_available(self) -> bool:
@@ -152,15 +186,7 @@ class SandlockSandbox:
         # Landlock requires every path in the allowlist to exist at rule-
         # attach time; passing a missing directory makes sandlock_spawn
         # fail outright.  Filter to paths that actually exist on this host.
-        _candidate_read_paths = [
-            "/usr/lib/python3",
-            "/usr/local/lib/python3",
-            "/lib",
-            "/usr/lib",
-            "/bin",
-            "/usr/bin",
-        ]
-        allowed_read_paths = [p for p in _candidate_read_paths if os.path.isdir(p)]
+        allowed_read_paths = [p for p in _READ_ROOTS if os.path.isdir(p)]
         if extra_readable:
             # extra_readable may name individual files (e.g. the single script
             # passed to execute_file), so accept any path that exists — not
@@ -170,7 +196,9 @@ class SandlockSandbox:
                 p for p in extra_readable if os.path.exists(p)
             )
 
+        policy = self.config.security_policy
         allowed_write_paths = []
+        allowed_read_paths += [p for p in policy.allowed_paths if os.path.isdir(p)]
         if working_dir:
             allowed_write_paths.append(working_dir)
         if self._temp_dir:
@@ -186,9 +214,9 @@ class SandlockSandbox:
             if p and os.path.isdir(p) and p not in allowed_read_paths:
                 allowed_read_paths.append(p)
 
-        # Add any configured allowed paths from security policy
-        if hasattr(self.config, 'security_policy') and self.config.security_policy:
-            allowed_write_paths.extend(self.config.security_policy.allowed_paths)
+        allowed_write_paths.extend(policy.allowed_paths)
+        if not policy.allow_file_write:
+            allowed_write_paths = []  # Landlock: read-only everywhere
         
         # Network policy.
         #
@@ -202,7 +230,7 @@ class SandlockSandbox:
         # actually usable we open all outbound TCP plus UDP DNS (port 53) so
         # the sandboxed process can resolve hostnames.  To block the network
         # we leave the allowlist empty (deny all).
-        if limits.network_enabled:
+        if limits.network_enabled and policy.allow_network:
             net_allow = ["*:*", "udp://*:53"]
         else:
             net_allow = []
@@ -287,6 +315,11 @@ class SandlockSandbox:
         ``working_dir`` is applied to the sandbox config (added to the
         writable-path allow-list).
         """
+        self._require_enforceable()
+        policy_error = self._policy_error(cmd, working_dir)
+        if policy_error:
+            return SandboxResult(execution_id=execution_id, status=SandboxStatus.FAILED,
+                                 error=f"Security policy violation: {policy_error}")
         sandbox_kwargs = self._build_sandbox_kwargs(
             limits, working_dir, extra_readable
         )
@@ -320,8 +353,9 @@ class SandlockSandbox:
 
         completed_at = time.time()
         duration = completed_at - started_at
-        stdout = self._decode(result.stdout)
-        stderr = self._decode(result.stderr)
+        cap = self.config.security_policy.max_output_size
+        stdout, stderr = (self._decode(b[:cap] + b"\n[OUTPUT TRUNCATED]" if cap and isinstance(
+            b, bytes) and len(b) > cap else b) for b in (result.stdout, result.stderr))
 
         # sandlock uses exit_code == -1 as the ExitStatus::Timeout sentinel
         # (see sandlock's python/src/sandlock/_sdk.py).  This is a
@@ -455,40 +489,20 @@ class SandlockSandbox:
         path: str,
         content: Union[str, bytes],
     ) -> bool:
-        """Write a file to the sandbox."""
-        full_path = self._safe_sandbox_path(path)
-        if full_path is None:
-            return False
-        
-        os.makedirs(os.path.dirname(full_path), exist_ok=True)
-        
-        try:
-            mode = "wb" if isinstance(content, bytes) else "w"
-            with open(full_path, mode) as f:
-                f.write(content)
-            return True
-        except Exception as e:
-            logger.error(f"Failed to write file: {e}")
-            return False
-    
+        """Write a file to the sandbox, never following a symlink the sandboxed code made."""
+        from ._compat import write_in_sandbox
+
+        return write_in_sandbox(self._temp_dir, path, content)
+
     async def read_file(
         self,
         path: str,
     ) -> Optional[Union[str, bytes]]:
-        """Read a file from the sandbox."""
-        full_path = self._safe_sandbox_path(path)
-        if full_path is None or not os.path.exists(full_path):
-            return None
-        
-        try:
-            with open(full_path, "r") as f:
-                return f.read()
-        except UnicodeDecodeError:
-            with open(full_path, "rb") as f:
-                return f.read()
-        except Exception:
-            return None
-    
+        """Read a file from the sandbox, never following a symlink the sandboxed code made."""
+        from ._compat import read_in_sandbox
+
+        return read_in_sandbox(self._temp_dir, path)
+
     async def list_files(
         self,
         path: str = "/",

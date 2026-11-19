@@ -42,18 +42,15 @@ def _download_image(url: str, path: str) -> None:
     refused (they would bypass the screen), and the read is bounded by a
     timeout and a size cap.
     """
-    import urllib.request
-    from ..jobs.models import _resolve_and_screen_webhook_host
+    from praisonaiagents.tools.url_safety import safe_stream
 
-    _resolve_and_screen_webhook_host(url, label="Image URL")
-
-    class _NoRedirect(urllib.request.HTTPRedirectHandler):
-        def redirect_request(self, *args, **kwargs):
-            return None
-
-    opener = urllib.request.build_opener(_NoRedirect)
-    with opener.open(url, timeout=_IMAGE_DOWNLOAD_TIMEOUT) as resp:
-        data = resp.read(_IMAGE_DOWNLOAD_MAX_BYTES + 1)
+    data = b""
+    with safe_stream(url, timeout=_IMAGE_DOWNLOAD_TIMEOUT, allow_local=False, max_redirects=0) as resp:
+        resp.raise_for_status()
+        for chunk in resp.iter_bytes():
+            data += chunk
+            if len(data) > _IMAGE_DOWNLOAD_MAX_BYTES:
+                break
     if len(data) > _IMAGE_DOWNLOAD_MAX_BYTES:
         raise ValueError("Image exceeds maximum download size")
     with open(path, 'wb') as f:

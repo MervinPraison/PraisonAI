@@ -620,12 +620,15 @@ class AgentOS:
         # Check the key baked into the app actually served (it may be cached).
         app = self.get_app()
         is_loopback = (resolved_host or "").lower() in _LOOPBACK_HOSTS
-        if not self._app_token and not is_loopback:
-            raise RuntimeError(
-                f"AgentOS refuses to serve on non-loopback host {resolved_host!r} "
-                "without an API key. Set AgentOSConfig(api_key=...) or "
-                "PRAISONAI_AGENTOS_API_KEY, or bind to 127.0.0.1."
+        from praisonaiagents.agent.launch_security import require_bind_token
+
+        try:
+            require_bind_token(
+                resolved_host or "", self._app_token, server="AgentOS",
+                hint="Set AgentOSConfig(api_key=...) or PRAISONAI_AGENTOS_API_KEY",
             )
+        except ValueError as e:
+            raise RuntimeError(str(e)) from None  # AgentOS has always raised RuntimeError
         # Default bind is loopback (unreachable from outside a container);
         # log it so Docker users see why and how to expose it.
         import logging

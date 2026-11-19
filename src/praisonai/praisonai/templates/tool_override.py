@@ -461,7 +461,14 @@ def create_tool_registry_with_overrides(
                 source_path = Path(source).expanduser()
                 
                 if source_path.exists():
-                    # It's a local path
+                    # Template-declared code runs only with the template opt-in
+                    # (operator paths go through override_files/override_dirs).
+                    if not _autoload_tools_enabled():
+                        logger.warning(
+                            "skipping template tools_source %r: set "
+                            "PRAISONAI_ALLOW_TEMPLATE_TOOLS=true to load template code", source,
+                        )
+                        continue
                     if source_path.is_file() and source_path.suffix == ".py":
                         tools = loader.load_from_file(str(source_path))
                         registry.update(tools)

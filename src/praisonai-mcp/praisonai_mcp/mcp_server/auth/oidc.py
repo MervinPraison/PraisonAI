@@ -8,6 +8,7 @@ Based on:
 - OAuth 2.0 Authorization Server Metadata (RFC8414)
 """
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -255,12 +256,12 @@ async def fetch_client_metadata(client_id_url: str) -> ClientMetadata:
     except ImportError:
         raise ImportError("httpx required for client metadata. Install with: pip install httpx")
     
-    async with httpx.AsyncClient() as client:
-        response = await client.get(client_id_url, follow_redirects=True)
-        response.raise_for_status()
-        
-        data = response.json()
-        return ClientMetadata.from_dict(data)
+    # The URL comes from the connecting client: pinned, redirect-checked fetch.
+    from praisonaiagents.tools.url_safety import safe_fetch
+
+    response = await asyncio.to_thread(safe_fetch, client_id_url, timeout=10)
+    response.raise_for_status()
+    return ClientMetadata.from_dict(response.json())
 
 
 async def fetch_protected_resource_metadata(resource_url: str) -> Dict[str, Any]:
@@ -283,7 +284,8 @@ async def fetch_protected_resource_metadata(resource_url: str) -> Dict[str, Any]
     # Build well-known URL
     metadata_url = f"{resource_url.rstrip('/')}/.well-known/oauth-protected-resource"
     
-    async with httpx.AsyncClient() as client:
-        response = await client.get(metadata_url, follow_redirects=True)
-        response.raise_for_status()
-        return response.json()
+    from praisonaiagents.tools.url_safety import safe_fetch
+
+    response = await asyncio.to_thread(safe_fetch, metadata_url, timeout=10)
+    response.raise_for_status()
+    return response.json()

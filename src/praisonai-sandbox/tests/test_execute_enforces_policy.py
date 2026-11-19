@@ -28,6 +28,7 @@ with that draft it was not). One end-to-end case still spawns, and stops the
 sandbox afterwards.
 """
 import asyncio
+import dataclasses
 
 import pytest
 
@@ -35,9 +36,14 @@ from praisonaiagents.sandbox.config import SandboxConfig, SecurityPolicy
 from praisonai_sandbox.subprocess import SubprocessSandbox
 
 
+def _enforceable(policy):
+    """A plain subprocess refuses allow_network/allow_file_write=False."""
+    return dataclasses.replace(policy, allow_network=True, allow_file_write=True)
+
+
 def _validator(policy=None):
     sandbox = SubprocessSandbox(SandboxConfig(
-        security_policy=policy or SecurityPolicy.strict()))
+        security_policy=_enforceable(policy or SecurityPolicy.strict())))
     return lambda code, language="python": sandbox._validate_code_against_policy(
         code, language, sandbox.config.security_policy)
 
@@ -125,7 +131,7 @@ class TestEndToEnd:
     def test_strict_policy_refuses_to_run_blocked_code(self):
         async def go():
             sandbox = SubprocessSandbox(SandboxConfig(
-                security_policy=SecurityPolicy.strict()))
+                security_policy=_enforceable(SecurityPolicy.strict())))
             try:
                 return await sandbox.execute("import subprocess\nprint('RAN')\n")
             finally:

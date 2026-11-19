@@ -85,7 +85,9 @@ def _serve_app_factory() -> Any:
     spec = json.loads(raw)
     handler = ServeHandler()
     builder = getattr(handler, spec["builder"])
-    return builder(spec["config"])
+    from praisonaiagents.agent.origin_guard import guard_loopback_requests
+
+    return guard_loopback_requests(builder(spec["config"]), spec["config"].get("host"))
 
 
 def _install_api_key_middleware(
@@ -93,8 +95,11 @@ def _install_api_key_middleware(
     api_key: Optional[str],
     public_paths: Optional[set] = None,
 ) -> None:
-    """Enforce --api-key on serve endpoints when a key is configured."""
+    """Enforce --api-key; a keyless app refuses cross-site (foreign Origin) requests."""
     if not api_key:
+        from praisonaiagents.agent.origin_guard import guard_loopback_requests
+
+        app.add_middleware(guard_loopback_requests, host=None)
         return
 
     from praisonai._api_auth import build_api_key_middleware
@@ -102,6 +107,16 @@ def _install_api_key_middleware(
     public = public_paths or {"/health", "/", "/.well-known/agent.json"}
 
     app.add_middleware(build_api_key_middleware(api_key, public))
+
+
+def _require_key(host: str, api_key: Optional[str], command: str, setting: str) -> None:
+    """Shared bind guard; keeps the CLI's SystemExit for a keyless public bind."""
+    from praisonaiagents.agent.launch_security import require_bind_token
+
+    try:
+        require_bind_token(host, api_key, server=f"praisonai serve {command}", hint=f"Set {setting}")
+    except ValueError as e:
+        raise SystemExit(str(e)) from None
 
 
 class ServeHandler:
@@ -356,12 +371,7 @@ Launch PraisonAI servers with unified discovery support.
         # non-localhost host without an API key, mirroring jobs/server.py.
         host = config.get("host", self.DEFAULT_HOST)
         api_key = config.get("api_key") or os.environ.get("PRAISONAI_SERVE_API_KEY")
-        if host not in _LOCALHOST_HOSTS and not api_key:
-            raise SystemExit(
-                "praisonai serve agents: --api-key (or PRAISONAI_SERVE_API_KEY) is "
-                "required when binding to a non-localhost host; POST /agents can "
-                "execute YAML-defined tools."
-            )
+        _require_key(host, api_key, "agents", "--api-key (or PRAISONAI_SERVE_API_KEY)")
 
         # Create discovery document
         discovery = create_discovery_document(server_name="praisonai-agents")
@@ -785,12 +795,8 @@ Launch PraisonAI servers with unified discovery support.
     def _resolve_api_key(config: Dict[str, Any], command: str) -> Optional[str]:
         """Require an API key for non-localhost binds of agent-driving servers."""
         api_key = config.get("api_key") or os.environ.get("PRAISONAI_SERVE_API_KEY")
-        if config.get("host", ServeHandler.DEFAULT_HOST) not in _LOCALHOST_HOSTS and not api_key:
-            raise SystemExit(
-                f"praisonai serve {command}: --api-key (or PRAISONAI_SERVE_API_KEY) is "
-                "required when binding to a non-localhost host; it exposes "
-                "tool-driving routes."
-            )
+        _require_key(config.get("host", ServeHandler.DEFAULT_HOST), api_key, command,
+                     "--api-key (or PRAISONAI_SERVE_API_KEY)")
         return api_key
 
     def _create_a2a_app(self, config: Dict[str, Any]) -> Any:
@@ -876,11 +882,10 @@ Launch PraisonAI servers with unified discovery support.
         }
         parsed = self._parse_args(args, spec)
         host = parsed["host"]
-        if host not in ("127.0.0.1", "localhost", "::1") and not os.environ.get("A2U_AUTH_TOKEN"):
-            self._print_error(
-                "A2U_AUTH_TOKEN required for non-localhost binding. "
-                "Set A2U_AUTH_TOKEN or bind to 127.0.0.1"
-            )
+        try:
+            _require_key(host, os.environ.get("A2U_AUTH_TOKEN"), "a2u", "A2U_AUTH_TOKEN")
+        except SystemExit as e:
+            self._print_error(str(e))
             return 4  # POLICY_DENIED
         
         try:
@@ -1179,8 +1184,10 @@ Launch PraisonAI servers with unified discovery support.
             return
 
         # Non-reload path: build the app now if a lazy builder was passed.
+        from praisonaiagents.agent.origin_guard import guard_loopback_requests
+
         resolved_app = app_builder() if app_builder is not None else app
-        uvicorn.run(resolved_app, host=host, port=port, reload=reload)
+        uvicorn.run(guard_loopback_requests(resolved_app, host), host=host, port=port, reload=reload)
 
 
 def handle_serve_command(args: List[str]) -> int:

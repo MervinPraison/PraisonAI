@@ -7,8 +7,10 @@ Supports systemd (Linux) and launchd (macOS).
 
 from __future__ import annotations
 
-import platform
 import logging
+import os
+import platform
+import re
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -18,6 +20,23 @@ logger = logging.getLogger(__name__)
 _SUPERVISOR_EXIT_MARGIN_S = 10.0
 # Floor matching the gateway's default shutdown grace (LoopWatchdogPolicy).
 _DEFAULT_SHUTDOWN_GRACE_S = 5.0
+
+
+# A line break would add directives, ``"`` would end a quoted argument, and
+# ``%`` is a specifier in systemd units and a variable in cmd.exe scripts.
+_UNSAFE_SERVICE_PATH = re.compile(r'[\x00-\x1f\x7f"%]')
+
+
+def service_config_path(config_path: str) -> str:
+    """Absolute config path, checked before it is written into a service file.
+
+    systemd, launchd and the Windows startup script all embed this path in a
+    generated text file; every generator goes through this helper.
+    """
+    abs_path = os.path.abspath(config_path)
+    if _UNSAFE_SERVICE_PATH.search(abs_path):
+        raise ValueError(f"Config path cannot be used in a service file: {abs_path!r}")
+    return abs_path
 
 
 def stop_timeout_seconds(config_path: str) -> int:
@@ -112,6 +131,10 @@ def get_daemon_status() -> Dict[str, Any]:
 
 def install_daemon(config_path: str = "bot.yaml", **kwargs: Any) -> Dict[str, Any]:
     """Install the bot as an OS daemon service."""
+    try:
+        service_config_path(config_path)
+    except ValueError as e:
+        return {"ok": False, "error": str(e)}
     plat = _detect_platform()
     if plat == "systemd":
         from .systemd import install

@@ -1,5 +1,18 @@
 /**
- * Sandbox Executor - Safe command execution with restrictions
+ * Sandbox Executor - command filtering before running a command on the host.
+ *
+ * Every mode checks the command text against allow/deny lists and then runs it
+ * on the host as the current user. It is not isolation and not a security
+ * boundary (see SECURITY.md, "Not a security boundary"): a filter over a
+ * command string cannot be complete. For untrusted commands use an isolating
+ * backend from praisonai-sandbox (Docker, Sandlock, E2B, ...).
+ *
+ * Mode names are kept for compatibility and describe what is filtered:
+ * - `basic`: deny-listed commands, paths and shell patterns.
+ * - `strict`: as basic, no shell, and a minimal environment.
+ * - `network-isolated`: as basic, plus network-tool names refused and proxy
+ *   variables pointed at a dead port. The process still has network access.
+ * - `disabled`: nothing runs.
  */
 
 export type SandboxMode = 'disabled' | 'basic' | 'strict' | 'network-isolated';
@@ -95,7 +108,8 @@ function parseCommandParts(command: string): { cmd: string; args: string[] } {
 }
 
 /**
- * Command validator
+ * Command validator: string checks on the command text. A guard rail against
+ * mistakes, not a boundary.
  */
 export class CommandValidator {
   private blockedCommands: string[];
@@ -174,7 +188,7 @@ export class CommandValidator {
 }
 
 /**
- * Sandbox Executor class
+ * Sandbox Executor: filters a command, then runs it on the host (not isolated).
  */
 export class SandboxExecutor {
   private config: SandboxConfig;
@@ -192,7 +206,7 @@ export class SandboxExecutor {
   }
 
   /**
-   * Execute a command in the sandbox
+   * Filter the command, then run it on the host as the current user
    */
   async execute(command: string): Promise<ExecutionResult> {
     const startTime = Date.now();
@@ -309,7 +323,7 @@ export class SandboxExecutor {
   }
 
   /**
-   * Build environment variables based on sandbox mode
+   * Build environment variables based on the filter mode
    */
   private buildEnv(): Record<string, string> {
     const baseEnv = { ...process.env, ...this.config.env };
@@ -360,14 +374,14 @@ export class SandboxExecutor {
   }
 
   /**
-   * Get current sandbox mode
+   * Get current filter mode
    */
   getMode(): SandboxMode {
     return this.config.mode;
   }
 
   /**
-   * Update sandbox mode
+   * Update filter mode
    */
   setMode(mode: SandboxMode): void {
     this.config.mode = mode;
@@ -376,14 +390,14 @@ export class SandboxExecutor {
 }
 
 /**
- * Create a sandbox executor
+ * Create a command executor that filters, then runs on the host
  */
 export function createSandboxExecutor(config?: Partial<SandboxConfig>): SandboxExecutor {
   return new SandboxExecutor(config);
 }
 
 /**
- * Quick execute with default sandbox
+ * Quick execute with the default (`basic`) filter, on the host
  */
 export async function sandboxExec(command: string, config?: Partial<SandboxConfig>): Promise<ExecutionResult> {
   const executor = createSandboxExecutor(config);

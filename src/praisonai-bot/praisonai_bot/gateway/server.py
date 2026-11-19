@@ -137,6 +137,15 @@ class _UnknownSessionAgent(ValueError):
     """A confined client cannot resume a record without agent identity."""
 
 
+class _SessionNotOwned(_UnknownSessionAgent):
+    """The session was created under another operator credential."""
+
+
+def _token_principal(token: Optional[str]) -> Optional[str]:
+    """Stable, non-secret id of an operator credential (same form as the API's)."""
+    return "token:" + hashlib.sha256(token.encode("utf-8")).hexdigest()[:16] if token else None
+
+
 def _installed_gateway_version() -> str:
     """Return the installed ``praisonai-bot`` version, not a hardcoded literal.
 
@@ -416,7 +425,14 @@ def _should_bypass_loopback_auth(
         return False
     # Reject if proxy headers are present (indicates request went through proxy)
     proxy_headers = ["x-forwarded-for", "via", "x-real-ip", "x-forwarded-host"]
-    return not any(header in request_headers for header in proxy_headers)
+    if any(header in request_headers for header in proxy_headers):
+        return False
+    # A browser page on another site (foreign Origin) or a DNS-rebound name
+    # (foreign Host) reaches 127.0.0.1 from a loopback peer too; only requests
+    # that name this machine keep the no-token mode.
+    from praisonaiagents.agent.origin_guard import is_loopback_request
+
+    return is_loopback_request(request_headers, check_host="host" in request_headers)
 
 
 class _ClientConn:
@@ -609,6 +625,9 @@ class GatewaySession:
     # Issue #5997: ``SessionVisibility`` value. ``private`` keeps today's 1:1
     # owner binding; ``shared``/``read_only`` let other clients attach.
     _visibility: str = "private"
+    # Operator credential that created the session (``_token_principal``);
+    # ``None`` when no operator scope policy is set (one operator).
+    _owner: Optional[str] = None
     
     @property
     def session_id(self) -> str:
@@ -764,6 +783,7 @@ class GatewaySession:
             "is_executing": self._is_executing,
             "channel_target": self._channel_target,
             "visibility": self._visibility,
+            "owner": self._owner,
         }
     
     @classmethod
@@ -815,6 +835,7 @@ class GatewaySession:
         # notify the originating channel about an interrupted turn.
         session._channel_target = data.get("channel_target")
         session._visibility = data.get("visibility", "private")
+        session._owner = data.get("owner")
         
         return session
 
@@ -1307,6 +1328,9 @@ class WebSocketGateway:
         # Issue #6253: client_id -> agent ids the operator is confined to
         # (absent/None = every agent).
         self._client_agents: Dict[str, Optional[List[str]]] = {}
+        # client_id -> operator credential principal; set only under a scope
+        # policy, where tokens are distinct operators (sessions bind to it).
+        self._client_principals: Dict[str, Optional[str]] = {}
         # Issue #3467: in-flight turn registry so a running turn can be aborted
         # (by a WS ``abort`` frame or a portable ``/stop`` chat command) and so
         # a per-turn timeout can cancel a runaway turn. Maps session_id ->
@@ -1637,7 +1661,12 @@ class WebSocketGateway:
             )
         
         async def health(request):
-            return JSONResponse(self.health())
+            data = self.health()
+            # A probe needs only the status; channel names, supervision state
+            # and counters are for an authenticated operator.
+            if _check_auth(request) is not None:
+                data = {"status": data.get("status")}
+            return JSONResponse(data)
         
         def _loopback_bypass_active(request) -> bool:
             """Whether the development loopback auth bypass applies to ``request``.
@@ -1724,7 +1753,19 @@ class WebSocketGateway:
               - ``?token=<token>`` query parameter (so the dashboard URL from
                 ``praisonai onboard`` is clickable in a browser)
               - Cookie-based authentication (praisonai_session cookie)
+
+            A browser ``Origin`` outside the gateway's origin policy is refused
+            first, with or without a token, so a page on another site cannot
+            drive the gateway through the operator's browser.
             """
+            origin = request.headers.get("origin")
+            if origin:
+                try:
+                    origin_ok = check_origin(origin, self.config.allowed_origins, self._host)
+                except ValueError:
+                    origin_ok = False
+                if not origin_ok:
+                    return JSONResponse({"error": "Origin not allowed"}, status_code=403)
             if not self.config.auth_token:
                 return None
             
@@ -1820,6 +1861,17 @@ class WebSocketGateway:
                 {"error": "insufficient scope", "required_scope": scope.value},
                 status_code=403,
             )
+
+        def _guard(handler, scope: Optional[OperatorScope] = None):
+            """Wrap a route in the gateway's one guard: Origin, credential, scope.
+
+            Every non-public route in the table below goes through this, so a
+            handler cannot forget a check (``test_route_auth_guard.py``).
+            """
+            async def _guarded(request):
+                err = _check_auth(request) or (scope and _require_scope(request, scope))
+                return err or await handler(request)
+            return _guarded
 
         def _client_subject(peer_ip, headers) -> str:
             """Resolve the per-IP policy subject for an inbound request.
@@ -2136,6 +2188,8 @@ class WebSocketGateway:
             self._client_agents[client_id] = (
                 _resolve_agents(operator_token) if _resolve_agents else None
             )
+            if self.config.has_scope_policy:
+                self._client_principals[client_id] = _token_principal(operator_token)
             # Issue #2661: stamp the session with the active secret's generation
             # so a later rotation can force-close it (instant revocation).
             self._client_auth_generation[client_id] = self._auth_generation()
@@ -2736,17 +2790,17 @@ class WebSocketGateway:
             Route("/health", health, methods=["GET"]),
             Route("/ready", ready, methods=["GET"]),
             Route("/live", live, methods=["GET"]),
-            Route("/metrics", metrics, methods=["GET"]),
-            Route("/info", info, methods=["GET"]),
-            Route("/api/approval/pending", approval_pending, methods=["GET"]),
-            Route("/api/approval/resolve", approval_resolve, methods=["POST"]),
-            Route("/api/approval/allow-list", approval_allowlist, methods=["GET", "POST", "DELETE"]),
-            Route("/api/pairing/pending", _pairing_routes["pending"], methods=["GET"]),
-            Route("/api/pairing/approve", _pairing_routes["approve"], methods=["POST"]),
-            Route("/api/pairing/revoke", _pairing_routes["revoke"], methods=["POST"]),
-            Route("/api/channels/{name}/pause", pause_channel_handler, methods=["POST"]),
-            Route("/api/channels/{name}/resume", resume_channel_handler, methods=["POST"]),
-            Route("/api/channels/{name}/reconnect", reconnect_channel_handler, methods=["POST"]),
+            Route("/metrics", _guard(metrics, OperatorScope.READ), methods=["GET"]),
+            Route("/info", _guard(info), methods=["GET"]),
+            Route("/api/approval/pending", _guard(approval_pending, OperatorScope.APPROVALS), methods=["GET"]),
+            Route("/api/approval/resolve", _guard(approval_resolve, OperatorScope.APPROVALS), methods=["POST"]),
+            Route("/api/approval/allow-list", _guard(approval_allowlist, OperatorScope.READ), methods=["GET", "POST", "DELETE"]),
+            Route("/api/pairing/pending", _guard(_pairing_routes["pending"], OperatorScope.PAIRING), methods=["GET"]),
+            Route("/api/pairing/approve", _guard(_pairing_routes["approve"], OperatorScope.PAIRING), methods=["POST"]),
+            Route("/api/pairing/revoke", _guard(_pairing_routes["revoke"], OperatorScope.PAIRING), methods=["POST"]),
+            Route("/api/channels/{name}/pause", _guard(pause_channel_handler, OperatorScope.ADMIN), methods=["POST"]),
+            Route("/api/channels/{name}/resume", _guard(resume_channel_handler, OperatorScope.ADMIN), methods=["POST"]),
+            Route("/api/channels/{name}/reconnect", _guard(reconnect_channel_handler, OperatorScope.ADMIN), methods=["POST"]),
             WebSocketRoute("/ws", websocket_endpoint),
         ]
 
@@ -2760,15 +2814,12 @@ class WebSocketGateway:
             from .api_endpoints import GatewayApiEndpoints
             self._api_endpoints = GatewayApiEndpoints(self)
 
-            def _api_guarded(handler):
+            def _api_guarded(handler, scope=OperatorScope.WRITE):
                 async def _wrapped(request):
-                    auth_err = _check_auth(request)
-                    if auth_err:
-                        return auth_err
                     # Issue #6215: bind the per-user budget key post-auth.
                     self._api_endpoints._bind_rate_key(request)
                     return await handler(request)
-                return _wrapped
+                return _guard(_wrapped, scope)
 
             if api_cfg.openai:
                 routes += [
@@ -2786,7 +2837,7 @@ class WebSocketGateway:
                     # Response by id and cancel an in-flight background run.
                     Route(
                         "/v1/responses/{id}",
-                        _api_guarded(self._api_endpoints.openai_responses_get),
+                        _api_guarded(self._api_endpoints.openai_responses_get, OperatorScope.READ),
                         methods=["GET"],
                     ),
                     Route(
@@ -2796,7 +2847,7 @@ class WebSocketGateway:
                     ),
                     Route(
                         "/v1/models",
-                        _api_guarded(self._api_endpoints.openai_models),
+                        _api_guarded(self._api_endpoints.openai_models, OperatorScope.READ),
                         methods=["GET"],
                     ),
                 ]
@@ -2811,7 +2862,17 @@ class WebSocketGateway:
                 ]
                 logger.info("Gateway MCP endpoint enabled (/mcp)")
 
-        app = Starlette(routes=routes)
+        # Cap every request body (shared helper, agent/request_limits.py)
+        # before any handler buffers it: the SDK default, or the 25 MB hooks
+        # already allowed if that is larger.
+        from praisonaiagents.agent.request_limits import DEFAULT_MAX_BODY_BYTES, limit_request_body
+        from starlette.middleware import Middleware
+
+        body_cap = max(DEFAULT_MAX_BODY_BYTES, 25 * 1024 * 1024)
+        app = Starlette(
+            routes=routes,
+            middleware=[Middleware(limit_request_body, max_bytes=body_cap)],
+        )
         
         config = uvicorn.Config(
             app,
@@ -7105,6 +7166,7 @@ class WebSocketGateway:
         Returns the session the client was bound to (if any).
         """
         bound = self._client_sessions.get(client_id)
+        self._client_principals.pop(client_id, None)
         for sid in [s for s, r in self._session_observers.items() if client_id in r]:
             self.detach(sid, client_id)
         session_id = self._client_sessions.pop(client_id, None)
@@ -7143,6 +7205,7 @@ class WebSocketGateway:
             as the events may not include the full gap if buffer was trimmed.
         """
         replay_events = []
+        principal = self._client_principals.get(client_id) if client_id else None
         
         # Try to resume existing session
         if session_id:
@@ -7152,6 +7215,12 @@ class WebSocketGateway:
                 session = self.create_session(agent_id, client_id, session_id)
             
             if session:
+                # A session resumes only for the credential that created it;
+                # an unowned (legacy) session is claimed by its first resumer.
+                if principal is not None:
+                    if session._owner not in (None, principal):
+                        raise _SessionNotOwned("Session belongs to another operator")
+                    session._owner = principal
                 # Get events to replay if cursor provided
                 if since_cursor is not None:
                     replay_events = session.get_events_since(since_cursor)
@@ -7160,6 +7229,8 @@ class WebSocketGateway:
         
         # Create new session if not found
         session = self.create_session(agent_id, client_id, session_id)
+        if principal is not None:
+            session._owner = principal
         return session, []
     
     def on_event(self, event_type: str) -> Callable:

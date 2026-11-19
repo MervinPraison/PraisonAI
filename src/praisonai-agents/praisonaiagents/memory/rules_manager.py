@@ -274,6 +274,10 @@ class RulesManager:
                 file_path = file_path.with_suffix(".md")
             
             if file_path.exists() and file_path.is_file():
+                if not self._import_allowed(file_path, import_path, base_path):
+                    logger.warning("Rules @import %r refused: %s is outside the workspace.",
+                                   import_path, file_path)
+                    return match.group(0)
                 try:
                     imported_content = file_path.read_text(encoding="utf-8")
                     # Recursively process imports in imported content
@@ -292,6 +296,24 @@ class RulesManager:
         
         return self.IMPORT_PATTERN.sub(replace_import, content)
     
+    def _import_allowed(self, file_path: Path, import_path: str, base_path: Path) -> bool:
+        """Whether an ``@import`` may read ``file_path`` (symlinks resolved).
+
+        Anything in the workspace, its git root or the global rules folder.
+        The documented ``@~/...`` form: Markdown files from a project file,
+        any file from a user-level rule file, which may also use its own folder.
+        """
+        from ..tools.path_safety import is_within_root
+
+        project = [str(r) for r in (self.workspace_path, self._find_git_root()) if r]
+        roots = project + [str(self.global_rules_path)]
+        user_level = not any(is_within_root(str(base_path), r) for r in project)
+        if user_level:
+            roots.append(str(base_path))
+        if import_path.startswith("~/") and (user_level or file_path.suffix == ".md"):
+            roots.append(str(Path.home()))
+        return any(is_within_root(str(file_path), r) for r in roots)
+
     def _truncate_rule_content(self, content: str) -> str:
         """Truncate rule content to MAX_RULE_CHARS if needed."""
         if len(content) <= self.MAX_RULE_CHARS:

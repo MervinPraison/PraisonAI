@@ -36,9 +36,12 @@ def _log_dir() -> str:
 def _generate_plist(config_path: str) -> str:
     """Generate a launchd plist XML for the bot."""
     python = shutil.which("python3") or shutil.which("python") or sys.executable
-    abs_config = os.path.abspath(config_path)
-    working_dir = os.path.dirname(abs_config) or os.getcwd()
-    log_dir = _log_dir()
+    from xml.sax.saxutils import escape
+    from . import service_config_path
+    abs_config = service_config_path(config_path)
+    working_dir = escape(os.path.dirname(abs_config) or os.getcwd())
+    log_dir = escape(_log_dir())
+    python = escape(python)
     from . import stop_timeout_seconds
     stop_timeout = stop_timeout_seconds(abs_config)
 
@@ -56,7 +59,7 @@ def _generate_plist(config_path: str) -> str:
         <string>gateway</string>
         <string>start</string>
         <string>--config</string>
-        <string>{abs_config}</string>
+        <string>{escape(abs_config)}</string>
     </array>
     <key>WorkingDirectory</key>
     <string>{working_dir}</string>
@@ -88,7 +91,7 @@ def _generate_plist(config_path: str) -> str:
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>{os.environ.get('PATH', '/usr/bin:/usr/local/bin')}</string>
+        <string>{escape(os.environ.get('PATH', '/usr/bin:/usr/local/bin'))}</string>
     </dict>
 </dict>
 </plist>

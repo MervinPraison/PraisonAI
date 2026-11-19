@@ -47,7 +47,6 @@ import json
 import os
 import threading
 import time
-from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
 
@@ -115,7 +114,10 @@ class RateLimiter:
     def __init__(self, requests_per_minute: int = DEFAULT_RATE_LIMIT):
         self.requests_per_minute = requests_per_minute
         self.window_seconds = 60
-        self._requests: Dict[str, List[float]] = defaultdict(list)
+        from praisonaiagents.agent.request_limits import BoundedDict
+
+        # Bounded: one entry per client, oldest forgotten past the cap.
+        self._requests: Dict[str, List[float]] = BoundedDict()
         self._sync_lock = threading.Lock()
         self._async_lock = asyncio.Lock()
 
@@ -125,16 +127,17 @@ class RateLimiter:
         window_start = now - self.window_seconds
 
         # Clean old requests
-        bucket = [t for t in self._requests[client_id] if t > window_start]
-        self._requests[client_id] = bucket
+        bucket = [t for t in self._requests.pop(client_id, []) if t > window_start]
 
         if len(bucket) >= self.requests_per_minute:
+            self._requests[client_id] = bucket
             # Calculate retry-after
             oldest = min(bucket)
             retry_after = int(oldest + self.window_seconds - now) + 1
             return False, max(1, retry_after)
 
         bucket.append(now)
+        self._requests[client_id] = bucket
         return True, 0
 
     def check(self, client_id: str) -> Tuple[bool, int]:
@@ -170,26 +173,38 @@ def create_rate_limiter(requests_per_minute: int = DEFAULT_RATE_LIMIT) -> RateLi
     return RateLimiter(requests_per_minute=requests_per_minute)
 
 
+_DURATION_BUCKETS = (0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10)
+
+
 class MetricsCollector:
     """Simple in-memory metrics collector for Prometheus format."""
     
     def __init__(self):
-        self._requests_total: Dict[str, int] = defaultdict(int)
-        self._request_durations: Dict[str, List[float]] = defaultdict(list)
-        self._errors_total: Dict[str, int] = defaultdict(int)
+        from praisonaiagents.agent.request_limits import BoundedDict
+
+        # Bounded label sets; durations kept as running [count, sum, *buckets].
+        self._requests_total: Dict[str, int] = BoundedDict(1000)
+        self._request_durations: Dict[str, List[float]] = BoundedDict(1000)
+        self._errors_total: Dict[str, int] = BoundedDict(1000)
     
     def record_request(self, path: str, method: str, status: int, duration: float):
         """Record a request."""
         # Normalize path to avoid label explosion
         normalized_path = self._normalize_path(path)
         key = f'{normalized_path}|{method}|{status}'
-        self._requests_total[key] += 1
-        self._request_durations[f'{normalized_path}|{method}'].append(duration)
+        self._requests_total[key] = self._requests_total.get(key, 0) + 1
+        dkey = f'{normalized_path}|{method}'
+        agg = self._request_durations.get(dkey) or [0, 0.0] + [0] * len(_DURATION_BUCKETS)
+        agg[0] += 1
+        agg[1] += duration
+        for i, bucket in enumerate(_DURATION_BUCKETS):
+            agg[2 + i] += duration <= bucket
+        self._request_durations[dkey] = agg
         
         if status >= 400:
             error_type = "client_error" if status < 500 else "server_error"
             error_key = f'{normalized_path}|{method}|{error_type}'
-            self._errors_total[error_key] += 1
+            self._errors_total[error_key] = self._errors_total.get(error_key, 0) + 1
     
     def _normalize_path(self, path: str) -> str:
         """Normalize path to avoid label explosion."""
@@ -217,17 +232,13 @@ class MetricsCollector:
         # Request duration histogram (simplified - just sum and count)
         lines.append("# HELP praisonai_http_request_duration_seconds HTTP request duration")
         lines.append("# TYPE praisonai_http_request_duration_seconds histogram")
-        for key, durations in self._request_durations.items():
+        for key, (count, total, *bucket_counts) in self._request_durations.items():
             path, method = key.split("|")
-            if durations:
-                total = sum(durations)
-                count = len(durations)
+            if count:
                 lines.append(f'praisonai_http_request_duration_seconds_sum{{path="{path}",method="{method}"}} {total:.6f}')
                 lines.append(f'praisonai_http_request_duration_seconds_count{{path="{path}",method="{method}"}} {count}')
                 # Add buckets
-                buckets = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10]
-                for bucket in buckets:
-                    bucket_count = sum(1 for d in durations if d <= bucket)
+                for bucket, bucket_count in zip(_DURATION_BUCKETS, bucket_counts):
                     lines.append(f'praisonai_http_request_duration_seconds_bucket{{path="{path}",method="{method}",le="{bucket}"}} {bucket_count}')
                 lines.append(f'praisonai_http_request_duration_seconds_bucket{{path="{path}",method="{method}",le="+Inf"}} {count}')
         
@@ -560,7 +571,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
         
         input_data = body.get("input", {})
         config_data = body.get("config", {})
-        options = body.get("options", {})
+        options = _request_options(body, config)
         session_id = body.get("session_id")
         
         from praisonai import recipe
@@ -610,7 +621,7 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
         
         input_data = body.get("input", {})
         config_data = body.get("config", {})
-        options = body.get("options", {})
+        options = _request_options(body, config)
         session_id = body.get("session_id")
         
         async def event_generator():
@@ -888,8 +899,23 @@ def create_app(config: Optional[Dict[str, Any]] = None) -> Any:
     
     if rate_limiter is not None:
         middleware.append(Middleware(RateLimitMiddleware))
+
+    if auth_type == "none":
+        # Keyless: refuse cross-site (foreign Origin) requests from web pages.
+        from praisonaiagents.agent.origin_guard import guard_loopback_requests
+
+        middleware.insert(0, Middleware(guard_loopback_requests, host=None))
     
     return Starlette(routes=routes, middleware=middleware)
+
+
+def _request_options(body: Dict[str, Any], config: Dict[str, Any]) -> Dict[str, Any]:
+    """Run options from a request; only the server config may allow dangerous tools."""
+    options = dict(body.get("options") or {})
+    options.pop("allow_dangerous_tools", None)
+    if config.get("allow_dangerous_tools"):
+        options["allow_dangerous_tools"] = True
+    return options
 
 
 def _per_worker_rate_limit(rate_limit: int, workers: int) -> int:
@@ -944,6 +970,16 @@ def serve(
             "Serve dependencies not installed. Run: pip install praisonai[serve]"
         )
     
+    from praisonaiagents.agent.launch_security import require_bind_token
+
+    cfg = config or {}
+    require_bind_token(
+        host,
+        (cfg.get("auth") or "none") != "none"
+        and (cfg.get("api_key") or cfg.get("jwt_secret") or os.environ.get("PRAISONAI_API_KEY")),
+        server="praisonai recipe serve", hint="Use auth: api-key or jwt with a key",
+    )
+
     # Initialize OpenTelemetry tracing if configured
     trace_exporter = (config or {}).get("trace_exporter", "none")
     if trace_exporter and trace_exporter != "none":
@@ -1003,7 +1039,9 @@ def serve(
         )
         return
 
-    uvicorn.run(create_app(config), host=host, port=port, reload=reload)
+    from praisonaiagents.agent.origin_guard import guard_loopback_requests
+
+    uvicorn.run(guard_loopback_requests(create_app(config), host), host=host, port=port, reload=reload)
 
 
 def _init_tracing(exporter: str, config: Dict[str, Any]):

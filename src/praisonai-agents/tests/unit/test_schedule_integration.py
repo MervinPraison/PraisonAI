@@ -89,6 +89,7 @@ class TestAgentScheduleToolIntegration:
                 name="test-exec",
                 instructions="You can set schedules.",
                 tools=[schedule_add, schedule_list, schedule_remove],
+                approval=True,  # schedule_add/remove are approval-gated
             )
 
             # Simulate LLM calling schedule_add

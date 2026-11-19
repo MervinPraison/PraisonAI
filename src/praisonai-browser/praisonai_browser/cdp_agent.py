@@ -16,6 +16,8 @@ import logging
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
 
+from .cdp_utils import js_string
+
 logger = logging.getLogger("praisonai.browser.cdp_agent")
 
 # Suppress verbose LiteLLM and HTTP client debug logs
@@ -607,7 +609,7 @@ class CDPBrowserAgent:
                 # Focus element and type; verify the selector matched an element
                 focus_result = await self._send("Runtime.evaluate", {
                     "expression": (
-                        f"(function(){{const el=document.querySelector('{selector}');"
+                        f"(function(){{const el=document.querySelector({js_string(selector)});"
                         f"if(!el)return false;el.focus();return true;}})()"
                     ),
                     "returnByValue": True
@@ -649,7 +651,7 @@ class CDPBrowserAgent:
                 result = await self._send("Runtime.evaluate", {
                     "expression": f"""
                         (function() {{
-                            const el = document.querySelector('{selector}');
+                            const el = document.querySelector({js_string(selector)});
                             if (!el) return null;
                             const rect = el.getBoundingClientRect();
                             return {{x: rect.x + rect.width/2, y: rect.y + rect.height/2}};
@@ -679,7 +681,7 @@ class CDPBrowserAgent:
                     # Fallback to JS click; verify the selector matched an element
                     click_result = await self._send("Runtime.evaluate", {
                         "expression": (
-                            f"(function(){{const el=document.querySelector('{selector}');"
+                            f"(function(){{const el=document.querySelector({js_string(selector)});"
                             f"if(!el)return false;el.click();return true;}})()"
                         ),
                         "returnByValue": True
@@ -704,7 +706,7 @@ class CDPBrowserAgent:
                 # Focus element and clear its value entirely; verify it matched
                 clear_result = await self._send("Runtime.evaluate", {
                     "expression": (
-                        f"(function(){{const el=document.querySelector('{selector}');"
+                        f"(function(){{const el=document.querySelector({js_string(selector)});"
                         f"if(!el)return false;el.focus();el.value='';"
                         f"el.dispatchEvent(new Event('input',{{bubbles:true}}));return true;}})()"
                     ),

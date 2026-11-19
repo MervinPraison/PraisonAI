@@ -1,4 +1,4 @@
-# PraisonAI 🦞 Claw — All-in-one: dashboard + bots + gateway + agents
+# PraisonAI 🦅 Dashboard (claw) — All-in-one: dashboard + bots + gateway + agents
 #
 # Build:    docker build -f docker/Dockerfile.claw -t praisonai:claw ..
 # Run:      docker run -p 8082:8082 -e OPENAI_API_KEY=sk-xxx praisonai:claw
@@ -31,7 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# ── Install PraisonAI 🦞 ────────────────────────────────────────────────────
+# ── Install PraisonAI 🦅 ────────────────────────────────────────────────────
 # Single command installs: AIUI dashboard, agents SDK (memory/knowledge/llm/mcp),
 # bot channels (Telegram/Discord/Slack), gateway, search tools, and more.
 RUN pip install --no-cache-dir "praisonai[claw]"

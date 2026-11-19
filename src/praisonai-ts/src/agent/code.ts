@@ -5,6 +5,7 @@
  */
 
 import { Agent, SimpleAgentConfig } from './simple';
+import { buildChildEnv } from '../utils/child-env';
 
 // ============================================================================
 // Configuration Types
@@ -453,7 +454,7 @@ export function createSubprocessExecutor(
       // outlive the timeout and keep consuming host resources.
       const child = spawn(interpreter.command, [...interpreter.args, code], {
         cwd: context.workingDirectory,
-        env: { ...process.env, ...context.environment },
+        env: buildChildEnv(context.environment),
         detached: process.platform !== 'win32',
       });
 

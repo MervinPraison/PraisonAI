@@ -293,7 +293,8 @@ class SlackApproval(DurableApprovalMixin):
 
         Uses ``conversations.replies`` when available so concurrent approval
         requests on the same channel don't cross-talk.  Falls back to
-        ``conversations.history`` if replies returns an error (e.g. DMs).
+        ``conversations.history`` if replies returns an error (e.g. DMs); in a
+        non-DM channel that fallback accepts only replies in the approval thread.
 
         When a reply is not a simple yes/no keyword, the text is sent to an
         LLM to classify intent and extract any modified arguments (e.g.
@@ -314,13 +315,17 @@ class SlackApproval(DurableApprovalMixin):
                     "limit": 20,
                 }, session=session)
 
-                # Fallback to history if replies fails (some DM contexts)
+                # Fallback to history if replies fails (some DM contexts).
+                # Only a DM (``D…``) is private to the approver; in a shared
+                # channel only messages in the approval's thread may count.
+                thread_only = False
                 if not data.get("ok"):
                     data = await self._slack_api("conversations.history", {
                         "channel": channel,
                         "oldest": message_ts,
                         "limit": 10,
                     }, session=session)
+                    thread_only = not str(channel).startswith("D")
 
                 if not data.get("ok"):
                     logger.warning(f"Slack poll error: {data.get('error')}")
@@ -332,6 +337,8 @@ class SlackApproval(DurableApprovalMixin):
                         continue
                     # Skip bot messages
                     if msg.get("bot_id"):
+                        continue
+                    if thread_only and msg.get("thread_ts") != message_ts:
                         continue
 
                     text = msg.get("text", "").strip()

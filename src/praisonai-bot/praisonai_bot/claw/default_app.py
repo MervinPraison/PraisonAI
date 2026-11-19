@@ -10,7 +10,7 @@ Custom page: Feature Explorer
 import os
 
 import praisonaiui as aiui
-from praisonai_bot.integration.host_app import configure_host, create_host_app
+from praisonai_bot.integration.host_app import DASHBOARD_PAGES, configure_host, create_host_app
 
 # ── Agent definitions ───────────────────────────────────────
 AGENTS = [
@@ -61,24 +61,7 @@ def _build_praison_agents():
 
 
 configure_host(
-    pages=[
-        "chat",
-        "channels",
-        "agents",
-        "skills",
-        "memory",
-        "knowledge",
-        "cron",
-        "guardrails",
-        "sessions",
-        "usage",
-        "kanban",        # ADD
-        "jobs-board",    # ADD
-        "config",
-        "connect",       # connect editors and agents to the MCP server (aiui >= 0.3.172)
-        "logs",
-        "debug",
-    ],
+    pages=DASHBOARD_PAGES,
     agents=_build_praison_agents(),
     modules=["jobs"],
     # Chat + Canvas: tables and code the agents write open beside the chat.
@@ -91,7 +74,7 @@ configure_host(
 @aiui.welcome
 async def _welcome():
     await aiui.say(
-        "🦞 Welcome to PraisonAI Claw! Ask anything; the tables and code "
+        "🦅 Welcome to PraisonAI! Ask anything; the tables and code "
         "your agents write open in the canvas."
     )
 

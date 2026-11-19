@@ -46,18 +46,13 @@ def _resolve_and_screen_webhook_host(url: str, label: str = "Webhook URL") -> Li
     except socket.gaierror as exc:
         raise ValueError(f"{label} hostname could not be resolved") from exc
 
+    from praisonaiagents.tools.url_safety import is_blocked_ip
+
     resolved: List[str] = []
     for _family, _type, _proto, _canon, sockaddr in infos:
         ip_str = sockaddr[0]
-        ip_obj = ipaddress.ip_address(ip_str)
-        if (
-            ip_obj.is_private
-            or ip_obj.is_loopback
-            or ip_obj.is_link_local
-            or ip_obj.is_multicast
-            or ip_obj.is_reserved
-            or ip_obj.is_unspecified
-        ):
+        # Shared with url_safety: also catches IPv4 wrapped in IPv6 and CGNAT.
+        if is_blocked_ip(ipaddress.ip_address(ip_str.split("%")[0]), loopback_ok=False):
             raise ValueError(
                 f"{label} resolves to a private or restricted network address"
             )

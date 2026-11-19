@@ -357,48 +357,15 @@ class MentionsParser:
             if not spider._validate_url(url):
                 return f"# URL: {url}\n[Blocked: URL is not allowed]"
 
-            import urllib.request
-            import urllib.error
-            from urllib.parse import urljoin
+            from .url_safety import UnsafeURLError, safe_fetch
 
-            # Follow redirects manually, re-validating EVERY hop. urllib's default
-            # opener follows redirects transparently, so validating only the first
-            # hop lets a redirect land on a metadata IP or internal host (#4189).
-            class _NoRedirect(urllib.request.HTTPRedirectHandler):
-                def redirect_request(self, *args, **kwargs):
-                    return None
-
-            opener = urllib.request.build_opener(_NoRedirect)
-            current_url = url
-            redirect_statuses = {301, 302, 303, 307, 308}
-            max_redirects = 5
-            content = None
-            for _ in range(max_redirects + 1):
-                if not spider._validate_url(current_url):
-                    return f"# URL: {url}\n[Blocked: redirect target is not allowed: {current_url}]"
-                req = urllib.request.Request(
-                    current_url,
-                    headers={'User-Agent': 'Mozilla/5.0 (compatible; PraisonAI/1.0)'}
-                )
-                try:
-                    response = opener.open(req, timeout=10)
-                except urllib.error.HTTPError as http_err:
-                    if http_err.code in redirect_statuses:
-                        location = http_err.headers.get("Location")
-                        if not location:
-                            return f"# URL: {url}\n[Error fetching URL: redirect without Location]"
-                        current_url = urljoin(current_url, location)
-                        continue
-                    raise
-                with response:
-                    content = response.read().decode('utf-8', errors='ignore')
-                break
-            else:
-                return f"# URL: {url}\n[Error fetching URL: too many redirects]"
-
-            if content is None:
-                return f"# URL: {url}\n[Error fetching URL: no response]"
-            
+            # Pinned to the checked address; every redirect hop re-checked.
+            try:
+                response = safe_fetch(url, headers={'User-Agent': 'Mozilla/5.0 (compatible; PraisonAI/1.0)'}, timeout=10)
+            except UnsafeURLError as e:
+                return f"# URL: {url}\n[Blocked: {e}]"
+            response.raise_for_status()
+            content = response.text
             # Limit content size (0 means no limit)
             if self.max_file_chars > 0 and len(content) > self.max_file_chars:
                 content = content[:self.max_file_chars] + "\n... (truncated)"

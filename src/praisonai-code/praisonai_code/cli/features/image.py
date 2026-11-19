@@ -343,14 +343,14 @@ class ImageGenerateHandler(FlagHandler):
     def _save_image(self, result: Dict[str, Any], output_path: str) -> bool:
         """Save generated image to file."""
         try:
-            import requests
-            
             if 'data' in result and len(result['data']) > 0:
                 image_data = result['data'][0]
                 
                 if 'url' in image_data:
-                    # Download from URL
-                    response = requests.get(image_data['url'])
+                    # Provider-returned URL: address checked and pinned.
+                    from praisonaiagents.tools.url_safety import safe_fetch
+                    response = safe_fetch(image_data['url'], timeout=60)
+                    response.raise_for_status()
                     with open(output_path, 'wb') as f:
                         f.write(response.content)
                     return True

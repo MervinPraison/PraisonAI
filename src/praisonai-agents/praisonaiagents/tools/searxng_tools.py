@@ -31,15 +31,15 @@ def searxng_search(
         List[Dict]: Search results with title, url, and snippet keys
                    Returns error dict on failure
     """
-    # Check if requests is available
-    if util.find_spec("requests") is None:
-        error_msg = "SearxNG search requires requests package. Install with: pip install requests"
+    # Check if httpx is available
+    if util.find_spec("httpx") is None:
+        error_msg = "SearxNG search requires httpx package. Install with: pip install httpx"
         logger.error(error_msg)
         return [{"error": error_msg}]
     
     try:
-        import requests
-        from praisonaiagents.tools.url_safety import validate_searxng_url
+        import httpx
+        from praisonaiagents.tools.url_safety import safe_fetch, searxng_allowlist, validate_searxng_url
         
         # Default URL for local SearxNG instance
         url = searxng_url or "http://localhost:32768/search"
@@ -55,7 +55,7 @@ def searxng_search(
             'safesearch': '1'  # Safe search enabled
         }
         
-        response = requests.get(url, params=params, timeout=10)
+        response = safe_fetch(url, params=params, timeout=10, allowlist=searxng_allowlist())
         response.raise_for_status()
         
         raw_results = response.json().get('results', [])
@@ -71,15 +71,15 @@ def searxng_search(
             
         return results
         
-    except requests.exceptions.ConnectionError:
+    except httpx.ConnectError:
         error_msg = f"Could not connect to SearxNG at {url}. Ensure SearxNG is running."
         logger.error(error_msg)
         return [{"error": error_msg}]
-    except requests.exceptions.Timeout:
+    except httpx.TimeoutException:
         error_msg = "SearxNG search request timed out"
         logger.error(error_msg)
         return [{"error": error_msg}]
-    except requests.exceptions.RequestException as e:
+    except httpx.HTTPError as e:
         error_msg = f"SearxNG search request failed: {e}"
         logger.error(error_msg)
         return [{"error": error_msg}]

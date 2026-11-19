@@ -633,6 +633,9 @@ def serve_runtime(
     token = secrets.token_urlsafe(32)
     handler = _make_handler(token, runtime)
 
+    from praisonaiagents.agent.launch_security import require_bind_token
+
+    require_bind_token(host, token, server="warm runtime", hint="(always token-gated)")
     httpd = ThreadingHTTPServer((host, port), handler)
     bound_host, bound_port = httpd.server_address[0], httpd.server_address[1]
 
