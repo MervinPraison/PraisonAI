@@ -228,9 +228,9 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "pairing": ("praisonai_bot.cli.commands.pairing", "app", "Manage bot user pairing"),
     "identity": ("praisonai_bot.cli.commands.identity", "app", "Manage cross-platform user identity links"),
     "kanban": ("praisonai_bot.cli.commands.kanban", "app", "Kanban task management"),
-    "claw": ("praisonai_bot.cli.commands.claw", "app", "PraisonAI Dashboard (full UI)"),
+    "claw": ("praisonai_bot.cli.commands.claw", "app", "PraisonAI Dashboard (same app as: praisonai dashboard)"),
     "mint_link": ("praisonai_bot.cli.commands.mint_link", "app", "Generate gateway magic links"),
-    "dashboard": ("praisonai.cli.commands.dashboard", "app", "PraisonAI Dashboard (same as claw; --unified for Flow + Claw + UI)"),
+    "dashboard": ("praisonai.cli.commands.dashboard", "app", "PraisonAI Dashboard: chat, agents, memory, knowledge, cron and more (alias: claw)"),
 
     "browser": ("praisonai_browser.cli.commands.browser", "app", "Browser automation (extension bridge, CDP, Playwright)"),
     "browser-tool": (".commands.browser_tool", "app", "praisonai-tools browser automation (snapshot/click/navigate)"),

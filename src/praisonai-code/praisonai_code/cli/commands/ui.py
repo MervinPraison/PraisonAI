@@ -89,10 +89,12 @@ def _launch_aiui_app(
         
         resolved = default_app
 
-    # 3. Launch via aiui run
+    # 3. Launch via aiui run, in this interpreter: a bare "aiui" from PATH can be a
+    # different install (another venv or an old global copy).
     import subprocess
 
-    cmd = ["aiui", "run", str(resolved), "--port", str(port), "--host", host]
+    cmd = [sys.executable, "-m", "praisonaiui.cli", "run", str(resolved),
+           "--port", str(port), "--host", host]
     if reload:
         cmd.append("--reload")
 
@@ -100,13 +102,6 @@ def _launch_aiui_app(
     print(f"   App: {resolved}\n")
 
     try:
-        subprocess.run(cmd, check=True)
-    except FileNotFoundError:
-        # Fallback: python -m praisonaiui.cli
-        cmd = [sys.executable, "-m", "praisonaiui.cli", "run", str(resolved),
-               "--port", str(port), "--host", host]
-        if reload:
-            cmd.append("--reload")
         subprocess.run(cmd, check=True)
     except KeyboardInterrupt:
         print(f"\n🤖 {ui_name} stopped.")
