@@ -477,7 +477,7 @@ Start simple with the core SDK, or expand to full visual builders and dashboards
 
 *   **Core SDK (`praisonaiagents`)**: For pure Python development. `pip install praisonaiagents`
 *   💻 **PraisonAI CLI (`praisonai`)**: For terminal-based developers. `pip install praisonai`
-*   🦞 **Claw Dashboard**: Connect agents directly to Telegram, Slack, or Discord. `pip install "praisonai[claw]"`
+*   🦅 **PraisonAI Dashboard**: Chat, agents, memory and knowledge, and connect agents to Telegram, Slack, or Discord. `pip install "praisonai[dashboard]"`
 *   🔗 **Flow Visual Builder**: Drag-and-drop workflow creation. `pip install "praisonai[flow]"`
 *   🤖 **PraisonAI UI**: Chat with a canvas for the tables and code your agents write. `pip install "praisonai[ui]"`
 
@@ -726,13 +726,13 @@ agent.chat("Hello!")  # Auto-persists messages, runs, traces
 
 > 📖 [Full persistence docs](https://praison.ai/docs/databases/overview) — PostgreSQL, MySQL, SQLite, MongoDB, Redis, and 20+ more
 
-### 6. PraisonAI Claw 🦞 (Dashboard UI)
+### 6. PraisonAI Dashboard 🦅
 
 Connect your AI agents to **Telegram, Discord, Slack, WhatsApp** and more — all from a single command.
 
 ```bash
-pip install "praisonai[claw]"
-praisonai claw        # or: praisonai dashboard (the same app)
+pip install "praisonai[dashboard]"   # or: "praisonai[claw]" (the same extra)
+praisonai dashboard                 # or: praisonai claw (the same app)
 ```
 
 #### Required Environment Variables
@@ -742,11 +742,11 @@ Copy `.env.example` to `.env` and configure the following variables:
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `OPENAI_API_KEY` | Yes | OpenAI API key for all LLM calls |
-| `TAVILY_API_KEY` | Yes (Claw) | Tavily key for the built-in web-search tool. Get one free at https://app.tavily.com |
+| `TAVILY_API_KEY` | Yes (Dashboard) | Tavily key for the built-in web-search tool. Get one free at https://app.tavily.com |
 
 Open **http://localhost:8082** — the dashboard opens in **Chat + Canvas**: the chat on the left, and the tables, code and files your agents write on a canvas beside it (sort, copy, download, compare versions). Every other page (Agents, Memory, Knowledge, Channels, Guardrails, Cron, and more) is in the sidebar or the command palette (⌘K). Add messaging channels directly from the UI.
 
-> 📖 [Full Claw docs](https://praison.ai/docs/concepts/claw) — platform tokens, CLI options, Docker, and YAML agent mode
+> 📖 [Full Dashboard docs](https://praison.ai/docs/concepts/claw) — platform tokens, CLI options, Docker, and YAML agent mode
 
 ### 7. Langflow Integration 🔗 (Visual Flow Builder)
 
