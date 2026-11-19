@@ -53,7 +53,18 @@ def test_launch_refreshes_a_stale_home_copy(bundled, tmp_path, monkeypatch):
     monkeypatch.setattr(importlib.util, "find_spec",
                         lambda n, *a, **k: object() if n == "praisonaiui" else real_find_spec(n, *a, **k))
     calls = []
-    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: calls.append(cmd))
+
+    class _FakePopen:
+        def __init__(self, cmd, **kw):
+            calls.append(cmd)
+
+        def wait(self, timeout=None):
+            return 0
+
+        def poll(self):
+            return 0
+
+    monkeypatch.setattr(subprocess, "Popen", _FakePopen)
     home_app = tmp_path / ".praisonai" / "ui" / "app.py"
     home_app.parent.mkdir(parents=True)
     home_app.write_text(OLD, encoding="utf-8")
