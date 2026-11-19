@@ -8,8 +8,10 @@ be complete. For untrusted commands use an isolating backend from
 ``praisonai-sandbox`` (Docker, Sandlock, E2B, ...).
 
 What a run applies: the command filters, ``shell=False``, a minimal
-environment, a wall-clock timeout (``max_cpu_seconds``) and, in ``strict``
-mode, a temporary working directory.
+environment, a wall-clock timeout, CPU-time and file-size limits (plus a memory
+limit on Linux), network tools refused in ``network_isolated`` mode and, in
+``strict`` mode, a temporary working directory. Settings a host subprocess
+cannot enforce are refused or logged.
 
 Architecture:
 - SubprocessSandbox: filters a command, then runs it in a host subprocess
@@ -56,7 +58,7 @@ class SandboxMode(Enum):
     - BASIC: Deny-listed commands, patterns and paths are refused
     - STRICT: As BASIC, adds network tools to the deny list and runs in a
       temporary working directory
-    - NETWORK_ISOLATED: Same command filters as BASIC
+    - NETWORK_ISOLATED: As BASIC, and refuses network tools
     """
     DISABLED = "disabled"
     BASIC = "basic"
@@ -266,7 +268,7 @@ class SubprocessSandbox:
     
     Applies:
     - Command validation (deny lists over the command text)
-    - A wall-clock timeout
+    - A wall-clock timeout and CPU, file-size and (on Linux) memory limits
     - A minimal environment
     - A temporary working directory in strict mode
     """
