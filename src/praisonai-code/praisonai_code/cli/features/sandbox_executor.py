@@ -1,13 +1,21 @@
 """
-Sandboxed Execution System for PraisonAI CLI.
+Command filter and runner for PraisonAI CLI.
 
-Inspired by Codex CLI's sandbox modes for secure command execution.
-Policy/validation helpers for an isolated execution environment.
+Every mode checks the command text against deny lists and then runs it on the
+host as the current user. It is not isolation and not a security boundary (see
+SECURITY.md, "Not a security boundary"): a filter over a command string cannot
+be complete. For untrusted commands use an isolating backend from
+``praisonai-sandbox`` (Docker, Sandlock, E2B, ...).
+
+What a run applies: the command filters, ``shell=False``, a minimal
+environment, a wall-clock timeout (``max_cpu_seconds``) and, in ``strict``
+mode, a temporary working directory. ``max_memory_mb``, ``max_file_size_mb``,
+``max_processes``, ``allowed_paths``, ``temp_dir``, ``allow_network`` and
+``allowed_hosts`` are recorded on the policy but not enforced.
 
 Architecture:
-- SandboxExecutor: Base class for sandboxed execution
-- SubprocessSandbox: Subprocess-based isolation with resource limits
-- SandboxPolicy: Configurable security policies
+- SubprocessSandbox: filters a command, then runs it in a host subprocess
+- SandboxPolicy: filter lists and settings for a mode
 
 Note: nothing in the CLI routes agent commands through this module, and no
 --sandbox flag enables it. OS-level containment of agent shell commands is
@@ -34,12 +42,14 @@ logger = logging.getLogger(__name__)
 
 class SandboxMode(Enum):
     """
-    Sandbox execution modes.
+    Command filter modes. Names are kept for compatibility; every mode runs
+    the command on the host.
     
-    - DISABLED: No sandboxing (default)
-    - BASIC: Basic isolation with resource limits
-    - STRICT: Strict isolation with filesystem restrictions
-    - NETWORK_ISOLATED: No network access
+    - DISABLED: No filtering (default)
+    - BASIC: Deny-listed commands, patterns and paths are refused
+    - STRICT: As BASIC, adds network tools to the deny list and runs in a
+      temporary working directory
+    - NETWORK_ISOLATED: Same filters as BASIC. Network access is not blocked.
     """
     DISABLED = "disabled"
     BASIC = "basic"
@@ -63,7 +73,9 @@ class SandboxMode(Enum):
 @dataclass
 class SandboxPolicy:
     """
-    Security policy for sandbox execution.
+    Filter lists and settings for one mode. Only the command, pattern and
+    path filters and ``max_cpu_seconds`` (as a wall-clock timeout) take
+    effect; the other fields are not enforced.
     """
     mode: SandboxMode = SandboxMode.DISABLED
     
@@ -222,13 +234,13 @@ class CommandValidator:
 
 class SubprocessSandbox:
     """
-    Subprocess-based sandbox execution.
+    Filters a command, then runs it in a host subprocess (not isolation).
     
-    Provides basic isolation through:
-    - Resource limits (timeout, memory via ulimit)
-    - Working directory isolation
-    - Environment variable control
-    - Command validation
+    Applies:
+    - Command validation (deny lists over the command text)
+    - A wall-clock timeout
+    - A minimal environment
+    - A temporary working directory in strict mode
     """
     
     def __init__(
@@ -286,7 +298,7 @@ class SubprocessSandbox:
         capture_output: bool = True
     ) -> ExecutionResult:
         """
-        Execute a command in the sandbox.
+        Filter a command, then run it on the host.
         
         Args:
             command: Command to execute
@@ -475,7 +487,7 @@ class SandboxExecutorHandler:
         Initialize the sandbox.
         
         Args:
-            mode: Sandbox mode (disabled, basic, strict, network_isolated)
+            mode: Filter mode (disabled, basic, strict, network_isolated)
             working_dir: Working directory for execution
             policy: Optional custom policy
             
