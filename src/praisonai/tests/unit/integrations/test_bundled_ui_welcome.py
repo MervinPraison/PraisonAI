@@ -58,5 +58,18 @@ def test_realtime_ui_turns_on_the_composer_microphone():
 
 
 def test_claw_lists_the_connect_page():
+    from praisonai_bot.integration.host_app import DASHBOARD_PAGES
+
     src = (Path(praisonai_bot.__file__).parent / "claw" / "default_app.py").read_text(encoding="utf-8")
-    assert '"connect"' in src
+    assert "pages=DASHBOARD_PAGES" in src
+    assert "connect" in DASHBOARD_PAGES
+
+
+def test_ui_chat_shows_the_dashboard_pages():
+    """`praisonai ui` and `praisonai dashboard` show the same sidebar pages."""
+    tree = ast.parse((WRAPPER / "ui_chat" / "default_app.py").read_text(encoding="utf-8"))
+    preset = next(n for n in ast.walk(tree)
+                  if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "UIPreset")
+    kwargs = {kw.arg: ast.unparse(kw.value) for kw in preset.keywords}
+    assert kwargs["pages"] == "DASHBOARD_PAGES"
+    assert "sidebar" not in kwargs and "page_header" not in kwargs  # UIPreset defaults: shown
