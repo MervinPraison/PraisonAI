@@ -10,8 +10,10 @@ import shlex
 from typing import Any, Dict, Tuple, List
 from .base import FlagHandler
 
-# Executables allowed as MCP server commands from the CLI.
-# The SDK MCP() class is intentionally unrestricted — developers control their own inputs.
+# Executables allowed as MCP server commands from the CLI. This list and the
+# flag list below only catch mistakes: the --mcp flag is the operator's own
+# input. A project file is untrusted; the config loaders drop the local servers
+# it declares unless the operator trusts them (praisonaiagents.mcp.trust).
 ALLOWED_MCP_COMMANDS = {
     "npx", "npx.cmd", "npx.exe",
     "node", "node.exe",
@@ -229,8 +231,9 @@ class MCPHandler(FlagHandler):
         try:
             if is_remote:
                 url = server.get("url")
-                if not url:
-                    self.print_status("Remote MCP server missing 'url'", "error")
+                from praisonaiagents.mcp.trust import is_mcp_url
+                if not is_mcp_url(url):  # MCP() would run any other string as a command
+                    self.print_status(f"Remote MCP server url is not an http(s) or ws(s) URL: {url!r}", "error")
                     return None
                 kwargs: Dict[str, Any] = {"timeout": timeout}
                 headers = server.get("headers")

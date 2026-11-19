@@ -107,7 +107,8 @@ def test_approval_decision_includes_auto_approved_tools():
     registry._agent_tool_auto_approve.clear()
     registry.clear_approved()
 
-    registry.add_requirement("read_file", "high")
+    # Skill grants cover low-risk tools only (they never widen approval).
+    registry.add_requirement("read_file", "low")
     registry.auto_approve_tool("read_file", agent_name="agent1")
 
     decision = registry.approve_sync("agent1", "read_file", {})
@@ -123,7 +124,8 @@ async def test_async_approval_decision_includes_auto_approved_tools():
     registry._agent_tool_auto_approve.clear()
     registry.clear_approved()  # context-var reset so "Already approved" doesn't fire
 
-    registry.add_requirement("read_file", "high")
+    # Skill grants cover low-risk tools only (they never widen approval).
+    registry.add_requirement("read_file", "low")
     registry.auto_approve_tool("read_file", agent_name="agent1")
 
     decision = await registry.approve_async("agent1", "read_file", {})

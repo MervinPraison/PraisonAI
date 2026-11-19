@@ -318,35 +318,10 @@ def _load_mcp_tools(verbose: bool = False) -> Dict[str, Callable]:
         logger.debug("MCP server collection failed: %s", exc)
         return tools
 
-    # Trust gate for project-declared local (stdio) servers. A cloned repo can
-    # declare an allowed interpreter running a repo-controlled script; starting
-    # that automatically on session open is host code execution the operator did
-    # not consent to. The executable allowlist limits *which* binary runs, not
-    # *whose* script -- so local servers from project config require an explicit
-    # opt-in. Remote (URL) servers do not spawn local processes and are left as
-    # is; the ad-hoc ``PRAISONAI_MCP`` env is operator-supplied and so trusted.
-    trust = os.environ.get("PRAISONAI_MCP_TRUST", "").strip().lower()
-    trusted = trust in ("1", "true", "yes", "on")
-    if servers and not trusted:
-        untrusted_local = [
-            s for s in servers
-            if not (s.get("type") == "remote" or s.get("url"))
-        ]
-        if untrusted_local:
-            names = ", ".join(
-                str(s.get("name", "?")) for s in untrusted_local
-            )
-            logger.warning(
-                "Skipping %d project-configured local MCP server(s) [%s]: set "
-                "PRAISONAI_MCP_TRUST=1 to allow this workspace to start local "
-                "MCP subprocesses.",
-                len(untrusted_local), names,
-            )
-        servers = [
-            s for s in servers
-            if (s.get("type") == "remote" or s.get("url"))
-        ]
-
+    # Project-declared servers were already checked by the resolver
+    # (praisonaiagents.mcp.trust): a project file starts only servers the
+    # operator trusts, and only real URLs count as remote. The ad-hoc
+    # ``PRAISONAI_MCP`` env is operator-supplied and so trusted.
     env_mcp = os.environ.get("PRAISONAI_MCP") or None
     env_mcp_env = os.environ.get("PRAISONAI_MCP_ENV") or None
     if not servers and not env_mcp:

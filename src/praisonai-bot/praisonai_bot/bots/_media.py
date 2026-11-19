@@ -25,13 +25,10 @@ stdlib for fetching so no optional dependency is required.
 
 from __future__ import annotations
 
-import ipaddress
 import logging
 import os
-import socket
 import tempfile
 from typing import Optional
-from urllib.parse import urlparse
 
 logger = logging.getLogger(__name__)
 
@@ -114,39 +111,12 @@ def _matches_kind(data: bytes, kind: str) -> bool:
 def _is_safe_url(url: str) -> bool:
     """Return True only for http(s) URLs whose host is a public address.
 
-    Blocks SSRF vectors: non-http(s) schemes, and hosts that resolve to
-    loopback/private/link-local/reserved IP ranges.
+    Delegates to the shared ``url_safety`` check (non-global addresses,
+    IPv4 carried in IPv6, ambiguous numeric hosts and parser tricks refused).
     """
-    try:
-        parsed = urlparse(url)
-    except Exception:
-        return False
-    if parsed.scheme not in ("http", "https"):
-        return False
-    host = parsed.hostname
-    if not host:
-        return False
-    try:
-        infos = socket.getaddrinfo(host, None)
-    except Exception as e:
-        logger.warning("Inbound media URL host resolution failed: %s", e)
-        return False
-    for info in infos:
-        addr = info[4][0]
-        try:
-            ip = ipaddress.ip_address(addr)
-        except ValueError:
-            return False
-        if (
-            ip.is_private
-            or ip.is_loopback
-            or ip.is_link_local
-            or ip.is_reserved
-            or ip.is_multicast
-            or ip.is_unspecified
-        ):
-            return False
-    return True
+    from praisonaiagents.tools.url_safety import is_safe_http_url
+
+    return is_safe_http_url(url, allow_local=False)
 
 
 # Public alias so adapters that download media themselves (e.g. Slack fetching
@@ -157,51 +127,32 @@ def is_safe_url(url: str) -> bool:
     return _is_safe_url(url)
 
 
-class _SafeRedirectHandler:
-    """Re-validate every redirect target so SSRF cannot be reached via 3xx."""
-
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        if not _is_safe_url(newurl):
-            raise InboundMediaError(
-                f"Refusing to follow inbound media redirect to unsafe URL: {newurl!r}"
-            )
-        import urllib.request
-        return urllib.request.HTTPRedirectHandler.redirect_request(
-            self, req, fp, code, msg, headers, newurl
-        )
-
-
 def _fetch_url(url: str, max_bytes: int) -> bytes:
     """Fetch ``url`` with an SSRF guard and hard size cap. Returns bytes.
 
-    The initial URL is vetted by :func:`_is_safe_url`, and every redirect
-    target is re-vetted so a public URL cannot bounce to a private host.
+    ``url_safety.safe_stream`` resolves the host once, connects to the checked
+    address and re-checks every redirect hop.
     """
+    from praisonaiagents.tools.url_safety import UnsafeURLError, safe_stream
+
     if not _is_safe_url(url):
         raise InboundMediaError(f"Refusing to fetch unsafe inbound media URL: {url!r}")
-    import urllib.request
-
-    class _Handler(_SafeRedirectHandler, urllib.request.HTTPRedirectHandler):
-        pass
-
-    opener = urllib.request.build_opener(_Handler())
-    req = urllib.request.Request(url, headers={"User-Agent": "PraisonAI-Bot"})
-    with opener.open(req, timeout=30) as resp:  # noqa: S310 - guarded above
-        # Reject oversize up front when the server declares a length.
-        declared = resp.headers.get("Content-Length")
-        if declared is not None:
-            try:
-                if int(declared) > max_bytes:
-                    raise InboundMediaError(
-                        f"Inbound media exceeds {max_bytes} bytes (declared {declared})"
-                    )
-            except ValueError:
-                pass
-        # Read one byte past the cap so we can detect overflow without
-        # streaming the whole payload into memory.
-        data = resp.read(max_bytes + 1)
-    if len(data) > max_bytes:
-        raise InboundMediaError(f"Inbound media exceeds {max_bytes} bytes")
+    data = b""
+    try:
+        with safe_stream(url, headers={"User-Agent": "PraisonAI-Bot"}, timeout=30,
+                         allow_local=False) as resp:
+            resp.raise_for_status()
+            declared = resp.headers.get("Content-Length", "")
+            if declared.isdigit() and int(declared) > max_bytes:
+                raise InboundMediaError(
+                    f"Inbound media exceeds {max_bytes} bytes (declared {declared})"
+                )
+            for chunk in resp.iter_bytes():
+                data += chunk
+                if len(data) > max_bytes:
+                    raise InboundMediaError(f"Inbound media exceeds {max_bytes} bytes")
+    except UnsafeURLError as exc:
+        raise InboundMediaError(f"Refusing to fetch unsafe inbound media URL: {exc}") from None
     return data
 
 

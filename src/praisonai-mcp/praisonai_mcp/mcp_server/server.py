@@ -184,7 +184,11 @@ class MCPServer:
 
         requirement = get_operation_scopes(method)
         if requirement is None:
-            return None
+            if method in ("initialize", "ping") or str(method).startswith("notifications/"):
+                return None
+            from .auth.scopes import ScopeRequirement
+
+            requirement = ScopeRequirement(["admin"])  # unmapped methods fail closed
 
         if self._scope_manager is None:
             self._scope_manager = ScopeManager()
@@ -317,6 +321,10 @@ class MCPServer:
             self._protocol_version = PROTOCOL_VERSION
         
         logger.info(f"Client initialized: {self._client_info}, protocol: {self._protocol_version}")
+        # Which client connected and when, for `praisonai connect` (local file).
+        from praisonai_mcp.connect.probe import record
+
+        record(self._client_info, getattr(self, "_transport_name", "stdio"))
         
         result = {
             "protocolVersion": self._protocol_version,
@@ -604,6 +612,8 @@ class MCPServer:
             endpoint: MCP endpoint path
         """
         from .transports.http_stream import HTTPStreamTransport
+
+        self._transport_name = "http"
         
         transport = HTTPStreamTransport(
             server=self,

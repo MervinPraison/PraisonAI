@@ -44,6 +44,45 @@ def _is_safe_crawl_url(url: str) -> bool:
     return is_safe_http_url(url)
 
 
+async def _route_guard(route) -> None:
+    """Abort a browser request whose http(s) URL fails the SSRF check."""
+    url = route.request.url
+    if url.startswith(("http://", "https://")) and not await asyncio.to_thread(_is_safe_crawl_url, url):
+        await route.abort()
+    else:
+        await route.fallback()
+
+
+async def _guard_page(page, context=None, **kwargs):
+    """crawl4ai hook: every page request (subresources, meta-refresh and script
+    navigations) must pass the SSRF check before the browser sends it."""
+    await page.route("**/*", _route_guard)
+    return page
+
+
+def _guard_crawler(crawler):
+    """Install :func:`_guard_page` on a crawl4ai crawler and return it.
+
+    HTTP 3xx hops are followed inside the browser without reaching the route
+    handler, so results also go through :func:`_refuse_blocked_final`.
+
+    The browser resolves and connects on its own, so its requests cannot all be
+    pinned to a checked address: a redirect hop is sent before the final URL is
+    checked (its response is not returned). Strict setups should also add a
+    network egress rule that blocks internal addresses for the crawler host."""
+    crawler.crawler_strategy.set_hook("on_page_context_created", _guard_page)
+    return crawler
+
+
+def _refuse_blocked_final(result):
+    """Mark a crawl result failed when its final URL fails the SSRF check."""
+    final = getattr(result, "redirected_url", None) or ""
+    if final.startswith(("http://", "https://")) and not _is_safe_crawl_url(final):
+        result.success = False
+        result.error_message = f"URL blocked by SSRF safety check: {final}"
+    return result
+
+
 def _blocked_url_result(url: str) -> Dict[str, Any]:
     """Uniform error payload for a URL rejected by SSRF validation."""
     return {
@@ -139,7 +178,7 @@ class Crawl4AITools:
                 verbose=self.verbose,
                 browser_type=self.browser_type
             )
-            self._crawler = AsyncWebCrawler(config=browser_config)
+            self._crawler = _guard_crawler(AsyncWebCrawler(config=browser_config))
             try:
                 await self._crawler.start()
             except Exception as e:
@@ -213,7 +252,7 @@ class Crawl4AITools:
                 cache_mode=CacheMode.BYPASS if bypass_cache else CacheMode.ENABLED
             )
             
-            result = await crawler.arun(url=url, config=config)
+            result = _refuse_blocked_final(await crawler.arun(url=url, config=config))
             
             if not result.success:
                 return {"error": f"Crawl failed: {result.error_message}", "success": False}
@@ -299,7 +338,7 @@ class Crawl4AITools:
             fetched: Dict[str, Dict[str, Any]] = {}
 
             def _record(result) -> None:
-                if result.success:
+                if _refuse_blocked_final(result).success:
                     fetched[result.url] = {
                         "success": True,
                         "url": result.url,
@@ -375,7 +414,7 @@ class Crawl4AITools:
                 cache_mode=CacheMode.BYPASS if bypass_cache else CacheMode.ENABLED
             )
             
-            result = await crawler.arun(url=url, config=config)
+            result = _refuse_blocked_final(await crawler.arun(url=url, config=config))
             
             if not result.success:
                 return {"error": f"Extraction failed: {result.error_message}", "success": False}
@@ -454,7 +493,7 @@ class Crawl4AITools:
                 cache_mode=CacheMode.BYPASS if bypass_cache else CacheMode.ENABLED
             )
             
-            result = await crawler.arun(url=url, config=config)
+            result = _refuse_blocked_final(await crawler.arun(url=url, config=config))
             
             if not result.success:
                 return {"error": f"LLM extraction failed: {result.error_message}", "success": False}

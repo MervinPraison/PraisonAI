@@ -284,8 +284,14 @@ class TestShellSubstitution:
                 assert result.strip() == "Output: hi"
 
     def test_frontmatter_allow_shell_enables(self):
-        """allow_shell: true frontmatter enables substitution for that command."""
-        with tempfile.TemporaryDirectory() as tmpdir:
+        """allow_shell: true frontmatter enables substitution for a user command.
+
+        (A project command cannot grant itself shell; see
+        tests/unit/test_project_trust_keys_cli.py in praisonai-code.)
+        """
+        with tempfile.TemporaryDirectory() as tmpdir, patch.dict(
+            "os.environ", {"PRAISONAI_HOME": tmpdir}
+        ):
             commands_dir = Path(tmpdir) / "commands"
             commands_dir.mkdir()
             (commands_dir / "diff.md").write_text(
@@ -376,14 +382,27 @@ class TestShellSubstitution:
                     interpolate_command_template("diff")
 
     def test_config_allow_shell_enables(self):
-        """commands.allow_shell: true in project config enables substitution."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            project = Path(tmpdir)
+        """commands.allow_shell: true in the user config enables substitution.
+
+        The same key in a project config is ignored (a project file cannot
+        grant itself shell).
+        """
+        with tempfile.TemporaryDirectory() as tmpdir, patch.dict(
+            "os.environ", {"HOME": tmpdir, "PRAISONAI_HOME": str(Path(tmpdir) / "home")}
+        ):
+            project = Path(tmpdir) / "project"
             praisonai_dir = project / ".praisonai"
             commands_dir = praisonai_dir / "commands"
             commands_dir.mkdir(parents=True)
             (commands_dir / "diff.md").write_text("Output: !`echo hi`\n")
             (praisonai_dir / "config.yaml").write_text(
+                "commands:\n  allow_shell: true\n"
+            )
+            from praisonai.cli.configuration.resolver import ConfigResolver
+            cfg = ConfigResolver(cwd=project).resolve(force_refresh=True)
+            assert (cfg.extra.get("commands") or {}).get("allow_shell") is None
+            (Path(tmpdir) / ".praisonai").mkdir()
+            (Path(tmpdir) / ".praisonai" / "config.yaml").write_text(
                 "commands:\n  allow_shell: true\n"
             )
 

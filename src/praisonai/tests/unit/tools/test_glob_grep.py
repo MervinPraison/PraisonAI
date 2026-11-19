@@ -2,6 +2,15 @@
 import os
 import tempfile
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _temp_dirs_are_the_workspace(monkeypatch):
+    """These tests search temp directories, so the temp root is the workspace
+    (the tools stay inside the cwd unless PRAISONAI_WORKSPACE says otherwise)."""
+    monkeypatch.setenv("PRAISONAI_WORKSPACE", tempfile.gettempdir())
+
 
 class TestGlobTool:
     """Tests for the glob tool."""

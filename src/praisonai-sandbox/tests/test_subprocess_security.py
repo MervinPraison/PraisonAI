@@ -23,6 +23,13 @@ try:
 except ImportError as e:
     pytest.skip(f"Could not import sandbox modules: {e}", allow_module_level=True)
 
+import dataclasses
+
+# A plain subprocess refuses allow_network=False / allow_file_write=False (it
+# cannot keep them); these tests are about the other strict() fields.
+_ENFORCEABLE_STRICT = dataclasses.replace(
+    SecurityPolicy.strict(), allow_network=True, allow_file_write=True)
+
 
 class TestEnvironmentIsolation:
     """Tests for SecurityPolicy-based environment isolation."""
@@ -32,7 +39,7 @@ class TestEnvironmentIsolation:
         """Strict policy should not inherit host environment variables."""
         config = SandboxConfig(
             env={},
-            security_policy=SecurityPolicy.strict()
+            security_policy=_ENFORCEABLE_STRICT
         )
         sandbox = SubprocessSandbox(config)
         
@@ -60,7 +67,7 @@ class TestEnvironmentIsolation:
         """When allow_network=True, proxy vars should be passed through."""
         policy = SecurityPolicy(
             allow_network=True,
-            allow_file_write=False,
+            allow_file_write=True,
             max_output_size=1024 * 1024
         )
         
@@ -91,7 +98,7 @@ class TestEnvironmentIsolation:
             max_output_size=1024 * 1024
         )
         
-        config = SandboxConfig(env={}, security_policy=policy)
+        config = SandboxConfig(env={}, security_policy=_ENFORCEABLE_STRICT)
         sandbox = SubprocessSandbox(config)
         
         # Set proxy vars in host environment
@@ -117,7 +124,7 @@ class TestEnvironmentIsolation:
         
         config = SandboxConfig(
             env=explicit_env,
-            security_policy=SecurityPolicy.strict()
+            security_policy=_ENFORCEABLE_STRICT
         )
         sandbox = SubprocessSandbox(config)
         
@@ -135,7 +142,7 @@ class TestEnvironmentIsolation:
         
         config = SandboxConfig(
             env=config_env,
-            security_policy=SecurityPolicy.strict()
+            security_policy=_ENFORCEABLE_STRICT
         )
         sandbox = SubprocessSandbox(config)
         
@@ -256,7 +263,7 @@ class TestOutputSizeLimit:
         """Output should be truncated when it exceeds max_output_size."""
         # Create a policy with small output limit for testing
         policy = SecurityPolicy(
-            allow_network=False,
+            allow_network=True,
             allow_file_write=True,
             max_output_size=100  # Very small for testing
         )
@@ -283,7 +290,7 @@ class TestOutputSizeLimit:
     async def test_small_output_not_truncated(self):
         """Small output should not be truncated."""
         policy = SecurityPolicy(
-            allow_network=False,
+            allow_network=True,
             allow_file_write=True,
             max_output_size=1000
         )
@@ -412,7 +419,7 @@ class TestSecurityRegressions:
         with patch.dict(os.environ, sensitive_env):
             config = SandboxConfig(
                 env={},
-                security_policy=SecurityPolicy.strict()
+                security_policy=_ENFORCEABLE_STRICT
             )
             sandbox = SubprocessSandbox(config)
             
@@ -425,7 +432,7 @@ class TestSecurityRegressions:
 
     def test_temp_dir_fallback_security(self):
         """Ensure /tmp fallback is documented and appropriate.""" 
-        config = SandboxConfig(security_policy=SecurityPolicy.strict())
+        config = SandboxConfig(security_policy=_ENFORCEABLE_STRICT)
         sandbox = SubprocessSandbox(config)
         
         # Before start(), _temp_dir is None, should fall back to /tmp
@@ -475,7 +482,7 @@ class TestShellPayloadScanning:
         from praisonai_sandbox import SubprocessSandbox
         from praisonaiagents.sandbox import SandboxConfig, SecurityPolicy
 
-        policy = SecurityPolicy(allow_subprocess=True, blocked_paths=["/etc/passwd"])
+        policy = SecurityPolicy(allow_network=True, allow_subprocess=True, blocked_paths=["/etc/passwd"])
         sandbox = SubprocessSandbox(config=SandboxConfig(security_policy=policy))
         await sandbox.start()
         try:

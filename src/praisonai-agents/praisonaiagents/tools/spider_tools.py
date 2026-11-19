@@ -98,7 +98,6 @@ class SpiderTools:
     
     def __init__(self):
         """Initialize SpiderTools and check for required packages."""
-        self._session = None
         
     def _validate_url(self, url: str) -> bool:
         """
@@ -140,25 +139,6 @@ class SpiderTools:
         except Exception:
             return False
         
-    def _get_session(self):
-        """Get or create requests session with common headers."""
-        if util.find_spec('requests') is None:
-            error_msg = "requests package is not available. Please install it using: pip install requests"
-            logger.error(error_msg)
-            return None
-            
-        if self._session is None:
-            import requests
-            self._session = requests.Session()
-            self._session.headers.update({
-                'User-Agent': 'Mozilla/5.0 (compatible; PraisonAI/1.0; +http://praisonai.com/bot)',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Connection': 'keep-alive',
-            })
-        return self._session
-
     def scrape_page(
         self,
         url: str,
@@ -187,42 +167,18 @@ class SpiderTools:
             if not self._validate_url(url):
                 return {"error": f"Invalid or potentially dangerous URL: {url}"}
             
-            session = self._get_session()
-            if session is None:
-                return {"error": "requests package not available"}
-
             # Import BeautifulSoup only when needed
             if util.find_spec('bs4') is None:
                 error_msg = "bs4 package is not available. Please install it using: pip install beautifulsoup4"
                 logger.error(error_msg)
                 return {"error": error_msg}
             from bs4 import BeautifulSoup
+            from .url_safety import safe_fetch
 
-            # Make request with manual redirect validation (SSRF-safe)
-            current_url = url
-            redirect_statuses = {301, 302, 303, 307, 308}
-            max_redirects = 5
-            response = None
-            for _ in range(max_redirects + 1):
-                if not self._validate_url(current_url):
-                    return {"error": f"Invalid or blocked redirect target: {current_url}"}
-                response = session.get(
-                    current_url,
-                    timeout=timeout,
-                    verify=verify_ssl,
-                    allow_redirects=False,
-                )
-                if response.status_code not in redirect_statuses:
-                    break
-                location = response.headers.get("Location")
-                if not location:
-                    break
-                current_url = urljoin(current_url, location)
-            else:
-                return {"error": "Too many redirects"}
-
-            if response is None:
-                return {"error": "Request failed"}
+            # Pinned to the checked address; every redirect hop re-checked.
+            ua = 'Mozilla/5.0 (compatible; PraisonAI/1.0; +http://praisonai.com/bot)'
+            response = safe_fetch(url, headers={'User-Agent': ua}, timeout=timeout, verify=verify_ssl)
+            current_url = str(response.url)
             response.raise_for_status()
             
             # Parse HTML
@@ -392,6 +348,8 @@ class SpiderTools:
         try:
             # Create output directory if needed
             if output_dir:
+                from .path_safety import resolve_inside
+                output_dir = resolve_inside(None, output_dir)  # stays inside the cwd
                 os.makedirs(output_dir, exist_ok=True)
             
             # Initialize crawl state

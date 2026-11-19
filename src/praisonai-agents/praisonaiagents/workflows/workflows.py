@@ -5021,6 +5021,13 @@ CONCISE SUMMARY:"""
                     _template_ok = os.environ.get("PRAISONAI_ALLOW_TEMPLATE_TOOLS", "").strip().lower() in (
                         "1", "true", "yes", "on"
                     )
+                    if _local_ok and not _template_ok:
+                        # The local-tools flag covers the working directory only;
+                        # a registry or outside recipe needs the template flag.
+                        try:
+                            tools_py.resolve().relative_to(Path.cwd().resolve())
+                        except ValueError:
+                            _local_ok = False
                     if _local_ok or _template_ok:
                         import importlib.util
                         spec = importlib.util.spec_from_file_location("recipe_tools", tools_py)
@@ -5031,8 +5038,9 @@ CONCISE SUMMARY:"""
                         tools_snapshot = (str(tools_py.resolve()), tools_content)
                     else:
                         logger.warning(
-                            "Skipping included recipe tools.py: set PRAISONAI_ALLOW_LOCAL_TOOLS "
-                            "or PRAISONAI_ALLOW_TEMPLATE_TOOLS to enable."
+                            "Skipping included recipe tools.py at %s: set PRAISONAI_ALLOW_TEMPLATE_TOOLS "
+                            "(or PRAISONAI_ALLOW_LOCAL_TOOLS for a recipe inside the working "
+                            "directory) to enable.", tools_py,
                         )
                         recipe_module = None
                     if recipe_module is not None:

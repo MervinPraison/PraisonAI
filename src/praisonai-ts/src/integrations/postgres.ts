@@ -9,11 +9,15 @@ export interface PostgresConfig {
   connectionUrl: string;
   /** Schema to use (default: public) */
   schema?: string;
-  /** Read-only mode (default: true for safety) */
+  /**
+   * Read-only mode (default: true). Enforced by PostgreSQL: each statement runs
+   * alone in a READ ONLY transaction. For a hard boundary also connect with a
+   * database role that has only the grants it needs.
+   */
   readOnly?: boolean;
-  /** Allowed tables (whitelist) */
+  /** Allowed tables (whitelist); checked against the tables a statement locks */
   allowedTables?: string[];
-  /** Blocked tables (blacklist) */
+  /** Blocked tables (blacklist); checked against the tables a statement locks */
   blockedTables?: string[];
   /** Maximum rows to return (default: 100) */
   maxRows?: number;
@@ -94,6 +98,19 @@ export async function createNLPostgres(config: PostgresConfig): Promise<NLPostgr
   await client.connect();
   return client;
 }
+
+let statementCount = 0;
+
+/** Tables, views and foreign tables the current transaction holds a lock on. */
+const TABLES_LOCKED_SQL = `
+  SELECT DISTINCT n.nspname AS schema, c.relname AS name
+  FROM pg_locks l
+  JOIN pg_class c ON c.oid = l.relation
+  JOIN pg_namespace n ON n.oid = c.relnamespace
+  WHERE l.pid = pg_backend_pid() AND l.locktype = 'relation'
+    AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+    AND n.nspname NOT IN ('pg_catalog', 'information_schema')
+    AND n.nspname NOT LIKE 'pg_toast%'`;
 
 export class NLPostgresClient {
   private config: PostgresConfig;
@@ -180,13 +197,7 @@ export class NLPostgresClient {
     const tableMap = new Map<string, TableSchema>();
     
     for (const row of result.rows) {
-      // Check allowed/blocked tables
-      if (this.config.allowedTables && !this.config.allowedTables.includes(row.table_name)) {
-        continue;
-      }
-      if (this.config.blockedTables && this.config.blockedTables.includes(row.table_name)) {
-        continue;
-      }
+      if (!this.isTableAllowed(row.table_name)) continue;
 
       if (!tableMap.has(row.table_name)) {
         tableMap.set(row.table_name, {
@@ -237,40 +248,65 @@ export class NLPostgresClient {
     return context;
   }
 
+  private isTableAllowed(name: string): boolean {
+    const { allowedTables, blockedTables } = this.config;
+    if (allowedTables && !allowedTables.includes(name)) return false;
+    return !(blockedTables && blockedTables.includes(name));
+  }
+
   /**
    * Execute a raw SQL query.
+   *
+   * The statement runs on its own connection inside a transaction that is
+   * READ ONLY when `readOnly` is set, so PostgreSQL itself refuses writes. It
+   * is sent as a named prepared statement (extended protocol), which PostgreSQL
+   * limits to one statement, so an embedded `COMMIT;` cannot end the
+   * transaction. Table lists are checked against the relations the statement
+   * locked, which covers views and functions, before any row is returned.
    */
   async executeSQL(sql: string): Promise<QueryResult> {
     if (!this.connected) {
       throw new Error('Not connected to database');
     }
 
-    // Safety check for read-only mode
-    if (this.config.readOnly) {
-      const normalizedSQL = sql.trim().toLowerCase();
-      const writeOperations = ['insert', 'update', 'delete', 'drop', 'alter', 'create', 'truncate'];
-      
-      for (const op of writeOperations) {
-        if (normalizedSQL.startsWith(op)) {
-          throw new Error(`Write operation '${op}' not allowed in read-only mode`);
-        }
+    const statement = sql.trim().replace(/;\s*$/, '');
+    // Add LIMIT if not present
+    const hasLimit = /\blimit\s+\d+/i.test(statement);
+    const finalSQL = hasLimit ? statement : `${statement} LIMIT ${this.config.maxRows}`;
+
+    const client = await this.pool.connect();
+    let open = true;
+    try {
+      await client.query(this.config.readOnly ? 'BEGIN READ ONLY' : 'BEGIN');
+      const startTime = Date.now();
+      const result = await client.query({ name: `praisonai_nlq_${++statementCount}`, text: finalSQL });
+      const executionTime = Date.now() - startTime;
+      await this.checkTablesUsed(client);
+      await client.query(this.config.readOnly ? 'ROLLBACK' : 'COMMIT');
+      open = false;
+      return {
+        rows: result.rows,
+        rowCount: result.rowCount,
+        fields: result.fields?.map((f: any) => ({ name: f.name, type: f.dataTypeID?.toString() })) || [],
+        executionTime,
+      };
+    } finally {
+      let broken = false;
+      if (open) await client.query('ROLLBACK').catch(() => { broken = true; });
+      client.release(broken || undefined);
+    }
+  }
+
+  /** Throw if the current transaction locked a table outside allowedTables/blockedTables. */
+  private async checkTablesUsed(client: any): Promise<void> {
+    if (!this.config.allowedTables && !this.config.blockedTables) return;
+    const locked = await client.query(TABLES_LOCKED_SQL);
+    for (const row of locked.rows) {
+      const name = row.schema === this.config.schema ? row.name : `${row.schema}.${row.name}`;
+      if (!this.isTableAllowed(name)) {
+        throw new Error(`Table '${name}' is not allowed by allowedTables/blockedTables`);
       }
     }
-
-    // Add LIMIT if not present
-    const hasLimit = /\blimit\s+\d+/i.test(sql);
-    const finalSQL = hasLimit ? sql : `${sql} LIMIT ${this.config.maxRows}`;
-
-    const startTime = Date.now();
-    const result = await this.pool.query(finalSQL);
-    const executionTime = Date.now() - startTime;
-
-    return {
-      rows: result.rows,
-      rowCount: result.rowCount,
-      fields: result.fields?.map((f: any) => ({ name: f.name, type: f.dataTypeID?.toString() })) || [],
-      executionTime,
-    };
   }
 
   /**
@@ -400,7 +436,7 @@ Always be helpful and explain your findings clearly.`;
     
     for (const table of this.schema) {
       try {
-        const result = await this.executeSQL(`SELECT * FROM ${table.name} LIMIT 3`);
+        const result = await this.executeSQL(`SELECT * FROM "${table.name.replace(/"/g, '""')}" LIMIT 3`);
         sampleData[table.name] = result.rows;
       } catch {
         sampleData[table.name] = [];

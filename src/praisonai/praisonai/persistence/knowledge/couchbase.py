@@ -8,7 +8,7 @@ Install: pip install couchbase
 import logging
 from typing import Any, Dict, List, Optional
 
-from .base import KnowledgeStore, KnowledgeDocument
+from .base import COUCHBASE_NAME_RE, KnowledgeStore, KnowledgeDocument, validate_identifier
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +56,11 @@ class CouchbaseKnowledgeStore(KnowledgeStore):
             text_field: Field name for text content
             embedding_dim: Embedding dimension
         """
+        # Interpolated into N1QL (``count``, ``delete_collection``): keyspace
+        # names cannot be bound as parameters.
+        for value, label in ((bucket_name, "bucket_name"), (scope_name, "scope_name"),
+                             (collection_name, "collection_name")):
+            validate_identifier(value, label, pattern=COUCHBASE_NAME_RE)
         self.connection_string = connection_string
         self.username = username
         self.password = password

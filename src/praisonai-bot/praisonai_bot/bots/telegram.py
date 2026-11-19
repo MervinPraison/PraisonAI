@@ -64,7 +64,7 @@ from ._album import (
     resolve_album_max_items,
 )
 from ._ack import AckReactor
-from ._unknown_user import UnknownUserHandler, BotContext
+from ._unknown_user import BotContext, UnknownUserHandler, is_sender_allowed
 from ._pairing_ui import PairingUIBuilder, PairingCallbackHandler
 from ._streaming import (
     StreamingConfig,
@@ -513,6 +513,10 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
 
         # Answer the callback query to stop loading spinner
         await query.answer()
+        chat_id = str(query.message.chat_id) if query.message else ""
+        if not is_sender_allowed(self, query.from_user.id, chat_id):
+            logger.debug("Callback dropped: sender not allowed")
+            return
 
         # Create interactive context
         from praisonaiagents.bots import InteractiveContext
@@ -681,6 +685,21 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
             supported_file_types=["image/*", "audio/*", "video/*", "application/*"],
         )
     
+    def _webhook_secret(self) -> str:
+        """Webhook secret_token: config metadata, then env, else a fresh one."""
+        secret = (self.config.metadata or {}).get("webhook_secret") or os.environ.get(
+            "TELEGRAM_WEBHOOK_SECRET"
+        )
+        if not secret:
+            import secrets
+
+            secret = secrets.token_urlsafe(32)
+            logger.info(
+                "Telegram webhook: generated a secret_token for this run "
+                "(set TELEGRAM_WEBHOOK_SECRET to pin one)"
+            )
+        return secret
+
     async def start(self) -> None:
         """Start the Telegram bot."""
         if self._is_running:
@@ -1505,14 +1524,25 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
         self._monitor = ConnectionMonitor(platform="telegram", policy=TELEGRAM_BACKOFF)
         
         if self.config.is_webhook_mode:
+            # secret_token is registered with set_webhook and checked by
+            # python-telegram-bot on every inbound request (403 on mismatch).
+            # The listen host goes through the shared bind guard (V-A).
+            from praisonaiagents.agent.launch_security import require_bind_token
+
+            listen = os.environ.get("PRAISONAI_WEBHOOK_HOST", "0.0.0.0")
+            secret = require_bind_token(
+                listen, self._webhook_secret(), server="Telegram webhook",
+                hint="Set TELEGRAM_WEBHOOK_SECRET",
+            )
             self._stop_event = asyncio.Event()
             try:
                 await self._application.initialize()
                 await self._application.updater.start_webhook(
-                    listen="0.0.0.0",
+                    listen=listen,
                     port=self.config.webhook_port,
                     url_path=self.config.webhook_path,
                     webhook_url=f"{self.config.webhook_url}{self.config.webhook_path}",
+                    secret_token=secret,
                 )
                 await self._application.start()
                 await self._stop_event.wait()

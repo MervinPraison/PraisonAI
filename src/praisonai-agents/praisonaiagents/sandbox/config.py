@@ -114,11 +114,19 @@ class SandboxConfig:
     working_dir: str = "/workspace"
     env: Dict[str, str] = field(default_factory=dict)
     resource_limits: ResourceLimits = field(default_factory=ResourceLimits)
-    security_policy: SecurityPolicy = field(default_factory=SecurityPolicy)
+    security_policy: SecurityPolicy = None  # type: ignore[assignment]  # set in __post_init__
     auto_cleanup: bool = True
     persist_files: bool = False
     mount_paths: List[str] = field(default_factory=list)
     metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        if self.security_policy is None:
+            # A plain host subprocess shares the host network, and that backend
+            # refuses a policy that claims otherwise. Its default policy says so
+            # instead of promising an isolation nothing provides.
+            local = self.sandbox_type in ("subprocess", "local")
+            self.security_policy = SecurityPolicy(allow_network=local)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""

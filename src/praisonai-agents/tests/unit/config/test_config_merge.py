@@ -100,7 +100,7 @@ def test_ancestor_directory_discovery_nearest_wins(tmp_path, monkeypatch):
     root = tmp_path / "workspace"
     _write_yaml(
         root / ".praisonai" / "config.yaml",
-        "defaults:\n  model: root-model\n  base_url: https://root\n",
+        "defaults:\n  model: root-model\n  memory: true\n",
     )
     nested = root / "sub" / "deep"
     _write_yaml(
@@ -110,9 +110,10 @@ def test_ancestor_directory_discovery_nearest_wins(tmp_path, monkeypatch):
     _run_with_dirs(tmp_path, monkeypatch, home, nested)
 
     raw = loader._load_config()
-    # Nearest (nested) wins for model; ancestor base_url falls through.
+    # Nearest (nested) wins for model; an ancestor-only key falls through.
+    # (base_url is a trust key, honoured from the user config only.)
     assert raw["defaults"]["model"] == "nested-model"
-    assert raw["defaults"]["base_url"] == "https://root"
+    assert raw["defaults"]["memory"] is True
 
 
 def test_write_target_prefers_highest_precedence_file(tmp_path, monkeypatch):

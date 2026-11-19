@@ -1,6 +1,7 @@
 /**
  * N8N Integration - Webhook triggers and workflow export for n8n
  */
+import { requireBindToken, tokenMatches } from '../../utils/bind-guard';
 
 export interface N8NConfig {
   baseUrl?: string;
@@ -292,18 +293,32 @@ return input;
   }
 
   /**
-   * Create a webhook listener (for local development)
+   * Create a webhook listener (for local development). Binds 127.0.0.1 by
+   * default; a non-loopback `host` requires `token`, which every request must
+   * send as `Authorization: Bearer <token>` or `X-Auth-Token`.
    */
   async createWebhookListener(
     port: number,
-    handler: (payload: N8NWebhookPayload) => Promise<any>
+    handler: (payload: N8NWebhookPayload) => Promise<any>,
+    options: { host?: string; token?: string } = {}
   ): Promise<{ close: () => void }> {
+    const host = options.host ?? '127.0.0.1';
+    const token = options.token;
+    requireBindToken(host, token, {
+      server: 'N8N webhook listener', hint: 'Pass { token }',
+    });
     const http = await import('http');
 
     const server = http.createServer(async (req, res) => {
       if (req.method !== 'POST') {
         res.writeHead(405);
         res.end('Method not allowed');
+        return;
+      }
+      const bearer = req.headers.authorization?.replace(/^Bearer /, '');
+      if (token && !tokenMatches(bearer, token) && !tokenMatches(req.headers['x-auth-token'], token)) {
+        res.writeHead(401);
+        res.end('Unauthorized');
         return;
       }
 
@@ -322,8 +337,8 @@ return input;
       });
     });
 
-    server.listen(port);
-    console.log(`N8N webhook listener started on port ${port}`);
+    server.listen(port, host);
+    console.log(`N8N webhook listener started on ${host}:${port}`);
 
     return {
       close: () => server.close()

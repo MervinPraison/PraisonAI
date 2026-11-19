@@ -79,10 +79,6 @@ _VALID_MODES = (MODE_OFF, MODE_SANDBOXED, MODE_UNSAFE)
 _TWO_CHAR_OPS = ("&&", "||", ">>", "2>", "$(", "<<")
 _ONE_CHAR_OPS = ("|", ">", "<", ";", "&", "`")
 
-# Environment variables withheld from a contained shell. Network is off by
-# default, but stdout goes back to the model, so ``env | grep KEY`` would put
-# credentials in the transcript and the provider request.
-_SECRET_ENV_RE = re.compile(r"KEY|TOKEN|SECRET|PASSW|CREDENTIAL", re.IGNORECASE)
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -309,11 +305,12 @@ def _run_real_shell(
         argv = wrapper.wrap(argv)
         backend = wrapper.backend
 
-    proc_env = os.environ.copy()
-    if contained:
-        proc_env = {k: v for k, v in proc_env.items() if not _SECRET_ENV_RE.search(k)}
-    if env:
-        proc_env.update(env)
+    # The model chose this command: it gets the allowlisted environment (plus
+    # PRAISONAI_SHELL_ENV_ALLOWLIST names and the caller's env), never the
+    # operator's keys -- contained or not.
+    from praisonaiagents.tools.shell_tools import build_subprocess_env
+
+    proc_env = build_subprocess_env(env)
 
     # Run the shell in its own process group so a timeout can kill the whole
     # tree, not just the immediate ``/bin/sh``. Without this a command like

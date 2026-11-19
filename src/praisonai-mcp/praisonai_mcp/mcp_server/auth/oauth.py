@@ -10,6 +10,7 @@ Based on:
 - OAuth 2.0 Protected Resource Metadata (RFC9728)
 """
 
+import asyncio
 import base64
 import hashlib
 import logging
@@ -417,19 +418,21 @@ async def discover_oauth_metadata(issuer_url: str) -> Dict[str, Any]:
     # Try OAuth 2.0 metadata endpoint first
     metadata_url = f"{issuer_url.rstrip('/')}/.well-known/oauth-authorization-server"
     
-    async with httpx.AsyncClient() as client:
-        try:
-            response = await client.get(metadata_url)
-            if response.status_code == 200:
-                return response.json()
-        except Exception:
-            pass
-        
-        # Fall back to OpenID Connect discovery
-        oidc_url = f"{issuer_url.rstrip('/')}/.well-known/openid-configuration"
-        response = await client.get(oidc_url)
-        response.raise_for_status()
-        return response.json()
+    # Pinned, redirect-checked fetch (praisonaiagents url_safety).
+    from praisonaiagents.tools.url_safety import safe_fetch
+
+    try:
+        response = await asyncio.to_thread(safe_fetch, metadata_url, timeout=10)
+        if response.status_code == 200:
+            return response.json()
+    except Exception:
+        pass
+
+    # Fall back to OpenID Connect discovery
+    oidc_url = f"{issuer_url.rstrip('/')}/.well-known/openid-configuration"
+    response = await asyncio.to_thread(safe_fetch, oidc_url, timeout=10)
+    response.raise_for_status()
+    return response.json()
 
 
 def create_oauth_config_from_metadata(

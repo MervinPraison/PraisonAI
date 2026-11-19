@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Set
 from pathlib import Path
 from enum import Enum
+import os
 import shlex
 import subprocess
 import logging
@@ -26,6 +27,14 @@ import shutil
 import time
 
 logger = logging.getLogger(__name__)
+
+# Refused when allow_network=False (NETWORK_ISOLATED): a plain subprocess has no
+# network isolation, so the commands that reach the network are not run at all.
+NETWORK_COMMANDS = frozenset({
+    "curl", "wget", "nc", "netcat", "ssh", "scp", "sftp", "ftp", "telnet",
+    "ping", "nslookup", "dig", "host", "traceroute", "tracepath", "nmap",
+    "socat", "openssl", "node", "python", "python3", "ruby", "perl",
+})
 
 
 # ============================================================================
@@ -161,10 +170,12 @@ class CommandValidator:
     def __init__(self, policy: SandboxPolicy):
         self.policy = policy
     
-    def validate(self, command: str) -> List[str]:
+    def validate(self, command: str, cwd: Optional[str] = None) -> List[str]:
         """
         Validate a command against the policy.
-        
+
+        *cwd* is where the command will run; relative paths resolve there.
+
         Returns:
             List of policy violations (empty if valid)
         """
@@ -173,8 +184,11 @@ class CommandValidator:
         if self.policy.mode == SandboxMode.DISABLED:
             return violations
         
-        # Parse command
-        parts = command.split()
+        # Parse exactly as execute() will (shlex), so quoting cannot hide a path.
+        try:
+            parts = shlex.split(command)
+        except ValueError:
+            return ["Command could not be parsed"]
         if not parts:
             return violations
         
@@ -183,6 +197,9 @@ class CommandValidator:
         # Check blocked commands
         if cmd_name in self.policy.blocked_commands:
             violations.append(f"Command '{cmd_name}' is blocked by sandbox policy")
+
+        if not self.policy.allow_network and cmd_name in NETWORK_COMMANDS:
+            violations.append(f"Network command '{cmd_name}' is blocked in network-isolated mode")
 
         if cmd_name == "find" and "-exec" in command:
             violations.append("find -exec is blocked by sandbox policy")
@@ -201,13 +218,28 @@ class CommandValidator:
             if pattern in command:
                 violations.append(message)
         
-        # Check path access
-        for part in parts:
-            if part.startswith("/"):
-                for blocked in self.policy.blocked_paths:
-                    if part.startswith(blocked):
-                        violations.append(f"Access to '{blocked}' is blocked")
-                        break
+        # Check path access (#52 + #68 combined): resolve each path-like token,
+        # also the value after "=", against the run directory, with "~",
+        # "../" and symlinks resolved. A path inside the run directory is the
+        # sandbox's own; anything else is checked against blocked_paths and,
+        # when set, allowed_paths.
+        base = os.path.realpath(cwd or os.getcwd())
+        inside = lambda p, root: p == root or p.startswith(root.rstrip(os.sep) + os.sep)  # noqa: E731
+        for token in (v for t in parts for v in (t, *t.split("=")[1:])):
+            if not token.startswith(("/", ".", "~")) and "/" not in token and ".." not in token:
+                continue
+            path = os.path.normpath(os.path.join(base, os.path.expanduser(token)))
+            real = os.path.realpath(path)
+            if inside(real, base):
+                continue
+            for blocked in self.policy.blocked_paths:
+                roots = {blocked.rstrip("/") or "/", os.path.realpath(blocked)}
+                if token.startswith(blocked) or any(inside(p, r) for p in (path, real) for r in roots):
+                    violations.append(f"Access to '{blocked}' is blocked")
+                    break
+            allowed = [os.path.realpath(p) for p in self.policy.allowed_paths]
+            if allowed and not any(inside(real, a) for a in allowed):
+                violations.append(f"Path '{token}' is outside allowed_paths")
         
         return violations
     
@@ -243,11 +275,34 @@ class SubprocessSandbox:
         self.validator = CommandValidator(self.policy)
         
         self._temp_dir: Optional[Path] = None
+        if self.policy.mode != SandboxMode.DISABLED:
+            if self.policy.allowed_hosts:
+                raise ValueError(
+                    "SandboxPolicy.allowed_hosts cannot be enforced by a subprocess sandbox. "
+                    "Use mode 'network_isolated' to keep commands off the network.")
+            if self.policy.max_processes != SandboxPolicy.max_processes:
+                logger.warning("SandboxPolicy.max_processes is not enforced by a subprocess sandbox")
+
+    def _apply_limits(self) -> None:
+        """POSIX resource limits for the child (runs in the child before exec)."""
+        import resource
+        import sys
+
+        mb = 1024 * 1024
+        limits = [(resource.RLIMIT_CPU, self.policy.max_cpu_seconds),
+                  (resource.RLIMIT_FSIZE, self.policy.max_file_size_mb * mb)]
+        if sys.platform != "darwin":  # RLIMIT_AS cannot be lowered on macOS
+            limits.append((resource.RLIMIT_AS, self.policy.max_memory_mb * mb))
+        for which, value in limits:
+            try:
+                resource.setrlimit(which, (value, value))
+            except (OSError, ValueError):
+                pass
     
     def _setup_temp_dir(self) -> Path:
         """Set up temporary directory for isolated execution."""
         if self._temp_dir is None:
-            self._temp_dir = Path(tempfile.mkdtemp(prefix="praisonai_sandbox_"))
+            self._temp_dir = Path(tempfile.mkdtemp(prefix="praisonai_sandbox_", dir=self.policy.temp_dir))
         return self._temp_dir
     
     def _cleanup_temp_dir(self) -> None:
@@ -302,9 +357,12 @@ class SubprocessSandbox:
         if self.policy.mode == SandboxMode.DISABLED:
             return self._execute_unsandboxed(command, timeout, capture_output)
         
-        # Validate command
-        violations = self.validator.validate(command)
+        # Validate where the command will run
+        cwd = self._setup_temp_dir() if self.policy.mode == SandboxMode.STRICT else self.working_dir
+        violations = self.validator.validate(command, str(cwd))
         if violations:
+            if self.policy.mode == SandboxMode.STRICT:
+                self._cleanup_temp_dir()
             return ExecutionResult(
                 success=False,
                 exit_code=-1,
@@ -314,13 +372,6 @@ class SubprocessSandbox:
                 was_sandboxed=True,
                 policy_violations=violations
             )
-        
-        # Set up sandbox
-        if self.policy.mode == SandboxMode.STRICT:
-            self._setup_temp_dir()
-            cwd = self._temp_dir
-        else:
-            cwd = self.working_dir
         
         # Build environment
         env = self._build_environment()
@@ -338,7 +389,8 @@ class SubprocessSandbox:
                 env=env,
                 capture_output=capture_output,
                 text=True,
-                timeout=timeout
+                timeout=timeout,
+                preexec_fn=self._apply_limits if os.name == "posix" else None,
             )
             
             return ExecutionResult(

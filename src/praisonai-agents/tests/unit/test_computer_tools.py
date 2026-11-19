@@ -157,8 +157,10 @@ class TestScreenshotSaveGated:
         assert "denied" in result.lower()
         fake.screenshot.assert_not_called()
 
-    def test_screenshot_save_allowed_with_approval(self, monkeypatch):
+    def test_screenshot_save_allowed_with_approval(self, monkeypatch, tmp_path):
+        import os
         from unittest.mock import MagicMock
+        monkeypatch.chdir(tmp_path)  # saves stay inside the working directory
         from praisonaiagents.tools import (
             computer_screenshot, computer_tools, set_computer_approval,
         )
@@ -166,9 +168,11 @@ class TestScreenshotSaveGated:
         fake.screenshot.return_value.size = (100, 50)
         monkeypatch.setattr(computer_tools, "_get_backend", lambda: fake)
         set_computer_approval(lambda action: True)
-        result = computer_screenshot(path="/tmp/ok.png")
+        result = computer_screenshot(path="ok.png")
         assert "denied" not in result.lower()
-        fake.screenshot.return_value.save.assert_called_once_with("/tmp/ok.png")
+        fake.screenshot.return_value.save.assert_called_once_with(
+            os.path.join(os.path.realpath(tmp_path), "ok.png"))
+        assert "denied" in computer_screenshot(path="/tmp/ok.png").lower()
 
     def test_screenshot_no_path_never_gated(self, monkeypatch):
         from unittest.mock import MagicMock

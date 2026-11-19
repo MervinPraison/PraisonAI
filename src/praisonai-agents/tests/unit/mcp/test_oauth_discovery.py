@@ -96,28 +96,47 @@ class TestEndpointHttpsValidation:
 
 class TestRedirectRevalidation:
     def test_rejects_redirect_before_requesting_it(self, monkeypatch):
+        import http.server
+        import threading
+
         from praisonaiagents.mcp import oauth_discovery
 
+        monkeypatch.delenv("ALLOW_LOCAL_CRAWL", raising=False)
         requested = []
 
-        class _Resp:
-            status_code = 302
-            headers = {"Location": "http://internal.local/.well-known/x"}
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                requested.append(self.path)
+                self.send_response(302)
+                self.send_header("Location", "http://10.0.0.5/.well-known/x")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
 
-        class _Requests:
-            @staticmethod
-            def get(url, **k):
-                requested.append(url)
-                assert k["allow_redirects"] is False
-                return _Resp()
+            def log_message(self, *a):
+                pass
 
-        monkeypatch.setitem(
-            __import__("sys").modules, "requests", _Requests()
-        )
-        with pytest.raises(ValueError):
-            oauth_discovery._get_json("http://127.0.0.1:8080/.well-known/x")
-        # The redirect target was refused without ever being fetched.
-        assert requested == ["http://127.0.0.1:8080/.well-known/x"]
+        server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        try:
+            with pytest.raises(ValueError):
+                oauth_discovery._get_json(
+                    f"http://127.0.0.1:{server.server_port}/.well-known/x", timeout=5
+                )
+        finally:
+            server.shutdown()
+            server.server_close()
+        # The private redirect target was refused before any connection.
+        assert requested == ["/.well-known/x"]
+
+    def test_rejects_plaintext_final_document(self, monkeypatch, public_dns):
+        import httpx
+        from praisonaiagents.mcp import oauth_discovery
+        from praisonaiagents.tools import url_safety
+
+        resp = httpx.Response(200, json={}, request=httpx.Request("GET", "http://api.example.com/m"))
+        monkeypatch.setattr(url_safety, "safe_fetch", lambda *a, **k: resp)
+        with pytest.raises(ValueError, match="insecure"):
+            oauth_discovery._get_json("https://api.example.com/m")
 
 
 class TestPrivateHostGuard:
@@ -174,7 +193,6 @@ class TestProviderTokenReuse:
         assert provider.ensure_authenticated() == "tok123"
 
     def test_refresh_redirect_keeps_saved_tokens(self, storage, monkeypatch, public_dns):
-        import requests
         from praisonaiagents.mcp.oauth_provider import MCPOAuthProvider
 
         url = "https://api.example.com/mcp"
@@ -186,11 +204,14 @@ class TestProviderTokenReuse:
         storage.set_tokens("example", tokens, server_url=url)
         storage.set_client_info("example", {"client_id": "c1"}, server_url=url)
 
-        resp = requests.Response()
-        resp.status_code = 307
-        resp.url = tokens["token_endpoint"]
-        resp._content = b'{"detail": "redirect"}'
-        monkeypatch.setattr(requests, "post", lambda *a, **k: resp)
+        import httpx
+        from praisonaiagents.tools import url_safety
+
+        resp = httpx.Response(
+            307, content=b'{"detail": "redirect"}',
+            request=httpx.Request("POST", tokens["token_endpoint"]),
+        )
+        monkeypatch.setattr(url_safety, "safe_fetch", lambda *a, **k: resp)
 
         provider = MCPOAuthProvider("example", url, storage=storage)
         assert provider._try_refresh(storage.get_for_url("example", url)) is False

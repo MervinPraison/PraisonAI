@@ -13,6 +13,7 @@ import subprocess
 import os
 import logging
 from ..approval import require_approval
+from .path_safety import resolve_within_root
 
 logger = logging.getLogger(__name__)
 
@@ -69,18 +70,10 @@ class SkillTools:
             The output from running the script, or error message if failed
         """
         try:
-            # Resolve the script path
-            script_path = os.path.expanduser(script_path)
-            if not os.path.isabs(script_path):
-                script_path = os.path.join(self._working_directory, script_path)
-            script_path = os.path.abspath(script_path)
-
-            root = os.path.realpath(self._working_directory)
-            try:
-                if os.path.commonpath([script_path, root]) != root:
-                    return f"Error: Script path outside working directory: {script_path}"
-            except ValueError:
+            resolved = resolve_within_root(script_path, self._working_directory)
+            if resolved is None:
                 return f"Error: Script path outside working directory: {script_path}"
+            script_path = resolved
             
             if not os.path.exists(script_path):
                 return f"Error: Script not found at {script_path}"
@@ -164,15 +157,9 @@ class SkillTools:
             File contents or error message
         """
         try:
-            # Resolve skill path
-            skill_path = os.path.expanduser(skill_path)
-            if not os.path.isabs(skill_path):
-                skill_path = os.path.join(self._working_directory, skill_path)
-            skill_path = os.path.abspath(skill_path)
-            
-            working_dir = os.path.abspath(self._working_directory)
-            if os.path.commonpath([skill_path, working_dir]) != working_dir:
-                return f"Error: Workspace boundary violation - skill directory escapes workspace"
+            skill_path = resolve_within_root(skill_path, self._working_directory)
+            if skill_path is None:
+                return "Error: Workspace boundary violation - skill directory escapes workspace"
             
             if not os.path.exists(skill_path):
                 return f"Error: Skill directory not found at {skill_path}"
@@ -180,12 +167,8 @@ class SkillTools:
             if not os.path.isdir(skill_path):
                 return f"Error: {skill_path} is not a directory"
             
-            # Resolve file path within skill
-            full_path = os.path.join(skill_path, file_path)
-            full_path = os.path.abspath(full_path)
-            
-            # Security check: ensure file is within skill directory
-            if os.path.commonpath([full_path, skill_path]) != skill_path:
+            full_path = resolve_within_root(file_path, skill_path)
+            if full_path is None:
                 return f"Error: Path traversal detected - {file_path} is outside skill directory"
             
             if not os.path.exists(full_path):
@@ -214,12 +197,10 @@ class SkillTools:
         import json
         
         try:
-            # Resolve skill path
-            skill_path = os.path.expanduser(skill_path)
-            if not os.path.isabs(skill_path):
-                skill_path = os.path.join(self._working_directory, skill_path)
-            skill_path = os.path.abspath(skill_path)
-            
+            skill_path = resolve_within_root(skill_path, self._working_directory)
+            if skill_path is None:
+                return "Error: Workspace boundary violation - skill directory escapes workspace"
+
             if not os.path.exists(skill_path):
                 return f"Error: Skill directory not found at {skill_path}"
             

@@ -9,6 +9,22 @@ from ..models import DeployResult, DeployStatus, DestroyResult, ServiceState
 from ..doctor import DoctorReport, DoctorCheckResult, check_gcp_cli
 
 
+
+def _env_vars_arg(env_vars: dict) -> str:
+    """``--set-env-vars`` value that keeps each value whole.
+
+    gcloud splits on ``,``, so a value with a comma would add a variable. Then
+    switch to gcloud's ``^DELIM^`` form with a delimiter no pair contains.
+    """
+    pairs = [f"{k}={v}" for k, v in env_vars.items()]
+    if not any("," in p for p in pairs):
+        return ",".join(pairs)
+    delim = next((d for d in "@|;#~" if not any(d in p for p in pairs)), None)
+    if delim is None:
+        raise ValueError("env_vars values use every --set-env-vars delimiter; set them another way")
+    return f"^{delim}^" + delim.join(pairs)
+
+
 class GCPProvider(BaseProvider):
     """GCP deployment provider using Cloud Run."""
     
@@ -118,8 +134,7 @@ class GCPProvider(BaseProvider):
             
             # Add environment variables
             if self.config.env_vars:
-                env_str = ','.join([f"{k}={v}" for k, v in self.config.env_vars.items()])
-                cmd.extend(['--set-env-vars', env_str])
+                cmd.extend(['--set-env-vars', _env_vars_arg(self.config.env_vars)])
             
             result = subprocess.run(
                 cmd,

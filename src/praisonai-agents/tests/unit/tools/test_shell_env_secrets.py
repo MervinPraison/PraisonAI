@@ -48,6 +48,7 @@ def test_env_command_does_not_leak(monkeypatch):
 def test_argument_expansion_does_not_leak(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-secret-value")
     monkeypatch.setenv("PLAIN_VAR", "visible")
+    monkeypatch.setenv("PRAISONAI_SHELL_ENV_ALLOWLIST", "PLAIN_VAR")  # inherited only when named
     result = _run("echo $OPENAI_API_KEY ${PLAIN_VAR}")
     assert "sk-secret-value" not in result["stdout"]
     assert "visible" in result["stdout"]

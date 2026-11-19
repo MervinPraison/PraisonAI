@@ -276,16 +276,20 @@ class TestPerformance:
     """Ensure no performance regression."""
     
     def test_import_time_acceptable(self):
-        """Import time should be under 200ms."""
+        """A fresh interpreter should import successfully within five seconds."""
         import subprocess
+        import sys
         import time
+        from pathlib import Path
         
         # Run import in subprocess to get clean timing
         start = time.time()
         subprocess.run(
-            ['python3', '-c', 'import praisonaiagents'],
+            [sys.executable, '-c', 'import praisonaiagents'],
             capture_output=True,
-            timeout=10
+            timeout=10,
+            check=True,
+            cwd=Path(__file__).resolve().parents[2],
         )
         elapsed = time.time() - start
         

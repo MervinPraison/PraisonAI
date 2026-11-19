@@ -47,6 +47,26 @@ DEFAULT_DANGEROUS_TOOLS: Dict[str, str] = {
     "github_create_branch": "high",
     "github_commit_and_push": "high",
     "github_create_pull_request": "high",
+    # Outbound mail and messages act as the operator, outside the workspace.
+    "send_email": "high",
+    "reply_email": "high",
+    "forward_email": "high",
+    "send_draft": "high",
+    "smtp_send_email": "high",
+    "send_message": "high",
+    "ask_conversation": "medium",
+    "draft_email": "medium",
+    "smtp_draft_email": "medium",
+    "archive_email": "medium",
+    "smtp_archive_email": "medium",
+    "create_inbox": "medium",
+    # Scheduled jobs run the agent later, unattended.
+    "schedule_add": "medium",
+    "schedule_update": "medium",
+    "schedule_remove": "low",
+    "schedule_pause": "low",
+    "schedule_resume": "low",
+    "execute_code_with_tools": "critical",
     "evaluate": "medium",
     "crawl": "medium",
     "scrape_page": "medium",
@@ -82,7 +102,7 @@ PERMISSION_PRESETS = {
     # "default" — blocks delete + shell/code exec + git push/PR. Allows read/create/edit.
     "default": frozenset({
         "execute_command", "kill_process", "execute_code", "acp_execute_command",
-        "delete_file", "move_file", "copy_file", "acp_delete_file",
+        "execute_code_with_tools", "delete_file", "move_file", "copy_file", "acp_delete_file",
         "github_create_branch", "github_commit_and_push", "github_create_pull_request",
     }),
     # "safe" — blocks all dangerous tools (file writes, shell exec, etc.)
@@ -312,6 +332,19 @@ class ApprovalRegistry:
         if not agent_name:
             return False
         return self._agent_tool_auto_approve.get((agent_name, tool_name), False)
+
+    def _skill_grant_covers(self, tool_name: str, agent_name: str) -> bool:
+        """Whether a skill's ``allowed-tools`` grant may skip the prompt.
+
+        A skill file can come from a cloned repository, so its grant never
+        widens approval: it covers only tools registered at ``low`` risk, never
+        a tool at medium risk or above, nor one with no registered risk (an
+        external/MCP tool or an ``ask`` rule).
+        """
+        return (
+            self.is_auto_approved(tool_name, agent_name)
+            and self.get_risk_level(tool_name) == "low"
+        )
 
     # ── Context helpers ──────────────────────────────────────────────────
 
@@ -675,7 +708,7 @@ class ApprovalRegistry:
             return ApprovalDecision(approved=True, reason="Approved (session)", approver="session")
 
         # Check per-tool auto-approval (G-A fix)
-        if self.is_auto_approved(tool_name, auto_scope):
+        if self._skill_grant_covers(tool_name, auto_scope):
             self.mark_approved(tool_name, arguments, agent_name, scope_id)
             return ApprovalDecision(approved=True, reason="Auto-approved (skill)", approver="skill")
 
@@ -765,7 +798,7 @@ class ApprovalRegistry:
             return ApprovalDecision(approved=True, reason="Approved (session)", approver="session")
 
         # Check per-tool auto-approval (G-A fix)
-        if self.is_auto_approved(tool_name, auto_scope):
+        if self._skill_grant_covers(tool_name, auto_scope):
             self.mark_approved(tool_name, arguments, agent_name, scope_id)
             return ApprovalDecision(approved=True, reason="Auto-approved (skill)", approver="skill")
 

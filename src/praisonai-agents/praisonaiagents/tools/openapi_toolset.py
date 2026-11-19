@@ -331,7 +331,7 @@ class OpenAPIOperation:
             # Returned, not raised, for the same reason as the transport errors
             # below: a raising tool ends the turn.
             return f"{self.name} failed: {exc}"
-        from .url_safety import is_safe_http_url
+        from .url_safety import is_safe_http_url, safe_fetch
         if not is_safe_http_url(request["url"]):
             # The host comes from an untrusted spec's `servers:` entry; keep it
             # off loopback/private/metadata addresses (ALLOW_LOCAL_CRAWL=true
@@ -339,13 +339,13 @@ class OpenAPIOperation:
             return (f"{self.name} failed: refusing unsafe URL "
                     f"{request['url']!r}")
         try:
-            with httpx.Client(timeout=self.timeout, follow_redirects=False) as client:
-                response = client.request(**request)
-                response.raise_for_status()
-                try:
-                    return response.json()
-                except ValueError:
-                    return response.text
+            # No redirects: they could carry this toolset's credentials off-origin.
+            response = safe_fetch(request.pop("url"), timeout=self.timeout, max_redirects=0, **request)
+            response.raise_for_status()
+            try:
+                return response.json()
+            except ValueError:
+                return response.text
         except Exception as exc:  # noqa: BLE001 - the model must see the failure
             # Returned rather than raised: a tool that raises ends the turn,
             # while a returned error lets the model retry or explain.
@@ -377,6 +377,14 @@ class OpenAPIToolset:
         self._spec_url = spec_url
         self.spec = self._load(spec_dict, spec_str, spec_url)
         self.base_url = base_url or self._infer_base_url(self.spec)
+        if auth and not base_url and spec_url and self.base_url and (
+                urlsplit(self.base_url)[:2] != urlsplit(spec_url)[:2]):
+            # A fetched spec is untrusted: its ``servers`` entry may not move
+            # this toolset's credentials to another origin.
+            raise ValueError(
+                f"OpenAPIToolset: the spec at {spec_url!r} names server "
+                f"{self.base_url!r} on another origin; pass base_url= to send "
+                "auth there.")
         if auth and str(self.base_url).lower().startswith("http://"):
             # Refuse to attach credentials to a cleartext endpoint: bearer
             # tokens, API keys and basic-auth values would travel in the clear.
@@ -397,15 +405,13 @@ class OpenAPIToolset:
         if spec_str is not None:
             text = spec_str
         else:
-            import httpx
-            from .url_safety import is_safe_http_url
+            from .url_safety import is_safe_http_url, safe_fetch
             if not is_safe_http_url(spec_url):
                 raise ValueError(
                     f"OpenAPIToolset refuses unsafe spec_url {spec_url!r}")
-            with httpx.Client(timeout=30, follow_redirects=False) as client:
-                response = client.get(spec_url)
-                response.raise_for_status()
-                text = response.text
+            response = safe_fetch(spec_url, timeout=30)
+            response.raise_for_status()
+            text = response.text
         try:
             return json.loads(text)
         except ValueError:

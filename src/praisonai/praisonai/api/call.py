@@ -719,6 +719,13 @@ def run_server(port: int, host: str = "127.0.0.1", use_public: bool = False):
         print("WARNING: Server is binding to all network interfaces (0.0.0.0). "
               "This exposes the service to your local network.")
 
+    from praisonaiagents.agent.launch_security import require_bind_token
+
+    # ngrok / 0.0.0.0 expose the call webhook; it is gated by CALL_SERVER_TOKEN.
+    require_bind_token(
+        host, os.getenv("CALL_SERVER_TOKEN"), server="Praison AI Call Server",
+        hint="Set CALL_SERVER_TOKEN",
+    )
     os.environ["PRAISONAI_CALL_BIND_HOST"] = host
 
     # Build the app here (server entry point) — this is the only place local

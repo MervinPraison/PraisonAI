@@ -1,9 +1,32 @@
 """
 Deploy configuration models using Pydantic.
 """
+import re
 from enum import Enum
 from typing import Optional, Dict, List, Any, Union
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+# Values written into a generated Dockerfile or passed as CLI arguments. One
+# check each, used by the models below and by ``docker.generate_dockerfile``.
+IMAGE_REF_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._/:@-]*")
+ENV_KEY_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+
+def check_value(value: Any, field: str, pattern: "re.Pattern[str] | None" = None) -> Any:
+    """Refuse a value that could start a new Dockerfile line or CLI option.
+
+    Without ``pattern``: no control characters and no leading ``-``. With
+    ``pattern``: the whole value must match it.
+    """
+    if value is None:
+        return value
+    text = str(value)
+    bad = (not pattern.fullmatch(text)) if pattern else (
+        text.startswith("-") or any(ord(c) < 32 or ord(c) == 127 for c in text))
+    if bad:
+        raise ValueError(f"{field} has characters that are not allowed: {text!r}")
+    return value
 
 
 class DeployType(str, Enum):
@@ -86,7 +109,7 @@ class APIConfig(BaseModel):
 
 class DockerConfig(BaseModel):
     """Configuration for Docker deployment."""
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     image_name: str = Field(default="praisonai-app", description="Docker image name")
     tag: str = Field(default="latest", description="Docker image tag")
@@ -96,10 +119,15 @@ class DockerConfig(BaseModel):
     push: bool = Field(default=False, description="Push image to registry after build")
     build_args: Optional[Dict[str, str]] = Field(default=None, description="Docker build arguments")
 
+    @field_validator('image_name', 'tag', 'base_image', 'registry')
+    @classmethod
+    def _validate_image_ref(cls, v, info):
+        return check_value(v, info.field_name, IMAGE_REF_RE)
+
 
 class CloudConfig(BaseModel):
     """Configuration for cloud deployment."""
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     provider: CloudProviderLike = Field(..., description="Cloud provider")
     region: str = Field(..., description="Deployment region")
@@ -129,6 +157,19 @@ class CloudConfig(BaseModel):
     def _validate_provider(cls, v):
         """Accept any provider the registry can actually resolve."""
         return coerce_cloud_provider(v)
+
+    @field_validator('region', 'service_name', 'image', 'cpu', 'memory', 'cluster_name',
+                     'task_definition', 'resource_group', 'subscription_id', 'project_id')
+    @classmethod
+    def _validate_cli_value(cls, v, info):
+        return check_value(v, info.field_name)
+
+    @field_validator('env_vars')
+    @classmethod
+    def _validate_env_keys(cls, v):
+        for key in v or {}:
+            check_value(key, "env_vars key", ENV_KEY_RE)
+        return v
 
 
 class AgentConfig(BaseModel):

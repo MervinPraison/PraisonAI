@@ -295,6 +295,28 @@ def build_host_app(**configure_kwargs):
     return create_host_app()
 
 
+# Sidebar pages of the full dashboard. `praisonai dashboard` (claw) and
+# `praisonai ui` both use this list, so the two show the same app.
+DASHBOARD_PAGES = [
+    "chat",
+    "channels",
+    "agents",
+    "skills",
+    "memory",
+    "knowledge",
+    "cron",
+    "guardrails",
+    "sessions",
+    "usage",
+    "kanban",        # ADD
+    "jobs-board",    # ADD
+    "config",
+    "connect",       # connect editors and agents to the MCP server (aiui >= 0.3.172)
+    "logs",
+    "debug",
+]
+
+
 @dataclass
 class UIPreset:
     """UI configuration preset for standardizing UI app creation."""

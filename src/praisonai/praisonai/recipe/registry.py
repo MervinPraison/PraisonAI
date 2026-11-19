@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Union, Protocol
 from urllib.parse import urlparse
 from praisonai._errors import _WrapperError
+from praisonaiagents.utils.safe_path import safe_child
 
 
 # Default registry paths
@@ -148,6 +149,7 @@ def _safe_extractall(tar: tarfile.TarFile, dest_dir: Path) -> None:
     file_count = 0
     
     dest_resolved = dest_dir.resolve()
+    has_links = False
     for member in tar.getmembers():
         file_count += 1
         if file_count > MAX_FILES:
@@ -178,6 +180,7 @@ def _safe_extractall(tar: tarfile.TarFile, dest_dir: Path) -> None:
         # Reject symlinks and hardlinks — their linkname may point outside dest_dir
         # and would not be caught by the member.name checks above.
         if member.issym() or member.islnk():
+            has_links = True
             linkname = member.linkname or ""
             if linkname.startswith("/"):
                 raise RegistryError(
@@ -192,7 +195,10 @@ def _safe_extractall(tar: tarfile.TarFile, dest_dir: Path) -> None:
     try:
         tar.extractall(dest_dir, filter="data")
     except TypeError:
-        # filter keyword not supported on Python < 3.12; validation above already covers safety
+        # No data filter (CPython without PEP 706): link ordering can redirect
+        # later members outside dest_dir, so refuse links; bundles do not need them.
+        if has_links:
+            raise RegistryError("Refusing to extract links without the tarfile data filter")
         tar.extractall(dest_dir)
 
 
@@ -408,7 +414,7 @@ class LocalRegistry:
         
         # Get bundle path
         bundle_name = f"{name}-{version}.praison"
-        bundle_path = self.recipes_path / name / version / bundle_name
+        bundle_path = self._recipe_dir(name, version) / bundle_name
         
         if not bundle_path.exists():
             raise RecipeNotFoundError(f"Bundle file missing: {bundle_path}")
@@ -515,6 +521,14 @@ class LocalRegistry:
             raise RecipeNotFoundError(f"Recipe not found: {name}")
         return list(index["recipes"][name]["versions"].keys())
     
+    def _recipe_dir(self, name: str, version: Optional[str] = None) -> Path:
+        """Registry directory of *name* (or one *version*); refuses traversal."""
+        try:
+            path = safe_child(self.recipes_path, name)
+            return safe_child(path, version) if version else path
+        except ValueError as e:
+            raise RegistryError(str(e)) from None
+
     def get_info(self, name: str, version: Optional[str] = None) -> Dict[str, Any]:
         """Get detailed info about a recipe version."""
         index = self._load_index()
@@ -524,7 +538,7 @@ class LocalRegistry:
         recipe_info = index["recipes"][name]
         version = version or recipe_info.get("latest")
         
-        manifest_path = self.recipes_path / name / version / "manifest.json"
+        manifest_path = self._recipe_dir(name, version) / "manifest.json"
         if not manifest_path.exists():
             raise RecipeNotFoundError(f"Version not found: {name}@{version}")
         
@@ -548,7 +562,7 @@ class LocalRegistry:
         
         if version:
             # Delete specific version
-            version_dir = self.recipes_path / name / version
+            version_dir = self._recipe_dir(name, version)
             if version_dir.exists():
                 shutil.rmtree(version_dir)
             
@@ -563,7 +577,7 @@ class LocalRegistry:
                 del index["recipes"][name]
         else:
             # Delete all versions
-            recipe_dir = self.recipes_path / name
+            recipe_dir = self._recipe_dir(name)
             if recipe_dir.exists():
                 shutil.rmtree(recipe_dir)
             del index["recipes"][name]

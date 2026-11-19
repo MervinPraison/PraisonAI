@@ -1,7 +1,7 @@
 """Telegram webhook lifecycle without network access."""
 import asyncio
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import ANY, AsyncMock
 
 import pytest
 
@@ -59,7 +59,8 @@ async def test_webhook_respects_port_and_stops(webhook):
         await asyncio.wait_for(webhook.ready.wait(), 1)
         assert bot.is_running
         webhook.app.updater.start_webhook.assert_awaited_once_with(
-            listen="0.0.0.0", port=9087, url_path="/hook", webhook_url="https://example.invalid/hook")
+            listen="0.0.0.0", port=9087, url_path="/hook", webhook_url="https://example.invalid/hook",
+            secret_token=ANY)
         await bot.stop()
         await asyncio.wait_for(task, 1)
         assert not bot.is_running

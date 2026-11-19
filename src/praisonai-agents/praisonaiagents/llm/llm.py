@@ -8973,41 +8973,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         logger.debug(f"Tool {function_name} in registry is not callable")
                         return None
                 else:
-                    logger.debug(f"Tool {function_name} not found in registry, falling back to globals/__main__")
-                    # Fall back to globals and __main__ for backward compatibility
-                    tool_def_name = f"{function_name}_definition"
-                    tool_def = globals().get(tool_def_name)
-                    if not tool_def:
-                        import __main__
-                        tool_def = getattr(__main__, tool_def_name, None)
-                    if tool_def:
-                        return tool_def
-                    
-                    func = globals().get(function_name)
-                    if not func:
-                        import __main__
-                        func = getattr(__main__, function_name, None)
-                    if not func or not callable(func):
-                        logger.debug(f"Function {function_name} not found or not callable")
-                        return None
-            except ImportError:
-                logger.debug("Tool registry not available, falling back to globals/__main__")
-                # Fall back to globals and __main__ when registry unavailable
-                tool_def_name = f"{function_name}_definition"
-                tool_def = globals().get(tool_def_name)
-                if not tool_def:
-                    import __main__
-                    tool_def = getattr(__main__, tool_def_name, None)
-                if tool_def:
-                    return tool_def
-                
-                func = globals().get(function_name)
-                if not func:
-                    import __main__
-                    func = getattr(__main__, function_name, None)
-                if not func or not callable(func):
-                    logger.debug(f"Function {function_name} not found or not callable")
+                    # Registry only, like OpenAIClient._generate_tool_definition_from_name:
+                    # never globals() or __main__, which tool execution refuses too.
+                    logger.debug(f"Tool {function_name} not found in registry")
                     return None
+            except ImportError:
+                logger.debug("Tool registry not available")
+                return None
 
         # Delegate signature introspection + schema generation to the shared
         # core helper so all layers produce identical, provider-safe schemas

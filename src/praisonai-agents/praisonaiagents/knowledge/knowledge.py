@@ -803,10 +803,18 @@ class Knowledge:
         same path as local files. Failures are surfaced to the caller so a
         single bad URL in a batch is visible, matching local-file behaviour.
         """
-        from ..tools.url_safety import is_safe_http_url
+        import io
+        import mimetypes
+        from ..tools.url_safety import is_safe_http_url, safe_fetch
         if not is_safe_http_url(url):
             raise ValueError(f"Refusing to fetch unsafe URL: {url}")
-        result = self.markdown.convert(url)
+        # Fetched here (pinned, every redirect re-checked), then converted.
+        response = safe_fetch(url)
+        response.raise_for_status()
+        ctype = response.headers.get("content-type", "").split(";")[0].strip()
+        result = self.markdown.convert_stream(
+            io.BytesIO(response.content), url=str(response.url),
+            file_extension=mimetypes.guess_extension(ctype) or os.path.splitext(response.url.path)[1] or None)
         content = getattr(result, 'text_content', None)
         if not content:
             raise ValueError(f"No content could be extracted from URL: {url}")

@@ -18,6 +18,11 @@ warnings.warn(
 
 logger = logging.getLogger(__name__)
 
+def _origin(url: str) -> tuple:
+    from urllib.parse import urlsplit
+    parts = urlsplit(url.strip())
+    return parts.scheme.lower(), (parts.hostname or "").lower(), parts.port
+
 def _get_jira_connection(
     url: str,
     username: Optional[str] = None,
@@ -27,7 +32,8 @@ def _get_jira_connection(
     """Create JIRA connection with proper authentication.
     
     Args:
-        url: JIRA server URL
+        url: JIRA server URL (JIRA_URL when empty). JIRA_API_TOKEN from the
+            environment is sent only to JIRA_URL.
         username: Username or use JIRA_USERNAME env var
         token: API token or use JIRA_API_TOKEN env var  
         email: Email for cloud JIRA or use JIRA_EMAIL env var
@@ -39,6 +45,16 @@ def _get_jira_connection(
             "JIRA library not installed. Install with: pip install jira"
         )
     
+    if not token and os.getenv('JIRA_API_TOKEN'):
+        # The operator's token goes only to the operator's server, never to a
+        # URL the model chose.
+        server = os.getenv('JIRA_URL', '')
+        if not server:
+            raise ValueError("Set JIRA_URL to the server JIRA_API_TOKEN belongs to")
+        url = url or server
+        if _origin(url) != _origin(server):
+            raise ValueError(f"Refusing to send JIRA_API_TOKEN to {url!r}; JIRA_URL is {server!r}")
+
     # Get credentials from environment if not provided
     username = username or os.getenv('JIRA_USERNAME')
     token = token or os.getenv('JIRA_API_TOKEN')

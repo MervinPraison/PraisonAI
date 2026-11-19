@@ -116,12 +116,13 @@ from ..config.feature_configs import (
 # function-local relative import per construction (#5835).
 from ..config.parse_utils import canonical_preset_key, validate_preset_string
 from ..config.agent_init import (
-    _is_file_path, provider_llm_params, resolve_agent_caching, resolve_agent_execution,
+    _is_file_path, provider_llm_params, resolve_agent_approval, resolve_agent_caching,
+    resolve_agent_execution,
     resolve_agent_guardrails, resolve_agent_history, resolve_agent_hooks, resolve_agent_knowledge,
     resolve_agent_learn, resolve_agent_llm_init_params, resolve_agent_llm_options,
     resolve_agent_local, resolve_agent_memory, resolve_agent_model, resolve_agent_output,
     resolve_agent_planning, resolve_agent_reflection, resolve_agent_skills, resolve_agent_templates,
-    resolve_agent_web,
+    resolve_agent_tools, resolve_agent_web,
 )
 
 # Default tool output limit (16000 chars ≈ 4000 tokens)
@@ -563,39 +564,16 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         Generate a tool definition from a function name by inspecting the function.
         """
         logger.debug(f"Attempting to generate tool definition for: {function_name}")
-        
-        # First try to get the tool definition if it exists
-        tool_def_name = f"{function_name}_definition"
-        tool_def = globals().get(tool_def_name)
-        logger.debug(f"Looking for {tool_def_name} in globals: {tool_def is not None}")
-        
-        if not tool_def:
-            import __main__
-            tool_def = getattr(__main__, tool_def_name, None)
-            logger.debug(f"Looking for {tool_def_name} in __main__: {tool_def is not None}")
-        
-        if tool_def:
-            logger.debug(f"Found tool definition: {tool_def}")
-            return tool_def
 
-        # Try to find the function in the agent's tools list first
+        # Only declared tools: never globals() or __main__, which execution
+        # refuses too (see ToolExecutionMixin._execute_tool_impl).
         func = None
         for tool in self.tools:
             if callable(tool) and getattr(tool, '__name__', '') == function_name:
                 func = tool
                 break
-        
+
         logger.debug(f"Looking for {function_name} in agent tools: {func is not None}")
-        
-        # If not found in tools, try globals and main
-        if not func:
-            func = globals().get(function_name)
-            logger.debug(f"Looking for {function_name} in globals: {func is not None}")
-            
-            if not func:
-                import __main__
-                func = getattr(__main__, function_name, None)
-                logger.debug(f"Looking for {function_name} in __main__: {func is not None}")
 
         if not func or not callable(func):
             logger.debug(f"Function {function_name} not found or not callable")
@@ -1791,59 +1769,11 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         # Store fallback models for resilience (defensive copy to avoid external mutations)
         self.fallback_models = list(fallback_models) if fallback_models else []
         
-        # Handle tools parameter - ensure it's always a list
-        if callable(tools):
-            # If a single function/callable is passed, wrap it in a list
-            self.tools = [tools]
-        elif isinstance(tools, str):
-            # Single tool name string - resolve from registry
-            self.tools = self._resolve_tool_names([tools])
-        elif isinstance(tools, (list, tuple)):
-            # Resolve tool-name strings PER ELEMENT. An all-or-nothing `all(...)`
-            # test silently left every name unresolved as soon as one callable
-            # was present, so `tools=[my_tool, 'read_file']` dropped 'read_file'.
-            self.tools = self._resolve_tools_list(tools)
-        else:
-            self.tools = tools or []
-        
-        # Handle toolsets parameter - resolve named toolset groups
-        if toolsets:
-            # Bound before the try: if the toolsets import fails, the except
-            # clauses below must still be able to name ToolResolutionError.
-            from ..tools.resolver import ToolResolutionError
-            try:
-                from ..toolsets import resolve_toolsets_for_model
-                # Advertise the model-family's preferred edit primitive first
-                # (e.g. apply_patch for Claude, edit_file for GPT). Unknown /
-                # non-string models fall back to the byte-for-byte default order.
-                model_id = self.llm if isinstance(self.llm, str) else None
-                toolset_tool_names = resolve_toolsets_for_model(toolsets, model_id)
-                # Remove duplicates with existing tools
-                existing_tool_names = set()
-                for tool in self.tools:
-                    name = getattr(tool, 'name', getattr(tool, '__name__', str(tool)))
-                    existing_tool_names.add(name)
-                
-                unique_tool_names = [name for name in toolset_tool_names if name not in existing_tool_names]
-                toolset_tools = self._resolve_tool_names(unique_tool_names)
-                self.tools.extend(toolset_tools)
-                logger.debug(f"Resolved toolsets {toolsets} to {len(toolset_tools)} tools: {[getattr(t, '__name__', str(t)) for t in toolset_tools]}")
-            except ToolResolutionError:
-                # Preserve the typed error (with .unknown / .suggestions) so
-                # strict-mode callers get the same self-correcting contract as
-                # the direct tools= path instead of a flattened ValueError.
-                raise
-            except (ValueError, KeyError) as e:
-                raise ValueError(
-                    f"Agent '{getattr(self, 'display_name', 'unknown')}' failed to resolve toolsets {toolsets}: {e}. "
-                    "Verify names with praisonaiagents.toolsets.list_toolsets()."
-                ) from e
-            except ImportError as e:
-                raise ImportError(
-                    f"Agent '{getattr(self, 'display_name', 'unknown')}' failed to import toolsets module: {e}. "
-                    "Ensure praisonaiagents is properly installed."
-                ) from e
-        
+        # tools= / toolsets= -> the tool list (names resolved, toolsets merged).
+        self.tools = resolve_agent_tools(
+            tools, toolsets, self.llm, getattr(self, 'display_name', 'unknown'),
+            self._resolve_tool_names, self._resolve_tools_list)
+
         # Inject default tools for autonomy mode (after self.tools is initialized)
         # ONLY inject if caller didn't provide tools - avoid duplicates with CLI/wrapper tools
         if self.autonomy_enabled and hasattr(self, '_autonomy_config_obj'):
@@ -2071,145 +2001,21 @@ Your Role: {self.role}
         # object = custom backend (dangerous tools only),
         # ApprovalConfig = full control (all_tools, timeout, etc.)
         # str = permission preset ("safe", "read_only", "full")
-        from ..approval.protocols import ApprovalConfig
         # Persist the approval kwarg exactly as given: it round-trips through the
         # constructor (str | bool | ApprovalConfig | dict | backend object).
         # clone_for_channel() reads this; without it the attribute never exists
         # and every served clone loses its approval policy.
         self._approval_config = approval
-        self._perm_deny = frozenset()  # Permission tier deny set (empty = no denials)
         self._perm_allow = None        # Permission tier allow set (None = allow all)
         # Optional pattern-based PermissionManager (rules from
         # .praisonai/permissions/, YAML or Python). When attached, its ``deny``
         # rules both hide tools from the advertised schema and block them at
         # call time (native + MCP, uniformly). None = no pattern rules consulted.
         self._permission_manager = None
-        # Optional Claude-Code-parity PermissionMode (bypass/plan/dont_ask/…).
-        # None = normal rule flow. Consulted at tool-call approval time.
-        self._permission_mode = None
-        if isinstance(approval, str) and approval not in ('True', 'False'):
-            # One string entry point for "how much the agent may do":
-            #   • deny-set presets — "safe"/"read_only"/"full"/"off"/"default"
-            #   • PermissionMode presets — "plan"/"bypass"/"accept_edits"/
-            #     "dont_ask" (+ aliases like "yolo", "auto_edit", "reject").
-            # Deny-set presets are matched first so their exact behaviour is
-            # unchanged; anything else falls through to the canonical
-            # PermissionMode resolver, so all spellings share one model.
-            from ..approval.registry import PERMISSION_PRESETS
-            # Normalise -/_ too so "read-only" hits the deny-set preset instead
-            # of falling through to PermissionMode.resolve (which returns None
-            # for deny-set names), which would silently produce an EMPTY deny
-            # set — the exact read-only-sandbox bypass this validation prevents.
-            preset_deny = PERMISSION_PRESETS.get(
-                approval.strip().lower().replace("-", "_")
-            )
-            self._approval_backend = None
-            self._approve_all_tools = False
-            self._approval_timeout = 0
-            self._approval_permissions = None
-            if preset_deny is not None:
-                self._perm_deny = preset_deny
-            else:
-                # Not a deny-set preset — try the canonical PermissionMode
-                # presets (plan/bypass/accept_edits/dont_ask + aliases).
-                from ..permissions.rules import PermissionMode
-                self._permission_mode = PermissionMode.resolve(approval)
-                # Unknown string with no mode → treat as no approval.
-        elif approval is True:
-            from ..approval.backends import AutoApproveBackend
-            self._approval_backend = AutoApproveBackend()
-            self._approve_all_tools = False
-            self._approval_timeout = 0  # 0 = use backend default
-            self._approval_permissions = None
-        elif approval is False or approval is None:
-            self._approval_backend = None
-            self._approve_all_tools = False
-            self._approval_timeout = 0
-            self._approval_permissions = None
-            # No explicit approval kwarg — honour PRAISONAI_TOOL_SAFETY.
-            # Default preset "default" blocks only destructive ops
-            # (delete_*, execute_command, execute_code, kill_process, move/copy)
-            # while leaving read / create / edit tools fully auto-approved.
-            # Users who want the pre-4.6.27 "trust everything" behaviour
-            # export PRAISONAI_TOOL_SAFETY=off. This adds zero Agent kwargs.
-            _raw_safety_env = os.environ.get("PRAISONAI_TOOL_SAFETY")
-            _safety_env = (_raw_safety_env or "").strip().lower()
-            _bypass_safety = _safety_env in ("off", "full", "none", "0", "false")
-            if not _bypass_safety:
-                from ..approval.registry import PERMISSION_PRESETS
-                _resolved_safety_env = _safety_env or "default"
-                _preset_deny = PERMISSION_PRESETS.get(_resolved_safety_env)
-                if _preset_deny is None and _safety_env:
-                    # Unknown env value - fall back to safe default and log warning
-                    # (logging is already imported at module level; a local `import logging`
-                    # here would shadow it and cause UnboundLocalError on earlier uses
-                    # inside __init__ such as the custom-LLM tools branch.)
-                    logging.getLogger(__name__).warning(
-                        "Unknown PRAISONAI_TOOL_SAFETY value %r; falling back to 'default' preset.",
-                        _raw_safety_env,
-                    )
-                    _resolved_safety_env = "default"
-                    _preset_deny = PERMISSION_PRESETS.get(_resolved_safety_env)
-
-                # Safe-by-default ask: when no approval kwarg was supplied
-                # (``approval is None``) and we are attached to an interactive
-                # terminal, route dangerous built-in tools (shell exec, file
-                # writes, etc.) through an interactive approval prompt instead
-                # of silently hard-denying them. This makes a fresh, un-flagged
-                # agent safe *and* usable — the user is asked once per dangerous
-                # call and can allow/deny.
-                #
-                # In non-interactive contexts (pipes, CI) — or when the user
-                # explicitly passed ``approval=False`` to opt out of prompting —
-                # we keep the existing deny-by-default preset so dangerous tools
-                # never execute unattended without an explicit policy. The full
-                # bypass remains ``PRAISONAI_TOOL_SAFETY=off`` / ``approval="bypass"``.
-                if approval is None and self._is_interactive_session():
-                    from ..approval.backends import ConsoleBackend
-                    self._approval_backend = ConsoleBackend()
-                    # Leave _perm_deny empty so dangerous tools reach the backend
-                    # (which classifies them via DEFAULT_DANGEROUS_TOOLS) and the
-                    # user is prompted to allow/deny rather than auto-denied.
-                elif _preset_deny is not None:
-                    self._perm_deny = _preset_deny
-        elif isinstance(approval, ApprovalConfig):
-            self._approval_backend = approval.backend
-            self._approve_all_tools = approval.all_tools
-            self._approval_timeout = approval.timeout  # None = indefinite, 0 = backend default
-            # Store permissions if provided (for CI-safe declarative policies)
-            self._approval_permissions = getattr(approval, 'permissions', None)
-            self._permission_mode = getattr(approval, 'permission_mode', None)
-            # Configuring approval must never be a WEAKER posture than passing
-            # nothing. When no declarative ``permissions`` policy is supplied,
-            # fall back to the same env-driven default deny set the bare
-            # ``approval is None`` path uses, so e.g. ``ApprovalConfig(timeout=30)``
-            # keeps the default denials (execute_command, delete_file, …) instead
-            # of silently dropping all of them. ``is None`` (not falsiness) so an
-            # explicit empty policy (``permissions={}``) is still an intentional
-            # policy that owns denial — only a genuinely absent policy inherits
-            # the env-driven default deny set.
-            if self._approval_permissions is None:
-                self._perm_deny = self._resolve_default_deny_set()
-        elif isinstance(approval, dict):
-            # Dict config: convert to ApprovalConfig
-            approval_config = ApprovalConfig(**approval)
-            self._approval_backend = approval_config.backend
-            self._approve_all_tools = approval_config.all_tools
-            self._approval_timeout = approval_config.timeout
-            self._approval_permissions = getattr(approval_config, 'permissions', None)
-            self._permission_mode = getattr(approval_config, 'permission_mode', None)
-            # See the ApprovalConfig branch above: never weaken the default
-            # posture just because a config object was passed. ``is None`` so an
-            # explicit empty policy (``approval={"permissions": {}}``) still owns
-            # denial rather than inheriting the default deny set.
-            if self._approval_permissions is None:
-                self._perm_deny = self._resolve_default_deny_set()
-        else:
-            # Plain backend object — dangerous tools only, backend default timeout
-            self._approval_backend = approval
-            self._approve_all_tools = False
-            self._approval_timeout = 0
-            self._approval_permissions = None
+        (self._approval_backend, self._approve_all_tools, self._approval_timeout,
+         self._approval_permissions, self._perm_deny,
+         self._permission_mode) = resolve_agent_approval(
+            approval, self._is_interactive_session, self._resolve_default_deny_set)
         
         # X-13: the caller turned code execution on, but the active tool-safety
         # policy keeps execute_code from the model. The policy stays; say so once.
@@ -2622,6 +2428,10 @@ Your Role: {self.role}
                 object.__setattr__(result, k, threading.Lock())
             elif k == "_approvals_lock":
                 object.__setattr__(result, k, asyncio.Lock())
+            elif k == "_approval_scope_id":
+                # A copy is a separate approval scope, like clone_for_channel:
+                # one user's "this session" grant must not cover another's copy.
+                object.__setattr__(result, k, f"{self.name}:{uuid.uuid4().hex}")
             else:
                 object.__setattr__(result, k, copy.deepcopy(v, memo))
         if rebuild_context_manager:

@@ -21,6 +21,14 @@ def _write_project_config(root: Path, data: dict) -> Path:
     return config_path
 
 
+def _trust_mcp_servers(home: Path, monkeypatch, *command_lines: str) -> None:
+    """Let the project file start these local MCP servers (user config opt-in)."""
+    (home / ".praisonai").mkdir(parents=True, exist_ok=True)
+    (home / ".praisonai" / "config.yaml").write_text(
+        yaml.safe_dump({"mcp": {"trusted_servers": list(command_lines)}}))
+    monkeypatch.setenv("PRAISONAI_HOME", str(home / ".praisonai"))
+
+
 class TestResolverSurfacesMcpAndPermissions:
     """The resolver must expose `mcp` and `permissions` on the resolved config."""
 
@@ -39,6 +47,7 @@ class TestResolverSurfacesMcpAndPermissions:
         (tmp_path / "home").mkdir(parents=True, exist_ok=True)
         for env_var in ("MODEL_NAME", "OPENAI_MODEL_NAME", "PRAISONAI_MODEL"):
             monkeypatch.delenv(env_var, raising=False)
+        _trust_mcp_servers(tmp_path / "home", monkeypatch, "npx -y @playwright/mcp")
 
         _write_project_config(
             tmp_path,
@@ -90,7 +99,8 @@ class TestResolverSurfacesMcpAndPermissions:
 
         assert config.permissions["default"] == "ask"
         patterns = {r["pattern"]: r["action"] for r in config.permissions["rules"]}
-        assert patterns["bash:git *"] == "allow"
+        # A project file may restrict, never allow (allow rules go in the user config).
+        assert "bash:git *" not in patterns
         assert patterns["bash:rm *"] == "deny"
 
     def test_resolved_config_roundtrip_preserves_sections(self):
@@ -252,6 +262,7 @@ class TestApplyConfigDefaults:
 
     def test_config_collects_mcp_servers_and_permissions(self, tmp_path, monkeypatch):
         from praisonai.cli.commands.run import _apply_config_defaults
+        _trust_mcp_servers(tmp_path / "home", monkeypatch, "npx -y @playwright/mcp")
 
         _write_project_config(
             tmp_path,
@@ -285,6 +296,7 @@ class TestApplyConfigDefaults:
 
     def test_config_collects_multiple_and_remote_mcp_servers(self, tmp_path, monkeypatch):
         from praisonai.cli.commands.run import _apply_config_defaults
+        _trust_mcp_servers(tmp_path / "home", monkeypatch, "npx -y @playwright/mcp", "npx -y @pg/mcp")
 
         _write_project_config(
             tmp_path,

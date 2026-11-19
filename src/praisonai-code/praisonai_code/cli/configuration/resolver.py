@@ -687,8 +687,11 @@ class ConfigResolver:
             for config_name in self.PROJECT_CONFIG_NAMES:
                 config_path = search_dir / config_name
                 if config_path.exists():
-                    data = self._read_config_file(config_path)
+                    data = self._read_config_file(config_path, project=True)
                     if data:
+                        # A project file may not choose a program to run (SECURITY.md).
+                        from praisonaiagents.mcp.trust import drop_untrusted_mcp_config
+                        data = drop_untrusted_mcp_config(data, str(config_path))
                         data["_source"] = str(config_path)
                         self._validate(data, str(config_path))
                         return data
@@ -1050,13 +1053,14 @@ class ConfigResolver:
         
         return config
     
-    def _read_config_file(self, path: Path) -> Optional[Dict[str, Any]]:
+    def _read_config_file(self, path: Path, project: bool = False) -> Optional[Dict[str, Any]]:
         """Read a configuration file (YAML or TOML) with value interpolation.
 
         ``${VAR}``, ``{env:VAR}`` and ``{file:./path}`` directives are resolved
         at load time so secrets and reused prompt bodies can live outside the
         tracked config file. Relative ``{file:...}`` paths resolve against the
-        directory containing this config file.
+        directory containing this config file. A ``project`` file loses its
+        trust keys before interpolation, so it cannot grant itself trust.
         """
         try:
             content = path.read_text()
@@ -1078,6 +1082,9 @@ class ConfigResolver:
                         return None
 
             if isinstance(data, dict):
+                if project:
+                    from praisonaiagents.config.trust import drop_project_trust_keys
+                    data = drop_project_trust_keys(data, path)
                 data = interpolate(data, base_dir=path.parent)
             return data
         except (OSError, json.JSONDecodeError, toml.TomlDecodeError, yaml.YAMLError):

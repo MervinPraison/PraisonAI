@@ -159,11 +159,14 @@ class Policy:
         for rule_data in data.get("rules", []):
             rules.append(PolicyRule(
                 action=PolicyAction(rule_data["action"]),
-                resource=rule_data.get("resource"),
+                # ``match`` is the key the YAML docs use; without it the rule
+                # had no resource and matched every resource.
+                resource=rule_data.get("resource", rule_data.get("match")),
                 reason=rule_data.get("reason"),
                 name=rule_data.get("name"),
                 priority=rule_data.get("priority", 0)
             ))
+        rules.sort(key=lambda r: r.priority, reverse=True)  # as add_rule does
         
         return cls(
             name=data["name"],

@@ -1,6 +1,6 @@
 {
   "name": "praisonai",
-  "version": "1.7.4",
+  "version": "1.8.0",
   "description": "Open-source TypeScript and JavaScript AI agent framework for Node.js, on hosted or local models. The JavaScript SDK of PraisonAI.",
   "main": "dist/index.js",
   "module": "dist/esm/index.js",

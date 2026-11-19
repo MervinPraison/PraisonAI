@@ -150,8 +150,8 @@ def test_schedule_runner_starts_once_and_stops(monkeypatch):
 
 @pytest.fixture
 def local_image_server(monkeypatch):
-    """Offline HTTP server; the public-host screen is bypassed so the real
-    download path (opener, redirect handler, size cap) is exercised."""
+    """Offline HTTP server; the address check is skipped so the real
+    download path (pinned fetch, redirect refusal, size cap) is exercised."""
     from http.server import BaseHTTPRequestHandler, HTTPServer
 
     class _Handler(BaseHTTPRequestHandler):
@@ -174,8 +174,8 @@ def local_image_server(monkeypatch):
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     monkeypatch.setattr(
-        "praisonai.jobs.models._resolve_and_screen_webhook_host",
-        lambda url, label="": ["127.0.0.1"],
+        "praisonaiagents.tools.url_safety._ip_blocked",
+        lambda ip, loopback_ok: False,
     )
     try:
         yield f"http://127.0.0.1:{server.server_address[1]}"
@@ -193,11 +193,11 @@ def test_image_save_downloads_public_url(tmp_path, local_image_server):
 
 
 def test_image_save_refuses_redirect(tmp_path, local_image_server):
-    import urllib.error
     from praisonai.capabilities.images import ImageResult
+    from praisonaiagents.tools.url_safety import UnsafeURLError
 
     out = tmp_path / "img.png"
-    with pytest.raises(urllib.error.HTTPError):
+    with pytest.raises(UnsafeURLError, match="redirect"):
         ImageResult(url=f"{local_image_server}/redirect").save(str(out))
     assert not out.exists()
 

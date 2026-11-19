@@ -111,7 +111,8 @@ class PythonSearchBackend:
             include_patterns=include_patterns,
             exclude_patterns=exclude_patterns,
             max_results=max_results,
-            context_lines=context_lines
+            context_lines=context_lines,
+            workspace_root=path,  # backends take a caller-chosen root
         )
     
     def glob(
@@ -126,7 +127,8 @@ class PythonSearchBackend:
         return glob_search(
             search_path=path,
             pattern=pattern,
-            max_results=max_results
+            max_results=max_results,
+            workspace_root=path,
         )
 
 class RipgrepBackend:

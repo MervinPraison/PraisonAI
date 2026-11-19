@@ -23,6 +23,16 @@ from ..registry import register_tool
 logger = logging.getLogger(__name__)
 
 
+def _local_path(path: str) -> str:
+    """Resolve a caller-supplied server path inside the working directory."""
+    from praisonaiagents.tools.path_safety import resolve_within_root
+
+    safe = resolve_within_root(path)
+    if safe is None:
+        raise ValueError(f"path must be inside the working directory: {path}")
+    return safe
+
+
 def _cap(name: str):
     from praisonai_mcp._wrapper_bridge import wrapper_callable
     return wrapper_callable("praisonai.capabilities", name)
@@ -57,7 +67,7 @@ def register_extended_capability_tools() -> None:
         """Upload a file."""
         try:
             file_create = _cap("file_create")
-            result = file_create(file=file_path, purpose=purpose)
+            result = file_create(file=_local_path(file_path), purpose=purpose)
             if hasattr(result, "id"):
                 return f"File created: {result.id}"
             return str(result)
@@ -253,6 +263,8 @@ def register_extended_capability_tools() -> None:
         """Extract text from image using OCR."""
         try:
             ocr = _cap("ocr")
+            if not image_path.startswith(("http://", "https://", "data:")):
+                image_path = _local_path(image_path)
             result = ocr(document=image_path, model=model)
             return str(result)
         except ImportError:

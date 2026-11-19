@@ -306,6 +306,15 @@ async def get_console(
         await ws.close()
 
 
+def js_string(value: Any) -> str:
+    """``value`` as a JavaScript string literal for a Runtime.evaluate expression.
+
+    JSON string syntax is valid JavaScript and escapes quotes, backslashes and
+    line separators, so a model-chosen selector stays one string.
+    """
+    return json.dumps(str(value))
+
+
 async def wait_for_element(
     page_id: str,
     selector: str,
@@ -331,7 +340,7 @@ async def wait_for_element(
     while time.time() - start < timeout:
         result = await execute_js(
             page_id,
-            f"!!document.querySelector('{selector}')",
+            f"!!document.querySelector({js_string(selector)})",
             port=port,
         )
         if result:

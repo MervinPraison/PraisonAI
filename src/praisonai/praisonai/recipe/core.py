@@ -944,11 +944,15 @@ def _collect_workflow_declared_tools(recipe_config: RecipeConfig) -> set:
             tools.add(approve)
         elif isinstance(approve, list):
             tools.update(str(t) for t in approve)
-        agents = data.get("agents", {})
-        if isinstance(agents, dict):
-            for agent_cfg in agents.values():
+        # Agents may be a mapping, a list, or the classic ``roles:`` mapping;
+        # the policy check must see the tools of every layout.
+        for group in (data.get("agents"), data.get("roles")):
+            cfgs = group.values() if isinstance(group, dict) else group if isinstance(group, list) else []
+            for agent_cfg in cfgs:
                 if isinstance(agent_cfg, dict):
                     agent_tools = agent_cfg.get("tools", [])
+                    if isinstance(agent_tools, str):
+                        agent_tools = [agent_tools]
                     if isinstance(agent_tools, list):
                         tools.update(str(t) for t in agent_tools)
     return tools

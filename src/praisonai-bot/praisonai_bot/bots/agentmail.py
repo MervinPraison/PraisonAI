@@ -32,6 +32,7 @@ from praisonaiagents.bots import (
 
 from ._email_utils import is_auto_reply, is_blocked_sender, extract_email_address
 from ._outbound_resilience import OutboundResilienceMixin
+from ._unknown_user import is_sender_allowed
 
 logger = logging.getLogger(__name__)
 
@@ -471,13 +472,17 @@ class AgentMailBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         
         self._webhook_runner = web.AppRunner(app)
         await self._webhook_runner.setup()
-        self._webhook_site = web.TCPSite(
-            self._webhook_runner, "0.0.0.0", self._webhook_port
+        from praisonai_bot.bots.webhook_security import webhook_bind_host
+
+        host = webhook_bind_host(
+            os.getenv("AGENTMAIL_WEBHOOK_SECRET"), server="AgentMail webhook",
+            hint="Set AGENTMAIL_WEBHOOK_SECRET",
         )
+        self._webhook_site = web.TCPSite(self._webhook_runner, host, self._webhook_port)
         await self._webhook_site.start()
         
         logger.info(
-            f"Webhook server listening on 0.0.0.0:{self._webhook_port}{webhook_path}"
+            f"Webhook server listening on {host}:{self._webhook_port}{webhook_path}"
         )
         
         # Register webhook with AgentMail API
@@ -662,6 +667,14 @@ class AgentMailBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
         # Fire message hooks (inbound gate: may drop or redact)
         if self.fire_message_received(message).get("drop"):
             logger.debug("Message dropped by MESSAGE_RECEIVED hook")
+            return
+
+        # The same sender allow-list as every other channel: allowed_users, an
+        # existing pairing, or unknown_user_policy="allow". Email has no
+        # pairing prompt, so an unknown sender is dropped (and logged).
+        sender = message.sender.user_id if message.sender else ""
+        if not is_sender_allowed(self, sender, sender):
+            logger.warning("Dropped email from %s: sender not allowed", sender)
             return
         
         # Check command prefix in subject

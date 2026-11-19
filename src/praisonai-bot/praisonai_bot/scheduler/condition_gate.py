@@ -282,6 +282,8 @@ class MonitorGate:
                 pass
 
     def _fetch_url(self, url: str) -> str:
+        from praisonaiagents.tools.url_safety import is_blocked_ip
+
         parsed = parse.urlsplit(url)
         if parsed.scheme not in {"http", "https"}:
             raise ValueError("scheme must be http or https")
@@ -301,7 +303,7 @@ class MonitorGate:
         public_addresses = []
         for address in addresses:
             ip = ipaddress.ip_address(address[4][0])
-            if not ip.is_global:
+            if is_blocked_ip(ip, False):
                 raise ValueError("target must resolve only to public addresses")
             public_addresses.append(str(ip))
 

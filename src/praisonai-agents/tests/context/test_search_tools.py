@@ -9,7 +9,7 @@ from pathlib import Path
 
 
 @pytest.fixture
-def temp_workspace():
+def temp_workspace(monkeypatch):
     """Create a temporary workspace with test files."""
     with tempfile.TemporaryDirectory() as tmpdir:
         # Create directory structure
@@ -74,6 +74,7 @@ __pycache__/
         cache_dir.mkdir()
         (cache_dir / "cached.pyc").write_text("cached content")
         
+        monkeypatch.chdir(tmpdir)  # tools stay inside the cwd by default
         yield tmpdir
 
 

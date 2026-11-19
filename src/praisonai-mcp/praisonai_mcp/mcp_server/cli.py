@@ -224,6 +224,19 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
         parser.add_argument("--resumability", action="store_true", default=True, help="Enable SSE resumability")
         parser.add_argument("--log-level", default="warning", choices=["debug", "info", "warning", "error"])
         parser.add_argument("--json", action="store_true", help="Output in JSON format")
+        parser.add_argument(
+            "--tools", default=None,
+            help="Comma-separated tool names or globs to expose (e.g. 'ask_*,praisonai.memory.*')",
+        )
+        parser.add_argument(
+            "--agents", default=None,
+            help="agents.yaml whose agents are exposed as ask_<agent> tools (instead of the built-in tools)",
+        )
+        parser.add_argument(
+            "--oauth", action="store_true",
+            help="Sign clients in with OAuth 2.1 (on by default for a non-localhost --host without --api-key)",
+        )
+        parser.add_argument("--issuer", default=None, help="Public base URL behind a proxy (default http://HOST:PORT)")
         
         try:
             parsed = parser.parse_args(args)
@@ -244,14 +257,30 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
         
         try:
             from .server import MCPServer
-            from .adapters import register_all
-            
-            # Register all tools, resources, and prompts
-            register_all()
+            from .registry import MCPToolRegistry, get_tool_registry
+
+            if parsed.agents:
+                # Only the user's agents: ask_<agent> + list_agents.
+                from .agent_adapter import load_agents_file, register_agents
+
+                registry = MCPToolRegistry()
+                register_agents(registry, load_agents_file(parsed.agents))
+            else:
+                from .adapters import register_all
+
+                # Register all tools, resources, and prompts
+                register_all()
+                registry = get_tool_registry()
+            if parsed.tools:
+                patterns = [p.strip() for p in parsed.tools.split(",") if p.strip()]
+                if not registry.keep_only(patterns):
+                    self._print_error(f"--tools {parsed.tools!r} matches no tool")
+                    return self.EXIT_ERROR
             
             # Create server
             server = MCPServer(
                 name=parsed.name,
+                tool_registry=registry,
                 instructions="PraisonAI MCP Server - AI agent capabilities exposed via MCP protocol.",
             )
             
@@ -269,6 +298,7 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
                 # enforced via OPERATION_SCOPES). Falls back to the scalar
                 # --api-key (single wildcard-scoped key) when no file is given.
                 api_key_auth = self._load_keys_file(parsed.keys_file) if parsed.keys_file else None
+                oauth = self._oauth_server(parsed) if not (parsed.api_key or api_key_auth) else None
 
                 if not parsed.json:
                     self._print_success(f"Starting MCP server '{parsed.name}' on http://{parsed.host}:{parsed.port}{parsed.endpoint}")
@@ -285,6 +315,7 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
                     allow_client_termination=allow_termination,
                     response_mode=parsed.response_mode,
                     resumability_enabled=parsed.resumability,
+                    oauth=oauth,
                 )
             
             return self.EXIT_SUCCESS
@@ -299,6 +330,27 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
         except Exception as e:
             self._print_error(str(e))
             return self.EXIT_ERROR
+
+    def _oauth_server(self, parsed):
+        """The built-in authorization server when this serve should sign clients in.
+
+        Localhost stays zero-auth unless ``--oauth``; a network address with
+        no API key gets OAuth (it used to refuse to start).
+        """
+        local = parsed.host in ("127.0.0.1", "localhost", "::1")
+        if local and not parsed.oauth:
+            return None
+        from praisonaiagents.paths import get_mcp_dir
+
+        from .auth.server import OAuthServer
+
+        issuer = (parsed.issuer or f"http://{parsed.host}:{parsed.port}").rstrip("/")
+        server = OAuthServer(issuer=issuer, resource=issuer + parsed.endpoint,
+                             store_path=get_mcp_dir() / "oauth.json")
+        if server.generated_key:
+            print(f"Owner key for approving sign-ins: {server.owner_key}\n"
+                  "(set PRAISONAI_MCP_OWNER_KEY to keep one across restarts)", file=sys.stderr)
+        return server
 
     def _load_keys_file(self, path: str):
         """Load scoped API keys from a JSON file into an APIKeyAuth instance.

@@ -2614,7 +2614,7 @@ class ToolExecutionMixin:
                     standing_grant = (
                         approval_registry.is_env_auto_approve()
                         or approval_registry.is_yaml_approved(tool_name)
-                        or approval_registry.is_auto_approved(tool_name, scope_id)
+                        or approval_registry._skill_grant_covers(tool_name, scope_id)
                         or approval_registry.is_already_approved(
                             tool_name, tool_args, scope_id
                         )
@@ -3097,7 +3097,8 @@ class ToolExecutionMixin:
             "write", "edit", "append", "delete", "remove", "create", "mkdir",
             "rm", "put", "post", "patch", "update", "insert", "save", "move",
             "rename", "chmod", "chown", "exec", "run", "shell", "bash", "command",
-            "kill", "apply_patch", "install", "deploy",
+            "kill", "apply_patch", "install", "deploy", "send", "publish",
+            "upload", "push", "notify", "forward", "reply", "archive", "commit",
         )
         return not any(marker in name for marker in write_markers)
 
@@ -4254,6 +4255,17 @@ class ToolExecutionMixin:
             return False, None
 
         def _execute_mcp_tool(mcp_instance, func_name, args):
+            found, result = _call_mcp_tool(mcp_instance, func_name, args)
+            if found:
+                # An MCP server is a third party: fence its output as external.
+                from ..tools.trust import add_external_tool
+                add_external_tool(func_name)
+            return found, result
+
+        def _call_mcp_tool(mcp_instance, func_name, args):
+            permitted = getattr(mcp_instance, "_tool_permitted", None)
+            if permitted is not None and not permitted(func_name):
+                return False, None  # filtered out by allowed_tools/disabled_tools
             if hasattr(mcp_instance, 'is_sse') and mcp_instance.is_sse:
                 if hasattr(mcp_instance, 'sse_client'):
                     for tool in mcp_instance.sse_client.tools:

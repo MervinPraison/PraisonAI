@@ -20,6 +20,12 @@ from praisonai_bot.bots._outbound_media import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _workspace_is_tmp_path(tmp_path, monkeypatch):
+    # Attachments must sit inside the workspace (the cwd by default).
+    monkeypatch.chdir(tmp_path)
+
+
 def test_valid_file_passes(tmp_path):
     f = tmp_path / "report.pdf"
     f.write_bytes(b"%PDF-1.4 data")
@@ -94,7 +100,8 @@ def test_strict_rejects_outside_allow_roots(tmp_path):
     policy = OutboundMediaPolicy(
         strict=True, allow_roots=[str(tmp_path / "allowed")], recent_mtime_seconds=1
     )
-    with pytest.raises(MediaDeliveryError, match="strict policy"):
+    # Outside every allow root: refused by the workspace check first.
+    with pytest.raises(MediaDeliveryError, match="outside the workspace|strict policy"):
         validate_media_delivery_path(str(f), policy=policy)
 
 

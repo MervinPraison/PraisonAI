@@ -297,7 +297,7 @@ class MCPOAuthProvider:
         timeout: float,
     ) -> Dict[str, Any]:
         """Exchange an authorization code for tokens at the token endpoint."""
-        import requests  # lazy import — optional dependency
+        from .oauth_discovery import _require_success, _send
 
         data = {
             "grant_type": "authorization_code",
@@ -311,15 +311,8 @@ class MCPOAuthProvider:
         if metadata.get("resource"):
             data["resource"] = metadata["resource"]
 
-        resp = requests.post(
-            metadata["token_endpoint"],
-            data=data,
-            headers={"Accept": "application/json"},
-            timeout=timeout,
-            allow_redirects=False,  # never re-send credentials to a redirect target
-        )
-        from .oauth_discovery import _require_success
-
+        resp = _send("POST", metadata["token_endpoint"], timeout, data=data,
+                     headers={"Accept": "application/json"})
         _require_success(resp)
         return self._normalize_tokens(
             resp.json(), token_endpoint=metadata["token_endpoint"]
@@ -336,13 +329,9 @@ class MCPOAuthProvider:
             return False
 
         try:
-            from .oauth_discovery import _require_https, _require_success
-
-            # Defense in depth: never POST a refresh token / client secret to a
-            # persisted endpoint that isn't HTTPS (or loopback).
-            _require_https(token_endpoint)
-
-            import requests  # lazy import — optional dependency
+            # _send never POSTs a refresh token / client secret to a persisted
+            # endpoint that isn't HTTPS (or loopback), nor follows a redirect.
+            from .oauth_discovery import _require_success, _send
 
             data = {
                 "grant_type": "refresh_token",
@@ -352,13 +341,8 @@ class MCPOAuthProvider:
             if client_info.get("client_secret"):
                 data["client_secret"] = client_info["client_secret"]
 
-            resp = requests.post(
-                token_endpoint,
-                data=data,
-                headers={"Accept": "application/json"},
-                timeout=10.0,
-                allow_redirects=False,  # never re-send credentials to a redirect target
-            )
+            resp = _send("POST", token_endpoint, 10.0, data=data,
+                         headers={"Accept": "application/json"})
             _require_success(resp)
             new_tokens = self._normalize_tokens(
                 resp.json(), token_endpoint=token_endpoint
