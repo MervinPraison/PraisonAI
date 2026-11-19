@@ -287,6 +287,21 @@ class ToolsMCPServer:
         if host is None:
             host = resolved_config.get_bind_address()
 
+        # A non-loopback bind is never keyless: without a configured token,
+        # generate one, print it once, and require it on every request.
+        if host not in ("127.0.0.1", "::1", "localhost") and not resolved_token:
+            import os
+            import secrets
+            from dataclasses import replace
+
+            resolved_token = secrets.token_urlsafe(32)
+            os.environ["MCP_SSE_AUTH_TOKEN"] = resolved_token
+            resolved_config = security = replace(resolved_config, require_auth=True)
+            print(
+                f"🔐 MCP SSE server bound to non-loopback host {host!r} without "
+                f"MCP_SSE_AUTH_TOKEN set. Generated a bearer token: {resolved_token}"
+            )
+
         # Refuse to start an unauthenticated server when auth was requested but
         # no token is available (env var unset/typo'd). Previously the
         # request-time guard `require_auth and self._token` evaluated False and
@@ -336,7 +351,7 @@ def launch_tools_mcp_server(
     tool_names: Optional[List[str]] = None,
     name: str = "praisonai-tools",
     transport: str = "stdio",
-    host: str = "0.0.0.0",
+    host: Optional[str] = None,
     port: int = 8080,
     debug: bool = False
 ) -> None:
@@ -347,7 +362,7 @@ def launch_tools_mcp_server(
         tool_names: List of tool names to load from praisonaiagents.tools
         name: Name of the MCP server
         transport: Transport type - "stdio" or "sse"
-        host: Host for SSE transport
+        host: Host for SSE transport (default: 127.0.0.1 via SecurityConfig)
         port: Port for SSE transport
         debug: Enable debug logging
     

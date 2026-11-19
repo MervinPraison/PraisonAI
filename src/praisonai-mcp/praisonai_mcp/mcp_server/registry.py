@@ -218,6 +218,22 @@ class MCPToolRegistry:
         """Get a tool by name."""
         self._ensure_loaded()
         return self._tools.get(name)
+
+    def keep_only(self, patterns: List[str]) -> int:
+        """Drop every tool whose name matches none of ``patterns`` (globs).
+
+        Backs ``serve --tools``: the scope chosen in ``praisonai connect``.
+        Returns how many tools remain.
+        """
+        import fnmatch
+
+        self._ensure_loaded()
+        with self._lock:
+            self._tools = {
+                n: t for n, t in self._tools.items()
+                if any(fnmatch.fnmatchcase(n, p) for p in patterns)
+            }
+            return len(self._tools)
     
     def list_all(self) -> List[MCPToolDefinition]:
         """List all registered tools."""

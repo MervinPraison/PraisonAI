@@ -162,6 +162,7 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "validate": ("praisonai.cli.commands.validate", "app", "Validate YAML configuration files"),
     "acp": (".commands.acp", "app", "Agent Client Protocol server"),
     "mcp": ("praisonai_mcp.cli.commands.mcp", "app", "MCP server management"),
+    "connect": ("praisonai_mcp.cli.commands.connect", "app", "Connect editors and agents (Cursor, Claude, Codex…) to PraisonAI"),
     "serve": (".commands.serve", "app", "API server management"),
     "daemon": (".commands.daemon", "app", "Warm local runtime (keeps MCP/provider clients hot)"),
     "attach": (".commands.attach", "app", "Attach to a live session on the warm runtime"),
@@ -311,6 +312,7 @@ _BROWSER_RESIDENT_COMMANDS = frozenset({
 # C12: MCP server commands implemented in ``praisonai_mcp.cli.commands.*``.
 _MCP_RESIDENT_COMMANDS = frozenset({
     "mcp",
+    "connect",
 })
 
 # Backward-compatible alias (C7.1 name).
@@ -329,6 +331,22 @@ from praisonai_code._train_bridge import train_package_available
 from praisonai_code._browser_bridge import browser_package_available
 from praisonai_code._mcp_bridge import mcp_package_available
 from praisonai_code._deploy_bridge import deploy_package_available
+
+
+def _install_hint_command(name: str, package: str) -> click.Command:
+    """A stand-in for a command whose package is not installed: one line, exit 1."""
+
+    def _hint() -> None:
+        typer.echo(f"`praisonai {name}` needs {package}: pip install {package}", err=True)
+        raise SystemExit(1)
+
+    return click.Command(
+        name,
+        callback=_hint,
+        help=f"Requires {package} (pip install {package})",
+        add_help_option=False,
+        context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
+    )
 
 
 class LazyCommandGroup(TyperGroup):
@@ -430,7 +448,9 @@ class LazyCommandGroup(TyperGroup):
             if name in _BROWSER_RESIDENT_COMMANDS and not browser_package_available():
                 return None
             if name in _MCP_RESIDENT_COMMANDS and not mcp_package_available():
-                return None
+                # Still hidden from --help, but typed by name it says what to
+                # install instead of "No such command".
+                return _install_hint_command(name, "praisonai-mcp")
             if name in _WRAPPER_RESIDENT_COMMANDS and not wrapper_available():
                 return None
             try:

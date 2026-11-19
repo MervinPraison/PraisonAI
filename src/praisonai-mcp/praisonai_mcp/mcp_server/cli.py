@@ -225,6 +225,14 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
         parser.add_argument("--log-level", default="warning", choices=["debug", "info", "warning", "error"])
         parser.add_argument("--json", action="store_true", help="Output in JSON format")
         parser.add_argument(
+            "--tools", default=None,
+            help="Comma-separated tool names or globs to expose (e.g. 'ask_*,praisonai.memory.*')",
+        )
+        parser.add_argument(
+            "--agents", default=None,
+            help="agents.yaml whose agents are exposed as ask_<agent> tools (instead of the built-in tools)",
+        )
+        parser.add_argument(
             "--oauth", action="store_true",
             help="Sign clients in with OAuth 2.1 (on by default for a non-localhost --host without --api-key)",
         )
@@ -249,14 +257,30 @@ Run PraisonAI as an MCP server for Claude Desktop, Cursor, Windsurf, and other M
         
         try:
             from .server import MCPServer
-            from .adapters import register_all
-            
-            # Register all tools, resources, and prompts
-            register_all()
+            from .registry import MCPToolRegistry, get_tool_registry
+
+            if parsed.agents:
+                # Only the user's agents: ask_<agent> + list_agents.
+                from .agent_adapter import load_agents_file, register_agents
+
+                registry = MCPToolRegistry()
+                register_agents(registry, load_agents_file(parsed.agents))
+            else:
+                from .adapters import register_all
+
+                # Register all tools, resources, and prompts
+                register_all()
+                registry = get_tool_registry()
+            if parsed.tools:
+                patterns = [p.strip() for p in parsed.tools.split(",") if p.strip()]
+                if not registry.keep_only(patterns):
+                    self._print_error(f"--tools {parsed.tools!r} matches no tool")
+                    return self.EXIT_ERROR
             
             # Create server
             server = MCPServer(
                 name=parsed.name,
+                tool_registry=registry,
                 instructions="PraisonAI MCP Server - AI agent capabilities exposed via MCP protocol.",
             )
             

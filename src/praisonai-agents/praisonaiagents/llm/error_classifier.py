@@ -125,6 +125,14 @@ _ERROR_PATTERNS: Dict[ErrorCategory, List[str]] = {
 }
 
 
+def is_shutdown_error(error: object) -> bool:
+    """True if a call was cut off because the process is stopping (e.g. Ctrl-C mid-call).
+
+    Retrying fails the same way, and it is not a model failure worth a panel.
+    """
+    return "cannot schedule new futures after" in str(error)
+
+
 def _is_connection_refused(exc: BaseException, _depth: int = 0) -> bool:
     """True if nothing accepted the connection (``ConnectionRefusedError`` in the chain).
 

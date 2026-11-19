@@ -86,6 +86,15 @@ configure_host(
 )
 
 
+# The greeting in the new-chat hero (aiui >= 0.3.170 shows it in every layout).
+@aiui.welcome
+async def _welcome():
+    await aiui.say(
+        "🦞 Welcome to PraisonAI Claw! Ask anything; the tables and code "
+        "your agents write open in the canvas."
+    )
+
+
 # ── Custom page: Feature Explorer ───────────────────────────
 
 @aiui.page(

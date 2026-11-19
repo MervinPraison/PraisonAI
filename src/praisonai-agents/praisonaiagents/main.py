@@ -490,6 +490,10 @@ def display_tool_call(message: str, console=None, tool_name: str = None, tool_in
 def display_error(message: str, console=None):
     if not message or not message.strip():
         return
+    from .llm.error_classifier import is_shutdown_error
+    if is_shutdown_error(message):  # a call cut off by Ctrl-C/exit is not an error to show
+        logger.debug("not shown during shutdown: %s", message)
+        return
     Console, Panel, Text, _Md = _rich()
     if console is None:
         console = Console()
