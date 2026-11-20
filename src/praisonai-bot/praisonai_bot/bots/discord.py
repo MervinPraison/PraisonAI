@@ -45,7 +45,7 @@ from ._commands import (
 )
 from ._failure import failure_reply_text
 from ._group_policy import decide_group_admission, record_passive_group_message
-from praisonaiagents.bots.admission import MentionFacts
+from praisonaiagents.bots.admission import MentionFacts, should_debounce_inbound
 from ._session import BotSessionManager
 from ._streaming import (
     StreamingConfig,
@@ -513,7 +513,23 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                         ack_ctx = await self._ack.ack(react_fn=_discord_react)
                     
                     async def _send_agent_response():
-                        text_to_send = await self._debouncer.debounce(user_id, bot_message.text)
+                        if should_debounce_inbound(
+                            bot_message.text,
+                            has_media=bool(getattr(bot_message, "attachments", None)),
+                        ):
+                            batch = await self._debouncer.debounce(
+                                user_id, bot_message.text
+                            )
+                            if batch is None:
+                                # Superseded by a later message in the same
+                                # burst: that caller's single turn already
+                                # carries this text.
+                                return
+                            text_to_send = batch.final
+                        else:
+                            # Control/empty/media-bearing message: never held
+                            # in the debounce window, dispatch as its own turn.
+                            text_to_send = bot_message.text
                         channel_id = str(message.channel.id)
 
                         # Streaming path: progressively edit a placeholder in

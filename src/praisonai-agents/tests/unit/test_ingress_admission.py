@@ -310,3 +310,38 @@ def test_unknown_group_policy_fails_closed_to_mention_only():
 
     d = resolve_ingress_admission(chat_type="group", sender_id="u", group_policy="bogus")
     assert d.admit is False and d.reason_code == "group_mention_only"
+
+
+class TestShouldDebounceInbound:
+    """Issue #6717: debounce eligibility is one pure decision, not per-adapter."""
+
+    @staticmethod
+    def _call(text, **kw):
+        from praisonaiagents.bots.admission import should_debounce_inbound
+
+        return should_debounce_inbound(text, **kw)
+
+    def test_plain_text_is_debouncable(self):
+        assert self._call("hello there") is True
+
+    def test_disabled_never_debounces(self):
+        assert self._call("hello", allow_debounce=False) is False
+
+    def test_media_bypasses_the_window(self):
+        assert self._call("look at this", has_media=True) is False
+
+    def test_empty_and_whitespace_bypass_the_window(self):
+        assert self._call("") is False
+        assert self._call("   \n\t ") is False
+
+    def test_control_words_bypass_the_window(self):
+        for word in ("stop", "cancel", "status", "STOP", " Cancel "):
+            assert self._call(word) is False, word
+
+    def test_slash_commands_bypass_the_window(self):
+        assert self._call("/model gpt-4o") is False
+
+    def test_text_mentioning_control_word_still_debounces(self):
+        # Only whole-command text is control intent, not prose containing it.
+        assert self._call("please stop adding features") is True
+        assert self._call("what is my status report?") is True

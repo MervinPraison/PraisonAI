@@ -22,7 +22,9 @@ class TestInboundDebouncer:
         """A single message is flushed after the debounce window."""
         debouncer = self._make_debouncer(debounce_ms=100)
         result = await debouncer.debounce("user1", "hello")
-        assert result == "hello"
+        assert result is not None
+        assert result.final == "hello"
+        assert result.preceding == []
 
     @pytest.mark.asyncio
     async def test_rapid_messages_coalesced(self):
@@ -34,11 +36,13 @@ class TestInboundDebouncer:
         await asyncio.sleep(0.02)
         task2 = asyncio.create_task(debouncer.debounce("user1", "world"))
 
-        results = await asyncio.gather(task1, task2)
-        # Both tasks should get the coalesced result
-        combined = results[-1]
-        assert "hello" in combined
-        assert "world" in combined
+        superseded, batch = await asyncio.gather(task1, task2)
+        # One turn per burst: the earlier caller short-circuits, the final
+        # caller dispatches the coalesced batch.
+        assert superseded is None
+        assert batch is not None
+        assert batch.final == "hello\nworld"
+        assert batch.preceding == ["hello"]
 
     @pytest.mark.asyncio
     async def test_different_users_independent(self):
@@ -49,15 +53,16 @@ class TestInboundDebouncer:
         task2 = asyncio.create_task(debouncer.debounce("user2", "msg_b"))
 
         r1, r2 = await asyncio.gather(task1, task2)
-        assert r1 == "msg_a"
-        assert r2 == "msg_b"
+        assert r1.final == "msg_a"
+        assert r2.final == "msg_b"
 
     @pytest.mark.asyncio
     async def test_zero_debounce_passes_through(self):
         """debounce_ms=0 means no debouncing — immediate pass-through."""
         debouncer = self._make_debouncer(debounce_ms=0)
         result = await debouncer.debounce("user1", "instant")
-        assert result == "instant"
+        assert result is not None
+        assert result.final == "instant"
 
     @pytest.mark.asyncio
     async def test_messages_joined_with_newline(self):
@@ -68,9 +73,9 @@ class TestInboundDebouncer:
         await asyncio.sleep(0.02)
         task2 = asyncio.create_task(debouncer.debounce("user1", "line2"))
 
-        results = await asyncio.gather(task1, task2)
-        combined = results[-1]
-        assert "line1\nline2" == combined or "line1" in combined
+        superseded, batch = await asyncio.gather(task1, task2)
+        assert superseded is None
+        assert batch.final == "line1\nline2"
 
     @pytest.mark.asyncio
     async def test_flush_resets_buffer(self):
@@ -78,11 +83,11 @@ class TestInboundDebouncer:
         debouncer = self._make_debouncer(debounce_ms=100)
 
         r1 = await debouncer.debounce("user1", "batch1")
-        assert r1 == "batch1"
+        assert r1.final == "batch1"
 
         r2 = await debouncer.debounce("user1", "batch2")
-        assert r2 == "batch2"
-        assert "batch1" not in r2
+        assert r2.final == "batch2"
+        assert "batch1" not in r2.final
 
     @pytest.mark.asyncio
     async def test_pending_count(self):
@@ -106,14 +111,18 @@ class TestInboundDebouncer:
         loop = asyncio.get_running_loop()
         start = loop.time()
         first = asyncio.create_task(debouncer.debounce("u", "m0"))
+        tasks = [first]
         for i in range(1, 10):
             await asyncio.sleep(0.05)
             if first.done():
                 break
-            asyncio.create_task(debouncer.debounce("u", f"m{i}"))
-        result = await asyncio.wait_for(first, timeout=1.0)
+            tasks.append(asyncio.create_task(debouncer.debounce("u", f"m{i}")))
+        results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=1.0)
         assert loop.time() - start < 0.4
-        assert result.startswith("m0\nm1")
+        # Exactly one caller dispatches the burst: the final one.
+        batches = [r for r in results if r is not None]
+        assert len(batches) == 1
+        assert batches[0].final.startswith("m0\nm1")
         debouncer.cancel_all()
 
     @pytest.mark.asyncio
@@ -124,8 +133,31 @@ class TestInboundDebouncer:
             debouncer = _debounce.InboundDebouncer(debounce_ms=5000)
         tasks = [asyncio.create_task(debouncer.debounce("u", str(i))) for i in range(3)]
         results = await asyncio.wait_for(asyncio.gather(*tasks), timeout=1.0)
-        assert results == ["0\n1\n2"] * 3
+        # Superseded callers resolve None; only the final caller dispatches.
+        assert results[0] is None
+        assert results[1] is None
+        assert results[2] is not None
+        assert results[2].final == "0\n1\n2"
+        assert results[2].preceding == ["0", "1"]
         assert debouncer.pending_count == 0
+
+    @pytest.mark.asyncio
+    async def test_one_turn_per_burst_contract(self):
+        """A 3-message burst: two callers get None, the last gets the batch."""
+        debouncer = self._make_debouncer(debounce_ms=200)
+
+        tasks = [asyncio.create_task(debouncer.debounce("user1", "a"))]
+        for msg in ("b", "c"):
+            await asyncio.sleep(0.02)
+            tasks.append(asyncio.create_task(debouncer.debounce("user1", msg)))
+
+        results = await asyncio.gather(*tasks)
+        assert results[0] is None
+        assert results[1] is None
+        assert results[2] is not None
+        batch = results[2]
+        assert batch.final == "a\nb\nc"
+        assert batch.preceding == ["a", "b"]
 
     def test_default_max_wait_is_multiple_of_debounce(self):
         from praisonai_bot.bots._debounce import InboundDebouncer
