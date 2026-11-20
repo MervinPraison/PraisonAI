@@ -74,6 +74,48 @@ def test_headless_jsonl_omits_an_unknown_model():
     assert _window_fields(1000, "totally-unknown-model-xyz", None) == {}
 
 
+class _Console:
+    def __init__(self):
+        self.lines = []
+
+    def print(self, *args, **kwargs):
+        self.lines.append(" ".join(str(arg) for arg in args))
+
+
+def test_context_show_survives_live_manager_stats():
+    from praisonai_code.cli.features.context_manager import (
+        ContextManagerHandler,
+        _show_context_summary,
+    )
+
+    handler = ContextManagerHandler(model="gpt-4o")
+    handler.track_history([
+        {"role": "user", "content": "hello " * 200},
+        {"role": "assistant", "content": "world"},
+    ])
+    console = _Console()
+    _show_context_summary(console, handler)
+    text = "\n".join(console.lines)
+    assert "Current Usage:" in text
+    assert "% of 128,000" in text
+    assert "Turns:" in text and "Messages:" in text
+
+
+def test_context_show_unknown_model_does_not_raise():
+    from praisonai_code.cli.features.context_manager import (
+        ContextManagerHandler,
+        _show_context_summary,
+    )
+
+    handler = ContextManagerHandler(model="totally-unknown-model-xyz")
+    handler.track_history([{"role": "user", "content": "hi"}])
+    console = _Console()
+    _show_context_summary(console, handler)
+    text = "\n".join(console.lines)
+    assert "Model Limit:    unknown" in text
+    assert "128,000" not in text
+
+
 def test_flat_stats_still_report_a_percent():
     figures = _context_window_figures({
         "total_tokens": 8192,

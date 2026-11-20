@@ -387,9 +387,13 @@ def _show_context_summary(console, manager: ContextManagerHandler) -> None:
     console.print(f"  Model Limit:    {limit_text}")
     console.print(f"  Output Reserve: {figures['reserve']:,} tokens")
     console.print(f"  Usable Budget:  {figures['usable']:,} tokens")
+    ledger = stats.get("ledger") if isinstance(stats.get("ledger"), dict) else {}
+    counted = ledger.get("ledger") if isinstance(ledger.get("ledger"), dict) else ledger
+    turns = stats.get("turn_count", counted.get("turn_count", 0))
+    messages = stats.get("message_count", counted.get("message_count", 0))
     console.print(f"  Current Usage:  {usage}")
-    console.print(f"  Turns:          {stats['turn_count']}")
-    console.print(f"  Messages:       {stats['message_count']}")
+    console.print(f"  Turns:          {turns}")
+    console.print(f"  Messages:       {messages}")
     console.print(f"  Auto-Compact:   {'enabled' if stats['auto_compact'] else 'disabled'}")
     console.print(f"  Monitoring:     {'enabled' if stats['monitor_enabled'] else 'disabled'}")
     
