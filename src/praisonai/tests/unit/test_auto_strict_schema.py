@@ -100,6 +100,10 @@ async def test_team_strict_schema_preserves_named_yaml(
     ("steps", "expected"),
     [
         (
+            [{"agent": "greeter", "repeat": {"max_iterations": 3}}],
+            [{"agent": "greeter", "repeat": {"max_iterations": 3}}],
+        ),
+        (
             [{"agent": "greeter", "action": "Greet"}],
             [{"agent": "greeter", "action": "Greet"}],
         ),

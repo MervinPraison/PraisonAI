@@ -1745,7 +1745,7 @@ def _get_workflow_models():
 
         class RepeatOutput(BaseModel):
             model_config = {'extra': 'forbid'}
-            until: str
+            until: Optional[str] = None
             max_iterations: int = 5
 
         class IncludeOutput(BaseModel):
