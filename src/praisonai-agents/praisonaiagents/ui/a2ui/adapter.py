@@ -7,7 +7,10 @@ Spec: https://github.com/google/A2UI
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any, Dict, List, Optional
+
+from praisonaiagents.ui.protocols import A2UI_MIME_TYPE
 
 
 _A2UI_INSTALL_HINT = (
@@ -29,16 +32,63 @@ def _import(name: str):
         ) from exc
 
 
+def _load_a2a_parts_module():
+    """Import A2A part helpers from the SDK (module path varies by SDK version)."""
+    for name in ("a2ui.a2a.parts", "a2ui.a2a"):
+        try:
+            return _import(name)
+        except ImportError:
+            continue
+    return None
+
+
+def _normalize_a2ui_payload(a2ui_data: Dict[str, Any]) -> Dict[str, Any]:
+    if "messages" in a2ui_data:
+        return a2ui_data
+    if any(k in a2ui_data for k in ("createSurface", "updateComponents", "updateDataModel")):
+        return {"messages": [a2ui_data]}
+    return a2ui_data
+
+
+def _local_create_a2ui_part(a2ui_data: Dict[str, Any]) -> Any:
+    """Fallback when a2ui-agent-sdk no longer ships ``a2ui.a2a.parts`` (e.g. 0.12+)."""
+    payload = _normalize_a2ui_payload(a2ui_data)
+    root = SimpleNamespace(
+        data=payload,
+        metadata={"mimeType": A2UI_MIME_TYPE},
+    )
+    return SimpleNamespace(root=root)
+
+
+def _local_is_a2ui_part(part: Any) -> bool:
+    root = getattr(part, "root", part)
+    metadata = getattr(root, "metadata", None) or {}
+    if isinstance(metadata, dict) and metadata.get("mimeType") == A2UI_MIME_TYPE:
+        return True
+    data = getattr(root, "data", None)
+    if isinstance(data, dict) and "messages" in data:
+        return True
+    return False
+
+
 def create_a2ui_part(a2ui_data: Dict[str, Any]) -> Any:
     """Wrap A2UI payload for A2A transport (MIME: application/json+a2ui)."""
-    parts = _import("a2ui.a2a.parts")
-    return parts.create_a2ui_part(a2ui_data)
+    parts = _load_a2a_parts_module()
+    if parts is not None and hasattr(parts, "create_a2ui_part"):
+        return parts.create_a2ui_part(a2ui_data)
+    try:
+        _import("a2ui")
+    except ImportError as exc:
+        raise ImportError(_A2UI_INSTALL_HINT) from exc
+    return _local_create_a2ui_part(a2ui_data)
 
 
 def is_a2ui_part(part: Any) -> bool:
     """Return True if an A2A part contains A2UI data."""
-    parts = _import("a2ui.a2a.parts")
-    return parts.is_a2ui_part(part)
+    parts = _load_a2a_parts_module()
+    if parts is not None and hasattr(parts, "is_a2ui_part"):
+        return parts.is_a2ui_part(part)
+    return _local_is_a2ui_part(part)
 
 
 def parse_a2ui_response(text: str) -> List[Any]:
