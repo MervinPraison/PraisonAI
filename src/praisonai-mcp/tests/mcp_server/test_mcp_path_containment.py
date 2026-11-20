@@ -16,7 +16,7 @@ import pytest
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="symlink fixture needs POSIX")
 
-ESCAPES = ("absolute", "dotdot", "sibling", "tilde", "symlink")
+ESCAPES = ("absolute", "dotdot", "sibling", "tilde", "symlink", "symlink_dotdot")
 
 # tool name -> keyword that carries the path
 PROBED = {
@@ -61,6 +61,11 @@ def box(tmp_path, monkeypatch):
         d.mkdir()
     for d in (outside, sibling, home):
         (d / "secret.yaml").write_text("secret: CANARY-31c9\n")
+    # "link/../secret.yaml" is the vector that separates a resolver which folds
+    # ".." lexically from one that resolves it through the symlink the way the
+    # OS opens the path. The file it really names sits next to the workspace,
+    # not inside it, so the canary has to live there too.
+    (tmp_path / "secret.yaml").write_text("secret: CANARY-31c9\n")
     os.symlink(outside, ws / "link")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.chdir(ws)
@@ -81,6 +86,7 @@ def box(tmp_path, monkeypatch):
         "sibling": str(sibling / "secret.yaml"),
         "tilde": "~/secret.yaml",
         "symlink": "link/secret.yaml",
+        "symlink_dotdot": "link/../secret.yaml",
     }
     return {"paths": paths, "seen": seen}
 
