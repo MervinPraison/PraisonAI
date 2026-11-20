@@ -56,5 +56,22 @@ class TestA2UIAdapterSmoke:
             )
 
         with patch.object(adapter, "_import", side_effect=_raise):
-            with pytest.raises(ImportError, match="praisonaiagents\\[a2ui\\]"):
-                adapter.create_a2ui_part({"messages": []})
+            with patch.object(adapter.importlib.util, "find_spec", return_value=None):
+                with pytest.raises(ImportError, match="praisonaiagents\\[a2ui\\]"):
+                    adapter.create_a2ui_part({"messages": []})
+
+    def test_newer_sdk_without_a2a_module_still_returns_a_part(self):
+        from unittest.mock import patch
+
+        from praisonaiagents.ui.a2ui import adapter
+
+        def find_spec(name):
+            if name == "a2ui":
+                return object()
+            return None
+
+        with patch.object(adapter.importlib.util, "find_spec", side_effect=find_spec):
+            part = adapter.create_a2ui_part({"messages": [{"createSurface": {"surfaceId": "main"}}]})
+        assert part.root.data["messages"][0]["createSurface"]["surfaceId"] == "main"
+        assert part.root.metadata["mimeType"] == "application/json+a2ui"
+        assert adapter.is_a2ui_part(part) is True
