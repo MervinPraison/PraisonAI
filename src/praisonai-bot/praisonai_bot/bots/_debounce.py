@@ -143,11 +143,14 @@ class InboundDebouncer:
         batch = DebouncedBatch(
             final=self._separator.join(messages), preceding=messages[:-1]
         )
-        for fut in futures[:-1]:
-            if not fut.done():
+        # The last *unfinished* caller owns the batch: a cancelled caller's
+        # future is already done, and resolving by position would then hand
+        # ``None`` to every survivor and drop the burst on the floor.
+        unfinished = [fut for fut in futures if not fut.done()]
+        if unfinished:
+            for fut in unfinished[:-1]:
                 fut.set_result(None)
-        if futures and not futures[-1].done():
-            futures[-1].set_result(batch)
+            unfinished[-1].set_result(batch)
 
     @property
     def pending_count(self) -> int:

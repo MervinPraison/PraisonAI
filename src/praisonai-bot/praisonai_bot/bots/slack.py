@@ -764,7 +764,13 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                         if batch is None:
                             # Superseded by a later message in the same
                             # burst: that caller's single turn already
-                            # carries this text.
+                            # carries this text. Clear this message's
+                            # processing indicator — it never gets its
+                            # own completion.
+                            if ack_ctx:
+                                await self._ack.clear(
+                                    ack_ctx, unreact_fn=_slack_unreact
+                                )
                             return
                         text = batch.final
                     else:

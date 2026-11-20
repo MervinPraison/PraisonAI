@@ -159,6 +159,28 @@ class TestInboundDebouncer:
         assert batch.final == "a\nb\nc"
         assert batch.preceding == ["a", "b"]
 
+    @pytest.mark.asyncio
+    async def test_cancelled_final_caller_batch_falls_back_to_survivor(self):
+        """A cancelled final caller must not swallow the whole burst.
+
+        The flush picks the last *unfinished* future as the batch owner, so
+        when the newest caller is cancelled the earlier survivor dispatches
+        the batch instead of every caller resolving ``None``.
+        """
+        debouncer = self._make_debouncer(debounce_ms=200)
+
+        first = asyncio.create_task(debouncer.debounce("user1", "a"))
+        await asyncio.sleep(0.02)
+        second = asyncio.create_task(debouncer.debounce("user1", "b"))
+        await asyncio.sleep(0.02)
+        second.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await second
+
+        batch = await first
+        assert batch is not None
+        assert batch.final == "a\nb"
+
     def test_default_max_wait_is_multiple_of_debounce(self):
         from praisonai_bot.bots._debounce import InboundDebouncer
         assert InboundDebouncer(debounce_ms=1000)._max_wait_s == 5.0

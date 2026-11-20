@@ -515,7 +515,11 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                     async def _send_agent_response():
                         if should_debounce_inbound(
                             bot_message.text,
-                            has_media=bool(getattr(bot_message, "attachments", None)),
+                            # Native attachments: ``_convert_message()`` does
+                            # not populate ``BotMessage.attachments``, so a
+                            # captioned upload must be detected here to stay
+                            # out of the text debounce window.
+                            has_media=bool(getattr(message, "attachments", None)),
                         ):
                             batch = await self._debouncer.debounce(
                                 user_id, bot_message.text
@@ -523,7 +527,13 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                             if batch is None:
                                 # Superseded by a later message in the same
                                 # burst: that caller's single turn already
-                                # carries this text.
+                                # carries this text. Clear this message's
+                                # processing indicator — it never gets its
+                                # own completion.
+                                if ack_ctx:
+                                    await self._ack.clear(
+                                        ack_ctx, unreact_fn=_discord_unreact
+                                    )
                                 return
                             text_to_send = batch.final
                         else:

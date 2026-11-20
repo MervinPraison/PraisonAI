@@ -812,8 +812,20 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     # latency ("inbound received -> reply delivered"). Cheap and
                     # unused unless config.footer is enabled.
                     turn_started_at = time.monotonic()
+                    # Media eligibility comes from the native update, not the
+                    # cached paths: a native voice/audio message is transcribed
+                    # upstream and caches nothing, and caching may be disabled
+                    # or fail — the message must still bypass the window.
+                    _native_media = bool(
+                        getattr(update.message, "photo", None)
+                        or getattr(update.message, "video", None)
+                        or getattr(update.message, "document", None)
+                        or getattr(update.message, "voice", None)
+                        or getattr(update.message, "audio", None)
+                    )
                     if should_debounce_inbound(
-                        message.content, has_media=bool(attachments)
+                        message.content,
+                        has_media=bool(attachments) or _native_media,
                     ):
                         batch = await self._debouncer.debounce(
                             user_id, message.content
@@ -821,8 +833,13 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                         if batch is None:
                             # Superseded by a later message in the same burst:
                             # that caller's single turn already carries this
-                            # text. The finally below still cleans this
-                            # update's cached media.
+                            # text. Clear this message's processing indicator
+                            # (it never gets its own completion); the finally
+                            # below still cleans this update's cached media.
+                            if ack_ctx:
+                                await self._ack.clear(
+                                    ack_ctx, unreact_fn=_tg_unreact
+                                )
                             return
                         message_text = batch.final
                     else:

@@ -175,3 +175,29 @@ class AckReactor:
                 await react_fn(emoji=self._done_emoji, **kwargs)
             except Exception as e:
                 logger.debug(f"AckReactor: failed to add done: {e}")
+
+    async def clear(
+        self,
+        ctx: AckContext,
+        unreact_fn: Optional[Callable[..., Coroutine]] = None,
+        **kwargs: Any,
+    ) -> None:
+        """Remove the ack emoji without adding the done emoji.
+
+        For callers whose work is folded into another turn — for example a
+        message superseded inside a debounce burst: its processing indicator
+        must not outlive the burst, but it also must not claim its own
+        completion.
+
+        Args:
+            ctx: AckContext returned from ``ack()``.
+            unreact_fn: Async function to remove a reaction (optional).
+            **kwargs: Extra args forwarded to ``unreact_fn``.
+        """
+        if not ctx.acked:
+            return
+        if unreact_fn:
+            try:
+                await unreact_fn(emoji=ctx.emoji, **kwargs)
+            except Exception as e:
+                logger.debug(f"AckReactor: failed to remove ack: {e}")

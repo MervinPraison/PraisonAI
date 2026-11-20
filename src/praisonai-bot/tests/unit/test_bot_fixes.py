@@ -449,6 +449,39 @@ class TestAckScopeGating:
         assert "_in_thread" in source
 
 
+class TestAckClear:
+    """``clear()`` removes the processing indicator without claiming done."""
+
+    @pytest.mark.asyncio
+    async def test_clear_removes_ack_without_done_emoji(self):
+        from praisonai_bot.bots._ack import AckReactor
+
+        reactor = AckReactor(ack_emoji="⏳", done_emoji="✅")
+        reactions = []
+
+        async def react_fn(emoji, **kw):
+            reactions.append(("add", emoji))
+
+        async def unreact_fn(emoji, **kw):
+            reactions.append(("remove", emoji))
+
+        ctx = await reactor.ack(react_fn=react_fn)
+        await reactor.clear(ctx, unreact_fn=unreact_fn)
+
+        assert ("add", "⏳") in reactions
+        assert ("remove", "⏳") in reactions
+        assert ("add", "✅") not in reactions
+
+    @pytest.mark.asyncio
+    async def test_clear_on_unacked_context_is_a_no_op(self):
+        from praisonai_bot.bots._ack import AckReactor
+
+        reactor = AckReactor(ack_emoji="⏳")
+
+        ctx = await reactor.ack(react_fn=None)  # disabled: ack never fired
+        await reactor.clear(ctx)  # must not raise
+
+
 class TestWhatsAppRateLimiterIntegration:
     """Tests for WhatsApp rate limiter integration."""
 
