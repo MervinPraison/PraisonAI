@@ -14,6 +14,8 @@ import types
 
 import pytest
 
+from praisonaiagents.tools.path_safety import resolve_within_root
+
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="symlink fixture needs POSIX")
 
 ESCAPES = ("absolute", "dotdot", "sibling", "tilde", "symlink", "symlink_dotdot")
@@ -88,7 +90,7 @@ def box(tmp_path, monkeypatch):
         "symlink": "link/secret.yaml",
         "symlink_dotdot": "link/../secret.yaml",
     }
-    return {"paths": paths, "seen": seen}
+    return {"paths": paths, "seen": seen, "ws": ws}
 
 
 class _Recorder:
@@ -126,6 +128,26 @@ def test_tool_does_not_open_outside(registry, box, tool, vector):
         result = "refused"
     assert "CANARY-31c9" not in str(result)
     assert not any("secret.yaml" in v for v in box["seen"]), f"outside path passed on: {box['seen']}"
+
+
+def test_legitimate_path_reaches_the_capability(registry, box):
+    """A path inside the workspace still reaches the capability layer.
+
+    Every other assertion in this file checks that a path is refused, so a
+    change that refused all of them would pass them. Keep one positive
+    control: a file inside the workspace has to arrive at the capability as
+    the file the request named.
+    """
+    inside = box["ws"] / "inside.yaml"
+    inside.write_text("framework: test\ntopic: ok\n", encoding="utf-8")
+
+    handler = registry.get("praisonai.files.create").handler
+    result = handler(file_path="inside.yaml", purpose="assistants")
+
+    expected = resolve_within_root("inside.yaml", str(box["ws"]))
+    assert expected is not None
+    assert any(expected in v for v in box["seen"]), f"path not passed on: {box['seen']}"
+    assert "Error:" not in str(result), str(result)
 
 
 def test_skills_load_does_not_open_a_path(tmp_path, monkeypatch):
