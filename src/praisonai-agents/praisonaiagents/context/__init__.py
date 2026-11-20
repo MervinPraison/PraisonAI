@@ -85,6 +85,10 @@ __all__ = [
     # Budgeting
     "ContextBudgeter",
     "get_model_limit",
+    "resolved_model_limit",
+    "context_window_usage",
+    "occupancy_tokens",
+    "compaction_context_payload",
     "get_output_reserve",
     # Ledger
     "ContextLedgerManager",
@@ -212,7 +216,9 @@ def __getattr__(name: str):
         return getattr(tokens, name)
     
     # Budgeting
-    if name in ("ContextBudgeter", "get_model_limit", "get_output_reserve"):
+    if name in ("ContextBudgeter", "get_model_limit", "resolved_model_limit",
+                "context_window_usage", "occupancy_tokens",
+                "compaction_context_payload", "get_output_reserve"):
         from . import budgeter
         return getattr(budgeter, name)
     

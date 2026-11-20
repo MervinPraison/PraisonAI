@@ -19,10 +19,33 @@ Event Types:
 """
 
 import json
+import logging
 import sys
 import time
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, TextIO
+
+logger = logging.getLogger(__name__)
+
+
+def _window_fields(tokens_in: int, model: Optional[str], usage: Any) -> Dict[str, int]:
+    """Full-window fields for a headless llm_end event. Empty when unknown."""
+    occupied = tokens_in or 0
+    try:
+        from praisonaiagents.context.budgeter import context_window_usage, occupancy_tokens
+        if usage is not None:
+            occupied = occupancy_tokens(usage) or occupied
+        window = context_window_usage(occupied, model)
+    except Exception:
+        logger.debug("context window fields unavailable", exc_info=True)
+        return {}
+    if not window:
+        return {}
+    return {
+        "context_tokens": window["used"],
+        "context_window_size": window["limit"],
+        "context_usage_percent": window["percent"],
+    }
 
 
 class JsonlDisplay:
@@ -98,7 +121,8 @@ class JsonlDisplay:
             tokens_in=tokens_in,
             tokens_out=tokens_out,
             cost=cost,
-            latency_ms=latency_ms
+            latency_ms=latency_ms,
+            **_window_fields(tokens_in, model, kwargs.get("usage")),
         )
     
     def on_error(self, message: str = None, **kwargs) -> None:

@@ -2341,7 +2341,8 @@ class OpenAIClient:
                 tokens_in=tokens_in,
                 tokens_out=tokens_out,
                 cost=cost,
-                latency_ms=llm_latency_ms
+                latency_ms=llm_latency_ms,
+                usage=usage,
             )
 
             # Check for tool calls

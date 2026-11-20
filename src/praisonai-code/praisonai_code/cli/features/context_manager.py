@@ -320,18 +320,80 @@ def handle_context_command(
         console.print("[yellow]Unknown subcommand. Use: show, stats, budget, dump, on, off, path, format, frequency, compact, history, config[/yellow]")
 
 
+def _stat_int(primary: Dict[str, Any], primary_key: str, fallback: Dict[str, Any], fallback_key: str) -> int:
+    """First present field, including an explicit zero. Missing means zero."""
+    if primary_key in primary:
+        raw = primary[primary_key]
+    elif fallback_key in fallback:
+        raw = fallback[fallback_key]
+    else:
+        return 0
+    try:
+        return int(raw or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _context_window_figures(stats: Dict[str, Any]) -> Dict[str, Any]:
+    """Tokens, full-window limit, and integer percent for one context report.
+
+    Percent matches the status bar: ``used * 100 // limit`` of the model
+    window, not of the usable budget. It is None when the window is only
+    the unknown-model default. Accepts both the nested ContextManager stats
+    dict and a flat dict that already carries the same fields.
+    """
+    budget = stats.get("budget") if isinstance(stats.get("budget"), dict) else {}
+    ledger = stats.get("ledger") if isinstance(stats.get("ledger"), dict) else {}
+    used = _stat_int(ledger, "total", stats, "total_tokens")
+    limit = _stat_int(budget, "model_limit", stats, "model_limit")
+    usable = _stat_int(budget, "usable", stats, "usable")
+    reserve = _stat_int(budget, "output_reserve", stats, "output_reserve")
+    model = stats.get("model")
+    percent = None
+    known = False
+    if model:
+        from praisonaiagents.context.budgeter import resolved_model_limit
+
+        resolved = resolved_model_limit(model)
+        if resolved:
+            limit = int(resolved)
+            percent = used * 100 // limit
+            known = True
+    elif limit:
+        percent = used * 100 // limit
+        known = True
+    return {
+        "used": used,
+        "limit": limit,
+        "usable": usable,
+        "reserve": reserve,
+        "percent": percent,
+        "known": known,
+        "segments": stats.get("segments") or ledger.get("segments") or {},
+    }
+
+
 def _show_context_summary(console, manager: ContextManagerHandler) -> None:
     """Show context summary."""
     stats = manager.get_stats()
-    
+    figures = _context_window_figures(stats)
+    usage = f"{figures['used']:,} tokens"
+    if figures["percent"] is not None:
+        usage += f" ({figures['percent']}% of {figures['limit']:,})"
+
     console.print("\n[bold cyan]Context Summary[/bold cyan]")
+    limit_text = f"{figures['limit']:,} tokens" if figures["known"] else "unknown"
     console.print(f"  Model:          {stats['model']}")
-    console.print(f"  Model Limit:    {stats['model_limit']:,} tokens")
-    console.print(f"  Output Reserve: {stats['output_reserve']:,} tokens")
-    console.print(f"  Usable Budget:  {stats['usable']:,} tokens")
-    console.print(f"  Current Usage:  {stats['total_tokens']:,} tokens ({stats['utilization']*100:.1f}%)")
-    console.print(f"  Turns:          {stats['turn_count']}")
-    console.print(f"  Messages:       {stats['message_count']}")
+    console.print(f"  Model Limit:    {limit_text}")
+    console.print(f"  Output Reserve: {figures['reserve']:,} tokens")
+    console.print(f"  Usable Budget:  {figures['usable']:,} tokens")
+    ledger = stats.get("ledger") if isinstance(stats.get("ledger"), dict) else {}
+    counted = ledger.get("ledger") if isinstance(ledger.get("ledger"), dict) else ledger
+    turns = stats.get("turn_count", counted.get("turn_count", 0))
+    messages = stats.get("message_count", counted.get("message_count", 0))
+    console.print(f"  Current Usage:  {usage}")
+    console.print(f"  Turns:          {turns}")
+    console.print(f"  Messages:       {messages}")
     console.print(f"  Auto-Compact:   {'enabled' if stats['auto_compact'] else 'disabled'}")
     console.print(f"  Monitoring:     {'enabled' if stats['monitor_enabled'] else 'disabled'}")
     
@@ -344,21 +406,27 @@ def _show_context_summary(console, manager: ContextManagerHandler) -> None:
 
 def _show_context_stats(console, manager: ContextManagerHandler) -> None:
     """Show detailed token stats."""
-    stats = manager.get_stats()
-    segments = stats.get("segments", {})
-    
+    figures = _context_window_figures(manager.get_stats())
+    segments = figures["segments"]
+    window_pct = f"{figures['percent']}%" if figures["percent"] is not None else "-"
+    limit_col = f"{figures['limit']:,}" if figures["known"] else "-"
+
     console.print("\n[bold cyan]Token Ledger[/bold cyan]")
     console.print(f"{'Segment':<20} {'Tokens':>10} {'Budget':>10} {'Used':>8}")
     console.print("-" * 50)
-    
+
     for name, data in segments.items():
         tokens = data.get("tokens", 0)
         budget = data.get("budget", 0)
         util = data.get("utilization", 0) * 100
         console.print(f"{name:<20} {tokens:>10,} {budget:>10,} {util:>7.1f}%")
-    
+
     console.print("-" * 50)
-    console.print(f"{'TOTAL':<20} {stats['total_tokens']:>10,} {stats['usable']:>10,} {stats['utilization']*100:>7.1f}%")
+    # TOTAL percent is of the full model window, the same denominator as the
+    # status bar. Segment rows above stay as a share of each segment budget.
+    console.print(
+        f"{'TOTAL':<20} {figures['used']:>10,} {limit_col:>10} {window_pct:>8}"
+    )
     console.print("")
 
 
