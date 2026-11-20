@@ -54,7 +54,7 @@ def _is_missing_metadata_scope(err: BaseException) -> bool:
 from .media import split_media_from_output, is_audio_file
 from ._failure import failure_reply_text
 from ._group_policy import decide_group_admission, record_passive_group_message
-from praisonaiagents.bots.admission import MentionFacts
+from praisonaiagents.bots.admission import MentionFacts, should_debounce_inbound
 from ._commands import (
     format_status, 
     format_help, 
@@ -757,7 +757,26 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 try:
                     user_id = event.get("user", "unknown")
                     logger.info(f"Message received: {text[:100]}...")
-                    text = await self._debouncer.debounce(user_id, text)
+                    if should_debounce_inbound(
+                        text, has_media=bool(event.get("files"))
+                    ):
+                        batch = await self._debouncer.debounce(user_id, text)
+                        if batch is None:
+                            # Superseded by a later message in the same
+                            # burst: that caller's single turn already
+                            # carries this text. Clear this message's
+                            # processing indicator — it never gets its
+                            # own completion.
+                            if ack_ctx:
+                                await self._ack.clear(
+                                    ack_ctx, unreact_fn=_slack_unreact
+                                )
+                            return
+                        text = batch.final
+                    else:
+                        # Control/empty/media-bearing message: never held
+                        # in the debounce window, dispatch as its own turn.
+                        pass
 
                     # Streaming path: progressively edit a placeholder in place
                     # using the shared DraftStreamer, mirroring Telegram/Discord

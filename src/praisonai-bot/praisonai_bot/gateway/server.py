@@ -10847,7 +10847,35 @@ class WebSocketGateway:
             }
 
             try:
-                message_text = await bot._debouncer.debounce(user_id, message_text)
+                from praisonaiagents.bots.admission import should_debounce_inbound
+
+                # Media eligibility comes from the native update: this
+                # handler also serves voice/audio delegations whose
+                # transcripts cache nothing (Issue #6717 debounce contract).
+                _native_media = bool(
+                    getattr(update.message, "photo", None)
+                    or getattr(update.message, "video", None)
+                    or getattr(update.message, "document", None)
+                    or getattr(update.message, "voice", None)
+                    or getattr(update.message, "audio", None)
+                )
+                if should_debounce_inbound(
+                    message_text, has_media=_native_media
+                ):
+                    batch = await bot._debouncer.debounce(user_id, message_text)
+                    if batch is None:
+                        # Superseded by a later message in the same burst:
+                        # that caller's single turn already carries this
+                        # text. Clear this message's processing indicator
+                        # (it never gets its own completion).
+                        if ack_ctx:
+                            await bot._ack.clear(
+                                ack_ctx, unreact_fn=_tg_unreact
+                            )
+                        return
+                    message_text = batch.final
+                # Control/empty/media-bearing message: dispatch as its own
+                # turn, unchanged.
                 
                 # Show typing indicator with renewal during long operation
                 if bot.config.typing_indicator:

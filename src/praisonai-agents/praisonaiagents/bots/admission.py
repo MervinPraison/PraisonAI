@@ -345,3 +345,37 @@ def resolve_ingress_admission(
     return IngressDecision(
         admit=True, reason_code=REASON_ALLOWED, gate=GATE_GROUP_POLICY
     )
+
+
+# Plain-text control words exempt from inbound debouncing: holding one in a
+# debounce window delays exactly the interrupt/status action a user expects
+# to land immediately. Slash forms are covered by the leading-``/`` check.
+_DEBOUNCE_CONTROL_WORDS = frozenset({"stop", "cancel", "status"})
+
+
+def should_debounce_inbound(
+    text: str, *, has_media: bool = False, allow_debounce: bool = True
+) -> bool:
+    """Whether an inbound message may be held in a debounce window.
+
+    A single pure decision every channel adapter feeds, so debounce
+    eligibility cannot drift across transports (mirrors
+    :func:`resolve_ingress_admission` for the admission ladder). Returns
+    ``False`` — dispatch immediately, do not buffer — when:
+
+    - debouncing is disabled for this channel/user (``allow_debounce``);
+    - the message carries media: its attachments must stay attached to
+      their own turn instead of being coalesced behind a window;
+    - the text is empty/whitespace-only: nothing to coalesce;
+    - the text is a control command (``stop``/``cancel``/``status`` or a
+      leading-slash command): a user interrupting or probing a running
+      agent must not wait out the window.
+    """
+    if not allow_debounce or has_media:
+        return False
+    stripped = text.strip()
+    if not stripped:
+        return False
+    return not (
+        stripped.startswith("/") or stripped.lower() in _DEBOUNCE_CONTROL_WORDS
+    )
