@@ -30,6 +30,10 @@ import threading
 from datetime import datetime
 from typing import Any, Dict, Optional, TextIO
 
+from .._logging import get_logger
+
+logger = get_logger(__name__)
+
 # Global state for actions mode
 _status_output_enabled = False
 _status_output: Optional['StatusOutput'] = None
@@ -51,6 +55,34 @@ def _format_duration(duration_ms: Optional[float]) -> str:
     if duration_ms < 1000:
         return f"{duration_ms:.0f}ms"
     return f"{duration_ms / 1000:.1f}s"
+
+
+def _occupied_tokens(tokens_in: int, usage: Any) -> int:
+    """Window fill for this call. Falls back to the reported input count."""
+    if usage is None:
+        return tokens_in or 0
+    try:
+        from ..context.budgeter import occupancy_tokens
+        occupied = occupancy_tokens(usage)
+    except Exception:
+        logger.debug("context occupancy unavailable", exc_info=True)
+        return tokens_in or 0
+    return occupied or tokens_in or 0
+
+
+def _context_usage(occupied: int, model: Optional[str]) -> Optional[Dict[str, int]]:
+    """Full-window occupancy for this call, or None when it cannot be shown.
+
+    Display must not raise, and must not invent a window for an unknown model.
+    """
+    if not occupied:
+        return None
+    try:
+        from ..context.budgeter import context_window_usage
+        return context_window_usage(occupied, model)
+    except Exception:
+        logger.debug("context usage unavailable", exc_info=True)
+        return None
 
 
 def _truncate(text: str, max_len: int = 50) -> str:
@@ -187,6 +219,7 @@ class StatusOutput:
         tokens_out: int = 0,
         cost: Optional[float] = None,
         latency_ms: Optional[float] = None,
+        usage: Any = None,
     ) -> None:
         """Record LLM call end with optional metrics for debug mode."""
         ts = time.time()
@@ -216,13 +249,20 @@ class StatusOutput:
                 self._session_cost += cost
             self._session_llm_calls += 1
         
-        # Only show metrics line in debug mode (when show_metrics is enabled)
+        # Only show metrics line in debug mode (when show_metrics is enabled).
+        # The window lookup stays off the quiet text path.
         show_metrics = getattr(self, '_show_metrics', False)
-        
+        window = None
+        if self._format == "jsonl" or show_metrics:
+            window = _context_usage(_occupied_tokens(tokens_in, usage), model)
+
         if self._format == "jsonl":
             self._emit_jsonl("llm_end", agent_name=agent_name, timestamp=ts, 
                            duration_ms=duration_ms, model=model, 
-                           tokens_in=tokens_in, tokens_out=tokens_out, cost=cost)
+                           tokens_in=tokens_in, tokens_out=tokens_out, cost=cost,
+                           context_tokens=window["used"] if window else None,
+                           context_window_size=window["limit"] if window else None,
+                           context_usage_percent=window["percent"] if window else None)
         elif show_metrics and (tokens_in > 0 or tokens_out > 0):
             # Debug mode: show metrics line
             duration_str = f" [{_format_duration(duration_ms)}]" if duration_ms else ""
@@ -230,6 +270,10 @@ class StatusOutput:
             cost_str = f" (~${cost:.4f})" if cost else ""
             
             metrics_line = f"  │ 📊 {model_str}: {tokens_in}→{tokens_out} tokens{cost_str}{duration_str}"
+            if window:
+                metrics_line += (
+                    f" · context {window['percent']}% ({window['used']}/{window['limit']})"
+                )
             self._emit_text(metrics_line, ts, "dim", show_timestamp=False)
     
     def tool_start(self, tool_name: str, tool_args: Optional[Dict[str, Any]] = None, agent_name: Optional[str] = None) -> None:
@@ -429,12 +473,15 @@ def enable_status_output(
         
         _status_output.llm_start(model=model, agent_name=agent_name)
     
-    def on_llm_end(model: str = None, tokens_in: int = 0, tokens_out: int = 0, cost: float = None, latency_ms: float = None, **kwargs):
+    def on_llm_end(model: str = None, tokens_in: int = 0, tokens_out: int = 0, cost: float = None, latency_ms: float = None, usage: Any = None, **kwargs):
         """Callback for LLM call completion with metrics."""
         if not _status_output_enabled or _status_output is None:
             return
         
-        _status_output.llm_end(model=model, tokens_in=tokens_in, tokens_out=tokens_out, cost=cost, latency_ms=latency_ms)
+        _status_output.llm_end(
+            model=model, tokens_in=tokens_in, tokens_out=tokens_out,
+            cost=cost, latency_ms=latency_ms, usage=usage,
+        )
     
     # Register the callbacks
     register_display_callback('tool_call', on_tool_call)

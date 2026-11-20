@@ -1858,6 +1858,32 @@ Your Role: {self.role}"""
         
         return CompactionRoute.FITS, messages
 
+    def _compaction_hook_payload(self, messages):
+        """Window snapshot for BEFORE_COMPACTION. Never raises."""
+        from ..context.budgeter import compaction_context_payload
+        from ..context.tokens import estimate_messages_tokens
+
+        msgs = list(messages or [])
+        try:
+            tokens = estimate_messages_tokens(msgs)
+        except Exception:
+            logger.debug("compaction payload token estimate failed", exc_info=True)
+            tokens = 0
+        llm = getattr(self, "llm", None)
+        if isinstance(llm, str):
+            model = llm
+        else:
+            model = getattr(llm, "model", None) if llm is not None else None
+        from ..hooks.types import HookInput
+        return HookInput(
+            session_id=str(getattr(self, "_session_id", None) or ""),
+            cwd=os.getcwd(),
+            event_name="before_compaction",
+            timestamp=str(time.time()),
+            agent_name=getattr(self, "name", None),
+            extra=compaction_context_payload(tokens, model, len(msgs)),
+        )
+
     def _apply_compaction(self, messages, compactor, policy):
         """Apply standard context compaction."""
         from ..compaction.strategy import CompactionStrategy as LegacyStrategy
@@ -1869,7 +1895,9 @@ Your Role: {self.role}"""
         
         # Execute hooks
         try:
-            self._hook_runner.execute_sync(_HookEvent.BEFORE_COMPACTION, None)
+            self._hook_runner.execute_sync(
+                _HookEvent.BEFORE_COMPACTION, self._compaction_hook_payload(messages)
+            )
         except Exception as e:
             logger.warning(f"BEFORE_COMPACTION hook failed: {e}")
             if getattr(self, '_strict_hooks', False):
@@ -2056,7 +2084,9 @@ Your Role: {self.role}"""
         
         # Execute hooks
         try:
-            await self._hook_runner.execute(_HookEvent.BEFORE_COMPACTION, None)
+            await self._hook_runner.execute(
+                _HookEvent.BEFORE_COMPACTION, self._compaction_hook_payload(messages)
+            )
         except Exception as e:
             logger.warning(f"BEFORE_COMPACTION hook failed: {e}")
             if getattr(self, '_strict_hooks', False):
@@ -6997,7 +7027,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
             # Execute BEFORE_COMPACTION hook
             try:
-                self._hook_runner.execute_sync(hook_event_class.BEFORE_COMPACTION, None)
+                self._hook_runner.execute_sync(
+                    hook_event_class.BEFORE_COMPACTION, self._compaction_hook_payload(messages)
+                )
             except Exception as e:
                 logger.warning(f"BEFORE_COMPACTION hook failed: {e}")
                 if getattr(self, '_strict_hooks', False):
@@ -7088,7 +7120,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 
             # Execute BEFORE_COMPACTION hook
             try:
-                await self._hook_runner.execute(hook_event_class.BEFORE_COMPACTION, None)
+                await self._hook_runner.execute(
+                    hook_event_class.BEFORE_COMPACTION, self._compaction_hook_payload(messages)
+                )
             except Exception as e:
                 logger.warning(f"BEFORE_COMPACTION hook failed: {e}")
                 if getattr(self, '_strict_hooks', False):

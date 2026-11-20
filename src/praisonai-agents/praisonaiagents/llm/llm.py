@@ -3664,6 +3664,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                         'llm_end', model=self.model,
                                         tokens_in=tokens_in, tokens_out=tokens_out,
                                         cost=None, latency_ms=llm_latency_ms,
+                                        usage=usage,
                                     )
                         else:
                             resp = self._call_responses_api(**responses_params)
@@ -3685,6 +3686,7 @@ Respond with ONLY a valid JSON tool call in this format:
                                     'llm_end', model=self.model,
                                     tokens_in=tokens_in, tokens_out=tokens_out,
                                     cost=None, latency_ms=llm_latency_ms,
+                                    usage=usage,
                                 )
 
                             # Emit reasoning if present
@@ -3947,7 +3949,8 @@ Respond with ONLY a valid JSON tool call in this format:
                             tokens_in=tokens_in,
                             tokens_out=tokens_out,
                             cost=llm_cost,
-                            latency_ms=llm_latency_ms
+                            latency_ms=llm_latency_ms,
+                            usage=usage,
                         )
                         
                         # Execute callbacks and display based on verbose setting
