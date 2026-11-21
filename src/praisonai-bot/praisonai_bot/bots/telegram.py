@@ -34,7 +34,7 @@ from praisonaiagents.bots import (
 from .media import split_media_from_output, is_audio_file
 from ._failure import failure_reply_text
 from ._group_policy import decide_group_admission, record_passive_group_message
-from praisonaiagents.bots.admission import MentionFacts, should_debounce_inbound
+from praisonaiagents.bots.admission import MentionFacts
 from ._commands import (
     format_status, 
     format_help, 
@@ -57,7 +57,7 @@ from ._commands import (
 )
 from . import _automations
 from ._session import BotSessionManager
-from ._debounce import InboundDebouncer
+from ._debounce import InboundDebouncer, should_debounce_inbound
 from ._album import (
     AlbumCoalescer,
     resolve_album_window_ms,

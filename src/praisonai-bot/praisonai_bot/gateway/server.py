@@ -10847,7 +10847,11 @@ class WebSocketGateway:
             }
 
             try:
-                from praisonaiagents.bots.admission import should_debounce_inbound
+                # The eligibility gate lives in the bot's debounce module, which
+                # binds the core predicate when the installed core has it and a
+                # dependency-free mirror otherwise, so this handler cannot fail
+                # to import on an older core.
+                from praisonai_bot.bots._debounce import should_debounce_inbound
 
                 # Media eligibility comes from the native update: this
                 # handler also serves voice/audio delegations whose
@@ -10860,7 +10864,12 @@ class WebSocketGateway:
                     or getattr(update.message, "audio", None)
                 )
                 if should_debounce_inbound(
-                    message_text, has_media=_native_media
+                    # Eligibility is judged on the raw inbound text, exactly as
+                    # the standalone adapter does: the prompt above has the
+                    # rendered quote block prepended, which would hide a plain
+                    # ``stop``/``cancel``/``status`` reply behind the block.
+                    # ``message_text`` stays the dispatched payload.
+                    message.content, has_media=_native_media
                 ):
                     batch = await bot._debouncer.debounce(user_id, message_text)
                     if batch is None:

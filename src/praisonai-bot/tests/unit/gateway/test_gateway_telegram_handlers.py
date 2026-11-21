@@ -17,7 +17,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from praisonaiagents.bots import BotConfig
+from praisonaiagents.bots import BotConfig, BotMessage, BotUser, QuotedRef
 from praisonai_bot.bots.telegram import TelegramBot
 from praisonai_bot.bots._presentation_approval_backend import (
     PresentationApprovalBackend,
@@ -211,6 +211,92 @@ def test_gateway_session_chat_receives_chat_and_message_ids(fake_ptb, monkeypatc
     assert kwargs["chat_id"] == "4242"
     assert kwargs["message_id"] == "7"
     assert kwargs["account"] == getattr(bot.config, "account", "default")
+
+
+@pytest.mark.parametrize(
+    "content,should_buffer",
+    [
+        # A plain control word must not be hidden behind the quote block.
+        ("stop", False),
+        ("cancel", False),
+        ("status", False),
+        # Ordinary text still coalesces, quoted or not.
+        ("hello bot", True),
+    ],
+)
+def test_gateway_debounce_eligibility_uses_raw_content(
+    fake_ptb, monkeypatch, content, should_buffer
+):
+    """A quoted reply keeps its rendered payload but is judged on raw content.
+
+    ``message_text`` folds the resolved quote above the content, so feeding it
+    to the eligibility gate would hide a plain ``stop``/``cancel``/``status``
+    behind the quoted block and hold the control word in the debounce window.
+    """
+    import praisonai_bot.bots.telegram as tg_mod
+    from praisonai_bot.bots._debounce import DebouncedBatch
+
+    inbound = BotMessage(
+        content=content,
+        sender=BotUser(user_id="777"),
+        quoted=QuotedRef(message_id="1", text="please summarize", author="user"),
+    )
+    quoted_prompt = inbound.prompt_text
+    assert quoted_prompt.startswith('[In reply to: "please summarize"]')
+    assert quoted_prompt != content
+    monkeypatch.setattr(
+        tg_mod, "process_inbound_telegram_message", AsyncMock(return_value=inbound)
+    )
+
+    async def run():
+        bot = TelegramBot(
+            token="123:abc", config=BotConfig(token="123:abc", typing_indicator=False)
+        )
+        bot._session = MagicMock()
+        bot._session.chat = AsyncMock(return_value="hi")
+        bot._ack = SimpleNamespace(enabled=False)
+        bot._debouncer = SimpleNamespace(
+            debounce=AsyncMock(
+                side_effect=lambda _uid, text: DebouncedBatch(final=text)
+            )
+        )
+        bot._send_response_with_media = AsyncMock()
+        bot._agent = object()
+        task = await _start(bot)
+        try:
+            handler = next(
+                h
+                for h in fake_ptb.handlers
+                if isinstance(h, MessageHandler)
+                and h.callback.__name__ == "handle_message"
+            )
+            # A bare MagicMock would report every native media attribute as
+            # present, tripping the media bypass instead of the rule under test.
+            message = MagicMock(
+                photo=None,
+                video=None,
+                document=None,
+                voice=None,
+                audio=None,
+                chat_id=4242,
+                message_id=7,
+            )
+            message.chat.type = "private"
+            message.chat.id = 4242
+            await handler.callback(SimpleNamespace(message=message), None)
+        finally:
+            await _stop(task)
+        return bot
+
+    bot = asyncio.run(run())
+    if should_buffer:
+        bot._debouncer.debounce.assert_awaited_once_with("777", quoted_prompt)
+    else:
+        # Control intent bypasses the window even behind a quote block.
+        bot._debouncer.debounce.assert_not_awaited()
+    # Either way the agent receives the rendered quote payload exactly once.
+    bot._session.chat.assert_awaited_once()
+    assert bot._session.chat.await_args.args[2] == quoted_prompt
 
 
 def test_gateway_message_handlers_do_not_block_approval_taps(fake_ptb):

@@ -45,7 +45,7 @@ from ._commands import (
 )
 from ._failure import failure_reply_text
 from ._group_policy import decide_group_admission, record_passive_group_message
-from praisonaiagents.bots.admission import MentionFacts, should_debounce_inbound
+from praisonaiagents.bots.admission import MentionFacts
 from ._session import BotSessionManager
 from ._streaming import (
     StreamingConfig,
@@ -53,7 +53,7 @@ from ._streaming import (
     DraftStreamer,
     build_streaming_config,
 )
-from ._debounce import InboundDebouncer
+from ._debounce import InboundDebouncer, should_debounce_inbound
 from ._ack import AckReactor
 from ._unknown_user import BotContext, UnknownUserHandler, is_sender_allowed
 from ._pairing_ui import PairingUIBuilder, PairingCallbackHandler

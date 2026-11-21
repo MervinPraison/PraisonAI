@@ -23,6 +23,43 @@ from .._lockmap import LockMap
 
 logger = logging.getLogger(__name__)
 
+# Plain-text control words exempt from inbound debouncing (mirror of the core
+# attribution in ``praisonaiagents.bots.admission``).
+_DEBOUNCE_CONTROL_WORDS = frozenset({"stop", "cancel", "status"})
+
+
+def _fallback_should_debounce_inbound(
+    text: str, *, has_media: bool = False, allow_debounce: bool = True
+) -> bool:
+    """Dependency-free mirror of the core debounce eligibility gate.
+
+    Bound to ``should_debounce_inbound`` only when the installed core predates
+    the shared predicate. A parity test pins it to the core function so the two
+    cannot drift while both exist; every install that has the core keeps
+    answering through the shared predicate, which stays the single authority.
+    """
+    if not allow_debounce or has_media:
+        return False
+    stripped = text.strip()
+    if not stripped:
+        return False
+    return not (
+        stripped.startswith("/") or stripped.lower() in _DEBOUNCE_CONTROL_WORDS
+    )
+
+
+try:  # Shared eligibility gate (Issue #6717); optional at import time.
+    from praisonaiagents.bots.admission import should_debounce_inbound
+except Exception:  # pragma: no cover - only when core predates the shared gate
+    # The bot's dependency floor (``praisonaiagents>=1.7.6``) admits core
+    # releases that predate this symbol, and the dist flywheel ships the bot
+    # and the core as separate wheels. Without this fallback the module-level
+    # imports in telegram/discord/slack — and the gateway handler — raise
+    # ImportError, so the bot cannot start at all on such an install. The
+    # fallback keeps the eligibility rule instead of losing it; new cores keep
+    # answering through the shared predicate, so the rule has one authority.
+    should_debounce_inbound = _fallback_should_debounce_inbound  # type: ignore
+
 # A buffer flushes after this many debounce windows, even if messages keep arriving.
 _MAX_WAIT_FACTOR = 5
 # A buffer flushes as soon as it holds this many messages.
