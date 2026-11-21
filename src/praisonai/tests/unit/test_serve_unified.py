@@ -123,6 +123,35 @@ class TestServeUnifiedCommands:
         assert calls[0]["model"] == "test-model"
         assert calls[0]["debug"] is True
 
+    def test_legacy_argparse_acp_reaches_wrapper_handler(
+        self, monkeypatch, tmp_path
+    ):
+        import sys
+
+        from praisonai.cli.features import acp
+        from praisonai.cli.main import PraisonAI
+
+        monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        flags = ["--workspace", str(tmp_path), "--debug"]
+        instance = PraisonAI()
+        calls = []
+
+        def run_acp(args):
+            calls.append(args)
+            return 17
+
+        monkeypatch.setattr(acp, "run_acp_command", run_acp)
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.setattr(sys, "argv", ["praisonai", "acp", *flags])
+
+        with pytest.raises(SystemExit) as result:
+            instance.parse_args()
+
+        assert result.value.code == 17
+        assert calls == [flags]
+
+
     def test_serve_acp_reports_missing_sdk(self, monkeypatch, tmp_path):
         import importlib.util
 
