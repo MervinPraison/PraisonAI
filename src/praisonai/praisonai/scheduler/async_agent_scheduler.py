@@ -270,7 +270,7 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
 
             # Start background task
             self._task = asyncio.create_task(
-                self._run_schedule(ticker, max_retries)
+                self._run_schedule(ticker, max_retries, run_immediately)
             )
             
             logger.info("Async agent scheduler started successfully")
@@ -387,7 +387,7 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
     # surfaces return the same dict shape (incl. runtime_seconds /
     # cost_per_execution) and read the delivery counters under the delivery lock.
     
-    async def _run_schedule(self, ticker: "ScheduleTicker", max_retries: int):
+    async def _run_schedule(self, ticker: "ScheduleTicker", max_retries: int, run_immediately: bool = False):
         """Internal method to run scheduled agent executions.
 
         For a wall-clock cron schedule this sleeps until the next real
@@ -397,6 +397,12 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
         """
         try:
             self._ensure_async_primitives()
+            if run_immediately and not ticker.is_cron:
+                try:
+                    await asyncio.wait_for(self._stop_event.wait(), timeout=ticker.seconds_until_next())
+                    return
+                except asyncio.TimeoutError:
+                    pass
             while not self._stop_event.is_set():
                 # For cron, sleep until the next wall-clock slot *before*
                 # running (unless a missed slot is already due → catch up once).
