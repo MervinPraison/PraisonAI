@@ -87,16 +87,16 @@ def _normalize_yaml_config(config: dict, strict: bool | None = None) -> dict:
     if isinstance(agents, list):
         config["agents"] = _list_to_dict(agents, "agent", "agent", strict=strict)
 
+    roles = config.get("roles")
+    if isinstance(roles, list):
+        config["roles"] = _list_to_dict(roles, "role", "role", strict=strict)
+
     for bucket_key in ("agents", "roles"):
         bucket = config.get(bucket_key)
         if isinstance(bucket, dict):
             for agent_config in bucket.values():
                 if isinstance(agent_config, dict) and "instructions" in agent_config and "backstory" not in agent_config:
                     agent_config["backstory"] = agent_config["instructions"]
-
-    roles = config.get("roles")
-    if isinstance(roles, list):
-        config["roles"] = _list_to_dict(roles, "role", "role", strict=strict)
 
     tasks = config.get("tasks")
     if isinstance(tasks, list):
