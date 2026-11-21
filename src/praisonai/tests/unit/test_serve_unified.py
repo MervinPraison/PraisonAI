@@ -84,6 +84,48 @@ class TestServeUnifiedCommands:
         # Should show help for acp command
         assert "acp" in result.output.lower() or "ide" in result.output.lower() or result.exit_code == 0
     
+    def test_serve_acp_reaches_wrapper_handler(self, monkeypatch):
+        """`serve acp` reaches the wrapper ACP handler instead of the ImportError branch.
+
+        Regression test for issue #6727: `praisonai serve acp` imported the
+        handler from `praisonai_code.cli.features.acp`, a module that does not
+        exist after the C0-C6 extraction, so the command always fell into its
+        `except ImportError` branch and reported "ACP module not available"
+        even with the `acp` extra installed. The handler stays in the wrapper
+        and is reached through the wrapper bridge, like `recipe`.
+        """
+        from praisonai.cli.commands.serve import app
+
+        import argparse
+
+        reached = []
+
+        class SentinelHandler:
+            @staticmethod
+            def add_arguments(parser: argparse.ArgumentParser) -> None:
+                # Register the flags `serve acp` parses, mirroring the real
+                # handler, so `parse_args` succeeds and `handle` is reached.
+                parser.add_argument("--workspace", default=".")
+                parser.add_argument("--agent", default="default")
+                parser.add_argument("--model", default=None)
+                parser.add_argument("--debug", action="store_true")
+                reached.append("add_arguments")
+
+            @staticmethod
+            def handle(args) -> int:
+                reached.append("handle")
+                return 0
+
+        # Patching the wrapper module patches the very object the fixed
+        # import resolves, so no real ACP server starts during the test.
+        monkeypatch.setattr("praisonai.cli.features.acp.ACPHandler", SentinelHandler)
+
+        result = runner.invoke(app, ["acp"])
+
+        assert "ACP module not available" not in result.output
+        assert reached == ["add_arguments", "handle"]
+        assert result.exit_code == 0
+
     def test_serve_lsp_command_exists(self):
         """Test serve lsp command is registered."""
         from praisonai.cli.commands.serve import app
