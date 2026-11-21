@@ -230,7 +230,7 @@ class AgentScheduler(_BaseAgentScheduler):
             
             self._thread = threading.Thread(
                 target=self._run_schedule,
-                args=(ticker, max_retries),
+                args=(ticker, max_retries, run_immediately),
                 daemon=True
             )
             self._thread.start()
@@ -292,7 +292,7 @@ class AgentScheduler(_BaseAgentScheduler):
                 total_cost=self._total_cost,
             )
     
-    def _run_schedule(self, ticker: "ScheduleTicker", max_retries: int):
+    def _run_schedule(self, ticker: "ScheduleTicker", max_retries: int, run_immediately: bool = False):
         """Internal method to run scheduled agent executions.
 
         For a wall-clock cron schedule this sleeps until the next real
@@ -301,6 +301,9 @@ class AgentScheduler(_BaseAgentScheduler):
         preserving the previous behaviour.
         """
         try:
+            if run_immediately and not ticker.is_cron:
+                if self._stop_event.wait(ticker.seconds_until_next()):
+                    return
             self._run_schedule_loop(ticker, max_retries)
         finally:
             # The thread is ending (budget brake, stop event, or error). Do the
