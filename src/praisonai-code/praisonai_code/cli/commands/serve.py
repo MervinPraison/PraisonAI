@@ -364,7 +364,9 @@ def serve_acp(
     output = get_output_controller()
     
     try:
-        from praisonai_code.cli.features.acp import ACPHandler
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+
+        ACPHandler = import_wrapper_module("praisonai.cli.features.acp").ACPHandler
         args_list = ["--workspace", workspace, "--agent", agent]
         if model:
             args_list.extend(["--model", model])

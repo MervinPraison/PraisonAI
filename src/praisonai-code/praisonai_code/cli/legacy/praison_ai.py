@@ -1022,8 +1022,8 @@ class PraisonAI:
 
         # Handle ACP command - Agent Client Protocol server for IDE integration
         if args.command == 'acp':
-            from ..features.acp import run_acp_command
-            exit_code = run_acp_command(unknown_args)
+            acp = import_wrapper_module("praisonai.cli.features.acp")
+            exit_code = acp.run_acp_command(unknown_args)
             sys.exit(exit_code)
         
         # Handle debug command - Debug and test interactive flows
