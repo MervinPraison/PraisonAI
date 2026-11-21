@@ -4298,20 +4298,12 @@ CONCISE SUMMARY:"""
                 # Try to parse as JSON list first (handles agent output like '["a", "b", "c"]')
                 items = self._parse_list_from_string(items)
         elif loop_step.from_csv:
-            try:
-                with open(loop_step.from_csv, 'r', encoding='utf-8') as f:
-                    reader = csv.DictReader(f)
-                    items = list(reader)
-            except Exception as e:
-                logger.error(f"Failed to read CSV {loop_step.from_csv}: {e}")
-                items = []
+            with open(loop_step.from_csv, 'r', encoding='utf-8') as f:
+                reader = csv.DictReader(f)
+                items = list(reader)
         elif loop_step.from_file:
-            try:
-                with open(loop_step.from_file, 'r', encoding='utf-8') as f:
-                    items = [line.strip() for line in f if line.strip()]
-            except Exception as e:
-                logger.error(f"Failed to read file {loop_step.from_file}: {e}")
-                items = []
+            with open(loop_step.from_file, 'r', encoding='utf-8') as f:
+                items = [line.strip() for line in f if line.strip()]
         
         num_items = len(items)
         
