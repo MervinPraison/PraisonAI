@@ -76,6 +76,14 @@ def server_sites(path: Path):
                 yield node.lineno, name
 
 
+def _has_guard_call(path: Path):
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    return any(
+        isinstance(node, ast.Call) and _dotted(node.func).split(".")[-1] in GUARD_NAMES
+        for node in ast.walk(tree)
+    )
+
+
 def _package_files():
     for pkg in PACKAGES:
         root = SRC / pkg
@@ -90,7 +98,7 @@ def test_every_server_uses_the_shared_bind_guard():
         sites = list(server_sites(path))
         if not sites or rel in EXEMPT:
             continue
-        if not any(g in path.read_text(encoding="utf-8") for g in GUARD_NAMES):
+        if not _has_guard_call(path):
             unguarded += [f"{rel}:{line} {name}" for line, name in sites]
     assert not unguarded, (
         "These servers bind a caller-chosen host without the shared guard "
@@ -121,6 +129,14 @@ def test_walk_finds_the_shapes_it_must_catch(tmp_path):
     assert [n for _, n in server_sites(sample)] == [
         "uvicorn.run", "web.TCPSite", "HTTPServer", "self._application.run_webhook",
         "self._application.updater.start_webhook"]
+
+
+def test_guard_detection_requires_a_call(tmp_path):
+    sample = tmp_path / "server.py"
+    sample.write_text("from security import require_bind_token\n# require_bind_token(host)\nuvicorn.run(app, host=host)\n")
+    assert not _has_guard_call(sample)
+    sample.write_text("from security import require_bind_token\nrequire_bind_token(host)\nuvicorn.run(app, host=host)\n")
+    assert _has_guard_call(sample)
 
 
 @pytest.mark.skipif(not (SRC / "praisonai/praisonai").is_dir(), reason="monorepo checkout only")
