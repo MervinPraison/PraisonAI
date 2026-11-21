@@ -151,7 +151,6 @@ class TestServeUnifiedCommands:
         assert result.value.code == 17
         assert calls == [flags]
 
-
     def test_serve_acp_reports_missing_sdk(self, monkeypatch, tmp_path):
         import importlib.util
 
