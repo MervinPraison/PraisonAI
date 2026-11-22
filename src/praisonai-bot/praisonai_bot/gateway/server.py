@@ -10736,6 +10736,11 @@ class WebSocketGateway:
         # /new strictly one at a time, as PTB's sequential dispatch did before,
         # so staged profiles, debounce batches and resets never interleave.
         turn_lock = asyncio.Lock()
+        # Bumped by ``/new`` while it holds ``turn_lock``. A message that was
+        # buffered in the debounce window before the reset must not run its
+        # turn afterwards: it would replay pre-reset text into the fresh
+        # conversation (and the user already saw "Session reset").
+        reset_generation = 0
 
         async def handle_message(update: Update, context: Any):
             # ``turn_lock`` is taken inside ``_handle_message`` once the
@@ -10854,6 +10859,7 @@ class WebSocketGateway:
                     or getattr(update.message, "voice", None)
                     or getattr(update.message, "audio", None)
                 )
+                generation = reset_generation
                 if should_debounce_inbound(
                     # Eligibility is judged on the raw inbound text, exactly as
                     # the standalone adapter does: the prompt above has the
@@ -10862,7 +10868,14 @@ class WebSocketGateway:
                     # ``message_text`` stays the dispatched payload.
                     message.content, has_media=_native_media
                 ):
-                    batch = await bot._debouncer.debounce(user_id, message_text)
+                    # Key the window by conversation, not by sender: the
+                    # same user can message the bot privately and in a group
+                    # within one window, and a buffer shared by sender alone
+                    # would hand the private text to the group caller's agent
+                    # and post its answer into the group.
+                    batch = await bot._debouncer.debounce(
+                        f"{user_id}|{chat_id or ''}", message_text
+                    )
                     if batch is None:
                         # Superseded by a later message in the same burst:
                         # that caller's single turn already carries this
@@ -10877,6 +10890,15 @@ class WebSocketGateway:
                 # Control/empty/media-bearing message: dispatch as its own
                 # turn, unchanged.
                 async with turn_lock:
+                    if generation != reset_generation:
+                        # ``/new`` ran while this message waited in the window:
+                        # the conversation it was written for is gone, so drop
+                        # the batch instead of replaying it into the fresh one.
+                        if ack_ctx:
+                            await bot._ack.clear(
+                                ack_ctx, unreact_fn=_tg_unreact
+                            )
+                        return
                     # Per-tenant profile scope (Issue #4341): enter the resolved
                     # route's profile namespace on the session so this turn's
                     # memory/session state is keyed per tenant. ``None`` clears
@@ -10953,6 +10975,7 @@ class WebSocketGateway:
                 await _handle_new(update, context)
 
         async def _handle_new(update: Update, context: Any):
+            nonlocal reset_generation
             if not update.message:
                 return
             from praisonai_bot.bots.telegram import process_inbound_telegram_message
@@ -10966,6 +10989,7 @@ class WebSocketGateway:
                 account=getattr(bot.config, "account", "default"),
                 chat_id=str(update.message.chat_id) if update.message.chat_id else "",
             )
+            reset_generation += 1
             await update.message.reply_text("Session reset. Starting fresh conversation.")
 
         async def handle_help(update: Update, context: Any):

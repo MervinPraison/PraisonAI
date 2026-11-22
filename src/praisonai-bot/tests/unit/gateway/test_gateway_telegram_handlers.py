@@ -290,7 +290,9 @@ def test_gateway_debounce_eligibility_uses_raw_content(
 
     bot = asyncio.run(run())
     if should_buffer:
-        bot._debouncer.debounce.assert_awaited_once_with("777", quoted_prompt)
+        # The window is keyed by sender *and* conversation, so a private and a
+        # group message from one user never share a buffer.
+        bot._debouncer.debounce.assert_awaited_once_with("777|4242", quoted_prompt)
     else:
         # Control intent bypasses the window even behind a quote block.
         bot._debouncer.debounce.assert_not_awaited()
@@ -551,3 +553,139 @@ def test_gateway_burst_runs_one_turn_and_none_path_skips(fake_ptb, monkeypatch):
     prompts = [c.args[2] for c in bot._session.chat.await_args_list]
     assert prompts == ["hi\nhi"]
     bot._send_response_with_media.assert_awaited_once()
+
+def test_gateway_debounce_window_is_per_conversation(fake_ptb, monkeypatch):
+    """One sender in two chats must not share a debounce buffer.
+
+    Keying the window by ``user_id`` alone hands a private message's text to
+    the group caller of the same burst: the group caller runs the turn with its
+    own agent/profile and posts the private text into the group.
+    """
+    import praisonai_bot.bots.telegram as tg_mod
+    from praisonai_bot.bots._debounce import InboundDebouncer
+
+    inbound = SimpleNamespace(
+        sender=SimpleNamespace(user_id="777"), content="hi", thread_id=None
+    )
+    monkeypatch.setattr(
+        tg_mod, "process_inbound_telegram_message", AsyncMock(return_value=inbound)
+    )
+
+    async def run():
+        bot = TelegramBot(
+            token="123:abc", config=BotConfig(token="123:abc", typing_indicator=False)
+        )
+        bot._session = MagicMock()
+        bot._session.chat = AsyncMock(return_value="hi")
+        bot._session.set_profile_namespace = lambda ns, agent: None
+        bot._ack = SimpleNamespace(enabled=False)
+        real = InboundDebouncer(debounce_ms=120)
+        bot._debouncer = SimpleNamespace(
+            debounce=AsyncMock(wraps=real.debounce), cancel_all=real.cancel_all
+        )
+        bot._send_response_with_media = AsyncMock()
+        bot._agent = object()
+        task = await _start(bot)
+        try:
+            handler = next(
+                h
+                for h in fake_ptb.handlers
+                if isinstance(h, MessageHandler)
+                and h.callback.__name__ == "handle_message"
+            )
+
+            def msg(chat_id):
+                m = MagicMock(
+                    photo=None,
+                    video=None,
+                    document=None,
+                    voice=None,
+                    audio=None,
+                    chat_id=chat_id,
+                    message_id=1,
+                )
+                m.chat.type = "private" if chat_id > 0 else "group"
+                m.chat.id = chat_id
+                m.reply_text = AsyncMock()
+                return SimpleNamespace(message=m)
+
+            private = asyncio.create_task(handler.callback(msg(4242), None))
+            group = asyncio.create_task(handler.callback(msg(-100777), None))
+            await asyncio.wait_for(asyncio.gather(private, group), 5)
+        finally:
+            await _stop(task)
+        return bot
+
+    bot = asyncio.run(run())
+    # Two conversations, two independent windows, two turns.
+    assert bot._debouncer.debounce.await_count == 2
+    keys = [c.args[0] for c in bot._debouncer.debounce.await_args_list]
+    assert keys == ["777|4242", "777|-100777"]
+    assert bot._session.chat.await_count == 2
+
+
+def test_gateway_new_drops_a_batch_buffered_before_the_reset(fake_ptb, monkeypatch):
+    """``/new`` while a message waits in the window must not replay that text.
+
+    The buffered message was written for the conversation that was just reset;
+    running it afterwards appends pre-reset text to the fresh conversation even
+    though the user was already told the session was reset.
+    """
+    import praisonai_bot.bots.telegram as tg_mod
+    from praisonai_bot.bots._debounce import InboundDebouncer
+
+    inbound = SimpleNamespace(
+        sender=SimpleNamespace(user_id="777"), content="hi", thread_id=None
+    )
+    monkeypatch.setattr(
+        tg_mod, "process_inbound_telegram_message", AsyncMock(return_value=inbound)
+    )
+
+    async def run():
+        bot = TelegramBot(
+            token="123:abc", config=BotConfig(token="123:abc", typing_indicator=False)
+        )
+        bot._session = MagicMock()
+        bot._session.chat = AsyncMock(return_value="hi")
+        bot._session.set_profile_namespace = lambda ns, agent: None
+        bot._session.reset = MagicMock()
+        bot._ack = SimpleNamespace(enabled=False)
+        real = InboundDebouncer(debounce_ms=200)
+        bot._debouncer = SimpleNamespace(
+            debounce=AsyncMock(wraps=real.debounce), cancel_all=real.cancel_all
+        )
+        bot._send_response_with_media = AsyncMock()
+        bot._agent = object()
+        task = await _start(bot)
+        try:
+            by_name = {h.callback.__name__: h for h in fake_ptb.handlers}
+
+            def msg():
+                m = MagicMock(
+                    photo=None,
+                    video=None,
+                    document=None,
+                    voice=None,
+                    audio=None,
+                    chat_id=4242,
+                    message_id=1,
+                )
+                m.chat.type = "private"
+                m.chat.id = 4242
+                m.reply_text = AsyncMock()
+                return SimpleNamespace(message=m)
+
+            buffered = asyncio.create_task(
+                by_name["handle_message"].callback(msg(), None)
+            )
+            await asyncio.sleep(0.02)
+            await by_name["handle_new"].callback(msg(), None)
+            await asyncio.wait_for(buffered, 5)
+        finally:
+            await _stop(task)
+        return bot
+
+    bot = asyncio.run(run())
+    # The reset happened; the pre-reset batch must not become a turn.
+    bot._session.reset.assert_called_once()
+    bot._session.chat.assert_not_awaited()
