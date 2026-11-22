@@ -260,8 +260,7 @@ print(result.completion_reason)
 Topology as a versionable artifact: prompt chaining, routing, parallelisation, orchestrator-worker.
 
 ```python
-from praisonai import AgentFlow
-from praisonai import route, parallel, repeat
+from praisonai import AgentFlow, route, parallel, repeat
 
 flow = AgentFlow(steps=[
     classifier,
