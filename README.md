@@ -73,7 +73,7 @@ Private AI that earns trust one task at a time. Each task moves to your own AI o
 <p align="center">
   <img src=".github/images/readme/offline-ollama.gif" alt="A terminal: offline.py creates an Agent with model ollama/llama3.2, the API key is shown as none, and the agent answers why the sky is blue in under three seconds" width="800" />
   <br />
-  <sub>A real run with `pip install praisonai`: a local Llama 3.2 model through Ollama, with no API key set.</sub>
+  <sub>A real run with <code>pip install praisonai</code>: a local Llama 3.2 model through Ollama, with no API key set.</sub>
 </p>
 
 ## Quick start
