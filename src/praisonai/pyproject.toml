@@ -283,7 +283,7 @@ xata = [
 dashboard = [
     # PraisonAI 🦅 Dashboard — full UI + bots + memory + knowledge + gateway
     # Install: pip install "praisonai[dashboard]"; run: praisonai dashboard
-    "aiui[all]>=0.3.172,<0.4",
+    "aiui[all]>=0.3.177,<0.4",
     "praisonaiagents[all]>=1.5.40",
     "praisonai-bot[gateway,bot]>=0.0.6",
     # UI + persistence
