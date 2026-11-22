@@ -10738,8 +10738,12 @@ class WebSocketGateway:
         turn_lock = asyncio.Lock()
 
         async def handle_message(update: Update, context: Any):
-            async with turn_lock:
-                await _handle_message(update, context)
+            # ``turn_lock`` is taken inside ``_handle_message`` once the
+            # debounce window has resolved: a burst's callers must all reach
+            # ``debounce()`` before any of them runs a turn, otherwise the
+            # lock serialises the wait itself and every buffered message
+            # dispatches its own turn (Issue #6717).
+            await _handle_message(update, context)
 
         async def _handle_message(update: Update, context: Any):
             # Import the shared security pipeline from telegram.py
@@ -10798,19 +10802,6 @@ class WebSocketGateway:
             tool_policy = gateway._resolve_tool_policy_for_message(
                 channel_name, facts=facts
             )
-            # Per-tenant profile scope (Issue #4341): enter the resolved route's
-            # profile namespace on the session so this turn's memory/session
-            # state is keyed per tenant. ``None`` clears any prior scope so an
-            # unscoped route never inherits another tenant's namespace.
-            _tg_session = getattr(bot, "_session", None)
-            if _tg_session is not None and hasattr(
-                _tg_session, "set_profile_namespace"
-            ):
-                _tg_session.set_profile_namespace(
-                    gateway._resolve_profile_for_message(channel_name, facts=facts),
-                    agent,
-                )
-
             # Ack reaction — show processing indicator.
             # Scope-gated like the standalone Telegram adapter so ambient group
             # chatter the bot won't answer is not acked (Greptile #4293): a
@@ -10885,26 +10876,43 @@ class WebSocketGateway:
                     message_text = batch.final
                 # Control/empty/media-bearing message: dispatch as its own
                 # turn, unchanged.
-                
-                # Show typing indicator with renewal during long operation
-                if bot.config.typing_indicator:
-                    from praisonai_bot.bots._typing_indicator import with_typing_renewal
-                    
-                    async def _typing_action():
-                        await update.message.chat.send_action("typing")
-                    
-                    response = await with_typing_renewal(
-                        typing_func=_typing_action,
-                        operation_coro=bot._session.chat(
+                async with turn_lock:
+                    # Per-tenant profile scope (Issue #4341): enter the resolved
+                    # route's profile namespace on the session so this turn's
+                    # memory/session state is keyed per tenant. ``None`` clears
+                    # any prior scope so an unscoped route never inherits another
+                    # tenant's namespace. Staged here, not before the debounce
+                    # window: a superseded caller must not stage a scope it never
+                    # uses, and the scope must be set immediately before the
+                    # ``chat()`` that consumes it.
+                    _tg_session = getattr(bot, "_session", None)
+                    if _tg_session is not None and hasattr(
+                        _tg_session, "set_profile_namespace"
+                    ):
+                        _tg_session.set_profile_namespace(
+                            gateway._resolve_profile_for_message(channel_name, facts=facts),
+                            agent,
+                        )
+
+                    # Show typing indicator with renewal during long operation
+                    if bot.config.typing_indicator:
+                        from praisonai_bot.bots._typing_indicator import with_typing_renewal
+
+                        async def _typing_action():
+                            await update.message.chat.send_action("typing")
+
+                        response = await with_typing_renewal(
+                            typing_func=_typing_action,
+                            operation_coro=bot._session.chat(
+                                agent, user_id, message_text, tool_policy=tool_policy,
+                                **_session_ids,
+                            )
+                        )
+                    else:
+                        response = await bot._session.chat(
                             agent, user_id, message_text, tool_policy=tool_policy,
                             **_session_ids,
                         )
-                    )
-                else:
-                    response = await bot._session.chat(
-                        agent, user_id, message_text, tool_policy=tool_policy,
-                        **_session_ids,
-                    )
                 if hasattr(bot, '_send_response_with_media'):
                     # Issue #3623: this handler serves VOICE|AUDIO as well as
                     # TEXT (handle_voice delegates here), so thread whether the

@@ -474,3 +474,80 @@ def test_gateway_concurrent_turns_run_one_at_a_time_while_taps_dispatch(
         ("end", "2", "tenant-b"),
         ("reset", "1"),
     ]
+
+
+def test_gateway_burst_runs_one_turn_and_none_path_skips(fake_ptb, monkeypatch):
+    """A burst must reach ``debounce()`` together and run exactly one turn.
+
+    The handler used to take ``turn_lock`` around the whole dispatch, so a
+    second message could not enter the debouncer until the first burst's turn
+    finished: every buffered message then woke up as its own burst and ran its
+    own agent turn, defeating the one-turn-per-burst contract (Issue #6717).
+    """
+    import praisonai_bot.bots.telegram as tg_mod
+    from praisonai_bot.bots._debounce import InboundDebouncer
+
+    inbound = SimpleNamespace(
+        sender=SimpleNamespace(user_id="777"), content="hi", thread_id=None
+    )
+    monkeypatch.setattr(
+        tg_mod, "process_inbound_telegram_message", AsyncMock(return_value=inbound)
+    )
+
+    async def run():
+        bot = TelegramBot(
+            token="123:abc", config=BotConfig(token="123:abc", typing_indicator=False)
+        )
+        bot._session = MagicMock()
+        bot._session.chat = AsyncMock(return_value="hi")
+        bot._session.set_profile_namespace = lambda ns, agent: None
+        bot._ack = SimpleNamespace(enabled=False)
+        # A real debouncer: the defect lived in the lock around it, not in a
+        # stub. Wrap it so the burst's *entry* into the window is observable.
+        real = InboundDebouncer(debounce_ms=120)
+        bot._debouncer = SimpleNamespace(
+            debounce=AsyncMock(wraps=real.debounce), cancel_all=real.cancel_all
+        )
+        bot._send_response_with_media = AsyncMock()
+        bot._agent = object()
+        task = await _start(bot)
+        try:
+            handler = next(
+                h
+                for h in fake_ptb.handlers
+                if isinstance(h, MessageHandler)
+                and h.callback.__name__ == "handle_message"
+            )
+
+            def msg(message_id):
+                m = MagicMock(
+                    photo=None,
+                    video=None,
+                    document=None,
+                    voice=None,
+                    audio=None,
+                    chat_id=4242,
+                    message_id=message_id,
+                )
+                m.chat.type = "private"
+                m.chat.id = 4242
+                m.reply_text = AsyncMock()
+                return SimpleNamespace(message=m)
+
+            # PTB schedules block=False handlers as tasks, in update order.
+            first = asyncio.create_task(handler.callback(msg(1), None))
+            second = asyncio.create_task(handler.callback(msg(2), None))
+            await asyncio.wait_for(asyncio.gather(first, second), 5)
+        finally:
+            await _stop(task)
+        return bot
+
+    bot = asyncio.run(run())
+    # Both messages reached the window (the lock no longer serialises entry) ...
+    assert bot._debouncer.debounce.await_count == 2
+    # ... one of them was superseded and took the ``None`` short-circuit, and
+    # the surviving caller ran the single turn that carries both messages.
+    bot._session.chat.assert_awaited_once()
+    prompts = [c.args[2] for c in bot._session.chat.await_args_list]
+    assert prompts == ["hi\nhi"]
+    bot._send_response_with_media.assert_awaited_once()
