@@ -25,7 +25,8 @@
 <td colspan="3">
 <b>Private AI</b> <i>(early access)</i><br />
 Private AI that earns trust one task at a time. Each task moves to your own AI only after it passes a test. If quality slips, it moves back automatically, and every step is recorded for regulators. For banks, insurers and hospitals.<br />
-<a href="#how-the-handover-works-early-access">How the handover works</a> · <a href="https://praison.ai/enterprise/">Talk to us</a>
+<a href="https://praison.ai/enterprise/"><img src=".github/images/readme/talk-to-us.svg" alt="Talk to us" width="168" height="40" align="right" /></a>
+<a href="#how-the-handover-works-early-access">How the handover works</a> · <a href="#whats-new">What's new</a>
 </td>
 </tr>
 <tr>
@@ -76,6 +77,16 @@ Private AI that earns trust one task at a time. Each task moves to your own AI o
   <sub>A real run with <code>pip install praisonai</code>: a local Llama 3.2 model through Ollama, with no API key set.</sub>
 </p>
 
+## What's new
+
+| What's new | What it is |
+|:--|:--|
+| **Six products, one framework** | Bot, Code, MCP and Train now install on their own: `pip install praisonai-bot`, `praisonai-code`, `praisonai-mcp`, `praisonai-train`. `pip install praisonai` still installs everything. |
+| **[`praisonai connect`](https://praison.ai/docs/cli/mcp)** | One command puts your agents and 85 tools in 22 MCP clients: Cursor, VS Code, Claude Desktop, Claude Code, Codex, Zed and more. |
+| **[Replay](https://praison.ai/docs/features/replay)** | Record any agent run, then replay it step by step, rerun from a node, or export it to HTML, Mermaid or OpenTelemetry. |
+| **[Dashboard](https://praison.ai/docs/concepts/claw)** | Chat + Canvas, a microphone in the composer, and a Connect page for MCP clients. `pip install "praisonai[dashboard]"` |
+| **[v4.8.0](https://github.com/MervinPraison/PraisonAI/releases/tag/v4.8.0)** | A security hardening release. 608 releases in the last 12 months. |
+
 ## Quick start
 
 Set a key for any supported provider (OpenAI shown here), or skip the key and use a local model as in the next section.
@@ -121,6 +132,15 @@ agent = Agent(instructions="...", model="ollama/llama3.2", base_url="http://192.
 
 vLLM and LM Studio work the same way: use `hosted_vllm/` (vLLM) or `lm_studio/` with your server's `base_url`. More in the [Ollama guide](https://praison.ai/docs/models/ollama) and [Models docs](https://praison.ai/docs/models).
 
+## How it fits together
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/images/readme/architecture-dark.svg" />
+    <img src=".github/images/readme/architecture-light.svg" alt="Chat apps and your tools on the left connect to PraisonAI in the middle: the Agents core with Bot, Code, MCP and Train. On the right, cloud models or your own models running fully offline. Underneath, Private AI for regulated teams: Watch, Test, Hand over, Roll back, Record." width="880" />
+  </picture>
+</p>
+
 ## What you can build
 
 <table>
@@ -134,8 +154,8 @@ vLLM and LM Studio work the same way: use `hosted_vllm/` (vLLM) or `lm_studio/` 
 <b>Dashboard</b><br /><sub>Chat, agents, memory, knowledge and channels in one app.</sub>
 </td>
 <td width="33%" valign="top">
-<a href="https://praison.ai/docs/ui"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/images/ui/ui-desktop-dark.webp" /><img src=".github/images/ui/ui-desktop-light.webp" alt="praisonai ui with a chat and a canvas showing a table and a script" /></picture></a><br />
-<b>Chat + Canvas</b><br /><sub>A chat app that shows the tables and code your agents write.</sub>
+<a href="https://praison.ai/docs/cli/mcp"><img src=".github/images/readme/mcp-connect.gif" alt="A terminal: praisonai-mcp connect cursor writes the Cursor MCP config and reports 85 tools ready from praisonai" /></a><br />
+<b>Your agents in Cursor</b><br /><sub><code>praisonai-mcp connect cursor</code>: 85 tools, one command. A real run.</sub>
 </td>
 </tr>
 <tr>
@@ -384,6 +404,12 @@ Sandboxes shut themselves down when idle (`auto_shutdown`, `idle_timeout_s`), an
 3. **Hand over:** a task moves to your own AI only when it passes.
 4. **Roll back:** if quality drops, the task moves back automatically.
 5. **Record:** every handover leaves a record your regulator can check.
+
+<p align="center">
+  <img src=".github/images/readme/handover-film.gif" alt="A hand-drawn machine tests three example tasks. Claim triage passes at 99% and Invoice check at 98%, so both move to your own AI. Discharge note scores 71%, so a person keeps it." width="800" />
+  <br />
+  <sub>An illustration with example tasks, not customer data.</sub>
+</p>
 
 **What is "your own AI"?** An open model, such as Llama, Qwen or Gemma, running on your own computers. Use it as it is, or train it on your own past work with [PraisonAI Train](https://praison.ai/docs/train) on your own GPU servers. Your team decides when to train; nothing trains automatically. Either way, a task moves to it only after it passes that exam.
 

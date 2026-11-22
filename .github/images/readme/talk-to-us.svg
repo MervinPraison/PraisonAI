@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 168 40" width="168" height="40" role="img" aria-label="Talk to us">
+<style>
+.b{fill:#20211e}.t{fill:#f5f2e9;font:600 14px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif}
+@media (prefers-color-scheme:dark){.b{fill:#f5f2e9}.t{fill:#20211e}}
+</style>
+<rect class="b" x="0" y="0" width="168" height="40" rx="8"/>
+<text class="t" x="84" y="25" text-anchor="middle">Talk to us  →</text>
+</svg>
