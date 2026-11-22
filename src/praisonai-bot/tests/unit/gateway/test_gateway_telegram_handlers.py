@@ -689,3 +689,72 @@ def test_gateway_new_drops_a_batch_buffered_before_the_reset(fake_ptb, monkeypat
     # The reset happened; the pre-reset batch must not become a turn.
     bot._session.reset.assert_called_once()
     bot._session.chat.assert_not_awaited()
+
+
+def test_gateway_new_keeps_another_chats_buffered_message(fake_ptb, monkeypatch):
+    """``/new`` in one chat must not drop a different chat's buffered message.
+
+    ``/new`` resets only the issuing sender's session, so a bot-wide reset
+    counter would also invalidate windows that were never reset.
+    """
+    import praisonai_bot.bots.telegram as tg_mod
+    from praisonai_bot.bots._debounce import InboundDebouncer
+
+    inbound = SimpleNamespace(
+        sender=SimpleNamespace(user_id="777"), content="hi", thread_id=None
+    )
+    monkeypatch.setattr(
+        tg_mod, "process_inbound_telegram_message", AsyncMock(return_value=inbound)
+    )
+
+    async def run():
+        bot = TelegramBot(
+            token="123:abc", config=BotConfig(token="123:abc", typing_indicator=False)
+        )
+        bot._session = MagicMock()
+        bot._session.chat = AsyncMock(return_value="hi")
+        bot._session.set_profile_namespace = lambda ns, agent: None
+        bot._session.reset = MagicMock()
+        bot._ack = SimpleNamespace(enabled=False)
+        real = InboundDebouncer(debounce_ms=200)
+        bot._debouncer = SimpleNamespace(
+            debounce=AsyncMock(wraps=real.debounce), cancel_all=real.cancel_all
+        )
+        bot._send_response_with_media = AsyncMock()
+        bot._agent = object()
+        task = await _start(bot)
+        try:
+            by_name = {h.callback.__name__: h for h in fake_ptb.handlers}
+
+            def msg(chat_id):
+                m = MagicMock(
+                    photo=None,
+                    video=None,
+                    document=None,
+                    voice=None,
+                    audio=None,
+                    chat_id=chat_id,
+                    message_id=1,
+                )
+                m.chat.type = "private" if chat_id > 0 else "group"
+                m.chat.id = chat_id
+                m.reply_text = AsyncMock()
+                return SimpleNamespace(message=m)
+
+            buffered = asyncio.create_task(
+                by_name["handle_message"].callback(msg(4242), None)
+            )
+            await asyncio.sleep(0.02)
+            # Reset a different conversation while 4242 still waits.
+            await by_name["handle_new"].callback(msg(-100777), None)
+            await asyncio.wait_for(buffered, 5)
+        finally:
+            await _stop(task)
+        return bot
+
+    bot = asyncio.run(run())
+    # Only the issuer's session was reset, so 4242's message still runs.
+    bot._session.reset.assert_called_once()
+    bot._session.chat.assert_awaited_once()
+    assert bot._session.chat.await_args.kwargs["chat_id"] == "4242"
+

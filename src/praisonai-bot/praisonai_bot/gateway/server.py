@@ -10740,7 +10740,10 @@ class WebSocketGateway:
         # buffered in the debounce window before the reset must not run its
         # turn afterwards: it would replay pre-reset text into the fresh
         # conversation (and the user already saw "Session reset").
-        reset_generation = 0
+        # Keyed by conversation, not bot-wide: ``/new`` resets one sender's
+        # session, so counting resets globally would also drop a *different*
+        # chat's buffered message whose session was never reset.
+        reset_generations: dict[str, int] = {}
 
         async def handle_message(update: Update, context: Any):
             # ``turn_lock`` is taken inside ``_handle_message`` once the
@@ -10859,7 +10862,9 @@ class WebSocketGateway:
                     or getattr(update.message, "voice", None)
                     or getattr(update.message, "audio", None)
                 )
-                generation = reset_generation
+                generation = reset_generations.get(
+                    f"{user_id}|{chat_id or ''}", 0
+                )
                 if should_debounce_inbound(
                     # Eligibility is judged on the raw inbound text, exactly as
                     # the standalone adapter does: the prompt above has the
@@ -10890,7 +10895,9 @@ class WebSocketGateway:
                 # Control/empty/media-bearing message: dispatch as its own
                 # turn, unchanged.
                 async with turn_lock:
-                    if generation != reset_generation:
+                    if generation != reset_generations.get(
+                        f"{user_id}|{chat_id or ''}", 0
+                    ):
                         # ``/new`` ran while this message waited in the window:
                         # the conversation it was written for is gone, so drop
                         # the batch instead of replaying it into the fresh one.
@@ -10975,7 +10982,6 @@ class WebSocketGateway:
                 await _handle_new(update, context)
 
         async def _handle_new(update: Update, context: Any):
-            nonlocal reset_generation
             if not update.message:
                 return
             from praisonai_bot.bots.telegram import process_inbound_telegram_message
@@ -10983,13 +10989,14 @@ class WebSocketGateway:
             if not message:
                 return
             user_id = message.sender.user_id if message.sender else "unknown"
+            chat_key = f"{user_id}|{update.message.chat_id or ''}"
             # Same route chat() receives, so ``per_chat`` group sessions reset.
             bot._session.reset(
                 user_id,
                 account=getattr(bot.config, "account", "default"),
                 chat_id=str(update.message.chat_id) if update.message.chat_id else "",
             )
-            reset_generation += 1
+            reset_generations[chat_key] = reset_generations.get(chat_key, 0) + 1
             await update.message.reply_text("Session reset. Starting fresh conversation.")
 
         async def handle_help(update: Update, context: Any):
