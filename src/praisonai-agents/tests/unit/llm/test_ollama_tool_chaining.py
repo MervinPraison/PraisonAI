@@ -106,6 +106,9 @@ async def test_async_ollama_resolves_same_turn_tool_result_references(monkeypatc
     )
     llm._record_finish_reason = lambda response: None
 
+    # One tool-call turn, then a short no-tool reply. The async loop now
+    # matches sync: that reply is the answer (the old in-block follow-up
+    # used to ignore short Ollama text and keep going).
     responses = [
         Response(
             choices=[
@@ -130,24 +133,6 @@ async def test_async_ollama_resolves_same_turn_tool_result_references(monkeypatc
                 )
             ]
         ),
-        Response(
-            choices=[
-                Choice(
-                    message={
-                        "content": "continue",
-                        "tool_calls": [
-                            {"id": "call-3", "function": {"name": "second"}},
-                        ],
-                    }
-                )
-            ]
-        ),
-        Response(
-            choices=[Choice(message={"content": "final answer", "tool_calls": []})]
-        ),
-        Response(
-            choices=[Choice(message={"content": "final answer", "tool_calls": []})]
-        ),
     ]
 
     async def completion(**kwargs):
@@ -169,9 +154,8 @@ async def test_async_ollama_resolves_same_turn_tool_result_references(monkeypatc
         stream=False,
     )
 
-    assert result == "final answer"
+    assert result == "ok"
     assert seen == [
         ("first", {}),
         ("second", {"value": 3}),
-        ("second", {"value": "first"}),
     ]

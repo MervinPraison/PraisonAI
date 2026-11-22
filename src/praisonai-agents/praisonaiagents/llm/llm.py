@@ -6580,157 +6580,13 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             "content": self.OLLAMA_FINAL_ANSWER_PROMPT
                         })
                     
-                    # Get response after tool calls
-                    response_text = ""
-                    # This round's tool calls are answered; only the follow-up
-                    # below decides whether there is another round. A stale
-                    # value re-sent the same follow-up a second time (F-06).
-                    tool_calls = None
                     # A tool may have cancelled the turn: stop before the
-                    # follow-up model call, as the sync loop does (F-14).
+                    # next model call, as the sync loop does (F-14).
                     if _is_cancelled():
                         reason = _cancel_reason()
                         logger.debug(f"Async LLM tool loop cancelled after tool dispatch: {reason}")
                         return _prepare_return_value(f"Task interrupted: {reason}")
-                    
-                    # If no special handling was needed
-                    if reasoning_steps:
-                        # Non-streaming call to capture reasoning
-                        resp = await self._acompletion_with_retry(
-                            **self._build_completion_params(
-                                messages=messages,
-                                temperature=temperature,
-                                stream=False,  # force non-streaming
-                                tools=formatted_tools,  # Include tools
-                                output_json=output_json,
-                                output_pydantic=output_pydantic,
-                                **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                            )
-                        )
-                        self._record_finish_reason(resp)
-                        _final_llm_response = resp
-                        reasoning_content = resp["choices"][0]["message"].get("provider_specific_fields", {}).get("reasoning_content")
-                        response_text = resp["choices"][0]["message"]["content"]
-                        
-                        if verbose and reasoning_content and not interaction_displayed:
-                            _get_display_functions()['display_interaction'](
-                                "Tool response reasoning:",
-                                f"Reasoning:\n{reasoning_content}\n\nAnswer:\n{response_text}",
-                                markdown=markdown,
-                                generation_time=time.time() - start_time,
-                                console=self.console,
-                                agent_name=agent_name,
-                                agent_role=agent_role,
-                                agent_tools=agent_tools,
-                                task_name=task_name,
-                                task_description=task_description,
-                                task_id=task_id
-                            )
-                            interaction_displayed = True
-                        elif verbose and not interaction_displayed:
-                            _get_display_functions()['display_interaction'](
-                                "Tool response:",
-                                response_text,
-                                markdown=markdown,
-                                generation_time=time.time() - start_time,
-                                console=self.console,
-                                agent_name=agent_name,
-                                agent_role=agent_role,
-                                agent_tools=agent_tools,
-                                task_name=task_name,
-                                task_description=task_description,
-                                task_id=task_id
-                            )
-                            interaction_displayed = True
-                    else:
-                        # Get response after tool calls with streaming if not already handled
-                        _use_stream = stream
-                        if _use_stream and hasattr(self, '_provider_adapter') and self._provider_adapter:
-                            if not self._provider_adapter.supports_streaming():
-                                _use_stream = False
-                        if not _use_stream:
-                            resp = await self._acompletion_with_retry(
-                                **self._build_completion_params(
-                                    messages=messages,
-                                    temperature=temperature,
-                                    stream=False,
-                                    tools=formatted_tools,
-                                    output_json=output_json,
-                                    output_pydantic=output_pydantic,
-                                    **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                                )
-                            )
-                            self._record_finish_reason(resp)
-                            _final_llm_response = resp
-                            response_text = resp["choices"][0]["message"].get("content") or ""
-                            # If the response also contains new tool_calls, treat this as a
-                            # tool-calling round rather than a final answer (Anthropic pattern)
-                            _next_tool_calls = resp["choices"][0]["message"].get("tool_calls") or []
-                            tool_calls = _next_tool_calls or None
-                        elif verbose:
-                            _stream_tool_calls = []
-                            async for chunk in await self._acompletion_with_retry(
-                                **self._build_completion_params(
-                                    messages=messages,
-                                    temperature=temperature,
-                                    stream=_use_stream,
-                                    tools=formatted_tools,
-                                    output_json=output_json,
-                                    output_pydantic=output_pydantic,
-                                    **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                                )
-                            ):
-                                if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                    content = chunk.choices[0].delta.content
-                                    response_text += content
-                                    print("\033[K", end="\r")
-                                    print(f"Reflecting... {time.time() - start_time:.1f}s", end="\r")
-                                # tools are sent, so text plus a new tool call is another round
-                                if chunk and chunk.choices and chunk.choices[0].delta:
-                                    _stream_tool_calls = self._process_tool_calls_from_stream(
-                                        chunk.choices[0].delta, _stream_tool_calls)
-                            tool_calls = _stream_tool_calls or None
-                        else:
-                            response_text = ""
-                            async for chunk in await self._acompletion_with_retry(
-                                **self._build_completion_params(
-                                    messages=messages,
-                                    temperature=temperature,
-                                    stream=_use_stream,
-                                    output_json=output_json,
-                                    output_pydantic=output_pydantic,
-                                    **{k:v for k,v in kwargs.items() if k != 'reasoning_steps'}
-                                )
-                            ):
-                                if chunk and chunk.choices and chunk.choices[0].delta.content:
-                                    response_text += chunk.choices[0].delta.content
 
-                    response_text = response_text.strip() if response_text else ""
-                    
-                    # After tool execution, update messages and continue the loop
-                    # Only append as plain assistant message if there are no new tool_calls
-                    # (if tool_calls were set, the tool execution block will format correctly)
-                    if response_text and not tool_calls:
-                        messages.append({
-                            "role": "assistant",
-                            "content": response_text
-                        })
-                    
-                    # Store reasoning content if captured
-                    if reasoning_steps and reasoning_content:
-                        stored_reasoning_content = reasoning_content
-                    
-                    # Check if the LLM provided a final answer alongside the tool calls
-                    # If response_text contains substantive content, treat it as the final answer
-                    # The length floor is for Ollama's sequential-tool handling only;
-                    # elsewhere a short answer ("hello") was asked for again (F-06).
-                    if response_text and not tool_calls and (
-                            not self._is_ollama_provider() or len(response_text.strip()) > 10):
-                        # LLM provided a final answer after tool execution with no further tool calls
-                        final_response_text = response_text.strip()
-                        break
-                    
-                    
                     # Special handling for Ollama to prevent infinite loops
                     # Only generate summary after multiple iterations to allow sequential execution
                     should_break, tool_summary_text, iteration_count = self._handle_ollama_sequential_logic(
@@ -6741,7 +6597,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # Reset interaction_displayed to ensure final summary is shown
                         interaction_displayed = False
                         break
-                    
+
                     # Safety check: prevent infinite loops for any provider
                     if iteration_count + 1 >= max_iterations:
                         self._last_stop_reason = "max_steps"
@@ -6750,9 +6606,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                             **{k: v for k, v in kwargs.items() if k != 'reasoning_steps'}
                         )
                         break
-                    
-                    # Continue the loop to check if more tools are needed
+
+                    # Continue the loop so the next iteration makes the
+                    # single post-tool model call, as the sync loop does.
                     iteration_count += 1
+                    response_text = ""
                     continue
                 else:
                     # No tool calls, we're done with this iteration
