@@ -75,9 +75,14 @@ def _install(monkeypatch, agent, recorder):
     llm = agent.llm_instance
     monkeypatch.setattr(llm, "_supports_responses_api", lambda: False)
     monkeypatch.setattr(llm, "_supports_streaming_tools", lambda: True)
+    # anthropic/claude-x uses AnthropicAdapter, which disables streaming
+    # even when _supports_streaming_tools is patched.
+    if getattr(llm, "_provider_adapter", None) is not None:
+        monkeypatch.setattr(llm._provider_adapter, "supports_streaming", lambda: True)
 
     def _completion_with_retry(**kwargs):
         recorder["calls"] += 1
+        recorder["streams"].append(bool(kwargs.get("stream")))
         content, tool_calls = _reply(kwargs.get("messages", []), kwargs.get("tools"))
         if kwargs.get("stream"):
             return _make_stream(content, tool_calls)
@@ -85,6 +90,7 @@ def _install(monkeypatch, agent, recorder):
 
     async def _acompletion_with_retry(**kwargs):
         recorder["calls"] += 1
+        recorder["streams"].append(bool(kwargs.get("stream")))
         content, tool_calls = _reply(kwargs.get("messages", []), kwargs.get("tools"))
         if kwargs.get("stream"):
             return _make_async_stream(content, tool_calls)
@@ -102,7 +108,9 @@ def _collect(result):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("stream", [False, True], ids=["no_stream", "stream"])
-async def test_chat_and_achat_two_tool_chain_parity(monkeypatch, stream):
+async def test_chat_and_achat_two_tool_chain_parity(monkeypatch, tmp_path, stream):
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
     tools_ran = []
 
     def step_a():
@@ -115,7 +123,7 @@ async def test_chat_and_achat_two_tool_chain_parity(monkeypatch, stream):
         tools_ran.append("b")
         return "B done"
 
-    sync_recorder = {"calls": 0}
+    sync_recorder = {"calls": 0, "streams": []}
     sync_agent = Agent(
         name="w",
         llm="anthropic/claude-x",
@@ -128,7 +136,7 @@ async def test_chat_and_achat_two_tool_chain_parity(monkeypatch, stream):
     sync_tools = list(tools_ran)
 
     tools_ran.clear()
-    async_recorder = {"calls": 0}
+    async_recorder = {"calls": 0, "streams": []}
     async_agent = Agent(
         name="w",
         llm="anthropic/claude-x",
@@ -146,3 +154,9 @@ async def test_chat_and_achat_two_tool_chain_parity(monkeypatch, stream):
     assert async_recorder["calls"] == 3
     assert async_tools == ["a", "b"]
     assert async_result == "final: did A and B"
+    if stream:
+        assert sync_recorder["streams"] and all(sync_recorder["streams"])
+        assert async_recorder["streams"] and all(async_recorder["streams"])
+    else:
+        assert sync_recorder["streams"] and not any(sync_recorder["streams"])
+        assert async_recorder["streams"] and not any(async_recorder["streams"])
