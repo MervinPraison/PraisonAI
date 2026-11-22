@@ -86,17 +86,18 @@ class _StubAgent:
 
 
 def _a2a(**kw):
+    pytest.importorskip("fastapi")
+    pytest.importorskip("uvicorn")
     from praisonaiagents.ui.a2a import A2A
 
     return A2A(agent=_StubAgent(), **kw)
 
 
 def test_a2a_serve_default_host_is_loopback():
-    from praisonaiagents.ui.a2a import A2A
-
-    assert inspect.signature(A2A.serve).parameters["host"].default in LOOPBACK
+    a2a = _a2a()
+    assert inspect.signature(type(a2a).serve).parameters["host"].default in LOOPBACK
     with patch("uvicorn.run") as run:
-        _a2a().serve()
+        a2a.serve()
     assert run.call_args.kwargs["host"] in LOOPBACK
 
 
@@ -113,8 +114,9 @@ def test_a2a_serve_public_bind_without_token_uses_shared_guard():
 
 
 def test_a2a_serve_public_bind_with_token_starts():
+    a2a = _a2a(auth_token="t0k")
     with patch("uvicorn.run") as run:
-        _a2a(auth_token="t0k").serve(host="0.0.0.0", port=9999)
+        a2a.serve(host="0.0.0.0", port=9999)
     assert run.call_args.kwargs["host"] == "0.0.0.0"
 
 
