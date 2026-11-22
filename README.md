@@ -84,7 +84,7 @@ Private AI that earns trust one task at a time. Each task moves to your own AI o
 | **Six products, one framework** | Bot, Code, MCP and Train now install on their own: `pip install praisonai-bot`, `praisonai-code`, `praisonai-mcp`, `praisonai-train`. `pip install praisonai` still installs everything. |
 | **[`praisonai connect`](https://praison.ai/docs/cli/mcp)** | One command puts your agents and 85 tools in 22 MCP clients: Cursor, VS Code, Claude Desktop, Claude Code, Codex, Zed and more. |
 | **[Replay](https://praison.ai/docs/features/replay)** | Record any agent run, then replay it step by step, rerun from a node, or export it to HTML, Mermaid or OpenTelemetry. |
-| **[Dashboard](https://praison.ai/docs/concepts/claw)** | Chat + Canvas, a microphone in the composer, and a Connect page for MCP clients. `pip install "praisonai[dashboard]"` |
+| **[Dashboard](https://praison.ai/docs/concepts/claw)** | Chat + Canvas and a Connect page for MCP clients. `pip install "praisonai[dashboard]"` |
 | **[v4.8.0](https://github.com/MervinPraison/PraisonAI/releases/tag/v4.8.0)** | A security hardening release. 608 releases in the last 12 months. |
 
 ## Quick start
