@@ -77,15 +77,14 @@ Private AI that earns trust one task at a time. Each task moves to your own AI o
   <sub>A real run with <code>pip install praisonai</code>: a local Llama 3.2 model through Ollama, with no API key set.</sub>
 </p>
 
-## What's new
+## How it fits together
 
-| What's new | What it is |
-|:--|:--|
-| **Six products, one framework** | Bot, Code, MCP and Train now install on their own: `pip install praisonai-bot`, `praisonai-code`, `praisonai-mcp`, `praisonai-train`. `pip install praisonai` still installs everything. |
-| **[`praisonai connect`](https://praison.ai/docs/cli/mcp)** | One command puts your agents and 85 tools in 22 MCP clients: Cursor, VS Code, Claude Desktop, Claude Code, Codex, Zed and more. |
-| **[Replay](https://praison.ai/docs/features/replay)** | Record any agent run, then replay it step by step, rerun from a node, or export it to HTML, Mermaid or OpenTelemetry. |
-| **[Dashboard](https://praison.ai/docs/concepts/claw)** | Chat + Canvas, a microphone in the composer, and a Connect page for MCP clients. `pip install "praisonai[dashboard]"` |
-| **[v4.8.0](https://github.com/MervinPraison/PraisonAI/releases/tag/v4.8.0)** | A security hardening release. 608 releases in the last 12 months. |
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/images/readme/architecture-dark.svg" />
+    <img src=".github/images/readme/architecture-light.svg" alt="Chat apps and your tools on the left connect to PraisonAI in the middle: the Agents core with Bot, Code, MCP and Train. On the right, cloud models or your own models running fully offline. Underneath, Private AI for regulated teams: Watch, Test, Hand over, Roll back, Record." width="880" />
+  </picture>
+</p>
 
 ## Quick start
 
@@ -131,15 +130,6 @@ agent = Agent(instructions="...", model="ollama/llama3.2", base_url="http://192.
 ```
 
 vLLM and LM Studio work the same way: use `hosted_vllm/` (vLLM) or `lm_studio/` with your server's `base_url`. More in the [Ollama guide](https://praison.ai/docs/models/ollama) and [Models docs](https://praison.ai/docs/models).
-
-## How it fits together
-
-<p align="center">
-  <picture>
-    <source media="(prefers-color-scheme: dark)" srcset=".github/images/readme/architecture-dark.svg" />
-    <img src=".github/images/readme/architecture-light.svg" alt="Chat apps and your tools on the left connect to PraisonAI in the middle: the Agents core with Bot, Code, MCP and Train. On the right, cloud models or your own models running fully offline. Underneath, Private AI for regulated teams: Watch, Test, Hand over, Roll back, Record." width="880" />
-  </picture>
-</p>
 
 ## What you can build
 
@@ -1395,6 +1385,16 @@ See [MCP docs](https://praison.ai/docs/mcp/transports) for all transport options
 </div>
 
 ---
+
+## What's new
+
+| What's new | What it is |
+|:--|:--|
+| **Six products, one framework** | Bot, Code, MCP and Train now install on their own: `pip install praisonai-bot`, `praisonai-code`, `praisonai-mcp`, `praisonai-train`. `pip install praisonai` still installs everything. |
+| **[`praisonai connect`](https://praison.ai/docs/cli/mcp)** | One command puts your agents and 85 tools in 22 MCP clients: Cursor, VS Code, Claude Desktop, Claude Code, Codex, Zed and more. |
+| **[Replay](https://praison.ai/docs/features/replay)** | Record any agent run, then replay it step by step, rerun from a node, or export it to HTML, Mermaid or OpenTelemetry. |
+| **[Dashboard](https://praison.ai/docs/concepts/claw)** | Chat + Canvas, a microphone in the composer, and a Connect page for MCP clients. `pip install "praisonai[dashboard]"` |
+| **[v4.8.0](https://github.com/MervinPraison/PraisonAI/releases/tag/v4.8.0)** | A security hardening release. 608 releases in the last 12 months. |
 
 ## Star History
 
