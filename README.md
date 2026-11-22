@@ -1150,22 +1150,6 @@ Methodology, comparisons and how to reproduce: [benchmarks/BENCHMARK_RESULTS.md]
 
 ---
 
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=MervinPraison/PraisonAI&type=Date)](https://praison.ai/docs)
-
----
-
-<p align="center">
-  <img src=".github/images/agentflow.gif" alt="PraisonAI AgentFlow" width="800" />
-</p>
-
-<p align="center">
-  <img src=".github/images/latest_ai_news_and_crawl_each_url_to_find_info.gif" alt="PraisonAI command execution" width="800" />
-</p>
-
-\* `export TAVILY_API_KEY=xxxxx`
-
 ## Langfuse Tracing
 
 ```bash
@@ -1377,3 +1361,9 @@ See [MCP docs](https://praison.ai/docs/mcp/transports) for all transport options
     <a href="https://linkedin.com/in/mervinpraison">💼 LinkedIn</a>
   </p>
 </div>
+
+---
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=MervinPraison/PraisonAI&type=Date)](https://star-history.com/#MervinPraison/PraisonAI&Date)
