@@ -24,7 +24,7 @@ SUPPORTED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'
 DEFAULT_VISION_MODEL = "gpt-4o"
 
 # Default image generation models
-DEFAULT_IMAGE_GEN_MODEL = "gpt-image-2.5-flare"
+DEFAULT_IMAGE_GEN_MODEL = "openai/gpt-image-2.5-flare"
 SUPPORTED_IMAGE_GEN_MODELS = [
     DEFAULT_IMAGE_GEN_MODEL,
     'gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 
@@ -313,6 +313,9 @@ class ImageGenerateHandler(FlagHandler):
         
         # Direct-prompt dispatch wraps an explicit --llm in a configuration dict.
         model = (llm.get("model") if isinstance(llm, dict) else llm) or DEFAULT_IMAGE_GEN_MODEL
+        # Keep the bare CLI spelling working without relying on LiteLLM's online model map.
+        if model == "gpt-image-2.5-flare":
+            model = f"openai/{model}"
         
         # Validate model is supported for generation
         if model not in SUPPORTED_IMAGE_GEN_MODELS:

@@ -11,8 +11,8 @@ from praisonai_code.cli.features.image import ImageGenerateHandler
 @pytest.mark.parametrize(
     ("requested_model", "expected_model"),
     [
-        (None, "gpt-image-2.5-flare"),
-        ("gpt-image-2.5-flare", "gpt-image-2.5-flare"),
+        (None, "openai/gpt-image-2.5-flare"),
+        ("gpt-image-2.5-flare", "openai/gpt-image-2.5-flare"),
         ("dall-e-3", "dall-e-3"),
     ],
 )
