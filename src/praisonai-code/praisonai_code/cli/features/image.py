@@ -293,13 +293,13 @@ class ImageGenerateHandler(FlagHandler):
             config["use_image_generation"] = True
         return config
     
-    def generate_image(self, prompt: str, llm: str = None, output_path: str = None) -> Dict[str, Any]:
+    def generate_image(self, prompt: str, llm: str | Dict[str, Any] | None = None, output_path: str = None) -> Dict[str, Any]:
         """
         Generate an image from a text prompt.
         
         Args:
             prompt: Text description of the image to generate
-            llm: Image generation model (defaults to gpt-image-2.5-flare)
+            llm: Image model name or CLI LLM config (defaults to gpt-image-2.5-flare)
             output_path: Optional path to save the generated image
             
         Returns:
@@ -311,8 +311,8 @@ class ImageGenerateHandler(FlagHandler):
         
         from praisonaiagents import ImageAgent
         
-        # Use provided model or default
-        model = llm or DEFAULT_IMAGE_GEN_MODEL
+        # Direct-prompt dispatch wraps an explicit --llm in a configuration dict.
+        model = (llm.get("model") if isinstance(llm, dict) else llm) or DEFAULT_IMAGE_GEN_MODEL
         
         # Validate model is supported for generation
         if model not in SUPPORTED_IMAGE_GEN_MODELS:
@@ -367,13 +367,13 @@ class ImageGenerateHandler(FlagHandler):
             logger.error(f"Error saving image: {e}")
             return False
     
-    def execute(self, prompt: str = None, llm: str = None, output_path: str = None, **kwargs) -> Dict[str, Any]:
+    def execute(self, prompt: str = None, llm: str | Dict[str, Any] | None = None, output_path: str = None, **kwargs) -> Dict[str, Any]:
         """
         Execute image generation.
         
         Args:
             prompt: Text description of the image to generate
-            llm: Image generation model name
+            llm: Image model name or CLI LLM config
             output_path: Optional path to save the image
             
         Returns:
