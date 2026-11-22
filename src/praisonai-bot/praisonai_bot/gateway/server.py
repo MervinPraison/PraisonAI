@@ -10740,10 +10740,29 @@ class WebSocketGateway:
         # buffered in the debounce window before the reset must not run its
         # turn afterwards: it would replay pre-reset text into the fresh
         # conversation (and the user already saw "Session reset").
-        # Keyed by conversation, not bot-wide: ``/new`` resets one sender's
-        # session, so counting resets globally would also drop a *different*
-        # chat's buffered message whose session was never reset.
+        # Keyed by the *session* the turn uses, not by the bot or by the
+        # debounce window: with ``session_scope='per_chat'`` a whole group
+        # shares one session across senders, and with ``per_user`` one sender
+        # shares one session across chats. Reusing the debounce key (which must
+        # stay per conversation) would let one member's ``/new`` drop another
+        # member's buffered text, or miss a reset issued from a sibling chat.
         reset_generations: dict[str, int] = {}
+
+        def _session_key(message: Any, chat_id: str) -> str:
+            """The key ``chat()``/``reset()`` will use for this turn."""
+            user_id = message.sender.user_id if message.sender else "unknown"
+            session = getattr(bot, "_session", None)
+            storage_key = getattr(session, "_storage_key", None)
+            if storage_key is None:  # defensive: no session yet
+                return f"{user_id}|{chat_id}"
+            try:
+                return storage_key(
+                    user_id,
+                    account=getattr(bot.config, "account", "default"),
+                    chat_id=chat_id,
+                )
+            except Exception:  # pragma: no cover — defensive
+                return f"{user_id}|{chat_id}"
 
         async def handle_message(update: Update, context: Any):
             # ``turn_lock`` is taken inside ``_handle_message`` once the
@@ -10863,7 +10882,7 @@ class WebSocketGateway:
                     or getattr(update.message, "audio", None)
                 )
                 generation = reset_generations.get(
-                    f"{user_id}|{chat_id or ''}", 0
+                    _session_key(message, chat_id or ""), 0
                 )
                 if should_debounce_inbound(
                     # Eligibility is judged on the raw inbound text, exactly as
@@ -10896,11 +10915,11 @@ class WebSocketGateway:
                 # turn, unchanged.
                 async with turn_lock:
                     if generation != reset_generations.get(
-                        f"{user_id}|{chat_id or ''}", 0
+                        _session_key(message, chat_id or ""), 0
                     ):
                         # ``/new`` ran while this message waited in the window:
-                        # the conversation it was written for is gone, so drop
-                        # the batch instead of replaying it into the fresh one.
+                        # the session it was written for is gone, so drop the
+                        # batch instead of replaying it into the fresh one.
                         if ack_ctx:
                             await bot._ack.clear(
                                 ack_ctx, unreact_fn=_tg_unreact
@@ -10989,14 +11008,20 @@ class WebSocketGateway:
             if not message:
                 return
             user_id = message.sender.user_id if message.sender else "unknown"
-            chat_key = f"{user_id}|{update.message.chat_id or ''}"
+            chat_id = str(update.message.chat_id) if update.message.chat_id else ""
             # Same route chat() receives, so ``per_chat`` group sessions reset.
             bot._session.reset(
                 user_id,
                 account=getattr(bot.config, "account", "default"),
-                chat_id=str(update.message.chat_id) if update.message.chat_id else "",
+                chat_id=chat_id,
             )
-            reset_generations[chat_key] = reset_generations.get(chat_key, 0) + 1
+            # Bump the generation of the session that was just cleared, so a
+            # message buffered for that same session is dropped while a
+            # different session's window keeps running.
+            session_key = _session_key(message, chat_id)
+            reset_generations[session_key] = (
+                reset_generations.get(session_key, 0) + 1
+            )
             await update.message.reply_text("Session reset. Starting fresh conversation.")
 
         async def handle_help(update: Update, context: Any):

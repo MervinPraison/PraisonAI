@@ -691,30 +691,32 @@ def test_gateway_new_drops_a_batch_buffered_before_the_reset(fake_ptb, monkeypat
     bot._session.chat.assert_not_awaited()
 
 
-def test_gateway_new_keeps_another_chats_buffered_message(fake_ptb, monkeypatch):
-    """``/new`` in one chat must not drop a different chat's buffered message.
+def test_gateway_new_from_another_user_keeps_the_buffered_message(
+    fake_ptb, monkeypatch
+):
+    """A different user's ``/new`` must not drop this user's buffered text.
 
-    ``/new`` resets only the issuing sender's session, so a bot-wide reset
-    counter would also invalidate windows that were never reset.
+    With ``per_user`` (the default) each sender owns their own session, so the
+    reset scope is the sender — not the bot (bot-wide counter) and not the
+    debounce window key alone (``user_id|chat_id`` would also be right here by
+    accident, but see the group test below for where that breaks).
     """
     import praisonai_bot.bots.telegram as tg_mod
     from praisonai_bot.bots._debounce import InboundDebouncer
+    from praisonai_bot.bots._session import BotSessionManager
 
-    inbound = SimpleNamespace(
-        sender=SimpleNamespace(user_id="777"), content="hi", thread_id=None
-    )
-    monkeypatch.setattr(
-        tg_mod, "process_inbound_telegram_message", AsyncMock(return_value=inbound)
+    alice = SimpleNamespace(
+        sender=SimpleNamespace(user_id="alice"), content="hi", thread_id=None
     )
 
     async def run():
         bot = TelegramBot(
             token="123:abc", config=BotConfig(token="123:abc", typing_indicator=False)
         )
-        bot._session = MagicMock()
+        # A real manager so ``_storage_key`` resolves exactly as in production;
+        # ``chat`` is stubbed so no agent runs.
+        bot._session = BotSessionManager(platform="telegram")
         bot._session.chat = AsyncMock(return_value="hi")
-        bot._session.set_profile_namespace = lambda ns, agent: None
-        bot._session.reset = MagicMock()
         bot._ack = SimpleNamespace(enabled=False)
         real = InboundDebouncer(debounce_ms=200)
         bot._debouncer = SimpleNamespace(
@@ -736,7 +738,85 @@ def test_gateway_new_keeps_another_chats_buffered_message(fake_ptb, monkeypatch)
                     chat_id=chat_id,
                     message_id=1,
                 )
-                m.chat.type = "private" if chat_id > 0 else "group"
+                m.chat.type = "private"
+                m.chat.id = chat_id
+                m.reply_text = AsyncMock()
+                return SimpleNamespace(message=m)
+
+            monkeypatch.setattr(
+                tg_mod, "process_inbound_telegram_message", AsyncMock(return_value=alice)
+            )
+            buffered = asyncio.create_task(
+                by_name["handle_message"].callback(msg(4242), None)
+            )
+            await asyncio.sleep(0.02)
+            # Bob resets *his* session while Alice's message waits.
+            bob = SimpleNamespace(
+                sender=SimpleNamespace(user_id="bob"), content="/new", thread_id=None
+            )
+            monkeypatch.setattr(
+                tg_mod, "process_inbound_telegram_message", AsyncMock(return_value=bob)
+            )
+            await by_name["handle_new"].callback(msg(9999), None)
+            await asyncio.wait_for(buffered, 5)
+        finally:
+            await _stop(task)
+        return bot
+
+    bot = asyncio.run(run())
+    # Only Bob's session was reset, so Alice's message still runs.
+    bot._session.chat.assert_awaited_once()
+    assert bot._session.chat.await_args.kwargs["chat_id"] == "4242"
+
+
+def test_gateway_new_in_another_chat_drops_the_same_users_buffered_text(
+    fake_ptb, monkeypatch
+):
+    """With ``per_user`` the same sender's DMs share one session, so a reset
+    issued from one of them must drop text buffered by the other.
+
+    Tracking generations by ``user_id|chat_id`` failed this: the other chat's
+    counter stayed put and the pre-reset text entered the fresh session.
+    """
+    import praisonai_bot.bots.telegram as tg_mod
+    from praisonai_bot.bots._debounce import InboundDebouncer
+    from praisonai_bot.bots._session import BotSessionManager
+
+    inbound = SimpleNamespace(
+        sender=SimpleNamespace(user_id="777"), content="hi", thread_id=None
+    )
+    monkeypatch.setattr(
+        tg_mod, "process_inbound_telegram_message", AsyncMock(return_value=inbound)
+    )
+
+    async def run():
+        bot = TelegramBot(
+            token="123:abc", config=BotConfig(token="123:abc", typing_indicator=False)
+        )
+        bot._session = BotSessionManager(platform="telegram")
+        bot._session.chat = AsyncMock(return_value="hi")
+        bot._ack = SimpleNamespace(enabled=False)
+        real = InboundDebouncer(debounce_ms=200)
+        bot._debouncer = SimpleNamespace(
+            debounce=AsyncMock(wraps=real.debounce), cancel_all=real.cancel_all
+        )
+        bot._send_response_with_media = AsyncMock()
+        bot._agent = object()
+        task = await _start(bot)
+        try:
+            by_name = {h.callback.__name__: h for h in fake_ptb.handlers}
+
+            def msg(chat_id):
+                m = MagicMock(
+                    photo=None,
+                    video=None,
+                    document=None,
+                    voice=None,
+                    audio=None,
+                    chat_id=chat_id,
+                    message_id=1,
+                )
+                m.chat.type = "private"
                 m.chat.id = chat_id
                 m.reply_text = AsyncMock()
                 return SimpleNamespace(message=m)
@@ -745,16 +825,91 @@ def test_gateway_new_keeps_another_chats_buffered_message(fake_ptb, monkeypatch)
                 by_name["handle_message"].callback(msg(4242), None)
             )
             await asyncio.sleep(0.02)
-            # Reset a different conversation while 4242 still waits.
-            await by_name["handle_new"].callback(msg(-100777), None)
+            # Same sender, a different DM: same per_user session.
+            await by_name["handle_new"].callback(msg(9999), None)
             await asyncio.wait_for(buffered, 5)
         finally:
             await _stop(task)
         return bot
 
     bot = asyncio.run(run())
-    # Only the issuer's session was reset, so 4242's message still runs.
-    bot._session.reset.assert_called_once()
-    bot._session.chat.assert_awaited_once()
-    assert bot._session.chat.await_args.kwargs["chat_id"] == "4242"
+    # That session was reset, so the buffered pre-reset text must not run.
+    bot._session.chat.assert_not_awaited()
 
+
+def test_gateway_new_in_a_group_drops_another_members_buffered_text(
+    fake_ptb, monkeypatch
+):
+    """With ``session_scope='per_chat'`` a group shares one session, so one
+    member's ``/new`` must drop another member's buffered text.
+
+    The debounce windows stay per conversation *and* per sender, so the two
+    senders reach different windows; only the session key ties them together.
+    """
+    import praisonai_bot.bots.telegram as tg_mod
+    from praisonai_bot.bots._debounce import InboundDebouncer
+    from praisonai_bot.bots._session import BotSessionManager
+
+    alice = SimpleNamespace(
+        sender=SimpleNamespace(user_id="alice"), content="hi", thread_id=None
+    )
+
+    async def run():
+        bot = TelegramBot(
+            token="123:abc", config=BotConfig(token="123:abc", typing_indicator=False)
+        )
+        bot._session = BotSessionManager(platform="telegram", session_scope="per_chat")
+        bot._session.chat = AsyncMock(return_value="hi")
+        bot._ack = SimpleNamespace(enabled=False)
+        real = InboundDebouncer(debounce_ms=200)
+        bot._debouncer = SimpleNamespace(
+            debounce=AsyncMock(wraps=real.debounce), cancel_all=real.cancel_all
+        )
+        bot._send_response_with_media = AsyncMock()
+        bot._agent = object()
+        task = await _start(bot)
+        try:
+            by_name = {h.callback.__name__: h for h in fake_ptb.handlers}
+
+            def msg(chat_id):
+                m = MagicMock(
+                    photo=None,
+                    video=None,
+                    document=None,
+                    voice=None,
+                    audio=None,
+                    chat_id=chat_id,
+                    message_id=1,
+                )
+                m.chat.type = "group"
+                m.chat.id = chat_id
+                m.reply_text = AsyncMock()
+                return SimpleNamespace(message=m)
+
+            monkeypatch.setattr(
+                tg_mod,
+                "process_inbound_telegram_message",
+                AsyncMock(return_value=alice),
+            )
+            buffered = asyncio.create_task(
+                by_name["handle_message"].callback(msg(-100123), None)
+            )
+            await asyncio.sleep(0.02)
+            # A different group member issues ``/new`` for the shared session.
+            bob = SimpleNamespace(
+                sender=SimpleNamespace(user_id="bob"), content="/new", thread_id=None
+            )
+            monkeypatch.setattr(
+                tg_mod,
+                "process_inbound_telegram_message",
+                AsyncMock(return_value=bob),
+            )
+            await by_name["handle_new"].callback(msg(-100123), None)
+            await asyncio.wait_for(buffered, 5)
+        finally:
+            await _stop(task)
+        return bot
+
+    bot = asyncio.run(run())
+    # The shared per_chat session was reset, so Alice's pre-reset text is gone.
+    bot._session.chat.assert_not_awaited()
