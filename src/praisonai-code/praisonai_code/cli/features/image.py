@@ -24,8 +24,9 @@ SUPPORTED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'
 DEFAULT_VISION_MODEL = "gpt-4o"
 
 # Default image generation models
-DEFAULT_IMAGE_GEN_MODEL = "dall-e-3"
+DEFAULT_IMAGE_GEN_MODEL = "gpt-image-2.5-flare"
 SUPPORTED_IMAGE_GEN_MODELS = [
+    DEFAULT_IMAGE_GEN_MODEL,
     'gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 
     'chatgpt-image-latest', 'dall-e-2', 'dall-e-3'
 ]
@@ -256,12 +257,12 @@ class ImageGenerateHandler(FlagHandler):
     """
     Handler for --image-generate flag (Image Generation).
     
-    Generates NEW images from text prompts using DALL-E or similar models.
+    Generates new images from text prompts using an image generation model.
     This is for CREATING images, not analyzing existing ones.
     
     Example:
         praisonai "A sunset over mountains" --image-generate
-        praisonai "A cat wearing a hat" --image-generate --llm dall-e-3
+        praisonai "A cat wearing a hat" --image-generate --llm gpt-image-2.5-flare
     """
     
     @property
@@ -298,7 +299,7 @@ class ImageGenerateHandler(FlagHandler):
         
         Args:
             prompt: Text description of the image to generate
-            llm: Image generation model (dall-e-3, dall-e-2, etc.)
+            llm: Image generation model (defaults to gpt-image-2.5-flare)
             output_path: Optional path to save the generated image
             
         Returns:
