@@ -32,7 +32,8 @@ Private AI that earns trust one task at a time. Each task moves to your own AI o
 <td width="33%" valign="top">
 <a href="src/praisonai-agents"><b>Agents</b></a><br />
 <sub>Python agent framework: teams, workflows, memory, tools.</sub><br />
-<code>pip install praisonaiagents</code>
+<code>pip install praisonaiagents</code><br />
+<a href="#quick-start">Your first agent</a>
 </td>
 <td width="33%" valign="top">
 <a href="src/praisonai-bot"><b>Bot</b></a><br />
@@ -57,13 +58,13 @@ Private AI that earns trust one task at a time. Each task moves to your own AI o
 <td valign="top">
 <a href="src/praisonai-train"><b>Train</b></a><br />
 <sub>Fine-tune an open model on your own GPUs, and train agents on past runs.</sub><br />
-<code>pip install praisonai-train</code><br />
+<code>pip install "praisonai-train[llm]"</code><br />
 <code>praisonai-train --help</code>
 </td>
 <td valign="top">
 <b>All of it</b><br />
 <sub>CLI, bots, dashboard and integrations in one install.</sub><br />
-<code>pip install praisonai</code><br />
+<code>pip install "praisonai[dashboard]"</code><br />
 <code>praisonai setup</code>
 </td>
 </tr>
@@ -427,7 +428,7 @@ One-line installer:
 curl -fsSL https://praison.ai/install.sh | bash
 ```
 
-The full `praisonai` package, with the CLI, bots, dashboard and integrations:
+The full `praisonai` package, with the CLI and integrations. Add the `[dashboard]` extra for bots and the dashboard (`pip install "praisonai[dashboard]"`):
 
 ```
  ██████╗ ██████╗  █████╗ ██╗███████╗ ██████╗ ███╗   ██╗     █████╗ ██╗
