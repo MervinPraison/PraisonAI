@@ -71,9 +71,9 @@ Private AI that earns trust one task at a time. Each task moves to your own AI o
 </table>
 
 <p align="center">
-  <img src=".github/images/readme/offline-ollama.gif" alt="A terminal: offline.py creates an Agent with model ollama/llama3.2, the API key is shown as none, and the agent answers why the sky is blue in about four seconds" width="800" />
+  <img src=".github/images/readme/offline-ollama.gif" alt="A terminal: offline.py creates an Agent with model ollama/llama3.2, the API key is shown as none, and the agent answers why the sky is blue in under three seconds" width="800" />
   <br />
-  <sub>A real run: a local Llama 3.2 model through Ollama, with no API key set.</sub>
+  <sub>A real run with <code>pip install praisonai</code>: a local Llama 3.2 model through Ollama, with no API key set.</sub>
 </p>
 
 ## Quick start
@@ -81,21 +81,24 @@ Private AI that earns trust one task at a time. Each task moves to your own AI o
 Set a key for any supported provider (OpenAI shown here), or skip the key and use a local model as in the next section.
 
 ```bash
+pip install praisonai
 export OPENAI_API_KEY="your-api-key"
 ```
 
 ```python
-from praisonaiagents import Agent
+from praisonai import Agent
 
 agent = Agent(instructions="You are a helpful assistant.")
 print(agent.start("In two sentences, why do some companies keep their data on their own computers?"))
 ```
 
+Only want the lightweight core? `pip install praisonaiagents` and write `from praisonaiagents import Agent`; the rest of the code is the same.
+
 ## Run fully offline
 
 Run the same agent on a model on your own computer with [Ollama](https://ollama.com). You need no API key, and your prompts and answers stay on the machine.
 
-Install the package and pull the model while you still have internet; after that, the agent runs with no network at all. If you installed only the core library, use `pip install "praisonaiagents[llm]"`, which adds the local-model support.
+Install the package and pull the model while you still have internet; after that, the agent runs with no network at all. `pip install praisonai` includes local-model support; with only the core library, use `pip install "praisonaiagents[llm]"`.
 
 ```bash
 # Start Ollama first (the app, or "ollama serve" in another terminal)
@@ -104,7 +107,7 @@ export DO_NOT_TRACK=true   # keeps telemetry off (PraisonAI sends none unless yo
 ```
 
 ```python
-from praisonaiagents import Agent
+from praisonai import Agent
 
 agent = Agent(instructions="You are a helpful assistant.", model="ollama/llama3.2")
 print(agent.start("Why is the sky blue?"))
@@ -182,7 +185,7 @@ Each layer wraps the one inside it. When an agent misbehaves, the layer tells yo
 Role, instructions, examples, output format.
 
 ```python
-from praisonaiagents import Agent
+from praisonai import Agent
 
 agent = Agent(
     role="Senior Data Analyst",
@@ -197,7 +200,7 @@ agent.start("Summarise Q3 revenue trends")
 Write, select, compress, isolate — the four context operations, one parameter each.
 
 ```python
-from praisonaiagents import Agent
+from praisonai import Agent
 
 agent = Agent(
     instructions="You are a support engineer.",
@@ -214,7 +217,7 @@ agent = Agent(
 *Agent = Model + Harness.* Tool dispatch, plus the guides that steer before acting and the sensors that observe after.
 
 ```python
-from praisonaiagents import Agent, MCP, tool
+from praisonai import Agent, MCP, tool
 
 @tool
 def deploy(env: str) -> str:
@@ -235,7 +238,7 @@ agent.start("Deploy to staging, then list the files you can read")
 Hard iteration caps, budget ceilings, no-progress detection and completion checks — every brake is explicit.
 
 ```python
-from praisonaiagents import Agent, ExecutionConfig
+from praisonai import Agent, ExecutionConfig
 
 agent = Agent(
     instructions="Fix the failing tests.",
@@ -257,8 +260,8 @@ print(result.completion_reason)
 Topology as a versionable artifact: prompt chaining, routing, parallelisation, orchestrator-worker.
 
 ```python
-from praisonaiagents import AgentFlow
-from praisonaiagents.workflows import route, parallel, repeat
+from praisonai import AgentFlow
+from praisonai import route, parallel, repeat
 
 flow = AgentFlow(steps=[
     classifier,
@@ -283,7 +286,7 @@ pip install praisonai
 The simplest way in is `tools_run_on=` — one whole team or workflow shares **one** sandbox, so a file written by step 1 is there for step 2. Thinking stays on your machine:
 
 ```python
-from praisonaiagents import Agent, AgentFlow
+from praisonai import Agent, AgentFlow
 
 writer = Agent(name="Writer", instructions="You write files.")
 reader = Agent(name="Reader", instructions="You read files.")
@@ -310,7 +313,7 @@ steps:
 For a single agent, two words cover it — and they answer different questions:
 
 ```python
-from praisonaiagents import Agent
+from praisonai import Agent
 
 # A. Only the TOOLS move. Thinking stays on your machine.
 agent = Agent(name="builder", instructions="You build things.",
@@ -594,7 +597,7 @@ Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
 ### 1. Single Agent
 
 ```python
-from praisonaiagents import Agent
+from praisonai import Agent
 agent = Agent(instructions="You are a helpful AI assistant")
 agent.start("Write a movie script about a robot in Mars")
 ```
@@ -602,7 +605,7 @@ agent.start("Write a movie script about a robot in Mars")
 ### 2. Multi Agents
 
 ```python
-from praisonaiagents import Agent, Agents
+from praisonai import Agent, Agents
 
 research_agent = Agent(instructions="Research about AI")
 summarise_agent = Agent(instructions="Summarise research agent's findings")
@@ -613,7 +616,7 @@ agents.start()
 ### 3. MCP (Model Context Protocol)
 
 ```python
-from praisonaiagents import Agent, MCP
+from praisonai import Agent, MCP
 
 # stdio - Local NPX/Python servers
 agent = Agent(tools=MCP("npx @modelcontextprotocol/server-memory"))
@@ -639,7 +642,7 @@ agent = Agent(
 ### 4. Custom Tools
 
 ```python
-from praisonaiagents import Agent, tool
+from praisonai import Agent, tool
 
 @tool
 def search(query: str) -> str:
@@ -691,7 +694,7 @@ agent.start("Search for AI news and calculate 15*4")
 ### 5. Persistence (Databases)
 
 ```python
-from praisonaiagents import Agent, db
+from praisonai import Agent, db
 
 agent = Agent(
     name="Assistant",
@@ -1212,12 +1215,14 @@ We welcome contributions! Fork the repo, create a branch, and submit a PR → [C
 <summary><strong>Show FAQ and troubleshooting</strong></summary>
 
 <details>
-<summary><strong>ModuleNotFoundError: No module named 'praisonaiagents'</strong></summary>
+<summary><strong>ModuleNotFoundError: No module named 'praisonai'</strong></summary>
 
 Install the package:
 ```bash
-pip install praisonaiagents
+pip install praisonai
 ```
+
+Using only the core library? `pip install praisonaiagents` and import from `praisonaiagents` instead.
 
 </details>
 
@@ -1243,7 +1248,7 @@ ollama pull llama3.2
 ```
 
 ```python
-from praisonaiagents import Agent
+from praisonai import Agent
 
 agent = Agent(instructions="You are a helpful assistant", llm="ollama/llama3.2")
 agent.start("Why is the sky blue?")
@@ -1279,7 +1284,7 @@ See [Models docs](https://praison.ai/docs/models) for more details.
 
 Use the `db` parameter:
 ```python
-from praisonaiagents import Agent, db
+from praisonai import Agent, db
 
 agent = Agent(
     name="Assistant",
@@ -1298,7 +1303,7 @@ See [Persistence docs](https://praison.ai/docs/databases/overview) for supported
 <summary><strong>How do I enable agent memory?</strong></summary>
 
 ```python
-from praisonaiagents import Agent
+from praisonai import Agent
 
 agent = Agent(
     name="Assistant",
@@ -1315,7 +1320,7 @@ See [Memory docs](https://praison.ai/docs/concepts/memory) for more options.
 <summary><strong>How do I run multiple agents together?</strong></summary>
 
 ```python
-from praisonaiagents import Agent, Agents
+from praisonai import Agent, Agents
 
 agent1 = Agent(instructions="Research topics")
 agent2 = Agent(instructions="Summarize findings")
@@ -1331,7 +1336,7 @@ See [Agents docs](https://praison.ai/docs/concepts/agents) for more examples.
 <summary><strong>How do I use MCP tools?</strong></summary>
 
 ```python
-from praisonaiagents import Agent, MCP
+from praisonai import Agent, MCP
 
 agent = Agent(
     tools=MCP("npx @modelcontextprotocol/server-memory")
