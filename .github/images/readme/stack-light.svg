@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 350" width="880" height="350" role="img" aria-label="The five-layer agent stack: Prompt inside Context inside Harness inside Loop inside Graph, all inside Managed Agents">
+<style>
+    .ring{fill:none;stroke:#20211e;stroke-width:1.5}
+    .ring.m{stroke-dasharray:7 6}
+    .lab{font:600 13px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#20211e;letter-spacing:.06em}
+    .q{font:400 13px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#5f6059}
+    .hl{animation:glow 9s infinite;stroke:#9a6a12;stroke-width:3;fill:none;opacity:0}
+    @keyframes glow{0%{opacity:0}3%,13%{opacity:1}17%,100%{opacity:0}}
+    .d1{animation-delay:0s}.d2{animation-delay:1.3s}.d3{animation-delay:2.6s}.d4{animation-delay:3.9s}.d5{animation-delay:5.2s}.d6{animation-delay:6.5s}
+    @media (prefers-reduced-motion:reduce){.hl{animation:none}}
+    </style>
+<rect class="ring m" x="10" y="10" width="860" height="330" rx="14"/>
+<rect class="hl d6" x="10" y="10" width="860" height="330" rx="14"/>
+<text class="lab" x="28" y="34">⬡ MANAGED AGENTS</text>
+<text class="q" x="852" y="34" text-anchor="end">Where does it actually run?</text>
+<rect class="ring" x="40" y="48" width="800" height="262" rx="13"/>
+<rect class="hl d5" x="40" y="48" width="800" height="262" rx="13"/>
+<text class="lab" x="58" y="72">5 · GRAPH</text>
+<text class="q" x="822" y="72" text-anchor="end">Who runs when, and who checks whom?</text>
+<rect class="ring" x="70" y="86" width="740" height="194" rx="12"/>
+<rect class="hl d4" x="70" y="86" width="740" height="194" rx="12"/>
+<text class="lab" x="88" y="110">4 · LOOP</text>
+<text class="q" x="792" y="110" text-anchor="end">When do we stop?</text>
+<rect class="ring" x="100" y="124" width="680" height="126" rx="11"/>
+<rect class="hl d3" x="100" y="124" width="680" height="126" rx="11"/>
+<text class="lab" x="118" y="148">3 · HARNESS</text>
+<text class="q" x="762" y="148" text-anchor="end">Can it act, and be checked?</text>
+<rect class="ring" x="130" y="162" width="620" height="64" rx="10"/>
+<rect class="hl d2" x="130" y="162" width="620" height="64" rx="10"/>
+<text class="lab" x="148" y="186">2 · CONTEXT</text>
+<text class="q" x="732" y="186" text-anchor="end">Is the right thing in the window?</text>
+<rect class="ring" x="160" y="196" width="560" height="22" rx="6" style="fill:#fffef8"/>
+<rect class="hl d1" x="160" y="196" width="560" height="22" rx="6"/>
+<text class="lab" x="176" y="212">1 · PROMPT</text><text class="q" x="704" y="212" text-anchor="end">Did I say it clearly?</text>
+</svg>

@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 180" width="880" height="180" role="img" aria-label="How the handover works: Watch, Test, Hand over, Roll back, Record. A task moves to your own AI only after it passes; if quality drops it moves back.">
+<style>
+    .box{fill:#161b22;stroke:#e6edf3;stroke-width:1.5}
+    .t{font:600 16px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#e6edf3}
+    .s{font:500 10.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9198a1;letter-spacing:.06em}
+    .wire{stroke:#3d444d;stroke-width:2}
+    .back{fill:none;stroke:#e38d7f;stroke-width:1.5;stroke-dasharray:5 5}
+    .bl{font:500 10.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#e38d7f;letter-spacing:.06em}
+    .tok{fill:#e0b25a;animation:ride 8s infinite}
+    .pass{font:600 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#8fc39b;letter-spacing:.06em;opacity:0;animation:pass 8s infinite}
+    @keyframes ride{0%{transform:translateX(0);opacity:0}4%{opacity:1}
+      18%,24%{transform:translateX(168px)}38%,46%{transform:translateX(336px)}
+      60%,66%{transform:translateX(504px)}82%,94%{transform:translateX(672px);opacity:1}100%{transform:translateX(672px);opacity:0}}
+    @keyframes pass{0%,36%{opacity:0}40%,52%{opacity:1}58%,100%{opacity:0}}
+    @media (prefers-reduced-motion:reduce){.tok,.pass{animation:none}.tok{transform:translateX(336px)}}
+    </style>
+<line class="wire" x1="104" y1="74" x2="776" y2="74"/>
+<path class="back" d="M520 104 C 520 156, 352 156, 352 104"/>
+<text class="bl" x="436" y="166" text-anchor="middle">MOVES BACK AUTOMATICALLY</text>
+<rect class="box" x="30" y="44" width="148" height="60" rx="7"/>
+<text class="t" x="104" y="72" text-anchor="middle">Watch</text>
+<text class="s" x="104" y="91" text-anchor="middle">RECORDS TODAY</text>
+<rect class="box" x="198" y="44" width="148" height="60" rx="7"/>
+<text class="t" x="272" y="72" text-anchor="middle">Test</text>
+<text class="s" x="272" y="91" text-anchor="middle">EXAM FROM PAST WORK</text>
+<rect class="box" x="366" y="44" width="148" height="60" rx="7"/>
+<text class="t" x="440" y="72" text-anchor="middle">Hand over</text>
+<text class="s" x="440" y="91" text-anchor="middle">ONLY IF IT PASSES</text>
+<rect class="box" x="534" y="44" width="148" height="60" rx="7"/>
+<text class="t" x="608" y="72" text-anchor="middle">Roll back</text>
+<text class="s" x="608" y="91" text-anchor="middle">IF QUALITY DROPS</text>
+<rect class="box" x="702" y="44" width="148" height="60" rx="7"/>
+<text class="t" x="776" y="72" text-anchor="middle">Record</text>
+<text class="s" x="776" y="91" text-anchor="middle">FOR REGULATORS</text>
+<text class="s" x="30" y="26">ONE TASK AT A TIME · RENTED AI → YOUR OWN AI</text>
+<text class="pass" x="436" y="128" text-anchor="middle">✓ PASSED</text>
+<circle class="tok" cx="104" cy="36" r="7"/>
+</svg>

@@ -16,40 +16,65 @@
 
 # PraisonAI
 
-**Private AI that earns trust one task at a time.**
+**AI agents that run on your own computers, even fully offline.**
 
-PraisonAI runs AI agents on your own computers, even fully offline, so private data never has to leave the building.
+[2M+ downloads](https://pepy.tech/projects/praisonai) · [9.3K stars](https://github.com/MervinPraison/PraisonAI) · [600+ releases in the last year](https://github.com/MervinPraison/PraisonAI/releases) · [80+ contributors](https://github.com/MervinPraison/PraisonAI/graphs/contributors) · MIT
 
-- **For highly regulated teams (early access):** each task moves to your own AI only after it passes a test. If quality slips, it moves back automatically, and every step is recorded for regulators. [How it works](#how-the-handover-works-early-access)
-- **For everyone else:** a free, open-source Python agent framework. With a local model you need no API key and pay no cloud bill, and your files stay yours.
+<table>
+<tr>
+<td colspan="3">
+<b>Private AI</b> <i>(early access)</i><br />
+Private AI that earns trust one task at a time. Each task moves to your own AI only after it passes a test. If quality slips, it moves back automatically, and every step is recorded for regulators. For banks, insurers and hospitals.<br />
+<a href="#how-the-handover-works-early-access">How the handover works</a> · <a href="https://praison.ai/enterprise/">Talk to us</a>
+</td>
+</tr>
+<tr>
+<td width="33%" valign="top">
+<a href="src/praisonai-agents"><b>Agents</b></a><br />
+<sub>Python agent framework: teams, workflows, memory, tools.</sub><br />
+<code>pip install praisonaiagents</code><br />
+<a href="#quick-start">Your first agent</a>
+</td>
+<td width="33%" valign="top">
+<a href="src/praisonai-bot"><b>Bot</b></a><br />
+<sub>Your agent on Telegram, Discord, Slack and WhatsApp, 24/7.</sub><br />
+<code>pip install "praisonai-bot[gateway,bot]"</code><br />
+<code>praisonai-bot onboard</code>
+</td>
+<td width="33%" valign="top">
+<a href="src/praisonai-code"><b>Code</b></a><br />
+<sub>An agent in your terminal that reads and edits your code.</sub><br />
+<code>pip install praisonai-code</code><br />
+<code>praisonai-code code</code>
+</td>
+</tr>
+<tr>
+<td valign="top">
+<a href="src/praisonai-mcp"><b>MCP</b></a><br />
+<sub>Your agents and tools inside Cursor, Claude Desktop and other MCP clients.</sub><br />
+<code>pip install praisonai-mcp</code><br />
+<code>praisonai-mcp connect cursor</code>
+</td>
+<td valign="top">
+<a href="src/praisonai-train"><b>Train</b></a><br />
+<sub>Fine-tune an open model on your own GPUs, and train agents on past runs.</sub><br />
+<code>pip install "praisonai-train[llm]"</code><br />
+<code>praisonai-train --help</code>
+</td>
+<td valign="top">
+<b>All of it</b><br />
+<sub>CLI, bots, dashboard and integrations in one install.</sub><br />
+<code>pip install "praisonai[dashboard]"</code><br />
+<code>praisonai setup</code>
+</td>
+</tr>
+</table>
 
-[2M+ downloads](https://pepy.tech/projects/praisonai) · [9.3K stars](https://github.com/MervinPraison/PraisonAI) · [600+ releases in the last year](https://github.com/MervinPraison/PraisonAI/releases) · [80+ contributors](https://github.com/MervinPraison/PraisonAI/graphs/contributors) · Python
-
-```bash
-pip install praisonai
-```
-
-Only need the Python library? `pip install praisonaiagents` installs just the lightweight core.
-
-## Using PraisonAI for something else?
-
-PraisonAI is still a general-purpose, open-source agent framework, and everything works as before: the same packages, imports, commands and examples. Go straight to what you came for:
-
-- **Agents and multi-agent teams:** [Agents](https://praison.ai/docs/concepts/agents) · [Handoffs](https://praison.ai/docs/concepts/handoffs)
-- **Workflows:** [AgentFlow: route, parallel, loop, repeat](https://praison.ai/docs/concepts/agentflow)
-- **Memory and knowledge:** [Memory](https://praison.ai/docs/concepts/memory) · [Knowledge](https://praison.ai/docs/concepts/knowledge) · [RAG](https://praison.ai/docs/concepts/rag)
-- **Tools and MCP:** [Tools](https://praison.ai/docs/tools/tools) · [MCP](https://praison.ai/docs/mcp/transports)
-- **Bots (Telegram, Discord, Slack, WhatsApp):** [Bot CLI](https://praison.ai/docs/cli/bot) · [Bot gateway](https://praison.ai/docs/features/bot-gateway)
-- **Terminal CLI:** [`praisonai code`](https://praison.ai/docs/cli/code) · [`praisonai run`](https://praison.ai/docs/cli/run) · [`praisonai chat`](https://praison.ai/docs/cli/chat) · [CLI reference](https://praison.ai/docs/cli/cli-reference)
-- **Training and fine-tuning:** [PraisonAI Train](https://praison.ai/docs/train)
-- **Browser automation:** [Browser agent](https://praison.ai/docs/features/browser-agent) · [Browser CLI](https://praison.ai/docs/cli/browser)
-- **Sandboxes:** [Sandboxed code execution](https://praison.ai/docs/features/sandbox)
-- **Deploy:** [Deploy guide](https://praison.ai/docs/deploy)
-- **Dashboard and UI:** [Claw dashboard](https://praison.ai/docs/concepts/claw) · [Chat UI](https://praison.ai/docs/ui)
-- **YAML, no code:** [YAML agents](#-using-yaml-no-code) · [YAML reference](https://praison.ai/docs/features/yaml-configuration-reference)
-- **JavaScript and TypeScript:** [JavaScript SDK](https://praison.ai/docs/js)
-- **Desktop app:** [PraisonAI Desktop](https://praison.ai/docs/features/desktop/index) · [Downloads](#desktop-app)
-- **Everything else:** the [full feature reference](#full-feature-reference) further down this page
+<p align="center">
+  <img src=".github/images/readme/offline-ollama.gif" alt="A terminal: offline.py creates an Agent with model ollama/llama3.2, the API key is shown as none, and the agent answers why the sky is blue in about four seconds" width="800" />
+  <br />
+  <sub>A real run: a local Llama 3.2 model through Ollama, with no API key set.</sub>
+</p>
 
 ## Quick start
 
@@ -93,182 +118,52 @@ agent = Agent(instructions="...", model="ollama/llama3.2", base_url="http://192.
 
 vLLM and LM Studio work the same way: use `hosted_vllm/` (vLLM) or `lm_studio/` with your server's `base_url`. More in the [Ollama guide](https://praison.ai/docs/models/ollama) and [Models docs](https://praison.ai/docs/models).
 
-## How the handover works (early access)
+## What you can build
 
-1. **Watch:** records how each task is done today.
-2. **Test:** your own AI takes an exam made from real past work it never studied.
-3. **Hand over:** a task moves to your own AI only when it passes.
-4. **Roll back:** if quality drops, the task moves back automatically.
-5. **Record:** every handover leaves a record your regulator can check.
+<table>
+<tr>
+<td width="33%" valign="top">
+<a href="https://praison.ai/docs/cli/bot"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/images/ui/bot-desktop-dark.webp" /><img src=".github/images/ui/bot-desktop-light.webp" alt="PraisonAI Bot reporting that Telegram and Slack are connected" /></picture></a><br />
+<b>Bots</b><br /><sub>Telegram, Discord, Slack and WhatsApp, with memory. <a href="https://praison.ai/docs/features/bot-gateway">Gateway</a></sub>
+</td>
+<td width="33%" valign="top">
+<a href="https://praison.ai/docs/concepts/claw"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/images/ui/claw-desktop-dark.webp" /><img src=".github/images/ui/claw-desktop-light.webp" alt="The PraisonAI dashboard with a chat on the left and a canvas on the right" /></picture></a><br />
+<b>Dashboard</b><br /><sub>Chat, agents, memory, knowledge and channels in one app.</sub>
+</td>
+<td width="33%" valign="top">
+<a href="https://praison.ai/docs/ui"><picture><source media="(prefers-color-scheme: dark)" srcset=".github/images/ui/ui-desktop-dark.webp" /><img src=".github/images/ui/ui-desktop-light.webp" alt="praisonai ui with a chat and a canvas showing a table and a script" /></picture></a><br />
+<b>Chat + Canvas</b><br /><sub>A chat app that shows the tables and code your agents write.</sub>
+</td>
+</tr>
+<tr>
+<td valign="top"><b><a href="https://praison.ai/docs/concepts/agentflow">Multi-agent teams</a></b><br /><sub>Handoffs, route, parallel, loop and repeat.</sub></td>
+<td valign="top"><b><a href="https://praison.ai/docs/concepts/memory">Memory and RAG</a></b><br /><sub>Memory, knowledge and sessions, with zero extra deps to start.</sub></td>
+<td valign="top"><b><a href="https://praison.ai/docs/tools/tools">Tools and MCP</a></b><br /><sub>Your own <code>@tool</code> or any MCP server.</sub></td>
+</tr>
+<tr>
+<td valign="top"><b><a href="https://praison.ai/docs/cli/code">Coding agent</a></b><br /><sub><code>praisonai code</code>, <code>run</code> and <code>chat</code> in your terminal.</sub></td>
+<td valign="top"><b><a href="https://praison.ai/docs/features/browser-agent">Browser automation</a></b><br /><sub>An agent that uses websites for you.</sub></td>
+<td valign="top"><b><a href="https://praison.ai/docs/features/sandbox">Sandboxes</a></b><br /><sub>Run tools in Docker, E2B, Modal and more.</sub></td>
+</tr>
+<tr>
+<td valign="top"><b><a href="https://praison.ai/docs/train">Fine-tuning</a></b><br /><sub>Train an open model on your own past work.</sub></td>
+<td valign="top"><b><a href="#using-yaml-no-code">YAML, no code</a></b><br /><sub>Agents and workflows from one file.</sub></td>
+<td valign="top"><b><a href="https://praison.ai/docs/deploy">Deploy</a></b><br /><sub>Ship agents as APIs or to the cloud.</sub></td>
+</tr>
+</table>
 
-**What is "your own AI"?** An open model, such as Llama, Qwen or Gemma, running on your own computers. Use it as it is, or train it on your own past work with [PraisonAI Train](https://praison.ai/docs/train) on your own GPU servers. Your team decides when to train; nothing trains automatically. Either way, a task moves to it only after it passes that exam.
-
-Highly regulated teams, such as banks, insurers and hospitals, want AI but can't send customer data to outside models. From 6 January 2027, OpenAI also takes no new self-serve fine-tuning jobs ([notice](https://developers.openai.com/api/docs/deprecations)), so teams that customise models need models they own. The handover lets these teams move work to AI they own, one task at a time, with a record that shows why each step was trusted.
-
-It is built on parts of this framework that are live today: tracing, evaluation, fine-tuning, model routing and local models. The handover itself is in early access, and we are taking on our first design partners. To take part, see [praison.ai/enterprise](https://praison.ai/enterprise/).
-
-## Features
-
-- **Agents and multi-agent teams:** [Agents](https://praison.ai/docs/concepts/agents) · [Handoffs](https://praison.ai/docs/concepts/handoffs) · [Workflows](https://praison.ai/docs/concepts/agentflow)
-- **Memory:** [Memory](https://praison.ai/docs/concepts/memory) · [Knowledge and RAG](https://praison.ai/docs/concepts/rag) · [Sessions](https://praison.ai/docs/concepts/session-management)
-- **Tools and MCP:** [Tools](https://praison.ai/docs/tools/tools) · [MCP](https://praison.ai/docs/mcp/transports)
-- **Guardrails and approval:** [Guardrails](https://praison.ai/docs/concepts/guardrails) · [Human approval](https://praison.ai/docs/concepts/approval) · [Policy engine](https://praison.ai/docs/features/policy-engine)
-- **Tracing and evaluation:** [Tracing](https://praison.ai/docs/observability/overview) · [Telemetry](https://praison.ai/docs/features/telemetry) · [Langfuse](https://praison.ai/docs/observability/langfuse) · [Evaluation](https://praison.ai/docs/concepts/evaluation)
-- **Your choice of model:** [Models](https://praison.ai/docs/models) · [Model router](https://praison.ai/docs/features/model-router)
-- **Fine-tuning:** [PraisonAI Train](https://praison.ai/docs/train)
-- **Deploy:** [Deploy guide](https://praison.ai/docs/deploy)
-
-## JavaScript and TypeScript
-
-```bash
-npm install praisonai
-```
-
-The TypeScript and JavaScript SDK has its own guide at [praison.ai/docs/js](https://praison.ai/docs/js). A short example is in [Using JavaScript Code](#-using-javascript-code) below.
-
-## The company
-
-- **What we're building:** the task handover above, as a self-hosted product on top of this framework. It is in early access, and we are taking on our first design partners.
-- **Why now:** highly regulated teams want AI but can't send customer data to outside models, and from 6 January 2027 OpenAI takes no new self-serve fine-tuning jobs.
-- **How it fits together:** the framework stays free and MIT-licensed, and brings developers in. Regulated teams license the handover to run inside their own walls.
-- **Traction:** every number at the top of this page is public and linked to its source.
-- **Get in touch:** design partners, investors and press: enterprise@praison.ai or [praison.ai/enterprise](https://praison.ai/enterprise/)
-
-## Docs, community and licence
-
-- **Documentation:** [praison.ai/docs](https://praison.ai/docs)
-- **Questions and bugs:** [Discussions](https://github.com/MervinPraison/PraisonAI/discussions) · [Issues](https://github.com/MervinPraison/PraisonAI/issues)
-- **Contributing:** [Contributing guide](https://github.com/MervinPraison/PraisonAI/blob/main/CONTRIBUTING.md)
-- **Videos and news:** [YouTube](https://youtube.com/@MervinPraison) · [X](https://x.com/MervinPraison) · [LinkedIn](https://linkedin.com/in/mervinpraison)
-- **Desktop app:** macOS, Windows and Linux builds are on the [latest release](https://github.com/MervinPraison/PraisonAI/releases/latest)
-- **Licence:** [MIT](https://github.com/MervinPraison/PraisonAI/blob/main/LICENSE)
-
----
-
-## Full feature reference
-
-Everything below is the full reference that was on this page before. Nothing has been removed; the longest parts are folded, so click a heading's summary to open it.
-
-### Desktop app
-
-<div align="center">
-  <a href="https://github.com/MervinPraison/PraisonAI/releases/latest">
-    <img src="https://img.shields.io/badge/Download_for_macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" />
-  </a>
-  &nbsp;&nbsp;
-  <a href="https://github.com/MervinPraison/PraisonAI/releases/latest">
-    <img src="https://img.shields.io/badge/Download_for_Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" />
-  </a>
-  &nbsp;&nbsp;
-  <a href="https://github.com/MervinPraison/PraisonAI/releases/latest">
-    <img src="https://img.shields.io/badge/Download_for_Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux" />
-  </a>
-</div>
-
-### Other ways to install
-
-One-line installer:
-
-```bash
-curl -fsSL https://praison.ai/install.sh | bash
-```
-
-The full `praisonai` package, with the CLI, bots, dashboard and integrations:
-
-```
- ██████╗ ██████╗  █████╗ ██╗███████╗ ██████╗ ███╗   ██╗     █████╗ ██╗
- ██╔══██╗██╔══██╗██╔══██╗██║██╔════╝██╔═══██╗████╗  ██║    ██╔══██╗██║
- ██████╔╝██████╔╝███████║██║███████╗██║   ██║██╔██╗ ██║    ███████║██║
- ██╔═══╝ ██╔══██╗██╔══██║██║╚════██║██║   ██║██║╚██╗██║    ██╔══██║██║
- ██║     ██║  ██║██║  ██║██║███████║╚██████╔╝██║ ╚████║    ██║  ██║██║
- ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═══╝    ╚═╝  ╚═╝╚═╝
-
- pip install praisonai
-```
-
-<p align="center">
-  <img src=".github/images/ui/claw-desktop-light.webp" alt="PraisonAI Claw dashboard in the Chat + Canvas layout: the chat on the left with a comparison table and a Python script the agent wrote, and the canvas on the right showing the table above the script" width="800" />
-</p>
-
-<div align="center">
-
-<a href="https://trendshift.io/repositories/9130" target="_blank"><img src="https://trendshift.io/api/badge/repositories/9130" alt="MervinPraison%2FPraisonAI | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
-
-</div>
-
-<div align="center">
-  <a href="https://praison.ai/docs">
-    <p align="center">
-      <img src="https://img.shields.io/badge/📚_Documentation-Visit_praison.ai%2Fdocs-blue?style=for-the-badge&logo=bookstack&logoColor=white" alt="Documentation" />
-    </p>
-  </a>
-</div>
-
----
-
-## 🎯 Use Cases
-
-AI agents solving real-world problems across industries:
-
-| Use Case | Description |
-|----------|-------------|
-| 🔍 **Research & Analysis** | Conduct deep research, gather information, and generate insights from multiple sources automatically |
-| 💻 **Code Generation** | Write, debug, and refactor code with AI agents that understand your codebase and requirements |
-| ✍️ **Content Creation** | Generate blog posts, documentation, marketing copy, and technical writing with multi-agent teams |
-| 📊 **Data Pipelines** | Extract, transform, and analyze data from APIs, databases, and web sources automatically |
-| 🤖 **Customer Support** | Deploy 24/7 support bots on Telegram, Discord, Slack with memory and knowledge-backed responses |
-| ⚙️ **Workflow Automation** | Automate multi-step business processes with agents that hand off tasks, verify results, and self-correct |
-
----
-
-## 🚀 Meet your first Agent (Under 1 Minute)
-
-1. Install the lightweight core SDK:
-```bash
-pip install praisonaiagents
-export OPENAI_API_KEY="your-api-key"
-```
-
-2. Run your first autonomous agent:
-```python
-from praisonaiagents import Agent
-
-# Give your agent a goal, and watch it work.
-agent = Agent(instructions="You are a senior data analyst.")
-print(agent.start("Analyze the top 3 tech trends of 2026 and format as a markdown table."))
-```
-
----
-
-## 🧬 The Five-Layer Agent Stack
+## The Five-Layer Agent Stack
 
 Most frameworks hand you one or two layers and leave the rest as homework. PraisonAI covers **all five** — plus the outer layer that decides *where* your agent actually runs.
 
 Each layer wraps the one inside it. When an agent misbehaves, the layer tells you where to look.
 
-<details>
-<summary><strong>Show the five layers, examples and Managed Agents</strong></summary>
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│ ⬡ MANAGED AGENTS — Where does it actually run?                  │
-│ ┌─────────────────────────────────────────────────────────────┐ │
-│ │ 5 · GRAPH — Who runs when, and who checks whom?             │ │
-│ │ ┌─────────────────────────────────────────────────────────┐ │ │
-│ │ │ 4 · LOOP — When do we stop?                             │ │ │
-│ │ │ ┌─────────────────────────────────────────────────────┐ │ │ │
-│ │ │ │ 3 · HARNESS — Can it act, and be checked?           │ │ │ │
-│ │ │ │ ┌─────────────────────────────────────────────────┐ │ │ │ │
-│ │ │ │ │ 2 · CONTEXT — Is the right thing in the window? │ │ │ │ │
-│ │ │ │ │ ┌─────────────────────────────────────────────┐ │ │ │ │ │
-│ │ │ │ │ │ 1 · PROMPT — Did I say it clearly?          │ │ │ │ │ │
-│ │ │ │ │ └─────────────────────────────────────────────┘ │ │ │ │ │
-│ │ │ │ └─────────────────────────────────────────────────┘ │ │ │ │
-│ │ │ └─────────────────────────────────────────────────────┘ │ │ │
-│ │ └─────────────────────────────────────────────────────────┘ │ │
-│ └─────────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────────┘
-```
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/images/readme/stack-dark.svg" />
+    <img src=".github/images/readme/stack-light.svg" alt="Five nested layers: Prompt inside Context inside Harness inside Loop inside Graph, all inside Managed Agents" width="880" />
+  </picture>
+</p>
 
 | Layer | The question it answers | PraisonAI |
 |:--|:--|:--|
@@ -278,6 +173,9 @@ Each layer wraps the one inside it. When an agent misbehaves, the layer tells yo
 | **4 · Loop** | When do we stop? | `execution=ExecutionConfig(...)`, `reflection=`, `autonomy=`, doom-loop detection |
 | **5 · Graph** | Who runs when, and who checks whom? | `AgentFlow`, `route()`, `parallel()`, `loop()`, `repeat()` |
 | **⬡ Managed** | *Where does it actually run?* | `tools_run_on="docker"` — one shared sandbox for the tools, or `run_on="anthropic"` for the whole agent |
+
+<details>
+<summary><strong>Show an example for each layer, and Managed Agents</strong></summary>
 
 ### Layer 1 · Prompt — *Did I say it clearly?*
 
@@ -469,9 +367,106 @@ Sandboxes shut themselves down when idle (`auto_shutdown`, `idle_timeout_s`), an
 
 </details>
 
+## How the handover works (early access)
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/images/readme/handover-dark.svg" />
+    <img src=".github/images/readme/handover-light.svg" alt="Watch, Test, Hand over, Roll back, Record: a task moves to your own AI only after it passes a test, and moves back if quality drops" width="880" />
+  </picture>
+</p>
+
+1. **Watch:** records how each task is done today.
+2. **Test:** your own AI takes an exam made from real past work it never studied.
+3. **Hand over:** a task moves to your own AI only when it passes.
+4. **Roll back:** if quality drops, the task moves back automatically.
+5. **Record:** every handover leaves a record your regulator can check.
+
+**What is "your own AI"?** An open model, such as Llama, Qwen or Gemma, running on your own computers. Use it as it is, or train it on your own past work with [PraisonAI Train](https://praison.ai/docs/train) on your own GPU servers. Your team decides when to train; nothing trains automatically. Either way, a task moves to it only after it passes that exam.
+
+**Why now.** Highly regulated teams, such as banks, insurers and hospitals, want AI but can't send customer data to outside models. The largest banks built private AI in-house; most mid-size banks and insurers can't fund a team to do that. From 6 January 2027, OpenAI also takes no new self-serve fine-tuning jobs ([notice](https://developers.openai.com/api/docs/deprecations)), so teams that customise models need models they own.
+
+The handover is built on parts of this framework that are live today: tracing, evaluation, fine-tuning, model routing and local models. It is in early access, and we are taking on our first design partners. The framework stays free and MIT-licensed. Design partners, investors and press: enterprise@praison.ai or [praison.ai/enterprise](https://praison.ai/enterprise/).
+
+## JavaScript and TypeScript
+
+```bash
+npm install praisonai
+```
+
+The TypeScript and JavaScript SDK has its own guide at [praison.ai/docs/js](https://praison.ai/docs/js).
+
+```javascript
+const { Agent } = require('praisonai');
+const agent = new Agent({ instructions: 'You are a helpful AI assistant' });
+agent.start('Write a movie script about a robot in Mars');
+```
+
+## Install
+
+### Desktop app
+
+<div align="center">
+  <a href="https://github.com/MervinPraison/PraisonAI/releases/latest">
+    <img src="https://img.shields.io/badge/Download_for_macOS-000000?style=for-the-badge&logo=apple&logoColor=white" alt="Download for macOS" />
+  </a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/MervinPraison/PraisonAI/releases/latest">
+    <img src="https://img.shields.io/badge/Download_for_Windows-0078D6?style=for-the-badge&logo=windows&logoColor=white" alt="Download for Windows" />
+  </a>
+  &nbsp;&nbsp;
+  <a href="https://github.com/MervinPraison/PraisonAI/releases/latest">
+    <img src="https://img.shields.io/badge/Download_for_Linux-FCC624?style=for-the-badge&logo=linux&logoColor=black" alt="Download for Linux" />
+  </a>
+</div>
+
+### Other ways to install
+
+One-line installer:
+
+```bash
+curl -fsSL https://praison.ai/install.sh | bash
+```
+
+The full `praisonai` package, with the CLI and integrations. Add the `[dashboard]` extra for bots and the dashboard (`pip install "praisonai[dashboard]"`):
+
+```
+ ██████╗ ██████╗  █████╗ ██╗███████╗ ██████╗ ███╗   ██╗     █████╗ ██╗
+ ██╔══██╗██╔══██╗██╔══██╗██║██╔════╝██╔═══██╗████╗  ██║    ██╔══██╗██║
+ ██████╔╝██████╔╝███████║██║███████╗██║   ██║██╔██╗ ██║    ███████║██║
+ ██╔═══╝ ██╔══██╗██╔══██║██║╚════██║██║   ██║██║╚██╗██║    ██╔══██║██║
+ ██║     ██║  ██║██║  ██║██║███████║╚██████╔╝██║ ╚████║    ██║  ██║██║
+ ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝╚══════╝ ╚═════╝ ╚═╝  ╚═══╝    ╚═╝  ╚═╝╚═╝
+
+ pip install praisonai
+```
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/images/ui/claw-desktop-dark.webp" />
+    <img src=".github/images/ui/claw-desktop-light.webp" alt="PraisonAI Claw dashboard in the Chat + Canvas layout: the chat on the left with a comparison table and a Python script the agent wrote, and the canvas on the right showing the table above the script" width="800" />
+  </picture>
+</p>
+
+<div align="center">
+
+<a href="https://trendshift.io/repositories/9130" target="_blank"><img src="https://trendshift.io/api/badge/repositories/9130" alt="MervinPraison%2FPraisonAI | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+
+</div>
+
+## Docs, community and licence
+
+- **Documentation:** [praison.ai/docs](https://praison.ai/docs)
+- **Questions and bugs:** [Discussions](https://github.com/MervinPraison/PraisonAI/discussions) · [Issues](https://github.com/MervinPraison/PraisonAI/issues)
+- **Contributing:** [Contributing guide](https://github.com/MervinPraison/PraisonAI/blob/main/CONTRIBUTING.md)
+- **Videos and news:** [YouTube](https://youtube.com/@MervinPraison) · [X](https://x.com/MervinPraison) · [LinkedIn](https://linkedin.com/in/mervinpraison)
+- **Highlighted by Elon Musk:** [his post quoting our Grok 3 customer-support tutorial](https://x.com/elonmusk/status/1893870468249141688)
+- **Desktop app:** macOS, Windows and Linux builds are on the [latest release](https://github.com/MervinPraison/PraisonAI/releases/latest)
+- **Licence:** [MIT](https://github.com/MervinPraison/PraisonAI/blob/main/LICENSE)
+
 ---
 
-## 🌌 The PraisonAI Ecosystem
+## The PraisonAI Ecosystem
 
 Start simple with the core SDK, or expand to full visual builders and dashboards when you're ready.
 
@@ -487,7 +482,7 @@ Start simple with the core SDK, or expand to full visual builders and dashboards
 npm install praisonai
 ```
 
-## 🧠 Supported Providers & Features
+## Supported Providers & Features
 
 Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
 
@@ -547,22 +542,9 @@ Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
 
 </details>
 
-<div align="center">
-  <a href="https://x.com/elonmusk/status/1893870468249141688" target="_blank">
-    <img src="https://img.shields.io/badge/Highlighted_by_Elon_Musk-000000?style=for-the-badge&logo=x&logoColor=white" alt="Highlighted by Elon Musk" />
-  </a>
-  <br>
-  <br>
-  <a href="https://x.com/elonmusk/status/1893870468249141688" target="_blank">
-    <img src=".github/images/elon_musk_praisonai.png" alt="Highlighted by Elon Musk" width="600" />
-  </a>
-  <p><em>"Grok 3 customer support" — <a href="https://x.com/elonmusk/status/1893870468249141688">Elon Musk quoting PraisonAI's tutorial</a></em></p>
-</div>
-<br>
-
 ---
 
-## 🌟 Why PraisonAI?
+## Why PraisonAI?
 
 | | Feature | How |
 |--|---------|-----|
@@ -600,12 +582,9 @@ Powered by 100+ LLMs (OpenAI, Anthropic, Gemini & local models).
 
 </details>
 
-
-
-
 ---
 
-## 📘 Using Python Code
+## Using Python Code
 
 <details>
 <summary><strong>Show Python examples: single agent, multi-agent, MCP, tools, databases, Claw, Langflow, UI</strong></summary>
@@ -726,7 +705,7 @@ agent.chat("Hello!")  # Auto-persists messages, runs, traces
 
 > 📖 [Full persistence docs](https://praison.ai/docs/databases/overview) — PostgreSQL, MySQL, SQLite, MongoDB, Redis, and 20+ more
 
-### 6. PraisonAI Dashboard 🦅
+### 6. PraisonAI Dashboard
 
 Connect your AI agents to **Telegram, Discord, Slack, WhatsApp** and more — all from a single command.
 
@@ -748,7 +727,7 @@ Open **http://localhost:8082** — the dashboard opens in **Chat + Canvas**: the
 
 > 📖 [Full Dashboard docs](https://praison.ai/docs/concepts/claw) — platform tokens, CLI options, Docker, and YAML agent mode
 
-### 7. Langflow Integration 🔗 (Visual Flow Builder)
+### 7. Langflow Integration (Visual Flow Builder)
 
 Build multi-agent workflows visually with **drag-and-drop** components in Langflow.
 
@@ -761,7 +740,7 @@ Open **http://localhost:7861** — use the **Agent** and **Agent Team** componen
 
 > 📖 [Full Flow docs](https://praison.ai/docs/concepts/agentflow) — visual agent building, component reference, and deployment
 
-### 8. PraisonAI UI 🤖 (Chat + Canvas)
+### 8. PraisonAI UI (Chat + Canvas)
 
 Chat with your AI agents; the tables and code they write open on a canvas beside the chat.
 
@@ -790,7 +769,7 @@ praisonai ui realtime   # realtime voice
 
 ---
 
-## 📄 Using YAML (No Code)
+## Using YAML (No Code)
 
 <details>
 <summary><strong>Show YAML examples</strong></summary>
@@ -870,7 +849,7 @@ praisonai agents.yaml
 
 ---
 
-## 🎯 CLI Quick Reference
+## CLI Quick Reference
 
 | Category | Commands |
 |----------|----------|
@@ -890,7 +869,7 @@ praisonai agents.yaml
 
 ---
 
-## ✨ Key Features
+## Key Features
 
 <details>
 <summary><strong>Show all features by category</strong></summary>
@@ -1158,22 +1137,7 @@ praisonai agents.yaml
 
 ---
 
-## 💻 Using JavaScript Code
-
-```bash
-npm install praisonai
-export OPENAI_API_KEY=xxxxxxxxxxxxxxxxxxxxxx
-```
-
-```javascript
-const { Agent } = require('praisonai');
-const agent = new Agent({ instructions: 'You are a helpful AI assistant' });
-agent.start('Write a movie script about a robot in Mars');
-```
-
----
-
-## ⚡ Performance
+## Performance
 
 PraisonAI keeps framework overhead microsecond-class: creating an `Agent` (one tool, no LLM call) averaged **46 μs** in our 2026-10-15 run, so per-agent setup is negligible next to model latency in multi-agent workloads.
 
@@ -1185,27 +1149,9 @@ Methodology, comparisons and how to reproduce: [benchmarks/BENCHMARK_RESULTS.md]
 
 ---
 
-
-
 ---
 
-## ⭐ Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=MervinPraison/PraisonAI&type=Date)](https://praison.ai/docs)
-
----
-
-<p align="center">
-  <img src=".github/images/agentflow.gif" alt="PraisonAI AgentFlow" width="800" />
-</p>
-
-<p align="center">
-  <img src=".github/images/latest_ai_news_and_crawl_each_url_to_find_info.gif" alt="PraisonAI command execution" width="800" />
-</p>
-
-\* `export TAVILY_API_KEY=xxxxx`
-
-## 🔍 Langfuse Tracing
+## Langfuse Tracing
 
 ```bash
 pip install "praisonai[langfuse]"
@@ -1218,7 +1164,7 @@ praisonai langfuse
 
 ---
 
-## 🎓 Video Tutorials
+## Video Tutorials
 
 Learn PraisonAI through our comprehensive video series:
 
@@ -1254,13 +1200,13 @@ Learn PraisonAI through our comprehensive video series:
 
 ---
 
-## 👥 Contributing
+## Contributing
 
 We welcome contributions! Fork the repo, create a branch, and submit a PR → [Contributing Guide](https://github.com/MervinPraison/PraisonAI/blob/main/CONTRIBUTING.md).
 
 ---
 
-## ❓ FAQ & Troubleshooting
+## FAQ & Troubleshooting
 
 <details>
 <summary><strong>Show FAQ and troubleshooting</strong></summary>
@@ -1416,3 +1362,9 @@ See [MCP docs](https://praison.ai/docs/mcp/transports) for all transport options
     <a href="https://linkedin.com/in/mervinpraison">💼 LinkedIn</a>
   </p>
 </div>
+
+---
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=MervinPraison/PraisonAI&type=Date)](https://star-history.com/#MervinPraison/PraisonAI&Date)
