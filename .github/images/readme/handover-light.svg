@@ -1,38 +1,60 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 180" width="880" height="180" role="img" aria-label="How the handover works: Watch, Test, Hand over, Roll back, Record. A task moves to your own AI only after it passes; if quality drops it moves back.">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 488" width="880" height="488" role="img" aria-label="How the handover works: a loop of Watch, Test, Hand over, Record and Roll back, moving one task at a time from rented AI to your own AI, built on tracing, evaluation, fine-tuning, model routing and local models">
 <style>
-    .box{fill:#fffef8;stroke:#20211e;stroke-width:1.5}
-    .t{font:600 16px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#20211e}
-    .s{font:500 10.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#5f6059;letter-spacing:.06em}
-    .wire{stroke:#b8b7ab;stroke-width:2}
-    .back{fill:none;stroke:#9b3b2e;stroke-width:1.5;stroke-dasharray:5 5}
-    .bl{font:500 10.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9b3b2e;letter-spacing:.06em}
-    .tok{fill:#9a6a12;animation:ride 8s infinite}
-    .pass{font:600 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#3f6b4a;letter-spacing:.06em;opacity:0;animation:pass 8s infinite}
-    @keyframes ride{0%{transform:translateX(0);opacity:0}4%{opacity:1}
-      18%,24%{transform:translateX(168px)}38%,46%{transform:translateX(336px)}
-      60%,66%{transform:translateX(504px)}82%,94%{transform:translateX(672px);opacity:1}100%{transform:translateX(672px);opacity:0}}
-    @keyframes pass{0%,36%{opacity:0}40%,52%{opacity:1}58%,100%{opacity:0}}
-    @media (prefers-reduced-motion:reduce){.tok,.pass{animation:none}.tok{transform:translateX(336px)}}
-    </style>
-<line class="wire" x1="104" y1="74" x2="776" y2="74"/>
-<path class="back" d="M520 104 C 520 156, 352 156, 352 104"/>
-<text class="bl" x="436" y="166" text-anchor="middle">MOVES BACK AUTOMATICALLY</text>
-<rect class="box" x="30" y="44" width="148" height="60" rx="7"/>
-<text class="t" x="104" y="72" text-anchor="middle">Watch</text>
-<text class="s" x="104" y="91" text-anchor="middle">RECORDS TODAY</text>
-<rect class="box" x="198" y="44" width="148" height="60" rx="7"/>
-<text class="t" x="272" y="72" text-anchor="middle">Test</text>
-<text class="s" x="272" y="91" text-anchor="middle">EXAM FROM PAST WORK</text>
-<rect class="box" x="366" y="44" width="148" height="60" rx="7"/>
-<text class="t" x="440" y="72" text-anchor="middle">Hand over</text>
-<text class="s" x="440" y="91" text-anchor="middle">ONLY IF IT PASSES</text>
-<rect class="box" x="534" y="44" width="148" height="60" rx="7"/>
-<text class="t" x="608" y="72" text-anchor="middle">Roll back</text>
-<text class="s" x="608" y="91" text-anchor="middle">IF QUALITY DROPS</text>
-<rect class="box" x="702" y="44" width="148" height="60" rx="7"/>
-<text class="t" x="776" y="72" text-anchor="middle">Record</text>
-<text class="s" x="776" y="91" text-anchor="middle">FOR REGULATORS</text>
-<text class="s" x="30" y="26">ONE TASK AT A TIME · RENTED AI → YOUR OWN AI</text>
-<text class="pass" x="436" y="128" text-anchor="middle">✓ PASSED</text>
-<circle class="tok" cx="104" cy="36" r="7"/>
+.eb{font:500 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#74756e;letter-spacing:.12em}
+.ebA{font:600 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9a6a12;letter-spacing:.12em}
+.h1{font:650 22px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#20211e}
+.h2{font:600 15px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#20211e}
+.tx{font:400 13px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#3c3d38}
+.sm{font:400 12px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#74756e}
+.mono{font:500 12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#20211e}
+.pill{fill:#fffef8;stroke:#b8b7ab;stroke-width:1}
+.pillHi{fill:#efe6cf;stroke:#9a6a12;stroke-width:1.2}
+.card{fill:#fffef8;stroke:#20211e;stroke-width:1.4}
+.soft{fill:#f3f0e6;stroke:#b8b7ab;stroke-width:1}
+.dash{fill:none;stroke:#9a6a12;stroke-width:1.4;stroke-dasharray:6 6}
+.wire{fill:none;stroke:#b8b7ab;stroke-width:1.4}
+.flow{fill:none;stroke:#9a6a12;stroke-width:1.6;stroke-dasharray:4 10;animation:flow 1.6s linear infinite}
+.flowR{fill:none;stroke:#9a6a12;stroke-width:1.6;stroke-dasharray:4 10;animation:flowR 1.6s linear infinite}
+.okb{fill:#e1eedf} .okt{font:600 11px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#2f6b45}
+.acb{fill:#f6ead0} .act{font:600 11px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#9a6a12}
+.dot{fill:#9a6a12}
+@keyframes flow{to{stroke-dashoffset:-28}}
+@keyframes flowR{to{stroke-dashoffset:28}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+
+.orbit{fill:none;stroke:#b8b7ab;stroke-width:1.4}
+.orbitF{fill:none;stroke:#9a6a12;stroke-width:2;stroke-dasharray:3 12;animation:flow 1.8s linear infinite}
+.node{fill:#fffef8;stroke:#20211e;stroke-width:1.4}
+.nodeBack{fill:#fffef8;stroke:#9b3b2e;stroke-width:1.6;stroke-dasharray:4 3}
+.nodeHi{fill:#efe6cf;stroke:#9a6a12;stroke-width:1.6}
+.num{font:650 12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9a6a12}
+.back{fill:none;stroke:#9b3b2e;stroke-width:1.6;stroke-dasharray:6 6;animation:flowR 1.6s linear infinite}
+.bt{font:600 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9b3b2e;letter-spacing:.08em}
+.spin{transform-origin:440px 236px;animation:spin 10s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+<circle class="orbit" cx="440" cy="236" r="150"/>
+<circle class="orbitF" cx="440" cy="236" r="150"/>
+<g class="spin"><circle class="dot" cx="440" cy="86" r="6"/></g>
+<text class="ebA" x="440" y="212" text-anchor="middle">ONE TASK AT A TIME</text>
+<text class="h1" x="440" y="240" text-anchor="middle" style="font-size:24px">Rented AI</text>
+<text class="sm" x="440" y="260" text-anchor="middle">to</text>
+<text class="h1" x="440" y="286" text-anchor="middle" style="font-size:24px">your own AI</text>
+<circle class="node" cx="440.0" cy="86.0" r="20"/><text class="num" x="440.0" y="90.0" text-anchor="middle">01</text>
+<text class="h2" x="476.0" y="52.0" text-anchor="start">Watch</text><text class="sm" x="476.0" y="70.0" text-anchor="start">Records how each task</text><text class="sm" x="476.0" y="85.0" text-anchor="start">is done today</text>
+<circle class="node" cx="582.7" cy="189.6" r="20"/><text class="num" x="582.7" y="193.6" text-anchor="middle">02</text>
+<text class="h2" x="614.7" y="181.6" text-anchor="start">Test</text><text class="sm" x="614.7" y="199.6" text-anchor="start">An exam made from real</text><text class="sm" x="614.7" y="214.6" text-anchor="start">past work it never saw</text>
+<circle class="nodeHi" cx="528.2" cy="357.4" r="20"/><text class="num" x="528.2" y="361.4" text-anchor="middle">03</text>
+<text class="h2" x="560.2" y="349.4" text-anchor="start">Hand over</text><text class="sm" x="560.2" y="367.4" text-anchor="start">The task moves only</text><text class="sm" x="560.2" y="382.4" text-anchor="start">when it passes</text>
+<circle class="nodeBack" cx="351.8" cy="357.4" r="20"/><text class="num" x="351.8" y="361.4" text-anchor="middle">04</text>
+<text class="h2" x="319.8" y="349.4" text-anchor="end">Roll back</text><text class="sm" x="319.8" y="367.4" text-anchor="end">If quality drops, the task</text><text class="sm" x="319.8" y="382.4" text-anchor="end">moves back automatically</text>
+<circle class="node" cx="297.3" cy="189.6" r="20"/><text class="num" x="297.3" y="193.6" text-anchor="middle">05</text>
+<text class="h2" x="265.3" y="181.6" text-anchor="end">Record</text><text class="sm" x="265.3" y="199.6" text-anchor="end">Every step leaves a</text><text class="sm" x="265.3" y="214.6" text-anchor="end">record a regulator can check</text>
+<line x1="20" y1="436" x2="860" y2="436" style="stroke-dasharray:2 6" class="wire"/>
+<text class="eb" x="20" y="466">BUILT ON PARTS LIVE TODAY</text>
+<rect class="pill" x="230" y="448" width="75.80000000000001" height="28" rx="14.0"/><text class="tx" x="267.9" y="466.5" text-anchor="middle">Tracing</text>
+<rect class="pill" x="315.8" y="448" width="98.0" height="28" rx="14.0"/><text class="tx" x="364.8" y="466.5" text-anchor="middle">Evaluation</text>
+<rect class="pill" x="423.8" y="448" width="105.4" height="28" rx="14.0"/><text class="tx" x="476.5" y="466.5" text-anchor="middle">Fine-tuning</text>
+<rect class="pill" x="539.2" y="448" width="120.2" height="28" rx="14.0"/><text class="tx" x="599.3000000000001" y="466.5" text-anchor="middle">Model routing</text>
+<rect class="pill" x="669.4000000000001" y="448" width="112.80000000000001" height="28" rx="14.0"/><text class="tx" x="725.8000000000001" y="466.5" text-anchor="middle">Local models</text>
 </svg>

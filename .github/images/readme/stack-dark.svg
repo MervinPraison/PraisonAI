@@ -1,35 +1,65 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 350" width="880" height="350" role="img" aria-label="The five-layer agent stack: Prompt inside Context inside Harness inside Loop inside Graph, all inside Managed Agents">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 434" width="880" height="434" role="img" aria-label="The five-layer agent stack: Prompt inside Context inside Harness inside Loop inside Graph, all inside Managed Agents, each with the PraisonAI parameters that control it">
 <style>
-    .ring{fill:none;stroke:#e6edf3;stroke-width:1.5}
-    .ring.m{stroke-dasharray:7 6}
-    .lab{font:600 13px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#e6edf3;letter-spacing:.06em}
-    .q{font:400 13px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#9198a1}
-    .hl{animation:glow 9s infinite;stroke:#e0b25a;stroke-width:3;fill:none;opacity:0}
-    @keyframes glow{0%{opacity:0}3%,13%{opacity:1}17%,100%{opacity:0}}
-    .d1{animation-delay:0s}.d2{animation-delay:1.3s}.d3{animation-delay:2.6s}.d4{animation-delay:3.9s}.d5{animation-delay:5.2s}.d6{animation-delay:6.5s}
-    @media (prefers-reduced-motion:reduce){.hl{animation:none}}
-    </style>
-<rect class="ring m" x="10" y="10" width="860" height="330" rx="14"/>
-<rect class="hl d6" x="10" y="10" width="860" height="330" rx="14"/>
-<text class="lab" x="28" y="34">⬡ MANAGED AGENTS</text>
-<text class="q" x="852" y="34" text-anchor="end">Where does it actually run?</text>
-<rect class="ring" x="40" y="48" width="800" height="262" rx="13"/>
-<rect class="hl d5" x="40" y="48" width="800" height="262" rx="13"/>
-<text class="lab" x="58" y="72">5 · GRAPH</text>
-<text class="q" x="822" y="72" text-anchor="end">Who runs when, and who checks whom?</text>
-<rect class="ring" x="70" y="86" width="740" height="194" rx="12"/>
-<rect class="hl d4" x="70" y="86" width="740" height="194" rx="12"/>
-<text class="lab" x="88" y="110">4 · LOOP</text>
-<text class="q" x="792" y="110" text-anchor="end">When do we stop?</text>
-<rect class="ring" x="100" y="124" width="680" height="126" rx="11"/>
-<rect class="hl d3" x="100" y="124" width="680" height="126" rx="11"/>
-<text class="lab" x="118" y="148">3 · HARNESS</text>
-<text class="q" x="762" y="148" text-anchor="end">Can it act, and be checked?</text>
-<rect class="ring" x="130" y="162" width="620" height="64" rx="10"/>
-<rect class="hl d2" x="130" y="162" width="620" height="64" rx="10"/>
-<text class="lab" x="148" y="186">2 · CONTEXT</text>
-<text class="q" x="732" y="186" text-anchor="end">Is the right thing in the window?</text>
-<rect class="ring" x="160" y="196" width="560" height="22" rx="6" style="fill:#161b22"/>
-<rect class="hl d1" x="160" y="196" width="560" height="22" rx="6"/>
-<text class="lab" x="176" y="212">1 · PROMPT</text><text class="q" x="704" y="212" text-anchor="end">Did I say it clearly?</text>
+.eb{font:500 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9198a1;letter-spacing:.12em}
+.ebA{font:600 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#e0b25a;letter-spacing:.12em}
+.h1{font:650 22px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#e6edf3}
+.h2{font:600 15px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#e6edf3}
+.tx{font:400 13px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#c9d1d9}
+.sm{font:400 12px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#9198a1}
+.mono{font:500 12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#e6edf3}
+.pill{fill:#161b22;stroke:#3d444d;stroke-width:1}
+.pillHi{fill:#2d2716;stroke:#e0b25a;stroke-width:1.2}
+.card{fill:#161b22;stroke:#e6edf3;stroke-width:1.4}
+.soft{fill:#1c2128;stroke:#3d444d;stroke-width:1}
+.dash{fill:none;stroke:#e0b25a;stroke-width:1.4;stroke-dasharray:6 6}
+.wire{fill:none;stroke:#3d444d;stroke-width:1.4}
+.flow{fill:none;stroke:#e0b25a;stroke-width:1.6;stroke-dasharray:4 10;animation:flow 1.6s linear infinite}
+.flowR{fill:none;stroke:#e0b25a;stroke-width:1.6;stroke-dasharray:4 10;animation:flowR 1.6s linear infinite}
+.okb{fill:#1f3326} .okt{font:600 11px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#8fc39b}
+.acb{fill:#3a2f1a} .act{font:600 11px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#e0b25a}
+.dot{fill:#e0b25a}
+@keyframes flow{to{stroke-dashoffset:-28}}
+@keyframes flowR{to{stroke-dashoffset:28}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+
+.ring{fill:none;stroke:#e6edf3;stroke-width:1.3}
+.ring.m{stroke-dasharray:7 6;stroke:#e0b25a;animation:flow 2.4s linear infinite}
+.inner{fill:#2d2716;stroke:#e0b25a;stroke-width:1.4}
+.lab{font:650 12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#e6edf3;letter-spacing:.06em}
+.q{font:italic 400 12.5px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#9198a1}
+.p{font:500 11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#e0b25a}
+.hl{fill:none;stroke:#e0b25a;stroke-width:2.6;opacity:0;animation:glow 9s infinite}
+@keyframes glow{0%{opacity:0}3%,13%{opacity:1}17%,100%{opacity:0}}
+.d0{animation-delay:6.5s}.d1{animation-delay:5.2s}.d2{animation-delay:3.9s}.d3{animation-delay:2.6s}.d4{animation-delay:1.3s}.d5{animation-delay:0s}
+</style>
+<rect class="ring m" x="8" y="8" width="864" height="416" rx="12"/>
+<rect class="hl d0" x="8" y="8" width="864" height="416" rx="12"/>
+<text class="lab" x="24" y="28">⬡ MANAGED AGENTS</text>
+<text class="q" x="24" y="45">Where does it actually run?</text>
+<text class="p" x="856" y="36" text-anchor="end">tools_run_on="docker" · run_on=</text>
+<rect class="ring" x="34" y="60" width="812" height="342" rx="11"/>
+<rect class="hl d1" x="34" y="60" width="812" height="342" rx="11"/>
+<text class="lab" x="50" y="80">5 · GRAPH</text>
+<text class="q" x="50" y="97">Who runs when, and who checks whom?</text>
+<text class="p" x="830" y="88" text-anchor="end">AgentFlow · route() · parallel() · loop()</text>
+<rect class="ring" x="60" y="112" width="760" height="268" rx="10"/>
+<rect class="hl d2" x="60" y="112" width="760" height="268" rx="10"/>
+<text class="lab" x="76" y="132">4 · LOOP</text>
+<text class="q" x="76" y="149">When do we stop?</text>
+<text class="p" x="804" y="140" text-anchor="end">execution= · reflection= · autonomy=</text>
+<rect class="ring" x="86" y="164" width="708" height="194" rx="9"/>
+<rect class="hl d3" x="86" y="164" width="708" height="194" rx="9"/>
+<text class="lab" x="102" y="184">3 · HARNESS</text>
+<text class="q" x="102" y="201">Can it act, and be checked?</text>
+<text class="p" x="778" y="192" text-anchor="end">tools= · MCP() · guardrails= · approval=</text>
+<rect class="ring" x="112" y="216" width="656" height="120" rx="8"/>
+<rect class="hl d4" x="112" y="216" width="656" height="120" rx="8"/>
+<text class="lab" x="128" y="236">2 · CONTEXT</text>
+<text class="q" x="128" y="253">Is the right thing in the window?</text>
+<text class="p" x="752" y="244" text-anchor="end">memory= · knowledge= · context=</text>
+<rect class="inner" x="138" y="268" width="604" height="46" rx="7"/>
+<rect class="hl d5" x="138" y="268" width="604" height="46" rx="7"/>
+<text class="lab" x="154" y="288">1 · PROMPT</text>
+<text class="q" x="154" y="305">Did I say it clearly?</text>
+<text class="p" x="726" y="296" text-anchor="end">instructions= · role · goal · output=</text>
 </svg>
