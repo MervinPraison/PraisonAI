@@ -18,7 +18,7 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 640 |
-| ✅ Agent | 22 | 65 | 20381 |
+| ✅ Agent | 22 | 65 | 20388 |
 | ✅ Agent-to-Agent (A2A) | 1 | 7 | 3175 |
 | ✅ Agent-to-User (A2U) | 1 | 3 | 701 |
 | ✅ Approval | 1 | 8 | 4227 |
@@ -44,17 +44,17 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Files | 2 | 7 | 2528 |
 | ✅ Flow | 1 | 3 | 811 |
 | ✅ Gateway | 7 | 110 | 43032 |
-| ✅ Guardrails | 5 | 5 | 2940 |
+| ✅ Guardrails | 5 | 5 | 2967 |
 | ✅ Handoffs | 11 | 6 | 2860 |
 | ✅ Hooks | 2 | 9 | 5341 |
 | ✅ Image | 1 | 11 | 1574 |
 | ✅ Knowledge | 4 | 20 | 6295 |
-| ✅ LLM | 3 | 16 | 6513 |
+| ✅ LLM | 3 | 17 | 6754 |
 | ✅ Loops | 4 | 5 | 1600 |
 | ✅ MCP | 1 | 67 | 15750 |
 | ✅ Memory | 6 | 21 | 8633 |
 | ✅ OCR | 2 | 1 | 237 |
-| ✅ Observability | 2 | 23 | 2866 |
+| ✅ Observability | 2 | 23 | 2868 |
 | ✅ Optimizer | 1 | 2 | 794 |
 | ✅ Output | 3 | 6 | 1575 |
 | ✅ Parallel Execution | 3 | 2 | 546 |
@@ -64,7 +64,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Providers | 1 | 58 | 8999 |
 | ✅ Query | 1 | 2 | 736 |
 | ✅ RAG | 5 | 15 | 3307 |
-| ✅ Realtime | 2 | 5 | 696 |
+| ✅ Realtime | 2 | 5 | 705 |
 | ✅ Reflection | 3 | 3 | 736 |
 | ✅ Retrieval | 2 | 5 | 1105 |
 | ✅ Routing | 1 | 2 | 430 |
@@ -72,10 +72,10 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Security | 1 | 3 | 3733 |
 | ✅ Sessions | 4 | 22 | 9064 |
 | ✅ Skills | 6 | 16 | 6064 |
-| ✅ Tasks | 2 | 10 | 3593 |
+| ✅ Tasks | 2 | 10 | 3595 |
 | ✅ Telemetry | 1 | 2 | 681 |
 | ✅ Templates | 1 | 9 | 1859 |
-| ✅ Tools | 12 | 148 | 46488 |
+| ✅ Tools | 12 | 149 | 46666 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1219 |
 | ✅ Video | 2 | 11 | 1458 |
