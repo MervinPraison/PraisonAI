@@ -338,8 +338,8 @@ def _context_window_figures(stats: Dict[str, Any]) -> Dict[str, Any]:
     """Tokens, full-window limit, and integer percent for one context report.
 
     Percent matches the status bar: ``used * 100 // limit`` of the model
-    window, not of the usable budget. It is None when the window is only
-    the unknown-model default. Accepts both the nested ContextManager stats
+    window, not of the usable budget. It is None when endpoint provenance
+    is unavailable. Accepts both the nested ContextManager stats
     dict and a flat dict that already carries the same fields.
     """
     budget = stats.get("budget") if isinstance(stats.get("budget"), dict) else {}
@@ -352,16 +352,13 @@ def _context_window_figures(stats: Dict[str, Any]) -> Dict[str, Any]:
     percent = None
     known = False
     if model:
-        from praisonaiagents.context.budgeter import resolved_model_limit
+        from praisonaiagents.context.budgeter import verified_context_window
 
-        resolved = resolved_model_limit(model)
+        resolved = verified_context_window(model)
         if resolved:
             limit = int(resolved)
             percent = used * 100 // limit
             known = True
-    elif limit:
-        percent = used * 100 // limit
-        known = True
     return {
         "used": used,
         "limit": limit,

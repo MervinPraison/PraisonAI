@@ -70,7 +70,7 @@ def _occupied_tokens(tokens_in: int, usage: Any) -> int:
     return occupied or tokens_in or 0
 
 
-def _context_usage(occupied: int, model: Optional[str]) -> Optional[Dict[str, int]]:
+def _context_usage(occupied: int, model: Optional[str], endpoint: Optional[str] = None) -> Optional[Dict[str, int]]:
     """Full-window occupancy for this call, or None when it cannot be shown.
 
     Display must not raise, and must not invent a window for an unknown model.
@@ -79,7 +79,7 @@ def _context_usage(occupied: int, model: Optional[str]) -> Optional[Dict[str, in
         return None
     try:
         from ..context.budgeter import context_window_usage
-        return context_window_usage(occupied, model)
+        return context_window_usage(occupied, model, endpoint=endpoint)
     except Exception:
         logger.debug("context usage unavailable", exc_info=True)
         return None
@@ -220,6 +220,8 @@ class StatusOutput:
         cost: Optional[float] = None,
         latency_ms: Optional[float] = None,
         usage: Any = None,
+        context_endpoint: Optional[str] = None,
+        context_model: Optional[str] = None,
     ) -> None:
         """Record LLM call end with optional metrics for debug mode."""
         ts = time.time()
@@ -254,7 +256,7 @@ class StatusOutput:
         show_metrics = getattr(self, '_show_metrics', False)
         window = None
         if self._format == "jsonl" or show_metrics:
-            window = _context_usage(_occupied_tokens(tokens_in, usage), model)
+            window = _context_usage(_occupied_tokens(tokens_in, usage), context_model if context_endpoint else model, context_endpoint)
 
         if self._format == "jsonl":
             self._emit_jsonl("llm_end", agent_name=agent_name, timestamp=ts, 
@@ -481,6 +483,7 @@ def enable_status_output(
         _status_output.llm_end(
             model=model, tokens_in=tokens_in, tokens_out=tokens_out,
             cost=cost, latency_ms=latency_ms, usage=usage,
+            context_endpoint=kwargs.get("context_endpoint"), context_model=kwargs.get("context_model"),
         )
     
     # Register the callbacks

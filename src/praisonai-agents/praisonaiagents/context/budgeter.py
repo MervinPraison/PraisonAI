@@ -184,6 +184,43 @@ def get_model_limit(model: str) -> int:
     return resolved_model_limit(model) or MODEL_LIMITS["default"]
 
 
+# Full context windows, verified against the provider documentation. This is
+# deliberately independent of LiteLLM's input-token cap and of request budgets.
+_VERIFIED_OPENAI_WINDOWS = {
+    "gpt-5": 400000,
+    "gpt-5-2025-08-07": 400000,
+    "gpt-5-mini": 400000,
+    "gpt-5-mini-2025-08-07": 400000,
+    "gpt-5-nano": 400000,
+    "gpt-5-nano-2025-08-07": 400000,
+}
+
+
+def verified_context_window(model: Optional[str], *, endpoint: Optional[str] = None) -> Optional[int]:
+    """Return a verified full window only for an actual official endpoint.
+
+    https://developers.openai.com/api/docs/models/gpt-5 (and mini/nano).
+    Unknown aliases, custom endpoints and absent provenance are unavailable.
+    """
+    from urllib.parse import urlsplit
+
+    if not isinstance(model, str) or not isinstance(endpoint, str):
+        return None
+    try:
+        url = urlsplit(endpoint)
+        official = (url.scheme.lower() == "https" and url.hostname == "api.openai.com"
+                    and url.port in (None, 443) and url.username is None and url.password is None
+                    and url.path.rstrip("/") == "/v1" and not url.query and not url.fragment)
+    except ValueError:
+        return None
+    if not official:
+        return None
+    name = model.lower()
+    if name.startswith("openai/"):
+        name = name[len("openai/"):]
+    return _VERIFIED_OPENAI_WINDOWS.get(name)
+
+
 def _non_negative_int(value: Any) -> int:
     """Token counts from providers are integers. Anything else counts as zero."""
     try:
@@ -244,6 +281,7 @@ def context_window_usage(
     *,
     cache_read_tokens: int = 0,
     cache_creation_tokens: int = 0,
+    endpoint: Optional[str] = None,
 ) -> Optional[Dict[str, int]]:
     """Occupancy of the full context window for one prompt.
 
@@ -253,13 +291,13 @@ def context_window_usage(
     ``input_tokens`` and must be added. Do not pass OpenAI ``cached_tokens``;
     those are already inside ``prompt_tokens``.
 
-    Returns None when there is nothing to report, or when the model window
-    is only the unknown-model default. ``percent`` is integer division of
+    Returns None when there is nothing to report or the actual endpoint and
+    model do not have a verified window. ``percent`` is integer division of
     the full window and may exceed 100 when the prompt is over the limit.
 
     The dict keys are ``used``, ``limit``, and ``percent``.
     """
-    limit = resolved_model_limit(model)
+    limit = verified_context_window(model, endpoint=endpoint)
     if not limit:
         return None
     used = (

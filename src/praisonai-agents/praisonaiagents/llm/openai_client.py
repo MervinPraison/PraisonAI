@@ -2034,6 +2034,7 @@ class OpenAIClient:
         Returns:
             ChatCompletion object or async stream iterator
         """
+        provenance_callback = kwargs.pop("_context_provenance_callback", None)
         # ── Responses API path (non-streaming only) ────────────────────
         if not stream and self._use_responses_api(model):
             raw = None
@@ -2042,8 +2043,12 @@ class OpenAIClient:
                     messages, model, temperature, tools,
                     tool_choice=tool_choice, **kwargs
                 )
-                raw = await self.async_client.responses.create(**resp_params)
-                return self._responses_to_chat_completion(raw)
+                client = self.async_client
+                raw = await client.responses.create(**resp_params)
+                result = self._responses_to_chat_completion(raw)
+                if provenance_callback is not None:
+                    provenance_callback(result.model, str(client.base_url) if getattr(client, "base_url", None) else None)
+                return result
             except (FileNotFoundError, ValueError):
                 raise
             except Exception as e:
@@ -2072,7 +2077,11 @@ class OpenAIClient:
                 params["tool_choice"] = tool_choice
         
         try:
-            return await self.async_client.chat.completions.create(**_normalize_chat_params(params))
+            client = self.async_client
+            result = await client.chat.completions.create(**_normalize_chat_params(params))
+            if provenance_callback is not None and not stream:
+                provenance_callback(getattr(result, "model", None), str(client.base_url) if getattr(client, "base_url", None) else None)
+            return result
         except Exception as e:
             self.logger.error(f"Error creating async completion: {e}")
             raise
@@ -2226,6 +2235,15 @@ class OpenAIClient:
                 })
                 _wrapup_injected = True
 
+            context_provenance = {}
+
+            def record_context_provenance(effective_model, endpoint):
+                from ..context.budgeter import verified_context_window
+                if verified_context_window(effective_model, endpoint=endpoint) is not None:
+                    # Only publish the canonical public endpoint, never a custom
+                    # URL that could contain private routing information.
+                    context_provenance.update(model=effective_model, endpoint="https://api.openai.com/v1")
+
             if stream:
                 # Process as streaming response with formatted tools
                 final_response = await self.process_stream_response_async(
@@ -2282,6 +2300,7 @@ class OpenAIClient:
                             temperature=temperature,
                             tools=formatted_tools,
                             stream=False,
+                            _context_provenance_callback=record_context_provenance,
                             **kwargs
                         )
                 else:
@@ -2291,6 +2310,7 @@ class OpenAIClient:
                         temperature=temperature,
                         tools=formatted_tools,
                         stream=False,
+                        _context_provenance_callback=record_context_provenance,
                         **kwargs
                     )
             
@@ -2343,6 +2363,8 @@ class OpenAIClient:
                 cost=cost,
                 latency_ms=llm_latency_ms,
                 usage=usage,
+                context_model=context_provenance.get("model"),
+                context_endpoint=context_provenance.get("endpoint"),
             )
 
             # Check for tool calls
