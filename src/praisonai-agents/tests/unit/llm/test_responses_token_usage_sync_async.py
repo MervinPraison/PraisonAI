@@ -19,7 +19,8 @@ _RESPONSE = {
     "model": "gpt-4o-mini",
     "output": [{"type": "message", "id": "msg_1", "status": "completed", "role": "assistant",
                 "content": [{"type": "output_text", "text": "hello", "annotations": []}]}],
-    "usage": {"input_tokens": 7, "output_tokens": 3, "total_tokens": 10},
+    "usage": {"input_tokens": 7, "output_tokens": 3, "total_tokens": 10,
+              "input_tokens_details": {"cached_tokens": 5}},
     "parallel_tool_calls": True, "tool_choice": "auto", "tools": [],
 }
 
@@ -76,3 +77,4 @@ def test_responses_route_returns_token_usage(base, mode, stream):
         text, usage = asyncio.run(llm.get_response_async(**kwargs))
     assert text == "hello"
     assert (usage.prompt_tokens, usage.completion_tokens, usage.total_tokens) == (7, 3, 10)
+    assert usage.cached_tokens == 5

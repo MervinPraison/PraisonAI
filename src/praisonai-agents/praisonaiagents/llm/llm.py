@@ -7230,11 +7230,25 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             def _usage_value(*names: str) -> int:
                 return usage_value(usage, *names)
 
+            def _field(obj: Any, name: str) -> Any:
+                return obj.get(name) if isinstance(obj, dict) else getattr(obj, name, None)
+
+            # Cache reads are a breakdown of the prompt count, not extra
+            # prompt tokens. Preserve an explicitly reported zero.
+            cached = _field(usage, "cached_tokens")
+            if cached is None:
+                for name in ("prompt_tokens_details", "input_tokens_details"):
+                    cached = _field(_field(usage, name), "cached_tokens")
+                    if cached is not None:
+                        break
+            if cached is None:
+                cached = _field(usage, "cache_read_input_tokens")
+
             return TokenUsage(
                 prompt_tokens=_usage_value("prompt_tokens", "input_tokens"),
                 completion_tokens=_usage_value("completion_tokens", "output_tokens"),
                 total_tokens=_usage_value("total_tokens"),
-                cached_tokens=_usage_value("cached_tokens"),
+                cached_tokens=int(cached or 0),
                 reasoning_tokens=_usage_value("reasoning_tokens"),
                 audio_input_tokens=_usage_value("audio_input_tokens"),
                 audio_output_tokens=_usage_value("audio_output_tokens"),
