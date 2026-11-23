@@ -1974,7 +1974,8 @@ class AgentFlow:
                 previous_output = route_result["output"]
                 all_variables.update(route_result.get("variables", {}))
                 if route_result.get("stop"):
-                    self.status = "failed"
+                    if route_result.get("failed", True):
+                        self.status = "failed"
                     if verbose:
                         print("🛑 Workflow stopped by nested route step")
                     break
@@ -3411,6 +3412,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 "step": f"route_{index}",
                 "output": route_result.get("output", ""),
                 "stop": route_result.get("stop", False),
+                "failed": route_result.get("failed", False),
                 "variables": route_result.get("variables", all_variables)
             }
         
@@ -3756,6 +3758,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         
         # Execute matched route steps
         route_stopped = False
+        route_failed = False
         for idx, step in enumerate(matched_route):
             step_result = self._execute_single_step_internal(
                 step, output, input, all_variables, model, verbose, idx, stream=stream, depth=depth+1
@@ -3766,9 +3769,10 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             
             if step_result.get("stop"):
                 route_stopped = True
+                route_failed = step_result.get("failed", True)
                 break
         
-        return {"steps": results, "output": output, "variables": all_variables, "stop": route_stopped}
+        return {"steps": results, "output": output, "variables": all_variables, "stop": route_stopped, "failed": route_failed}
     
     def _llm_summarize_for_parallel(
         self,
