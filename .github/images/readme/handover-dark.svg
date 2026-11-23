@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 488" width="880" height="488" role="img" aria-label="How the handover works: a loop of Watch, Test, Hand over, Record and Roll back, moving one task at a time from rented AI to your own AI, built on tracing, evaluation, fine-tuning, model routing and local models">
-<style>
+<style>.bgr{fill:#0d1117}
 .eb{font:500 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9198a1;letter-spacing:.12em}
 .ebA{font:600 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#e0b25a;letter-spacing:.12em}
 .h1{font:650 22px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#e6edf3}
@@ -33,6 +33,7 @@
 .spin{transform-origin:440px 236px;animation:spin 10s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 </style>
+<rect class="bgr" x="0" y="0" width="880" height="488" rx="12"/>
 <circle class="orbit" cx="440" cy="236" r="150"/>
 <circle class="orbitF" cx="440" cy="236" r="150"/>
 <g class="spin"><circle class="dot" cx="440" cy="86" r="6"/></g>

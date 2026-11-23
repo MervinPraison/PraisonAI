@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 462" width="880" height="462" role="img" aria-label="Ten channels send messages into the praisonai-bot gateway, which handles pairing, limits, sessions, approvals, voice and reliable delivery, and runs an Agent, AgentTeam or AgentFlow.">
-<style>
+<style>.bgr{fill:#0d1117}
 .eb{font:500 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9198a1;letter-spacing:.12em}
 .ebA{font:600 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#e0b25a;letter-spacing:.12em}
 .h1{font:650 22px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#e6edf3}
@@ -22,6 +22,7 @@
 @keyframes flowR{to{stroke-dashoffset:28}}
 @media (prefers-reduced-motion:reduce){*{animation:none!important}}
 </style>
+<rect class="bgr" x="0" y="0" width="880" height="462" rx="12"/>
 <text class="eb" x="20" y="22">CHANNELS (10)</text>
 <text class="eb" x="246" y="22">PRAISONAI-BOT GATEWAY</text>
 <text class="eb" x="664" y="22">THE BRAIN</text>
