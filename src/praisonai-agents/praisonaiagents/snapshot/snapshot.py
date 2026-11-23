@@ -452,14 +452,15 @@ class FileSnapshot:
                 # commit's tree, and remove project files that aren't, so undo
                 # cannot resurrect or leak files from a later snapshot.
                 ls = self._run_git(
-                    "ls-tree", "-r", "--name-only", commit_hash, check=False
+                    "ls-tree", "-r", "--name-only", commit_hash
                 )
                 committed = (
                     set(ls.stdout.strip().split("\n"))
                     if ls.stdout.strip()
                     else set()
                 )
-                self._run_git("checkout", commit_hash, "--", ".")
+                if committed:
+                    self._run_git("checkout", commit_hash, "--", ".")
                 
                 # Remove project files not present in the target commit, but
                 # ONLY files the snapshot would have tracked. Ignored/excluded

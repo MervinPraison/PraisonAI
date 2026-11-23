@@ -3639,12 +3639,14 @@ Summary:"""
             if not self._snapshot_stack:
                 return False
             try:
-                target_hash = self._snapshot_stack.pop()
-                # Get current hash before restore (for redo)
-                current_hash = self._file_snapshot.get_current_hash()
-                if current_hash:
-                    self._redo_stack.append(current_hash)
-                self._file_snapshot.restore(target_hash)
+                target_hash = self._snapshot_stack[-1]
+                # Capture the working files, not the shadow repository's last
+                # commit, which is normally the pre-run snapshot itself.
+                current_hash = self._file_snapshot.track(message="pre-undo").commit_hash
+                if not self._file_snapshot.restore(target_hash):
+                    return False
+                self._snapshot_stack.pop()
+                self._redo_stack.append(current_hash)
                 return True
             except Exception as e:
                 logger.debug(f"Undo failed: {e}")
@@ -3665,11 +3667,12 @@ Summary:"""
             if not self._redo_stack:
                 return False
             try:
-                target_hash = self._redo_stack.pop()
-                current_hash = self._file_snapshot.get_current_hash()
-                if current_hash:
-                    self._snapshot_stack.append(current_hash)
-                self._file_snapshot.restore(target_hash)
+                target_hash = self._redo_stack[-1]
+                current_hash = self._file_snapshot.track(message="pre-redo").commit_hash
+                if not self._file_snapshot.restore(target_hash):
+                    return False
+                self._redo_stack.pop()
+                self._snapshot_stack.append(current_hash)
                 return True
             except Exception as e:
                 logger.debug(f"Redo failed: {e}")
