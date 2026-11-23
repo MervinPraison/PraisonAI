@@ -220,6 +220,30 @@ def _handler(name, output=None):
 
 
 class TestFlowSteps:
+    def test_yaml_route_reused_agent_keeps_graph_identity(self, recorder, monkeypatch):
+        from praisonaiagents.agent.agent import Agent
+        from praisonaiagents.workflows.yaml_parser import YAMLWorkflowParser
+
+        calls = []
+        def chat(self, prompt, **kwargs):
+            calls.append(prompt)
+            return 'chosen' if len(calls) == 1 else 'done'
+        monkeypatch.setattr(Agent, 'chat', chat)
+        flow = YAMLWorkflowParser().parse_string('''
+agents:
+  writer: {role: Writer, goal: Write}
+steps:
+  - {agent: writer, name: choose, action: choose}
+  - route: {chosen: [writer, writer]}
+''')
+        flow.start('topic')
+        start = _of(recorder, 'workflow_start')[0]
+        graph_ids = {n['id'] for n in start.data['graph']['nodes']}
+        steps = _of(recorder, 'step_start')
+        routed = [e.node_id for e in steps if e.node_id.startswith('step:writer')]
+        assert routed == ['step:writer', 'step:writer#2']
+        assert set(routed) <= graph_ids
+
     def test_flow_records_workflow_and_step_events_with_graph(self, recorder):
         from praisonaiagents.workflows.workflows import AgentFlow
 
