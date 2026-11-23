@@ -47,7 +47,17 @@ KNOWN_EXTRA_EXCEPTIONS = {
 
 
 def _name(requirement: str) -> str:
-    return re.split(r"[\s\[<>=!~;]", requirement.strip(), maxsplit=1)[0].lower().replace("_", "-")
+    """Return the PEP 503 normalized project name of a requirement string."""
+    raw = re.split(r"[\s\[(<>=!~;@,]", requirement.strip(), maxsplit=1)[0]
+    return re.sub(r"[-_.]+", "-", raw).lower()
+
+
+@pytest.mark.parametrize("requirement", [
+    "praisonai-bot>=0.2", "praisonai.bot>=0.2", "praisonai__bot", "PraisonAI_-.Bot[x]; python_version>'3'",
+    "praisonai-bot @ https://example.com/x.whl", "praisonai-bot (>=0.2)",
+])
+def test_name_normalizes_equivalent_spellings(requirement):
+    assert _name(requirement) == "praisonai-bot"
 
 
 def _project(directory: str) -> dict:
