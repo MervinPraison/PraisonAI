@@ -47,6 +47,8 @@ def _a2a_parts():
     """Return the 0.2.x A2A helper module, or None when that layout is absent."""
     if importlib.util.find_spec("a2ui") is None:
         raise ImportError(_A2UI_INSTALL_HINT)
+    if importlib.util.find_spec("a2ui.a2a") is None:
+        return None
     if importlib.util.find_spec("a2ui.a2a.parts") is None:
         return None
     return _import("a2ui.a2a.parts")
