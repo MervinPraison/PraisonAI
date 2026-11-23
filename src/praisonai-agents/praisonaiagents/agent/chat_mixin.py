@@ -1884,6 +1884,17 @@ Your Role: {self.role}"""
             extra=compaction_context_payload(tokens, model, len(msgs)),
         )
 
+    def _after_compaction_hook_payload(self, result):
+        """Expose compaction results through the common hook input contract."""
+        from ..compaction.result import CompactionHookInput
+        return CompactionHookInput(
+            result,
+            session_id=str(getattr(self, "_session_id", None) or ""),
+            cwd=os.getcwd(),
+            timestamp=str(time.time()),
+            agent_name=getattr(self, "name", None),
+        )
+
     def _apply_compaction(self, messages, compactor, policy):
         """Apply standard context compaction."""
         from ..compaction.strategy import CompactionStrategy as LegacyStrategy
@@ -1921,7 +1932,7 @@ Your Role: {self.role}"""
         self._persist_compaction_checkpoint(result)
         
         try:
-            self._hook_runner.execute_sync(_HookEvent.AFTER_COMPACTION, result)
+            self._hook_runner.execute_sync(_HookEvent.AFTER_COMPACTION, self._after_compaction_hook_payload(result))
         except Exception as e:
             logger.warning(f"AFTER_COMPACTION hook failed: {e}")
             if getattr(self, '_strict_hooks', False):
@@ -2115,7 +2126,7 @@ Your Role: {self.role}"""
             logger.debug(f"Failed to persist compaction checkpoint (async): {e}")
 
         try:
-            await self._hook_runner.execute(_HookEvent.AFTER_COMPACTION, result)
+            await self._hook_runner.execute(_HookEvent.AFTER_COMPACTION, self._after_compaction_hook_payload(result))
         except Exception as e:
             logger.warning(f"AFTER_COMPACTION hook failed: {e}")
             if getattr(self, '_strict_hooks', False):
@@ -7091,7 +7102,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             
             # Execute AFTER_COMPACTION hook  
             try:
-                self._hook_runner.execute_sync(hook_event_class.AFTER_COMPACTION, None)
+                self._hook_runner.execute_sync(hook_event_class.AFTER_COMPACTION, self._after_compaction_hook_payload(_cr))
             except Exception as e:
                 logger.warning(f"AFTER_COMPACTION hook failed: {e}")
                 if getattr(self, '_strict_hooks', False):
@@ -7176,7 +7187,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             
             # Execute AFTER_COMPACTION hook  
             try:
-                await self._hook_runner.execute(hook_event_class.AFTER_COMPACTION, None)
+                await self._hook_runner.execute(hook_event_class.AFTER_COMPACTION, self._after_compaction_hook_payload(_cr))
             except Exception as e:
                 logger.warning(f"AFTER_COMPACTION hook failed: {e}")
                 if getattr(self, '_strict_hooks', False):

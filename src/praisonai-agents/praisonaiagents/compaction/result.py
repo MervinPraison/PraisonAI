@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Any
 
 from .strategy import CompactionStrategy
+from ..hooks.types import HookInput
 
 
 @dataclass
@@ -68,3 +69,20 @@ class CompactionResult:
             "was_skipped_due_to_low_savings": self.was_skipped_due_to_low_savings,
             "summary": self.summary
         }
+
+
+class CompactionHookInput(CompactionResult, HookInput):
+    """After-compaction hook data retaining CompactionResult compatibility."""
+
+    def __init__(self, result: CompactionResult, *, session_id: str, cwd: str,
+                 timestamp: str, agent_name: str):
+        self.__dict__.update(vars(result))
+        self.session_id = session_id
+        self.cwd = cwd
+        self.event_name = "after_compaction"
+        self.timestamp = timestamp
+        self.agent_name = agent_name
+        self.extra = {}
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {**CompactionResult.to_dict(self), **HookInput.to_dict(self)}
