@@ -2076,7 +2076,8 @@ class AgentFlow:
                 previous_output = if_result["output"]
                 all_variables.update(if_result.get("variables", {}))
                 if if_result.get("stop"):
-                    self.status = "failed"
+                    if if_result.get("failed", True):
+                        self.status = "failed"
                     if verbose:
                         print("🛑 Workflow stopped by nested conditional step")
                     break
@@ -3448,6 +3449,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 "step": f"if_{index}",
                 "output": if_result.get("output", ""),
                 "stop": if_result.get("stop", False),
+                "failed": if_result.get("failed", False),
                 "variables": if_result.get("variables", all_variables)
             }
         
@@ -4867,6 +4869,7 @@ CONCISE SUMMARY:"""
         
         # Execute the selected branch
         if_stopped = False
+        if_failed = False
         for idx, step in enumerate(steps_to_execute):
             step_result = self._execute_single_step_internal(
                 step, output, input, all_variables, model, verbose, idx, stream=stream, depth=depth
@@ -4877,9 +4880,10 @@ CONCISE SUMMARY:"""
             
             if step_result.get("stop"):
                 if_stopped = True
+                if_failed = step_result.get("failed", True)
                 break
         
-        return {"steps": results, "output": output, "variables": all_variables, "stop": if_stopped}
+        return {"steps": results, "output": output, "variables": all_variables, "stop": if_stopped, "failed": if_failed}
     
     def _evaluate_condition(
         self,
