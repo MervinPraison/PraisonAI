@@ -70,6 +70,7 @@ class ContextManagerHandler:
         self.model = model
         self.session_id = session_id
         self.agent_name = agent_name
+        self._empty_tools_tracked = False
     
     @property
     def config(self):
@@ -79,6 +80,7 @@ class ContextManagerHandler:
     def set_model(self, model: str) -> None:
         """Update model and reset manager."""
         self.model = model
+        self._empty_tools_tracked = False
         create_manager = _get_create_manager()
         self._manager = create_manager(
             model=model,
@@ -104,7 +106,9 @@ class ContextManagerHandler:
     
     def track_tools(self, tools: List[Dict[str, Any]]) -> int:
         """Track tool schema tokens."""
-        return self._manager._ledger.track_tools(tools)
+        result = self._manager._ledger.track_tools(tools)
+        self._empty_tools_tracked = not tools
+        return result
     
     def check_overflow(self) -> bool:
         """Check if context is approaching limit."""
@@ -153,6 +157,7 @@ class ContextManagerHandler:
         
         Uses SDK ContextManager.process() for full pipeline.
         """
+        self._empty_tools_tracked = False
         return self._manager.process(
             messages=messages,
             system_prompt=system_prompt,
@@ -420,7 +425,8 @@ def _show_context_stats(console, manager: ContextManagerHandler) -> None:
     for name, data in segments.items():
         tokens = data.get("tokens", 0)
         budget = data.get("budget", 0)
-        if name != "history" and data.get("count") == 0:
+        if (name != "history" and data.get("count") == 0
+                and not (name == "tools_schema" and manager._empty_tools_tracked)):
             unavailable = "-"
             console.print(f"{name:<20} {unavailable:>10} {budget:>10,} {unavailable:>8}")
         else:

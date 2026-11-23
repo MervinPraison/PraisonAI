@@ -153,3 +153,17 @@ def test_interactive_stats_preserve_recorded_zero_and_summary_is_partial():
     console = _Console()
     handle_context_command(console, "show", state, manager)
     assert any("Partial estimate" in line for line in console.lines)
+
+
+def test_interactive_stats_preserve_explicit_empty_tools():
+    from praisonai_code.cli.features.context_manager import ContextManagerHandler, handle_context_command
+
+    manager = ContextManagerHandler(model="gpt-4o")
+    assert manager.track_tools([]) == 0
+    console = _Console()
+    handle_context_command(console, "stats", {"conversation_history": []}, manager)
+    assert next(line for line in console.lines if line.startswith("tools_schema")).split()[1] == "0"
+    manager.set_model("gpt-4o")
+    console = _Console()
+    handle_context_command(console, "stats", {"conversation_history": []}, manager)
+    assert next(line for line in console.lines if line.startswith("tools_schema")).split()[1] == "-"
