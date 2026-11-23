@@ -125,3 +125,31 @@ def test_flat_stats_still_report_a_percent():
     })
     assert figures["percent"] == 6
     assert figures["limit"] == 128000
+
+
+def test_interactive_stats_distinguish_unrecorded_categories():
+    from praisonai_code.cli.features.context_manager import handle_context_command
+
+    state = {"current_model": "gpt-4o", "conversation_history": [{"role": "user", "content": "hello"}]}
+    console = _Console()
+    handle_context_command(console, "stats", state)
+    lines = console.lines
+    assert any("Partial estimate" in line for line in lines)
+    assert next(line for line in lines if line.startswith("system_prompt")).split()[1] == "-"
+    assert int(next(line for line in lines if line.startswith("history")).split()[1]) > 0
+    # The machine-facing ledger remains numeric and its contract is unchanged.
+    assert state["context_manager"].get_stats()["ledger"]["ledger"]["system_prompt"] == 0
+
+
+def test_interactive_stats_preserve_recorded_zero_and_summary_is_partial():
+    from praisonai_code.cli.features.context_manager import ContextManagerHandler, handle_context_command
+
+    manager = ContextManagerHandler(model="gpt-4o")
+    manager.track_system_prompt("")
+    state = {"conversation_history": []}
+    console = _Console()
+    handle_context_command(console, "stats", state, manager)
+    assert next(line for line in console.lines if line.startswith("system_prompt")).split()[1] == "0"
+    console = _Console()
+    handle_context_command(console, "show", state, manager)
+    assert any("Partial estimate" in line for line in console.lines)

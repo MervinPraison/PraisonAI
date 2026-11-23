@@ -392,6 +392,7 @@ def _show_context_summary(console, manager: ContextManagerHandler) -> None:
     turns = stats.get("turn_count", counted.get("turn_count", 0))
     messages = stats.get("message_count", counted.get("message_count", 0))
     console.print(f"  Current Usage:  {usage}")
+    console.print("  [dim]Partial estimate: untracked request content is excluded.[/dim]")
     console.print(f"  Turns:          {turns}")
     console.print(f"  Messages:       {messages}")
     console.print(f"  Auto-Compact:   {'enabled' if stats['auto_compact'] else 'disabled'}")
@@ -412,14 +413,19 @@ def _show_context_stats(console, manager: ContextManagerHandler) -> None:
     limit_col = f"{figures['limit']:,}" if figures["known"] else "-"
 
     console.print("\n[bold cyan]Token Ledger[/bold cyan]")
+    console.print("[dim]Partial estimate; - means no category data was recorded.[/dim]")
     console.print(f"{'Segment':<20} {'Tokens':>10} {'Budget':>10} {'Used':>8}")
     console.print("-" * 50)
 
     for name, data in segments.items():
         tokens = data.get("tokens", 0)
         budget = data.get("budget", 0)
-        util = data.get("utilization", 0) * 100
-        console.print(f"{name:<20} {tokens:>10,} {budget:>10,} {util:>7.1f}%")
+        if name != "history" and data.get("count") == 0:
+            unavailable = "-"
+            console.print(f"{name:<20} {unavailable:>10} {budget:>10,} {unavailable:>8}")
+        else:
+            util = data.get("utilization", 0) * 100
+            console.print(f"{name:<20} {tokens:>10,} {budget:>10,} {util:>7.1f}%")
 
     console.print("-" * 50)
     # TOTAL percent is of the full model window, the same denominator as the
