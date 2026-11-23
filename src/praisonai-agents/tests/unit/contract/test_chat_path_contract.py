@@ -32,20 +32,23 @@ ENDPOINT = {"openai_client": "/chat/completions", "litellm_chat": "/chat/complet
             "litellm_responses": "/responses"}
 
 REQUESTS = []  # (path, request body) for every call that reached the stub
-STATE = {"fail": False, "delay": 0.0, "filter_chunk": False, "tool_rounds": 1}
+STATE = {"fail": False, "delay": 0.0, "filter_chunk": False, "tool_rounds": 1,
+         "ignore_tools": False}
 _ERR = {"error": {"message": "Incorrect API key provided", "type": "invalid_request_error",
                   "code": "invalid_api_key"}}
 USAGE_IN, USAGE_OUT = 7, 3
 
 
 def _tool_name(req):
+    if not req.get("tools"):
+        return "lookup"  # ignore_tools: a server that calls tools it was not offered
     tool = req["tools"][0]
     return tool.get("function", tool).get("name")
 
 
 def _chat_reply(req):
     done = sum(m.get("role") == "tool" for m in req.get("messages", []))
-    if req.get("tools") and done < STATE["tool_rounds"]:
+    if (req.get("tools") or STATE["ignore_tools"]) and done < STATE["tool_rounds"]:
         return {"role": "assistant", "content": None, "tool_calls": [{
             "id": f"call_{done + 1}", "type": "function",
             "function": {"name": _tool_name(req), "arguments": '{"query": "x"}'}}]}, "tool_calls"
@@ -129,7 +132,7 @@ class _Handler(BaseHTTPRequestHandler):
 @pytest.fixture
 def stub(monkeypatch, tmp_path):
     REQUESTS.clear()
-    STATE.update(fail=False, delay=0.0, filter_chunk=False, tool_rounds=1)
+    STATE.update(fail=False, delay=0.0, filter_chunk=False, tool_rounds=1, ignore_tools=False)
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_address[1]}/v1"
@@ -276,6 +279,21 @@ def test_turn_runs_more_than_one_tool_round(stub, mode, route):
     assert _turn(agent, mode) == "hello"
     assert len(calls) == 2, calls
     assert len(REQUESTS) == 3, [p for p, _ in REQUESTS]
+
+
+def test_stream_tool_rounds_stop_at_max_steps(stub):
+    """A server that keeps calling tools after they are removed cannot run past max_steps."""
+    from praisonaiagents.config.feature_configs import ExecutionConfig
+    STATE.update(tool_rounds=10, ignore_tools=True)
+    agent = _agent("openai_client", stub, tools=[lookup], execution=ExecutionConfig(max_steps=2))
+    try:
+        "".join(str(c) for c in agent.start("go", stream=True) or [])
+    except RuntimeError:
+        pass  # the model never answers; only the bound matters here
+    streamed = [r for _, r in REQUESTS if r.get("stream")]
+    # first request + one follow-up per allowed round; tools dropped on the last
+    assert len(streamed) == 3, len(streamed)
+    assert "tools" in streamed[1] and "tools" not in streamed[2]
 
 
 @pytest.mark.parametrize("route", ROUTES)

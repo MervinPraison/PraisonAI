@@ -6775,8 +6775,10 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                                 response_content=followup_text,
                             )
                             _open_llm_call = None
-                            if _next_tool_calls:
+                            if _next_tool_calls and _tool_round < _max_tool_rounds:
                                 # Another round of tools: run them and ask again.
+                                # Past the budget the calls are ignored even if a
+                                # server returns them without tools offered.
                                 tool_calls_data = _next_tool_calls
                                 response_text = followup_text
                                 continue
