@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 232" width="880" height="232" role="img" aria-label="An AgentFlow runs agent steps in order, and seven patterns change how - route, parallel, loop, repeat, when, include and handoff.">
-<style>
+<style>.bgr{fill:#ffffff}
 .eb{font:500 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#74756e;letter-spacing:.12em}
 .ebA{font:600 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9a6a12;letter-spacing:.12em}
 .h1{font:650 22px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#20211e}
@@ -29,6 +29,7 @@
 .bt{font:600 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9b3b2e;letter-spacing:.08em}
 .num{font:650 12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9a6a12}
 </style>
+<rect class="bgr" x="0" y="0" width="880" height="232" rx="12"/>
 <rect class="soft" x="338" y="58" width="522" height="164" rx="12"/>
 <text class="eb" x="20" y="24">MULTI-AGENT PATTERNS</text>
 <text class="eb" x="350" y="52">FROM PRAISONAI IMPORT ...</text>

@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 539" width="880" height="539" role="img" aria-label="One agent turn - build the prompt, call the model, approve and run any tool, check the result, and repeat until the model answers without a tool or max_steps is reached.">
-<style>
+<style>.bgr{fill:#ffffff}
 .eb{font:500 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#74756e;letter-spacing:.12em}
 .ebA{font:600 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9a6a12;letter-spacing:.12em}
 .h1{font:650 22px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#20211e}
@@ -36,6 +36,7 @@
 .nodeHi{fill:#efe6cf;stroke:#9a6a12;stroke-width:1.6}
 .nodeBack{fill:#fffef8;stroke:#9b3b2e;stroke-width:1.6;stroke-dasharray:4 3}
 </style>
+<rect class="bgr" x="0" y="0" width="880" height="539" rx="12"/>
 <circle class="orbit" cx="440" cy="286" r="150"/>
 <circle class="orbitF" cx="440" cy="286" r="150"/>
 <g class="spin"><circle class="dot" cx="440" cy="136" r="6"/></g>
