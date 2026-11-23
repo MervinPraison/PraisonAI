@@ -7,6 +7,7 @@ Provides two types of training:
 """
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -90,8 +91,6 @@ def train_llm(
         praisonai-train llm dataset.json --lora-r 32 --epochs 2
         praisonai-train llm -c config.yaml --dry-run
     """
-    import sys
-
     # Typer fills these in when Click invokes the command, but `train_llm` is
     # also called directly as a plain function -- by tests, and by anything
     # importing it. Unfilled parameters then arrive as OptionInfo objects and
@@ -129,7 +128,6 @@ def train_llm(
     verbose = _v(verbose) or False
 
     from ..output.console import get_output_controller
-    from praisonai_train._code_bridge import code_available, import_code_module
 
     # File first, flags on top -- the same precedence the dry-run preview shows.
     # Snapshot locals() BEFORE the comprehension: a comprehension has its own
@@ -187,60 +185,23 @@ def train_llm(
     if _dispatch_remote(resolved, remote_overrides, config, dataset):
         return
 
-    try:
-        PraisonAI = import_code_module("praisonai_code.cli.main").PraisonAI
-    except ImportError as exc:
-        output = get_output_controller()
-        if not code_available():
-            output.print_error(
-                "LLM fine-tuning dependencies not installed",
-                remediation='pip install "praisonai-train[llm]"',
-            )
-        else:
-            output.print_error(
-                f"Failed to load LLM fine-tuning runner: {exc}",
-            )
-        raise typer.Exit(1)
+    from praisonai_train.train.llm.launch import TrainingDepsMissing, launch
 
+    # The trainer reads ./config.yaml, so write the resolved config first: the
+    # config the --dry-run preview showed is the one that trains. Launched from
+    # this package directly; praisonai-code and the wrapper are not needed.
     _materialize_config(resolved)
-
-    argv = ['train']
-    # Deliberately NOT forwarding --dataset or --model.
-    #
-    # I added them as "belt and braces" and they were the opposite. The legacy
-    # dispatcher branches on `args.model or args.dataset != <default>`
-    # (praisonai_code/cli/legacy/praison_ai.py:676) and, on that branch, calls
-    # generate_config() with every tuning parameter None -- which REWRITES
-    # config.yaml from defaults. Measured effect of forwarding them:
-    #
-    #     lora_r 64 -> 16,  epochs 5 -> 1,  lr 1e-4 -> 2e-4,
-    #     max_seq_length 8192 -> 2048,  method dpo -> sft (not even a
-    #     generate_config parameter), and worst of all
-    #     huggingface_save false -> TRUE with hf_model_name defaulted to
-    #     someone else's Hub repo.
-    #
-    # So a --dry-run preview showed one config and a completely different one
-    # trained, and the run tried to publish to a third party's account. The
-    # materialised config.yaml above is the single source of truth; passing a
-    # bare `train` keeps the dispatcher on its "file exists, no override"
-    # branch, which reads that file as-is.
-    if verbose:
-        argv.append('--verbose')
-
-    original_argv = sys.argv
-    sys.argv = ['praisonai'] + argv
-
     try:
-        praison = PraisonAI()
-        praison.main()
-    except SystemExit as exc:
-        # Propagate a non-zero exit (e.g. missing training dependencies) so
-        # callers and CI gating on ``$?`` see the failure. A clean exit is
-        # swallowed so the command returns 0 as before.
-        if exc.code:
-            raise typer.Exit(exc.code if isinstance(exc.code, int) else 1) from exc
-    finally:
-        sys.argv = original_argv
+        launch(resolved)
+    except TrainingDepsMissing:
+        get_output_controller().print_error(
+            "LLM fine-tuning dependencies not installed",
+            remediation='pip install "praisonai-train[llm]"',
+        )
+        raise typer.Exit(1)
+    except subprocess.CalledProcessError as exc:
+        # Propagate the trainer's failure so callers and CI gating on $? see it.
+        raise typer.Exit(exc.returncode or 1) from exc
 
 
 def _dispatch_remote(resolved, remote_overrides, config_path, dataset):

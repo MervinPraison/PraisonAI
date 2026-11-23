@@ -40,9 +40,6 @@ PRAISON_PACKAGES = {TIER1, WRAPPER, *TIER2.values()}
 KNOWN_EXTRA_EXCEPTIONS = {
     # Opt-in sandbox backends for the core SDK.
     ("praisonaiagents", "sandbox", "praisonai-sandbox"),
-    # Fine-tuning CLI glue; should move to a bridge so train never pulls the wrapper.
-    ("praisonai-train", "llm", "praisonai-code"),
-    ("praisonai-train", "llm", "praisonai"),
 }
 
 
