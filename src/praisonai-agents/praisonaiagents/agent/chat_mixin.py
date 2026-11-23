@@ -1915,6 +1915,8 @@ Your Role: {self.role}"""
             # Only anchor a transcript that was actually included in this input.
             if any(messages[i:i + len(history)] == history for i in range(len(messages) - len(history) + 1)):
                 snapshot = [message.to_dict() for message in session.messages]
+            else:
+                logger.warning("Skipped compaction checkpoint: session history is not present in the input")
         
         # Perform compaction (protected: interrupt busy-mode queues instead)
         with protect_turn(getattr(self, 'interrupt_controller', None)):
