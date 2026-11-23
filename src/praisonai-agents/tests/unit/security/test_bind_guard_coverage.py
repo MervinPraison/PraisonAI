@@ -2,7 +2,7 @@
 
 Walks the source of each Python package in the monorepo for calls that open a
 listening socket (uvicorn, aiohttp TCPSite, wsgiref/http.server, telegram
-run_webhook, websockets.serve). Each one must either bind a loopback literal or
+run_webhook/start_webhook, websockets.serve). Each one must either bind a loopback literal or
 sit in a module that calls the shared bind guard
 (``praisonaiagents.agent.launch_security.require_bind_token`` or a thin
 wrapper of it). A new server that binds a caller-chosen host without the guard
@@ -28,7 +28,7 @@ PACKAGES = [
 ]
 SERVER_CALLS = {
     "uvicorn.run", "uvicorn.Config", "web.TCPSite", "make_server",
-    "HTTPServer", "ThreadingHTTPServer", "run_webhook", "websockets.serve",
+    "HTTPServer", "ThreadingHTTPServer", "run_webhook", "start_webhook", "websockets.serve",
 }
 GUARD_NAMES = ("require_bind_token", "resolve_launch_host", "webhook_bind_host", "guard_browser_app")
 LOOPBACK = {"127.0.0.1", "localhost", "::1"}
@@ -38,8 +38,6 @@ EXEMPT = {
         "binds for launch(); both callers run resolve_launch_host() first",
     "praisonai-bot/praisonai_bot/gateway/server.py":
         "gateway has its own auth mode (token required off loopback, resolve_auth_mode); V-H owns it",
-    "praisonai-bot/praisonai_bot/bots/telegram.py":
-        "PENDING V-H: webhook listen host through require_bind_token (patch on va/telegram-webhook-secret)",
 }
 
 
@@ -115,11 +113,13 @@ def test_walk_finds_the_shapes_it_must_catch(tmp_path):
         "web.TCPSite(runner, '0.0.0.0', 8080)\n"
         "HTTPServer((host, 0), H)\n"
         "self._application.run_webhook(listen='0.0.0.0')\n"
+        "await app.updater.start_webhook(listen=listen)\n"
         "uvicorn.run(app, host='127.0.0.1')\n"
         "HTTPServer(('127.0.0.1', 0), H)\n"
     )
     assert [n for _, n in server_sites(sample)] == [
-        "uvicorn.run", "web.TCPSite", "HTTPServer", "self._application.run_webhook"]
+        "uvicorn.run", "web.TCPSite", "HTTPServer", "self._application.run_webhook",
+        "app.updater.start_webhook"]
 
 
 @pytest.mark.skipif(not (SRC / "praisonai/praisonai").is_dir(), reason="monorepo checkout only")
