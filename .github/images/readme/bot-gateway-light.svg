@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 462" width="880" height="462" role="img" aria-label="Ten channels send messages into the praisonai-bot gateway, which handles pairing, limits, sessions, approvals, voice and reliable delivery, and runs an Agent, AgentTeam or AgentFlow.">
+<style>
+.eb{font:500 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#74756e;letter-spacing:.12em}
+.ebA{font:600 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9a6a12;letter-spacing:.12em}
+.h1{font:650 22px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#20211e}
+.h2{font:600 15px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#20211e}
+.tx{font:400 13px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#3c3d38}
+.sm{font:400 12px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#74756e}
+.mono{font:500 12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#20211e}
+.pill{fill:#fffef8;stroke:#b8b7ab;stroke-width:1}
+.pillHi{fill:#efe6cf;stroke:#9a6a12;stroke-width:1.2}
+.card{fill:#fffef8;stroke:#20211e;stroke-width:1.4}
+.soft{fill:#f3f0e6;stroke:#b8b7ab;stroke-width:1}
+.dash{fill:none;stroke:#9a6a12;stroke-width:1.4;stroke-dasharray:6 6}
+.wire{fill:none;stroke:#b8b7ab;stroke-width:1.4}
+.flow{fill:none;stroke:#9a6a12;stroke-width:1.6;stroke-dasharray:4 10;animation:flow 1.6s linear infinite}
+.flowR{fill:none;stroke:#9a6a12;stroke-width:1.6;stroke-dasharray:4 10;animation:flowR 1.6s linear infinite}
+.okb{fill:#e1eedf} .okt{font:600 11px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#2f6b45}
+.acb{fill:#f6ead0} .act{font:600 11px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#9a6a12}
+.dot{fill:#9a6a12}
+@keyframes flow{to{stroke-dashoffset:-28}}
+@keyframes flowR{to{stroke-dashoffset:28}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+<text class="eb" x="20" y="22">CHANNELS (10)</text>
+<text class="eb" x="246" y="22">PRAISONAI-BOT GATEWAY</text>
+<text class="eb" x="664" y="22">THE BRAIN</text>
+<text class="eb" x="20" y="48">CHAT APPS</text>
+<rect class="pill" x="20" y="58" width="170" height="28" rx="14.0"/><text class="tx" x="105.0" y="76.5" text-anchor="middle">Telegram</text>
+<rect class="pill" x="20" y="94" width="170" height="28" rx="14.0"/><text class="tx" x="105.0" y="112.5" text-anchor="middle">Discord</text>
+<rect class="pill" x="20" y="130" width="170" height="28" rx="14.0"/><text class="tx" x="105.0" y="148.5" text-anchor="middle">Slack</text>
+<rect class="pill" x="20" y="166" width="170" height="28" rx="14.0"/><text class="tx" x="105.0" y="184.5" text-anchor="middle">WhatsApp</text>
+<rect class="pill" x="20" y="202" width="170" height="28" rx="14.0"/><text class="tx" x="105.0" y="220.5" text-anchor="middle">Signal</text>
+<text class="eb" x="20" y="258">OTHER</text>
+<rect class="pill" x="20" y="268" width="170" height="28" rx="14.0"/><text class="tx" x="105.0" y="286.5" text-anchor="middle">Email</text>
+<rect class="pill" x="20" y="304" width="170" height="28" rx="14.0"/><text class="tx" x="105.0" y="322.5" text-anchor="middle">AgentMail</text>
+<rect class="pill" x="20" y="340" width="170" height="28" rx="14.0"/><text class="tx" x="105.0" y="358.5" text-anchor="middle">Linear</text>
+<rect class="pill" x="20" y="376" width="170" height="28" rx="14.0"/><text class="tx" x="105.0" y="394.5" text-anchor="middle">Webhook</text>
+<rect class="pill" x="20" y="412" width="170" height="28" rx="14.0"/><text class="tx" x="105.0" y="430.5" text-anchor="middle">Local</text>
+<text class="ebA" x="674" y="48">RUNS ONE OF</text>
+<rect class="pillHi" x="674" y="58" width="186" height="28" rx="14.0"/><text class="tx" x="767.0" y="76.5" text-anchor="middle">Agent</text>
+<rect class="pillHi" x="674" y="94" width="186" height="28" rx="14.0"/><text class="tx" x="767.0" y="112.5" text-anchor="middle">AgentTeam</text>
+<rect class="pillHi" x="674" y="130" width="186" height="28" rx="14.0"/><text class="tx" x="767.0" y="148.5" text-anchor="middle">AgentFlow</text>
+<rect class="card" x="246" y="38" width="372" height="408" rx="14"/>
+<text class="h1" x="268" y="72">Gateway</text>
+<rect class="okb" x="372.24" y="57" width="97.2" height="20" rx="10"/><circle class="okt" cx="382.24" cy="67" r="2.6"/><text class="okt" x="389.24" y="71">praisonai-bot</text>
+<rect class="soft" x="266" y="92" width="332" height="104" rx="10"/>
+<text class="h2" x="282" y="118">In</text>
+<text class="sm" x="308.8" y="118">every message</text>
+<circle class="dot" cx="288" cy="138" r="2.6"/><text class="tx" x="298" y="142">Pairing and allow-lists</text>
+<circle class="dot" cx="288" cy="160" r="2.6"/><text class="tx" x="298" y="164">Rate limits and de-duplication</text>
+<circle class="dot" cx="288" cy="182" r="2.6"/><text class="tx" x="298" y="186">One session per chat or room</text>
+<rect class="soft" x="266" y="208" width="332" height="104" rx="10"/>
+<text class="h2" x="282" y="234">Out</text>
+<text class="sm" x="317.2" y="234">every reply</text>
+<circle class="dot" cx="288" cy="254" r="2.6"/><text class="tx" x="298" y="258">Streaming and typing indicator</text>
+<circle class="dot" cx="288" cy="276" r="2.6"/><text class="tx" x="298" y="280">Voice in and out (STT, TTS)</text>
+<circle class="dot" cx="288" cy="298" r="2.6"/><text class="tx" x="298" y="302">Outbox, retries, dead-letter queue</text>
+<rect class="soft" x="266.0" y="324" width="105.3" height="50" rx="9"/>
+<text class="h2" x="278.0" y="346">Approvals</text>
+<text class="sm" x="278.0" y="364">in the chat</text>
+<rect class="soft" x="379.3" y="324" width="105.3" height="50" rx="9"/>
+<text class="h2" x="391.3" y="346">Media</text>
+<text class="sm" x="391.3" y="364" style="font-size:11px">files, albums</text>
+<rect class="soft" x="492.7" y="324" width="105.3" height="50" rx="9"/>
+<text class="h2" x="504.7" y="346">Rooms</text>
+<text class="sm" x="504.7" y="364">groups</text>
+<path class="wire" d="M190 72 H206 V426 H190"/>
+<path class="wire" d="M190 108 H206"/>
+<path class="wire" d="M190 144 H206"/>
+<path class="wire" d="M190 180 H206"/>
+<path class="wire" d="M190 216 H206"/>
+<path class="wire" d="M190 282 H206"/>
+<path class="wire" d="M190 318 H206"/>
+<path class="wire" d="M190 354 H206"/>
+<path class="wire" d="M190 390 H206"/>
+<path class="flow" d="M206 242 H246"/>
+<path class="wire" d="M674 72 H660 V144 H674"/>
+<path class="wire" d="M674 108 H660"/>
+<path class="flowR" d="M618 242 H660"/>
+</svg>

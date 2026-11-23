@@ -165,6 +165,18 @@ vLLM and LM Studio work the same way: use `hosted_vllm/` (vLLM) or `lm_studio/` 
 </tr>
 </table>
 
+<details>
+<summary><b>How the bot gateway works</b></summary>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/images/readme/bot-gateway-dark.svg" />
+    <img src=".github/images/readme/bot-gateway-light.svg" alt="Ten channels on the left (Telegram, Discord, Slack, WhatsApp, Signal, Email, AgentMail, Linear, Webhook, Local) feed the praisonai-bot gateway. Incoming messages get pairing, rate limits and one session per chat; replies get streaming, voice and an outbox with retries. Approvals, media and rooms are built in. The gateway runs an Agent, AgentTeam or AgentFlow." width="880" />
+  </picture>
+</p>
+
+</details>
+
 ## The Five-Layer Agent Stack
 
 Most frameworks hand you one or two layers and leave the rest as homework. PraisonAI covers **all five** — plus the outer layer that decides *where* your agent actually runs.
@@ -264,6 +276,18 @@ print(result.completion_reason)
 ```
 
 > **Doom-loop detection is on by default.** Repeated identical tool calls and A→B→A→B oscillation get caught — while a poller whose output keeps changing does not. [📖 Doom Loop Detection](https://praison.ai/docs/features/doom-loop-detection)
+
+<details>
+<summary><b>What happens in one turn</b></summary>
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/images/readme/agent-turn-dark.svg" />
+    <img src=".github/images/readme/agent-turn-light.svg" alt="One agent turn as a loop: build the prompt, call the model, approve risky tools, run the tool locally or in a sandbox, check it with guardrails and the loop guard, then answer or go round again, up to max_steps." width="880" />
+  </picture>
+</p>
+
+</details>
 
 ### Layer 5 · Graph — *Who runs when, and who checks whom?*
 
@@ -629,6 +653,13 @@ agents = Agents(agents=[research_agent, summarise_agent])
 agents.start()
 ```
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/images/readme/multi-agent-patterns-dark.svg" />
+    <img src=".github/images/readme/multi-agent-patterns-light.svg" alt="An AgentFlow runs steps in order, and seven patterns change how: route picks one branch, parallel runs steps at once, loop runs once per item, repeat runs until a condition holds, when or If branches on a check, include reuses another flow, and handoffs pass work to another agent." width="880" />
+  </picture>
+</p>
+
 ### 3. MCP (Model Context Protocol)
 
 ```python
@@ -652,6 +683,13 @@ agent = Agent(
     )
 )
 ```
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/images/readme/mcp-both-ways-dark.svg" />
+    <img src=".github/images/readme/mcp-both-ways-light.svg" alt="MCP both ways. Left: agents use any MCP server over stdio, SSE, Streamable HTTP or WebSocket, with OAuth sign-in and trust checks. Right: praisonai-mcp serves 85 tools to 22 clients such as Cursor, Claude Desktop, Claude Code, VS Code and Codex." width="880" />
+  </picture>
+</p>
 
 > 📖 [Full MCP docs](https://praison.ai/docs/mcp/transports) — stdio, HTTP, WebSocket, SSE transports
 
