@@ -5,7 +5,7 @@ Provides early validation of framework availability to fail fast at CLI entry
 rather than inside run() methods after expensive setup work.
 """
 
-from .registry import get_default_registry, get_install_hint
+from .registry import get_default_registry, get_install_hint, removed_framework_message
 
 
 def assert_framework_available(name: str, *, registry=None) -> None:
@@ -23,6 +23,15 @@ def assert_framework_available(name: str, *, registry=None) -> None:
         ImportError: If framework is not available with actionable install hint
     """
     registry = registry or get_default_registry()
+
+    # Removed frameworks (e.g. 'ag2', #6661) are rejected with a clear error
+    # naming the supported frameworks. Checking before the availability probe
+    # keeps the generic install hint below from telling users to
+    # `pip install 'praisonai-frameworks[ag2]'`, which cannot help: the AG2
+    # adapter is an unimplemented stub.
+    message = removed_framework_message(name, registry=registry)
+    if message is not None:
+        raise ImportError(message)
 
     if registry.is_available(name):
         return

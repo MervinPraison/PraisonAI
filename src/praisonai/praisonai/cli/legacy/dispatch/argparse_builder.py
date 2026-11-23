@@ -83,12 +83,12 @@ def build_argument_parser(in_test_env: bool):
     try:
         list_framework_choices = _fw_registry_module().list_framework_choices
         _framework_choices = list_framework_choices(include_unavailable=True) or [
-            "ag2", "autogen", "crewai", "praisonai",
+            "autogen", "crewai", "praisonai",
         ]
     except ImportError:
         # Only fall back to the static list when the adapter layer itself
         # cannot be imported; genuine registry discovery errors should surface.
-        _framework_choices = ["ag2", "autogen", "crewai", "praisonai"]
+        _framework_choices = ["autogen", "crewai", "praisonai"]
     parser.add_argument(
         "--framework",
         choices=_framework_choices,

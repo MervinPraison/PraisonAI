@@ -219,3 +219,30 @@ class TestAssertFrameworkAvailableSucceeds:
 
             result = assert_framework_available("praisonai")
             assert result is None
+
+
+class TestRemovedFrameworkAg2:
+    """framework='ag2' is rejected with a clear error, not an install hint (#6661)."""
+
+    def test_ag2_rejected_with_supported_frameworks(self):
+        with pytest.raises(ImportError, match="not supported") as exc_info:
+            assert_framework_available("ag2")
+        message = str(exc_info.value)
+        assert "Supported frameworks" in message
+        assert "praisonai" in message
+        # Installing the extra cannot help: the AG2 adapter is a stub.
+        assert "praisonai-frameworks[ag2]" not in message
+        assert "pip install" not in message
+
+    def test_ag2_rejected_even_when_registry_reports_unavailable(self):
+        # The rejection must not depend on the availability probe: with the
+        # probe mocked to "unavailable", the old code fell through to the
+        # generic `pip install 'praisonai-frameworks[ag2]'` hint.
+        with patch("praisonai.framework_adapters.validators.get_default_registry") as mock_get:
+            mock_registry = MagicMock()
+            mock_registry.is_available.return_value = False
+            mock_registry.create.return_value.install_hint = None
+            mock_get.return_value = mock_registry
+
+            with pytest.raises(ImportError, match="not supported"):
+                assert_framework_available("ag2")

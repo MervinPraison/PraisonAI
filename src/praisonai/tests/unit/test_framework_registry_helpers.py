@@ -145,3 +145,27 @@ def test_framework_from_config_uses_registry_default():
     registry = FrameworkAdapterRegistry()
     assert framework_from_config({}, registry=registry) == registry.pick_default().lower()
     assert framework_from_config({"framework": "CrewAI"}, registry=registry) == "crewai"
+
+
+def test_ag2_framework_rejected_by_create():
+    """framework='ag2' is rejected: the AG2 adapter is not implemented (#6661)."""
+    from praisonai.framework_adapters.registry import FrameworkAdapterRegistry
+
+    registry = FrameworkAdapterRegistry(discover_entry_points=False)
+    with pytest.raises(ValueError, match="not supported") as exc_info:
+        registry.create("ag2")
+    message = str(exc_info.value)
+    assert "Supported frameworks" in message
+    assert "praisonai" in message
+    # Never point users at an install that cannot help.
+    assert "praisonai-frameworks[ag2]" not in message
+    assert "pip install" not in message
+
+
+def test_ag2_not_in_framework_choices():
+    """'ag2' is no longer an accepted framework value (#6661)."""
+    from praisonai.framework_adapters.registry import list_framework_choices
+
+    choices = list_framework_choices(include_unavailable=True)
+    assert "ag2" not in choices
+    assert "praisonai" in choices
