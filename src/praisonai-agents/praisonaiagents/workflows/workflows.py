@@ -1993,7 +1993,8 @@ class AgentFlow:
                 # A nested step with on_error="stop" halts the whole workflow,
                 # not just the parallel block: honor the propagated stop signal.
                 if parallel_result.get("stop"):
-                    self.status = "failed"
+                    if parallel_result.get("failed", True):
+                        self.status = "failed"
                     if verbose:
                         print("🛑 Workflow stopped by nested parallel step")
                     break
@@ -2029,7 +2030,8 @@ class AgentFlow:
                 # A speaker with on_error="stop" halts the whole workflow, not
                 # just the discussion: honor the propagated stop signal here.
                 if discussion_result.get("stop"):
-                    self.status = "failed"
+                    if discussion_result.get("failed", True):
+                        self.status = "failed"
                     if verbose:
                         print("🛑 Workflow stopped by nested discussion step")
                     break
@@ -3403,6 +3405,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 # Propagate a nested stop request so an on_error="stop" step
                 # inside the parallel block halts the enclosing workflow.
                 "stop": parallel_result.get("stop", False),
+                "failed": parallel_result.get("failed", False),
                 "variables": parallel_result.get("variables", all_variables)
             }
         
@@ -3442,6 +3445,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 # discussion, and so a nested Discussion is not stringified into
                 # a Task action by _normalize_single_step.
                 "stop": discussion_result.get("stop", False),
+                "failed": discussion_result.get("failed", False),
                 "variables": discussion_result.get("variables", all_variables)
             }
         
@@ -4085,6 +4089,7 @@ CONCISE SUMMARY:"""
         succeeded = {}   # idx -> {"result": {...}, "delta": {...}, "stop": bool}
         failed = {}      # idx -> {"error": e, "delta": {...} | None, "stop": bool}
         parallel_stopped = False
+        parallel_failed = False
 
         # Branch threads cannot be killed: the stop scope (set on exit) makes any
         # agent turn still running after timeout/fail_fast/caller exit stop at
@@ -4177,6 +4182,7 @@ CONCISE SUMMARY:"""
                                 "output": None,
                                 "delta": None,
                                 "stop": branch_stop,
+                                "failed": step_result.get("failed", False),
                             }
                             continue
                         succeeded[idx] = {
@@ -4184,6 +4190,7 @@ CONCISE SUMMARY:"""
                             "output": step_result["output"],
                             "delta": self._branch_variable_delta(step_result.get("variables")),
                             "stop": branch_stop,
+                            "failed": step_result.get("failed", False),
                         }
                         continue
 
@@ -4240,8 +4247,10 @@ CONCISE SUMMARY:"""
                     branch_deltas.append((idx, info["delta"]))
                 if info["stop"]:
                     parallel_stopped = True
+                    parallel_failed = parallel_failed or info["failed"]
             elif idx in failed:
                 info = failed[idx]
+                parallel_failed = True
                 errors.append({"step": idx, "error": info["error"]})
                 # partial_ok: record the failure but keep going; fold neither the
                 # exception text into outputs nor skip the index alignment.
@@ -4272,7 +4281,7 @@ CONCISE SUMMARY:"""
         if verbose:
             print(f"✅ Parallel complete: {len(outputs)} results")
         
-        return {"steps": results, "output": combined_output, "variables": all_variables, "stop": parallel_stopped}
+        return {"steps": results, "output": combined_output, "variables": all_variables, "stop": parallel_stopped, "failed": parallel_failed}
     
     @_replay_pattern("loop")
     def _execute_loop(
@@ -4688,6 +4697,7 @@ CONCISE SUMMARY:"""
         transcript = []
         stopped = False
         discussion_stopped = False
+        discussion_failed = False
 
         if verbose:
             names = [getattr(a, "name", getattr(a, "__name__", str(a))) for a in discussion.agents]
@@ -4731,6 +4741,7 @@ CONCISE SUMMARY:"""
                 if step_result.get("stop"):
                     stopped = True
                     discussion_stopped = True
+                    discussion_failed = step_result.get("failed", True)
                     break
 
                 if discussion.until:
@@ -4760,6 +4771,7 @@ CONCISE SUMMARY:"""
             "output": output,
             "variables": {"discussion_transcript": "\n".join(transcript)},
             "stop": discussion_stopped,
+            "failed": discussion_failed,
         }
 
     @_replay_pattern("repeat")

@@ -2,7 +2,7 @@ import asyncio
 
 import pytest
 
-from praisonaiagents.workflows import StepResult, Task, Workflow, loop, repeat, route, when
+from praisonaiagents.workflows import Discussion, StepResult, Task, Workflow, loop, parallel, repeat, route, when
 
 
 @pytest.mark.parametrize("async_run", [False, True])
@@ -326,5 +326,82 @@ def test_loop_replay_records_stop_status(monkeypatch, failure):
 
     task = Task(name="step", handler=step, on_error="stop", max_retries=0)
     result = Workflow(steps=[loop(task, over="items")], variables={"items": ["a"]}).start("input")
+    assert result["status"] == ("failed" if failure else "completed")
+    assert any(status == ("failed" if failure else "completed") and (failure or output == "done") for status, output in events)
+
+
+@pytest.mark.parametrize("async_run", [False, True])
+@pytest.mark.parametrize("nested", [False, True])
+def test_discussion_normal_stop_preserves_transcript(async_run, nested):
+    calls = []
+
+    def stop(ctx):
+        calls.append("stop")
+        return StepResult(output="done", stop_workflow=True)
+
+    def later(ctx):
+        calls.append("later")
+        return "later"
+
+    discussion = Discussion([stop, later], rounds=2)
+    body = repeat(discussion, max_iterations=2) if nested else discussion
+    flow = Workflow(steps=[body, later])
+    result = asyncio.run(flow.astart("input")) if async_run else flow.start("input")
+    assert result["status"] == "completed"
+    assert result["output"] == "done"
+    assert result["variables"]["discussion_transcript"] == "stop: done"
+    assert calls == ["stop"]
+
+
+@pytest.mark.parametrize("async_run", [False, True])
+@pytest.mark.parametrize("failure", [False, True])
+def test_parallel_stop_keeps_concurrent_order_and_failures(async_run, failure):
+    from threading import Barrier
+
+    barrier = Barrier(2, timeout=5)
+    calls = []
+
+    def stop(ctx):
+        calls.append("stop")
+        barrier.wait()
+        return StepResult(output="done", stop_workflow=True)
+
+    def peer(ctx):
+        calls.append("peer")
+        barrier.wait()
+        if failure:
+            raise ValueError("synthetic failure")
+        return "peer"
+
+    def later(ctx):
+        calls.append("later")
+        return "later"
+
+    task = Task(name="peer", handler=peer, on_error="stop", max_retries=0)
+    flow = Workflow(steps=[parallel([stop, task], max_workers=2), later])
+    result = asyncio.run(flow.astart("input")) if async_run else flow.start("input")
+    assert result["status"] == ("failed" if failure else "completed")
+    assert result["output"] == (None if failure else "done\n---\npeer")
+    assert result["variables"]["parallel_outputs"] == (["done", None] if failure else ["done", "peer"])
+    assert sorted(calls) == ["peer", "stop"]
+
+
+@pytest.mark.parametrize("pattern", ["parallel", "discussion"])
+@pytest.mark.parametrize("failure", [False, True])
+def test_remaining_pattern_replay_stop_status(monkeypatch, pattern, failure):
+    import praisonaiagents.workflows.workflows as workflows
+
+    events = []
+    monkeypatch.setattr(workflows, "_replay_step_begin", lambda *args, **kwargs: {})
+    monkeypatch.setattr(workflows, "_replay_step_end", lambda span, status, output=None, *args, **kwargs: events.append((status, output)))
+
+    def handler(ctx):
+        if failure:
+            raise ValueError("synthetic failure")
+        return StepResult(output="done", stop_workflow=True)
+
+    task = Task(name="handler", handler=handler, on_error="stop", max_retries=0)
+    body = parallel([task]) if pattern == "parallel" else Discussion([task], rounds=1)
+    result = Workflow(steps=[body]).start("input")
     assert result["status"] == ("failed" if failure else "completed")
     assert any(status == ("failed" if failure else "completed") and (failure or output == "done") for status, output in events)
