@@ -2011,7 +2011,8 @@ class AgentFlow:
                 # A nested step with on_error="stop" halts the whole workflow,
                 # not just the loop: honor the propagated stop signal here.
                 if loop_result.get("stop"):
-                    self.status = "failed"
+                    if loop_result.get("failed", True):
+                        self.status = "failed"
                     if verbose:
                         print("🛑 Workflow stopped by nested loop step")
                     break
@@ -3388,6 +3389,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 # Propagate a nested stop request so an on_error="stop" step
                 # inside the loop halts the enclosing workflow, not just the loop.
                 "stop": loop_result.get("stop", False),
+                "failed": loop_result.get("failed", False),
                 "variables": loop_result.get("variables", all_variables)
             }
         
@@ -4298,6 +4300,7 @@ CONCISE SUMMARY:"""
         # Tracks whether any iteration requested a workflow stop (on_error="stop")
         # so the signal can propagate to the enclosing workflow, not just this loop.
         loop_stopped = False
+        loop_failed = False
         
         # Get items from variable, CSV, or file
         if loop_step.over:
@@ -4396,6 +4399,7 @@ CONCISE SUMMARY:"""
                     iteration_output = opt_prev
                     iteration_results = []
                     iteration_stopped = False
+                    iteration_failed = False
                     for step_idx, step in enumerate(steps_to_run):
                         step_result = self._execute_single_step_internal(
                             step, iteration_output, input, loop_vars, model, False, step_idx, stream=False, depth=depth+1
@@ -4413,6 +4417,7 @@ CONCISE SUMMARY:"""
                         # this iteration instead of feeding later steps forward.
                         if step_result.get("stop"):
                             iteration_stopped = True
+                            iteration_failed = step_result.get("failed", True)
                             break
                     
                     # Return final output (last step's output). Surface the stop
@@ -4422,6 +4427,7 @@ CONCISE SUMMARY:"""
                         "output": iteration_output,
                         "steps": iteration_results,
                         "stop": iteration_stopped,
+                        "failed": iteration_failed,
                         # Only what this iteration actually wrote, so untouched
                         # variables keep the parent's own objects instead of being
                         # replaced by this iteration's deep-copied clones.
@@ -4452,6 +4458,7 @@ CONCISE SUMMARY:"""
                     except Exception as e:
                         logger.error(f"Parallel loop iteration {idx} failed: {e}")
                         self.status = "failed"
+                        loop_failed = True
                         indexed_results.append((idx, {"step": f"loop_{idx}", "output": None, "error": str(e)}))
                 
                 # Sort by index to maintain order
@@ -4464,6 +4471,7 @@ CONCISE SUMMARY:"""
                     iteration_deltas.append((idx, step_result.get("variable_delta") or {}))
                     if step_result.get("stop"):
                         loop_stopped = True
+                        loop_failed = loop_failed or step_result.get("failed", True)
 
             # Merge each iteration's writes back into the shared scope. Without
             # this every output_variable set inside the loop body was written to a
@@ -4535,6 +4543,7 @@ CONCISE SUMMARY:"""
                         # iteration instead of feeding later steps the error forward.
                         if step_result.get("stop"):
                             iteration_stopped = True
+                            loop_failed = step_result.get("failed", True)
                             break
 
                     results.append({"step": f"loop_{idx}", "output": iteration_output})
@@ -4586,7 +4595,7 @@ CONCISE SUMMARY:"""
         if verbose:
             print(f"📦 Loop stored {len(outputs)} results in variable: '{output_var_name}'")
         
-        return {"steps": results, "output": combined_output, "variables": all_variables, "stop": loop_stopped}
+        return {"steps": results, "output": combined_output, "variables": all_variables, "stop": loop_stopped, "failed": loop_failed}
     
     def _parse_list_from_string(self, text: str) -> List[Any]:
         """
