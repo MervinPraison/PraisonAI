@@ -913,7 +913,7 @@ def _replay_pattern(pattern):
             is_dict = isinstance(result, dict)
             _replay_step_end(
                 span,
-                "failed" if is_dict and result.get("stop") else "completed",
+                "failed" if is_dict and result.get("failed", result.get("stop")) else "completed",
                 result.get("output") if is_dict else None,
             )
             return result
@@ -2043,7 +2043,8 @@ class AgentFlow:
                 previous_output = repeat_result["output"]
                 all_variables.update(repeat_result.get("variables", {}))
                 if repeat_result.get("stop"):
-                    self.status = "failed"
+                    if repeat_result.get("failed", True):
+                        self.status = "failed"
                     if verbose:
                         print("🛑 Workflow stopped by nested repeat step")
                     break
@@ -3329,11 +3330,15 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             if _replay is not None:
                 _replay["status"] = "cached"
 
-        return _with_step_cache(
+        result = _with_step_cache(
             getattr(self, "_step_cache", None),
             step, (previous_output, input, all_variables), _run_uncached,
             verbose=verbose, on_hit=_on_hit,
         )
+        # Older successful cache entries predate the failure discriminator.
+        if not result.get("error"):
+            result.setdefault("failed", False)
+        return result
 
     def _execute_single_step_uncached(
         self, 
@@ -3416,6 +3421,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 "step": f"repeat_{index}",
                 "output": repeat_result.get("output", ""),
                 "stop": repeat_result.get("stop", False),
+                "failed": repeat_result.get("failed", False),
                 "variables": repeat_result.get("variables", all_variables)
             }
         
@@ -3574,6 +3580,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                     "step": normalized.name,
                     "output": output if output is not None else previous_output,
                     "stop": True,
+                    "failed": True,
                     "error": str(step_error),
                     "variables": all_variables
                 }
@@ -3604,6 +3611,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             "step": normalized.name,
             "output": output,
             "stop": state["stop"],
+            "failed": False,
             "variables": all_variables
         }
 
@@ -4755,6 +4763,7 @@ CONCISE SUMMARY:"""
         results = []
         output = previous_output
         repeat_stopped = False
+        repeat_failed = False
         
         if verbose:
             print(f"🔄 Repeating up to {repeat_step.max_iterations} times...")
@@ -4789,6 +4798,7 @@ CONCISE SUMMARY:"""
                 # discard the stop request and let the flow continue.
                 if step_result.get("stop"):
                     repeat_stopped = True
+                    repeat_failed = step_result.get("failed", True)
                     break
             if len(steps) == 1 and last_name is not None:
                 results.append({"step": f"{last_name}_{iteration}", "output": output})
@@ -4812,7 +4822,7 @@ CONCISE SUMMARY:"""
                     logger.error(f"Repeat until condition failed: {e}")
         
         all_variables["repeat_iterations"] = iteration + 1 if repeat_step.max_iterations > 0 else 0
-        return {"steps": results, "output": output, "variables": all_variables, "stop": repeat_stopped}
+        return {"steps": results, "output": output, "variables": all_variables, "stop": repeat_stopped, "failed": repeat_failed}
     
     @_replay_pattern("if")
     def _execute_if(
