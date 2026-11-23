@@ -20,6 +20,9 @@ export interface LLMResponse {
     }>;
 }
 
+/** Request-scoped provider usage, absent when the provider did not report it. */
+export type PromptUsageObserver = (model: string | undefined, promptTokens: number | undefined) => void;
+
 // Using OpenAI's types for compatibility
 type ChatRole = 'system' | 'user' | 'assistant' | 'tool';
 
@@ -211,7 +214,8 @@ export class OpenAIService {
         tools?: ChatCompletionTool[],
         tool_choice?: ChatCompletionToolChoiceOption,
         responseFormat?: ResponseFormat,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        onUsage?: PromptUsageObserver
     ): Promise<string> {
         await Logger.startSpinner('Generating text with OpenAI...');
         
@@ -228,18 +232,18 @@ export class OpenAIService {
             // Convert tools to OpenAI format if provided
             const openAITools = tools ? tools.map(convertToOpenAITool) : undefined;
             
-            const completion = await this.getClient().then(client =>
-                client.chat.completions.create({
+            const client = await this.getClient();
+            const completion = await client.chat.completions.create({
                     model: this.model,
                     ...this.temperatureParam(temperature),
                     messages: openAIMessages,
                     tools: openAITools,
                     tool_choice,
                     ...(responseFormat ? { response_format: responseFormat } : {})
-                }, { signal })
-            );
+                }, { signal });
 
             const message = completion.choices[0]?.message;
+            onUsage?.(/^https:\/\/api\.openai\.com\/v1\/?$/.test(client.baseURL) ? completion.model : undefined, completion.usage?.prompt_tokens);
             if (!message) {
                 throw new Error('No response from OpenAI');
             }
@@ -272,7 +276,8 @@ export class OpenAIService {
         tools?: ChatCompletionTool[],
         tool_choice?: ChatCompletionToolChoiceOption,
         responseFormat?: ResponseFormat,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        onUsage?: PromptUsageObserver
     ): Promise<LLMResponse> {
         await Logger.startSpinner('Generating chat response...');
 
@@ -283,18 +288,18 @@ export class OpenAIService {
             // Convert tools to OpenAI format if provided
             const openAITools = tools ? tools.map(convertToOpenAITool) : undefined;
             
-            const completion = await this.getClient().then(client =>
-                client.chat.completions.create({
+            const client = await this.getClient();
+            const completion = await client.chat.completions.create({
                     model: this.model,
                     ...this.temperatureParam(temperature),
                     messages: openAIMessages,
                     tools: openAITools,
                     tool_choice,
                     ...(responseFormat ? { response_format: responseFormat } : {})
-                }, { signal })
-            );
+                }, { signal });
 
             const response = completion.choices[0]?.message;
+            onUsage?.(/^https:\/\/api\.openai\.com\/v1\/?$/.test(client.baseURL) ? completion.model : undefined, completion.usage?.prompt_tokens);
             if (!response) {
                 throw new Error('No response from OpenAI');
             }
@@ -411,7 +416,8 @@ export class OpenAIService {
         messages: ChatMessage[],
         temperature: number = 0.7,
         onToken: (token: string) => void,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        onUsage?: PromptUsageObserver
     ): Promise<string> {
         await Logger.debug('Starting chat stream with messages...', {
             model: this.model,
@@ -421,18 +427,19 @@ export class OpenAIService {
         try {
             const openAIMessages = messages.map(convertToOpenAIMessage);
             
-            const stream = await this.getClient().then(client =>
-                client.chat.completions.create({
+            const client = await this.getClient();
+            const stream = await client.chat.completions.create({
                     model: this.model,
                     ...this.temperatureParam(temperature),
                     messages: openAIMessages,
-                    stream: true
-                }, { signal })
-            );
+                    stream: true,
+                    stream_options: onUsage && /^https:\/\/api\.openai\.com\/v1\/?$/.test(client.baseURL) ? { include_usage: true } : undefined,
+                }, { signal });
 
             let fullResponse = '';
             
             for await (const chunk of stream) {
+                if (chunk.usage) onUsage?.(/^https:\/\/api\.openai\.com\/v1\/?$/.test(client.baseURL) ? chunk.model : undefined, chunk.usage.prompt_tokens);
                 const delta = chunk.choices[0]?.delta;
                 if (delta?.content) {
                     const token = delta.content;
@@ -465,7 +472,8 @@ export class OpenAIService {
         onToken?: (token: string) => void,
         tool_choice?: ChatCompletionToolChoiceOption,
         responseFormat?: ResponseFormat,
-        signal?: AbortSignal
+        signal?: AbortSignal,
+        onUsage?: PromptUsageObserver
     ): Promise<LLMResponse> {
         await Logger.debug('Starting chat stream with tools...', {
             model: this.model,
@@ -476,22 +484,23 @@ export class OpenAIService {
             const openAIMessages = messages.map(convertToOpenAIMessage);
             const openAITools = tools ? tools.map(convertToOpenAITool) : undefined;
 
-            const stream = await this.getClient().then(client =>
-                client.chat.completions.create({
+            const client = await this.getClient();
+            const stream = await client.chat.completions.create({
                     model: this.model,
                     ...this.temperatureParam(temperature),
                     messages: openAIMessages,
                     stream: true,
+                    stream_options: onUsage && /^https:\/\/api\.openai\.com\/v1\/?$/.test(client.baseURL) ? { include_usage: true } : undefined,
                     tools: openAITools,
                     tool_choice,
                     ...(responseFormat ? { response_format: responseFormat } : {})
-                }, { signal })
-            );
+                }, { signal });
 
             let fullResponse = '';
             const toolCalls: Record<number, any> = {};
 
             for await (const chunk of stream) {
+                if (chunk.usage) onUsage?.(/^https:\/\/api\.openai\.com\/v1\/?$/.test(client.baseURL) ? chunk.model : undefined, chunk.usage.prompt_tokens);
                 const delta = chunk.choices[0]?.delta;
                 if (!delta) continue;
 

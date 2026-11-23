@@ -207,6 +207,7 @@ export class AISDKBackend implements LLMProvider {
               args: tc.args ?? tc.input
             })),
             usage: result.usage,
+            response: result.response,
             finishReason: result.finishReason
           });
         } finally {
@@ -342,12 +343,15 @@ export class AISDKBackend implements LLMProvider {
             }
           }
           
-          // Yield final chunk with usage
+          // Yield final chunk with usage and the provider-reported model.
+          const finalUsage = options.includeResponseMetadata ? await finalResult.usage : finalResult.usage;
+          const responseMetadata = options.includeResponseMetadata ? await finalResult.response : undefined;
           yield {
-            usage: finalResult.usage ? {
-              promptTokens: finalResult.usage.promptTokens,
-              completionTokens: finalResult.usage.completionTokens,
-              totalTokens: finalResult.usage.promptTokens + finalResult.usage.completionTokens
+            model: responseMetadata?.modelId,
+            usage: finalUsage ? {
+              promptTokens: finalUsage.promptTokens ?? finalUsage.inputTokens,
+              completionTokens: finalUsage.completionTokens ?? finalUsage.outputTokens,
+              totalTokens: finalUsage.totalTokens ?? ((finalUsage.promptTokens ?? finalUsage.inputTokens) + (finalUsage.completionTokens ?? finalUsage.outputTokens))
             } : undefined,
             finishReason: finalResult.finishReason
           };

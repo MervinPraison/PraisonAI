@@ -45,6 +45,7 @@
 // AgentTeam is the primary class (Python parity), Agents/PraisonAIAgents are silent aliases
 export { Agent, AgentTeam, Agents, PraisonAIAgents, Router } from './agent';
 export type { SimpleAgentConfig, AgentTeamConfig, PraisonAIAgentsConfig, SimpleRouterConfig, SimpleRouteConfig, AgentEvent, AgentStreamOptions, StopReason, AgentMessage } from './agent';
+export type { TurnContextUsage } from './agent';
 export type {
   AgentChatOptions, AgentChatCallOptions, AgentExecuteTask, AgentTaskLike,
   AgentRetryConfig, AgentMemoryStore, AgentGuardrailFunction, AgentGuardrailEntry,

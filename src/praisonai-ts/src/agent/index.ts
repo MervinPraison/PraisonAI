@@ -15,6 +15,7 @@ export { Agent } from './simple';
 // see the note at the bottom of ./simple.
 export { AgentTeam, PraisonAIAgents, Agents } from './team';
 export type { SimpleAgentConfig, AgentTeamConfig, PraisonAIAgentsConfig, AgentEvent, AgentStreamOptions, StopReason, AgentMessage } from './simple';
+export type { TurnContextUsage } from './context-usage';
 // Python-parity surfaces (see src/praisonai-ts/SIGNATURE_PARITY.md)
 export type {
   AgentChatOptions, AgentChatCallOptions, AgentExecuteTask, AgentTaskLike,

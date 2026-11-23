@@ -1,4 +1,6 @@
 import { OpenAIService } from '../llm/openai';
+import { turnContextUsage, type TurnContextUsage } from './context-usage';
+export type { TurnContextUsage } from './context-usage';
 import { Logger } from '../utils/logger';
 import type { ChatCompletionTool } from 'openai/resources/chat/completions';
 import type { DbAdapter, DbMessage, DbRun } from '../db/types';
@@ -558,6 +560,8 @@ function joinContext(context: string | string[] | null | undefined): string | un
  * the keyword arguments of Python's `Agent.chat`.
  */
 export interface AgentChatOptions {
+  /** Final request context occupancy, or null when reliable usage or window data is unavailable. */
+  onContextUsage?: (usage: TurnContextUsage | null) => void;
   /** Python parity: temperature (Optional[float]). Sampling temperature for this call. */
   temperature?: number;
   /** Python parity: tools (Optional[List[Any]]). Tools for this call only (replaces the agent's). */
@@ -2535,8 +2539,19 @@ export class Agent {
     // One place to record what the agent produced, so `getResult()` cannot
     // drift away from the turn machinery as entry points are added. A turn
     // that throws leaves the previous result in place rather than clearing it.
-    const result = await this.runTurnUnrecorded(prompt, previousResult, onToken, signal, onEvent, options);
+    let snapshot: TurnContextUsage | null = null;
+    const observe = options?.onContextUsage
+      ? (model: string | undefined, tokens: number | undefined) => { snapshot = turnContextUsage(model, tokens); }
+      : undefined;
+    let result: string;
+    try {
+      result = await this.runTurnUnrecorded(prompt, previousResult, onToken, signal, onEvent, options, observe);
+    } catch (error) {
+      options?.onContextUsage?.(null);
+      throw error;
+    }
     this._lastResult = result;
+    options?.onContextUsage?.(snapshot);
     return result;
   }
 
@@ -2548,6 +2563,7 @@ export class Agent {
     signal: AbortSignal | undefined,
     onEvent: ((event: AgentEvent) => void) | undefined,
     options?: AgentChatOptions,
+    observe?: (model: string | undefined, tokens: number | undefined) => void,
   ): Promise<string> {
     // Steering guidance is folded in first, exactly where Python injects it at
     // the top of `chat()` -- before the backend/runtime branches, so a turn
@@ -2583,12 +2599,12 @@ export class Agent {
     let attemptPrompt = turn.prompt;
     for (let attempt = 0; ; attempt++) {
       const response = await this.withRetry(
-        () => this.runTurnOnce(attemptPrompt, undefined, countingSink, signal, onEvent, turn),
+        () => this.runTurnOnce(attemptPrompt, undefined, countingSink, signal, onEvent, turn, observe),
         // A retry after tokens reached the caller would replay them; a
         // cancelled run is not a transient failure.
         () => !emitted && !abortSignal?.aborted,
       );
-      const reflected = await this.applyReflection(turn, response, signal);
+      const reflected = await this.applyReflection(turn, response, signal, observe);
       try {
         return await this.finishTurn(turn.userPrompt, reflected, turn.task);
       } catch (e) {
@@ -2620,8 +2636,9 @@ export class Agent {
    */
   private async completeOnce(
     messages: Array<{ role: string; content: any; [key: string]: unknown }>,
-    opts: { model?: string; schema?: Record<string, any>; temperature?: number; signal?: AbortSignal } = {},
+    opts: { model?: string; schema?: Record<string, any>; temperature?: number; signal?: AbortSignal; observe?: (model: string | undefined, tokens: number | undefined) => void } = {},
   ): Promise<string> {
+    opts.observe?.(undefined, undefined);
     const temperature = opts.temperature ?? this.defaultTemperature;
     const model = opts.model;
     const hasCustomEndpoint = this._baseURL !== undefined && this._baseURL !== '';
@@ -2639,11 +2656,12 @@ export class Agent {
           return typeof structured.object === 'string' ? structured.object : JSON.stringify(structured.object);
         }
         const result = await backend.generateText({ messages: messages as any, temperature, signal: opts.signal });
+        opts.observe?.(backend.providerId === 'openai' ? result.raw?.response?.modelId : undefined, result.raw?.usage?.promptTokens ?? result.raw?.usage?.inputTokens);
         return result.text ?? '';
       }
       const response = await this.llmService.generateChat(
         messages as any, temperature, undefined, undefined,
-        opts.schema ? this.getResponseFormat(opts.schema) : undefined, opts.signal,
+        opts.schema ? this.getResponseFormat(opts.schema) : undefined, opts.signal, opts.observe,
       );
       return response.content ?? '';
     }
@@ -2659,7 +2677,7 @@ export class Agent {
       });
       const response = await service.generateChat(
         messages as any, temperature, undefined, undefined,
-        opts.schema ? this.getResponseFormat(opts.schema) : undefined, opts.signal,
+        opts.schema ? this.getResponseFormat(opts.schema) : undefined, opts.signal, opts.observe,
       );
       return response.content ?? '';
     }
@@ -2672,6 +2690,7 @@ export class Agent {
       return typeof structured.object === 'string' ? structured.object : JSON.stringify(structured.object);
     }
     const result = await resolved.provider.generateText({ messages: messages as any, temperature, signal: opts.signal });
+    opts.observe?.(resolved.provider.providerId === 'openai' ? result.raw?.response?.modelId : undefined, result.raw?.usage?.promptTokens ?? result.raw?.usage?.inputTokens);
     return result.text ?? '';
   }
 
@@ -2682,7 +2701,7 @@ export class Agent {
    * `maxIterations` rounds, and a "yes" only counts once `minIterations`
    * reflections have run.
    */
-  private async applyReflection(turn: PreparedTurn, response: string, signal?: AbortSignal): Promise<string> {
+  private async applyReflection(turn: PreparedTurn, response: string, signal?: AbortSignal, observe?: (model: string | undefined, tokens: number | undefined) => void): Promise<string> {
     this.lastReflections = [];
     const config = this._reflectionConfig;
     if (!config) return response;
@@ -2705,6 +2724,7 @@ export class Agent {
         schema,
         temperature: turn.temperature,
         signal: signal ?? this.signal,
+        observe: schema ? undefined : observe,
       }),
       onReflection: (round) => {
         void Logger.debug(`Agent ${this.name} self reflection`, round);
@@ -3064,7 +3084,13 @@ export class Agent {
     signal: AbortSignal | undefined,
     onEvent: ((event: AgentEvent) => void) | undefined,
     turn: PreparedTurn,
+    observe?: (model: string | undefined, tokens: number | undefined) => void,
   ): Promise<string> {
+    observe?.(undefined, undefined);
+    const observeBackend = (result: { raw?: any }, provider: string) => {
+      const raw = result.raw;
+      observe?.(provider === 'openai' ? raw?.response?.modelId : undefined, raw?.usage?.promptTokens ?? raw?.usage?.inputTokens);
+    };
     await Logger.debug(`Agent ${this.name} starting with prompt: ${prompt}`);
 
     // Explicit per-call signal wins over the agent-level default (mirrors
@@ -3130,6 +3156,7 @@ export class Agent {
 
           while (continueConversation && iterations < maxIterations) {
             iterations++;
+            observe?.(undefined, undefined);
 
             // Stop between round-trips if cancelled (before another model call
             // or another batch of tool executions).
@@ -3148,7 +3175,7 @@ export class Agent {
             //
             // StreamChunk carries text AND toolCalls, and StreamTextOptions
             // extends GenerateTextOptions, so one shape covers both.
-            let result: { text: string; toolCalls?: any[] };
+            let result: { text: string; toolCalls?: any[]; raw?: any };
             if (streaming) {
               const stream = await backend.streamText({
                 messages,
@@ -3156,10 +3183,12 @@ export class Agent {
                 tools: toolDefinitions,
                 toolChoice: toolChoice ?? 'auto',
                 signal: abortSignal,
+                includeResponseMetadata: !!observe,
               });
               let streamedText = '';
               const streamedCalls: any[] = [];
               for await (const chunk of stream) {
+                if (chunk.usage) observe?.(backend.providerId === 'openai' ? chunk.model : undefined, chunk.usage.promptTokens);
                 if (chunk.text) {
                   emitToken(chunk.text);
                   streamedText += chunk.text;
@@ -3177,6 +3206,7 @@ export class Agent {
                 toolChoice: toolChoice ?? 'auto',
                 signal: abortSignal,
               });
+              observeBackend(result, backend.providerId);
             }
 
             messages.push({
@@ -3196,12 +3226,14 @@ export class Agent {
               // mirrors the OpenAI native path threading responseFormat through
               // the loop.
               if (outputSchema) {
+                observe?.(undefined, undefined);
                 const structured = await backend.generateObject({
                   messages,
                   schema: outputSchema,
                   temperature,
                   signal: abortSignal,
                 });
+                observeBackend(structured, backend.providerId);
                 finalResponse = typeof structured.object === 'string'
                   ? structured.object
                   : JSON.stringify(structured.object);
@@ -3227,6 +3259,7 @@ export class Agent {
             temperature,
             signal: abortSignal,
           });
+          observeBackend(result, backend.providerId);
           finalResponse = typeof result.object === 'string'
             ? result.object
             : JSON.stringify(result.object);
@@ -3235,11 +3268,13 @@ export class Agent {
           const stream = await backend.streamText({
             messages,
             temperature,
-            signal: abortSignal
+            signal: abortSignal,
+            includeResponseMetadata: !!observe,
           });
           
           let accumulated = '';
           for await (const chunk of stream) {
+            if (chunk.usage) observe?.(backend.providerId === 'openai' ? chunk.model : undefined, chunk.usage.promptTokens);
             if (chunk.text) {
               emitToken(chunk.text);
               accumulated += chunk.text;
@@ -3253,6 +3288,7 @@ export class Agent {
             temperature,
             signal: abortSignal
           });
+          observeBackend(result, backend.providerId);
           finalResponse = result.text;
         }
       } else if (tools) {
@@ -3279,6 +3315,7 @@ export class Agent {
           // returns tool_calls. So during tool rounds we omit the schema and let
           // the model decide; once the model stops calling tools we re-issue a
           // final request with the schema applied to shape the answer.
+          observe?.(undefined, undefined);
           const response = streaming
             ? await this.llmService.streamChatWithTools(
                 messages,
@@ -3287,10 +3324,11 @@ export class Agent {
                 (token: string) => emitToken(token),
                 toolChoice,
                 undefined,
-                abortSignal
+                abortSignal,
+                observe
               )
             : await this.llmService.generateChat(
-                messages, temperature, tools, toolChoice, undefined, abortSignal
+                messages, temperature, tools, toolChoice, undefined, abortSignal, observe
               );
 
           // Cap tool calls executed per turn (Python parity:
@@ -3329,8 +3367,9 @@ export class Agent {
             // structured output schema. Tools are omitted here so `tools` and
             // `response_format` never coexist (OpenAI treats them as mutually
             // exclusive). generateChat sends the full history.
+            observe?.(undefined, undefined);
             const finalResp = await this.llmService.generateChat(
-              messages, temperature, undefined, undefined, this.getResponseFormat(outputSchema), abortSignal
+              messages, temperature, undefined, undefined, this.getResponseFormat(outputSchema), abortSignal, observe
             );
             finalResponse = finalResp.content || response.content || '';
             continueConversation = false;
@@ -3360,7 +3399,8 @@ export class Agent {
           (token: string) => {
             emitToken(token);
           },
-          abortSignal
+          abortSignal,
+          observe
         );
       } else if (outputSchema) {
         // Structured output (no tools): go through generateChat so the full
@@ -3374,7 +3414,8 @@ export class Agent {
           undefined,
           undefined,
           this.getResponseFormat(outputSchema),
-          abortSignal
+          abortSignal,
+          observe
         );
         finalResponse = response.content || '';
       } else if (this.messages.length > 0 || Array.isArray(turn.promptContent)) {
@@ -3391,7 +3432,8 @@ export class Agent {
           undefined,
           undefined,
           this.getResponseFormat(outputSchema),
-          abortSignal
+          abortSignal,
+          observe
         );
         finalResponse = response.content || '';
       } else {
@@ -3406,7 +3448,8 @@ export class Agent {
           undefined,
           undefined,
           this.getResponseFormat(outputSchema),
-          abortSignal
+          abortSignal,
+          observe
         );
         finalResponse = response;
       }
@@ -3649,6 +3692,7 @@ export class Agent {
       // getResult() must reflect it -- runTurn (which records _lastResult) is
       // skipped on this path, so record it here.
       this._lastResult = cached;
+      options?.onContextUsage?.(null);
       return cached;
     }
     

@@ -257,6 +257,7 @@ export function extractToolCallsFromContent(content: unknown[]): ToolCall[] {
  * Convert AI SDK generate result to praisonai-ts format
  */
 export function fromAISDKResult(result: {
+  response?: { modelId?: string };
   text?: string;
   content?: unknown[];
   toolCalls?: AISDKToolCall[];
