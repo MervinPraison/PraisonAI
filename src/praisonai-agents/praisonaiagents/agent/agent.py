@@ -1826,6 +1826,9 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
         self._on_budget_exceeded = _on_budget_exceeded
         # Thread-safe cost/token tracking (Gap 1a fix)
         self._cost_lock = threading.Lock()
+        # History forks share accounting as well as the lock, so branch spend
+        # remains visible to the original agent and its budget guard.
+        self._usage_totals = {"cost": 0.0, "in": 0, "out": 0, "calls": 0}
         # Serializes the read-modify-write of _auto_save_last_index. Auto-save
         # now runs via asyncio.to_thread, so two concurrent async runs sharing
         # one Agent could otherwise read the same last-saved index in separate
@@ -2831,6 +2834,38 @@ Your Role: {self.role}
                 instance.reasoning_effort = value
             except Exception:
                 logger.debug("Could not set reasoning_effort on %s; the backend keeps its own", type(instance).__name__, exc_info=True)
+
+    @property
+    def _total_cost(self):
+        return self._usage_totals["cost"]
+
+    @_total_cost.setter
+    def _total_cost(self, value):
+        self._usage_totals["cost"] = value
+
+    @property
+    def _total_tokens_in(self):
+        return self._usage_totals["in"]
+
+    @_total_tokens_in.setter
+    def _total_tokens_in(self, value):
+        self._usage_totals["in"] = value
+
+    @property
+    def _total_tokens_out(self):
+        return self._usage_totals["out"]
+
+    @_total_tokens_out.setter
+    def _total_tokens_out(self, value):
+        self._usage_totals["out"] = value
+
+    @property
+    def _llm_call_count(self):
+        return self._usage_totals["calls"]
+
+    @_llm_call_count.setter
+    def _llm_call_count(self, value):
+        self._usage_totals["calls"] = value
 
     @property
     def total_cost(self) -> float:
