@@ -24,7 +24,7 @@ test('requests and emits final usage-only chunk after finish', async () => {
     { choices: [{ delta: { content: 'hello' }, finish_reason: null }] },
     { choices: [{ delta: {}, finish_reason: 'stop' }], usage: null },
     { choices: [], usage: { prompt_tokens: 12, completion_tokens: 3, total_tokens: 15 } },
-  ]);
+  ], 'https://api.openai.com/v1');
   const chunks = await collect(provider);
   expect(getRequest().stream_options).toEqual({ include_usage: true });
   expect(chunks).toEqual([
