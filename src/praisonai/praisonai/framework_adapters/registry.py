@@ -369,6 +369,7 @@ def removed_framework_message(name: str, *, registry: Optional[FrameworkAdapterR
     if reason is None:
         return None
     supported = ""
+    supported_names: list[str] = []
     if registry is not None:
         try:
             names = registry.list_registered()
@@ -376,16 +377,29 @@ def removed_framework_message(name: str, *, registry: Optional[FrameworkAdapterR
             names = []
         if names:
             try:
-                supported = ", ".join(sorted(names))
+                # Removed frameworks are never valid choices, even when a
+                # third-party entry point still registers one (same filter
+                # list_framework_choices() applies).
+                supported_names = sorted(
+                    n for n in names if str(n).lower() not in REMOVED_FRAMEWORKS
+                )
+                supported = ", ".join(supported_names)
             except Exception:  # noqa: BLE001 -- non-iterable mock
                 supported = ""
     if not supported:
         supported = ", ".join(FrameworkAdapterRegistry.DEFAULT_PRIORITY)
+        supported_names = list(FrameworkAdapterRegistry.DEFAULT_PRIORITY)
+    # Only point at autogen when it is actually among the supported names;
+    # otherwise the message suggests a framework the user may not have.
+    suggestion = (
+        " Use framework='autogen' instead."
+        if "autogen" in supported_names
+        else ""
+    )
     return (
         f"Framework '{name}' is not supported: {reason} "
         f"(see https://github.com/MervinPraison/PraisonAI/issues/6661). "
-        f"Supported frameworks: {supported}. "
-        f"Use framework='autogen' instead."
+        f"Supported frameworks: {supported}.{suggestion}"
     )
 
 

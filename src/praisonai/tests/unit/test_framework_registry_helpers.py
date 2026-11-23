@@ -162,6 +162,50 @@ def test_ag2_framework_rejected_by_create():
     assert "pip install" not in message
 
 
+def test_removed_framework_message_excludes_removed_names():
+    """A registered 'ag2' stub must not appear under 'Supported frameworks'."""
+    from praisonai.framework_adapters.registry import removed_framework_message
+
+    class _Registry:
+        def list_registered(self):
+            return ["ag2", "praisonai", "autogen"]
+
+    message = removed_framework_message("ag2", registry=_Registry())
+    assert message is not None
+    supported = message.split("Supported frameworks:")[1]
+    assert "ag2" not in supported
+    assert "praisonai" in supported
+    assert "Use framework='autogen' instead." in message
+
+
+def test_removed_framework_message_skips_autogen_hint_when_unavailable():
+    """No 'use autogen instead' pointer when autogen is not supported."""
+    from praisonai.framework_adapters.registry import removed_framework_message
+
+    class _Registry:
+        def list_registered(self):
+            return ["praisonai"]
+
+    message = removed_framework_message("ag2", registry=_Registry())
+    assert message is not None
+    assert "Use framework='autogen' instead." not in message
+    assert "Supported frameworks: praisonai." in message
+
+
+def test_removed_framework_message_falls_back_when_only_removed_registered():
+    """Fallback to the default priority when every registered name is removed."""
+    from praisonai.framework_adapters.registry import removed_framework_message
+
+    class _Registry:
+        def list_registered(self):
+            return ["ag2"]
+
+    message = removed_framework_message("ag2", registry=_Registry())
+    assert message is not None
+    assert "Supported frameworks: praisonai, crewai, autogen." in message
+    assert "Use framework='autogen' instead." in message
+
+
 def test_ag2_not_in_framework_choices():
     """'ag2' is no longer an accepted framework value (#6661)."""
     from praisonai.framework_adapters.registry import list_framework_choices
