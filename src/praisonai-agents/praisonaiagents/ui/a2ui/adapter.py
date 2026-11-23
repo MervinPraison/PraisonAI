@@ -23,6 +23,11 @@ def _import(name: str):
 
         return importlib.import_module(name)
     except ImportError as exc:
+        if name == "a2ui.schema.constants" and getattr(exc, "name", None) == "a2ui.schema":
+            raise ImportError(
+                "The installed a2ui-agent-sdk does not provide the legacy schema manager; "
+                "A2UI.schema_manager and A2UI.system_prompt are not supported by this SDK layout."
+            ) from exc
         raise ImportError(
             f"{_A2UI_INSTALL_HINT} "
             f"(failed to import '{name}'; "
@@ -47,6 +52,8 @@ def _a2a_parts():
     """Return the 0.2.x A2A helper module, or None when that layout is absent."""
     if importlib.util.find_spec("a2ui") is None:
         raise ImportError(_A2UI_INSTALL_HINT)
+    if importlib.util.find_spec("a2ui.a2a") is None:
+        return None
     if importlib.util.find_spec("a2ui.a2a.parts") is None:
         return None
     return _import("a2ui.a2a.parts")
@@ -75,6 +82,11 @@ def is_a2ui_part(part: Any) -> bool:
 def parse_a2ui_response(text: str) -> List[Any]:
     """Parse and split LLM text into A2A parts (text + validated A2UI JSON)."""
     parser = _import("a2ui.parser.parser")
+    if not hasattr(parser, "parse_response"):
+        raise NotImplementedError(
+            "The installed a2ui-agent-sdk does not provide the legacy response parser; "
+            "A2UI.parse_response is not supported by this SDK layout."
+        )
     return parser.parse_response(text)
 
 

@@ -100,3 +100,96 @@ class TestA2UIAdapterSmoke:
         assert part.root.data["messages"][0]["createSurface"]["surfaceId"] == "main"
         assert part.root.metadata["mimeType"] == "application/json+a2ui"
         assert adapter.is_a2ui_part(part) is True
+
+
+def test_public_tool_with_missing_a2a_parent_in_real_package_layout(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+
+    # A separate interpreter uses real importlib instead of a mocked find_spec.
+    package = tmp_path / "a2ui"
+    package.mkdir()
+    (package / "__init__.py").write_text("")
+    code = (
+        "from praisonaiagents.tools.a2ui_tools import send_a2ui_messages; "
+        "result = send_a2ui_messages([{\"createSurface\": {\"surfaceId\": \"main\"}}]); "
+        "assert result[\"mime_type\"] == \"application/json+a2ui\""
+    )
+    import os
+    from pathlib import Path
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(tmp_path) + os.pathsep + str(Path(__file__).resolve().parents[2])
+    subprocess.run([sys.executable, "-c", code], env=env, check=True)
+
+
+def test_missing_transitive_import_in_existing_a2a_package_is_not_hidden(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+    import os
+    from pathlib import Path
+
+    package = tmp_path / "a2ui" / "a2a"
+    package.mkdir(parents=True)
+    (package.parent / "__init__.py").write_text("")
+    (package / "__init__.py").write_text("import missing_a2ui_transitive_dependency\n")
+    code = (
+        "from praisonaiagents.ui.a2ui.adapter import create_a2ui_part; "
+        "create_a2ui_part({})"
+    )
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(tmp_path) + os.pathsep + str(Path(__file__).resolve().parents[2])
+    result = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
+    assert result.returncode != 0
+    assert "missing_a2ui_transitive_dependency" in result.stderr
+
+
+def test_existing_a2a_helper_is_used(tmp_path):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    package = tmp_path / "a2ui" / "a2a"
+    package.mkdir(parents=True)
+    (package.parent / "__init__.py").write_text("")
+    (package / "__init__.py").write_text("")
+    (package / "parts.py").write_text("def create_a2ui_part(data): return (\"legacy\", data)\n")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(tmp_path) + os.pathsep + str(Path(__file__).resolve().parents[2])
+    code = "from praisonaiagents.ui.a2ui.adapter import create_a2ui_part; assert create_a2ui_part({}) == (\"legacy\", {})"
+    subprocess.run([sys.executable, "-c", code], env=env, check=True)
+
+
+def test_modern_sdk_parser_reports_unsupported_layout(monkeypatch):
+    from types import SimpleNamespace
+    from praisonaiagents.ui.a2ui import adapter
+
+    monkeypatch.setattr(adapter, "_import", lambda name: SimpleNamespace())
+    with pytest.raises(NotImplementedError, match="legacy response parser"):
+        adapter.parse_a2ui_response("Hello")
+
+
+def test_missing_schema_layout_is_distinct_from_missing_sdk(monkeypatch):
+    import importlib
+    from praisonaiagents.ui.a2ui import adapter
+
+    def missing_schema(name):
+        raise ModuleNotFoundError("No module named a2ui.schema", name="a2ui.schema")
+
+    monkeypatch.setattr(importlib, "import_module", missing_schema)
+    with pytest.raises(ImportError, match="legacy schema manager"):
+        adapter.get_schema_manager(catalogs=[], accepts_inline_catalogs=True)
+
+
+def test_schema_transitive_dependency_failure_is_not_misreported(monkeypatch):
+    import importlib
+    from praisonaiagents.ui.a2ui import adapter
+
+    def missing_dependency(name):
+        raise ModuleNotFoundError("No module named unrelated_dependency", name="unrelated_dependency")
+
+    monkeypatch.setattr(importlib, "import_module", missing_dependency)
+    with pytest.raises(ImportError) as caught:
+        adapter.get_schema_manager()
+    assert caught.value.__cause__.name == "unrelated_dependency"
+    assert "legacy schema manager" not in str(caught.value)
