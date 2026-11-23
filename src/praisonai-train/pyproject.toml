@@ -24,16 +24,10 @@ dependencies = [
 # Mirrors praisonai_train/setup/setup_conda_env.sh (the conda path remains the
 # recommended GPU install; this extra is the pip approximation).
 llm = [
-    # `praisonai-train llm` bridges into the code-tier CLI runner for dataset
-    # dispatch, so the LLM extra must pull praisonai-code alongside the ML stack.
-    "praisonai-code>=0.0.1",
-    # praison_ai.py:988 imports praisonai.cli.legacy.dispatch.argparse_builder
-    # unconditionally in parse_args(), and _get_generate_config() imports
-    # praisonai.cli.legacy.inbuilt_tools. Neither praisonai-train nor
-    # praisonai-code declares the wrapper, so `pip install
-    # "praisonai-train[llm]"` produced an `llm` command that died at
-    # parse_args. CI never saw it because it installs every package.
-    "praisonai>=0.0.1",
+    # `praisonai-train llm` starts its trainer itself
+    # (praisonai_train.train.llm.launch), so this extra needs neither
+    # praisonai-code nor the praisonai wrapper: Tier 2 packages depend only on
+    # praisonaiagents.
     "torch>=2.6.0",
     # Latest Unsloth requires modern TRL/Transformers; the old `trl<0.9.0` pin was
     # incompatible with any recent Unsloth and blocked new-model support.
