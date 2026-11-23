@@ -139,15 +139,15 @@ def test_tests_do_not_require_a_newer_python_than_pyproject_allows():
 # --------------------------------------------------------------------------- #
 # 5. Everything the llm path imports must be declared
 # --------------------------------------------------------------------------- #
-def test_the_llm_extra_declares_the_wrapper_it_hard_requires():
-    """praison_ai.py:988 imports praisonai.cli.legacy... in parse_args().
+def test_the_llm_extra_pulls_no_other_praisonai_package():
+    """`praisonai-train llm` starts its own trainer (train/llm/launch.py).
 
-    Neither praisonai-train nor praisonai-code declared `praisonai`, so
-    `pip install "praisonai-train[llm]"` gave you an `llm` command that died at
-    argument parsing. CI never saw it because it installs every package.
+    It used to reach the trainer through praisonai-code's legacy dispatcher,
+    whose parse_args() imports the wrapper, so the extra had to declare both
+    `praisonai-code` and `praisonai` -- a Tier 2 -> Tier 3 edge and a cycle
+    (`praisonai` requires `praisonai-train`). Neither is needed now.
     """
     data = tomllib.loads((ROOT / "pyproject.toml").read_text())
     llm = data["project"]["optional-dependencies"]["llm"]
-    names = {re.split(r"[<>=!\[ ]", spec)[0] for spec in llm}
-    assert "praisonai" in names, "the llm extra does not declare the wrapper"
-    assert "praisonai-code" in names
+    names = {re.split(r"[<>=!\[ ]", spec)[0].strip() for spec in llm}
+    assert not {n for n in names if n.startswith("praisonai")}, names

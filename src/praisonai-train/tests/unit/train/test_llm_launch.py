@@ -85,11 +85,3 @@ def test_llm_command_runs_without_praisonai_code_or_wrapper(tmp_path, monkeypatc
     launched.assert_called_once()
     assert (tmp_path / "config.yaml").exists()
 
-
-def test_llm_extra_needs_no_other_praisonai_package():
-    import tomllib
-    from pathlib import Path
-
-    pyproject = Path(__file__).resolve().parents[3] / "pyproject.toml"
-    extra = tomllib.loads(pyproject.read_text())["project"]["optional-dependencies"]["llm"]
-    assert not [r for r in extra if r.split(">")[0].split("[")[0].strip().startswith("praisonai")]
