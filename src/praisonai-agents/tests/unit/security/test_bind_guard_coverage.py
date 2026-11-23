@@ -28,7 +28,7 @@ PACKAGES = [
 ]
 SERVER_CALLS = {
     "uvicorn.run", "uvicorn.Config", "web.TCPSite", "make_server",
-    "HTTPServer", "ThreadingHTTPServer", "run_webhook", "websockets.serve",
+    "HTTPServer", "ThreadingHTTPServer", "run_webhook", "start_webhook", "websockets.serve",
 }
 GUARD_NAMES = ("require_bind_token", "resolve_launch_host", "webhook_bind_host", "guard_browser_app")
 LOOPBACK = {"127.0.0.1", "localhost", "::1"}
@@ -38,8 +38,6 @@ EXEMPT = {
         "binds for launch(); both callers run resolve_launch_host() first",
     "praisonai-bot/praisonai_bot/gateway/server.py":
         "gateway has its own auth mode (token required off loopback, resolve_auth_mode); V-H owns it",
-    "praisonai-bot/praisonai_bot/bots/telegram.py":
-        "PENDING V-H: webhook listen host through require_bind_token (patch on va/telegram-webhook-secret)",
 }
 
 
