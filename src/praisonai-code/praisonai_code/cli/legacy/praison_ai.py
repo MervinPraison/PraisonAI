@@ -1021,8 +1021,13 @@ class PraisonAI:
             sys.exit(0)
 
         # Handle ACP command - Agent Client Protocol server for IDE integration
+        # The handler stays in the praisonai wrapper (its dependency
+        # `praisonai.acp.serve` lives there), so reach it through the wrapper
+        # bridge, the same pattern the recipe command uses below.
         if args.command == 'acp':
-            from ..features.acp import run_acp_command
+            from praisonai_code._wrapper_bridge import import_wrapper_module
+            _acp_mod = import_wrapper_module('praisonai.cli.features.acp')
+            run_acp_command = _acp_mod.run_acp_command
             exit_code = run_acp_command(unknown_args)
             sys.exit(exit_code)
         
