@@ -10,7 +10,7 @@ def test_offline_gpt5_full_window_and_meter(monkeypatch, model):
     assert budgeter.get_model_limit(model) == 400000
     assert budgeter.context_window_usage(200000, model) == {'used': 200000, 'limit': 400000, 'percent': 50}
     assert budgeter.ContextBudgeter(model=model).model_limit == 400000
-    assert get_context_length(model) == 400000
+    assert get_context_length(model, use_litellm=False) == 400000
 
 
 def test_litellm_input_limit_keeps_existing_precedence(monkeypatch):
