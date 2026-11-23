@@ -3051,7 +3051,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             Output from the agent execution
         """
         # Get yaml_action which specifies the method to call
-        yaml_action = action
+        yaml_action = _substitute_action_variables(step.action or action, variables, None, variables.get('input', ''))
         
         # AudioAgent - TTS (speech) or STT (transcribe)
         if agent_class_name == 'AudioAgent':
@@ -3302,7 +3302,8 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 k: v for k, v in (result.get("variables") or {}).items()
                 if k not in before or _differs(before[k], v)
             }
-            step_vars.pop(getattr(step, "output_variable", None) or f"{result.get('step')}_output", None)
+            output_variable = self._normalize_single_step(step, index).output_variable
+            step_vars.pop(output_variable or f"{result.get('step')}_output", None)
         _replay_step_end(span, status, result.get("output") if is_dict else None, step_vars)
         return result
 

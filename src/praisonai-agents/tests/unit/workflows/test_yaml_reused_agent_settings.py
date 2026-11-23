@@ -7,6 +7,16 @@ from praisonaiagents.workflows.yaml_parser import YAMLWorkflowParser
 from praisonaiagents.workflows.workflows import _step_agents
 
 
+@pytest.fixture(autouse=True)
+def isolate_test_home(monkeypatch, tmp_path):
+    from praisonaiagents import paths
+    monkeypatch.setenv('PRAISONAI_HOME', str(tmp_path / 'home'))
+    monkeypatch.chdir(tmp_path)
+    paths._clear_cache()
+    yield
+    paths._clear_cache()
+
+
 def parse(steps):
     return YAMLWorkflowParser().parse_string('''
 name: reuse
@@ -147,7 +157,7 @@ def test_reused_audio_agent_dispatches_each_action(monkeypatch, tmp_path):
     from praisonaiagents.agent.audio_agent import AudioAgent
     monkeypatch.chdir(tmp_path)
     calls = []
-    monkeypatch.setattr(AudioAgent, 'speech', lambda self, *a, **kw: calls.append('speech') or 'audio')
+    monkeypatch.setattr(AudioAgent, 'speech', lambda self, *a, **kw: calls.append('speech') or 'speech.wav')
     monkeypatch.setattr(AudioAgent, 'transcribe', lambda self, *a, **kw: calls.append('transcribe') or 'text')
     wf = YAMLWorkflowParser().parse_string('''
 name: audio-reuse
