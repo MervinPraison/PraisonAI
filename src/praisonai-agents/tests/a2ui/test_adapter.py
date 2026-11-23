@@ -158,3 +158,38 @@ def test_existing_a2a_helper_is_used(tmp_path):
     env["PYTHONPATH"] = str(tmp_path) + os.pathsep + str(Path(__file__).resolve().parents[2])
     code = "from praisonaiagents.ui.a2ui.adapter import create_a2ui_part; assert create_a2ui_part({}) == (\"legacy\", {})"
     subprocess.run([sys.executable, "-c", code], env=env, check=True)
+
+
+def test_modern_sdk_parser_reports_unsupported_layout(monkeypatch):
+    from types import SimpleNamespace
+    from praisonaiagents.ui.a2ui import adapter
+
+    monkeypatch.setattr(adapter, "_import", lambda name: SimpleNamespace())
+    with pytest.raises(NotImplementedError, match="legacy response parser"):
+        adapter.parse_a2ui_response("Hello")
+
+
+def test_missing_schema_layout_is_distinct_from_missing_sdk(monkeypatch):
+    import importlib
+    from praisonaiagents.ui.a2ui import adapter
+
+    def missing_schema(name):
+        raise ModuleNotFoundError("No module named a2ui.schema", name="a2ui.schema")
+
+    monkeypatch.setattr(importlib, "import_module", missing_schema)
+    with pytest.raises(ImportError, match="legacy schema manager"):
+        adapter.get_schema_manager(catalogs=[], accepts_inline_catalogs=True)
+
+
+def test_schema_transitive_dependency_failure_is_not_misreported(monkeypatch):
+    import importlib
+    from praisonaiagents.ui.a2ui import adapter
+
+    def missing_dependency(name):
+        raise ModuleNotFoundError("No module named unrelated_dependency", name="unrelated_dependency")
+
+    monkeypatch.setattr(importlib, "import_module", missing_dependency)
+    with pytest.raises(ImportError) as caught:
+        adapter.get_schema_manager()
+    assert caught.value.__cause__.name == "unrelated_dependency"
+    assert "legacy schema manager" not in str(caught.value)
