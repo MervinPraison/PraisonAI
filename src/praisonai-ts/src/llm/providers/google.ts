@@ -172,16 +172,20 @@ export class GoogleProvider extends BaseProvider {
                 }
               }
               
+              const metadata = event.usageMetadata;
+              const usage = metadata ? {
+                ...(metadata.promptTokenCount != null && { promptTokens: metadata.promptTokenCount }),
+                ...(metadata.candidatesTokenCount != null && { completionTokens: metadata.candidatesTokenCount }),
+                ...(metadata.totalTokenCount != null && { totalTokens: metadata.totalTokenCount }),
+              } : undefined;
               if (candidate?.finishReason) {
                 yield {
                   finishReason: self.mapFinishReason(candidate.finishReason),
                   toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-                  usage: event.usageMetadata ? {
-                    promptTokens: event.usageMetadata.promptTokenCount || 0,
-                    completionTokens: event.usageMetadata.candidatesTokenCount || 0,
-                    totalTokens: event.usageMetadata.totalTokenCount || 0,
-                  } : undefined,
+                  usage,
                 };
+              } else if (usage) {
+                yield { usage };
               }
             } catch (e) {
               // Skip malformed JSON
