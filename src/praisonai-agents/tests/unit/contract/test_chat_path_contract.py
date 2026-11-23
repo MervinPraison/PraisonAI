@@ -32,7 +32,7 @@ ENDPOINT = {"openai_client": "/chat/completions", "litellm_chat": "/chat/complet
             "litellm_responses": "/responses"}
 
 REQUESTS = []  # (path, request body) for every call that reached the stub
-STATE = {"fail": False, "delay": 0.0, "filter_chunk": False}
+STATE = {"fail": False, "delay": 0.0, "filter_chunk": False, "tool_rounds": 1}
 _ERR = {"error": {"message": "Incorrect API key provided", "type": "invalid_request_error",
                   "code": "invalid_api_key"}}
 USAGE_IN, USAGE_OUT = 7, 3
@@ -44,17 +44,19 @@ def _tool_name(req):
 
 
 def _chat_reply(req):
-    if req.get("tools") and not any(m.get("role") == "tool" for m in req.get("messages", [])):
+    done = sum(m.get("role") == "tool" for m in req.get("messages", []))
+    if req.get("tools") and done < STATE["tool_rounds"]:
         return {"role": "assistant", "content": None, "tool_calls": [{
-            "id": "call_1", "type": "function",
+            "id": f"call_{done + 1}", "type": "function",
             "function": {"name": _tool_name(req), "arguments": '{"query": "x"}'}}]}, "tool_calls"
     return {"role": "assistant", "content": "hello"}, "stop"
 
 
 def _responses_output(req):
     items = req.get("input") if isinstance(req.get("input"), list) else []
-    if req.get("tools") and not any(isinstance(i, dict) and i.get("type") == "function_call_output" for i in items):
-        return [{"type": "function_call", "id": "fc_1", "call_id": "call_1", "name": _tool_name(req),
+    done = sum(isinstance(i, dict) and i.get("type") == "function_call_output" for i in items)
+    if req.get("tools") and done < STATE["tool_rounds"]:
+        return [{"type": "function_call", "id": f"fc_{done + 1}", "call_id": f"call_{done + 1}", "name": _tool_name(req),
                  "arguments": '{"query": "x"}', "status": "completed"}]
     return [{"type": "message", "id": "msg_1", "status": "completed", "role": "assistant",
              "content": [{"type": "output_text", "text": "hello", "annotations": []}]}]
@@ -127,7 +129,7 @@ class _Handler(BaseHTTPRequestHandler):
 @pytest.fixture
 def stub(monkeypatch, tmp_path):
     REQUESTS.clear()
-    STATE.update(fail=False, delay=0.0, filter_chunk=False)
+    STATE.update(fail=False, delay=0.0, filter_chunk=False, tool_rounds=1)
     server = ThreadingHTTPServer(("127.0.0.1", 0), _Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_address[1]}/v1"
@@ -252,6 +254,28 @@ def test_tool_round_costs_two_model_calls(stub, mode, route):
     agent = _agent(route, stub, tools=[lookup])
     assert _turn(agent, mode) == "hello"
     assert len(REQUESTS) == 2, [p for p, _ in REQUESTS]
+
+
+G_ACHAT_LITELLM_REPEAT = _drift(
+    "G-6748", "achat on litellm sends the second tool round's follow-up twice",
+    ("achat", "litellm_chat"))
+
+
+@pytest.mark.parametrize("mode,route", _cells(G_ACHAT_LITELLM_REPEAT))
+def test_turn_runs_more_than_one_tool_round(stub, mode, route):
+    """A turn keeps calling tools until the model answers (Issue #6748)."""
+    STATE["tool_rounds"] = 2
+    calls = []
+
+    def lookup(query: str) -> str:
+        """Look something up."""
+        calls.append(query)
+        return "found it"
+
+    agent = _agent(route, stub, tools=[lookup])
+    assert _turn(agent, mode) == "hello"
+    assert len(calls) == 2, calls
+    assert len(REQUESTS) == 3, [p for p, _ in REQUESTS]
 
 
 @pytest.mark.parametrize("route", ROUTES)

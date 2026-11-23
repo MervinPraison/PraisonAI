@@ -6502,280 +6502,304 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                         # append exactly the assistant tool-call and tool-result
                         # messages onto the original request context below.
                         tool_turn_start = len(self.chat_history)
-                        # Drop any partial record for this turn before writing
-                        # the authoritative tool-call assistant turn below so the
-                        # store never keeps a stale partial (Issue #5407).
-                        self._discard_partial_assistant_turn()
-                        # From here the post-tool answer is the recoverable
-                        # phase; reset the interrupt tracker so a Ctrl-C during
-                        # the follow-up persists that answer, not the pre-tool
-                        # text we just discarded (Issue #5407).
-                        active_stream["after_tools"] = True
-                        active_stream["text"] = ""
-                        # Add assistant message with tool calls to chat history
-                        assistant_message = {"role": "assistant", "content": response_text}
-                        if tool_calls_data:
-                            assistant_message["tool_calls"] = [
-                                {
-                                    "id": tc['id'],
-                                    "type": "function", 
-                                    "function": tc['function']
-                                } for tc in tool_calls_data if tc['id']
-                            ]
-                        self._append_to_chat_history(assistant_message)
-                        # Persist the assistant tool-call turn so resume replays
-                        # it (Issue #3089).
-                        self._persist_message(
-                            "assistant",
-                            response_text,
-                            tool_calls=assistant_message.get("tool_calls"),
-                        )
+                        # Run tool rounds until the model answers without calling a
+                        # tool, bounded by the same step budget as chat() (Issue #6748).
+                        _max_tool_rounds = self._resolve_max_steps()
+                        _tool_round = 0
+                        while True:
+                            _tool_round += 1
+                            # Drop any partial record for this turn before writing
+                            # the authoritative tool-call assistant turn below so the
+                            # store never keeps a stale partial (Issue #5407).
+                            self._discard_partial_assistant_turn()
+                            # From here the post-tool answer is the recoverable
+                            # phase; reset the interrupt tracker so a Ctrl-C during
+                            # the follow-up persists that answer, not the pre-tool
+                            # text we just discarded (Issue #5407).
+                            active_stream["after_tools"] = True
+                            active_stream["text"] = ""
+                            # Add assistant message with tool calls to chat history
+                            assistant_message = {"role": "assistant", "content": response_text}
+                            if tool_calls_data:
+                                assistant_message["tool_calls"] = [
+                                    {
+                                        "id": tc['id'],
+                                        "type": "function", 
+                                        "function": tc['function']
+                                    } for tc in tool_calls_data if tc['id']
+                                ]
+                            self._append_to_chat_history(assistant_message)
+                            # Persist the assistant tool-call turn so resume replays
+                            # it (Issue #3089).
+                            self._persist_message(
+                                "assistant",
+                                response_text,
+                                tool_calls=assistant_message.get("tool_calls"),
+                            )
 
-                        # Execute tool calls and add results to chat history.
-                        # Media-bearing follow-up messages are deferred until all
-                        # tool replies for this turn are appended, keeping the
-                        # tool replies consecutive (provider contract).
-                        _deferred_media_followups = []
-                        for tool_call in tool_calls_data:
-                            if tool_call['id'] and tool_call['function']['name']:
-                                try:
-                                    # Parse JSON arguments safely. A parse failure
-                                    # is NOT {}: a truncated/malformed argument
-                                    # string must not silently run the tool with
-                                    # defaults and report success. Surface a
-                                    # retryable tool-error to the model instead.
-                                    from .tool_execution import (
-                                        _TOOL_ARGUMENTS_PARSE_FAILED,
-                                        tool_arguments_parse_failed,
-                                        tool_parse_error_message,
-                                    )
+                            # Execute tool calls and add results to chat history.
+                            # Media-bearing follow-up messages are deferred until all
+                            # tool replies for this turn are appended, keeping the
+                            # tool replies consecutive (provider contract).
+                            _deferred_media_followups = []
+                            for tool_call in tool_calls_data:
+                                if tool_call['id'] and tool_call['function']['name']:
                                     try:
-                                        parsed_args = json.loads(tool_call['function']['arguments']) if tool_call['function']['arguments'] else {}
-                                    except (json.JSONDecodeError, TypeError) as json_error:
-                                        # TypeError: a non-text argument value also
-                                        # cannot be parsed; treat it as malformed.
-                                        logger.error(f"Failed to parse tool arguments as JSON: {json_error}")
-                                        parsed_args = _TOOL_ARGUMENTS_PARSE_FAILED
-                                    if tool_arguments_parse_failed(parsed_args):
+                                        # Parse JSON arguments safely. A parse failure
+                                        # is NOT {}: a truncated/malformed argument
+                                        # string must not silently run the tool with
+                                        # defaults and report success. Surface a
+                                        # retryable tool-error to the model instead.
+                                        from .tool_execution import (
+                                            _TOOL_ARGUMENTS_PARSE_FAILED,
+                                            tool_arguments_parse_failed,
+                                            tool_parse_error_message,
+                                        )
+                                        try:
+                                            parsed_args = json.loads(tool_call['function']['arguments']) if tool_call['function']['arguments'] else {}
+                                        except (json.JSONDecodeError, TypeError) as json_error:
+                                            # TypeError: a non-text argument value also
+                                            # cannot be parsed; treat it as malformed.
+                                            logger.error(f"Failed to parse tool arguments as JSON: {json_error}")
+                                            parsed_args = _TOOL_ARGUMENTS_PARSE_FAILED
+                                        if tool_arguments_parse_failed(parsed_args):
+                                            self._notify_tool_call(
+                                                tool_call['function']['name'],
+                                                {},
+                                                None,
+                                                elapsed_time=0.0,
+                                                success=False,
+                                            )
+                                            _err_msg = tool_parse_error_message(
+                                                tool_call['function']['name'],
+                                                tool_call['id'],
+                                            )
+                                            self._append_to_chat_history(_err_msg)
+                                            self._persist_message(
+                                                "tool",
+                                                _err_msg["content"],
+                                                tool_call_id=tool_call['id'],
+                                            )
+                                            continue
+
+                                        executor = self._durable_sync_tool_executor(
+                                            self.execute_tool
+                                        )
+                                        iteration_kwargs = (
+                                            {"_durable_iteration_index": _tool_round - 1}
+                                            if getattr(
+                                                executor,
+                                                "_accepts_durable_iteration",
+                                                False,
+                                            )
+                                            else {}
+                                        )
+                                        _tool_started = time_module.perf_counter()
+                                        try:
+                                            tool_result = executor(
+                                                tool_call['function']['name'],
+                                                parsed_args,
+                                                tool_call_id=tool_call.get('id'),
+                                                **iteration_kwargs,
+                                            )
+                                        except Exception as _exec_error:
+                                            # Streaming UIs only learn about tool
+                                            # activity through this callback; report
+                                            # the failure before re-raising.
+                                            self._notify_tool_call(
+                                                tool_call['function']['name'],
+                                                parsed_args,
+                                                {"error": str(_exec_error)},
+                                                elapsed_time=time_module.perf_counter() - _tool_started,
+                                                success=False,
+                                            )
+                                            raise
+                                        # A deferred result is registered and the
+                                        # model gets its note, as on the
+                                        # non-streaming path (F-13).
+                                        from ..llm.openai_client import _handle_native_deferred_result
+                                        tool_result = _handle_native_deferred_result(
+                                            tool_result, self.chat_history, tool_call.get('id'),
+                                            tool_call['function']['name'],
+                                        )
+                                        # Parity with the non-streaming path, which
+                                        # fires 'tool_call' after every tool run.
                                         self._notify_tool_call(
                                             tool_call['function']['name'],
-                                            {},
-                                            None,
-                                            elapsed_time=0.0,
-                                            success=False,
+                                            parsed_args,
+                                            tool_result,
+                                            elapsed_time=time_module.perf_counter() - _tool_started,
+                                            success=True,
                                         )
-                                        _err_msg = tool_parse_error_message(
-                                            tool_call['function']['name'],
-                                            tool_call['id'],
+                                        # Add tool result to chat history (multimodal-aware)
+                                        from .tool_execution import build_tool_result_message_pair
+                                        _pair = build_tool_result_message_pair(
+                                            tool_result, tool_call['id'],
+                                            function_name=tool_call['function']['name'],
                                         )
-                                        self._append_to_chat_history(_err_msg)
+                                        if _pair:
+                                            _tool_msg, _followup_msg = _pair
+                                            self._append_to_chat_history(_tool_msg)
+                                            _deferred_media_followups.append(_followup_msg)
+                                        else:
+                                            self._append_to_chat_history({
+                                                "role": "tool",
+                                                "tool_call_id": tool_call['id'],
+                                                "content": str(tool_result)
+                                            })
+                                        # Persist the tool-result turn (Issue #3089).
                                         self._persist_message(
                                             "tool",
-                                            _err_msg["content"],
+                                            str(tool_result),
                                             tool_call_id=tool_call['id'],
                                         )
-                                        continue
-
-                                    executor = self._durable_sync_tool_executor(
-                                        self.execute_tool
-                                    )
-                                    iteration_kwargs = (
-                                        {"_durable_iteration_index": 0}
-                                        if getattr(
-                                            executor,
-                                            "_accepts_durable_iteration",
-                                            False,
-                                        )
-                                        else {}
-                                    )
-                                    _tool_started = time_module.perf_counter()
-                                    try:
-                                        tool_result = executor(
-                                            tool_call['function']['name'],
-                                            parsed_args,
-                                            tool_call_id=tool_call.get('id'),
-                                            **iteration_kwargs,
-                                        )
-                                    except Exception as _exec_error:
-                                        # Streaming UIs only learn about tool
-                                        # activity through this callback; report
-                                        # the failure before re-raising.
-                                        self._notify_tool_call(
-                                            tool_call['function']['name'],
-                                            parsed_args,
-                                            {"error": str(_exec_error)},
-                                            elapsed_time=time_module.perf_counter() - _tool_started,
-                                            success=False,
-                                        )
+                                    except ToolExecutionError:
                                         raise
-                                    # A deferred result is registered and the
-                                    # model gets its note, as on the
-                                    # non-streaming path (F-13).
-                                    from ..llm.openai_client import _handle_native_deferred_result
-                                    tool_result = _handle_native_deferred_result(
-                                        tool_result, self.chat_history, tool_call.get('id'),
-                                        tool_call['function']['name'],
-                                    )
-                                    # Parity with the non-streaming path, which
-                                    # fires 'tool_call' after every tool run.
-                                    self._notify_tool_call(
-                                        tool_call['function']['name'],
-                                        parsed_args,
-                                        tool_result,
-                                        elapsed_time=time_module.perf_counter() - _tool_started,
-                                        success=True,
-                                    )
-                                    # Add tool result to chat history (multimodal-aware)
-                                    from .tool_execution import build_tool_result_message_pair
-                                    _pair = build_tool_result_message_pair(
-                                        tool_result, tool_call['id'],
-                                        function_name=tool_call['function']['name'],
-                                    )
-                                    if _pair:
-                                        _tool_msg, _followup_msg = _pair
-                                        self._append_to_chat_history(_tool_msg)
-                                        _deferred_media_followups.append(_followup_msg)
-                                    else:
+                                    except Exception as tool_error:
+                                        logger.error(f"Tool execution error in streaming: {tool_error}")
+                                        # Add error result to chat history
                                         self._append_to_chat_history({
-                                            "role": "tool",
+                                            "role": "tool", 
                                             "tool_call_id": tool_call['id'],
-                                            "content": str(tool_result)
+                                            "content": f"Error: {str(tool_error)}"
                                         })
-                                    # Persist the tool-result turn (Issue #3089).
-                                    self._persist_message(
-                                        "tool",
-                                        str(tool_result),
-                                        tool_call_id=tool_call['id'],
-                                    )
-                                except ToolExecutionError:
-                                    raise
-                                except Exception as tool_error:
-                                    logger.error(f"Tool execution error in streaming: {tool_error}")
-                                    # Add error result to chat history
-                                    self._append_to_chat_history({
-                                        "role": "tool", 
-                                        "tool_call_id": tool_call['id'],
-                                        "content": f"Error: {str(tool_error)}"
-                                    })
-                                    self._persist_message(
-                                        "tool",
-                                        f"Error: {str(tool_error)}",
-                                        tool_call_id=tool_call['id'],
-                                    )
+                                        self._persist_message(
+                                            "tool",
+                                            f"Error: {str(tool_error)}",
+                                            tool_call_id=tool_call['id'],
+                                        )
 
-                        # Flush deferred media follow-ups after all tool replies.
-                        for _m in _deferred_media_followups:
-                            self._append_to_chat_history(_m)
+                            # Flush deferred media follow-ups after all tool replies.
+                            for _m in _deferred_media_followups:
+                                self._append_to_chat_history(_m)
 
-                        # Ask the model for the answer now that the tools have
-                        # run. Without this the generator ends here: the tool
-                        # results sit in chat history, nothing is yielded, and
-                        # the caller receives an empty stream with no error --
-                        # indistinguishable from a model that had nothing to
-                        # say. The non-streaming path already does this round
-                        # trip, so the two disagreed about whether an answer
-                        # existed at all.
-                        #
-                        # Reuse the original `messages` (system prompt, output
-                        # constraints, memory context and the user turn) rather
-                        # than `self.chat_history`, which omits the system turn
-                        # and would let the follow-up ignore the agent role and
-                        # output format. Append only the tool turns produced by
-                        # this round -- everything added to chat history since
-                        # the completion began.
-                        if _stream_cancel_token is not None and _stream_cancel_token.is_set():
-                            reason = getattr(_stream_cancel_token, "reason", None) or "cancelled during tools"
-                            raise InterruptedError(f"Agent stream cancelled: {reason}")
-                        followup_args = dict(completion_args)
-                        followup_args['messages'] = (
-                            list(messages) + self.chat_history[tool_turn_start:]
-                        )
-                        followup_args['stream'] = True
-                        # No tools on the follow-up: the model has its results
-                        # and should now answer, not call another tool. That
-                        # also bounds the turn to a single round of tools.
-                        followup_args.pop('tools', None)
-                        followup_args.pop('tool_choice', None)
-                        followup_args.pop('parallel_tool_calls', None)
-
-                        # Bracket the follow-up with stream events so consumers
-                        # see request/terminal telemetry for the answer too --
-                        # the STREAM_END above referred only to the tool-call
-                        # round, before any answer existed.
-                        self.stream_emitter.emit(StreamEvent(
-                            type=StreamEventType.REQUEST_START,
-                            timestamp=time_module.perf_counter(),
-                            metadata={
-                                "model": self.llm,
-                                "message_count": len(followup_args['messages']),
-                                "phase": "post_tool_answer",
-                            }
-                        ))
-
-                        followup_text = ""
-                        followup_last_content_time = None
-                        _followup_started = time_module.perf_counter()
-                        _stream_trace.llm_request(
-                            self.name, messages_count=len(followup_args['messages']), tokens_used=0,
-                            model=self.llm if isinstance(self.llm, str) else None,
-                            messages=followup_args['messages'],
-                        )
-                        _open_llm_call = (_stream_trace, _followup_started)
-                        _followup_usage = None
-                        for followup_chunk in self._openai_client.sync_client.chat.completions.create(
-                            **followup_args
-                        ):
-                            if getattr(followup_chunk, "usage", None):
-                                _followup_usage = followup_chunk
-                            if not followup_chunk.choices:
-                                continue
-                            piece = followup_chunk.choices[0].delta.content
-                            if piece:
-                                followup_text += piece
-                                followup_last_content_time = time_module.perf_counter()
-                                # Flush the post-tool answer incrementally too so
-                                # an interrupt during the follow-up keeps it
-                                # (Issue #5407, debounced).
-                                active_stream["text"] = followup_text
-                                self._persist_assistant_delta(followup_text)
-                                yield piece
-                        if _followup_usage is not None:  # the follow-up is billed too (F-08)
-                            self._record_llm_usage(*self._extract_llm_usage(_followup_usage))
-                        if followup_last_content_time:
-                            self.stream_emitter.emit(StreamEvent(
-                                type=StreamEventType.LAST_TOKEN,
-                                timestamp=followup_last_content_time
-                            ))
-                        self.stream_emitter.emit(StreamEvent(
-                            type=StreamEventType.STREAM_END,
-                            timestamp=time_module.perf_counter(),
-                            metadata={"response_length": len(followup_text)}
-                        ))
-                        _stream_trace.llm_response(
-                            self.name,
-                            duration_ms=(time_module.perf_counter() - _followup_started) * 1000,
-                            response_content=followup_text,
-                        )
-                        _open_llm_call = None
-                        if followup_text:
-                            self._append_to_chat_history(
-                                {"role": "assistant", "content": followup_text}
+                            # Ask the model for the answer now that the tools have
+                            # run. Without this the generator ends here: the tool
+                            # results sit in chat history, nothing is yielded, and
+                            # the caller receives an empty stream with no error --
+                            # indistinguishable from a model that had nothing to
+                            # say. The non-streaming path already does this round
+                            # trip, so the two disagreed about whether an answer
+                            # existed at all.
+                            #
+                            # Reuse the original `messages` (system prompt, output
+                            # constraints, memory context and the user turn) rather
+                            # than `self.chat_history`, which omits the system turn
+                            # and would let the follow-up ignore the agent role and
+                            # output format. Append only the tool turns produced by
+                            # this round -- everything added to chat history since
+                            # the completion began.
+                            if _stream_cancel_token is not None and _stream_cancel_token.is_set():
+                                reason = getattr(_stream_cancel_token, "reason", None) or "cancelled during tools"
+                                raise InterruptedError(f"Agent stream cancelled: {reason}")
+                            followup_args = dict(completion_args)
+                            followup_args['messages'] = (
+                                list(messages) + self.chat_history[tool_turn_start:]
                             )
-                            # Finalize the post-tool answer so resume sees a
-                            # completed turn, not a dangling partial (Issue
-                            # #5407).
-                            self._finalize_assistant_turn(followup_text)
-                        else:
-                            # Tools ran and the model then said nothing. Simply
-                            # returning here is indistinguishable from a model
-                            # that had nothing to say, and that is exactly how
-                            # this reached users: the generator ended having
-                            # yielded not one character, and the caller could
-                            # only report "no output" for a turn whose tools
-                            # had all succeeded. Fail loudly instead.
-                            raise RuntimeError(
-                                "the model called {} tool(s) and then returned "
-                                "no answer".format(len(tool_calls_data)))
+                            followup_args['stream'] = True
+                            # Keep the tools so the model can take further steps, as
+                            # chat() does; drop them only on the last allowed round
+                            # so the turn ends with an answer (Issue #6748).
+                            if _tool_round >= _max_tool_rounds:
+                                followup_args.pop('tools', None)
+                                followup_args.pop('tool_choice', None)
+                                followup_args.pop('parallel_tool_calls', None)
+
+                            # Bracket the follow-up with stream events so consumers
+                            # see request/terminal telemetry for the answer too --
+                            # the STREAM_END above referred only to the tool-call
+                            # round, before any answer existed.
+                            self.stream_emitter.emit(StreamEvent(
+                                type=StreamEventType.REQUEST_START,
+                                timestamp=time_module.perf_counter(),
+                                metadata={
+                                    "model": self.llm,
+                                    "message_count": len(followup_args['messages']),
+                                    "phase": "post_tool_answer",
+                                }
+                            ))
+
+                            followup_text = ""
+                            followup_last_content_time = None
+                            _followup_started = time_module.perf_counter()
+                            _stream_trace.llm_request(
+                                self.name, messages_count=len(followup_args['messages']), tokens_used=0,
+                                model=self.llm if isinstance(self.llm, str) else None,
+                                messages=followup_args['messages'],
+                            )
+                            _open_llm_call = (_stream_trace, _followup_started)
+                            _followup_usage = None
+                            _next_tool_calls = []
+                            for followup_chunk in self._openai_client.sync_client.chat.completions.create(
+                                **followup_args
+                            ):
+                                if getattr(followup_chunk, "usage", None):
+                                    _followup_usage = followup_chunk
+                                if not followup_chunk.choices:
+                                    continue
+                                _fdelta = followup_chunk.choices[0].delta
+                                for _tcd in (getattr(_fdelta, 'tool_calls', None) or []):
+                                    while len(_next_tool_calls) <= _tcd.index:
+                                        _next_tool_calls.append({'id': '', 'function': {'name': '', 'arguments': ''}})
+                                    if _tcd.id:
+                                        _next_tool_calls[_tcd.index]['id'] = _tcd.id
+                                    if _tcd.function.name:
+                                        _next_tool_calls[_tcd.index]['function']['name'] = _tcd.function.name
+                                    if _tcd.function.arguments:
+                                        _next_tool_calls[_tcd.index]['function']['arguments'] += _tcd.function.arguments
+                                piece = _fdelta.content
+                                if piece:
+                                    followup_text += piece
+                                    followup_last_content_time = time_module.perf_counter()
+                                    # Flush the post-tool answer incrementally too so
+                                    # an interrupt during the follow-up keeps it
+                                    # (Issue #5407, debounced).
+                                    active_stream["text"] = followup_text
+                                    self._persist_assistant_delta(followup_text)
+                                    yield piece
+                            if _followup_usage is not None:  # the follow-up is billed too (F-08)
+                                self._record_llm_usage(*self._extract_llm_usage(_followup_usage))
+                            if followup_last_content_time:
+                                self.stream_emitter.emit(StreamEvent(
+                                    type=StreamEventType.LAST_TOKEN,
+                                    timestamp=followup_last_content_time
+                                ))
+                            self.stream_emitter.emit(StreamEvent(
+                                type=StreamEventType.STREAM_END,
+                                timestamp=time_module.perf_counter(),
+                                metadata={"response_length": len(followup_text)}
+                            ))
+                            _stream_trace.llm_response(
+                                self.name,
+                                duration_ms=(time_module.perf_counter() - _followup_started) * 1000,
+                                response_content=followup_text,
+                            )
+                            _open_llm_call = None
+                            if _next_tool_calls:
+                                # Another round of tools: run them and ask again.
+                                tool_calls_data = _next_tool_calls
+                                response_text = followup_text
+                                continue
+                            if followup_text:
+                                self._append_to_chat_history(
+                                    {"role": "assistant", "content": followup_text}
+                                )
+                                # Finalize the post-tool answer so resume sees a
+                                # completed turn, not a dangling partial (Issue
+                                # #5407).
+                                self._finalize_assistant_turn(followup_text)
+                            else:
+                                # Tools ran and the model then said nothing. Simply
+                                # returning here is indistinguishable from a model
+                                # that had nothing to say, and that is exactly how
+                                # this reached users: the generator ended having
+                                # yielded not one character, and the caller could
+                                # only report "no output" for a turn whose tools
+                                # had all succeeded. Fail loudly instead.
+                                raise RuntimeError(
+                                    "the model called {} tool(s) and then returned "
+                                    "no answer".format(len(tool_calls_data)))
+                            break
                     else:
                         # Add complete response to chat history (text-only response)
                         if response_text:
