@@ -1,5 +1,7 @@
 import { OpenAIProvider } from '../../../src/llm/providers/openai';
 
+jest.unmock('openai');
+
 function fakeProvider(chunks: unknown[], baseUrl?: string) {
   const provider = new OpenAIProvider('gpt-4o-mini', { apiKey: 'synthetic', baseUrl });
   let request: Record<string, unknown> = {};
@@ -58,6 +60,19 @@ test('respects an OpenAI-compatible endpoint configured through the environment'
     const { provider, getRequest } = fakeProvider([]);
     await collect(provider);
     expect(getRequest().stream_options).toBeUndefined();
+  } finally {
+    if (previous === undefined) delete process.env.OPENAI_BASE_URL;
+    else process.env.OPENAI_BASE_URL = previous;
+  }
+});
+
+test('requests usage when the SDK resolves a whitespace-padded official environment URL', async () => {
+  const previous = process.env.OPENAI_BASE_URL;
+  process.env.OPENAI_BASE_URL = ' https://api.openai.com/v1 ';
+  try {
+    const { provider, getRequest } = fakeProvider([]);
+    await collect(provider);
+    expect(getRequest().stream_options).toEqual({ include_usage: true });
   } finally {
     if (previous === undefined) delete process.env.OPENAI_BASE_URL;
     else process.env.OPENAI_BASE_URL = previous;

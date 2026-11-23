@@ -26,8 +26,6 @@ export class OpenAIProvider extends BaseProvider {
 
   constructor(modelId: string, config: ProviderConfig = {}) {
     super(modelId, config);
-    const baseUrl = config.baseUrl ?? getEnv('OPENAI_BASE_URL');
-    this.requestStreamUsage = !baseUrl || /^https:\/\/api\.openai\.com\/v1\/?$/.test(baseUrl);
     this.client = new OpenAI(buildOpenAIClientOptions(
       {
         apiKey: config.apiKey || getEnv('OPENAI_API_KEY'),
@@ -37,6 +35,7 @@ export class OpenAIProvider extends BaseProvider {
       },
       { fetch: config.fetch, dangerouslyAllowBrowser: config.dangerouslyAllowBrowser }
     ));
+    this.requestStreamUsage = /^https:\/\/api\.openai\.com\/v1\/?$/.test(this.client.baseURL);
   }
 
   async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
