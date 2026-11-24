@@ -1026,7 +1026,11 @@ class PraisonAI:
         # bridge, the same pattern the recipe command uses below.
         if args.command == 'acp':
             from praisonai_code._wrapper_bridge import import_wrapper_module
-            _acp_mod = import_wrapper_module('praisonai.cli.features.acp')
+            try:
+                _acp_mod = import_wrapper_module('praisonai.cli.features.acp')
+            except ImportError as e:
+                print(f"ERROR: {e}", file=sys.stderr)
+                sys.exit(1)
             run_acp_command = _acp_mod.run_acp_command
             exit_code = run_acp_command(unknown_args)
             sys.exit(exit_code)
