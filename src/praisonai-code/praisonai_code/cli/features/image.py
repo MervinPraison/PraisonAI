@@ -24,8 +24,9 @@ SUPPORTED_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'
 DEFAULT_VISION_MODEL = "gpt-4o"
 
 # Default image generation models
-DEFAULT_IMAGE_GEN_MODEL = "dall-e-3"
+DEFAULT_IMAGE_GEN_MODEL = "openai/gpt-image-2.5-flare"
 SUPPORTED_IMAGE_GEN_MODELS = [
+    DEFAULT_IMAGE_GEN_MODEL,
     'gpt-image-1', 'gpt-image-1-mini', 'gpt-image-1.5', 
     'chatgpt-image-latest', 'dall-e-2', 'dall-e-3'
 ]
@@ -256,12 +257,12 @@ class ImageGenerateHandler(FlagHandler):
     """
     Handler for --image-generate flag (Image Generation).
     
-    Generates NEW images from text prompts using DALL-E or similar models.
+    Generates new images from text prompts using an image generation model.
     This is for CREATING images, not analyzing existing ones.
     
     Example:
         praisonai "A sunset over mountains" --image-generate
-        praisonai "A cat wearing a hat" --image-generate --llm dall-e-3
+        praisonai "A cat wearing a hat" --image-generate --llm gpt-image-2.5-flare
     """
     
     @property
@@ -292,13 +293,13 @@ class ImageGenerateHandler(FlagHandler):
             config["use_image_generation"] = True
         return config
     
-    def generate_image(self, prompt: str, llm: str = None, output_path: str = None) -> Dict[str, Any]:
+    def generate_image(self, prompt: str, llm: str | Dict[str, Any] | None = None, output_path: str = None) -> Dict[str, Any]:
         """
         Generate an image from a text prompt.
         
         Args:
             prompt: Text description of the image to generate
-            llm: Image generation model (dall-e-3, dall-e-2, etc.)
+            llm: Image model name or CLI LLM config (defaults to gpt-image-2.5-flare)
             output_path: Optional path to save the generated image
             
         Returns:
@@ -310,8 +311,11 @@ class ImageGenerateHandler(FlagHandler):
         
         from praisonaiagents import ImageAgent
         
-        # Use provided model or default
-        model = llm or DEFAULT_IMAGE_GEN_MODEL
+        # Direct-prompt dispatch wraps an explicit --llm in a configuration dict.
+        model = (llm.get("model") if isinstance(llm, dict) else llm) or DEFAULT_IMAGE_GEN_MODEL
+        # Keep the bare CLI spelling working without relying on LiteLLM's online model map.
+        if model == "gpt-image-2.5-flare":
+            model = f"openai/{model}"
         
         # Validate model is supported for generation
         if model not in SUPPORTED_IMAGE_GEN_MODELS:
@@ -366,13 +370,13 @@ class ImageGenerateHandler(FlagHandler):
             logger.error(f"Error saving image: {e}")
             return False
     
-    def execute(self, prompt: str = None, llm: str = None, output_path: str = None, **kwargs) -> Dict[str, Any]:
+    def execute(self, prompt: str = None, llm: str | Dict[str, Any] | None = None, output_path: str = None, **kwargs) -> Dict[str, Any]:
         """
         Execute image generation.
         
         Args:
             prompt: Text description of the image to generate
-            llm: Image generation model name
+            llm: Image model name or CLI LLM config
             output_path: Optional path to save the image
             
         Returns:
