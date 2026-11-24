@@ -261,6 +261,46 @@ def __getattr__(name):
         return value
     raise AttributeError(name)
 
+
+# ACP owns its own flag surface, and two of its flags collide with legacy ones.
+# ``--model`` is a legacy flag too, so the argparse pass would consume the value
+# and the handler would start on its default model; ``--resume --last`` is a
+# legal ACP pair the legacy parser rejects outright, because its own
+# ``--resume`` requires a value. ``acp`` is therefore dispatched before the
+# parser runs, with the arguments exactly as typed.
+def _acp_tail(argv):
+    """Return the arguments after a leading ``acp`` verb, or None.
+
+    Only leading flags are skipped, so ``-v acp --model m`` forwards both
+    flags while an option value ahead of the verb (``--model m acp``) keeps
+    the legacy path — better to leave an unusual prefix to the parser than to
+    mis-forward its value as the command.
+    """
+    for index, token in enumerate(argv):
+        if token == "acp":
+            return list(argv[index + 1:])
+        if not token.startswith("-"):
+            return None
+    return None
+
+
+def _run_acp(acp_args):
+    """Run the ACP handler on ``acp_args`` and exit with its code.
+
+    The handler stays in the praisonai wrapper (its dependency
+    ``praisonai.acp.serve`` lives there), so it is reached through the wrapper
+    bridge, the same pattern the recipe command uses. A missing wrapper prints
+    the install hint and exits non-zero instead of raising.
+    """
+    from praisonai_code._wrapper_bridge import import_wrapper_module
+    try:
+        _acp_mod = import_wrapper_module("praisonai.cli.features.acp")
+    except ImportError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+    sys.exit(_acp_mod.run_acp_command(acp_args))
+
+
 class PraisonAI:
     def __init__(self, agent_file="agents.yaml", framework="", auto=False, init=False, agent_yaml=None, tools=None):
         """
@@ -990,6 +1030,12 @@ class PraisonAI:
             default_args.no_rules = False
             return default_args
         
+        # Dispatch ACP before the legacy parser consumes or rejects its flags
+        # (see _acp_tail): the handler parses the arguments as typed.
+        acp_args = _acp_tail(sys.argv[1:])
+        if acp_args is not None:
+            _run_acp(acp_args)
+
         from praisonai_code._wrapper_bridge import import_wrapper_module
         _ab = import_wrapper_module("praisonai.cli.legacy.dispatch.argparse_builder")
         args, unknown_args, special_commands = _ab.build_argument_parser(in_test_env)
@@ -1021,19 +1067,10 @@ class PraisonAI:
             sys.exit(0)
 
         # Handle ACP command - Agent Client Protocol server for IDE integration
-        # The handler stays in the praisonai wrapper (its dependency
-        # `praisonai.acp.serve` lives there), so reach it through the wrapper
-        # bridge, the same pattern the recipe command uses below.
+        # Fallback for a prefix _acp_tail does not classify (an option value
+        # ahead of the verb); the normal path dispatches before parsing.
         if args.command == 'acp':
-            from praisonai_code._wrapper_bridge import import_wrapper_module
-            try:
-                _acp_mod = import_wrapper_module('praisonai.cli.features.acp')
-            except ImportError as e:
-                print(f"ERROR: {e}", file=sys.stderr)
-                sys.exit(1)
-            run_acp_command = _acp_mod.run_acp_command
-            exit_code = run_acp_command(unknown_args)
-            sys.exit(exit_code)
+            _run_acp(unknown_args)
         
         # Handle debug command - Debug and test interactive flows
         if args.command == 'debug':
