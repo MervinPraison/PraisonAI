@@ -1,5 +1,7 @@
 """Regression tests for issue #6318."""
 
+import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -72,10 +74,11 @@ def test_rag_dedup_keeps_chunks_sharing_long_prefix():
     assert len(ContextCompressor()._deduplicate(chunks)) == 3
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="':' is a drive separator on Windows, so the raw legacy dir can't be made under tmp_path")
 def test_artifact_list_skips_drive_relative_legacy_names(tmp_path):
     # On Windows, root / "C:outside" is the drive-relative path "C:outside",
     # outside the store root, so an id with a colon is never tried as a raw,
-    # pre-sanitisation directory name; only its sanitised form "C_outside" is.
+    # pre-sanitization directory name; only its sanitized form "C_outside" is.
     store = FileSystemArtifactStore(base_dir=str(tmp_path))
     ref = store.store("x", ArtifactMetadata(agent_id="C_outside", run_id="r", tool_name="t", turn_id=1))
     raw = tmp_path / "C:outside" / "r"
@@ -83,5 +86,7 @@ def test_artifact_list_skips_drive_relative_legacy_names(tmp_path):
     src = Path(ref.path)
     meta = src.with_suffix(".meta.json")
     (raw / src.name).write_bytes(src.read_bytes())
-    (raw / meta.name).write_text(meta.read_text().replace('"C_outside"', '"C:outside"'))
+    data = json.loads(meta.read_text())
+    data["agent_id"] = "C:outside"
+    (raw / meta.name).write_text(json.dumps(data))
     assert store.list_artifacts(agent_id="C:outside", run_id="r") == []
