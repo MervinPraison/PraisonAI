@@ -68,10 +68,14 @@ export type ModelOverrides = Record<string, Record<string, any>>;
  * fallback in {@link getModelLimit}, exactly as it does in Python.
  */
 export const MODEL_LIMITS: Readonly<Record<string, number>> = {
-  // OpenAI -- gpt-5 family (1M context window)
-  'gpt-5': 1047576,
-  'gpt-5-mini': 1047576,
-  'gpt-5-nano': 1047576,
+  // More specific names must precede gpt-5 for dated/prefixed matches.
+  'gpt-5.4-mini': 400000,
+  'gpt-5.4-nano': 400000,
+  'gpt-5.4': 1050000,
+  // OpenAI -- original gpt-5 family (400k full context window)
+  'gpt-5': 400000,
+  'gpt-5-mini': 400000,
+  'gpt-5-nano': 400000,
   // OpenAI -- gpt-4.1 family (1M context window)
   'gpt-4.1': 1047576,
   'gpt-4.1-mini': 1047576,
