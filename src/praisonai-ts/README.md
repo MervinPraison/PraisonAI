@@ -64,6 +64,25 @@ async function main() {
 main();
 ```
 
+To observe the final model request's context occupancy without changing the
+text response, pass a per-turn callback:
+
+```typescript
+const answer = await agent.chat('Explain photosynthesis', undefined, undefined, {
+  onContextUsage: (usage) => {
+    if (usage) console.log(`${usage.percent}% (${usage.inputTokens}/${usage.windowTokens})`);
+  },
+});
+```
+
+The callback receives `null` when provider input usage, the actual model, or a
+verified full window is unavailable (including text-only managed backends and
+OpenAI-compatible custom endpoints).
+The known-window list currently covers GPT-4o, GPT-4.1, and GPT-5 and their
+explicitly listed snapshots; other models report unavailable. Counts come
+from the final answer-producing request, not cumulative cost. The existing
+`ContextManager.getUtilization()` continues to measure its usable budget.
+
 ### 2. Multi-Agent Example
 
 ```typescript

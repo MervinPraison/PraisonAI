@@ -54,11 +54,15 @@ export interface GenerateTextResult {
 }
 
 export interface StreamTextOptions extends GenerateTextOptions {
+  /** Include provider response model metadata in the final chunk when available. */
+  includeResponseMetadata?: boolean;
   onToken?: (token: string) => void;
   onToolCall?: (toolCall: ToolCall) => void;
 }
 
 export interface StreamChunk {
+  /** Actual provider-reported model, when available. */
+  model?: string;
   text?: string;
   toolCalls?: ToolCall[];
   usage?: Partial<TokenUsage>;
