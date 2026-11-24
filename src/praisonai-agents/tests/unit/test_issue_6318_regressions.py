@@ -70,3 +70,18 @@ def test_rag_dedup_keeps_chunks_sharing_long_prefix():
         {"text": "  " + hdr.upper() + "Leave:   25 days.  "},  # exact dup after normalising
     ]
     assert len(ContextCompressor()._deduplicate(chunks)) == 3
+
+
+def test_artifact_list_skips_drive_relative_legacy_names(tmp_path):
+    # On Windows, root / "C:outside" is the drive-relative path "C:outside",
+    # outside the store root, so an id with a colon is never tried as a raw,
+    # pre-sanitisation directory name; only its sanitised form "C_outside" is.
+    store = FileSystemArtifactStore(base_dir=str(tmp_path))
+    ref = store.store("x", ArtifactMetadata(agent_id="C_outside", run_id="r", tool_name="t", turn_id=1))
+    raw = tmp_path / "C:outside" / "r"
+    raw.mkdir(parents=True)
+    src = Path(ref.path)
+    meta = src.with_suffix(".meta.json")
+    (raw / src.name).write_bytes(src.read_bytes())
+    (raw / meta.name).write_text(meta.read_text().replace('"C_outside"', '"C:outside"'))
+    assert store.list_artifacts(agent_id="C:outside", run_id="r") == []
