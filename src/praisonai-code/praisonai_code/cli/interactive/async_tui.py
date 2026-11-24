@@ -1916,16 +1916,14 @@ Example: /handoff code "refactor the auth module" """
     def _resolved_window(self) -> Optional[int]:
         """Current full window for the status bar, or None when unknown.
 
-        Reads the live resolver rather than the budgeter cached at session
-        start, so a local probe that arrives later (Ollama context length)
-        is shown. The generic 128000 default is not a resolved window.
+        This model-only surface does not know which endpoint served a turn,
+        so the verified resolver reports unavailable until provenance is wired.
         """
         try:
-            from praisonaiagents.context.budgeter import resolved_model_limit
+            from praisonaiagents.context.budgeter import verified_context_window
         except Exception:  # noqa: BLE001
             return None
-        # Same default ``_get_context_manager`` builds the budgeter with.
-        return resolved_model_limit(self.config.model or "gpt-4o-mini")
+        return verified_context_window(self.config.model or "gpt-4o-mini")
 
     def _refresh_usage_status(self) -> None:
         """Recompute the context-window / cost readout shown in the status bar.

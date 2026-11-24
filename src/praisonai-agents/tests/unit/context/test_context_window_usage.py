@@ -2,6 +2,7 @@
 
 import io
 import json
+import pytest
 
 from praisonaiagents.context.budgeter import (
     compaction_context_payload,
@@ -10,6 +11,13 @@ from praisonaiagents.context.budgeter import (
     occupancy_tokens,
     resolved_model_limit,
 )
+
+
+@pytest.fixture(autouse=True)
+def verified_test_windows(monkeypatch):
+    """Exercise formatting/accounting independently of provenance lookup."""
+    from praisonaiagents.context import budgeter
+    monkeypatch.setattr(budgeter, "verified_context_window", lambda model, endpoint=None: budgeter.resolved_model_limit(model))
 
 
 class TestResolvedModelLimit:

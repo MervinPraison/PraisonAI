@@ -39,7 +39,7 @@ def test_mid_session_shows_context_and_cost(collector):
     tui._refresh_usage_status()
     bar = tui._status_bar_text()
     expected = get_pricing("gpt-4o-mini").calculate_cost(1000, 100)
-    assert "ctx " in bar and "/128.0k (" in bar
+    assert "ctx " in bar and "/128.0k (" not in bar
     assert f"1.1k tok ${expected:.4f}" in bar
     assert bar.isascii()
 
@@ -84,14 +84,14 @@ def test_new_conversation_clears_readout(collector):
     assert "tok" not in tui._status_bar_text()
 
 
-def test_later_probe_replaces_a_stale_budgeter_window(collector, monkeypatch):
+def test_model_only_probe_does_not_prove_endpoint_window(collector, monkeypatch):
     import praisonaiagents.context.budgeter as budgeter
 
     monkeypatch.setattr(budgeter, "resolved_model_limit", lambda model: 131072)
     tui = AsyncTUI(config=AsyncTUIConfig(model="llama3.1"))
     tui._conversation_history = [{"role": "user", "content": "hello " * 200}]
     tui._refresh_usage_status()
-    assert "/131.1k (" in tui._usage_status
+    assert "/131.1k (" not in tui._usage_status
 
 
 def test_unknown_model_limit_hides_fallback(collector):
@@ -119,9 +119,9 @@ def test_narrow_terminal_keeps_cost_visible(collector):
 
 
 
-def test_unset_model_uses_context_manager_default_limit(collector):
-    # _get_context_manager falls back to gpt-4o-mini; its limit is known.
+def test_unset_model_does_not_infer_verified_window(collector):
+    # A default model does not establish actual endpoint provenance.
     tui = AsyncTUI(config=AsyncTUIConfig(model=None))
     tui._conversation_history = [{"role": "user", "content": "hello " * 200}]
     tui._refresh_usage_status()
-    assert "/128.0k (" in tui._usage_status
+    assert "/128.0k (" not in tui._usage_status
