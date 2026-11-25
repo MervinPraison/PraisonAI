@@ -23,11 +23,14 @@ _FIELD_ALIASES = {
     "includeTools": "allowed_tools", "enabled_tools": "allowed_tools",
     "include_tools": "allowed_tools", "tool_filter": "allowed_tools",
     "excludeTools": "disabled_tools", "exclude_tools": "disabled_tools",
+    "transport": "type", "tool_timeout_sec": "timeout",
 }
+# Harmless editor fields with no meaning here: dropped without a warning.
+_QUIET_FIELDS = {"name", "description", "trust", "alwaysAllow", "autoApprove", "startup_timeout_sec"}
 _FIELDS = {"type", "command", "args", "env", "cwd", "url", "headers", "oauth",
            "allowed_tools", "disabled_tools", "timeout", "enabled"}
 _TYPE_ALIASES = {"local": "stdio", "remote": "http", "streamable-http": "http",
-                 "streamableHttp": "http", "websocket": "ws"}
+                 "streamable_http": "http", "streamableHttp": "http", "websocket": "ws"}
 _ENV_VAR = re.compile(r"\$\{(?:env:)?([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 
 
@@ -39,12 +42,14 @@ def _normalize_entry(name: str, raw: Any) -> Dict[str, Any]:
         raise ValueError(f"MCP server '{name}' must be a mapping or a command string")
     entry = {_FIELD_ALIASES.get(k, k): v for k, v in raw.items()}
     bearer_var = entry.pop("bearer_token_env_var", None)
-    unknown = [k for k in entry if k not in _FIELDS]
+    if entry.pop("disabled", False):  # Claude Code, Cline, VS Code
+        entry["enabled"] = False
+    unknown = [k for k in entry if k not in _FIELDS | _QUIET_FIELDS]
+    entry = {k: v for k, v in entry.items() if k in _FIELDS}
     if unknown:
-        entry = {k: v for k, v in entry.items() if k in _FIELDS}
         logger.warning("MCP server '%s': ignoring unknown field(s): %s", name, ", ".join(unknown))
     if bearer_var:
-        entry["headers"] = {**entry.get("headers", {}), "Authorization": f"Bearer ${{{bearer_var}}}"}
+        entry["headers"] = {**(entry.get("headers") or {}), "Authorization": f"Bearer ${{{bearer_var}}}"}
     oauth = entry.get("oauth")
     if isinstance(oauth, dict):
         client_id = oauth.get("client_id") or oauth.get("clientId") or oauth.get("CLIENT_ID")
@@ -61,6 +66,8 @@ def _normalize_entry(name: str, raw: Any) -> Dict[str, Any]:
 def parse_mcp_servers(data: Any) -> Dict[str, Dict[str, Any]]:
     """Return ``{name: entry}`` from ``mcpServers``/``servers``/``mcp_servers``/``mcp.servers``
     or a bare mapping, with editor field names mapped to one shape. ``${VAR}`` is kept as is.
+    It does not apply ``mcp/trust.py``: callers reading a project file must still call
+    ``drop_untrusted_mcp_servers`` first.
     """
     if not data:
         return {}
@@ -94,13 +101,21 @@ def _expand(value: Any, name: str) -> Any:
 def build_mcp(entry: Any, name: str = "server", cls: type = MCP) -> MCP:
     """Build an ``MCP`` client from one config entry. Used by :meth:`MCP.from_config`."""
     entry = _normalize_entry(name, entry)
+    if entry.get("enabled") is False:
+        raise ValueError(f"MCP server '{name}' is disabled")
     kwargs: Dict[str, Any] = {}
     if entry.get("url"):
         target = _expand(entry["url"], name)
         if not is_mcp_url(target):
             raise ValueError(f"MCP server '{name}': url must be an http(s) or ws(s) URL")
-        if entry.get("headers"):
-            kwargs["headers"] = _expand(entry["headers"], name)
+        headers = entry.get("headers")
+        if headers and target.rstrip("/").endswith("/sse"):
+            # The legacy SSE client cannot send headers; never connect without auth.
+            if any(k.lower() == "authorization" for k in headers):
+                raise ValueError(f"MCP server '{name}': legacy SSE URLs cannot send an Authorization header")
+            logger.warning("MCP server '%s': headers are not supported for legacy SSE URLs and are ignored", name)
+        elif headers:
+            kwargs["headers"] = _expand(headers, name)
         if entry.get("oauth"):
             logger.warning("MCP server '%s': oauth sign-in is not applied by this client yet", name)
     else:
@@ -110,7 +125,7 @@ def build_mcp(entry: Any, name: str = "server", cls: type = MCP) -> MCP:
                 kwargs[key] = _expand(entry[key], name)
     timeout = entry.get("timeout")
     if timeout is not None:
-        kwargs["timeout"] = timeout / 1000 if timeout > 1000 else timeout  # ms in the code schema
+        kwargs["timeout"] = timeout / 1000 if timeout >= 1000 else timeout  # 1000+ is ms (code schema)
     for key in ("allowed_tools", "disabled_tools"):
         if entry.get(key):
             kwargs[key] = entry[key]

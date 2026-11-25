@@ -171,3 +171,59 @@ def test_parse_mcp_servers_not_a_root_export():
     import praisonaiagents
 
     assert "parse_mcp_servers" not in getattr(praisonaiagents, "__all__", [])
+
+
+# --- review fixes: disabled servers, SSE headers, quiet editor fields ---------
+
+def test_disabled_true_means_enabled_false():
+    out = parse_mcp_servers({"mcpServers": {"s": {"command": "x", "disabled": True}}})
+    assert out["s"]["enabled"] is False and "disabled" not in out["s"]
+    assert "enabled" not in parse_mcp_servers({"s": {"command": "x", "disabled": False}})["s"]
+
+
+@pytest.mark.parametrize("entry", [{"command": "x", "enabled": False},
+                                   {"command": "x", "disabled": True}])
+def test_from_config_refuses_disabled_server(entry):
+    with pytest.raises(ValueError, match="'s' is disabled"):
+        MCP.from_config(entry, name="s")
+
+
+def test_sse_authorization_header_is_refused():
+    with pytest.raises(ValueError, match="SSE"):
+        _build({"url": "https://x.dev/sse/", "headers": {"Authorization": "Bearer t"}})
+
+
+def test_sse_other_headers_warn_and_are_dropped(caplog):
+    with caplog.at_level("WARNING"):
+        rec = _build({"url": "https://x.dev/sse", "headers": {"X-A": "1"}})
+    assert "headers" not in rec.kw
+    assert "SSE" in caplog.text
+
+
+@pytest.mark.parametrize("field", ["name", "description", "trust", "alwaysAllow",
+                                   "autoApprove", "startup_timeout_sec"])
+def test_known_editor_fields_are_quiet(field, caplog):
+    with caplog.at_level("WARNING"):
+        out = parse_mcp_servers({"s": {"command": "x", field: 1}})
+    assert field not in out["s"]
+    assert caplog.text == ""
+
+
+@pytest.mark.parametrize("transport,kind", [("stdio", "stdio"), ("sse", "sse"),
+                                            ("streamable_http", "http"), ("streamable-http", "http"),
+                                            ("http", "http"), ("websocket", "ws")])
+def test_transport_maps_to_type(transport, kind):
+    assert parse_mcp_servers({"s": {"url": "https://x/m", "transport": transport}})["s"]["type"] == kind
+
+
+def test_codex_tool_timeout_sec():
+    assert _build({"command": "x", "tool_timeout_sec": 45}).kw["timeout"] == 45
+
+
+def test_bearer_with_null_headers():
+    out = parse_mcp_servers({"s": {"url": "https://x/m", "headers": None, "bearer_token_env_var": "T"}})
+    assert out["s"]["headers"] == {"Authorization": "Bearer ${T}"}
+
+
+def test_timeout_1000_is_milliseconds():
+    assert _build({"command": "x", "timeout": 1000}).kw["timeout"] == 1
