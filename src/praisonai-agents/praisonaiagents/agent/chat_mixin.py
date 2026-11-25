@@ -20,6 +20,7 @@ from praisonaiagents._logging import get_logger
 from ..errors import BudgetExceededError, ToolExecutionError
 from .tool_execution import _active_turn_cancel
 from .interrupt import protect_turn
+from .turn_lock import serial_aturn, serial_stream_turn, serial_turn
 
 # Shared lazy display helpers (cached, thread-safe; avoid circular imports)
 from ._lazy_display import _get_console, _get_live, _get_display_functions
@@ -3947,6 +3948,7 @@ Your Role: {self.role}"""
             )
         return rendered
 
+    @serial_turn
     def chat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None) -> Optional[str]:
         """
         Chat with the agent.
@@ -4803,6 +4805,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
         return clean_triple_backticks(output)
 
+    @serial_aturn
     async def achat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None):
         """Async version of chat method with self-reflection support.
         
@@ -5944,6 +5947,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Auto-save session if enabled
         self._auto_save_session()
 
+    @serial_stream_turn
     def _start_stream(self, prompt: str, **kwargs) -> Generator[str, None, None]:
         """Own the durable context for the complete streaming generator."""
         # A stream is a turn too: give it its own loop guard (as chat/achat get
