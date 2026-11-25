@@ -895,6 +895,7 @@ class AgentTeam(SpawnAnnounceProtocol):
         tools_run_on: Optional[Any] = None,
         # Accepted only to fail with a useful message -- see resolve_placement.
         run_on: Optional[Any] = None,
+        manager_model: Optional[str] = None,  # Same as manager_llm=, named like model=
     ):
         """
         Initialize AgentManager with consolidated feature parameters.
@@ -907,6 +908,7 @@ class AgentTeam(SpawnAnnounceProtocol):
                 objects within a "workflow" or "sequential" process.
             manager_llm: Model for the hierarchical manager agent. Unrelated to
                 model=/llm=; it never touches the members.
+            manager_model: Same as manager_llm=. Passing both raises TypeError.
             llm: Deprecated alias for model=. Passing both raises TypeError.
             model: Default model for members that did not name one themselves.
                 An agent constructed with its own llm=/model=/auth= keeps it.
@@ -937,6 +939,15 @@ class AgentTeam(SpawnAnnounceProtocol):
         # inside chat() with "'LLMConfig' object has no attribute 'lower'".
         from ..utils.model_alias import resolve_model_name
         self.llm = resolve_model_name(llm, model, type(self).__name__)
+        if llm is not None and model is None:
+            from ..utils.deprecation import warn_deprecated_param
+            warn_deprecated_param(
+                "llm", since="1.0.0", removal="2.0.0", stacklevel=3,
+                alternative="use 'model' instead. Example: AgentTeam(agents=[...], model='gpt-4o-mini')")
+        if manager_llm is not None and manager_model is not None:
+            raise TypeError(f"{type(self).__name__}() received both manager_llm= and manager_model=; "
+                            "they are the same parameter. Pass only manager_model=.")
+        manager_llm = manager_model if manager_model is not None else manager_llm
         if self.llm:
             for _member in (agents.values() if isinstance(agents, dict) else (agents or [])):
                 _apply = getattr(_member, "_apply_default_llm", None)

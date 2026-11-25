@@ -67,6 +67,11 @@ waivers:
       scope for this key): the accepted DOMAIN differs -- TS implements `process: "parallel"` with Promise.all,
       which Python rejects with a ValueError, and TS validates nothing, so a typo runs sequentially instead
       of raising.'
+  AgentTeam.__init__.manager_model:
+    owner: praisonai-ts
+    reason: Python-only spelling of manager_llm (D-10), added so the manager model is named like
+      model=. TS already has `managerLlm`, the parity of manager_llm; a `managerModel` alias can follow
+      if TS adopts the same naming.
   GoalEngineer.__init__.auto_decompose:
     owner: praisonai-ts
     reason: The constructor only overrides `autoDecompose` when it is supplied; the default lives on GoalConfig,
