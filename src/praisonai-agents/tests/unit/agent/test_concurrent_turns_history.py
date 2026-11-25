@@ -98,3 +98,15 @@ def test_an_abandoned_stream_releases_the_turn():
     next(iter(stream), None)  # started, then dropped half-way
     stream.close()
     assert agent.chat("second") == "re: second"  # would block forever if the lock leaked
+
+
+def test_streams_ending_out_of_order_leave_no_turn_marked_held():
+    from praisonaiagents.agent.turn_lock import _held
+
+    x, y = _agent(), _agent()
+    sx, sy = x.start("x", stream=True), y.start("y", stream=True)
+    next(iter(sx), None)
+    next(iter(sy), None)
+    sx.close()  # x ends first, y second
+    sy.close()
+    assert _held.get() == frozenset()  # a stale mark would let x skip its lock

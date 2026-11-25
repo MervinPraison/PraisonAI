@@ -79,14 +79,13 @@ def serial_stream_turn(method):
             return (yield from method(self, *args, **kwargs))
         lock = _thread_lock(self)
         lock.acquire()
-        token = _held.set(held | {id(self)})
+        _held.set(held | {id(self)})
         try:
             return (yield from method(self, *args, **kwargs))
         finally:
-            try:
-                _held.reset(token)
-            except ValueError:  # closed from another context (GC, another thread)
-                pass
+            # Not reset(token): streams can end out of order, and a token
+            # restore would drop or revive another agent's mark.
+            _held.set(_held.get() - {id(self)})
             lock.release()
 
     return wrapper
