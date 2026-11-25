@@ -588,6 +588,16 @@ class MCP:
             lock.release()
 
     @classmethod
+    def from_config(cls, entry, name: str = "server") -> "MCP":
+        """Build a client from one config entry, e.g. ``{"url": ..., "headers": ...}``.
+
+        Accepts the entry shapes read by :func:`praisonaiagents.mcp.parse_mcp_servers`
+        and expands ``${VAR}`` references from the environment.
+        """
+        from .loader import build_mcp
+        return build_mcp(entry, name=name, cls=cls)
+
+    @classmethod
     def _is_cold_start_launcher(cls, cmd) -> bool:
         """True when ``cmd`` is a package launcher (npx/uvx/...) whose first run
         downloads the server before the MCP handshake starts."""
