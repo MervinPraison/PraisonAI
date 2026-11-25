@@ -15,6 +15,7 @@ def _view(**over):
             {"__typename": "CheckRun", "name": "lint", "status": "COMPLETED", "conclusion": "SUCCESS"},
             {"__typename": "CheckRun", "name": "slow", "status": "IN_PROGRESS", "conclusion": ""},
             {"__typename": "StatusContext", "context": "ci/legacy", "state": "ERROR"},
+            {"__typename": "CheckRun", "name": "unit", "status": "COMPLETED", "conclusion": "FAILURE"},
         ],
     }
     data.update(over)
@@ -26,7 +27,8 @@ def _threads(viewer="me"):
         return {"id": tid, "isResolved": resolved, "isOutdated": outdated, "path": "a.py", "line": 3,
                 "comments": {"nodes": [{"author": {"login": last}, "body": f"fix {tid}"}]}}
     return json.dumps({"data": {"viewer": {"login": viewer}, "repository": {"pullRequest": {"reviewThreads": {
-        "nodes": [node("T1"), node("T2", resolved=True), node("T3", outdated=True), node("T4", last=viewer)]}}}}})
+        "nodes": [node("T1"), node("T2", resolved=True), node("T3", outdated=True), node("T4", last=viewer),
+                  {**node("T5"), "comments": {"nodes": []}}]}}}}})
 
 
 class Runner:
@@ -42,9 +44,16 @@ class Runner:
 def test_reads_failing_checks_and_open_threads():
     s = read_pr_state("7", run=Runner())
     assert (s.number, s.state, s.head, s.base) == (7, "OPEN", "feat/x", "main")
-    assert s.failing == ["unit", "ci/legacy"]
-    assert [t.id for t in s.threads] == ["T1"]  # resolved, outdated and already-answered threads skipped
+    assert s.failing == ["unit", "ci/legacy"]  # duplicate "unit" collapsed
+    assert [t.id for t in s.threads] == ["T1"]  # resolved, outdated, answered and empty threads skipped
     assert s.threads[0].body == "fix T1" and s.threads[0].path == "a.py"
+
+
+def test_threads_read_from_the_prs_own_repo():
+    run = Runner(_view(url="https://github.com/other/proj/pull/7"))
+    read_pr_state("https://github.com/other/proj/pull/7", run=run)
+    gql = next(c for c in run.calls if c[:3] == ["gh", "api", "graphql"])
+    assert "owner=other" in gql and "name=proj" in gql and "number=7" in gql
 
 
 def test_reads_only_never_writes():

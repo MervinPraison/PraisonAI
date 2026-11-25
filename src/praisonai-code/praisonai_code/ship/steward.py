@@ -54,14 +54,18 @@ def read_pr_state(pr: Optional[str] = None, run: Callable = subprocess.run) -> P
     """Read the PR (the current branch's when ``pr`` is None) with ``gh``. Never writes."""
     view = _gh(run, "pr", "view", *([pr] if pr else []), "--json",
                "number,url,state,mergeable,headRefName,baseRefName,statusCheckRollup")
-    failing = [c.get("name") or c.get("context") for c in view.get("statusCheckRollup") or []
-               if (c.get("conclusion") or c.get("state")) in _FAILED]
-    data = _gh(run, "api", "graphql", "-f", f"query={_THREADS_QUERY}", "-F", "owner={owner}",
-               "-F", "name={repo}", "-F", f"number={view['number']}")["data"]
+    failing = list(dict.fromkeys(c.get("name") or c.get("context") for c in view.get("statusCheckRollup") or []
+                                 if (c.get("conclusion") or c.get("state")) in _FAILED))
+    # owner/name from the PR's own URL, not gh's {owner}/{repo} (the cwd repo), so a PR URL from another repo works.
+    owner, name = view["url"].split("/")[3:5]
+    data = _gh(run, "api", "graphql", "-f", f"query={_THREADS_QUERY}", "-F", f"owner={owner}",
+               "-F", f"name={name}", "-F", f"number={view['number']}")["data"]
     me = data["viewer"]["login"]
     threads = []
     for node in data["repository"]["pullRequest"]["reviewThreads"]["nodes"]:
-        last = (node["comments"]["nodes"] or [{}])[-1]
+        if not node["comments"]["nodes"]:
+            continue
+        last = node["comments"]["nodes"][-1]
         author = (last.get("author") or {}).get("login", "")
         if not node["isResolved"] and not node["isOutdated"] and author != me:
             threads.append(Thread(node["id"], node["path"], node.get("line"), author, last.get("body", "")))
