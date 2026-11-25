@@ -4,7 +4,7 @@ agent = Agent(
     instructions="You are a legal AI agent. "
                  "Help users with legal document analysis, contract review, "
                  "and legal advice while ensuring compliance and risk assessment.",
-    llm="xai/grok-4"
+    model="xai/grok-4"
 )
 
 response = agent.start(

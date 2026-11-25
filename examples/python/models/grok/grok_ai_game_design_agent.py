@@ -4,7 +4,7 @@ agent = Agent(
     instructions="You are a game design AI agent. "
                  "Help users with game concept development, mechanics design, "
                  "and creative storytelling for various gaming platforms and genres.",
-    llm="xai/grok-4"
+    model="xai/grok-4"
 )
 
 response = agent.start(
