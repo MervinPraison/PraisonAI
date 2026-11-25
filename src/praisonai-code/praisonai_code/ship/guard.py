@@ -46,8 +46,10 @@ def _api_reason(words: List[str], args: List[str]) -> Optional[str]:
         return "merging a pull request through the API is left to the user"
     if "event=approve" in text or ("addpullrequestreview" in text and "approve" in text):
         return "approving a pull request through the API is left to the user"
-    if "graphql" in words and ("--input" in args or "=@" in text):
-        return "a GraphQL query read from a file cannot be checked"
+    # A body read from a file or stdin (--input, -F x=@file) hides an approve or merge.
+    from_file = any(a.split("=", 1)[0] == "--input" for a in args) or "=@" in text
+    if from_file and ("graphql" in words or any("/reviews" in p for p in paths)):
+        return "a GraphQL query or review body read from a file cannot be checked"
     return None
 
 
