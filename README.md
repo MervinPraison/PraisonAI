@@ -391,6 +391,15 @@ Sandboxes shut themselves down when idle (`auto_shutdown`, `idle_timeout_s`), an
   </picture>
 </p>
 
+**Agent teams.** One `AgentTeam`, three ways to run the same tasks: in order, under a manager agent, or as a workflow. [Docs](https://praison.ai/docs/concepts/process)
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/images/readme/agent-team-dark.svg" />
+    <img src=".github/images/readme/agent-team-light.svg" alt="AgentTeam runs the same tasks three ways. Sequential: Research, Write and Review run in list order. Hierarchical: a manager agent tells each agent to execute or stop and reads their status back. Workflow: a start task, a decision that routes to Publish or Revise, and Revise routes back to the start." width="880" />
+  </picture>
+</p>
+
 **One agent turn.** What happens between your prompt and the answer, and what stops it. [Docs](https://praison.ai/docs/features/doom-loop-detection)
 
 <p align="center">
