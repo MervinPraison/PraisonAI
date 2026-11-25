@@ -24,7 +24,6 @@ class TestInboundDebouncer:
         result = await debouncer.debounce("user1", "hello")
         assert result is not None
         assert result.final == "hello"
-        assert result.preceding == []
 
     @pytest.mark.asyncio
     async def test_rapid_messages_coalesced(self):
@@ -42,7 +41,6 @@ class TestInboundDebouncer:
         assert superseded is None
         assert batch is not None
         assert batch.final == "hello\nworld"
-        assert batch.preceding == ["hello"]
 
     @pytest.mark.asyncio
     async def test_different_users_independent(self):
@@ -138,7 +136,6 @@ class TestInboundDebouncer:
         assert results[1] is None
         assert results[2] is not None
         assert results[2].final == "0\n1\n2"
-        assert results[2].preceding == ["0", "1"]
         assert debouncer.pending_count == 0
 
     @pytest.mark.asyncio
@@ -157,7 +154,6 @@ class TestInboundDebouncer:
         assert results[2] is not None
         batch = results[2]
         assert batch.final == "a\nb\nc"
-        assert batch.preceding == ["a", "b"]
 
     @pytest.mark.asyncio
     async def test_cancelled_final_caller_batch_falls_back_to_survivor(self):

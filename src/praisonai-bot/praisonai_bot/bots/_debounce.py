@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Dict, List, Optional
 from .._lockmap import LockMap
 
@@ -71,12 +71,10 @@ class DebouncedBatch:
     """One dispatchable turn coalesced from a debounce burst.
 
     ``final`` is the separator-joined burst text to hand the agent (the same
-    input the debouncer always produced). ``preceding`` lists the burst's
-    earlier messages in arrival order, for callers that want the parts.
+    input the debouncer always produced).
     """
 
     final: str
-    preceding: List[str] = field(default_factory=list)
 
 
 class InboundDebouncer:
@@ -177,9 +175,7 @@ class InboundDebouncer:
         if not messages:
             return
 
-        batch = DebouncedBatch(
-            final=self._separator.join(messages), preceding=messages[:-1]
-        )
+        batch = DebouncedBatch(final=self._separator.join(messages))
         # The last *unfinished* caller owns the batch: a cancelled caller's
         # future is already done, and resolving by position would then hand
         # ``None`` to every survivor and drop the burst on the floor.
