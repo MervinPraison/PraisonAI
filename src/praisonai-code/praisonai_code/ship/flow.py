@@ -9,7 +9,7 @@ from praisonaiagents.permissions import is_secret_path
 
 
 class ShipRefused(RuntimeError, PraisonAIError):
-    """Ship stopped before changing anything; the message says why."""
+    """Ship stopped; the message says why. Refusals change nothing; a failed push or PR may follow a commit."""
 
 
 def _out(run: Callable, *cmd: str, ok: bool = False) -> Optional[str]:
