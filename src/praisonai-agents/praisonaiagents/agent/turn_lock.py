@@ -1,22 +1,10 @@
-"""One turn at a time per agent.
-
-An ``Agent`` is one conversation. When several threads or asyncio tasks called
-``chat()``/``achat()`` on the same agent at once, their messages interleaved in
-its history (user, user, assistant, assistant): each call sent the others'
-unanswered questions as context and replies no longer followed their
-questions. These decorators hold a per-agent lock for the whole turn, so
-concurrent callers queue. Use separate agents (or ``clone_for_channel``) for
-conversations that should run in parallel.
-
-A nested call on the same agent inside its own turn (a tool, a guardrail retry,
-``achat`` falling back to ``chat`` in a worker thread) sees the turn already
-held through a context variable and does not wait for itself. That flag, not
-lock re-entrancy, makes nesting safe, so the thread lock is a plain ``Lock``:
-a streamed turn may be closed from another thread (or by garbage collection),
-and only a plain lock can be released there.
+"""One turn at a time per agent (X-18): concurrent chat()/achat()/start(stream=True)
+calls on one Agent interleaved its history; now each turn holds a per-agent lock
+and callers queue (use separate agents for parallel conversations). A nested call
+inside the agent's own turn sees it held through a context variable and does not
+wait. A stream holds the lock from its first chunk until it ends, raises or is
+closed (close() or GC), maybe on another thread: so a plain Lock, not an RLock.
 """
-
-from __future__ import annotations
 
 import asyncio
 import contextvars
@@ -25,7 +13,6 @@ import threading
 import weakref
 
 _create_guard = threading.Lock()
-# ids of the agents whose turn this context already holds.
 _held = contextvars.ContextVar("praisonai_agent_turn_held", default=frozenset())
 
 
@@ -47,15 +34,12 @@ def _loop_lock(agent) -> asyncio.Lock:
         if locks is None:
             locks = weakref.WeakKeyDictionary()
             object.__setattr__(agent, "_turn_loop_locks", locks)
-        lock = locks.get(loop)
-        if lock is None:
-            lock = locks[loop] = asyncio.Lock()
-    return lock
+        if loop not in locks:
+            locks[loop] = asyncio.Lock()
+        return locks[loop]
 
 
 def serial_turn(method):
-    """Run a sync turn method while holding the agent's turn lock."""
-
     @functools.wraps(method)
     def wrapper(self, *args, **kwargs):
         held = _held.get()
@@ -72,8 +56,6 @@ def serial_turn(method):
 
 
 def serial_aturn(method):
-    """Run an async turn method while holding the agent's per-loop turn lock."""
-
     @functools.wraps(method)
     async def wrapper(self, *args, **kwargs):
         held = _held.get()
@@ -90,13 +72,6 @@ def serial_aturn(method):
 
 
 def serial_stream_turn(method):
-    """Hold the agent's turn lock for the life of a streaming generator.
-
-    The lock is taken when the first chunk is requested and released when the
-    stream ends, raises, or is closed (``close()``, or garbage collection of a
-    dropped generator).
-    """
-
     @functools.wraps(method)
     def wrapper(self, *args, **kwargs):
         held = _held.get()
