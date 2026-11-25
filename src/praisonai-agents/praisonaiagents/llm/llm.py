@@ -7234,8 +7234,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 prompt_tokens=_usage_value("prompt_tokens", "input_tokens"),
                 completion_tokens=_usage_value("completion_tokens", "output_tokens"),
                 total_tokens=_usage_value("total_tokens"),
-                cached_tokens=_usage_value("cached_tokens"),
-                reasoning_tokens=_usage_value("reasoning_tokens"),
+                cached_tokens=_usage_value("cached_tokens") or usage_detail(
+                    usage, ("prompt_tokens_details", "input_tokens_details"), "cached_tokens"
+                ),
+                reasoning_tokens=_usage_value("reasoning_tokens") or usage_detail(
+                    usage, ("completion_tokens_details", "output_tokens_details"), "reasoning_tokens"
+                ),
                 audio_input_tokens=_usage_value("audio_input_tokens"),
                 audio_output_tokens=_usage_value("audio_output_tokens"),
             )
