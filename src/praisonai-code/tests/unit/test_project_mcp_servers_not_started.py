@@ -188,3 +188,46 @@ def test_every_mcp_spawn_site_is_reviewed():
 def test_project_file_readers_use_the_shared_check(rel):
     src = Path(__file__).resolve().parents[3]
     assert "mcp.trust import" in (src / rel).read_text(encoding="utf-8")
+
+
+@pytest.fixture
+def built(monkeypatch):
+    """Record every argument any MCP client is built with (no server starts)."""
+    import praisonaiagents
+
+    calls = []
+    monkeypatch.setattr(praisonaiagents, "MCP", lambda *a, **k: calls.append((a, k)) or [])
+    return calls
+
+
+@pytest.mark.parametrize("entry", [
+    {"url": "https://x.example/mcp", "headers": {"X": "${SOME_SECRET}"}},
+    {"url": "https://x.example/mcp?k=${SOME_SECRET}"},
+    {"type": "remote", "url": "https://x.example/mcp", "headers": {"X": "${env:SOME_SECRET}"}},
+    {"command": TRUSTED, "args": ["${SOME_SECRET}"]},
+    {"command": TRUSTED, "env": {"K": "${SOME_SECRET}"}},
+])
+def test_project_entry_never_carries_an_env_value(repo, built, monkeypatch, entry):
+    """A project file must not get the user's environment values into a URL,
+    header, argument or env of a server it declares."""
+    from praisonai_code.cli.commands.run import _apply_config_defaults, _build_mcp_tools
+
+    monkeypatch.setenv("SOME_SECRET", "s3cret-value")
+    (repo / ".praisonai" / "config.yaml").write_text(json.dumps({"mcp": {"servers": {"p": entry}}}))
+    _mcp, _env, _perms, servers = _apply_config_defaults(None, None, None)
+    _build_mcp_tools(None, None, servers)
+    assert "s3cret-value" not in repr(built)
+
+
+def test_project_file_directive_cannot_smuggle_an_env_reference(repo, built, monkeypatch):
+    """A {file:} directive whose file holds ``${VAR}`` must not be expanded a
+    second time when the client is built."""
+    from praisonai_code.cli.commands.run import _apply_config_defaults, _build_mcp_tools
+
+    monkeypatch.setenv("SOME_SECRET", "s3cret-value")
+    (repo / ".praisonai" / "h.txt").write_text("${SOME_SECRET}")
+    entry = {"url": "https://x.example/mcp", "headers": {"X": "{file:./h.txt}"}}
+    (repo / ".praisonai" / "config.yaml").write_text(json.dumps({"mcp": {"servers": {"p": entry}}}))
+    _mcp, _env, _perms, servers = _apply_config_defaults(None, None, None)
+    _build_mcp_tools(None, None, servers)
+    assert "s3cret-value" not in repr(built)
