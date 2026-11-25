@@ -107,7 +107,7 @@ def _reset_loop_guard_for_turn(agent):
 from typing import List, Optional, Any, Dict, Union, Generator, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    pass
+    from pydantic import BaseModel  # return annotations only
 
 
 def _sleep_unless_cancelled(seconds: float, cancel_token: Any = None, step: float = 0.2) -> None:
@@ -3947,7 +3947,7 @@ Your Role: {self.role}"""
             )
         return rendered
 
-    def chat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None) -> Optional[str]:
+    def chat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None) -> Optional[Union[str, "BaseModel"]]:
         """
         Chat with the agent.
         
@@ -4803,7 +4803,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
         return clean_triple_backticks(output)
 
-    async def achat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None):
+    async def achat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None) -> Optional[Union[str, "BaseModel"]]:
         """Async version of chat method with self-reflection support.
         
         Args:
