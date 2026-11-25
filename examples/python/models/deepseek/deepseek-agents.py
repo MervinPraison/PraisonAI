@@ -4,6 +4,6 @@
 
 from praisonaiagents import Agent
 
-agent = Agent(instructions="You are helpful Assisant", llm="deepseek-r1")
+agent = Agent(instructions="You are helpful Assisant", model="deepseek-r1")
 
 agent.start("Why sky is Blue?")

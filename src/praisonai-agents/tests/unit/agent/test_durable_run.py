@@ -561,8 +561,10 @@ def test_agent_chat_isolates_stop_reason_across_overlapping_turns(tmp_path):
         patch.object(agent, "_chat_impl", side_effect=overlapping_result),
         ThreadPoolExecutor(max_workers=2) as pool,
     ):
-        cancelled = pool.submit(agent.chat, "cancelled task", cancel_token=cancelled_token)
-        failed = pool.submit(agent.chat, "failed task", cancel_token=failed_token)
+        # Overlap on purpose: call past the per-agent turn lock (X-18) to test per-turn isolation.
+        chat = type(agent).chat.__wrapped__
+        cancelled = pool.submit(chat, agent, "cancelled task", cancel_token=cancelled_token)
+        failed = pool.submit(chat, agent, "failed task", cancel_token=failed_token)
         assert cancelled.result() is None
         assert failed.result() is None
 
@@ -707,9 +709,11 @@ async def test_agent_achat_isolates_stop_reason_across_overlapping_turns(tmp_pat
         patch("praisonaiagents.agent.durable.abegin_durable_run", side_effect=record_begin),
         patch.object(agent, "_achat_impl", side_effect=overlapping_result),
     ):
+        # Overlap on purpose: call past the per-agent turn lock (X-18) to test per-turn isolation.
+        achat = type(agent).achat.__wrapped__
         cancelled, failed = await asyncio.gather(
-            agent.achat("cancelled task", cancel_token=cancelled_token),
-            agent.achat("failed task", cancel_token=failed_token),
+            achat(agent, "cancelled task", cancel_token=cancelled_token),
+            achat(agent, "failed task", cancel_token=failed_token),
         )
         assert cancelled is None
         assert failed is None

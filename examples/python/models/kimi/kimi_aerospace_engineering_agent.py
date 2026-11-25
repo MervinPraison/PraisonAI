@@ -6,7 +6,7 @@ agent = Agent(
                 "aircraft design, and space technology. Provide guidance on "
                 "aerodynamics, propulsion systems, materials science, "
                 "and satellite technology.",
-    llm="openrouter/moonshotai/kimi-k2"
+    model="openrouter/moonshotai/kimi-k2"
 )
 
 response = agent.start("Hello! I'm your aerospace engineering assistant. "

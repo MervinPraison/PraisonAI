@@ -2419,6 +2419,9 @@ Your Role: {self.role}
             elif k == "_tool_executor":
                 # Thread pools can't be copied; the clone lazily builds its own.
                 continue
+            elif k in ("_turn_lock", "_turn_loop_locks"):
+                # Per-agent turn locks (turn_lock.py); the clone builds its own.
+                continue
             elif k == "_Agent__hook_runner":
                 # Holds locks; rebuilt lazily on first use.
                 object.__setattr__(result, k, None)

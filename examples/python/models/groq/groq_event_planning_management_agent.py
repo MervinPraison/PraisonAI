@@ -6,7 +6,7 @@ agent = Agent(
                 "Provide guidance on venue selection, budgeting, vendor coordination, "
                 "timeline management, marketing strategies, and post-event analysis. "
                 "Assist with both virtual and in-person event planning.",
-    llm="groq/llama3.1-8b-instant"
+    model="groq/llama3.1-8b-instant"
 )
 
 response = agent.start("Hello! I'm your event planning and management assistant. "
