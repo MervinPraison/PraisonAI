@@ -24,13 +24,13 @@ logger = get_logger(__name__)
 DEFAULT_PERMISSIONS_DIR = str(get_permissions_dir())
 
 
-def is_secret_path(path: str) -> bool:
+def is_secret_path(path: "str | os.PathLike[str]") -> bool:
     """Return ``True`` if *path* names a secret file (``.env``, private keys).
 
     Matches the basename case-insensitively against the built-in secret globs,
     excluding example/sample/template files. Pattern-only: no filesystem access.
     """
-    basename = os.path.basename(path.rstrip("/\\").strip()).lower()
+    basename = os.path.basename(os.fspath(path).rstrip("/\\").strip()).lower()
     if not basename:
         return False
     if any(fnmatch.fnmatch(basename, p) for p in PermissionManager._SECRET_ALLOW_PATTERNS):
