@@ -98,7 +98,7 @@ def cleanup_launch_registration(agent_id: str) -> None:
     _server_registry.teardown_routes_for(agent_id)
 
 if TYPE_CHECKING:
-    pass
+    from pydantic import BaseModel  # return annotations only
 
 
 class ExecutionMixin:
@@ -171,7 +171,7 @@ class ExecutionMixin:
             config=HandoffConfig(context_policy=ContextPolicy.NONE),
         )
 
-    async def arun(self, prompt: str, **kwargs) -> Optional[str]:
+    async def arun(self, prompt: str, **kwargs) -> Optional[Union[str, "BaseModel"]]:
         """Async version of run() - silent, non-streaming, returns structured result.
         
         Production-friendly async execution. Does not stream or display output.
@@ -187,7 +187,7 @@ class ExecutionMixin:
         kwargs.pop('stream', None)
         return await self.achat(prompt, **kwargs)
 
-    async def astart(self, prompt: str, **kwargs):
+    async def astart(self, prompt: str, **kwargs) -> Union[str, "BaseModel", Any, None]:
         """Async version of start() - interactive, streaming-aware.
         
         Beginner-friendly async execution. Streams by default when in TTY.
@@ -393,7 +393,7 @@ class ExecutionMixin:
             return RunOutcome(reason=reason, output=output)
         return RunOutcome.completed(output=output)
 
-    def run(self, prompt: str, **kwargs: Any) -> Optional[str]:
+    def run(self, prompt: str, **kwargs: Any) -> Optional[Union[str, "BaseModel"]]:
         """Execute agent silently and return structured result.
         
         Production-friendly execution. Always uses silent mode with no streaming
@@ -835,7 +835,7 @@ Write the complete compiled report:"""
                 # If LLM class not available, just update the model string
                 pass
 
-    def start(self, prompt: Optional[str] = None, **kwargs: Any) -> Union[str, Generator[str, None, None], None]:
+    def start(self, prompt: Optional[str] = None, **kwargs: Any) -> Union[str, "BaseModel", Generator[str, None, None], None]:
         """Start the agent interactively with verbose output.
         
         Beginner-friendly execution. Defaults to verbose output with streaming
@@ -1394,7 +1394,7 @@ Write the complete compiled report:"""
                 self.tools.append(tool)
                 existing_names.add(_tool_id(tool))
 
-    def execute(self, task: Any, context: Optional[Any] = None) -> Optional[str]:
+    def execute(self, task: Any, context: Optional[Any] = None) -> Optional[Union[str, "BaseModel"]]:
         """Execute a task synchronously - backward compatibility method"""
         if hasattr(task, 'description'):
             prompt = task.description
@@ -1404,7 +1404,7 @@ Write the complete compiled report:"""
             prompt = str(task)
         return self.chat(prompt)
 
-    async def aexecute(self, task, context=None):
+    async def aexecute(self, task, context=None) -> Optional[Union[str, "BaseModel"]]:
         """Execute a task asynchronously - backward compatibility method"""
         if hasattr(task, 'description'):
             prompt = task.description
