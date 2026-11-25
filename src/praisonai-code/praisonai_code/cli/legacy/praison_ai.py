@@ -1072,13 +1072,26 @@ class PraisonAI:
         # ACP's flags (see _acp_tail); the same parser then reads non-ACP argv.
         from praisonai_code._wrapper_bridge import import_wrapper_module
         _ab = import_wrapper_module("praisonai.cli.legacy.dispatch.argparse_builder")
-        parser, special_commands = _ab.build_parser(in_test_env)
+        build_parser = getattr(_ab, "build_parser", None)
+        parse_args_with = getattr(_ab, "parse_args_with", None)
 
-        acp_args = _acp_tail(sys.argv[1:], parser)
-        if acp_args is not None:
-            _run_acp(acp_args)
-
-        args, unknown_args = _ab.parse_args_with(parser, in_test_env)
+        if build_parser is None or parse_args_with is None:
+            # A wrapper older than the split has only build_argument_parser.
+            # Every legacy command must still run against it: only `acp` needs
+            # the pre-parse look, so it keeps the post-parse route there.
+            args, unknown_args, special_commands = _ab.build_argument_parser(in_test_env)
+            if not in_test_env and args.command == 'acp':
+                _run_acp(unknown_args)
+        else:
+            parser, special_commands = build_parser(in_test_env)
+            # The scan reads the real argv, so it must not run under pytest:
+            # a test runner's own flags (`-k acp`) would otherwise look like
+            # an `acp` invocation and exit the process mid-test.
+            if not in_test_env:
+                acp_args = _acp_tail(sys.argv[1:], parser)
+                if acp_args is not None:
+                    _run_acp(acp_args)
+            args, unknown_args = parse_args_with(parser, in_test_env)
 
         # Handle special cases first
         if len(unknown_args) >= 2 and unknown_args[0] == '-b' and unknown_args[1] == 'api:app':

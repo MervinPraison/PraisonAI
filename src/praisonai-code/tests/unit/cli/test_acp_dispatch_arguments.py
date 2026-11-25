@@ -68,9 +68,80 @@ def test_resume_last_reaches_the_handler(monkeypatch):
         acp_mod, "run_acp_command", lambda args: seen.append(list(args)) or 0
     )
     monkeypatch.setattr(sys, "argv", ["praisonai", "acp", "--resume", "--last"])
+    # Outside a test environment, which is where the scan is allowed to run.
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
 
     with pytest.raises(SystemExit) as exit_info:
         praison_ai.PraisonAI().parse_args()
 
     assert exit_info.value.code == 0
     assert seen == [["--resume", "--last"]]
+
+
+def test_pytest_argv_does_not_dispatch_acp(monkeypatch):
+    """The scan reads the real argv, so a test runner's `-k acp` must not run it."""
+    import praisonai.cli.features.acp as acp_mod
+
+    calls = []
+    monkeypatch.setattr(
+        acp_mod, "run_acp_command", lambda args: calls.append(list(args)) or 0
+    )
+    monkeypatch.setattr(sys, "argv", ["/venv/bin/pytest", "-k", "acp"])
+
+    args, _unknown = praison_ai.PraisonAI().parse_args()
+
+    assert calls == []
+    assert args.command is None
+
+
+def _legacy_wrapper(monkeypatch, builder):
+    """Make the bridge return a wrapper that predates the build_parser split."""
+    import praisonai_code._wrapper_bridge as bridge
+
+    real = bridge.import_wrapper_module
+
+    def fake(name):
+        if name.endswith("argparse_builder"):
+            return builder
+        return real(name)
+
+    monkeypatch.setattr(bridge, "import_wrapper_module", fake)
+
+
+def _old_wrapper_builder():
+    """A wrapper module with only the pre-split API, backed by the real builder."""
+    import types
+
+    from praisonai.cli.legacy.dispatch import argparse_builder as real
+
+    return types.SimpleNamespace(build_argument_parser=real.build_argument_parser)
+
+
+def test_an_older_wrapper_still_runs_non_acp_commands(monkeypatch):
+    """Only `acp` needs the pre-parse look; every other command must not break."""
+    _legacy_wrapper(monkeypatch, _old_wrapper_builder())
+    monkeypatch.setattr(sys, "argv", ["praisonai", "agents.yaml"])
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    args, _unknown = praison_ai.PraisonAI().parse_args()
+
+    assert args.command == "agents.yaml"
+
+
+def test_an_older_wrapper_still_routes_acp(monkeypatch):
+    """The post-parse route survives for a wrapper without build_parser."""
+    import praisonai.cli.features.acp as acp_mod
+
+    seen = []
+    monkeypatch.setattr(
+        acp_mod, "run_acp_command", lambda args: seen.append(list(args)) or 0
+    )
+    _legacy_wrapper(monkeypatch, _old_wrapper_builder())
+    monkeypatch.setattr(sys, "argv", ["praisonai", "acp", "--workspace", "."])
+    monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+
+    with pytest.raises(SystemExit) as exit_info:
+        praison_ai.PraisonAI().parse_args()
+
+    assert exit_info.value.code == 0
+    assert seen == [["--workspace", "."]]
