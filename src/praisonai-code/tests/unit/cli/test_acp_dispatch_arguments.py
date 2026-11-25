@@ -16,6 +16,10 @@ import pytest
 
 from praisonai_code.cli.legacy import praison_ai
 
+# The handler lives in the wrapper; without it these gates would error on the
+# import in _stub_handler rather than skip, so stand down when it is absent.
+pytest.importorskip("praisonai.cli.features.acp")
+
 
 def _stub_handler(monkeypatch):
     import praisonai.cli.features.acp as acp_mod
