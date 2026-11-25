@@ -124,9 +124,11 @@ def test_concurrent_async_turns_keep_input_output_pairs(recorded_agent, monkeypa
             return f"answer to {prompt}"
 
         monkeypatch.setattr(agent, "_achat_impl", respond)
-        first = asyncio.create_task(agent.achat("first"))
+        # Overlap on purpose: call past the per-agent turn lock (X-18) to test per-turn isolation.
+        achat = type(agent).achat.__wrapped__
+        first = asyncio.create_task(achat(agent, "first"))
         await first_entered.wait()
-        second = asyncio.create_task(agent.achat("second"))
+        second = asyncio.create_task(achat(agent, "second"))
         outputs["first"] = await first
         assert outputs["first"]
         first_finished.set()
