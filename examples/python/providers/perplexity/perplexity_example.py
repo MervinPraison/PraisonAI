@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with Perplexity
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="perplexity/llama-3.1-8b-instruct",
+    model="perplexity/llama-3.1-8b-instruct",
 )
 
 # Example conversation
