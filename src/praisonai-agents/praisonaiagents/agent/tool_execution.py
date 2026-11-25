@@ -942,8 +942,16 @@ class ToolExecutionMixin:
                                             rule_name,
                                         )
                                         continue
-                                except Exception:  # pragma: no cover
-                                    logger.debug("Could not look up existing policy %r", rule_name, exc_info=True)
+                                except Exception:
+                                    # Fail closed: if we cannot tell whether a user
+                                    # policy has this name, adding the plugin rule
+                                    # could overwrite it, so skip the rule.
+                                    logger.warning(
+                                        "Skipping plugin policy %r: could not check for "
+                                        "an existing policy with that name.",
+                                        rule_name, exc_info=True,
+                                    )
+                                    continue
                             if rule_name is not None and rule_name in existing:
                                 logger.warning(
                                     "Skipping duplicate plugin policy %r.",
