@@ -29,7 +29,7 @@ web_scraper_agent = Agent(
     goal="Extract URLs from https://quotes.toscrape.com/",
     backstory="An expert in data extraction from websites, adept at navigating and retrieving detailed information.",
     tools=[code_interpret],
-    llm="gpt-4o-mini"
+    model="gpt-4o-mini"
 )
 
 url_data_extractor_agent = Agent(
@@ -38,7 +38,7 @@ url_data_extractor_agent = Agent(
     goal="Crawl each URL for data extraction",
     backstory="Specializes in crawling websites to gather comprehensive data, ensuring nothing is missed from each link.",
     tools=[code_interpret],
-    llm="gpt-4o-mini"
+    model="gpt-4o-mini"
 )
 
 blog_writer_agent = Agent(
@@ -47,7 +47,7 @@ blog_writer_agent = Agent(
     goal="Create engaging and insightful blog posts from provided data",
     backstory="An experienced content creator and storyteller with a knack for weaving compelling narratives. Skilled at analyzing quotes and creating meaningful connections that resonate with readers.",
     tools=[code_interpret],
-    llm="gpt-4o-mini"
+    model="gpt-4o-mini"
 )
 
 # 2) Create Tasks

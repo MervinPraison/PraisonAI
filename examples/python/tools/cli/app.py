@@ -39,7 +39,7 @@ system_ops_agent = Agent(
     You always validate commands before execution and ensure they are safe to run.""",
     reflection=True,
     tools=[run_terminal_command, save_to_file],
-    llm="gpt-4o-mini"
+    model="gpt-4o-mini"
 )
 
 # Create a complex task that tests various system operations

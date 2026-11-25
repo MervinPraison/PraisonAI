@@ -92,7 +92,7 @@ project_manager = Agent(
     goal="Track and report project progress",
     backstory="An experienced project manager who keeps track of all project details",
     tools=[display_project_status, update_project_stage],
-    llm="gpt-4o-mini")
+    model="gpt-4o-mini")
 
 developer = Agent(
     name="Developer",
@@ -100,7 +100,7 @@ developer = Agent(
     goal="Implement new features and track them in state",
     backstory="A skilled developer who implements features",
     tools=[add_feature, display_project_status],
-    llm="gpt-4o-mini")
+    model="gpt-4o-mini")
 
 finance_manager = Agent(
     name="FinanceManager",
@@ -108,7 +108,7 @@ finance_manager = Agent(
     goal="Ensure project stays within budget",
     backstory="A careful finance manager who tracks spending",
     tools=[check_budget_health],
-    llm="gpt-4o-mini")
+    model="gpt-4o-mini")
 
 # Create tasks
 task1 = Task(
