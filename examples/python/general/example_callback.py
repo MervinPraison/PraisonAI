@@ -127,7 +127,7 @@ def main():
         skilled in identifying trends and analyzing complex data.""",
         allow_delegation=False,
         tools=[internet_search_tool],
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
     )
     
     writer = Agent(
@@ -137,7 +137,7 @@ def main():
         backstory="""You are a content strategist known for 
         making complex tech topics interesting and easy to understand.""",
         allow_delegation=True,
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
         tools=[],
     )
 

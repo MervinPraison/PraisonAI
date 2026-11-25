@@ -35,7 +35,7 @@ def example_minimal():
     agent = Agent(
         name="email_assistant",
         instructions="You are a helpful email assistant. Reply concisely and professionally.",
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
     )
 
     # Token and server resolved from env vars automatically:
@@ -74,7 +74,7 @@ def example_with_config():
         - If you don't know the answer, escalate to support@exampleco.com
         - Keep replies under 500 words
         """,
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
     )
 
     bot = Bot("email", agent=agent, config=config)
@@ -90,7 +90,7 @@ def example_direct():
     agent = Agent(
         name="smart_inbox",
         instructions="You help triage and respond to support emails.",
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
     )
 
     bot = EmailBot(
@@ -131,7 +131,7 @@ def example_multi_platform():
     agent = Agent(
         name="omni_assistant",
         instructions="You are a helpful assistant available on email, Telegram, and Discord.",
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
     )
 
     botos = BotOS(agent=agent, platforms=["email", "telegram", "discord"])
