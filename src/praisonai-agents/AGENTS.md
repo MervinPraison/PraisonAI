@@ -573,7 +573,7 @@ The resolution of each parameter is a pure function `resolve_agent_<param>()` in
 
 **Still accepted, with a `DeprecationWarning`:** `allow_delegation`, `allow_code_execution`, `auto_save`, `verification_hooks`. `code_execution_mode` and `rate_limiter` are still accepted too.
 
-**Removed — these raise `TypeError` naming the replacement:** `verbose`, `markdown`, `stream`, `metrics` (use `output=`); `self_reflect`, `max_reflect`, `min_reflect` (use `reflection=`); `system_template` (use `templates=`); `cache` (use `caching=`); `web_search` (use `web=`); `max_iter` (use `execution=`); `temperature`, `max_tokens` (set on the model: `model={"model": ..., "temperature": ...}`).
+**Removed — these raise `TypeError` naming the replacement:** `verbose`, `markdown`, `stream`, `metrics` (use `output=`); `self_reflect`, `max_reflect`, `min_reflect` (use `reflection=`); `system_template`, `prompt_template`, `response_template`, `use_system_prompt` (use `templates=`); `cache`, `prompt_caching` (use `caching=`); `web_search`, `web_fetch` (use `web=`); `max_iter`, `max_retry_limit`, `max_execution_time` (use `execution=`); `user_id` (use `memory=`); `temperature`, `max_tokens` (set on the model: `model={"model": ..., "temperature": ...}`).
 
 > **📢 Deprecation Notice:** `ExecutionConfig.context_compaction` currently defaults to `False` during a deprecation period. In the next release, it will default to `True` for automatic proactive context overflow protection. To opt out explicitly, set `context_compaction=False`. To use the new behavior early, set `context_compaction=True`.
 
