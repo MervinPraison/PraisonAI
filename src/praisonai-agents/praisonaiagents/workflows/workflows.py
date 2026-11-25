@@ -1119,8 +1119,8 @@ class AgentFlow:
     history: bool = False  # Enable execution history tracking for debugging
     
     # Status tracking
-    status: str = field(default="not_started", init=False)  # not_started, running, completed, failed
-    step_statuses: Dict[str, str] = field(init=False, default_factory=dict)  # {step_name: status}
+    status: str = "not_started"  # not_started, running, completed, failed
+    step_statuses: Dict[str, str] = field(default_factory=dict)  # {step_name: status}
 
     #: Optional type for ``variables``: a Pydantic model or a dataclass. When
     #: set, the initial variables are validated and ``flow.state`` gives typed
