@@ -14,6 +14,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
+from .protocols import RerankerProtocol  # one definition; this import path still works
+
 logger = logging.getLogger(__name__)
 
 
@@ -28,22 +30,6 @@ class RetrieverProtocol(Protocol):
         filters: Optional[Dict[str, Any]] = None,
     ) -> List[Dict[str, Any]]:
         """Retrieve relevant chunks for query."""
-        ...
-
-
-@runtime_checkable
-class RerankerProtocol(Protocol):
-    """Protocol for reranking implementations."""
-    
-    name: str
-    
-    def rerank(
-        self,
-        query: str,
-        results: List[Dict[str, Any]],
-        top_k: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
-        """Rerank results by relevance to query."""
         ...
 
 
