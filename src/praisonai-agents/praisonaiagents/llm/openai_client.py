@@ -1039,7 +1039,34 @@ class OpenAIClient:
         if reasoning_effort:
             params["reasoning"] = {"effort": reasoning_effort}
 
+        # Chat Completions takes ``response_format``; the Responses API takes it
+        # as ``text: {"format": ...}`` with the json_schema fields one level up.
+        # Dropping it left output_pydantic with no schema: the prompt omits the
+        # schema text when native structured output is in use (N-7).
+        text_format = self._responses_text_format(kwargs.get("response_format"))
+        if text_format:
+            params["text"] = {"format": text_format}
+
         return params
+
+    @staticmethod
+    def _responses_text_format(response_format: Any) -> Optional[Dict[str, Any]]:
+        """Map a Chat Completions ``response_format`` to a Responses ``text.format``."""
+        if not isinstance(response_format, dict):
+            return None
+        kind = response_format.get("type")
+        if kind == "json_schema":
+            spec = response_format.get("json_schema") or {}
+            fmt = {"type": "json_schema", "name": spec.get("name") or "response",
+                   "schema": spec.get("schema") or {}}
+            if "strict" in spec:
+                fmt["strict"] = spec["strict"]
+            if spec.get("description"):
+                fmt["description"] = spec["description"]
+            return fmt
+        if kind in ("json_object", "text"):
+            return {"type": kind}
+        return None
 
     @staticmethod
     def _normalise_responses_image_url(image_url: Any) -> str:
