@@ -1151,7 +1151,7 @@ class AgentFlow:
     # Execution history for debugging (only populated when history=True)
     _execution_history: List[Dict[str, Any]] = field(default_factory=list, repr=False)
     # Gap 3c: Cross-step handoff cycle detection
-    _handoff_chain: List[str] = field(default_factory=list, repr=False)
+    _handoff_chain: List[Tuple[int, str]] = field(default_factory=list, repr=False)
     # Guards per-run mutable state (status/step_statuses/_handoff_chain) so a
     # shared Workflow instance cannot be corrupted by concurrent run() calls.
     _run_lock: Optional[Any] = field(default=None, repr=False, compare=False)
@@ -1567,16 +1567,17 @@ class AgentFlow:
                 "Install with: pip install praisonai"
             )
     
-    def _check_handoff_cycle(self, step: Any) -> None:
+    def _check_handoff_cycle(self, step: Any, step_index: int) -> None:
         """Check for cross-step handoff cycles (Gap 3c fix)."""
         step_id = getattr(step, 'name', str(step))
         
         # If step involves handoff (basic check for agent steps)
         if hasattr(step, 'agent') and step.agent:
             # Track this step in handoff chain
-            if step_id in self._handoff_chain:
+            positions = [index for index, _ in self._handoff_chain]
+            if step_index in positions:
                 # Cycle detected!
-                cycle_path = self._handoff_chain[self._handoff_chain.index(step_id):] + [step_id]
+                cycle_path = [name for _, name in self._handoff_chain[positions.index(step_index):]] + [step_id]
                 from ..errors import HandoffCycleError
                 raise HandoffCycleError(
                     f"Cross-step handoff cycle detected: {' -> '.join(cycle_path)}",
@@ -1584,7 +1585,7 @@ class AgentFlow:
                 )
             
             # Add to chain (limit chain length to prevent memory issues)
-            self._handoff_chain.append(step_id)
+            self._handoff_chain.append((step_index, step_id))
             if len(self._handoff_chain) > 100:  # Reasonable limit
                 self._handoff_chain = self._handoff_chain[-50:]  # Keep last 50
         else:
@@ -2179,7 +2180,7 @@ class AgentFlow:
                     continue
             
             # Gap 3c: Check for cross-step handoff cycles
-            self._check_handoff_cycle(step)
+            self._check_handoff_cycle(step, i)
             
             # Execute step with retry and guardrail support
             output = None
