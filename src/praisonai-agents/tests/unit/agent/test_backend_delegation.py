@@ -99,8 +99,6 @@ def test_backend_delegation():
         print("✅ Local agent execution attempted (not delegated)!")
     
     print("\n🎉 All tests passed! Backend delegation is working correctly.")
-    
-    return True
 
 
 if __name__ == "__main__":
