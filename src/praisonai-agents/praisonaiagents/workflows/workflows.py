@@ -1119,8 +1119,8 @@ class AgentFlow:
     history: bool = False  # Enable execution history tracking for debugging
     
     # Status tracking
-    status: str = "not_started"  # not_started, running, completed, failed
-    step_statuses: Dict[str, str] = field(default_factory=dict)  # {step_name: status}
+    status: str = field(default="not_started", init=False)  # not_started, running, completed, failed
+    step_statuses: Dict[str, str] = field(init=False, default_factory=dict)  # {step_name: status}
 
     #: Optional type for ``variables``: a Pydantic model or a dataclass. When
     #: set, the initial variables are validated and ``flow.state`` gives typed
@@ -1131,38 +1131,38 @@ class AgentFlow:
     state_model: Optional[type] = None
 
     # Private resolved fields (set in __post_init__)
-    _verbose: bool = field(default=False, repr=False)
-    _stream: bool = field(default=True, repr=False)
-    _output_config: Optional[Any] = field(default=None, repr=False)  # Full OutputConfig for propagation
-    _planning_enabled: bool = field(default=False, repr=False)
-    _planning_llm: Optional[str] = field(default=None, repr=False)
-    _reasoning: bool = field(default=False, repr=False)
-    _memory_config: Optional[Any] = field(default=None, repr=False)
-    _hooks_config: Optional[Any] = field(default=None, repr=False)
-    _context_manager: Optional[Any] = field(default=None, repr=False)
-    _context_manager_initialized: bool = field(default=False, repr=False)
-    _session_dedup_cache: Optional[Any] = field(default=None, repr=False)  # Shared session deduplication cache
+    _verbose: bool = field(init=False, default=False, repr=False)
+    _stream: bool = field(init=False, default=True, repr=False)
+    _output_config: Optional[Any] = field(init=False, default=None, repr=False)  # Full OutputConfig for propagation
+    _planning_enabled: bool = field(init=False, default=False, repr=False)
+    _planning_llm: Optional[str] = field(init=False, default=None, repr=False)
+    _reasoning: bool = field(init=False, default=False, repr=False)
+    _memory_config: Optional[Any] = field(init=False, default=None, repr=False)
+    _hooks_config: Optional[Any] = field(init=False, default=None, repr=False)
+    _context_manager: Optional[Any] = field(init=False, default=None, repr=False)
+    _context_manager_initialized: bool = field(init=False, default=False, repr=False)
+    _session_dedup_cache: Optional[Any] = field(init=False, default=None, repr=False)  # Shared session deduplication cache
     # NEW: Resolved configs for agent-like params (for propagation to steps/agents)
-    _autonomy_config: Optional[Any] = field(default=None, repr=False)
-    _knowledge_config: Optional[Any] = field(default=None, repr=False)
-    _guardrails_config: Optional[Any] = field(default=None, repr=False)
-    _web_config: Optional[Any] = field(default=None, repr=False)
-    _reflection_config: Optional[Any] = field(default=None, repr=False)
+    _autonomy_config: Optional[Any] = field(init=False, default=None, repr=False)
+    _knowledge_config: Optional[Any] = field(init=False, default=None, repr=False)
+    _guardrails_config: Optional[Any] = field(init=False, default=None, repr=False)
+    _web_config: Optional[Any] = field(init=False, default=None, repr=False)
+    _reflection_config: Optional[Any] = field(init=False, default=None, repr=False)
     # Execution history for debugging (only populated when history=True)
-    _execution_history: List[Dict[str, Any]] = field(default_factory=list, repr=False)
+    _execution_history: List[Dict[str, Any]] = field(init=False, default_factory=list, repr=False)
     # Gap 3c: Cross-step handoff cycle detection
-    _handoff_chain: List[str] = field(default_factory=list, repr=False)
+    _handoff_chain: List[str] = field(init=False, default_factory=list, repr=False)
     # Guards per-run mutable state (status/step_statuses/_handoff_chain) so a
     # shared Workflow instance cannot be corrupted by concurrent run() calls.
-    _run_lock: Optional[Any] = field(default=None, repr=False, compare=False)
+    _run_lock: Optional[Any] = field(init=False, default=None, repr=False, compare=False)
     # Monotonic id of the currently-executing run. Bumped at each run() so an
     # abandoned fail_fast/timeout Parallel branch can tell it outlived its run
     # and must not mutate a later run's shared status (see _begin_run_generation
     # and _is_current_run_generation).
-    _current_run_generation: int = field(default=0, repr=False, compare=False)
+    _current_run_generation: int = field(init=False, default=0, repr=False, compare=False)
     # Reset token for the _run_generation contextvar captured at run() start and
     # consumed in run()'s finally to restore the caller's generation (nested runs).
-    _run_generation_token: Any = field(default=None, repr=False, compare=False)
+    _run_generation_token: Any = field(init=False, default=None, repr=False, compare=False)
 
     def _reset_approval_token(self) -> None:
         """Reset this run's YAML-approved tools exactly once."""
