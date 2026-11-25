@@ -268,19 +268,32 @@ def __getattr__(name):
 # legal ACP pair the legacy parser rejects outright, because its own
 # ``--resume`` requires a value. ``acp`` is therefore dispatched before the
 # parser runs, with the arguments exactly as typed.
-def _acp_tail(argv):
+def _acp_tail(argv, arity):
     """Return the arguments after a leading ``acp`` verb, or None.
 
-    Only leading flags are skipped, so ``-v acp --model m`` forwards both
-    flags while an option value ahead of the verb (``--model m acp``) keeps
-    the legacy path — better to leave an unusual prefix to the parser than to
-    mis-forward its value as the command.
+    ``arity`` is ``option_arity(parser)`` — ``(value_opts, remainder_opts)``
+    read off the legacy parser itself — so an option's *value* is never read
+    as the verb: ``--model acp`` keeps ``acp`` as the model and stays on the
+    legacy path, while ``--model prefix acp --model target`` skips
+    ``prefix`` and still forwards ``--model target``. ``--flag=value``
+    consumes itself, and a ``--auto``/``--init`` REMAINDER swallows the rest,
+    so no verb can follow one.
     """
-    for index, token in enumerate(argv):
-        if token == "acp":
+    value_opts, remainder_opts = arity
+    index = 0
+    while index < len(argv):
+        arg = argv[index]
+        if arg == "acp":
             return list(argv[index + 1:])
-        if not token.startswith("-"):
+        if not arg.startswith("-"):
             return None
+        name = arg.split("=", 1)[0]
+        if name in remainder_opts:
+            return None
+        index += 1
+        if "=" in arg or name not in value_opts:
+            continue
+        index += 1  # the option's value is not a positional
     return None
 
 
@@ -1030,15 +1043,17 @@ class PraisonAI:
             default_args.no_rules = False
             return default_args
         
-        # Dispatch ACP before the legacy parser consumes or rejects its flags
-        # (see _acp_tail): the handler parses the arguments as typed.
-        acp_args = _acp_tail(sys.argv[1:])
+        # Build the parser once and dispatch ACP before it consumes or rejects
+        # ACP's flags (see _acp_tail); the same parser then reads non-ACP argv.
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+        _ab = import_wrapper_module("praisonai.cli.legacy.dispatch.argparse_builder")
+        parser, special_commands = _ab.build_parser(in_test_env)
+
+        acp_args = _acp_tail(sys.argv[1:], _ab.option_arity(parser))
         if acp_args is not None:
             _run_acp(acp_args)
 
-        from praisonai_code._wrapper_bridge import import_wrapper_module
-        _ab = import_wrapper_module("praisonai.cli.legacy.dispatch.argparse_builder")
-        args, unknown_args, special_commands = _ab.build_argument_parser(in_test_env)
+        args, unknown_args = _ab.parse_args_with(parser, in_test_env)
 
         # Handle special cases first
         if len(unknown_args) >= 2 and unknown_args[0] == '-b' and unknown_args[1] == 'api:app':
@@ -1066,12 +1081,9 @@ class PraisonAI:
             self._handle_serve_command(args, unknown_args)
             sys.exit(0)
 
-        # Handle ACP command - Agent Client Protocol server for IDE integration
-        # Fallback for a prefix _acp_tail does not classify (an option value
-        # ahead of the verb); the normal path dispatches before parsing.
-        if args.command == 'acp':
-            _run_acp(unknown_args)
-        
+        # ACP never reaches here: _acp_tail dispatches it before this parser
+        # runs, so an `acp` token has already been read as an option value or
+        # a REMAINDER payload if it was not the verb.
         # Handle debug command - Debug and test interactive flows
         if args.command == 'debug':
             from ..features.debug import run_debug_command
