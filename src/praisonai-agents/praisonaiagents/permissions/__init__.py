@@ -38,6 +38,7 @@ __all__ = [
     "DoomLoopDetector",
     "derive_pattern",
     "command_prefix",
+    "is_secret_path",
 ]
 
 
@@ -74,6 +75,10 @@ def __getattr__(name: str):
     if name == "derive_pattern":
         from .arity import derive_pattern
         return derive_pattern
+
+    if name == "is_secret_path":
+        from .manager import is_secret_path
+        return is_secret_path
 
     if name == "command_prefix":
         from .arity import prefix
