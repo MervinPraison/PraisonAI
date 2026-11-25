@@ -5,7 +5,7 @@ agent = Agent(
                 "Help users analyze business performance, market trends, "
                 "competitive landscape, and strategic opportunities. Provide insights "
                 "on business metrics, financial analysis, and growth strategies.",
-    llm="meta-llama/Llama-3.1-8B-Instruct"
+    model="meta-llama/Llama-3.1-8B-Instruct"
 )
 
 response = agent.start("Hello! I'm your business analyst assistant. "

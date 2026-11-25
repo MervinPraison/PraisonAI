@@ -6,7 +6,7 @@ agent = Agent(
                 "and immersive technologies. Provide guidance on "
                 "3D modeling, VR programming, digital twins, "
                 "and virtual world design.",
-    llm="openrouter/moonshotai/kimi-k2"
+    model="openrouter/moonshotai/kimi-k2"
 )
 
 response = agent.start("Hello! I'm your metaverse and VR assistant. "

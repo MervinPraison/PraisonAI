@@ -6,7 +6,7 @@ agent = Agent(
                 "and understand cultural nuances. Provide guidance on language learning strategies, "
                 "grammar explanations, vocabulary building, pronunciation, "
                 "and cultural context for effective communication.",
-    llm="groq/llama3.1-8b-instant"
+    model="groq/llama3.1-8b-instant"
 )
 
 response = agent.start("Hello! I'm your language learning and translation assistant. "

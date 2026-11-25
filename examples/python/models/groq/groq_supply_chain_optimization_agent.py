@@ -6,7 +6,7 @@ agent = Agent(
                 "improve logistics efficiency, reduce costs, and enhance inventory management. "
                 "Provide guidance on demand forecasting, supplier management, "
                 "warehouse optimization, transportation planning, and risk mitigation.",
-    llm="groq/llama3.1-8b-instant"
+    model="groq/llama3.1-8b-instant"
 )
 
 response = agent.start("Hello! I'm your supply chain optimization assistant. "

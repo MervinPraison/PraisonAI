@@ -6,7 +6,7 @@ agent = Agent(
                 "and material science. Provide guidance on "
                 "nanomaterials, material properties, fabrication techniques, "
                 "and applications in various industries.",
-    llm="openrouter/moonshotai/kimi-k2"
+    model="openrouter/moonshotai/kimi-k2"
 )
 
 response = agent.start("Hello! I'm your nanotechnology and materials assistant. "

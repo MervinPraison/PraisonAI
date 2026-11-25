@@ -39,7 +39,7 @@ def main():
     print("\n1. Using Anthropic Claude 3.5 Sonnet via Bedrock")
     claude_agent = Agent(
         instructions="You are a helpful assistant that provides concise, accurate responses.",
-        llm={
+        model={
             "model": "bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0",
             "temperature": 0.7
         }
@@ -52,7 +52,7 @@ def main():
     print("\n2. Using Amazon Titan Text Express via Bedrock")
     titan_agent = Agent(
         instructions="You are a technical assistant focused on providing clear explanations.",
-        llm={
+        model={
             "model": "bedrock/amazon.titan-text-express-v1",
             "temperature": 0.5
         }
@@ -67,7 +67,7 @@ def main():
     # Research agent using Claude
     researcher = Agent(
         instructions="You are a research specialist who gathers and analyzes information.",
-        llm={
+        model={
             "model": "bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0",
             "temperature": 0.3
         }
@@ -76,7 +76,7 @@ def main():
     # Writer agent using Titan
     writer = Agent(
         instructions="You are a creative writer who crafts engaging content.",
-        llm={
+        model={
             "model": "bedrock/amazon.titan-text-express-v1",
             "temperature": 0.8
         }
