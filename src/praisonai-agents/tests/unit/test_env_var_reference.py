@@ -1,5 +1,8 @@
 """X-19: every environment variable the core SDK reads is listed in docs/env-vars.md.
 
+The table has only the name and its kind, not where it is read, so moving a
+file or reading a variable in one more place does not change it.
+
 The table is generated from the source by an AST scan, so a new variable read
 fails this test until the table is regenerated:
 
@@ -15,7 +18,6 @@ resolved. Names built at run time (f-strings) cannot be listed.
 import ast
 import re
 import sys
-from collections import defaultdict
 from pathlib import Path
 
 PKG_ROOT = Path(__file__).resolve().parents[2]
@@ -50,8 +52,8 @@ def _key(node):
 
 
 def scan():
-    """{variable: sorted module paths that read it}."""
-    found = defaultdict(set)
+    """Sorted names of the variables read in the package."""
+    found = set()
     for path in sorted(SOURCE.rglob("*.py")):
         tree = ast.parse(path.read_text(encoding="utf-8"))
         consts = {
@@ -64,8 +66,8 @@ def scan():
             if isinstance(key, ast.Name):
                 key = ast.Constant(consts.get(key.id))
             if isinstance(key, ast.Constant) and isinstance(key.value, str) and _NAME.match(key.value):
-                found[key.value].add(path.relative_to(PKG_ROOT).as_posix())
-    return {k: sorted(v) for k, v in sorted(found.items())}
+                found.add(key.value)
+    return sorted(found)
 
 
 def _kind(name):
@@ -87,11 +89,11 @@ def render(found):
         "\"Security switch\" marks a variable that loosens or tightens a safety check; "
         "\"credential\" marks a secret. Names built at run time are not listed.",
         "",
-        "| Variable | Kind | Read in |",
-        "|---|---|---|",
+        "| Variable | Kind |",
+        "|---|---|",
     ]
-    for name, paths in found.items():
-        lines.append(f"| `{name}` | {_kind(name)} | {', '.join(f'`{p}`' for p in paths)} |")
+    for name in found:
+        lines.append(f"| `{name}` | {_kind(name)} |")
     return "\n".join(lines) + "\n"
 
 

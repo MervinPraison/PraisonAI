@@ -4,153 +4,153 @@
 
 148 variables, 67 of them `PRAISONAI_*`/`PRAISON_*`. "Security switch" marks a variable that loosens or tightens a safety check; "credential" marks a secret. Names built at run time are not listed.
 
-| Variable | Kind | Read in |
-|---|---|---|
-| `AGENTMAIL_API_KEY` | credential | `praisonaiagents/tools/email_tools.py` |
-| `AGENTMAIL_INBOX_ID` |  | `praisonaiagents/tools/email_tools.py` |
-| `ALLOW_LOCAL_CRAWL` | security switch | `praisonaiagents/tools/url_safety.py` |
-| `ANONYMIZED_TELEMETRY` |  | `praisonaiagents/knowledge/adapters/mem0_adapter.py`, `praisonaiagents/knowledge/knowledge.py` |
-| `APPDATA` |  | `praisonaiagents/mcp/mcp.py` |
-| `AZURE_STORAGE_CONNECTION_STRING` | credential | `praisonaiagents/knowledge/cloud.py` |
-| `BRAVE_API_KEY` | credential | `praisonaiagents/tools/web_search.py` |
-| `CODEX_HOME` |  | `praisonaiagents/auth/subscription/codex.py` |
-| `COMSPEC` |  | `praisonaiagents/mcp/mcp.py` |
-| `DAKERA_AGENT_ID` |  | `praisonaiagents/memory/adapters/factories.py` |
-| `DAKERA_API_KEY` | credential | `praisonaiagents/memory/adapters/factories.py` |
-| `DAKERA_API_URL` |  | `praisonaiagents/memory/adapters/factories.py` |
-| `DAKERA_URL` |  | `praisonaiagents/memory/adapters/factories.py` |
-| `DO_NOT_TRACK` |  | `praisonaiagents/_config.py`, `praisonaiagents/telemetry/__init__.py`, `praisonaiagents/telemetry/integration.py`, `praisonaiagents/telemetry/telemetry.py` |
-| `EMAIL_ADDRESS` |  | `praisonaiagents/tools/email_tools.py` |
-| `EMAIL_IMAP_PORT` |  | `praisonaiagents/tools/email_tools.py` |
-| `EMAIL_IMAP_SERVER` |  | `praisonaiagents/tools/email_tools.py` |
-| `EMAIL_PASSWORD` | credential | `praisonaiagents/tools/email_tools.py` |
-| `EMAIL_SMTP_PORT` |  | `praisonaiagents/tools/email_tools.py` |
-| `EMAIL_SMTP_SERVER` |  | `praisonaiagents/tools/email_tools.py` |
-| `EXA_API_KEY` | credential | `praisonaiagents/tools/exa_tools.py`, `praisonaiagents/tools/web_search.py` |
-| `GEMINI_API_KEY` | credential | `praisonaiagents/agent/deep_research_agent.py` |
-| `GITHUB_TOKEN` | credential | `praisonaiagents/agent/context_agent.py` |
-| `GIT_DIR` |  | `praisonaiagents/memory/rules_manager.py` |
-| `GIT_WORK_TREE` |  | `praisonaiagents/memory/rules_manager.py` |
-| `GOOGLE_API_KEY` | credential | `praisonaiagents/agent/deep_research_agent.py` |
-| `HOME` |  | `praisonaiagents/mcp/mcp.py` |
-| `JIRA_API_TOKEN` | credential | `praisonaiagents/tools/jira_tools.py` |
-| `JIRA_EMAIL` |  | `praisonaiagents/tools/jira_tools.py` |
-| `JIRA_URL` |  | `praisonaiagents/tools/jira_tools.py` |
-| `JIRA_USERNAME` |  | `praisonaiagents/tools/jira_tools.py` |
-| `LANG` |  | `praisonaiagents/mcp/mcp.py` |
-| `LC_ALL` |  | `praisonaiagents/mcp/mcp.py` |
-| `LITELLM_TELEMETRY` |  | `praisonaiagents/llm/__init__.py`, `praisonaiagents/memory/memory.py` |
-| `LOCALAPPDATA` |  | `praisonaiagents/mcp/mcp.py` |
-| `LOGLEVEL` |  | `praisonaiagents/_logging.py`, `praisonaiagents/agent/agent.py`, `praisonaiagents/agent/context_agent.py`, `praisonaiagents/context/instrumentation.py`, `praisonaiagents/llm/llm.py`, `praisonaiagents/tools/train/data/generatecot.py` |
-| `MCP_AUTH_TOKEN` | credential | `praisonaiagents/mcp/mcp_security.py` |
-| `MCP_SSE_ALLOWED_ORIGINS` | security switch | `praisonaiagents/mcp/mcp_security.py` |
-| `MCP_SSE_AUTH_TOKEN` | credential | `praisonaiagents/mcp/mcp_security.py` |
-| `MEM0_API_KEY` | credential | `praisonaiagents/memory/adapters/factories.py` |
-| `MODEL_NAME` |  | `praisonaiagents/frameworks/base.py` |
-| `NVIDIA_API_KEY` | credential | `praisonaiagents/llm/llm.py` |
-| `NVIDIA_NIM_API_BASE` |  | `praisonaiagents/llm/llm.py` |
-| `NVIDIA_NIM_API_KEY` | credential | `praisonaiagents/llm/llm.py` |
-| `OLLAMA_API_KEY` | credential | `praisonaiagents/decisions/system_one.py` |
-| `OLLAMA_DECISION_MODEL` |  | `praisonaiagents/decisions/routing.py`, `praisonaiagents/decisions/system_one.py` |
-| `OLLAMA_HOST` |  | `praisonaiagents/local/resolve.py` |
-| `OLLAMA_SYSTEM_ONE_TIMEOUT` |  | `praisonaiagents/decisions/system_one.py` |
-| `OPENAI_API_BASE` |  | `praisonaiagents/agent/agent.py`, `praisonaiagents/llm/llm.py`, `praisonaiagents/llm/openai_client.py`, `praisonaiagents/local/resolve.py`, `praisonaiagents/memory/memory.py` |
-| `OPENAI_API_KEY` | credential | `praisonaiagents/agent/deep_research_agent.py`, `praisonaiagents/agent/realtime_agent.py`, `praisonaiagents/llm/openai_client.py`, `praisonaiagents/memory/memory.py`, `praisonaiagents/runtime/builtin.py`, `praisonaiagents/tools/crawl4ai_tools.py` |
-| `OPENAI_BASE_URL` |  | `praisonaiagents/agent/agent.py`, `praisonaiagents/llm/llm.py`, `praisonaiagents/llm/openai_client.py`, `praisonaiagents/local/resolve.py`, `praisonaiagents/memory/memory.py` |
-| `OPENAI_EMBEDDING_MODEL` |  | `praisonaiagents/knowledge/adapters/factories.py` |
-| `OPENAI_MAX_RETRIES` |  | `praisonaiagents/llm/openai_client.py` |
-| `OPENAI_MODEL_NAME` |  | `praisonaiagents/agent/agent.py`, `praisonaiagents/agent/router_agent.py`, `praisonaiagents/agents/agents.py`, `praisonaiagents/agents/autoagents.py`, `praisonaiagents/eval/accuracy.py`, `praisonaiagents/eval/criteria.py`, `praisonaiagents/eval/grader.py`, `praisonaiagents/eval/judge.py`, `praisonaiagents/eval/media.py`, `praisonaiagents/goal/config.py`, `praisonaiagents/goal/judge.py`, `praisonaiagents/llm/model_router.py` |
-| `OPENAI_TIMEOUT` |  | `praisonaiagents/llm/openai_client.py` |
-| `OPENROUTER_APP_TITLE` |  | `praisonaiagents/agent/video_agent.py` |
-| `OPENROUTER_REFERER` |  | `praisonaiagents/agent/video_agent.py` |
-| `PATH` |  | `praisonaiagents/mcp/mcp.py` |
-| `PLAYWRIGHT_BROWSERS_PATH` |  | `praisonaiagents/tools/crawl4ai_tools.py` |
-| `PRAISONAI_ALLOW_INSECURE_WS` | security switch | `praisonaiagents/gateway/protocols.py` |
-| `PRAISONAI_ALLOW_LOCAL_TOOLS` | security switch | `praisonaiagents/workflows/workflows.py` |
-| `PRAISONAI_ALLOW_MODEL_REQUESTS` | security switch | `praisonaiagents/model_harness/guard.py` |
-| `PRAISONAI_ALLOW_PLUGIN_DISCOVERY` | security switch | `praisonaiagents/plugins/manager.py` |
-| `PRAISONAI_ALLOW_PROJECT_PLUGINS` | security switch | `praisonaiagents/plugins/discovery.py` |
-| `PRAISONAI_ALLOW_TEMPLATE_TOOLS` | security switch | `praisonaiagents/workflows/workflows.py` |
-| `PRAISONAI_APPEND_SYSTEM_PROMPT` |  | `praisonaiagents/agent/agent.py`, `praisonaiagents/agent/chat_mixin.py` |
-| `PRAISONAI_ATTACHMENTS_ON_MISSING` |  | `praisonaiagents/agent/attachments.py` |
-| `PRAISONAI_ATTACHMENTS_STRICT` | security switch | `praisonaiagents/agent/attachments.py` |
-| `PRAISONAI_AUTO_APPROVE` | security switch | `praisonaiagents/approval/registry.py` |
-| `PRAISONAI_AUTO_INSTRUMENT` |  | `praisonaiagents/_config.py` |
-| `PRAISONAI_BACKGROUND_JOB_STORE` |  | `praisonaiagents/background/job_manager.py` |
-| `PRAISONAI_CONTEXT_MONITOR_FORMAT` |  | `praisonaiagents/context/models.py` |
-| `PRAISONAI_CONTEXT_MONITOR_FREQUENCY` |  | `praisonaiagents/context/models.py` |
-| `PRAISONAI_CONTEXT_MONITOR_PATH` |  | `praisonaiagents/context/models.py` |
-| `PRAISONAI_CONTEXT_MONITOR_WRITE_MODE` |  | `praisonaiagents/context/models.py` |
-| `PRAISONAI_CONTEXT_STRATEGY` |  | `praisonaiagents/context/models.py` |
-| `PRAISONAI_DISABLE_TELEMETRY` |  | `praisonaiagents/_config.py`, `praisonaiagents/telemetry/__init__.py`, `praisonaiagents/telemetry/integration.py`, `praisonaiagents/telemetry/telemetry.py` |
-| `PRAISONAI_EMBEDDING_MODEL` |  | `praisonaiagents/agent/embedding_agent.py` |
-| `PRAISONAI_FLOW_ANALYSIS_ENABLED` |  | `praisonaiagents/telemetry/performance_utils.py` |
-| `PRAISONAI_FULL_TELEMETRY` |  | `praisonaiagents/_config.py` |
-| `PRAISONAI_GIT_ALLOW_UNSAFE_BRANCH` | security switch | `praisonaiagents/tools/github_tools.py` |
-| `PRAISONAI_GIT_USER_EMAIL` |  | `praisonaiagents/checkpoints/types.py`, `praisonaiagents/snapshot/snapshot.py` |
-| `PRAISONAI_GIT_USER_NAME` |  | `praisonaiagents/checkpoints/types.py`, `praisonaiagents/snapshot/snapshot.py` |
-| `PRAISONAI_HOME` |  | `praisonaiagents/paths.py` |
-| `PRAISONAI_IDENTITY_PATH` |  | `praisonaiagents/session/identity.py` |
-| `PRAISONAI_LAUNCH_AUTH_TOKEN` | credential | `praisonaiagents/agent/launch_security.py` |
-| `PRAISONAI_LOCAL_EMBED_MODEL` |  | `praisonaiagents/local/embed.py` |
-| `PRAISONAI_LOCAL_MODEL` |  | `praisonaiagents/local/target.py` |
-| `PRAISONAI_LOCAL_NEG_TTL` |  | `praisonaiagents/local/resolve.py` |
-| `PRAISONAI_LOCAL_TIMEOUT` |  | `praisonaiagents/local/resolve.py` |
-| `PRAISONAI_LOCAL_TTL` |  | `praisonaiagents/local/resolve.py` |
-| `PRAISONAI_MAX_BODY_BYTES` |  | `praisonaiagents/agent/request_limits.py` |
-| `PRAISONAI_MAX_DOWNLOAD_BYTES` |  | `praisonaiagents/tools/file_tools.py` |
-| `PRAISONAI_MCP_TRUST` | security switch | `praisonaiagents/mcp/trust.py` |
-| `PRAISONAI_NO_PLUGINS` |  | `praisonaiagents/plugins/manager.py` |
-| `PRAISONAI_OCR_MODEL` |  | `praisonaiagents/agent/ocr_agent.py` |
-| `PRAISONAI_OUTPUT` |  | `praisonaiagents/agent/agent.py` |
-| `PRAISONAI_PERFORMANCE_DISABLED` |  | `praisonaiagents/telemetry/telemetry.py` |
-| `PRAISONAI_PERFORMANCE_ENABLED` |  | `praisonaiagents/telemetry/integration.py`, `praisonaiagents/telemetry/telemetry.py` |
-| `PRAISONAI_PERFORMANCE_MODE` |  | `praisonaiagents/_config.py` |
-| `PRAISONAI_PLUGINS` |  | `praisonaiagents/_config.py`, `praisonaiagents/config/loader.py` |
-| `PRAISONAI_PRE_COMPACTION_FLUSH` |  | `praisonaiagents/compaction/memory_flush.py` |
-| `PRAISONAI_PRE_COMPACTION_FLUSH_TIMEOUT` |  | `praisonaiagents/compaction/memory_flush.py` |
-| `PRAISONAI_PROFILE` |  | `praisonaiagents/profiling/__init__.py` |
-| `PRAISONAI_PROJECT_ROOT` |  | `praisonaiagents/utils/output_file.py` |
-| `PRAISONAI_QWEN_BASE_URL` |  | `praisonaiagents/auth/subscription/qwen_cli.py` |
-| `PRAISONAI_SAVE_OUTPUT` |  | `praisonaiagents/llm/_cost.py` |
-| `PRAISONAI_SCHEDULE_TIMEZONE` |  | `praisonaiagents/scheduler/due.py`, `praisonaiagents/scheduler/parser.py` |
-| `PRAISONAI_SERVER_READY_TIMEOUT` |  | `praisonaiagents/agent/server_registry.py` |
-| `PRAISONAI_SESSION_ACTIVE_WINDOW` |  | `praisonaiagents/session/store.py` |
-| `PRAISONAI_SESSION_LEGACY_AGENT_KEYS` |  | `praisonaiagents/session/api.py` |
-| `PRAISONAI_SESSION_RETENTION` |  | `praisonaiagents/session/store.py` |
-| `PRAISONAI_SHELL_ENV_ALLOWLIST` | security switch | `praisonaiagents/tools/shell_tools.py` |
-| `PRAISONAI_STRICT_TOOLS` | security switch | `praisonaiagents/tools/resolver.py` |
-| `PRAISONAI_STRUCTURED_LOGS` |  | `praisonaiagents/_logging.py` |
-| `PRAISONAI_TELEMETRY_DISABLED` |  | `praisonaiagents/_config.py`, `praisonaiagents/telemetry/__init__.py`, `praisonaiagents/telemetry/integration.py`, `praisonaiagents/telemetry/telemetry.py` |
-| `PRAISONAI_TELEMETRY_ENABLED` |  | `praisonaiagents/_config.py`, `praisonaiagents/telemetry/integration.py`, `praisonaiagents/telemetry/telemetry.py` |
-| `PRAISONAI_TELEMETRY_SHUTDOWN_TIMEOUT` |  | `praisonaiagents/telemetry/integration.py` |
-| `PRAISONAI_TOOL_OUTPUT_DIR` |  | `praisonaiagents/tools/_output_overflow.py`, `praisonaiagents/tools/ast_grep_tool.py` |
-| `PRAISONAI_TOOL_OUTPUT_RETENTION_HOURS` |  | `praisonaiagents/runtime/tool_output_store.py` |
-| `PRAISONAI_TOOL_SAFETY` | security switch | `praisonaiagents/agent/agent.py`, `praisonaiagents/config/agent_init.py` |
-| `PRAISONAI_TRACK_COST` |  | `praisonaiagents/llm/_cost.py` |
-| `PRAISONAI_VIDEO_MODEL` |  | `praisonaiagents/agent/video_agent.py` |
-| `PRAISONAI_VISION_MODEL` |  | `praisonaiagents/agent/vision_agent.py` |
-| `PRAISON_HOME` |  | `praisonaiagents/trace/last_run.py` |
-| `PRAISON_MAX_FILE_CHARS` |  | `praisonaiagents/tools/mentions.py` |
-| `SEARXNG_URL` |  | `praisonaiagents/tools/web_search.py` |
-| `SEARXNG_URL_ALLOWLIST` | security switch | `praisonaiagents/tools/url_safety.py` |
-| `SHELL` |  | `praisonaiagents/mcp/mcp.py` |
-| `SKILL_CAPABILITY_ENFORCEMENT` | security switch | `praisonaiagents/skills/manager.py` |
-| `SKILL_MAX_PENDING` |  | `praisonaiagents/skills/manager.py` |
-| `SKILL_WRITE_APPROVAL` | security switch | `praisonaiagents/skills/manager.py` |
-| `SPIDER_API_KEY` | credential | `praisonaiagents/tools/web_crawl_tools.py` |
-| `SYSTEMROOT` |  | `praisonaiagents/mcp/mcp.py` |
-| `SYSTEM_ONE_TIMEOUT` |  | `praisonaiagents/decisions/system_one.py` |
-| `TAVILY_API_KEY` | credential | `praisonaiagents/tools/tavily_tools.py`, `praisonaiagents/tools/web_crawl_tools.py`, `praisonaiagents/tools/web_search.py` |
-| `TAVILY_SEARCH_DEPTH` |  | `praisonaiagents/tools/web_search.py` |
-| `TEMP` |  | `praisonaiagents/mcp/mcp.py` |
-| `TMP` |  | `praisonaiagents/mcp/mcp.py` |
-| `TMPDIR` |  | `praisonaiagents/mcp/mcp.py` |
-| `TYPESAFE_API_KEY` | credential | `praisonaiagents/decisions/system_one.py` |
-| `TYPESAFE_DEFAULT_MODEL` |  | `praisonaiagents/decisions/system_one.py` |
-| `USER` |  | `praisonaiagents/mcp/mcp.py` |
-| `USERNAME` |  | `praisonaiagents/mcp/mcp.py` |
-| `USERPROFILE` |  | `praisonaiagents/mcp/mcp.py` |
-| `WEB_SEARCH_PROVIDER` |  | `praisonaiagents/tools/web_search.py` |
-| `XDG_DATA_HOME` |  | `praisonaiagents/paths.py` |
-| `YDC_API_KEY` | credential | `praisonaiagents/tools/web_search.py`, `praisonaiagents/tools/youdotcom_tools.py` |
+| Variable | Kind |
+|---|---|
+| `AGENTMAIL_API_KEY` | credential |
+| `AGENTMAIL_INBOX_ID` |  |
+| `ALLOW_LOCAL_CRAWL` | security switch |
+| `ANONYMIZED_TELEMETRY` |  |
+| `APPDATA` |  |
+| `AZURE_STORAGE_CONNECTION_STRING` | credential |
+| `BRAVE_API_KEY` | credential |
+| `CODEX_HOME` |  |
+| `COMSPEC` |  |
+| `DAKERA_AGENT_ID` |  |
+| `DAKERA_API_KEY` | credential |
+| `DAKERA_API_URL` |  |
+| `DAKERA_URL` |  |
+| `DO_NOT_TRACK` |  |
+| `EMAIL_ADDRESS` |  |
+| `EMAIL_IMAP_PORT` |  |
+| `EMAIL_IMAP_SERVER` |  |
+| `EMAIL_PASSWORD` | credential |
+| `EMAIL_SMTP_PORT` |  |
+| `EMAIL_SMTP_SERVER` |  |
+| `EXA_API_KEY` | credential |
+| `GEMINI_API_KEY` | credential |
+| `GITHUB_TOKEN` | credential |
+| `GIT_DIR` |  |
+| `GIT_WORK_TREE` |  |
+| `GOOGLE_API_KEY` | credential |
+| `HOME` |  |
+| `JIRA_API_TOKEN` | credential |
+| `JIRA_EMAIL` |  |
+| `JIRA_URL` |  |
+| `JIRA_USERNAME` |  |
+| `LANG` |  |
+| `LC_ALL` |  |
+| `LITELLM_TELEMETRY` |  |
+| `LOCALAPPDATA` |  |
+| `LOGLEVEL` |  |
+| `MCP_AUTH_TOKEN` | credential |
+| `MCP_SSE_ALLOWED_ORIGINS` | security switch |
+| `MCP_SSE_AUTH_TOKEN` | credential |
+| `MEM0_API_KEY` | credential |
+| `MODEL_NAME` |  |
+| `NVIDIA_API_KEY` | credential |
+| `NVIDIA_NIM_API_BASE` |  |
+| `NVIDIA_NIM_API_KEY` | credential |
+| `OLLAMA_API_KEY` | credential |
+| `OLLAMA_DECISION_MODEL` |  |
+| `OLLAMA_HOST` |  |
+| `OLLAMA_SYSTEM_ONE_TIMEOUT` |  |
+| `OPENAI_API_BASE` |  |
+| `OPENAI_API_KEY` | credential |
+| `OPENAI_BASE_URL` |  |
+| `OPENAI_EMBEDDING_MODEL` |  |
+| `OPENAI_MAX_RETRIES` |  |
+| `OPENAI_MODEL_NAME` |  |
+| `OPENAI_TIMEOUT` |  |
+| `OPENROUTER_APP_TITLE` |  |
+| `OPENROUTER_REFERER` |  |
+| `PATH` |  |
+| `PLAYWRIGHT_BROWSERS_PATH` |  |
+| `PRAISONAI_ALLOW_INSECURE_WS` | security switch |
+| `PRAISONAI_ALLOW_LOCAL_TOOLS` | security switch |
+| `PRAISONAI_ALLOW_MODEL_REQUESTS` | security switch |
+| `PRAISONAI_ALLOW_PLUGIN_DISCOVERY` | security switch |
+| `PRAISONAI_ALLOW_PROJECT_PLUGINS` | security switch |
+| `PRAISONAI_ALLOW_TEMPLATE_TOOLS` | security switch |
+| `PRAISONAI_APPEND_SYSTEM_PROMPT` |  |
+| `PRAISONAI_ATTACHMENTS_ON_MISSING` |  |
+| `PRAISONAI_ATTACHMENTS_STRICT` | security switch |
+| `PRAISONAI_AUTO_APPROVE` | security switch |
+| `PRAISONAI_AUTO_INSTRUMENT` |  |
+| `PRAISONAI_BACKGROUND_JOB_STORE` |  |
+| `PRAISONAI_CONTEXT_MONITOR_FORMAT` |  |
+| `PRAISONAI_CONTEXT_MONITOR_FREQUENCY` |  |
+| `PRAISONAI_CONTEXT_MONITOR_PATH` |  |
+| `PRAISONAI_CONTEXT_MONITOR_WRITE_MODE` |  |
+| `PRAISONAI_CONTEXT_STRATEGY` |  |
+| `PRAISONAI_DISABLE_TELEMETRY` |  |
+| `PRAISONAI_EMBEDDING_MODEL` |  |
+| `PRAISONAI_FLOW_ANALYSIS_ENABLED` |  |
+| `PRAISONAI_FULL_TELEMETRY` |  |
+| `PRAISONAI_GIT_ALLOW_UNSAFE_BRANCH` | security switch |
+| `PRAISONAI_GIT_USER_EMAIL` |  |
+| `PRAISONAI_GIT_USER_NAME` |  |
+| `PRAISONAI_HOME` |  |
+| `PRAISONAI_IDENTITY_PATH` |  |
+| `PRAISONAI_LAUNCH_AUTH_TOKEN` | credential |
+| `PRAISONAI_LOCAL_EMBED_MODEL` |  |
+| `PRAISONAI_LOCAL_MODEL` |  |
+| `PRAISONAI_LOCAL_NEG_TTL` |  |
+| `PRAISONAI_LOCAL_TIMEOUT` |  |
+| `PRAISONAI_LOCAL_TTL` |  |
+| `PRAISONAI_MAX_BODY_BYTES` |  |
+| `PRAISONAI_MAX_DOWNLOAD_BYTES` |  |
+| `PRAISONAI_MCP_TRUST` | security switch |
+| `PRAISONAI_NO_PLUGINS` |  |
+| `PRAISONAI_OCR_MODEL` |  |
+| `PRAISONAI_OUTPUT` |  |
+| `PRAISONAI_PERFORMANCE_DISABLED` |  |
+| `PRAISONAI_PERFORMANCE_ENABLED` |  |
+| `PRAISONAI_PERFORMANCE_MODE` |  |
+| `PRAISONAI_PLUGINS` |  |
+| `PRAISONAI_PRE_COMPACTION_FLUSH` |  |
+| `PRAISONAI_PRE_COMPACTION_FLUSH_TIMEOUT` |  |
+| `PRAISONAI_PROFILE` |  |
+| `PRAISONAI_PROJECT_ROOT` |  |
+| `PRAISONAI_QWEN_BASE_URL` |  |
+| `PRAISONAI_SAVE_OUTPUT` |  |
+| `PRAISONAI_SCHEDULE_TIMEZONE` |  |
+| `PRAISONAI_SERVER_READY_TIMEOUT` |  |
+| `PRAISONAI_SESSION_ACTIVE_WINDOW` |  |
+| `PRAISONAI_SESSION_LEGACY_AGENT_KEYS` |  |
+| `PRAISONAI_SESSION_RETENTION` |  |
+| `PRAISONAI_SHELL_ENV_ALLOWLIST` | security switch |
+| `PRAISONAI_STRICT_TOOLS` | security switch |
+| `PRAISONAI_STRUCTURED_LOGS` |  |
+| `PRAISONAI_TELEMETRY_DISABLED` |  |
+| `PRAISONAI_TELEMETRY_ENABLED` |  |
+| `PRAISONAI_TELEMETRY_SHUTDOWN_TIMEOUT` |  |
+| `PRAISONAI_TOOL_OUTPUT_DIR` |  |
+| `PRAISONAI_TOOL_OUTPUT_RETENTION_HOURS` |  |
+| `PRAISONAI_TOOL_SAFETY` | security switch |
+| `PRAISONAI_TRACK_COST` |  |
+| `PRAISONAI_VIDEO_MODEL` |  |
+| `PRAISONAI_VISION_MODEL` |  |
+| `PRAISON_HOME` |  |
+| `PRAISON_MAX_FILE_CHARS` |  |
+| `SEARXNG_URL` |  |
+| `SEARXNG_URL_ALLOWLIST` | security switch |
+| `SHELL` |  |
+| `SKILL_CAPABILITY_ENFORCEMENT` | security switch |
+| `SKILL_MAX_PENDING` |  |
+| `SKILL_WRITE_APPROVAL` | security switch |
+| `SPIDER_API_KEY` | credential |
+| `SYSTEMROOT` |  |
+| `SYSTEM_ONE_TIMEOUT` |  |
+| `TAVILY_API_KEY` | credential |
+| `TAVILY_SEARCH_DEPTH` |  |
+| `TEMP` |  |
+| `TMP` |  |
+| `TMPDIR` |  |
+| `TYPESAFE_API_KEY` | credential |
+| `TYPESAFE_DEFAULT_MODEL` |  |
+| `USER` |  |
+| `USERNAME` |  |
+| `USERPROFILE` |  |
+| `WEB_SEARCH_PROVIDER` |  |
+| `XDG_DATA_HOME` |  |
+| `YDC_API_KEY` | credential |
