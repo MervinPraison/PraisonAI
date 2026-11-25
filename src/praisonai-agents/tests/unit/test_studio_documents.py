@@ -2,6 +2,7 @@
 
 from praisonaiagents.studio.documents import (
     clear_studio,
+    excalidraw_create,
     sheet_create,
     sheet_set_cells,
     whiteboard_add,
@@ -50,6 +51,25 @@ def test_sheet_formulas():
     assert values[3][1] == 140
     edited = sheet_set_cells(book["id"], "Q1", {"B2": "250"})
     assert edited["document"]["tabs"][0]["values"][3][1] == 290
+
+
+def test_excalidraw_scene_is_separate_from_the_sticky_board():
+    scene = excalidraw_create(
+        "Launch",
+        [
+            {"type": "rectangle", "x": 40, "y": 40, "width": 180, "height": 90, "text": "Idea"},
+            {"type": "arrow", "x": 220, "y": 80, "width": 80, "height": 0},
+            {"type": "text", "x": 320, "y": 70, "text": "Ship"},
+        ],
+    )
+    doc = scene["document"]
+    assert scene["kind"] == "excalidraw"
+    assert doc["type"] == "excalidraw"
+    assert [el["type"] for el in doc["elements"]] == ["rectangle", "arrow", "text"]
+    assert doc["elements"][0]["label"] == {"text": "Idea"}
+    assert doc["elements"][1]["points"] == [[0, 0], [80, 0]]
+    assert "```excalidraw" in scene["markdown"]
+    assert "items" not in doc
 
 
 def test_sheet_average_and_errors():

@@ -205,6 +205,8 @@ TOOL_MAPPINGS = {
     'sheet_set_cells': ('.sheet_tools', None),
     'sheet_add_tab': ('.sheet_tools', None),
     'sheet_get': ('.sheet_tools', None),
+    'excalidraw_create': ('.excalidraw_tools', None),
+    'excalidraw_get': ('.excalidraw_tools', None),
 
     # Computer Use Tools (agent-centric screen control - Issue #516)
     'computer_screenshot': ('.computer_tools', None),

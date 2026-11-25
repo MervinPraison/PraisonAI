@@ -1,9 +1,9 @@
-"""Whiteboards and spreadsheets stored for one process.
+"""Whiteboards, spreadsheets, and Excalidraw scenes stored for one process.
 
-Claude Whiteboards is a shared board of stickies, shapes, and arrows.
-Claude Sheets is a workbook with tabs, formulas, and computed cells.
-This is the same idea for an agent: tools mutate a document, and the
-``markdown`` field is a fence the chat canvas renders.
+The sticky whiteboard is stickies, shapes, and arrows. Sheets are workbooks
+with tabs, formulas, and computed cells. Excalidraw is a separate hand-drawn
+diagram canvas, not the sticky board. Tools mutate a document and the
+``markdown`` field is a fence the chat renders.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from typing import Any, Dict, List, Optional
 _lock = threading.Lock()
 _boards: Dict[str, Dict[str, Any]] = {}
 _books: Dict[str, Dict[str, Any]] = {}
+_scenes: Dict[str, Dict[str, Any]] = {}
 
 _CELL = re.compile(r"^([A-Z]+)(\d+)$")
 
@@ -26,6 +27,7 @@ def clear_studio() -> None:
     with _lock:
         _boards.clear()
         _books.clear()
+        _scenes.clear()
 
 
 def _id(prefix: str) -> str:
@@ -136,6 +138,66 @@ def _num(value: Any, default: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+# ── excalidraw (dedicated sketch canvas, not the sticky board) ────────
+
+
+_EXCALIDRAW_TYPES = {"rectangle", "ellipse", "diamond", "text", "arrow", "line"}
+
+
+def excalidraw_create(title: str, elements: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+    """A separate hand-drawn scene. Elements are skeletons the UI expands."""
+    scene = {
+        "id": _id("ex_"),
+        "type": "excalidraw",
+        "version": 2,
+        "title": (title or "Diagram").strip() or "Diagram",
+        "source": "praisonai",
+        "elements": [_excalidraw_element(raw) for raw in (elements or []) if isinstance(raw, dict)],
+    }
+    with _lock:
+        _scenes[scene["id"]] = scene
+        doc = json.loads(json.dumps(scene))
+    return _public("excalidraw", doc, f"{len(doc['elements'])} shapes on '{doc['title']}'")
+
+
+def excalidraw_get(scene_id: str) -> Dict[str, Any]:
+    with _lock:
+        scene = _scenes.get(scene_id)
+        if scene is None:
+            raise KeyError(f"excalidraw scene not found: {scene_id}")
+        doc = json.loads(json.dumps(scene))
+    return _public("excalidraw", doc, f"{len(doc['elements'])} shapes")
+
+
+def _excalidraw_element(raw: Dict[str, Any]) -> Dict[str, Any]:
+    kind = str(raw.get("type") or "rectangle").lower()
+    if kind not in _EXCALIDRAW_TYPES:
+        kind = "rectangle"
+    element: Dict[str, Any] = {
+        "type": kind,
+        "x": _num(raw.get("x"), 80),
+        "y": _num(raw.get("y"), 80),
+    }
+    text = str(raw.get("text") or raw.get("label") or "")
+    if kind == "text":
+        element["text"] = text or "Text"
+        element["fontSize"] = int(_num(raw.get("fontSize"), 20))
+    elif kind in {"arrow", "line"}:
+        width = _num(raw.get("width"), 160)
+        height = _num(raw.get("height"), 0)
+        element["points"] = raw.get("points") or [[0, 0], [width, height]]
+    else:
+        element["width"] = _num(raw.get("width") or raw.get("w"), 180)
+        element["height"] = _num(raw.get("height") or raw.get("h"), 100)
+        if text:
+            element["label"] = {"text": text}
+    if raw.get("strokeColor"):
+        element["strokeColor"] = str(raw["strokeColor"])
+    if raw.get("backgroundColor"):
+        element["backgroundColor"] = str(raw["backgroundColor"])
+    return element
 
 
 # ── sheets ────────────────────────────────────────────────────────────

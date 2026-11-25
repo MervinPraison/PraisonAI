@@ -2,8 +2,8 @@
 
 from .documents import (
     clear_studio,
-    sheet_add_tab,
-    sheet_create,
+    excalidraw_create,
+    excalidraw_get,
     sheet_get,
     sheet_set_cells,
     whiteboard_add,
