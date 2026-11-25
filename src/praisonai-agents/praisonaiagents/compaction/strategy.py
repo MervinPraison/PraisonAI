@@ -11,7 +11,7 @@ class CompactionStrategy(str, Enum):
     TRUNCATE = "truncate"
     SLIDING = "sliding"
     SUMMARIZE = "summarize"
-    SMART = "smart"
+    SMART = "smart"  # Alias of SLIDING: same result (no importance scoring yet)
     LLM_SUMMARIZE = "llm_summarize"  # Use LLM for summarization
     PRUNE = "prune"  # Remove old tool outputs
 
