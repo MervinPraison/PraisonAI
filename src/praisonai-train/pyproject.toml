@@ -1,6 +1,6 @@
 [project]
 name = "praisonai-train"
-version = "0.2.1"
+version = "0.2.2"
 description = "Training for PraisonAI — LLM fine-tuning (Unsloth) and iterative agent training extracted from the praisonai wrapper."
 readme = "README.md"
 license = "MIT"
