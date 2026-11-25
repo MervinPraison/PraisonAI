@@ -4,6 +4,10 @@ The user merges; the agent never does. A before_tool hook refuses any shell
 command that merges, approves, enables auto-merge or force-pushes. A hook
 runs before the permission store, so an earlier "always" approval of
 ``bash:gh pr *`` cannot let a merge through.
+
+This is a guard rail, not a security boundary: a string filter cannot see
+every form (for example ``python -c "os.system('gh pr merge 1')"``). The real
+backstop is branch protection or a token without merge rights.
 """
 
 from typing import List, Optional
@@ -15,6 +19,8 @@ from praisonaiagents.permissions.command_parser import parse_command
 _COMMAND_KEYS = ("command", "cmd", "script")
 # gh / git global options that take a value before the subcommand.
 _VALUE_FLAGS = {"-R", "--repo", "-C", "-c", "--git-dir", "--work-tree"}
+# GraphQL mutations that merge, enable auto-merge or approve.
+_MERGE_MUTATIONS = ("mergepullrequest", "enablepullrequestautomerge")
 _FORCE_FLAGS = {"-f", "--force", "--force-with-lease", "--force-if-includes", "--mirror"}
 
 
@@ -31,6 +37,18 @@ def _words(args: List[str]) -> List[str]:
     return out
 
 
+def _api_reason(words: List[str], args: List[str]) -> Optional[str]:
+    """Refuse ``gh api`` calls that merge or approve, over REST or GraphQL."""
+    text = " ".join(args).lower().replace(" ", "")
+    if any(w.rstrip("/").endswith("/merge") for w in words) or any(m in text for m in _MERGE_MUTATIONS):
+        return "merging a pull request through the API is left to the user"
+    if "event=approve" in text or ("addpullrequestreview" in text and "approve" in text):
+        return "approving a pull request through the API is left to the user"
+    if words[1:2] == ["graphql"] and ("--input" in args or "=@" in text):
+        return "a GraphQL query read from a file cannot be checked"
+    return None
+
+
 def _op_reason(executable: str, args: List[str]) -> Optional[str]:
     name = executable.rsplit("/", 1)[-1]
     words = _words(args)
@@ -39,8 +57,8 @@ def _op_reason(executable: str, args: List[str]) -> Optional[str]:
             return "merging a pull request is left to the user"
         if words[:2] == ["pr", "review"] and ("--approve" in args or "-a" in args):
             return "approving a pull request is left to the user"
-        if words[:1] == ["api"] and any(w.rstrip("/").endswith("/merge") for w in words):
-            return "merging a pull request through the API is left to the user"
+        if words[:1] == ["api"]:
+            return _api_reason(words, args)
     if name == "git" and "push" in words:
         flags = {a.split("=", 1)[0] for a in args}
         short = "".join(a[1:] for a in args if a.startswith("-") and not a.startswith("--"))
