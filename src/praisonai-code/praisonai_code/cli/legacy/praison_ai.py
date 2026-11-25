@@ -262,66 +262,6 @@ def __getattr__(name):
     raise AttributeError(name)
 
 
-# ACP owns its own flag surface, and two of its flags collide with legacy ones.
-# ``--model`` is a legacy flag too, so the argparse pass would consume the value
-# and the handler would start on its default model; ``--resume --last`` is a
-# legal ACP pair the legacy parser rejects outright, because its own
-# ``--resume`` requires a value. ``acp`` is therefore dispatched before the
-# parser runs, with the arguments exactly as typed.
-def _acp_tail(argv, parser):
-    """Return the arguments after an ``acp`` verb, or None.
-
-    Each token is classified by the legacy parser itself (``_parse_optional``
-    is argparse's own option resolution, so exact spellings, ``--opt=value``,
-    unambiguous long prefixes such as ``--mode`` for ``--model`` and clustered
-    short options such as ``-vv`` all mean what the legacy parse would mean).
-    An option's value is therefore never read as the verb — ``--model acp``
-    keeps ``acp`` as the model — while ``--mode prefix acp --model target``
-    skips the value and still forwards ``--model target``.
-
-    ``--`` ends option parsing, so only the token after it can be the command.
-    Four shapes keep the legacy path: ``-h``/``--help`` (argparse prints help
-    and exits), a ``--auto``/``--init`` REMAINDER (it swallows the rest), an
-    argument argparse would reject (``--model --verbose`` has no value), and
-    an unknown option. ACP takes over only where the legacy parse would reach
-    an ``acp`` command.
-    """
-    index = 0
-    while index < len(argv):
-        arg = argv[index]
-        if arg == "--":
-            if index + 1 >= len(argv) or argv[index + 1] != "acp":
-                return None
-            return list(argv[index + 2:])
-        resolution = parser._parse_optional(arg)
-        if resolution is None:  # a positional token
-            return list(argv[index + 1:]) if arg == "acp" else None
-        # argparse returns (action, option_string, explicit_arg) on older
-        # Pythons and (action, option_string, sep, explicit_arg) on newer ones;
-        # the explicit value is the last element either way.
-        action, _option_string, *rest = resolution
-        explicit_value = rest[-1] if rest else None
-        if action is None or isinstance(action, argparse._HelpAction):
-            return None
-        if action.nargs == argparse.REMAINDER:
-            return None
-        index += 1
-        if explicit_value is not None or action.nargs == 0:  # self-contained
-            continue
-        # The option takes a value: consume the next token only when it can be
-        # one, so an option there stays an option (and argparse's own refusal
-        # to accept it as a value is what the user sees).
-        if (
-            index < len(argv)
-            and argv[index] != "--"
-            and parser._parse_optional(argv[index]) is None
-        ):
-            index += 1
-        else:
-            return None
-    return None
-
-
 def _run_acp(acp_args):
     """Run the ACP handler on ``acp_args`` and exit with its code.
 
@@ -1068,30 +1008,20 @@ class PraisonAI:
             default_args.no_rules = False
             return default_args
         
-        # Build the parser once and dispatch ACP before it consumes or rejects
-        # ACP's flags (see _acp_tail); the same parser then reads non-ACP argv.
+        # ACP parses its own flags, and two of them collide with legacy ones:
+        # `--model` would be consumed by this parser (the handler would start on
+        # its default model) and `--resume --last` is rejected outright because
+        # the legacy `--resume` requires a value. The documented invocation puts
+        # the verb first (`praisonai acp ...`, `praisonai-code acp ...`), so that
+        # shape is dispatched here with its arguments exactly as typed, before
+        # the parser runs. Any other shape keeps the legacy parse and reaches
+        # ACP below with the arguments the parser did not consume.
+        if not in_test_env and sys.argv[1:2] == ["acp"]:
+            _run_acp(sys.argv[2:])
+
         from praisonai_code._wrapper_bridge import import_wrapper_module
         _ab = import_wrapper_module("praisonai.cli.legacy.dispatch.argparse_builder")
-        build_parser = getattr(_ab, "build_parser", None)
-        parse_args_with = getattr(_ab, "parse_args_with", None)
-
-        if build_parser is None or parse_args_with is None:
-            # A wrapper older than the split has only build_argument_parser.
-            # Every legacy command must still run against it: only `acp` needs
-            # the pre-parse look, so it keeps the post-parse route there.
-            args, unknown_args, special_commands = _ab.build_argument_parser(in_test_env)
-            if not in_test_env and args.command == 'acp':
-                _run_acp(unknown_args)
-        else:
-            parser, special_commands = build_parser(in_test_env)
-            # The scan reads the real argv, so it must not run under pytest:
-            # a test runner's own flags (`-k acp`) would otherwise look like
-            # an `acp` invocation and exit the process mid-test.
-            if not in_test_env:
-                acp_args = _acp_tail(sys.argv[1:], parser)
-                if acp_args is not None:
-                    _run_acp(acp_args)
-            args, unknown_args = parse_args_with(parser, in_test_env)
+        args, unknown_args, special_commands = _ab.build_argument_parser(in_test_env)
 
         # Handle special cases first
         if len(unknown_args) >= 2 and unknown_args[0] == '-b' and unknown_args[1] == 'api:app':
@@ -1119,9 +1049,13 @@ class PraisonAI:
             self._handle_serve_command(args, unknown_args)
             sys.exit(0)
 
-        # ACP never reaches here: _acp_tail dispatches it before this parser
-        # runs, so an `acp` token has already been read as an option value or
-        # a REMAINDER payload if it was not the verb.
+        # Handle ACP command - Agent Client Protocol server for IDE integration
+        # The verb-first shape was dispatched before the parse; this catches the
+        # shapes it did not cover and forwards the arguments the legacy parser
+        # left unconsumed (the same tail the branch has always used).
+        if args.command == 'acp':
+            _run_acp(unknown_args)
+
         # Handle debug command - Debug and test interactive flows
         if args.command == 'debug':
             from ..features.debug import run_debug_command

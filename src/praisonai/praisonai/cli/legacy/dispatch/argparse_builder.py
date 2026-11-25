@@ -75,14 +75,8 @@ def classify_unknown_command(command: Optional[str], special_commands: Sequence[
     return None
 
 
-def build_parser(in_test_env: bool):
-    """Build the legacy ArgumentParser without parsing argv.
-
-    Split out of :func:`build_argument_parser` so a caller that has to look at
-    argv before it is parsed (the ACP verb scan in ``legacy/praison_ai.py``)
-    can read the parser's own option arity instead of keeping a second copy of
-    the flag list that could drift. Returns ``(parser, special_commands)``.
-    """
+def build_argument_parser(in_test_env: bool):
+    """Build ArgumentParser and parse argv. Returns (args, unknown_args, special_commands)."""
     special_commands = list(LEGACY_SPECIAL_COMMANDS)
 
     parser = argparse.ArgumentParser(prog="praisonai", description="praisonAI command-line interface")
@@ -377,30 +371,12 @@ def build_parser(in_test_env: bool):
     parser.add_argument("--force-tool-usage", type=str, choices=["auto", "always", "never"], default=None,
                       help="Force tool usage mode: auto (default for Ollama), always, never")
 
-    return parser, special_commands
-
-
-def parse_args_with(parser, in_test_env: bool):
-    """Parse the process argv with ``parser``. Returns ``(args, unknown_args)``.
-
-    The parser is passed in rather than built here so a caller can inspect it
-    first and then parse with the very same one (``build_argument_parser`` is
-    the build-and-parse convenience for callers that do not need to). In a test
-    environment the parse uses empty argv so pytest's own arguments never reach
-    the legacy parser.
-    """
+    # If we're in a test environment, parse with empty args to avoid pytest interference
     if in_test_env:
         args, unknown_args = parser.parse_known_args([])
     else:
         args, unknown_args = parser.parse_known_args()
     _normalize_max_tokens(args)
-    return args, unknown_args
-
-
-def build_argument_parser(in_test_env: bool):
-    """Build ArgumentParser and parse argv. Returns (args, unknown_args, special_commands)."""
-    parser, special_commands = build_parser(in_test_env)
-    args, unknown_args = parse_args_with(parser, in_test_env)
     return args, unknown_args, special_commands
 
 
