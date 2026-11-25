@@ -40,11 +40,13 @@ def _words(args: List[str]) -> List[str]:
 def _api_reason(words: List[str], args: List[str]) -> Optional[str]:
     """Refuse ``gh api`` calls that merge or approve, over REST or GraphQL."""
     text = " ".join(args).lower().replace(" ", "")
-    if any(w.rstrip("/").endswith("/merge") for w in words) or any(m in text for m in _MERGE_MUTATIONS):
+    paths = [w.split("?", 1)[0].rstrip("/") for w in words]
+    # .../pulls/N/merge merges a PR; .../merges merges one branch into another.
+    if any(p.endswith(("/merge", "/merges")) for p in paths) or any(m in text for m in _MERGE_MUTATIONS):
         return "merging a pull request through the API is left to the user"
     if "event=approve" in text or ("addpullrequestreview" in text and "approve" in text):
         return "approving a pull request through the API is left to the user"
-    if words[1:2] == ["graphql"] and ("--input" in args or "=@" in text):
+    if "graphql" in words and ("--input" in args or "=@" in text):
         return "a GraphQL query read from a file cannot be checked"
     return None
 
