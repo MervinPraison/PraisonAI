@@ -44,3 +44,22 @@ def test_manager_model_is_an_alias_of_manager_llm():
 def test_manager_llm_and_manager_model_together_are_refused():
     with pytest.raises(TypeError, match="manager_model"):
         AgentTeam(agents=[_member()], manager_llm="a", manager_model="b")
+
+
+def test_autoagents_builds_without_llm_deprecation_warning(fresh_warnings, monkeypatch):
+    # AutoAgents passed llm= to both its members and its parent team, so a user
+    # who never wrote llm= still got the deprecation warning.
+    from praisonaiagents.agents import autoagents as aa
+
+    config = aa.AutoAgentsConfig(
+        main_instruction="x", process_type="sequential",
+        agents=[aa.AgentConfig(
+            name="a", role="r", goal="g", backstory="b", tools=[],
+            tasks=[aa.TaskConfig(name="t", description="d", expected_output="o", tools=[])],
+        )],
+    )
+    monkeypatch.setattr(aa.AutoAgents, "_generate_config", lambda self: config)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error", DeprecationWarning)
+        team = aa.AutoAgents(instructions="x", llm="gpt-4o-mini", memory=False)
+    assert team.agents[0].llm == "gpt-4o-mini"
