@@ -42,8 +42,9 @@ def _first_agent_block():
     # runs with only the core package on the path.
     assert "## Quick start" in text, "README.md has no '## Quick start' section"
     section = text.split("## Quick start", 1)[1]
-    block = re.search(r"```python\n(.*?)```", section, re.S).group(1)
-    return block.replace("from praisonai import Agent", "from praisonaiagents import Agent")
+    match = re.search(r"```python\n(.*?)```", section, re.S)
+    assert match, "README.md '## Quick start' section has no python code block"
+    return re.sub(r"^from praisonai import ", "from praisonaiagents import ", match.group(1), flags=re.M)
 
 
 def test_first_agent_example_prints_when_piped(tmp_path):
