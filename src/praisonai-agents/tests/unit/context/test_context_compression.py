@@ -1,15 +1,16 @@
-#!/usr/bin/env python3
-"""
-Test script for the new context compression implementation.
+"""ContextCompressor and LLMContextCompressorOptimizer without an LLM (#1806).
 
-This tests the ContextCompressor and LLMContextCompressorOptimizer classes
-to ensure they work correctly according to issue #1806 requirements.
+These were script-style checks that caught every exception and returned
+True/False, so pytest passed them whatever happened; two had been failing
+silently (``compress()`` is async, and the estimator method is
+``estimate_messages``). They now assert.
 """
 
-import sys
-from praisonaiagents.context.compressor import ContextCompressor, CompressResult
+import asyncio
+
+from praisonaiagents.context.compressor import ContextCompressor
 from praisonaiagents.context.optimizer import LLMContextCompressorOptimizer
-from praisonaiagents.context.tokens import estimate_messages_tokens
+from praisonaiagents.context.tokens import estimate_messages_tokens, get_estimator
 
 
 def test_context_compressor():
@@ -34,36 +35,20 @@ def test_context_compressor():
             "content": f"Answer {i+1}: Certainly! Python concept {i+1} is important because it helps with programming efficiency and code readability. Here's a detailed explanation that goes on for quite a while to make this message longer and more realistic for testing compression scenarios."
         })
     
-    print(f"Original messages: {len(messages)}")
     original_tokens = estimate_messages_tokens(messages)
-    print(f"Original tokens: {original_tokens}")
     
     # Test ContextCompressor with fallback (no LLM)
     compressor = ContextCompressor(llm=None, enable_session_tracking=True)
     
-    try:
-        result = compressor.compress(
-            messages=messages,
-            summary_target_tokens=150,
-            protect_last_n_tokens=500
-        )
-        
-        print(f"Compressed messages: {len(result.messages)}")
-        print(f"Final tokens: {result.final_tokens}")
-        print(f"Tokens saved: {result.tokens_saved}")
-        print(f"Compression ratio: {result.compression_ratio:.2f}")
-        
-        # Verify compression worked
-        assert len(result.messages) <= len(messages)
-        assert result.final_tokens <= original_tokens
-        assert result.tokens_saved >= 0
-        
-        print("✓ ContextCompressor test passed!")
-        return True
-        
-    except Exception as e:
-        print(f"✗ Error in ContextCompressor: {e}")
-        return False
+    result = asyncio.run(compressor.compress(
+        messages=messages,
+        summary_target_tokens=150,
+        protect_last_n_tokens=500
+    ))
+
+    assert len(result.messages) < len(messages)
+    assert result.final_tokens < original_tokens
+    assert result.tokens_saved > 0
 
 
 def test_llm_context_compressor_optimizer():
@@ -82,91 +67,27 @@ def test_llm_context_compressor_optimizer():
         {"role": "assistant", "content": "You're welcome! Happy to help anytime."}
     ]
     
-    print(f"Original messages: {len(messages)}")
     original_tokens = estimate_messages_tokens(messages)
-    print(f"Original tokens: {original_tokens}")
     
     # Test LLMContextCompressorOptimizer (without LLM, should fall back to sync compression)
     optimizer = LLMContextCompressorOptimizer(llm_client=None)
     
-    try:
-        result_messages, result = optimizer.optimize(messages, target_tokens=150)
-        
-        print(f"Optimized messages: {len(result_messages)}")
-        print(f"Optimized tokens: {result.optimized_tokens}")
-        print(f"Tokens saved: {result.tokens_saved}")
-        print(f"Strategy used: {result.strategy_used}")
-        
-        # Check if compression occurred when needed
-        if result.tokens_saved > 0:
-            assert result.summary_added, "Expected a summary to be added when tokens are saved"
-            print("✓ LLMContextCompressorOptimizer test passed!")
-            return True
-        else:
-            print("⚠ No compression was needed (under token limit)")
-            return True
-            
-    except Exception as e:
-        print(f"✗ Error in LLMContextCompressorOptimizer: {e}")
-        return False
+    result_messages, result = optimizer.optimize(messages, target_tokens=150)
+
+    assert len(result_messages) <= len(messages)
+    if result.tokens_saved > 0:
+        assert result.summary_added, "Expected a summary to be added when tokens are saved"
 
 
 def test_tokenization_improvements():
     """Test the improved tokenization features."""
     
-    try:
-        from praisonaiagents.context.tokens import get_estimator
-        
-        # Test different estimator configurations
-        estimator_heuristic = get_estimator(use_accurate=False)
-        estimator_accurate = get_estimator(use_accurate=True)
-        
-        test_message = {
-            "role": "assistant",
-            "content": "This is a test message for tokenization with various words and punctuation!"
-        }
-        
-        tokens_heuristic = estimator_heuristic.estimate_message_tokens(test_message)
-        tokens_accurate = estimator_accurate.estimate_message_tokens(test_message)
-        
-        # Verify both estimators return reasonable token counts
-        assert isinstance(tokens_heuristic, int) and tokens_heuristic > 0
-        assert isinstance(tokens_accurate, int) and tokens_accurate > 0
-        
-        print("✓ Tokenization improvements test passed!")
-        return True
-        
-    except Exception as e:
-        print(f"✗ Error in tokenization test: {e}")
-        return False
+    test_message = {
+        "role": "assistant",
+        "content": "This is a test message for tokenization with various words and punctuation!"
+    }
 
+    for use_accurate in (False, True):
+        tokens = get_estimator(use_accurate=use_accurate).estimate_messages([test_message])
+        assert isinstance(tokens, int) and tokens > 0, use_accurate
 
-if __name__ == "__main__":
-    print("Testing PraisonAI Context Compression Implementation")
-    print("============================================================")
-    
-    tests = [
-        test_context_compressor,
-        test_llm_context_compressor_optimizer,
-        test_tokenization_improvements,
-    ]
-    
-    passed = 0
-    total = len(tests)
-    
-    for test_func in tests:
-        try:
-            if test_func():
-                passed += 1
-        except Exception as e:
-            print(f"✗ {test_func.__name__} failed with exception: {e}")
-    
-    print("============================================================")
-    print(f"Tests passed: {passed}/{total}")
-    
-    if passed == total:
-        print("🎉 All tests passed!")
-        sys.exit(0)
-    else:
-        print("❌ Some tests failed!")
-        sys.exit(1)
