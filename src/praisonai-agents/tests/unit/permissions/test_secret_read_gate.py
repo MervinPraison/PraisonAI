@@ -141,3 +141,15 @@ class TestNonRegression:
             PermissionRule(pattern="write:*", action=PermissionAction.ALLOW)
         )
         assert manager.check("write:.env").action == PermissionAction.ALLOW
+
+
+@pytest.mark.parametrize(
+    "path, expected",
+    [(".env", True), ("config/prod.env", True), ("keys/id_rsa", True), ("a/server.pem", True),
+     (".env.example", False), ("main.py", False), ("", False)],
+)
+def test_is_secret_path_shares_the_read_gate_list(path, expected):
+    """One helper for every caller that must not touch secret files (ship, read gate)."""
+    from praisonaiagents.permissions import is_secret_path
+
+    assert is_secret_path(path) is expected

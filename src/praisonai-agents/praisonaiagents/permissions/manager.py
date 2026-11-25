@@ -23,6 +23,21 @@ logger = get_logger(__name__)
 # Default storage path (uses centralized paths - DRY)
 DEFAULT_PERMISSIONS_DIR = str(get_permissions_dir())
 
+
+def is_secret_path(path: str) -> bool:
+    """Return ``True`` if *path* names a secret file (``.env``, private keys).
+
+    Matches the basename case-insensitively against the built-in secret globs,
+    excluding example/sample/template files. Pattern-only: no filesystem access.
+    """
+    basename = os.path.basename(path.rstrip("/\\").strip()).lower()
+    if not basename:
+        return False
+    if any(fnmatch.fnmatch(basename, p) for p in PermissionManager._SECRET_ALLOW_PATTERNS):
+        return False
+    return any(fnmatch.fnmatch(basename, p) for p in PermissionManager._SECRET_PATTERNS)
+
+
 class PermissionManager:
     """
     Manages permission rules and approvals.
@@ -348,19 +363,8 @@ class PermissionManager:
     )
 
     def _is_secret_read_path(self, path: str) -> bool:
-        """Return ``True`` if *path* is a secret file that should gate reads.
-
-        Matches the file's basename (case-insensitively) against the built-in
-        secret globs, excluding safe example/sample/template files. Purely
-        pattern-based (no filesystem access) so it is cheap and side-effect
-        free.
-        """
-        basename = os.path.basename(path.rstrip("/\\").strip()).lower()
-        if not basename:
-            return False
-        if any(fnmatch.fnmatch(basename, p) for p in self._SECRET_ALLOW_PATTERNS):
-            return False
-        return any(fnmatch.fnmatch(basename, p) for p in self._SECRET_PATTERNS)
+        """Return ``True`` if *path* is a secret file that should gate reads."""
+        return is_secret_path(path)
 
     # Non-secret basenames used to probe whether an allow rule is a broad
     # catch-all (matches everything) rather than a secret-specific opt-in.
