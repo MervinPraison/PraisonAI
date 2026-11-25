@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with Google Vertex AI
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="vertex_ai/gemini-1.5-pro",
+    model="vertex_ai/gemini-1.5-pro",
 )
 
 # Example conversation

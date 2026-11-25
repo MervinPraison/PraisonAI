@@ -6,7 +6,7 @@ from praisonaiagents import Agent
 # Method 1: Using base_url parameter directly (NEW)
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="ollama/llama3.2",
+    model="ollama/llama3.2",
     base_url="http://remote-host:11434"
 )
 
@@ -16,7 +16,7 @@ print(response)
 # Method 2: Using dict configuration
 agent2 = Agent(
     instructions="You are a helpful assistant",
-    llm={
+    model={
         "model": "ollama/llama3.2",
         "base_url": "http://remote-host:11434"
     }

@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with DeepSeek
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="deepseek/deepseek-chat",
+    model="deepseek/deepseek-chat",
 )
 
 # Example conversation

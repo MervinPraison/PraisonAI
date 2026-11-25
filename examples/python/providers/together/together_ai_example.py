@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with Together AI
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="together_ai/meta-llama/Llama-3.1-8B-Instruct",
+    model="together_ai/meta-llama/Llama-3.1-8B-Instruct",
 )
 
 # Example conversation

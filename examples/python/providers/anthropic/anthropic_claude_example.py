@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with Anthropic Claude
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="anthropic/claude-3-5-sonnet-20241022",
+    model="anthropic/claude-3-5-sonnet-20241022",
 )
 
 # Example conversation

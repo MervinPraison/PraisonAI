@@ -15,7 +15,7 @@ if not api_key:
 
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm={
+    model={
         "model": "openai/gpt-5.2",
         "api_key": api_key,
         "base_url": "https://direct.evolink.ai/v1",

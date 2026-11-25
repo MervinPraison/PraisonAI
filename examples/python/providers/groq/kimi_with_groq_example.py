@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with Kimi model using Groq provider
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="groq/kimi",
+    model="groq/kimi",
 )
 
 # Example conversation
