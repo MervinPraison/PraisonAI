@@ -61,7 +61,6 @@ def test_conversation_compaction():
     print(f"✓ Compaction successful: {len(messages)} → {len(result)} messages")
     print(f"  Context topic: {context.main_topic}")
     print("✓ Conversation compaction test passed!")
-    return True
 
 
 if __name__ == "__main__":
