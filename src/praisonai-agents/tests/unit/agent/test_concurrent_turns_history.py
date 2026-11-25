@@ -75,3 +75,26 @@ def test_a_copied_agent_gets_its_own_turn_lock():
     clone = copy.deepcopy(agent)
     assert clone.__dict__.get("_turn_lock") is None  # built lazily on the clone's first turn
     assert _thread_lock(clone) is not lock
+
+
+def test_threads_streaming_one_agent_keep_turns_paired():
+    agent = _agent()
+
+    def worker(w):
+        for c in range(CALLS):
+            "".join(str(chunk) for chunk in agent.start(f"stream {w} call {c}", stream=True))
+
+    threads = [threading.Thread(target=worker, args=(w,)) for w in range(WORKERS)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+    _assert_paired(agent)
+
+
+def test_an_abandoned_stream_releases_the_turn():
+    agent = _agent()
+    stream = agent.start("first", stream=True)
+    next(iter(stream), None)  # started, then dropped half-way
+    stream.close()
+    assert agent.chat("second") == "re: second"  # would block forever if the lock leaked

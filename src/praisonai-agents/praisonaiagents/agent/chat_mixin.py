@@ -20,7 +20,7 @@ from praisonaiagents._logging import get_logger
 from ..errors import BudgetExceededError, ToolExecutionError
 from .tool_execution import _active_turn_cancel
 from .interrupt import protect_turn
-from .turn_lock import serial_aturn, serial_turn
+from .turn_lock import serial_aturn, serial_stream_turn, serial_turn
 
 # Shared lazy display helpers (cached, thread-safe; avoid circular imports)
 from ._lazy_display import _get_console, _get_live, _get_display_functions
@@ -5947,6 +5947,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Auto-save session if enabled
         self._auto_save_session()
 
+    @serial_stream_turn
     def _start_stream(self, prompt: str, **kwargs) -> Generator[str, None, None]:
         """Own the durable context for the complete streaming generator."""
         # A stream is a turn too: give it its own loop guard (as chat/achat get
