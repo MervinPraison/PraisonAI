@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with AWS SageMaker
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="sagemaker/meta-llama/Llama-3.1-8B-Instruct",
+    model="sagemaker/meta-llama/Llama-3.1-8B-Instruct",
 )
 
 # Example conversation

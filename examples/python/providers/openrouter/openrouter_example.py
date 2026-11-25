@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with OpenRouter
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="openrouter/meta-llama/llama-3.1-8b-instruct",
+    model="openrouter/meta-llama/llama-3.1-8b-instruct",
 )
 
 # Example conversation

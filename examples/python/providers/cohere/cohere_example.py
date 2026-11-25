@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with Cohere
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="cohere/command-r-plus",
+    model="cohere/command-r-plus",
 )
 
 # Example conversation

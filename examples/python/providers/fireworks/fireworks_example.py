@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with Fireworks AI
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="fireworks/accounts/fireworks/models/llama-v3-8b-instruct",
+    model="fireworks/accounts/fireworks/models/llama-v3-8b-instruct",
 )
 
 # Example conversation

@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with Hugging Face
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="huggingface/meta-llama/Llama-3.1-8B-Instruct",
+    model="huggingface/meta-llama/Llama-3.1-8B-Instruct",
 )
 
 # Example conversation
