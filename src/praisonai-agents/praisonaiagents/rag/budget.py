@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 from ..context.budgeter import MODEL_LIMITS as _CANONICAL_LIMITS
+from ..context.budgeter import litellm_model_info as _litellm_model_info
 from ..context.tokens import estimate_tokens_heuristic
 
 
@@ -103,7 +104,15 @@ def get_model_context_window(model_name: Optional[str]) -> int:
     """
     if not model_name:
         return DEFAULT_CONTEXT_WINDOW
-    
+
+    # litellm's model data first (no litellm import), as the budgeter does;
+    # the static table below is only the fallback (X-03).
+    info = _litellm_model_info(model_name.strip())
+    if info:
+        limit = info.get("max_input_tokens") or info.get("max_tokens")
+        if limit:
+            return int(limit)
+
     # Normalize model name
     model_lower = model_name.lower().strip()
     
