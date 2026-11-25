@@ -1,6 +1,6 @@
 """One turn at a time per agent (X-18): concurrent chat()/achat()/start(stream=True)
-calls on one Agent interleaved its history; now each turn holds a per-agent lock
-and callers queue (use separate agents for parallel conversations). A nested call
+calls on one Agent interleaved its history; a per-agent lock now serialises turns
+within sync callers and within one event loop (sync vs async can still overlap). A nested call
 inside the agent's own turn sees it held through a context variable and does not
 wait. A stream holds the lock from its first chunk until it ends, raises or is
 closed (close() or GC), maybe on another thread: so a plain Lock, not an RLock.
