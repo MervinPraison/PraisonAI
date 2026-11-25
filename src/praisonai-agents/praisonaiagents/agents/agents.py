@@ -2971,6 +2971,13 @@ class AgentTeam(SpawnAnnounceProtocol):
         # Always run silently - no verbose output
         return self.start(content=content, return_dict=return_dict, output="silent", **kwargs)
 
+    async def arun(self, content=None, return_dict=False, **kwargs):
+        """Async version of run(): same as astart(), which shows no progress panels.
+
+        Gives AgentTeam the same start/astart/run/arun set as Agent and AgentFlow.
+        """
+        return await self.astart(content=content, return_dict=return_dict, **kwargs)
+
     def _snapshot_task_state(self):
         """Snapshot per-task run state so a batch can restore it afterwards.
 
