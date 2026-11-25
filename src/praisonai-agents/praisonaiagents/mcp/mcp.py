@@ -588,14 +588,15 @@ class MCP:
             lock.release()
 
     @classmethod
-    def from_config(cls, entry, name: str = "server") -> "MCP":
+    def from_config(cls, entry, name: str = "server", expand_env: bool = False) -> "MCP":
         """Build a client from one config entry, e.g. ``{"url": ..., "headers": ...}``.
 
-        Accepts the entry shapes read by :func:`praisonaiagents.mcp.parse_mcp_servers`
-        and expands ``${VAR}`` references from the environment.
+        Accepts the entry shapes read by :func:`praisonaiagents.mcp.parse_mcp_servers`.
+        ``${VAR}`` is passed through as written unless ``expand_env=True``; only
+        enable it for a user's own config that no loader has interpolated yet.
         """
         from .loader import build_mcp
-        return build_mcp(entry, name=name, cls=cls)
+        return build_mcp(entry, name=name, cls=cls, expand_env=expand_env)
 
     @classmethod
     def _is_cold_start_launcher(cls, cmd) -> bool:

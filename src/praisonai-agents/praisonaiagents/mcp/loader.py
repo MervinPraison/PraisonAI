@@ -80,12 +80,12 @@ def parse_mcp_servers(data: Any) -> Dict[str, Dict[str, Any]]:
     return {name: _normalize_entry(name, entry) for name, entry in servers.items()}
 
 
-def _expand(value: Any, name: str) -> Any:
+def _expand_env(value: Any, name: str) -> Any:
     """Expand ``${VAR}``, ``${env:VAR}`` and ``${VAR:-default}`` from the environment."""
     if isinstance(value, dict):
-        return {k: _expand(v, name) for k, v in value.items()}
+        return {k: _expand_env(v, name) for k, v in value.items()}
     if isinstance(value, list):
-        return [_expand(v, name) for v in value]
+        return [_expand_env(v, name) for v in value]
     if not isinstance(value, str):
         return value
 
@@ -98,9 +98,14 @@ def _expand(value: Any, name: str) -> Any:
     return _ENV_VAR.sub(_sub, value)
 
 
-def build_mcp(entry: Any, name: str = "server", cls: type = MCP) -> MCP:
-    """Build an ``MCP`` client from one config entry. Used by :meth:`MCP.from_config`."""
+def build_mcp(entry: Any, name: str = "server", cls: type = MCP, expand_env: bool = False) -> MCP:
+    """Build an ``MCP`` client from one config entry. Used by :meth:`MCP.from_config`.
+
+    ``expand_env=True`` expands ``${VAR}`` from the environment. Leave it off for
+    entries a loader has already interpolated, so nothing is expanded twice.
+    """
     entry = _normalize_entry(name, entry)
+    _expand = _expand_env if expand_env else (lambda value, _name: value)
     if entry.get("enabled") is False:
         raise ValueError(f"MCP server '{name}' is disabled")
     kwargs: Dict[str, Any] = {}

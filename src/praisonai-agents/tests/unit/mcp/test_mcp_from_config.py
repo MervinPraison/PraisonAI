@@ -106,14 +106,14 @@ class _Recorder:
     """Records what ``MCP.__init__`` was called with (no server is started)."""
 
 
-def _build(entry):
+def _build(entry, **opts):
     rec = _Recorder()
 
     def fake_init(self, target=None, args=None, **kw):
         rec.target, rec.args, rec.kw = target, args, kw
 
     with patch.object(MCP, "__init__", fake_init):
-        MCP.from_config(entry)
+        MCP.from_config(entry, **opts)
     return rec
 
 
@@ -121,7 +121,7 @@ def test_from_config_stdio(monkeypatch):
     monkeypatch.setenv("FS_ROOT", "/data")
     rec = _build({"command": "npx", "args": ["-y", "fs", "${FS_ROOT}"],
                   "env": {"K": "${env:FS_ROOT}"}, "timeout": 30,
-                  "allowed_tools": ["read"], "enabled": True})
+                  "allowed_tools": ["read"], "enabled": True}, expand_env=True)
     assert rec.target == "npx"
     assert rec.args == ["-y", "fs", "/data"]
     assert rec.kw == {"env": {"K": "/data"}, "timeout": 30, "allowed_tools": ["read"]}
@@ -129,7 +129,8 @@ def test_from_config_stdio(monkeypatch):
 
 def test_from_config_http_headers_expanded(monkeypatch):
     monkeypatch.setenv("TOK", "s3cret")
-    rec = _build({"url": "https://x.dev/mcp", "headers": {"Authorization": "Bearer ${TOK}"}})
+    rec = _build({"url": "https://x.dev/mcp", "headers": {"Authorization": "Bearer ${TOK}"}},
+                 expand_env=True)
     assert rec.target == "https://x.dev/mcp"
     assert rec.kw == {"headers": {"Authorization": "Bearer s3cret"}}
 
@@ -146,13 +147,13 @@ def test_from_config_timeout_ms():
 
 def test_from_config_default_value(monkeypatch):
     monkeypatch.delenv("NOPE_VAR", raising=False)
-    assert _build({"command": "x", "args": ["${NOPE_VAR:-fallback}"]}).args == ["fallback"]
+    assert _build({"command": "x", "args": ["${NOPE_VAR:-fallback}"]}, expand_env=True).args == ["fallback"]
 
 
 def test_from_config_missing_var_fails_fast(monkeypatch):
     monkeypatch.delenv("NOPE_VAR", raising=False)
     with pytest.raises(ValueError, match="NOPE_VAR"):
-        _build({"command": "x", "args": ["${NOPE_VAR}"]})
+        _build({"command": "x", "args": ["${NOPE_VAR}"]}, expand_env=True)
 
 
 def test_from_config_bad_url_never_runs_as_command():
@@ -163,8 +164,23 @@ def test_from_config_bad_url_never_runs_as_command():
 def test_from_config_does_not_write_env_back(monkeypatch):
     monkeypatch.setenv("TOK", "s3cret")
     entry = {"url": "https://x.dev/mcp", "headers": {"Authorization": "Bearer ${TOK}"}}
-    _build(entry)
+    _build(entry, expand_env=True)
     assert entry["headers"]["Authorization"] == "Bearer ${TOK}"
+
+
+def test_default_passes_variables_through_literally(monkeypatch):
+    """Expansion is opt-in: callers whose loader already interpolated must not
+    expand a second time."""
+    monkeypatch.setenv("TOK", "s3cret")
+    rec = _build({"url": "https://x.dev/mcp", "headers": {"X": "${TOK}", "Y": "${env:TOK}"}})
+    assert rec.kw["headers"] == {"X": "${TOK}", "Y": "${env:TOK}"}
+    rec = _build({"command": "x", "args": ["${TOK}"], "env": {"K": "${TOK}"}})
+    assert rec.args == ["${TOK}"] and rec.kw["env"] == {"K": "${TOK}"}
+
+
+def test_default_missing_variable_does_not_raise(monkeypatch):
+    monkeypatch.delenv("NOPE_VAR", raising=False)
+    assert _build({"command": "x", "args": ["${NOPE_VAR}"]}).args == ["${NOPE_VAR}"]
 
 
 def test_parse_mcp_servers_not_a_root_export():
