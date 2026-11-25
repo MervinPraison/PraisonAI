@@ -149,7 +149,7 @@ SPAWN_SITES = {
     "praisonai/praisonai/capabilities/mcp.py": "function arguments from code",
     "praisonai/praisonai/endpoints/providers/mcp.py": "constructor arguments from code",
 }
-_SPAWN_CALLS = {"MCP", "StdioServerParameters", "stdio_client"}
+_SPAWN_CALLS = {"MCP", "StdioServerParameters", "stdio_client", "build_mcp"}
 
 
 def _spawn_sites(src: Path):
@@ -165,6 +165,8 @@ def _spawn_sites(src: Path):
             for node in ast.walk(tree):
                 fn = getattr(node, "func", None)
                 name = getattr(fn, "id", None) or getattr(fn, "attr", None)
+                if name == "from_config" and getattr(getattr(fn, "value", None), "id", None) == "MCP":
+                    name = "MCP"  # MCP.from_config(...) starts a server too
                 if name in _SPAWN_CALLS or (name == "Popen" and "mcp" in path.name):
                     yield rel.as_posix()
                     break
