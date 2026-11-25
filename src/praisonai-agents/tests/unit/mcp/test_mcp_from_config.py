@@ -206,7 +206,23 @@ def test_from_config_refuses_disabled_server(entry):
 
 def test_sse_authorization_header_is_refused():
     with pytest.raises(ValueError, match="SSE"):
-        _build({"url": "https://x.dev/sse/", "headers": {"Authorization": "Bearer t"}})
+        _build({"url": "https://x.dev/sse", "headers": {"Authorization": "Bearer t"}})
+
+
+def test_sse_check_matches_client_routing():
+    # MCP.__init__ routes ".../sse/" to Streamable HTTP, which sends headers.
+    rec = _build({"url": "https://x.dev/sse/", "headers": {"Authorization": "Bearer t"}})
+    assert rec.kw == {"headers": {"Authorization": "Bearer t"}}
+
+
+def test_explicit_http_type_on_sse_path_keeps_headers():
+    rec = _build({"type": "streamable-http", "url": "https://x.dev/sse",
+                  "headers": {"Authorization": "Bearer t"}})
+    assert rec.kw == {"transport_type": "http_stream", "headers": {"Authorization": "Bearer t"}}
+
+
+def test_timeout_string_from_yaml():
+    assert _build({"command": "x", "timeout": "30"}).kw["timeout"] == 30
 
 
 def test_sse_other_headers_warn_and_are_dropped(caplog):

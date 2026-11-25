@@ -114,8 +114,12 @@ def build_mcp(entry: Any, name: str = "server", cls: type = MCP, expand_env: boo
         target = _expand(entry["url"], name)
         if not is_mcp_url(target):
             raise ValueError(f"MCP server '{name}': url must be an http(s) or ws(s) URL")
+        from .mcp_transport import get_transport_type
+        sse = get_transport_type(target) == "sse"  # same rule MCP.__init__ uses
+        if sse and entry["type"] == "http":  # explicit Streamable HTTP on a /sse path
+            kwargs["transport_type"], sse = "http_stream", False
         headers = entry.get("headers")
-        if headers and target.rstrip("/").endswith("/sse"):
+        if headers and sse:
             # The legacy SSE client cannot send headers; never connect without auth.
             if any(k.lower() == "authorization" for k in headers):
                 raise ValueError(f"MCP server '{name}': legacy SSE URLs cannot send an Authorization header")
@@ -133,6 +137,7 @@ def build_mcp(entry: Any, name: str = "server", cls: type = MCP, expand_env: boo
                 kwargs[key] = _expand(entry[key], name)
     timeout = entry.get("timeout")
     if timeout is not None:
+        timeout = float(timeout)
         kwargs["timeout"] = timeout / 1000 if timeout >= 1000 else timeout  # 1000+ is ms (code schema)
     for key in ("allowed_tools", "disabled_tools"):
         if entry.get(key):
