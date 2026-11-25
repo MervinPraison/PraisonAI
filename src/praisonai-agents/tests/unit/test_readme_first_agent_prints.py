@@ -37,8 +37,13 @@ _STUB = textwrap.dedent('''
 def _first_agent_block():
     with open(os.path.join(REPO, "README.md"), encoding="utf-8") as fh:
         text = fh.read()
-    section = text.split("Run your first autonomous agent", 1)[1]
-    return re.search(r"```python\n(.*?)```", section, re.S).group(1)
+    # The README's first-agent example sits under "## Quick start". It imports the
+    # wrapper; the README says the core package takes the same code, and this test
+    # runs with only the core package on the path.
+    assert "## Quick start" in text, "README.md has no '## Quick start' section"
+    section = text.split("## Quick start", 1)[1]
+    block = re.search(r"```python\n(.*?)```", section, re.S).group(1)
+    return block.replace("from praisonai import Agent", "from praisonaiagents import Agent")
 
 
 def test_first_agent_example_prints_when_piped(tmp_path):
