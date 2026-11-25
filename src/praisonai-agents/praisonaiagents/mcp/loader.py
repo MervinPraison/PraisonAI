@@ -104,6 +104,7 @@ def build_mcp(entry: Any, name: str = "server", cls: type = MCP) -> MCP:
     if entry.get("enabled") is False:
         raise ValueError(f"MCP server '{name}' is disabled")
     kwargs: Dict[str, Any] = {}
+    args = _expand(entry.get("args"), name)
     if entry.get("url"):
         target = _expand(entry["url"], name)
         if not is_mcp_url(target):
@@ -120,6 +121,8 @@ def build_mcp(entry: Any, name: str = "server", cls: type = MCP) -> MCP:
             logger.warning("MCP server '%s': oauth sign-in is not applied by this client yet", name)
     else:
         target = _expand(entry["command"], name)
+        if isinstance(target, list):  # ["npx", "-y", "pkg"]
+            target, args = str(target[0]), [str(a) for a in target[1:]] + list(args or [])
         for key in ("env", "cwd"):
             if entry.get(key):
                 kwargs[key] = _expand(entry[key], name)
@@ -129,7 +132,7 @@ def build_mcp(entry: Any, name: str = "server", cls: type = MCP) -> MCP:
     for key in ("allowed_tools", "disabled_tools"):
         if entry.get(key):
             kwargs[key] = entry[key]
-    return cls(target, args=_expand(entry.get("args"), name), **kwargs)
+    return cls(target, args=args, **kwargs)
 
 
 def _sanitize_server_name(name: str) -> str:

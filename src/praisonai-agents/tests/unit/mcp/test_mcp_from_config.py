@@ -227,3 +227,9 @@ def test_bearer_with_null_headers():
 
 def test_timeout_1000_is_milliseconds():
     assert _build({"command": "x", "timeout": 1000}).kw["timeout"] == 1
+
+
+def test_from_config_command_as_list():
+    rec = _build({"command": ["npx", "-y", "pkg"], "args": ["/tmp"]})
+    assert rec.target == "npx"
+    assert rec.args == ["-y", "pkg", "/tmp"]
