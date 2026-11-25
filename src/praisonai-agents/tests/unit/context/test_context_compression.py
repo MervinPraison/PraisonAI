@@ -68,15 +68,25 @@ def test_llm_context_compressor_optimizer():
     ]
     
     original_tokens = estimate_messages_tokens(messages)
-    
-    # Test LLMContextCompressorOptimizer (without LLM, should fall back to sync compression)
-    optimizer = LLMContextCompressorOptimizer(llm_client=None)
-    
-    result_messages, result = optimizer.optimize(messages, target_tokens=150)
 
-    assert len(result_messages) <= len(messages)
-    if result.tokens_saved > 0:
-        assert result.summary_added, "Expected a summary to be added when tokens are saved"
+    # Under the target: returned untouched, no summary.
+    result_messages, result = LLMContextCompressorOptimizer(llm_client=None).optimize(
+        messages, target_tokens=original_tokens + 1
+    )
+    assert result_messages == messages
+    assert result.tokens_saved == 0 and not result.summary_added
+
+    # Over the target with a small protected tail: the middle is summarised.
+    optimizer = LLMContextCompressorOptimizer(
+        llm_client=None, protect_last_n_tokens=10, summary_target_tokens=50
+    )
+    result_messages, result = optimizer.optimize(messages, target_tokens=original_tokens // 2)
+
+    assert len(result_messages) < len(messages)
+    assert result.tokens_saved > 0
+    assert result.optimized_tokens < original_tokens
+    assert result.summary_added
+    assert result_messages[0] == messages[0]
 
 
 def test_tokenization_improvements():
