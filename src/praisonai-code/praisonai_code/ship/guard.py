@@ -51,13 +51,28 @@ def _api_reason(words: List[str], args: List[str]) -> Optional[str]:
     return None
 
 
+def _approves(args: List[str]) -> bool:
+    """``gh pr review`` approves: ``--approve[=v]`` or ``-a``, also combined (``-ab x``)."""
+    for arg in args:
+        if arg.split("=", 1)[0] == "--approve":
+            return True
+        if arg.startswith("-") and not arg.startswith("--"):
+            # Short flags combine until one that takes a value (-b body, -F file).
+            for ch in arg[1:]:
+                if ch == "a":
+                    return True
+                if ch in "bF":
+                    break
+    return False
+
+
 def _op_reason(executable: str, args: List[str]) -> Optional[str]:
     name = executable.rsplit("/", 1)[-1]
     words = _words(args)
     if name == "gh":
         if words[:2] == ["pr", "merge"]:
             return "merging a pull request is left to the user"
-        if words[:2] == ["pr", "review"] and ("--approve" in args or "-a" in args):
+        if words[:2] == ["pr", "review"] and _approves(args):
             return "approving a pull request is left to the user"
         if words[:1] == ["api"]:
             return _api_reason(words, args)
