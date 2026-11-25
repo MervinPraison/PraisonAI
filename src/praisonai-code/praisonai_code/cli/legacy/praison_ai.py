@@ -268,32 +268,57 @@ def __getattr__(name):
 # legal ACP pair the legacy parser rejects outright, because its own
 # ``--resume`` requires a value. ``acp`` is therefore dispatched before the
 # parser runs, with the arguments exactly as typed.
-def _acp_tail(argv, arity):
-    """Return the arguments after a leading ``acp`` verb, or None.
+def _acp_tail(argv, parser):
+    """Return the arguments after an ``acp`` verb, or None.
 
-    ``arity`` is ``option_arity(parser)`` — ``(value_opts, remainder_opts)``
-    read off the legacy parser itself — so an option's *value* is never read
-    as the verb: ``--model acp`` keeps ``acp`` as the model and stays on the
-    legacy path, while ``--model prefix acp --model target`` skips
-    ``prefix`` and still forwards ``--model target``. ``--flag=value``
-    consumes itself, and a ``--auto``/``--init`` REMAINDER swallows the rest,
-    so no verb can follow one.
+    Each token is classified by the legacy parser itself (``_parse_optional``
+    is argparse's own option resolution, so exact spellings, ``--opt=value``,
+    unambiguous long prefixes such as ``--mode`` for ``--model`` and clustered
+    short options such as ``-vv`` all mean what the legacy parse would mean).
+    An option's value is therefore never read as the verb — ``--model acp``
+    keeps ``acp`` as the model — while ``--mode prefix acp --model target``
+    skips the value and still forwards ``--model target``.
+
+    ``--`` ends option parsing, so only the token after it can be the command.
+    Four shapes keep the legacy path: ``-h``/``--help`` (argparse prints help
+    and exits), a ``--auto``/``--init`` REMAINDER (it swallows the rest), an
+    argument argparse would reject (``--model --verbose`` has no value), and
+    an unknown option. ACP takes over only where the legacy parse would reach
+    an ``acp`` command.
     """
-    value_opts, remainder_opts = arity
     index = 0
     while index < len(argv):
         arg = argv[index]
-        if arg == "acp":
-            return list(argv[index + 1:])
-        if not arg.startswith("-"):
+        if arg == "--":
+            if index + 1 >= len(argv) or argv[index + 1] != "acp":
+                return None
+            return list(argv[index + 2:])
+        resolution = parser._parse_optional(arg)
+        if resolution is None:  # a positional token
+            return list(argv[index + 1:]) if arg == "acp" else None
+        # argparse returns (action, option_string, explicit_arg) on older
+        # Pythons and (action, option_string, sep, explicit_arg) on newer ones;
+        # the explicit value is the last element either way.
+        action, _option_string, *rest = resolution
+        explicit_value = rest[-1] if rest else None
+        if action is None or isinstance(action, argparse._HelpAction):
             return None
-        name = arg.split("=", 1)[0]
-        if name in remainder_opts:
+        if action.nargs == argparse.REMAINDER:
             return None
         index += 1
-        if "=" in arg or name not in value_opts:
+        if explicit_value is not None or action.nargs == 0:  # self-contained
             continue
-        index += 1  # the option's value is not a positional
+        # The option takes a value: consume the next token only when it can be
+        # one, so an option there stays an option (and argparse's own refusal
+        # to accept it as a value is what the user sees).
+        if (
+            index < len(argv)
+            and argv[index] != "--"
+            and parser._parse_optional(argv[index]) is None
+        ):
+            index += 1
+        else:
+            return None
     return None
 
 
@@ -1049,7 +1074,7 @@ class PraisonAI:
         _ab = import_wrapper_module("praisonai.cli.legacy.dispatch.argparse_builder")
         parser, special_commands = _ab.build_parser(in_test_env)
 
-        acp_args = _acp_tail(sys.argv[1:], _ab.option_arity(parser))
+        acp_args = _acp_tail(sys.argv[1:], parser)
         if acp_args is not None:
             _run_acp(acp_args)
 

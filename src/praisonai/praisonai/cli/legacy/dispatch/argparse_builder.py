@@ -397,25 +397,6 @@ def parse_args_with(parser, in_test_env: bool):
     return args, unknown_args
 
 
-def option_arity(parser):
-    """Return ``(value_opts, remainder_opts)`` for tokenizing argv pre-parse.
-
-    ``value_opts`` consume exactly one following token (``--model gpt-4o``);
-    ``remainder_opts`` (``--auto``, ``--init``) consume everything after them.
-    True/false flags take neither and appear in no set, so a caller scanning
-    for a verb can skip an option's value without mistaking it for the verb.
-    """
-    value_opts, remainder_opts = set(), set()
-    for action in parser._actions:
-        if not action.option_strings:
-            continue
-        if action.nargs == argparse.REMAINDER:
-            remainder_opts.update(action.option_strings)
-        elif action.nargs != 0:
-            value_opts.update(action.option_strings)
-    return value_opts, remainder_opts
-
-
 def build_argument_parser(in_test_env: bool):
     """Build ArgumentParser and parse argv. Returns (args, unknown_args, special_commands)."""
     parser, special_commands = build_parser(in_test_env)
