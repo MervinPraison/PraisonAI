@@ -153,3 +153,11 @@ def test_is_secret_path_shares_the_read_gate_list(path, expected):
     from praisonaiagents.permissions import is_secret_path
 
     assert is_secret_path(path) is expected
+
+
+def test_is_secret_path_accepts_pathlike():
+    from pathlib import Path
+    from praisonaiagents.permissions import is_secret_path
+
+    assert is_secret_path(Path("config") / ".env") is True
+    assert is_secret_path(Path("README.md")) is False
