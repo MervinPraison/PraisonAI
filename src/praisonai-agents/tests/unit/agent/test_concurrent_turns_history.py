@@ -110,3 +110,32 @@ def test_streams_ending_out_of_order_leave_no_turn_marked_held():
     sx.close()  # x ends first, y second
     sy.close()
     assert _held.get() == frozenset()  # a stale mark would let x skip its lock
+
+
+def test_a_stream_resumed_in_a_fresh_context_can_call_its_own_agent():
+    import contextvars
+
+    from praisonaiagents.agent.turn_lock import serial_stream_turn, serial_turn
+
+    class Bot:
+        @serial_turn
+        def chat(self, prompt):
+            return f"re: {prompt}"
+
+        @serial_stream_turn
+        def stream(self):
+            yield "first"
+            yield self.chat("fallback")  # e.g. the stream's chat() fallback
+
+    stream = Bot().stream()
+    out = {}
+
+    def step():  # each chunk pulled in a new context copy, as thread pools do
+        out.setdefault("chunks", []).append(contextvars.copy_context().run(next, stream))
+
+    for _ in range(2):
+        t = threading.Thread(target=step, daemon=True)
+        t.start()
+        t.join(timeout=5)
+        assert not t.is_alive(), "stream deadlocked on its own turn lock"
+    assert out["chunks"] == ["first", "re: fallback"]

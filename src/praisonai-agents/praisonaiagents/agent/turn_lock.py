@@ -79,10 +79,20 @@ def serial_stream_turn(method):
             return (yield from method(self, *args, **kwargs))
         lock = _thread_lock(self)
         lock.acquire()
-        _held.set(held | {id(self)})
+        gen = method(self, *args, **kwargs)
         try:
-            return (yield from method(self, *args, **kwargs))
+            sent = None
+            while True:
+                # Mark on every step: a stream may resume in a fresh context
+                # (thread pool), where a nested chat() would wait on itself.
+                _held.set(_held.get() | {id(self)})
+                try:
+                    chunk = gen.send(sent)
+                except StopIteration as stop:
+                    return stop.value
+                sent = yield chunk
         finally:
+            gen.close()
             # Not reset(token): streams can end out of order, and a token
             # restore would drop or revive another agent's mark.
             _held.set(_held.get() - {id(self)})
