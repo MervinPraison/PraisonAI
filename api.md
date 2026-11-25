@@ -98,6 +98,7 @@ Methods:
 * <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">aexecute_task</a>(task_id)</code>
 * <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">announce_completion</a>(agent_id: str, task_id: str, result: Any, success: bool = True, error: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> None</code>
 * <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">append_to_state</a>(key: str, value: Any, max_length: Optional[int] = None) -> List[Any]</code>
+* <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">arun</a>(content = None, return_dict = False, **kwargs)</code>
 * <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">arun_all_tasks</a>()</code>
 * <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">arun_task</a>(task_id)</code>
 * <code title="class Agents">Agents.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">aspawn_sub_agent</a>(agent: Agent, task: Any, completion_callback: Optional[Callable[[SubAgentCompletionEvent], Any]] = None, metadata: Optional[Dict[str, Any]] = None) -> SpawnedSubAgent</code>
@@ -581,6 +582,7 @@ from praisonaiagents import MCP
 Methods:
 
 * <code title="class MCP">MCP.<a href="./src/praisonai-agents/praisonaiagents/mcp/mcp.py">apply_tool_filters</a>(allowed_tools: Optional[List[str]] = None, disabled_tools: Optional[List[str]] = None) -> 'MCP'</code>
+* <code title="class MCP">MCP.<a href="./src/praisonai-agents/praisonaiagents/mcp/mcp.py">from_config</a>(entry, name: str = 'server', expand_env: bool = False) -> 'MCP'</code>
 * <code title="class MCP">MCP.<a href="./src/praisonai-agents/praisonaiagents/mcp/mcp.py">get_prompts</a>() -> List[dict]</code>
 * <code title="class MCP">MCP.<a href="./src/praisonai-agents/praisonaiagents/mcp/mcp.py">get_resources</a>() -> List[dict]</code>
 * <code title="class MCP">MCP.<a href="./src/praisonai-agents/praisonaiagents/mcp/mcp.py">get_tools</a>() -> List[Callable]</code>
@@ -783,6 +785,7 @@ Methods:
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">aexecute_task</a>(task_id)</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">announce_completion</a>(agent_id: str, task_id: str, result: Any, success: bool = True, error: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> None</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">append_to_state</a>(key: str, value: Any, max_length: Optional[int] = None) -> List[Any]</code>
+* <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">arun</a>(content = None, return_dict = False, **kwargs)</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">arun_all_tasks</a>()</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">arun_task</a>(task_id)</code>
 * <code title="class AgentTeam">AgentTeam.<a href="./src/praisonai-agents/praisonaiagents/agents/agents.py">aspawn_sub_agent</a>(agent: Agent, task: Any, completion_callback: Optional[Callable[[SubAgentCompletionEvent], Any]] = None, metadata: Optional[Dict[str, Any]] = None) -> SpawnedSubAgent</code>
