@@ -86,7 +86,7 @@ def example_base_url_api_key_separate():
     agent = Agent(
         name="CustomEndpoint",
         instructions="You use a custom endpoint.",
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
         # base_url="http://localhost:11434/v1",  # Uncomment for Ollama
         # api_key=os.getenv("CUSTOM_API_KEY"),   # Separate parameter
     )

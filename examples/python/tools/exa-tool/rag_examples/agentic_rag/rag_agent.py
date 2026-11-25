@@ -21,7 +21,7 @@ rag_agent = Agent(
     4. Always be informative and helpful about Thai cooking!
     
     You can use the internet_search function to search the web when needed.""",
-    llm="gpt-4o",
+    model="gpt-4o",
     output={"markdown": True},
 )
 

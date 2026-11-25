@@ -71,7 +71,7 @@ if openai_key:
                 "Use proper markdown formatting with headers, lists, and emphasis where appropriate.",
                 "Structure your response with clear sections and bullet points when helpful.",
             ],
-            llm="gpt-4o-mini",
+            model="gpt-4o-mini",
             output="verbose"
         )
 
