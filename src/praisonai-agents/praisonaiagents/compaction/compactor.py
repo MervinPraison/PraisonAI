@@ -844,8 +844,11 @@ class ContextCompactor:
         return result
     
     def _smart_compact(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Smart compaction based on message importance."""
-        # For now, use sliding window as base
+        """SMART is an alias of SLIDING: it returns the sliding window unchanged.
+
+        No importance scoring exists yet. The name is kept so existing configs
+        keep working; ``context.optimizer.SmartOptimizer`` is a separate system.
+        """
         return self._sliding_window(messages)
     
     def _prune(self, messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
