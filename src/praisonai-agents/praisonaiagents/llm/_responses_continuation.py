@@ -95,6 +95,8 @@ class ResponsesContinuation:
             if state is False:
                 params.pop("store", None)
                 return None
+        if not isinstance(params.get("input"), list):
+            return None
         return _Request(self, key, params, state)
 
     def save(self, key, state):

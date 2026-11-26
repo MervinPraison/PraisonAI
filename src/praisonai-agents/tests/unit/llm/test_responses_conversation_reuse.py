@@ -296,6 +296,36 @@ def test_constructor_store_false_disables_reuse(endpoint):
     assert requests[0]["store"] is False
 
 
+@pytest.mark.parametrize("mode", ["sync", "async", "stream", "astream", "events"])
+def test_string_input_override_is_forwarded_without_automatic_continuation(
+    endpoint, mode
+):
+    base, requests, _ = endpoint
+    llm = LLM(
+        model="gpt-4o-mini",
+        api_key="local-test",
+        base_url=base,
+        server_side_conversation=True,
+    )
+
+    def invoke(value):
+        options = dict(input=value, stream=mode in ("stream", "astream"), verbose=False)
+        if mode in ("async", "astream"):
+            return asyncio.run(llm.get_response_async("ignored", **options))
+        if mode == "events":
+            options.pop("stream")
+            return "".join(llm.get_response_stream("ignored", **options))
+        return llm.get_response("ignored", **options)
+
+    assert invoke("Hello") == "hello"
+    assert invoke("Next") == "hello"
+    assert [request["input"] for request in requests] == ["Hello", "Next"]
+    assert all(
+        "store" not in request and "previous_response_id" not in request
+        for request in requests
+    )
+
+
 def test_environment_credential_change_starts_a_new_chain(endpoint, monkeypatch):
     base, requests, _ = endpoint
     llm = LLM(model="gpt-4o-mini", base_url=base, server_side_conversation=True)
@@ -388,6 +418,14 @@ def test_unsupported_store_stays_disabled_with_explicit_store_true(
     assert invoke("Next") == "hello"
     assert requests[0]["store"] is True
     assert all("store" not in request for request in requests[1:])
+    assert (
+        llm.get_response(
+            "ignored", input="Custom", store=True, stream=False, verbose=False
+        )
+        == "hello"
+    )
+    assert requests[-1]["input"] == "Custom"
+    assert "store" not in requests[-1]
     llm.get_response(
         "Explicit",
         previous_response_id="caller_owned",
