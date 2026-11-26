@@ -326,6 +326,55 @@ def test_string_input_override_is_forwarded_without_automatic_continuation(
     )
 
 
+@pytest.mark.parametrize("mode", ["sync", "async", "stream", "astream", "events"])
+@pytest.mark.parametrize("setting", ["constructor", "per_call"])
+def test_explicit_store_fallback_preserves_string_input(endpoint, mode, setting):
+    base, requests, control = endpoint
+    llm = LLM(
+        model="gpt-4o-mini",
+        api_key="local-test",
+        base_url=base,
+        server_side_conversation=True,
+        max_retries=0,
+        **({"store": True} if setting == "constructor" else {}),
+    )
+
+    def invoke(value):
+        options = dict(input=value, stream=mode in ("stream", "astream"), verbose=False)
+        if setting == "per_call":
+            options["store"] = True
+        if mode in ("async", "astream"):
+            return asyncio.run(llm.get_response_async("ignored", **options))
+        if mode == "events":
+            options.pop("stream")
+            return "".join(llm.get_response_stream("ignored", **options))
+        return llm.get_response("ignored", **options)
+
+    assert invoke("First") == "hello"
+    control["errors"].append(
+        (
+            400,
+            {
+                "message": "Unsupported parameter: store",
+                "type": "invalid_request_error",
+                "param": "store",
+                "code": "unsupported_parameter",
+            },
+        )
+    )
+    assert invoke("Next") == "hello"
+    assert invoke("Last") == "hello"
+    assert [request["input"] for request in requests] == [
+        "First",
+        "Next",
+        "Next",
+        "Last",
+    ]
+    assert all(request["store"] is True for request in requests[:2])
+    assert all("store" not in request for request in requests[2:])
+    assert all("previous_response_id" not in request for request in requests)
+
+
 def test_environment_credential_change_starts_a_new_chain(endpoint, monkeypatch):
     base, requests, _ = endpoint
     llm = LLM(model="gpt-4o-mini", base_url=base, server_side_conversation=True)

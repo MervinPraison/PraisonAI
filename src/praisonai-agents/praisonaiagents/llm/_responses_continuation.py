@@ -95,8 +95,6 @@ class ResponsesContinuation:
             if state is False:
                 params.pop("store", None)
                 return None
-        if not isinstance(params.get("input"), list):
-            return None
         return _Request(self, key, params, state)
 
     def save(self, key, state):
@@ -111,10 +109,11 @@ class _Request:
     def __init__(self, owner, key, params, state):
         self.owner, self.key = owner, key
         self.full = dict(params)
-        self.prefix = _fingerprints(params.get("input", []))
-        self.params = {**params, "store": True}
-        self.remember = True
-        if state:
+        inputs = params.get("input", [])
+        self.remember = isinstance(inputs, list)
+        self.prefix = _fingerprints(inputs) if self.remember else ()
+        self.params = {**params, "store": True} if self.remember else dict(params)
+        if state and self.remember:
             response_id, prefix = state
             if len(self.prefix) > len(prefix) and self.prefix[: len(prefix)] == prefix:
                 self.params["previous_response_id"] = response_id
