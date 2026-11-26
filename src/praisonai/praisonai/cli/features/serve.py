@@ -24,6 +24,10 @@ from typing import Any, Dict, List, Optional
 _MAX_QUERY_CHARS = 32_000
 
 
+class ServeArgumentError(ValueError):
+    """Raised when ``praisonai serve`` options cannot be parsed."""
+
+
 def _query_from_body(body: Any) -> str:
     """Extract a bounded ``query``/``message`` string from a JSON request body."""
     from fastapi import HTTPException
@@ -177,7 +181,11 @@ class ServeHandler:
         }
         
         if command in commands:
-            return commands[command](remaining)
+            try:
+                return commands[command](remaining)
+            except ServeArgumentError as e:
+                self._print_error(str(e))
+                return self.EXIT_VALIDATION_ERROR
         else:
             self._print_error(f"Unknown command: {command}")
             self._print_help()
@@ -271,7 +279,11 @@ Launch PraisonAI servers with unified discovery support.
             print(f"✓ {message}")
     
     def _parse_args(self, args: List[str], spec: Dict[str, Any]) -> Dict[str, Any]:
-        """Parse command arguments based on spec."""
+        """Parse command arguments based on spec.
+
+        Accepts ``--key value`` and ``--key=value``. Raises ``ServeArgumentError``
+        for unknown options, a missing value, or a value that is not a valid int.
+        """
         result = {k: v.get("default") for k, v in spec.items()}
         
         i = 0
@@ -279,20 +291,32 @@ Launch PraisonAI servers with unified discovery support.
             arg = args[i]
             
             if arg.startswith("--"):
-                key = arg[2:].replace("-", "_")
-                if key in spec:
-                    if spec[key].get("flag"):
-                        result[key] = True
+                name, has_inline, inline_value = arg[2:].partition("=")
+                key = name.replace("-", "_")
+                if key not in spec:
+                    raise ServeArgumentError(f"unrecognized option: --{name}")
+                if spec[key].get("flag"):
+                    if has_inline:
+                        raise ServeArgumentError(f"option --{name} does not take a value")
+                    result[key] = True
+                else:
+                    if has_inline:
+                        value = inline_value
                     elif i + 1 < len(args):
                         value = args[i + 1]
-                        # Type conversion
-                        if spec[key].get("type") == "int":
-                            value = int(value)
-                        result[key] = value
                         i += 1
-                i += 1
-            else:
-                i += 1
+                    else:
+                        raise ServeArgumentError(f"option --{name} expects a value")
+                    # Type conversion
+                    if spec[key].get("type") == "int":
+                        try:
+                            value = int(value)
+                        except ValueError:
+                            raise ServeArgumentError(
+                                f"option --{name}: invalid int value: {value!r}"
+                            ) from None
+                    result[key] = value
+            i += 1
         
         return result
     
