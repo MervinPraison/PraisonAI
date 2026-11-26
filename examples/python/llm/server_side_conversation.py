@@ -11,4 +11,6 @@ agent = Agent(
     llm={"model": "gpt-4o-mini", "server_side_conversation": True},
 )
 print(agent.start("My project is called ORANGE-PANDA. Remember that name."))
+# Expected: a brief acknowledgement of ORANGE-PANDA.
 print(agent.start("What is my project called?"))
+# Expected: an answer containing ORANGE-PANDA.
