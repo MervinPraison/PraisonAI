@@ -8,6 +8,18 @@ from pathlib import Path
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def restore_external_tool_names():
+    from praisonaiagents.tools.trust import EXTERNAL_TOOL_NAMES
+
+    snapshot = set(EXTERNAL_TOOL_NAMES)
+    try:
+        yield
+    finally:
+        EXTERNAL_TOOL_NAMES.clear()
+        EXTERNAL_TOOL_NAMES.update(snapshot)
+
+
 def _runner():
     from mcp import StdioServerParameters
     from praisonaiagents.mcp.mcp import MCPToolRunner
@@ -26,7 +38,6 @@ def test_mcp_stdio_progress_reaches_stream_before_tool_result():
     pytest.importorskip("mcp")
     from praisonaiagents.streaming.events import (
         StreamEventType,
-        mcp_progress_callback,
         tool_progress_channel,
     )
     from praisonaiagents.agent.tool_execution import ToolExecutionMixin
@@ -52,16 +63,17 @@ def test_mcp_stdio_progress_reaches_stream_before_tool_result():
         events.append(event)
         delivered.set()
 
-    def run_long_task(progress_sink):
+    def run_long_task():
         with tool_progress_channel(receive):
             found, value = dispatcher._resolve_mcp_tool_result(
                 "long_task", {"task": "index", "hold": True}
             )
+            assert found
             result.append(value)
         finished.set()
 
     try:
-        worker = threading.Thread(target=run_long_task, args=(None,))
+        worker = threading.Thread(target=run_long_task)
         worker.start()
         assert delivered.wait(timeout=10)
         assert not finished.is_set()
@@ -91,6 +103,7 @@ def test_agent_start_stream_includes_real_mcp_progress(monkeypatch, tmp_path):
     monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path / "home"))
     monkeypatch.chdir(tmp_path)
     runner = _runner()
+    results = []
 
     def long_task(task: str) -> str:
         """Run a task and report progress while it runs."""
@@ -99,6 +112,7 @@ def test_agent_start_stream_includes_real_mcp_progress(monkeypatch, tmp_path):
             {"task": task, "hold": False},
             progress_sink=mcp_progress_callback("long_task"),
         )
+        results.append(result)
         return result
 
     options = dict(
@@ -118,7 +132,8 @@ def test_agent_start_stream_includes_real_mcp_progress(monkeypatch, tmp_path):
             output = agent.start("Call long_task with task='index'.", stream=True)
             text = "".join(output)
             print("Full Agent.start output:", text)
-        assert "index" in text and "completed" in text.lower()
+        assert results == ["Completed index."]
+        assert text.strip()
         assert any(event.type == StreamEventType.TOOL_PROGRESS for event in events)
     finally:
         runner.stop()
