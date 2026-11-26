@@ -3672,7 +3672,6 @@ Respond with ONLY a valid JSON tool call in this format:
                         else:
                             resp = self._call_responses_api(**responses_params)
                             response_text, tool_calls, _reasoning = self._extract_from_responses_output(resp)
-                            self._remember_responses_continuation(responses_params, resp, response_text, tool_calls)
                             _final_llm_response = resp  # for return_token_usage
 
                             # Usage accounting is independent from metrics display.
@@ -6108,7 +6107,6 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     else:
                         resp = await self._call_responses_api_async(**responses_params)
                         response_text, tool_calls, _reasoning = self._extract_from_responses_output(resp)
-                        self._remember_responses_continuation(responses_params, resp, response_text, tool_calls)
                         _final_llm_response = resp
 
                     # Build Chat-Completions-compatible final_response
@@ -8098,10 +8096,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """
         check_model_request(self.model, "litellm.responses")
         import litellm
-        request = self._prepare_responses_continuation(params)
-        if request is not None:
-            return request.call(lambda **p: self._call_with_retry(litellm.responses, **p))
-        return self._call_with_retry(litellm.responses, **params)
+
+        def call_responses(**provider_params):
+            request = self._prepare_responses_continuation(provider_params)
+            if request is None:
+                return litellm.responses(**provider_params)
+            response = request.call(litellm.responses)
+            text, calls, _reasoning = self._extract_from_responses_output(response)
+            message = {"role": "assistant", "content": text, "tool_calls": calls}
+            output = self._build_responses_params([message])["input"]
+            request.complete(response, output)
+            return response
+
+        return self._call_with_retry(call_responses, **params)
 
     async def _call_responses_api_async(self, **params) -> Any:
         """``litellm.aresponses()`` with retry, recorded on the replay trace."""
@@ -8128,13 +8135,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """
         check_model_request(self.model, "litellm.aresponses")
         import litellm
-        request = self._prepare_responses_continuation(params)
-        if request is not None:
-            response = await request.acall(
-                lambda **p: self._call_with_retry_async(litellm.aresponses, **p)
-            )
-        else:
-            response = await self._call_with_retry_async(litellm.aresponses, **params)
+
+        async def call_responses(**provider_params):
+            request = self._prepare_responses_continuation(provider_params)
+            if request is None:
+                return await litellm.aresponses(**provider_params)
+            response = await request.acall(litellm.aresponses)
+            text, calls, _reasoning = self._extract_from_responses_output(response)
+            message = {"role": "assistant", "content": text, "tool_calls": calls}
+            output = self._build_responses_params([message])["input"]
+            request.complete(response, output)
+            return response
+
+        response = await self._call_with_retry_async(call_responses, **params)
         self._track_token_usage(response, self._response_model_for_tracking(response))
         return response
 

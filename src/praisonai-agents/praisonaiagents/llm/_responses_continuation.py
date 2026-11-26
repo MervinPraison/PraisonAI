@@ -25,6 +25,8 @@ def _fingerprints(items):
         item = dict(item)
         content = item.get("content")
         if isinstance(content, str):
+            if item.get("role") == "assistant":
+                content = content.strip()
             content = [{"type": "input_text", "text": content}]
         if isinstance(content, list):
             item["content"] = [

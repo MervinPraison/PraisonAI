@@ -16,7 +16,8 @@ def endpoint(monkeypatch, tmp_path):
     monkeypatch.setenv("OPENAI_API_KEY", "local-test")
     monkeypatch.chdir(tmp_path)
     requests = []
-    control = {"errors": [], "outputs": []}
+    control = {"errors": [], "outputs": [], "auth": []}
+    control["texts"] = []
 
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -24,6 +25,7 @@ def endpoint(monkeypatch, tmp_path):
         def do_POST(self):
             request = json.loads(self.rfile.read(int(self.headers["content-length"])))
             requests.append(request)
+            control["auth"].append(self.headers.get("authorization"))
             number = len(requests)
             error = control["errors"].pop(0) if control["errors"] else None
             if error:
@@ -57,6 +59,8 @@ def endpoint(monkeypatch, tmp_path):
                 "tool_choice": "auto",
                 "tools": [],
             }
+            if control["texts"]:
+                response["output"][0]["content"][0]["text"] = control["texts"].pop(0)
             if control["outputs"]:
                 response["output"] = control["outputs"].pop(0)
             if request.get("stream"):
@@ -109,7 +113,7 @@ def endpoint(monkeypatch, tmp_path):
 
 @pytest.mark.parametrize("mode", ["sync", "async", "stream", "astream", "events"])
 def test_reuses_response_with_only_new_input(endpoint, mode):
-    base, requests, _ = endpoint
+    base, requests, control = endpoint
     llm = LLM(
         model="gpt-4o-mini",
         api_key="local-test",
@@ -145,6 +149,43 @@ def test_reuses_response_with_only_new_input(endpoint, mode):
     assert requests[1]["previous_response_id"] == "resp_1"
     assert requests[1]["input"] == [{"role": "user", "content": "Second question"}]
     assert requests[1]["instructions"] == "Answer briefly."
+
+
+def test_assistant_whitespace_does_not_break_a_matching_history_prefix(endpoint):
+    base, requests, control = endpoint
+    control["texts"].append("hello\n")
+    llm = LLM(
+        model="gpt-4o-mini", api_key="local-test", base_url=base,
+        server_side_conversation=True,
+    )
+    answer = llm.get_response("First", stream=False, verbose=False)
+    history = [{"role": "user", "content": "First"},
+               {"role": "assistant", "content": answer.strip()}]
+    llm.get_response("Second", chat_history=history, stream=False, verbose=False)
+    assert requests[1]["previous_response_id"] == "resp_1"
+    assert len(requests[1]["input"]) == 1
+
+
+def test_rotating_provider_credentials_keep_separate_response_chains(endpoint):
+    base, requests, control = endpoint
+    llm = LLM(
+        model="gpt-4o-mini", base_url=base,
+        server_side_conversation=True,
+    )
+    assert llm.get_response("First", api_key="account-a", stream=False, verbose=False) == "hello"
+    history = [{"role": "user", "content": "First"},
+               {"role": "assistant", "content": "hello"}]
+    assert llm.get_response("Second", chat_history=history, api_key="account-b",
+                            stream=False, verbose=False) == "hello"
+    assert "previous_response_id" not in requests[1]
+    assert len(requests[1]["input"]) == 3
+    history.extend([{"role": "user", "content": "Second"},
+                    {"role": "assistant", "content": "hello"}])
+    assert llm.get_response("Third", chat_history=history, api_key="account-b",
+                            stream=False, verbose=False) == "hello"
+    assert requests[2]["previous_response_id"] == "resp_2"
+    assert len(requests[2]["input"]) == 1
+    assert control["auth"] == ["Bearer account-a", "Bearer account-b", "Bearer account-b"]
 
 
 def test_yaml_agent_uses_the_same_continuation(endpoint):
