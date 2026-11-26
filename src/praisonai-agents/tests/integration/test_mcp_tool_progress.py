@@ -2,6 +2,7 @@
 
 import os
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -31,13 +32,34 @@ def test_mcp_stdio_progress_reaches_stream_before_tool_result():
 
     runner = _runner()
     events = []
-    try:
-        with tool_progress_channel(events.append):
-            callback = mcp_progress_callback("long_task")
-            result = runner.call_tool(
-                "long_task", {"task": "index"}, progress_sink=callback
+    delivered = threading.Event()
+    finished = threading.Event()
+    result = []
+
+    def receive(event):
+        events.append(event)
+        delivered.set()
+
+    def run_long_task(progress_sink):
+        result.append(
+            runner.call_tool(
+                "long_task", {"task": "index", "hold": True},
+                progress_sink=progress_sink,
             )
-        assert result == "Completed index."
+        )
+        finished.set()
+
+    try:
+        with tool_progress_channel(receive):
+            callback = mcp_progress_callback("long_task")
+        worker = threading.Thread(target=run_long_task, args=(callback,))
+        worker.start()
+        assert delivered.wait(timeout=10)
+        assert not finished.is_set()
+        assert runner.call_tool("release_task", {}) == "Released."
+        worker.join(timeout=10)
+        assert finished.is_set()
+        assert result == ["Completed index."]
         progress = [
             event for event in events if event.type == StreamEventType.TOOL_PROGRESS
         ]
@@ -65,7 +87,7 @@ def test_agent_start_stream_includes_real_mcp_progress(monkeypatch, tmp_path):
         """Run a task and report progress while it runs."""
         result = runner.call_tool(
             "long_task",
-            {"task": task},
+            {"task": task, "hold": False},
             progress_sink=mcp_progress_callback("long_task"),
         )
         return result
