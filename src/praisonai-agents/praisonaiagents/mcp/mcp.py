@@ -200,7 +200,8 @@ class MCPToolRunner(threading.Thread):
 
     async def _handle_request(self, session, item):
         """Run one queued request on the session and post its result."""
-        response_queue, kind, name, arguments, cancelled = item
+        response_queue, kind, name, arguments, cancelled, *optional = item
+        progress_sink = optional[0] if optional else None
         if cancelled.is_set():
             # Caller already gave up (timed out); never execute a call it was
             # told did not happen.
@@ -211,7 +212,12 @@ class MCPToolRunner(threading.Thread):
             elif kind == "prompt":
                 coro = session.get_prompt(name, arguments or None)
             else:
-                coro = session.call_tool(name, arguments)
+                if progress_sink is None:
+                    coro = session.call_tool(name, arguments)
+                else:
+                    coro = session.call_tool(
+                        name, arguments, progress_callback=progress_sink,
+                    )
             result = await asyncio.wait_for(coro, timeout=self.timeout)
             response_queue.put((True, result))
         except asyncio.TimeoutError:
@@ -306,7 +312,7 @@ class MCPToolRunner(threading.Thread):
             return f"Error: {result[1]}"
         return normalize_prompt_result(result)
 
-    def call_tool(self, tool_name, arguments):
+    def call_tool(self, tool_name, arguments, progress_sink=None):
         """Call an MCP tool and wait for the result."""
         # Import telemetry here to avoid circular imports
         try:
@@ -340,7 +346,8 @@ class MCPToolRunner(threading.Thread):
         try:
             # Put request in queue with caller-specific response channel
             cancelled = threading.Event()
-            self.queue.put((response_queue, "tool", tool_name, arguments, cancelled))
+            request = (response_queue, "tool", tool_name, arguments, cancelled)
+            self.queue.put(request if progress_sink is None else (*request, progress_sink))
             if self._dead:
                 self._fail_pending()  # the runner may have drained the queue before our put
             
@@ -1021,7 +1028,7 @@ class MCP:
                     new_runner.stop(timeout=1)
             return self.runner or runner
 
-    def _call_stdio_tool(self, tool_name, arguments):
+    def _call_stdio_tool(self, tool_name, arguments, progress_sink=None):
         """Call a stdio tool, lazily respawning the runner if its server died.
 
         The call that observed the crash is never replayed (it may already have
@@ -1031,7 +1038,9 @@ class MCP:
         dead = getattr(runner, "_dead", None)
         if isinstance(dead, str):
             return f"Error: {dead}"
-        return runner.call_tool(tool_name, arguments)
+        if progress_sink is None:
+            return runner.call_tool(tool_name, arguments)
+        return runner.call_tool(tool_name, arguments, progress_sink=progress_sink)
 
     def _create_tool_wrapper(self, tool):
         """Create a wrapper function for an MCP tool."""
@@ -1078,7 +1087,12 @@ class MCP:
             all_args.update(kwargs)
             
             # Call the tool
-            return self._call_stdio_tool(tool.name, all_args)
+            from ..streaming.events import mcp_progress_callback
+
+            return self._call_stdio_tool(
+                tool.name, all_args,
+                progress_sink=mcp_progress_callback(tool.name),
+            )
         
         # Make sure the wrapper has the correct signature for inspection
         wrapper.__signature__ = signature
