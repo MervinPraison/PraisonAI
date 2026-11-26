@@ -93,6 +93,7 @@ class ResponsesContinuation:
         with self._lock:
             state = self._states.get(key)
             if state is False:
+                params.pop("store", None)
                 return None
         return _Request(self, key, params, state)
 
@@ -152,9 +153,13 @@ class _Request:
             and (getattr(error, "status_code", None) == 404 or "not found" in message)
         )
         if missing and "previous_response_id" in self.params:
+            logger.debug("Stored response expired; replaying the full input")
             self.params = {**self.full, "store": True}
         else:
             self.remember = False
+            logger.info(
+                "Responses continuation disabled: provider rejected %s", param or code
+            )
             self.owner.save(self.key, False)
             self.params = dict(self.full)
             self.params.pop("store", None)

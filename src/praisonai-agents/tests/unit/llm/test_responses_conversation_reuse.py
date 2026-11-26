@@ -155,12 +155,16 @@ def test_assistant_whitespace_does_not_break_a_matching_history_prefix(endpoint)
     base, requests, control = endpoint
     control["texts"].append("hello\n")
     llm = LLM(
-        model="gpt-4o-mini", api_key="local-test", base_url=base,
+        model="gpt-4o-mini",
+        api_key="local-test",
+        base_url=base,
         server_side_conversation=True,
     )
     answer = llm.get_response("First", stream=False, verbose=False)
-    history = [{"role": "user", "content": "First"},
-               {"role": "assistant", "content": answer.strip()}]
+    history = [
+        {"role": "user", "content": "First"},
+        {"role": "assistant", "content": answer.strip()},
+    ]
     llm.get_response("Second", chat_history=history, stream=False, verbose=False)
     assert requests[1]["previous_response_id"] == "resp_1"
     assert len(requests[1]["input"]) == 1
@@ -169,23 +173,53 @@ def test_assistant_whitespace_does_not_break_a_matching_history_prefix(endpoint)
 def test_rotating_provider_credentials_keep_separate_response_chains(endpoint):
     base, requests, control = endpoint
     llm = LLM(
-        model="gpt-4o-mini", base_url=base,
+        model="gpt-4o-mini",
+        base_url=base,
         server_side_conversation=True,
     )
-    assert llm.get_response("First", api_key="account-a", stream=False, verbose=False) == "hello"
-    history = [{"role": "user", "content": "First"},
-               {"role": "assistant", "content": "hello"}]
-    assert llm.get_response("Second", chat_history=history, api_key="account-b",
-                            stream=False, verbose=False) == "hello"
+    assert (
+        llm.get_response("First", api_key="account-a", stream=False, verbose=False)
+        == "hello"
+    )
+    history = [
+        {"role": "user", "content": "First"},
+        {"role": "assistant", "content": "hello"},
+    ]
+    assert (
+        llm.get_response(
+            "Second",
+            chat_history=history,
+            api_key="account-b",
+            stream=False,
+            verbose=False,
+        )
+        == "hello"
+    )
     assert "previous_response_id" not in requests[1]
     assert len(requests[1]["input"]) == 3
-    history.extend([{"role": "user", "content": "Second"},
-                    {"role": "assistant", "content": "hello"}])
-    assert llm.get_response("Third", chat_history=history, api_key="account-b",
-                            stream=False, verbose=False) == "hello"
+    history.extend(
+        [
+            {"role": "user", "content": "Second"},
+            {"role": "assistant", "content": "hello"},
+        ]
+    )
+    assert (
+        llm.get_response(
+            "Third",
+            chat_history=history,
+            api_key="account-b",
+            stream=False,
+            verbose=False,
+        )
+        == "hello"
+    )
     assert requests[2]["previous_response_id"] == "resp_2"
     assert len(requests[2]["input"]) == 1
-    assert control["auth"] == ["Bearer account-a", "Bearer account-b", "Bearer account-b"]
+    assert control["auth"] == [
+        "Bearer account-a",
+        "Bearer account-b",
+        "Bearer account-b",
+    ]
 
 
 def test_yaml_agent_uses_the_same_continuation(endpoint):
@@ -273,6 +307,96 @@ def test_environment_credential_change_starts_a_new_chain(endpoint, monkeypatch)
     ]
     llm.get_response("Next", chat_history=history, stream=False, verbose=False)
     assert "previous_response_id" not in requests[1]
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+@pytest.mark.parametrize("changed", ["credential", "agent"])
+def test_stream_completion_keeps_its_original_identity(
+    endpoint, monkeypatch, mode, changed
+):
+    base, requests, control = endpoint
+    llm = LLM(model="gpt-4o-mini", base_url=base, server_side_conversation=True)
+    llm.set_current_agent("first", "agent-a")
+    params = llm._build_responses_params([{"role": "user", "content": "First"}])
+
+    def change_identity(event):
+        if changed == "credential":
+            monkeypatch.setenv("OPENAI_API_KEY", "account-b")
+        else:
+            llm.set_current_agent("second", "agent-b")
+
+    options = dict(stream_callback=change_identity, emit_events=True)
+    if mode == "sync":
+        result = llm._stream_responses_api(params, **options)
+        assert result[0] == "hello"
+    else:
+        result = asyncio.run(llm._stream_responses_api_async(params, **options))
+        assert result[0] == "hello"
+        if changed == "agent":
+            # asyncio.run keeps ContextVar changes inside its task.
+            llm.set_current_agent("second", "agent-b")
+    history = [
+        {"role": "user", "content": "First"},
+        {"role": "assistant", "content": "hello"},
+    ]
+    llm.get_response("Next", chat_history=history, stream=False, verbose=False)
+    assert "previous_response_id" not in requests[1]
+    if changed == "credential":
+        assert control["auth"] == ["Bearer local-test", "Bearer account-b"]
+        monkeypatch.setenv("OPENAI_API_KEY", "local-test")
+    else:
+        llm.set_current_agent("first", "agent-a")
+    llm.get_response("Next", chat_history=history, stream=False, verbose=False)
+    assert requests[2]["previous_response_id"] == "resp_1"
+
+
+@pytest.mark.parametrize("mode", ["sync", "async", "stream", "astream"])
+@pytest.mark.parametrize("setting", ["constructor", "per_call"])
+def test_unsupported_store_stays_disabled_with_explicit_store_true(
+    endpoint, mode, setting
+):
+    base, requests, control = endpoint
+    llm = LLM(
+        model="gpt-4o-mini",
+        api_key="local-test",
+        base_url=base,
+        server_side_conversation=True,
+        max_retries=0,
+        **({"store": True} if setting == "constructor" else {}),
+    )
+    control["errors"].append(
+        (
+            400,
+            {
+                "message": "Unsupported parameter: store",
+                "type": "invalid_request_error",
+                "param": "store",
+                "code": "unsupported_parameter",
+            },
+        )
+    )
+
+    def invoke(prompt):
+        options = dict(stream=mode in ("stream", "astream"), verbose=False)
+        if setting == "per_call":
+            options["store"] = True
+        if mode in ("async", "astream"):
+            return asyncio.run(llm.get_response_async(prompt, **options))
+        return llm.get_response(prompt, **options)
+
+    assert invoke("First") == "hello"
+    assert invoke("Next") == "hello"
+    assert requests[0]["store"] is True
+    assert all("store" not in request for request in requests[1:])
+    llm.get_response(
+        "Explicit",
+        previous_response_id="caller_owned",
+        store=True,
+        stream=False,
+        verbose=False,
+    )
+    assert requests[-1]["previous_response_id"] == "caller_owned"
+    assert requests[-1]["store"] is True
 
 
 @pytest.mark.parametrize("status", [400, 401, 500])

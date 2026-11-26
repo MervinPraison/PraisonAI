@@ -8051,8 +8051,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         scope = (self.current_agent_id, get_context_emitter()._session_id)
         return self._responses_continuation.prepare(params, scope)
 
-    def _remember_responses_continuation(self, params, response, text, calls) -> None:
-        request = self._prepare_responses_continuation(params)
+    def _remember_responses_continuation(self, request, response, text, calls) -> None:
         if request is not None:
             message = {"role": "assistant", "content": text, "tool_calls": calls}
             output = self._build_responses_params([message])["input"]
@@ -8469,7 +8468,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 },
             })
 
-        self._remember_responses_continuation(params, _final_response, response_text, tool_calls)
+        self._remember_responses_continuation(request, _final_response, response_text, tool_calls)
         return response_text, tool_calls if tool_calls else None, _final_response
 
     async def _stream_responses_api_async(self, params: Dict[str, Any], *args: Any, **kwargs: Any) -> tuple:
@@ -8616,7 +8615,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 "function": {"name": tc["name"], "arguments": tc["arguments"]},
             })
 
-        self._remember_responses_continuation(params, _final_response, response_text, tool_calls)
+        self._remember_responses_continuation(request, _final_response, response_text, tool_calls)
         return response_text, tool_calls if tool_calls else None, _final_response
 
     def _process_streaming_chunk(self, chunk) -> Optional[str]:
