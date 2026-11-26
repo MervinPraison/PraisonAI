@@ -29,8 +29,20 @@ def test_mcp_stdio_progress_reaches_stream_before_tool_result():
         mcp_progress_callback,
         tool_progress_channel,
     )
+    from praisonaiagents.agent.tool_execution import ToolExecutionMixin
+    from praisonaiagents.mcp.mcp import MCP
 
     runner = _runner()
+    mcp_instance = object.__new__(MCP)
+    mcp_instance.runner = runner
+
+    class AgentToolDispatcher(ToolExecutionMixin):
+        tools = mcp_instance
+
+        def _turn_scope_tools(self):
+            return []
+
+    dispatcher = AgentToolDispatcher()
     events = []
     delivered = threading.Event()
     finished = threading.Event()
@@ -41,18 +53,15 @@ def test_mcp_stdio_progress_reaches_stream_before_tool_result():
         delivered.set()
 
     def run_long_task(progress_sink):
-        result.append(
-            runner.call_tool(
-                "long_task", {"task": "index", "hold": True},
-                progress_sink=progress_sink,
+        with tool_progress_channel(receive):
+            found, value = dispatcher._resolve_mcp_tool_result(
+                "long_task", {"task": "index", "hold": True}
             )
-        )
+            result.append(value)
         finished.set()
 
     try:
-        with tool_progress_channel(receive):
-            callback = mcp_progress_callback("long_task")
-        worker = threading.Thread(target=run_long_task, args=(callback,))
+        worker = threading.Thread(target=run_long_task, args=(None,))
         worker.start()
         assert delivered.wait(timeout=10)
         assert not finished.is_set()
@@ -63,8 +72,8 @@ def test_mcp_stdio_progress_reaches_stream_before_tool_result():
         progress = [
             event for event in events if event.type == StreamEventType.TOOL_PROGRESS
         ]
-        assert [event.content for event in progress] == ["Started", "Almost done"]
-        assert [event.metadata["progress"] for event in progress] == [0.5, 1.0]
+        assert progress and progress[0].content == "Started"
+        assert progress[0].metadata["progress"] == 0.5
         assert all(event.metadata["source"] == "mcp" for event in progress)
     finally:
         runner.stop()

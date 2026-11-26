@@ -44,3 +44,21 @@ def test_remote_mcp_tool_progress_reaches_stream(module_name, class_name):
     assert events[0].type == StreamEventType.TOOL_PROGRESS
     assert events[0].content == "Working"
     assert events[0].metadata["progress"] == 0.25
+
+
+def test_mcp_progress_callback_throttles_with_a_controlled_clock(monkeypatch):
+    from praisonaiagents.streaming.events import mcp_progress_callback
+
+    now = [10.0]
+    monkeypatch.setattr(
+        "praisonaiagents.streaming.events.time.monotonic", lambda: now[0]
+    )
+    events = []
+    with tool_progress_channel(events.append):
+        callback = mcp_progress_callback("long_task")
+    asyncio.run(callback(1, 4, "first"))
+    now[0] += 0.05
+    asyncio.run(callback(2, 4, "too soon"))
+    now[0] += 0.06
+    asyncio.run(callback(3, 4, "next interval"))
+    assert [event.content for event in events] == ["first", "next interval"]
