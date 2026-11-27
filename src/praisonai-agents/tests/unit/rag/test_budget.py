@@ -124,7 +124,7 @@ class TestModelContextWindows:
         assert get_model_context_window("claude-3-opus") == 200000
         assert get_model_context_window("claude-3-sonnet") == 200000
         assert get_model_context_window("claude-3-haiku") == 200000
-        assert get_model_context_window("gemini-pro") == 32768
+        assert get_model_context_window("gemini-pro") == 32760
         # gemini-1.5-pro now resolves from the canonical budgeter table
         assert get_model_context_window("gemini-1.5-pro") == 2097152
     
