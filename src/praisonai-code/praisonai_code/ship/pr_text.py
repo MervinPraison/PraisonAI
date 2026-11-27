@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 _MAX_TITLE = 72
+_MAX_DIFF = 20_000  # characters; a big diff adds cost, not a better title
 
 
 class PRText(BaseModel):
@@ -27,6 +28,8 @@ def write_pr_text(commits: List[str], diff: str, agent=None, llm: Optional[str] 
     """Title and body for a PR with ``commits`` (subjects, oldest first) and ``diff``."""
     if not commits:
         raise ValueError("no commits to describe; commit before opening a pull request")
+    if len(diff) > _MAX_DIFF:
+        diff = diff[:_MAX_DIFF] + "\n... (diff truncated)"
     prompt = (
         "Write a pull request title (one line, imperative, under 72 characters) and a short "
         "markdown body: what changed and why, then how it was tested. Commits, oldest first:\n"
@@ -38,7 +41,7 @@ def write_pr_text(commits: List[str], diff: str, agent=None, llm: Optional[str] 
         if agent is None:
             from praisonaiagents import Agent
 
-            agent = Agent(name="ship-pr-writer", instructions="You write clear pull request text.", llm=llm)
+            agent = Agent(name="ship-pr-writer", instructions="You write clear pull request text.", model=llm)
         reply = agent.chat(prompt, output_pydantic=PRText)
     except Exception as exc:  # the commit list is a fine PR text; never fail the ship on it
         logger.debug("PR text model call failed: %s", exc)

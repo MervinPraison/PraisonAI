@@ -71,3 +71,18 @@ def test_real_pr_text():
     print(text.model_dump())
     assert text.title and len(text.title) <= 72 and text.body
     assert text.body != "- fix: last() on an empty list\n- test: cover empty list", "model text, not the fallback"
+
+
+def test_long_diff_is_truncated_before_the_model_sees_it():
+    from praisonai_code.ship import pr_text
+
+    seen = {}
+
+    class _Agent:
+        def chat(self, prompt, output_pydantic=None):
+            seen["prompt"] = prompt
+            return pr_text.PRText(title="Add x", body="b")
+
+    pr_text.write_pr_text(["add x"], "+" * (pr_text._MAX_DIFF * 3), agent=_Agent())
+    assert "(diff truncated)" in seen["prompt"]
+    assert len(seen["prompt"]) < pr_text._MAX_DIFF + 2_000
