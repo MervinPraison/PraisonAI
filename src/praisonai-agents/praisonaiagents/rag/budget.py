@@ -35,10 +35,10 @@ _RAG_EXTRA_CONTEXT_WINDOWS: Dict[str, int] = {
     "claude-sonnet-4": 200000,
 
     # Google models
-    "gemini-pro": 32768,
-    "gemini-1.0-pro": 32768,
-    "gemini-2.5-pro": 1000000,
-    "gemini-2.5-flash": 1000000,
+    "gemini-pro": 32760,
+    "gemini-1.0-pro": 32760,
+    "gemini-2.5-pro": 1048576,
+    "gemini-2.5-flash": 1048576,
 
     # Mistral models
     "mistral-large": 128000,
@@ -57,7 +57,7 @@ _RAG_EXTRA_CONTEXT_WINDOWS: Dict[str, int] = {
     "llama-4-scout": 10000000,
 
     # DeepSeek models
-    "deepseek-chat": 64000,
+    "deepseek-chat": 131072,
     "deepseek-coder": 64000,
     "deepseek-r1": 64000,
 
