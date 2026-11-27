@@ -44,7 +44,10 @@ on:
     types: [completed]
 
 permissions:
+  actions: read
+  checks: read
   contents: write
+  issues: write
   pull-requests: write
   statuses: write
 

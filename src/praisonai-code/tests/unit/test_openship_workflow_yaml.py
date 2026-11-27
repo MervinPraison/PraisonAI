@@ -31,6 +31,8 @@ def test_openship_full_github_workflow_covers_all_three_pillars() -> None:
     assert "@praisonai review" in raw
     assert "openship/review" in raw
     assert "openship/approvals" in raw
+    assert "checks: read" in raw
+    assert "actions: read" in raw
     assert 'git config user.name "openship[bot]"' in raw
     assert "is_fork == 'false'" in raw
     assert "GH_REPO: ${{ github.repository }}" in raw

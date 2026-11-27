@@ -162,7 +162,10 @@ def ship(
     findings, severity, posted = [], "none", False
     if review:
         proc = run(["gh", "pr", "diff", pr_url], capture_output=True, text=True)
-        diff_text = proc.stdout if proc.returncode == 0 else ""
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "").strip() or f"exit {proc.returncode}"
+            raise ShipRefused(f"failed to fetch diff for PR {pr_url}: {detail}")
+        diff_text = proc.stdout
         if review_fn is not None:
             findings = review_fn(diff_text, effort=effort, llm=model)
         else:
@@ -171,6 +174,8 @@ def ship(
         severity = review_severity(findings)
         if post_review and findings:
             posted = post_inline_review(pr_url, findings, severity, diff_text, run=run)
+            if not posted:
+                raise ShipRefused(f"failed to post self-review findings to PR {pr_url}")
     if watch:
         if watch_fn is None:
             from praisonai_code.ship.steward_loop import watch_pr as watch_fn
