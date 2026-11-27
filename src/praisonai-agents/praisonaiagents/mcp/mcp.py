@@ -24,6 +24,27 @@ except ImportError:
     StdioServerParameters = None
     stdio_client = None
 
+_APPROVAL_MODES = ("never", "always")
+
+
+def resolve_mcp_approval_risk(annotations: Any, approval: Optional[str] = None) -> Optional[str]:
+    """Map MCP tool annotations and per-server ``approval`` override to a risk level."""
+    if approval is not None and (not isinstance(approval, str) or approval not in _APPROVAL_MODES):
+        raise ValueError(f"MCP approval must be 'never', 'always', or None (got {approval!r})")
+    if approval == "never":
+        return None
+    destructive = (
+        annotations.get("destructiveHint")
+        if isinstance(annotations, dict)
+        else getattr(annotations, "destructiveHint", None)
+    )
+    if destructive is True:
+        return "high"
+    if approval == "always":
+        return "medium"
+    return None
+
+
 def _is_transport_closed(exc):
     """True when ``exc`` means the stdio session is gone for good."""
     try:
@@ -614,7 +635,7 @@ class MCP:
     def __init__(self, command_or_string=None, args=None, *, command=None, timeout=None, debug=False,
                  allowed_tools: Optional[List[str]] = None, disabled_tools: Optional[List[str]] = None,
                  max_response_bytes: Optional[int] = None, oauth: Optional[Union[bool, Dict[str, Any]]] = None,
-                 server_name: Optional[str] = None, **kwargs):
+                 server_name: Optional[str] = None, approval: Optional[str] = None, **kwargs):
         """
         Initialize the MCP connection and get tools.
         
@@ -692,6 +713,9 @@ class MCP:
         self.debug = debug
         self.allowed_tools = allowed_tools
         self.disabled_tools = disabled_tools
+        if approval is not None and (not isinstance(approval, str) or approval not in _APPROVAL_MODES):
+            raise ValueError(f"MCP approval must be 'never', 'always', or None (got {approval!r})")
+        self.approval = approval
 
         # Optional prefix applied to tool names to avoid cross-server collisions
         # when multiple MCP servers are loaded together (see load_mcp_tools).
@@ -1105,6 +1129,7 @@ class MCP:
             )
 
         wrapper.get_schema = get_schema
+        wrapper.annotations = getattr(tool, 'annotations', None)
 
         return wrapper
     
@@ -1138,6 +1163,18 @@ class MCP:
             return name in allowed
         return name not in (getattr(self, "disabled_tools", None) or ())
 
+    def _apply_tool_approvals(self, tools: List[Any]) -> List[Any]:
+        """Attach annotation/override approval risk metadata onto each wrapped MCP tool."""
+        mode = getattr(self, "approval", None)
+        for tool in tools or ():
+            risk = resolve_mcp_approval_risk(getattr(tool, "annotations", None), mode)
+            try:
+                tool._mcp_approval_mode = mode
+                tool._approval_risk_level = risk
+            except (AttributeError, TypeError):
+                pass
+        return tools
+
     def _apply_tool_filters(self, raw_tools: List[Any]) -> List[Any]:
         """
         Apply tool filtering based on allowed_tools and disabled_tools.
@@ -1148,6 +1185,7 @@ class MCP:
         Returns:
             Filtered tool list
         """
+        self._apply_tool_approvals(raw_tools)
         if not self.allowed_tools and not self.disabled_tools:
             return raw_tools
             

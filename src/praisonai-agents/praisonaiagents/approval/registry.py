@@ -688,6 +688,7 @@ class ApprovalRegistry:
         auto_approve_scope: Optional[str] = None,
         scope_id: Optional[str] = None,
         liveness: Optional[Callable[[], bool]] = None,
+        risk_level: Optional[str] = None,
     ) -> ApprovalDecision:
         """Synchronous approval — used by ``Agent._execute_tool_impl``.
 
@@ -742,7 +743,7 @@ class ApprovalRegistry:
         request = ApprovalRequest(
             tool_name=tool_name,
             arguments=arguments,
-            risk_level=self.get_risk_level(tool_name, agent_name) or "medium",
+            risk_level=self.get_risk_level(tool_name, agent_name) or risk_level or "medium",
             agent_name=agent_name,
             liveness=liveness,
         )
@@ -792,6 +793,7 @@ class ApprovalRegistry:
         auto_approve_scope: Optional[str] = None,
         scope_id: Optional[str] = None,
         liveness: Optional[Callable[[], bool]] = None,
+        risk_level: Optional[str] = None,
     ) -> ApprovalDecision:
         """Asynchronous approval — used by async tool execution path.
 
@@ -829,7 +831,7 @@ class ApprovalRegistry:
         request = ApprovalRequest(
             tool_name=tool_name,
             arguments=arguments,
-            risk_level=self.get_risk_level(tool_name, agent_name) or "medium",
+            risk_level=self.get_risk_level(tool_name, agent_name) or risk_level or "medium",
             agent_name=agent_name,
             liveness=liveness,
         )
