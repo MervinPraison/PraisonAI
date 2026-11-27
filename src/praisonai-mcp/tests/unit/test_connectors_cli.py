@@ -83,7 +83,11 @@ class TestConnectorsCli:
         assert srv["url"] == "https://mcp.linear.app/mcp"
         assert srv["oauth"] is True
 
-    def test_add_custom_url_forwards_options(self, tmp_path, monkeypatch):
+    @pytest.mark.parametrize("without_optional_writer", [False, True])
+    def test_add_custom_url_forwards_options(self, tmp_path, monkeypatch, without_optional_writer):
+        if without_optional_writer:
+            monkeypatch.setitem(sys.modules, "tomli_w", None)
+
         from praisonai_code.cli.configuration import loader as cfg_loader
         from praisonai_mcp.cli.commands.connectors import app
 

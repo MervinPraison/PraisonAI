@@ -102,52 +102,11 @@ def _save_toml(path: Path, data: Dict[str, Any]) -> None:
             tomli_w.dump(data, f)
         return
     except ImportError:
-        pass
-    
-    # Fall back to basic TOML writing
-    _basic_toml_write(path, data)
+        # toml ships with the CLI and can write nested MCP server tables.
+        import toml
 
-
-def _basic_toml_write(path: Path, data: Dict[str, Any]) -> None:
-    """Basic TOML writer."""
-    lines = []
-    
-    # Write top-level keys first
-    for key, value in data.items():
-        if not isinstance(value, dict):
-            lines.append(f"{key} = {_format_toml_value(value)}")
-    
-    # Write sections
-    for key, value in data.items():
-        if isinstance(value, dict):
-            lines.append(f"\n[{key}]")
-            for sub_key, sub_value in value.items():
-                if not isinstance(sub_value, dict):
-                    lines.append(f"{sub_key} = {_format_toml_value(sub_value)}")
-                else:
-                    # Nested section
-                    lines.append(f"\n[{key}.{sub_key}]")
-                    for nested_key, nested_value in sub_value.items():
-                        lines.append(f"{nested_key} = {_format_toml_value(nested_value)}")
-    
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
-
-
-def _format_toml_value(value: Any) -> str:
-    """Format a value for TOML."""
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    elif isinstance(value, str):
-        return f'"{value}"'
-    elif isinstance(value, (int, float)):
-        return str(value)
-    elif isinstance(value, list):
-        items = ", ".join(_format_toml_value(v) for v in value)
-        return f"[{items}]"
-    else:
-        return f'"{value}"'
+        with open(path, "w", encoding="utf-8") as f:
+            toml.dump(data, f)
 
 
 def _merge_dicts(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:

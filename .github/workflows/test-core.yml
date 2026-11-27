@@ -518,13 +518,14 @@ jobs:
             # tests/unit/data/ (96 tests) was collected by no workflow at all.
             paths: >-
               tests/unit/train/ tests/unit/data/
+              tests/unit/test_remote_dispatch.py tests/unit/test_remote_parity.py
             extra_ignore: ""
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents:${{ github.workspace }}/src/praisonai-code
           - shard: mcp
             workdir: src/praisonai-mcp
             paths: >-
-              tests/mcp_server/
+              tests/mcp_server/ tests/unit/
             extra_ignore: ""
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents
@@ -650,6 +651,11 @@ jobs:
         else
           python -m pytest ${{ matrix.paths }} "${PYTEST_ARGS[@]}" ${{ matrix.extra_ignore }}
         fi
+
+    - name: Run OpenShip onboarding regressions
+      if: matrix.shard == 'cli'
+      working-directory: src/praisonai-code
+      run: python -m pytest tests/unit/test_ship_onboard.py -q --tb=line --timeout=60
 
     - name: Run isolated placement lifecycle tests
       if: matrix.shard == 'agents-core'
