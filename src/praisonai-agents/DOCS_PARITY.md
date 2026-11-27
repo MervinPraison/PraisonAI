@@ -27,7 +27,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Autonomy | 3 | 7 | 3059 |
 | ✅ Bots | 7 | 41 | 17228 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 126 | 40455 |
+| ✅ CLI | 5 | 126 | 40452 |
 | ✅ Chunking | 2 | 2 | 435 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 5222 |
@@ -69,7 +69,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Retrieval | 2 | 5 | 1105 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 7 | 3718 |
-| ✅ Security | 1 | 3 | 3733 |
+| ✅ Security | 1 | 3 | 3765 |
 | ✅ Sessions | 4 | 22 | 9064 |
 | ✅ Skills | 6 | 16 | 6064 |
 | ✅ Tasks | 2 | 10 | 3595 |
