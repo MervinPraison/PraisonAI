@@ -120,3 +120,47 @@ def test_real_review_finds_an_off_by_one():
     print([f.model_dump() for f in findings])
     assert findings and findings[0].severity == "important" and findings[0].path == "calc.py"
     assert review_severity(findings) == "high"
+
+
+def test_prompt_does_not_embed_json_schema():
+    agent = FakeAgent(ReviewReport())
+    review_diff(DIFF, agent=agent)
+    prompt = agent.prompts[0]
+    assert "$defs" not in prompt
+    assert "matching this schema" not in prompt.lower()
+
+
+def test_long_diff_is_truncated_and_fenced_before_the_model_sees_it():
+    from praisonai_code.ship import review
+
+    agent = FakeAgent(ReviewReport())
+    big = "+````\n" + "+" * (review._MAX_DIFF * 3)
+    review_diff(big, agent=agent)
+    prompt = agent.prompts[0]
+    assert "(diff truncated)" in prompt
+    assert len(prompt) < review._MAX_DIFF + 2_000
+    assert "`````diff\n" in prompt
+
+
+@pytest.mark.parametrize("effort", ["low", "high"])
+def test_prompt_instructs_flagging_hardcoded_secrets(effort):
+    agent = FakeAgent(ReviewReport())
+    review_diff(DIFF, effort=effort, agent=agent)
+    prompt = agent.prompts[0].lower()
+    assert "secret" in prompt and "credential" in prompt and "important" in prompt
+
+
+def test_review_report_produces_valid_strict_responses_schema():
+    from praisonaiagents import Agent
+    from praisonaiagents.llm.openai_client import OpenAIClient
+
+    agent = Agent(name="schema-probe", instructions="review", model="gpt-4o-mini")
+    rf = agent._build_response_format(ReviewReport)
+    tf = OpenAIClient._responses_text_format(rf)
+    assert tf["type"] == "json_schema" and tf["strict"] is True
+    root = tf["schema"]
+    assert root["additionalProperties"] is False
+    assert set(root["required"]) == set(root["properties"].keys())
+    finding = root["$defs"]["ReviewFinding"]
+    assert finding["additionalProperties"] is False
+    assert set(finding["required"]) == set(finding["properties"].keys())
