@@ -46,18 +46,18 @@ def test_basic_import():
 
 def test_agent_initialization():
     """Test DeepResearchAgent initialization."""
-    if not os.environ.get("OPENAI_API_KEY"):
-        pytest.skip("OPENAI_API_KEY not set")
-    
     agent = DeepResearchAgent(
         name="Test Researcher",
         instructions="You are a professional researcher.",
         model="o3-deep-research",
+        api_key=os.environ.get("OPENAI_API_KEY") or "sk-test",
         verbose=True
     )
-    
+
     assert agent.name == "Test Researcher"
-    assert agent.model == "o3-deep-research"
+    assert agent.model == DeepResearchAgent.DEFAULT_OPENAI_MODEL
+    assert agent.enable_web_search is True
+    assert agent.enable_code_interpreter is False
 
 
 def test_data_classes():
@@ -90,6 +90,7 @@ def test_data_classes():
     assert response.get_all_sources()
 
 
+@pytest.mark.live
 def test_research_query():
     """Test actual research query (requires API key)."""
     if not os.environ.get("OPENAI_API_KEY"):
@@ -115,6 +116,7 @@ def test_research_query():
     assert result.report
 
 
+@pytest.mark.live
 def test_clarify_and_rewrite():
     """Test clarifying questions and query rewriting."""
     if not os.environ.get("OPENAI_API_KEY"):
@@ -134,12 +136,10 @@ def test_clarify_and_rewrite():
 
 def test_mcp_configuration():
     """Test MCP server configuration."""
-    if not os.environ.get("OPENAI_API_KEY"):
-        pytest.skip("OPENAI_API_KEY not set")
-    
     agent = DeepResearchAgent(
         name="MCP Researcher",
         instructions="You are a researcher with access to internal documents.",
+        api_key=os.environ.get("OPENAI_API_KEY") or "sk-test",
         mcp_servers=[
             {
                 "label": "internal_docs",
@@ -151,12 +151,13 @@ def test_mcp_configuration():
     )
     
     assert len(agent.mcp_servers) == 1
-    tools = agent._build_tools(
+    tools = agent._build_openai_tools(
         web_search=True,
         code_interpreter=True,
         mcp_servers=agent.mcp_servers
     )
-    assert len(tools) >= 1
+    tool_types = {t.get("type") for t in tools}
+    assert tool_types == {"web_search_preview", "code_interpreter", "mcp"}
 
 
 def run_all_tests():

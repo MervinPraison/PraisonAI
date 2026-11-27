@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Comprehensive test script to verify self-reflection works with tools after the fix"""
 
+import pytest
+
 from praisonaiagents import Agent, Task, AgentTeam
 
 # Define duckduckgo_search tool locally to avoid import issues
@@ -26,6 +28,7 @@ def duckduckgo_search(query: str) -> str:
     except Exception as e:
         return f"Search error: {str(e)}"
 
+@pytest.mark.live
 def test_self_reflection_with_tools():
     """Test self-reflection with tools - should work after the fix"""
     print("=== Testing Self-Reflection WITH Tools ===")
@@ -67,6 +70,7 @@ def test_self_reflection_with_tools():
         print(f"\n❌ ERROR: {str(e)}")
         raise AssertionError(f"Test with tools failed: {str(e)}")
 
+@pytest.mark.live
 def test_self_reflection_without_tools():
     """Test self-reflection without tools - should work (baseline)"""
     print("\n=== Testing Self-Reflection WITHOUT Tools ===")

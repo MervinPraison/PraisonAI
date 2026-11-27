@@ -3,9 +3,13 @@
 Test script for graph memory functionality
 """
 
+import pytest
+
 from praisonaiagents.memory import Memory
 from praisonaiagents.knowledge import Knowledge
 
+
+@pytest.mark.live
 def test_memory_graph_config():
     """Test memory with graph configuration"""
     print("Testing Memory with graph configuration...")
@@ -40,6 +44,7 @@ def test_memory_graph_config():
     print(f"✅ Short-term search returned {len(results)} results")
     assert isinstance(results, list)
 
+@pytest.mark.live
 def test_knowledge_graph_config():
     """Test Knowledge with graph configuration"""
     print("\nTesting Knowledge with graph configuration...")
@@ -66,6 +71,7 @@ def test_knowledge_graph_config():
     final_config = knowledge.config
     assert "graph_store" in final_config, "Graph store configuration missing"
 
+@pytest.mark.live
 def test_backward_compatibility():
     """Test that existing configurations still work"""
     print("\nTesting backward compatibility...")

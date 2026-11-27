@@ -6,8 +6,12 @@ This script tests the robust error handling added to handle malformed JSON chunk
 during streaming responses from Gemini models.
 """
 
+import pytest
+
 from praisonaiagents import Agent
 
+
+@pytest.mark.live
 def test_gemini_streaming_robustness():
     """Test Gemini streaming with robust error handling."""
     print("🧪 Testing Gemini Streaming Robustness Fix")

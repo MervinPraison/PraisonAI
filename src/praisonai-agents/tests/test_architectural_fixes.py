@@ -227,6 +227,7 @@ class TestGap2ParallelToolExecution:
 class TestRealAgenticIntegration:
     """Real agentic tests as required by AGENTS.md."""
     
+    @pytest.mark.live
     @pytest.mark.asyncio
     async def test_real_agent_with_architectural_fixes(self):
         """
