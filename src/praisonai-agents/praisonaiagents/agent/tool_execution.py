@@ -4018,6 +4018,13 @@ class ToolExecutionMixin:
                         return run_async_in_sync_context(value)
                     return value
 
+                from ..approval import get_approval_registry
+                _approval_scope = getattr(self, "_approval_scope_id", None) or getattr(self, "name", None)
+
+                def _invoke_approved(target, kw):
+                    with get_approval_registry().active_scope(_approval_scope):
+                        return _resolve_result(target(**kw))
+
                 # BaseTool instances (plugin system) - call run() method
                 from ..tools.base import BaseTool
                 if isinstance(func, BaseTool):
@@ -4029,7 +4036,7 @@ class ToolExecutionMixin:
                     keyed_arguments = _with_durable_key(sig_target, arguments)
                     casted_arguments = self._cast_arguments(sig_target, keyed_arguments)
                     bind_arguments = casted_arguments
-                    return _resolve_result(func.run(**casted_arguments))
+                    return _invoke_approved(func.run, casted_arguments)
                 
                 # Langchain: If it's a class with run but not _run, instantiate and call run
                 if inspect.isclass(func) and hasattr(func, 'run') and not hasattr(func, '_run'):
@@ -4043,7 +4050,7 @@ class ToolExecutionMixin:
                     from ..tools.injected import inject_into_plain_callable
                     casted_params = inject_into_plain_callable(instance.run, casted_params)
                     bind_arguments = casted_params
-                    return _resolve_result(instance.run(**casted_params))
+                    return _invoke_approved(instance.run, casted_params)
 
                 # CrewAI: If it's a class with an _run method, instantiate and call _run
                 elif inspect.isclass(func) and hasattr(func, '_run'):
@@ -4057,7 +4064,7 @@ class ToolExecutionMixin:
                     from ..tools.injected import inject_into_plain_callable
                     casted_params = inject_into_plain_callable(instance._run, casted_params)
                     bind_arguments = casted_params
-                    return _resolve_result(instance._run(**casted_params))
+                    return _invoke_approved(instance._run, casted_params)
 
                 # Otherwise treat as regular function
                 elif callable(func):
@@ -4067,7 +4074,7 @@ class ToolExecutionMixin:
                     from ..tools.injected import inject_into_plain_callable
                     casted_arguments = inject_into_plain_callable(func, casted_arguments)
                     bind_arguments = casted_arguments
-                    return _resolve_result(func(**casted_arguments))
+                    return _invoke_approved(func, casted_arguments)
             except Exception as e:
                 error_msg = str(e)
                 logger.error(f"Error executing tool {function_name}: {error_msg}")

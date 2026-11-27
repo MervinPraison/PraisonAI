@@ -2097,16 +2097,20 @@ Write the complete compiled report:"""
                     from ..tools.injected import inject_into_plain_callable
                     call_arguments = inject_into_plain_callable(call_target, call_arguments, _inject_state)
 
+                from ..approval import get_approval_registry
+                _approval_scope = getattr(self, "_approval_scope_id", None) or getattr(self, "name", None)
+
                 async def _invoke():
-                    # Set the tool-progress channel BEFORE dispatch so the sink
-                    # propagates into the executor thread via contextvars, mirroring
-                    # the sync execute_tool path.
+                    # Set the tool-progress channel and active approval scope BEFORE
+                    # dispatch so both propagate into the executor thread via contextvars,
+                    # mirroring the sync execute_tool path.
+                    _scope_cm = get_approval_registry().active_scope(_approval_scope)
                     if inspect.iscoroutinefunction(call_target):
                         logger.debug(f"Executing async function: {function_name}")
                         if _inject_state is not None:
-                            with with_injection_context(_inject_state), tool_progress_channel(_progress_sink):
+                            with _scope_cm, with_injection_context(_inject_state), tool_progress_channel(_progress_sink):
                                 return await call_target(**call_arguments)
-                        with tool_progress_channel(_progress_sink):
+                        with _scope_cm, tool_progress_channel(_progress_sink):
                             return await call_target(**call_arguments)
                     logger.debug(f"Executing sync function in executor: {function_name}")
                     from ..trace.context_events import copy_context_to_callable
@@ -2114,9 +2118,9 @@ Write the complete compiled report:"""
                     # the injection contextvar) into the executor thread, so setting
                     # it here propagates cancel_event to the sync tool body too.
                     if _inject_state is not None:
-                        with with_injection_context(_inject_state), tool_progress_channel(_progress_sink):
+                        with _scope_cm, with_injection_context(_inject_state), tool_progress_channel(_progress_sink):
                             return await _run_sync(copy_context_to_callable(lambda: call_target(**call_arguments)))
-                    with tool_progress_channel(_progress_sink):
+                    with _scope_cm, tool_progress_channel(_progress_sink):
                         return await _run_sync(copy_context_to_callable(lambda: call_target(**call_arguments)))
 
                 async def _run_sync(fn):
