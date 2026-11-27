@@ -15,7 +15,7 @@ from typing import Callable, Dict, List, Mapping, Optional, Tuple
 from praisonaiagents.tools.path_safety import resolve_inside
 from praisonai_code.ship import is_ship_disabled
 from praisonai_code.ship.flow import ShipRefused
-from praisonai_code.ship.review import EFFORTS
+from praisonai_code.ship.review import EFFORTS, normalize_effort
 
 _MODEL_SAFE_RE = re.compile(r"^[A-Za-z0-9._:/@-]{1,128}$")
 _PROVIDER_DEFAULTS: Tuple[Tuple[str, str], ...] = (
@@ -32,9 +32,9 @@ name: OpenShip (Review, Steward & Policy)
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   pull_request_target:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
   pull_request_review:
     types: [submitted, dismissed]
   pull_request_review_comment:
@@ -69,7 +69,7 @@ jobs:
     if: >-
       !endsWith(github.actor, '[bot]') &&
       (
-        (github.event_name == 'pull_request' && github.event.action != 'labeled' && github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'openship-stop')) ||
+        (github.event_name == 'pull_request' && github.event.action != 'labeled' && github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'openship-stop') && (vars.OPENSHIP_SKIP_DRAFTS != 'true' || !github.event.pull_request.draft)) ||
         (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, '@praisonai review'))
       )
     runs-on: ubuntu-latest
@@ -126,7 +126,7 @@ jobs:
       !endsWith(github.actor, '[bot]') &&
       (
         (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.pull_requests[0].number != null) ||
-        (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'openship-stop')) ||
+        (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'openship-stop') && (vars.OPENSHIP_SKIP_DRAFTS != 'true' || !github.event.pull_request.draft)) ||
         (github.event_name == 'pull_request_review_comment' && github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'openship-stop')) ||
         (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, '@praisonai') && !contains(github.event.comment.body, '@praisonai stop') && !contains(github.event.comment.body, '@praisonai review'))
       )
@@ -137,11 +137,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          OPENSHIP_SKIP_DRAFTS: ${{ vars.OPENSHIP_SKIP_DRAFTS || 'false' }}
         run: |
           PR_NUM="${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}"
           echo "number=$PR_NUM" >> "$GITHUB_OUTPUT"
           HEAD_REF="$(gh pr view "$PR_NUM" --json headRefName --jq .headRefName)"
           IS_FORK="$(gh pr view "$PR_NUM" --json isCrossRepository --jq .isCrossRepository)"
+          IS_DRAFT="$(gh pr view "$PR_NUM" --json isDraft --jq .isDraft)"
           MERGEABLE="UNKNOWN"
           if [ "${{ github.event_name }}" = "pull_request_target" ]; then
             for _ in 1 2 3; do
@@ -152,8 +154,10 @@ jobs:
           fi
           SHOULD_RUN="false"
           if [ "$IS_FORK" = "false" ]; then
-            if [ "${{ github.event_name }}" != "pull_request_target" ] || [ "$MERGEABLE" = "CONFLICTING" ]; then
-              SHOULD_RUN="true"
+            if [ "${{ github.event_name }}" != "pull_request_target" ] || [ "${{ github.event.action }}" = "ready_for_review" ] || [ "$MERGEABLE" = "CONFLICTING" ]; then
+              if [ "$OPENSHIP_SKIP_DRAFTS" != "true" ] || [ "$IS_DRAFT" != "true" ] || [ "${{ github.event_name }}" = "issue_comment" ]; then
+                SHOULD_RUN="true"
+              fi
             fi
           fi
           echo "head_ref=$HEAD_REF" >> "$GITHUB_OUTPUT"
@@ -239,7 +243,7 @@ jobs:
         run: |
           if git show "origin/${{ steps.pr.outputs.base_ref }}:.praisonai/approvals.yml" >/dev/null 2>&1; then
             set +e
-            praisonai-code approvals "${{ steps.pr.outputs.number }}"
+            praisonai-code approvals "${{ steps.pr.outputs.number }}" --comment
             RC=$?
             set -e
             STATE="success"
@@ -330,6 +334,9 @@ class InitResult:
     kept: List[str] = field(default_factory=list)
     model: str = "gpt-4o-mini"
     readiness: ReadinessReport = field(default_factory=ReadinessReport)
+    github_secrets: List[str] = field(default_factory=list)
+    github_vars: Dict[str, str] = field(default_factory=dict)
+    github_notes: List[str] = field(default_factory=list)
 
 
 def default_model_for_env(env: Mapping[str, str]) -> str:
@@ -340,10 +347,31 @@ def default_model_for_env(env: Mapping[str, str]) -> str:
     return "gpt-4o-mini"
 
 
+def _secret_var_for_model(model: str, env: Mapping[str, str]) -> Tuple[Optional[str], Optional[str]]:
+    """Return ``(present_var, expected_var)`` for ``model`` without syncing a mismatched provider key."""
+    low = (model or "").strip().lower()
+    if low.startswith("ollama/"):
+        return None, None
+    preferred: Optional[str] = None
+    if low.startswith("openrouter/"):
+        preferred = "OPENROUTER_API_KEY"
+    elif low.startswith("gemini/") or "gemini" in low:
+        preferred = "GEMINI_API_KEY"
+    elif low.startswith("anthropic/") or "claude" in low:
+        preferred = "ANTHROPIC_API_KEY"
+    elif low.startswith("openai/") or low.startswith(("gpt-", "o1", "o3", "o4")):
+        preferred = "OPENAI_API_KEY"
+    if preferred is not None:
+        return (preferred if (env.get(preferred) or "").strip() else None), preferred
+    for var in _API_KEY_VARS:
+        if (env.get(var) or "").strip():
+            return var, var
+    return None, None
+
+
 def render_workflow_yaml(model: Optional[str] = None, effort: str = "high") -> str:
     """Return ``openship.yml`` with optional validated default model and effort."""
-    if effort not in EFFORTS:
-        raise ValueError(f"unknown review effort {effort!r}; use one of {', '.join(EFFORTS)}")
+    effort = normalize_effort(effort)
     text = OPENSHIP_WORKFLOW_YAML
     if model:
         cleaned = model.strip()
@@ -473,10 +501,71 @@ def format_readiness(report: ReadinessReport) -> str:
     return "\n".join(lines)
 
 
+def _sync_github_repo(
+    repo_root: Path,
+    *,
+    model: str,
+    effort: str,
+    dry_run: bool,
+    run: Callable,
+    env: Mapping[str, str],
+    which: Callable[[str], Optional[str]],
+    result: InitResult,
+) -> None:
+    """Sync detected LLM API key secret (via stdin, never argv) and model/effort vars to GitHub."""
+    secret_var, expected_var = _secret_var_for_model(model, env)
+    vars_to_set: Dict[str, str] = {"OPENSHIP_MODEL": model, "OPENSHIP_EFFORT": effort}
+    if dry_run:
+        if secret_var:
+            result.github_secrets.append(secret_var)
+        elif expected_var:
+            result.github_notes.append(f"{expected_var} not set locally for model {model}; skipped secret sync")
+        elif not model.lower().startswith("ollama/"):
+            result.github_notes.append("no local LLM API key found in environment (set one before syncing)")
+        result.github_vars.update(vars_to_set)
+        return
+    if not which("gh"):
+        raise ShipRefused("`gh` CLI is required for `--github` — install GitHub CLI and run `gh auth login`")
+    auth = run(["gh", "auth", "status"], cwd=str(repo_root), capture_output=True, text=True, check=False)
+    if auth.returncode != 0:
+        raise ShipRefused("`gh` CLI is not authenticated — run `gh auth login` first")
+    if secret_var:
+        secret_val = (env.get(secret_var) or "").strip()
+        proc = run(
+            ["gh", "secret", "set", secret_var],
+            cwd=str(repo_root),
+            input=secret_val,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "").strip() or f"exit {proc.returncode}"
+            raise ShipRefused(f"failed to set GitHub secret {secret_var}: {detail}")
+        result.github_secrets.append(secret_var)
+    elif expected_var:
+        result.github_notes.append(f"{expected_var} not set locally for model {model}; skipped `gh secret set`")
+    elif not model.lower().startswith("ollama/"):
+        result.github_notes.append("no local LLM API key env var detected; skipped `gh secret set`")
+    for k, v in vars_to_set.items():
+        proc = run(
+            ["gh", "variable", "set", k, "--body", v],
+            cwd=str(repo_root),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "").strip() or f"exit {proc.returncode}"
+            raise ShipRefused(f"failed to set GitHub variable {k}: {detail}")
+        result.github_vars[k] = v
+
+
 def init_repo(
     cwd: Optional[Path] = None,
     *,
     dry_run: bool = False,
+    github: bool = False,
     model: Optional[str] = None,
     effort: str = "high",
     run: Callable = subprocess.run,
@@ -493,8 +582,9 @@ def init_repo(
     if repo_root is None:
         raise ShipRefused("not inside a git repository — run `git init` first")
 
+    resolved_effort = normalize_effort(effort)
     resolved_model = model if model else default_model_for_env(active_env)
-    workflow_content = render_workflow_yaml(model=resolved_model, effort=effort)
+    workflow_content = render_workflow_yaml(model=resolved_model, effort=resolved_effort)
     targets: List[Tuple[str, str]] = [
         (".github/workflows/openship.yml", workflow_content),
         (".praisonai/approvals.yml", APPROVALS_POLICY_YAML),
@@ -515,6 +605,18 @@ def init_repo(
         dest.write_text(content, encoding="utf-8")
         result.created.append(rel)
 
+    if github:
+        _sync_github_repo(
+            repo_root,
+            model=resolved_model,
+            effort=resolved_effort,
+            dry_run=dry_run,
+            run=run,
+            env=active_env,
+            which=which,
+            result=result,
+        )
+
     result.readiness = check_readiness(
         repo_root, run=run, env=active_env, which=which, find_spec=find_spec
     )
@@ -532,8 +634,21 @@ def format_init_result(result: InitResult, *, dry_run: bool = False) -> str:
         lines.append(f"  = kept existing {rel}")
     if not (result.created or result.would_create):
         lines.append("  All OpenShip files already exist (nothing overwritten).")
+    verb = "would set" if dry_run else "synced"
+    for name in result.github_secrets:
+        lines.append(f"  + GitHub secret ({verb}): {name}")
+    for k, v in result.github_vars.items():
+        lines.append(f"  + GitHub variable ({verb}): {k}={v}")
+    for note in result.github_notes:
+        lines.append(f"  ! GitHub sync: {note}")
     lines.append("")
-    lines.append(format_readiness(result.readiness))
+    readiness_text = format_readiness(result.readiness)
+    if result.github_secrets and not dry_run:
+        readiness_text = "\n".join(
+            ln for ln in readiness_text.splitlines()
+            if "gh secret set " not in ln and "gh variable set OPENSHIP_MODEL" not in ln
+        )
+    lines.append(readiness_text)
     if not dry_run and result.created:
         quoted_root = shlex.quote(str(result.repo_root))
         joined = " ".join(shlex.quote(p) for p in result.created)

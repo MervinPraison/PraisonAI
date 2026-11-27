@@ -2,9 +2,9 @@ name: OpenShip (Review, Steward & Policy)
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled]
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   pull_request_target:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
   pull_request_review:
     types: [submitted, dismissed]
   pull_request_review_comment:
@@ -39,7 +39,7 @@ jobs:
     if: >-
       !endsWith(github.actor, '[bot]') &&
       (
-        (github.event_name == 'pull_request' && github.event.action != 'labeled' && github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'openship-stop')) ||
+        (github.event_name == 'pull_request' && github.event.action != 'labeled' && github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'openship-stop') && (vars.OPENSHIP_SKIP_DRAFTS != 'true' || !github.event.pull_request.draft)) ||
         (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, '@praisonai review'))
       )
     runs-on: ubuntu-latest
@@ -96,7 +96,7 @@ jobs:
       !endsWith(github.actor, '[bot]') &&
       (
         (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.pull_requests[0].number != null) ||
-        (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'openship-stop')) ||
+        (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'openship-stop') && (vars.OPENSHIP_SKIP_DRAFTS != 'true' || !github.event.pull_request.draft)) ||
         (github.event_name == 'pull_request_review_comment' && github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'openship-stop')) ||
         (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, '@praisonai') && !contains(github.event.comment.body, '@praisonai stop') && !contains(github.event.comment.body, '@praisonai review'))
       )
@@ -107,11 +107,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          OPENSHIP_SKIP_DRAFTS: ${{ vars.OPENSHIP_SKIP_DRAFTS || 'false' }}
         run: |
           PR_NUM="${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}"
           echo "number=$PR_NUM" >> "$GITHUB_OUTPUT"
           HEAD_REF="$(gh pr view "$PR_NUM" --json headRefName --jq .headRefName)"
           IS_FORK="$(gh pr view "$PR_NUM" --json isCrossRepository --jq .isCrossRepository)"
+          IS_DRAFT="$(gh pr view "$PR_NUM" --json isDraft --jq .isDraft)"
           MERGEABLE="UNKNOWN"
           if [ "${{ github.event_name }}" = "pull_request_target" ]; then
             for _ in 1 2 3; do
@@ -122,8 +124,10 @@ jobs:
           fi
           SHOULD_RUN="false"
           if [ "$IS_FORK" = "false" ]; then
-            if [ "${{ github.event_name }}" != "pull_request_target" ] || [ "$MERGEABLE" = "CONFLICTING" ]; then
-              SHOULD_RUN="true"
+            if [ "${{ github.event_name }}" != "pull_request_target" ] || [ "${{ github.event.action }}" = "ready_for_review" ] || [ "$MERGEABLE" = "CONFLICTING" ]; then
+              if [ "$OPENSHIP_SKIP_DRAFTS" != "true" ] || [ "$IS_DRAFT" != "true" ] || [ "${{ github.event_name }}" = "issue_comment" ]; then
+                SHOULD_RUN="true"
+              fi
             fi
           fi
           echo "head_ref=$HEAD_REF" >> "$GITHUB_OUTPUT"
@@ -209,7 +213,7 @@ jobs:
         run: |
           if git show "origin/${{ steps.pr.outputs.base_ref }}:.praisonai/approvals.yml" >/dev/null 2>&1; then
             set +e
-            praisonai-code approvals "${{ steps.pr.outputs.number }}"
+            praisonai-code approvals "${{ steps.pr.outputs.number }}" --comment
             RC=$?
             set -e
             STATE="success"
