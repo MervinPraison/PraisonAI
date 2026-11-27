@@ -1,0 +1,26 @@
+# Copy this file to .praisonai/approvals.yml on your default branch.
+# OpenShip loads approval policy from the default branch so a PR cannot
+# weaken its own rules.
+
+version: 1
+mode: observe  # Switch to "enforce" once your team has verified rule matches
+
+protected_paths:
+  - ".praisonai/approvals.yml"
+  - ".github/workflows/**"
+
+rules:
+  - name: core-source
+    paths:
+      - "src/**"
+    min_approvals: 1
+    require_codeowners: false
+    note: "Standard review for application source changes."
+
+  - name: security-sensitive
+    paths:
+      - "security/**"
+      - "**/auth/**"
+    min_approvals: 2
+    require_codeowners: true
+    note: "Two human approvals required for security and auth changes."
