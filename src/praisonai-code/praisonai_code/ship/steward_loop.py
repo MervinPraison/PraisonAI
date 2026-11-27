@@ -44,13 +44,16 @@ def watch_pr(
             return StewardSummary("branch switched", cycles, turns, attempts)
         cycles += 1
         state = read_pr_state(pr, run=run)
+        for key, count in getattr(state, "prior_attempts", {}).items():
+            if count > attempts.get(key, 0):
+                attempts[key] = count
         action = next_action(state, attempts, max_attempts=max_attempts)
         if action.kind == "stop":
             emit(f"steward: {action.detail}")
             return StewardSummary(action.detail, cycles, turns, attempts)
         if action.kind != "wait":
             attempts[action.key] = attempts.get(action.key, 0) + 1
-            res = run_steward_turn(state, action, agent=agent, llm=llm, run=run)
+            res = run_steward_turn(state, action, agent=agent, llm=llm, run=run, record_attempt=once)
             turns += 1
             emit(f"steward: {action.kind} ({action.key}) -> {res.pushed_sha or 'no push'}")
         else:
