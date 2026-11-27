@@ -11,6 +11,13 @@ def ship_main(
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the plan and change nothing"),
 ):
     """Commit all changes, push the branch and open a draft PR. You merge it."""
+    from praisonai_code.ship import is_ship_disabled
+
+    reason = is_ship_disabled()
+    if reason:
+        typer.echo(f"ship: {reason}", err=True)
+        raise typer.Exit(1)
+
     from praisonai_code.ship.flow import ShipRefused, ship_to_draft_pr
 
     try:
