@@ -28,7 +28,7 @@ _FIELD_ALIASES = {
 # Harmless editor fields with no meaning here: dropped without a warning.
 _QUIET_FIELDS = {"name", "description", "trust", "alwaysAllow", "autoApprove", "startup_timeout_sec"}
 _FIELDS = {"type", "command", "args", "env", "cwd", "url", "headers", "oauth",
-           "allowed_tools", "disabled_tools", "timeout", "enabled"}
+           "allowed_tools", "disabled_tools", "timeout", "enabled", "approval"}
 _TYPE_ALIASES = {"local": "stdio", "remote": "http", "streamable-http": "http",
                  "streamable_http": "http", "streamableHttp": "http", "websocket": "ws"}
 _ENV_VAR = re.compile(r"\$\{(?:env:)?([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
@@ -149,6 +149,11 @@ def build_mcp(entry: Any, name: str = "server", cls: type = MCP, expand_env: boo
     for key in ("allowed_tools", "disabled_tools"):
         if entry.get(key):
             kwargs[key] = entry[key]
+    approval = entry.get("approval")
+    if approval is not None:
+        if not isinstance(approval, str) or approval not in ("never", "always"):
+            raise ValueError(f"MCP server '{name}': approval must be 'never' or 'always' (got {approval!r})")
+        kwargs["approval"] = approval
     return cls(target, args=args, **kwargs)
 
 

@@ -205,7 +205,7 @@ def _build_httpx_oauth(server_url: str, headers: Optional[Dict[str, str]] = None
 class HTTPStreamMCPTool:
     """A wrapper for an MCP tool that can be used with praisonaiagents."""
     
-    def __init__(self, name: str, description: str, session: ClientSession, input_schema: Optional[Dict[str, Any]] = None, timeout: int = 60):
+    def __init__(self, name: str, description: str, session: ClientSession, input_schema: Optional[Dict[str, Any]] = None, timeout: int = 60, annotations: Optional[Any] = None):
         """Store the tool metadata, build its call signature, and remember the session's event loop."""
         self.name = name
         self.__name__ = name  # Required for Agent to recognize it as a tool
@@ -215,6 +215,7 @@ class HTTPStreamMCPTool:
         self.session = session
         self.input_schema = input_schema or {}
         self.timeout = timeout
+        self.annotations = annotations
         
         # Create a signature based on input schema
         self.__signature__ = build_tool_signature(input_schema)
@@ -703,7 +704,8 @@ class HTTPStreamMCPClient:
                 description=tool.description if hasattr(tool, 'description') else f"Call the {tool.name} tool",
                 session=self.session,
                 input_schema=input_schema,
-                timeout=self.timeout
+                timeout=self.timeout,
+                annotations=getattr(tool, 'annotations', None),
             )
             tools.append(wrapper)
         
