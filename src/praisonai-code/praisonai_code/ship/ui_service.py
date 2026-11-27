@@ -153,26 +153,35 @@ def resolve_policy_path(repo: Path, policy_path: Optional[str]) -> Optional[str]
     return str(resolved)
 
 
-def _default_base_branch(runner: Callable) -> str:
-    """Return the full default branch name (e.g. ``main``, ``master``, or ``release/2.x``)."""
+def _default_base_branch(runner: Callable) -> Optional[str]:
+    """Return the full default branch name (e.g. ``main``, ``master``, or ``release/2.x``), or ``None``."""
     base_ref = runner(["git", "symbolic-ref", "refs/remotes/origin/HEAD"], capture_output=True, text=True)
     if base_ref.returncode == 0:
         ref = base_ref.stdout.strip()
         prefix = "refs/remotes/origin/"
         if ref.startswith(prefix) and ref[len(prefix):]:
             return ref[len(prefix):]
-    for candidate in ("main", "master"):
+    for candidate in ("main", "master", "develop", "trunk"):
         for ref in (f"origin/{candidate}", candidate):
             if runner(["git", "rev-parse", "--verify", "--quiet", ref], capture_output=True, text=True).returncode == 0:
                 return candidate
-    gh_base = runner(
-        ["gh", "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
-        capture_output=True,
-        text=True,
-    )
-    if gh_base.returncode == 0 and gh_base.stdout.strip():
-        return gh_base.stdout.strip()
-    return "main"
+    try:
+        gh_base = runner(
+            ["gh", "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
+            capture_output=True,
+            text=True,
+        )
+        if gh_base.returncode == 0 and gh_base.stdout.strip():
+            return gh_base.stdout.strip()
+    except FileNotFoundError:
+        pass
+    cfg = runner(["git", "config", "--get", "init.defaultBranch"], capture_output=True, text=True)
+    if cfg.returncode == 0 and cfg.stdout.strip():
+        cand = cfg.stdout.strip()
+        for ref in (f"origin/{cand}", cand):
+            if runner(["git", "rev-parse", "--verify", "--quiet", ref], capture_output=True, text=True).returncode == 0:
+                return cand
+    return None
 
 
 def get_repo_status(repo: Path, run: Optional[Callable] = None) -> RepoStatus:
@@ -186,7 +195,7 @@ def get_repo_status(repo: Path, run: Optional[Callable] = None) -> RepoStatus:
     porcelain = runner(["git", "status", "--porcelain"], capture_output=True, text=True)
     if porcelain.returncode == 0:
         st.dirty_files = [ln[3:].strip() for ln in porcelain.stdout.splitlines() if ln.strip()]
-    st.base = _default_base_branch(runner)
+    st.base = _default_base_branch(runner) or "main"
     gh = runner(["gh", "pr", "view", "--json", "number,title,url,state,isDraft"], capture_output=True, text=True)
     if gh.returncode == 0 and gh.stdout.strip():
         try:
@@ -303,13 +312,23 @@ def get_diff_bundle(
         if not raw.strip():
             # Fall back to committed feature-branch diff against origin/<base> (or local <base> if remote missing)
             base_name = _default_base_branch(runner)
+            if not base_name:
+                raise ValueError(
+                    "could not determine base branch for committed diff — run `git remote set-head origin -a`"
+                )
+            compared = False
             for ref in (f"origin/{base_name}", base_name):
                 bdiff = runner(["git", "diff", f"{ref}...HEAD"], capture_output=True, text=True)
                 if bdiff.returncode == 0:
+                    compared = True
                     if bdiff.stdout.strip():
                         raw = bdiff.stdout
                         label = f"branch vs {ref}"
                     break
+            if not compared:
+                raise ValueError(
+                    f"could not compare against base branch {base_name!r} — run `git fetch origin`"
+                )
     cleaned = strip_noisy_diff(raw)[:_MAX_DIFF_CHARS]
     return cleaned, split_unified_diff(cleaned), label
 
@@ -343,7 +362,7 @@ def run_review(
     if review_fn is not None:
         findings = review_fn(diff_text, effort=effort, llm=(model or None))
     else:
-        base_name = _default_base_branch(runner)
+        base_name = _default_base_branch(runner) or "main"
         guidelines = load_review_guidelines(base=base_name, repo_root=repo, run=runner)
         findings = review_diff(diff_text, effort=effort, llm=(model or None), guidelines=(guidelines or None))
     sev = review_severity(findings)

@@ -371,3 +371,12 @@ def test_default_base_branch_resolves_master_and_gh_fallback_without_origin_head
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
 
     assert ui_service._default_base_branch(fake_custom_gh) == "develop"
+
+    def fake_missing_gh(cmd, **kw):
+        if cmd[0] == "gh":
+            raise FileNotFoundError("gh")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    assert ui_service._default_base_branch(fake_missing_gh) is None
+    with pytest.raises(ValueError, match="could not determine base branch"):
+        ui_service.get_diff_bundle(Path("."), run=fake_missing_gh)
