@@ -22,6 +22,7 @@ import type {
 export class OpenAIProvider extends BaseProvider {
   readonly providerId = 'openai';
   private client: OpenAI;
+  private requestStreamUsage: boolean;
 
   constructor(modelId: string, config: ProviderConfig = {}) {
     super(modelId, config);
@@ -34,6 +35,7 @@ export class OpenAIProvider extends BaseProvider {
       },
       { fetch: config.fetch, dangerouslyAllowBrowser: config.dangerouslyAllowBrowser }
     ));
+    this.requestStreamUsage = /^https:\/\/api\.openai\.com\/v1\/?$/.test(this.client.baseURL);
   }
 
   async generateText(options: GenerateTextOptions): Promise<GenerateTextResult> {
@@ -89,6 +91,7 @@ export class OpenAIProvider extends BaseProvider {
           tool_choice: options.toolChoice as any,
           stop: options.stop,
           stream: true,
+          stream_options: self.requestStreamUsage ? { include_usage: true } : undefined,
         }, { signal: options.signal });
 
         let toolCalls: ToolCall[] = [];
@@ -120,16 +123,19 @@ export class OpenAIProvider extends BaseProvider {
             }
           }
           
+          const usage = chunk.usage ? {
+            promptTokens: chunk.usage.prompt_tokens,
+            completionTokens: chunk.usage.completion_tokens,
+            totalTokens: chunk.usage.total_tokens,
+          } : undefined;
           if (chunk.choices[0]?.finish_reason) {
             yield {
               finishReason: chunk.choices[0].finish_reason,
               toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
-              usage: chunk.usage ? {
-                promptTokens: chunk.usage.prompt_tokens,
-                completionTokens: chunk.usage.completion_tokens,
-                totalTokens: chunk.usage.total_tokens,
-              } : undefined,
+              usage,
             };
+          } else if (usage) {
+            yield { usage };
           }
         }
       },
