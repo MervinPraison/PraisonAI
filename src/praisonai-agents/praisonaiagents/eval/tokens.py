@@ -59,7 +59,7 @@ _EVAL_EXTRA_LENGTHS: Dict[str, int] = {
     "codestral-latest": 32000,
 
     # DeepSeek models
-    "deepseek-chat": 64000,
+    "deepseek-chat": 131072,
     "deepseek-coder": 64000,
 
     # Groq models
