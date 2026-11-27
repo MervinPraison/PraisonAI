@@ -46,6 +46,8 @@ class FakeRunner:
         self.calls.append(cmd)
         if cmd[:2] == ["git", "rev-parse"]:
             sha = self.heads.pop(0) if len(self.heads) > 1 else self.heads[0]
+            if sha is None:
+                return subprocess.CompletedProcess(cmd, 128, stdout="", stderr="fatal: not a git repo")
             return subprocess.CompletedProcess(cmd, 0, stdout=f"{sha}\n", stderr="")
         if cmd[:3] == ["gh", "pr", "comment"]:
             return subprocess.CompletedProcess(cmd, self.comment_rc, stdout="", stderr="")
@@ -115,7 +117,7 @@ def test_posts_revert_comment_when_head_advances():
     comments = run.ran("gh", "pr", "comment")
     assert len(comments) == 1
     cmd = comments[0]
-    assert "7" in cmd
+    assert cmd[3] == "https://github.com/o/r/pull/7"
     body = cmd[cmd.index("--body") + 1]
     assert "Fixed null check in src/a.py." in body
     assert "git revert bbb2222" in body
@@ -127,3 +129,16 @@ def test_skips_revert_comment_when_head_does_not_advance():
     res = run_steward_turn(_state(), Action("fix_check", "check:CI/test", "CI/test"), agent=agent, run=run)
     assert res.acted and res.pushed_sha is None and not res.commented
     assert not run.ran("gh", "pr", "comment")
+
+
+def test_skips_revert_comment_when_initial_head_is_unknown():
+    run = FakeRunner(heads=(None, "bbb2222"))
+    res = run_steward_turn(_state(), Action("fix_check", "check:CI/test", "CI/test"), agent=FakeAgent(), run=run)
+    assert res.acted and res.pushed_sha is None and not res.commented
+    assert not run.ran("gh", "pr", "comment")
+
+
+def test_revert_comment_falls_back_to_pr_number_when_url_empty():
+    run = FakeRunner(heads=("aaa1111", "bbb2222"))
+    res = run_steward_turn(_state(url=""), Action("fix_check", "check:CI/test", "CI/test"), agent=FakeAgent(), run=run)
+    assert res.commented and run.ran("gh", "pr", "comment")[0][3] == "7"

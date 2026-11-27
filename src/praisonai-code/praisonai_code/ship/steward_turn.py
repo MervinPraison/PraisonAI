@@ -79,9 +79,10 @@ def run_steward_turn(
     before = _git_head(run)
     summary = str((agent or _steward_agent(llm)).chat(_build_prompt(state, action)) or "").strip()
     after = _git_head(run)
-    if after and after != before:
+    if before and after and after != before:
         what = summary or f"Handled {action.kind} ({action.key})."
         body = f"Steward pushed `{after}` ({action.kind}):\n\n{what}\n\nTo revert: `git revert {after}`"
-        proc = run(["gh", "pr", "comment", str(state.number), "--body", body], capture_output=True, text=True)
+        target = state.url or str(state.number)
+        proc = run(["gh", "pr", "comment", target, "--body", body], capture_output=True, text=True)
         return TurnResult(action.kind, True, summary, pushed_sha=after, commented=proc.returncode == 0)
     return TurnResult(action.kind, True, summary)
