@@ -1,0 +1,136 @@
+name: OpenShip (Review, Steward & Policy)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+  pull_request_review:
+    types: [submitted, dismissed]
+  pull_request_review_comment:
+    types: [created]
+  issue_comment:
+    types: [created]
+  workflow_run:
+    workflows: ["CI", "Tests", "Smoke"]
+    types: [completed]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: openship-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
+  cancel-in-progress: false
+
+env:
+  # Works with ANY LLM provider supported by PraisonAI:
+  # OpenAI (gpt-4o-mini), Anthropic (claude-sonnet-4-6), Gemini (gemini/gemini-2.5-flash),
+  # OpenRouter (openrouter/...), or self-hosted/local Ollama (ollama/qwen3.5:9b).
+  OPENSHIP_MODEL: ${{ vars.OPENSHIP_MODEL || 'gpt-4o-mini' }}
+  OPENSHIP_EFFORT: ${{ vars.OPENSHIP_EFFORT || 'high' }}
+
+jobs:
+  # Pillar 1: Inline AI Code Review (reads REVIEW.md from default branch, adversarial verify)
+  review:
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.action != 'labeled' &&
+      !endsWith(github.actor, '[bot]') &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !contains(github.event.pull_request.labels.*.name, 'openship-stop')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PraisonAI Code (OpenShip)
+        run: pip install --quiet praisonai-code
+      - name: Run OpenShip inline self-review
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: >-
+          praisonai ship "${{ github.event.pull_request.number }}"
+          --effort "${{ env.OPENSHIP_EFFORT }}"
+          --model "${{ env.OPENSHIP_MODEL }}"
+          --post-review
+
+  # Pillar 2: PR Steward (fixes failing CI, merge conflicts, review threads & @praisonai directives; 3-try circuit breaker; never merges)
+  steward:
+    if: >-
+      !endsWith(github.actor, '[bot]') &&
+      (
+        (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.pull_requests[0].number != null) ||
+        (github.event_name == 'pull_request_review_comment' && github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'openship-stop')) ||
+        (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, '@praisonai') && !contains(github.event.comment.body, '@praisonai stop'))
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve PR number & head ref
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_NUM="${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}"
+          echo "number=$PR_NUM" >> "$GITHUB_OUTPUT"
+          HEAD_REF="$(gh pr view "$PR_NUM" --json headRefName --jq .headRefName)"
+          IS_FORK="$(gh pr view "$PR_NUM" --json isCrossRepository --jq .isCrossRepository)"
+          echo "head_ref=$HEAD_REF" >> "$GITHUB_OUTPUT"
+          echo "is_fork=$IS_FORK" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.pr.outputs.is_fork == 'false'
+        with:
+          ref: ${{ steps.pr.outputs.head_ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        if: steps.pr.outputs.is_fork == 'false'
+        with:
+          python-version: "3.12"
+
+      - name: Install PraisonAI Code (OpenShip)
+        if: steps.pr.outputs.is_fork == 'false'
+        run: pip install --quiet praisonai-code
+
+      - name: Run one PR Steward cycle (stateless 3-attempt circuit breaker)
+        if: steps.pr.outputs.is_fork == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: >-
+          praisonai steward "${{ steps.pr.outputs.number }}"
+          --once
+          --model "${{ env.OPENSHIP_MODEL }}"
+
+  # Pillar 3: Declarative PR Approvals Policy Check (.praisonai/approvals.yml on default branch; observe or enforce)
+  approvals:
+    if: >-
+      (github.event_name == 'pull_request' || github.event_name == 'pull_request_review') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install PraisonAI Code (OpenShip)
+        run: pip install --quiet praisonai-code
+      - name: Evaluate .praisonai/approvals.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git show "origin/${{ github.event.pull_request.base.ref }}:.praisonai/approvals.yml" >/dev/null 2>&1; then
+            praisonai approvals "${{ github.event.pull_request.number }}"
+          else
+            echo "No .praisonai/approvals.yml on base branch; skipping policy check."
+          fi
