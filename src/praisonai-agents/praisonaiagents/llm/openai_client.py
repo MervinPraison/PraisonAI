@@ -1021,6 +1021,9 @@ class OpenAIClient:
                     if fn.get("strict") is not None:
                         responses_tool["strict"] = fn["strict"]
                     responses_tools.append(responses_tool)
+                elif isinstance(tool, dict) and tool.get("type") == "mcp":
+                    from ..tools.hosted import hosted_mcp_to_openai
+                    responses_tools.append(hosted_mcp_to_openai(tool))
                 else:
                     responses_tools.append(tool)
             params["tools"] = responses_tools
