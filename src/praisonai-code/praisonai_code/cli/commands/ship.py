@@ -24,16 +24,11 @@ def ship_main(
     from praisonai_code.ship.flow import ShipRefused
 
     try:
-        res = orchestrate.ship(
-            target, message=message, dry_run=dry_run, effort=effort, model=model,
-            review=review, post_review=post_review, watch=watch, reviewer=reviewer,
-        )
+        res = orchestrate.ship(target, message=message, dry_run=dry_run, effort=effort, model=model,
+                               review=review, post_review=post_review, watch=watch, reviewer=reviewer)
     except (ShipRefused, ValueError) as exc:
         typer.echo(f"ship: {exc}", err=True)
         raise typer.Exit(1)
-    if res.dry_run_plan:
-        typer.echo(res.dry_run_plan)
-    else:
-        typer.echo(res.pr_url)
-        if res.findings:
-            typer.echo(f"ship: self-review found {len(res.findings)} issue(s) (severity: {res.severity})")
+    typer.echo(res.dry_run_plan or res.pr_url)
+    if not res.dry_run_plan and res.findings:
+        typer.echo(f"ship: self-review found {len(res.findings)} issue(s) (severity: {res.severity})")

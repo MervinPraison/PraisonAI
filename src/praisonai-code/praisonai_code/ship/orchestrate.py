@@ -21,9 +21,8 @@ class ShipResult:
 
 
 def _format_review(findings: List[ReviewFinding], severity: str) -> str:
-    rows = [f"- **[{f.severity}]** `{f.path}:{f.line}`: {f.title}" + (f" — {f.fix}" if f.fix else "")
-            if f.line else f"- **[{f.severity}]** `{f.path}`: {f.title}" + (f" — {f.fix}" if f.fix else "")
-            for f in findings]
+    rows = [f"- **[{f.severity}]** `{f.path}{f':{f.line}' if f.line else ''}`: {f.title}"
+            + (f" — {f.fix}" if f.fix else "") for f in findings]
     return f"### Ship self-review (severity: `{severity}`)\n\n" + "\n".join(rows)
 
 
@@ -45,6 +44,11 @@ def ship(
         pr_url = out
     elif target.lstrip("#").isdigit() or "/pull/" in target:
         pr_url = target.lstrip("#") if target.startswith("#") else target
+        if dry_run:
+            steps = [s for s, on in ((f"add reviewer {reviewer}", reviewer), (f"review ({effort})", review),
+                                     ("post review", review and post_review), ("watch", watch)) if on]
+            return ShipResult(pr_url=pr_url, reviewer=reviewer,
+                              dry_run_plan=f"Would run on PR {pr_url}: {', '.join(steps) or 'no-op'}")
     else:
         raise ShipRefused(f"unrecognized target {target!r}; pass a PR number, PR URL, or +reviewer")
     if reviewer:

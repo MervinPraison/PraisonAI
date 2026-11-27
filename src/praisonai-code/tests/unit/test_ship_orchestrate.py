@@ -46,6 +46,23 @@ def test_dry_run_returns_plan_without_review_or_watch(monkeypatch):
     assert res.findings == [] and res.severity == "none" and not res.watched
 
 
+def test_dry_run_with_existing_pr_target_makes_no_calls():
+    calls = []
+    res = ship(
+        "42",
+        dry_run=True,
+        reviewer="alice",
+        post_review=True,
+        watch=True,
+        run=lambda *a, **kw: calls.append(("run", a)),
+        review_fn=lambda *a, **kw: calls.append(("review", a)),
+        watch_fn=lambda *a, **kw: calls.append(("watch", a)),
+    )
+    assert res.pr_url == "42" and res.dry_run_plan
+    assert "42" in res.dry_run_plan and "alice" in res.dry_run_plan
+    assert calls == [] and not res.posted_review and not res.watched
+
+
 def test_disabled_raises_ship_refused_before_any_work(monkeypatch):
     monkeypatch.setenv("PRAISONAI_DISABLE_SHIP", "1")
     monkeypatch.setattr(
