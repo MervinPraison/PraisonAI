@@ -4,6 +4,7 @@ import json, re, subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, List, Optional
+from urllib.parse import urlparse
 import yaml
 from praisonai_code.ship.flow import ShipRefused
 
@@ -99,7 +100,12 @@ def check_pr_policy(pr: Optional[str] = None, *, policy_path: Optional[str] = No
     return evaluate_policy(load_policy(policy_text), changed_files=[f["path"] for f in view.get("files") or [] if isinstance(f, dict) and f.get("path")], approvers=[u for u, s in latest.items() if s == "APPROVED"], passing_checks=passing)
 
 
-def format_policy_comment(report: PolicyReport) -> str:
+def _esc_md(text: str) -> str:
+    """Escape pipe and newline characters so Markdown table cells stay well-formed."""
+    return " ".join(str(text).splitlines()).replace("|", "\\|").strip()
+
+
+def format_policy_comment(report: PolicyReport, *, source: str = "") -> str:
     """Render an upserted PR status comment matching Claude Approvals' observe/enforce clarity."""
     status = "Passed" if report.passed else ("Blocking" if report.blocking else "Pending")
     lines = [
@@ -112,38 +118,51 @@ def format_policy_comment(report: PolicyReport) -> str:
     if report.verdicts:
         for v in report.verdicts:
             badge = "PASS" if v.passed else "PENDING"
-            detail = "; ".join(v.reasons) if v.reasons else "Satisfied"
-            lines.append(f"| `{v.rule}` | {badge} | {detail} |")
+            rule_cell = _esc_md(v.rule).replace("`", "\\`")
+            detail = _esc_md("; ".join(v.reasons)) if v.reasons else "Satisfied"
+            lines.append(f"| `{rule_cell}` | {badge} | {detail} |")
     else:
         lines.append("| *(no matching rules)* | PASS | No path-scoped rules matched this PR |")
-    lines.extend(["", "_Loaded from default branch `.praisonai/approvals.yml` · OpenShip never auto-merges or auto-approves._"])
+    provenance = _esc_md(source) if source else "PR base branch `.praisonai/approvals.yml`"
+    lines.extend(["", f"_Policy source: {provenance} · OpenShip never auto-merges or auto-approves._"])
     return "\n".join(lines)
 
 
-def post_policy_comment(pr: Optional[str], report: PolicyReport, *, run: Callable = subprocess.run) -> bool:
-    """Upsert a single OpenShip Approvals status comment on the PR (never spams)."""
+def post_policy_comment(
+    pr: Optional[str], report: PolicyReport, *, source: str = "", run: Callable = subprocess.run
+) -> bool:
+    """Upsert a single OpenShip Approvals status comment on the PR (never creates duplicates on failure)."""
     pr_arg = [pr.lstrip("#") if pr.startswith("#") else pr] if pr else []
-    body = format_policy_comment(report)
+    body = format_policy_comment(report, source=source)
     view_proc = run(["gh", "pr", "view", *pr_arg, "--json", "number,url,comments"], capture_output=True, text=True)
-    if view_proc.returncode == 0 and (view_proc.stdout or "").strip():
-        try:
-            view = json.loads(view_proc.stdout)
-            url_parts = str(view.get("url", "")).split("/")
-            owner, name = url_parts[3], url_parts[4]
-            for c in reversed(view.get("comments") or []):
-                if not isinstance(c, dict) or not (c.get("body") or "").lstrip().startswith(_COMMENT_MARKER):
-                    continue
-                cid = str(c.get("databaseId") or "")
-                if not cid and (m := _ISSUE_COMMENT_ID_RE.search(str(c.get("url") or ""))):
-                    cid = m.group(1)
-                if cid:
-                    upd = run(
-                        ["gh", "api", f"repos/{owner}/{name}/issues/comments/{cid}", "--method", "PATCH", "-f", f"body={body}"],
-                        capture_output=True,
-                        text=True,
-                    )
-                    if upd.returncode == 0:
-                        return True
-        except (ValueError, KeyError, IndexError):
-            pass
+    if view_proc.returncode != 0 or not (view_proc.stdout or "").strip():
+        return False
+    try:
+        view = json.loads(view_proc.stdout)
+        parsed = urlparse(str(view.get("url", "")))
+        parts = [p for p in parsed.path.split("/") if p]
+        owner, name = parts[0], parts[1]
+        host = parsed.hostname or ""
+        host_args = ["--hostname", host] if host and host != "github.com" else []
+    except (ValueError, KeyError, IndexError):
+        return False
+    existing_ids: List[str] = []
+    for c in reversed(view.get("comments") or []):
+        if not isinstance(c, dict) or not (c.get("body") or "").lstrip().startswith(_COMMENT_MARKER):
+            continue
+        cid = str(c.get("databaseId") or "")
+        if not cid and (m := _ISSUE_COMMENT_ID_RE.search(str(c.get("url") or ""))):
+            cid = m.group(1)
+        if cid:
+            existing_ids.append(cid)
+    if existing_ids:
+        for cid in existing_ids:
+            upd = run(
+                ["gh", "api", *host_args, f"repos/{owner}/{name}/issues/comments/{cid}", "--method", "PATCH", "-f", f"body={body}"],
+                capture_output=True,
+                text=True,
+            )
+            if upd.returncode == 0:
+                return True
+        return False
     return run(["gh", "pr", "comment", *pr_arg, "--body", body], capture_output=True, text=True).returncode == 0

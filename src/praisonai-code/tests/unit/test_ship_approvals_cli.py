@@ -120,9 +120,45 @@ def test_approvals_comment_flag_upserts_existing_or_posts_new(monkeypatch):
     assert approvals_mod.post_policy_comment("42", report, run=fake_run_new) is True
     assert any(c[:3] == ["gh", "pr", "comment"] for c in calls)
 
-    # CLI --comment wires post_policy_comment without changing exit code
+    # Failed PATCH or failed lookup must return False without creating duplicate comments
+    dup_calls = []
+
+    def fail_patch(cmd, **kw):
+        dup_calls.append(cmd)
+        if cmd[:3] == ["gh", "pr", "view"]:
+            return subprocess.CompletedProcess(
+                cmd, 0,
+                stdout=json.dumps({
+                    "number": 42,
+                    "url": "https://ghe.example.com/o/r/pull/42",
+                    "comments": [{"url": "https://ghe.example.com/o/r/pull/42#issuecomment-77", "body": "<!-- openship-approvals -->\nold"}],
+                }),
+                stderr="",
+            )
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="transient error")
+
+    assert approvals_mod.post_policy_comment("42", report, run=fail_patch) is False
+    assert any("--hostname" in c and "ghe.example.com" in c for c in dup_calls)
+    assert not any(c[:3] == ["gh", "pr", "comment"] for c in dup_calls)
+
+    # Markdown table escapes pipes and newlines in rule names/reasons and honors custom source
+    weird = PolicyReport(
+        passed=False,
+        mode="observe",
+        verdicts=[RuleVerdict("Backend | Python\nTier", False, ["needs 1 | review\nnow"])],
+        summary="failed",
+    )
+    md = approvals_mod.format_policy_comment(weird, source="local file `custom.yml`")
+    assert "Backend \\| Python Tier" in md and "needs 1 \\| review now" in md
+    assert "local file `custom.yml`" in md
+
+    # CLI --comment wires post_policy_comment with policy provenance without changing exit code
     posted = []
     monkeypatch.setattr(approvals_mod, "check_pr_policy", lambda pr=None, policy_path=None: report)
-    monkeypatch.setattr(approvals_mod, "post_policy_comment", lambda pr, rep: posted.append((pr, rep)) or True)
-    res = CliRunner().invoke(approvals_cmd.app, ["42", "--comment"])
-    assert res.exit_code == 0 and len(posted) == 1 and posted[0][0] == "42"
+    monkeypatch.setattr(
+        approvals_mod,
+        "post_policy_comment",
+        lambda pr, rep, **kw: posted.append((pr, rep, kw.get("source", ""))) or True,
+    )
+    res = CliRunner().invoke(approvals_cmd.app, ["42", "--policy", "/tmp/p.yml", "--comment"])
+    assert res.exit_code == 0 and len(posted) == 1 and posted[0][0] == "42" and "/tmp/p.yml" in posted[0][2]

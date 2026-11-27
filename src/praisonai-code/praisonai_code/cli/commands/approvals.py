@@ -27,8 +27,10 @@ def approvals_main(
         typer.echo(f"approvals: {exc}", err=True)
         raise typer.Exit(1)
 
-    if comment and not approvals.post_policy_comment(pr, report):
-        typer.echo("approvals: warning: failed to post status comment to PR", err=True)
+    if comment:
+        src = f"local file `{policy}`" if policy else ""
+        if not approvals.post_policy_comment(pr, report, source=src):
+            typer.echo("approvals: warning: failed to post status comment to PR", err=True)
 
     if as_json:
         typer.echo(json.dumps({**dataclasses.asdict(report), "blocking": report.blocking}, indent=2))
