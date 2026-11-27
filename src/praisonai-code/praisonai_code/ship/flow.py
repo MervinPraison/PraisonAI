@@ -47,7 +47,7 @@ def _branch_changes(run: Callable, base: str) -> Tuple[List[str], str]:
 
 
 def ship_to_draft_pr(
-    message: Optional[str] = None, dry_run: bool = False, run: Callable = subprocess.run
+    message: Optional[str] = None, dry_run: bool = False, run: Callable = subprocess.run, llm: Optional[str] = None
 ) -> str:
     """Commit all changes, push the branch and open a draft PR. Returns the PR URL.
 
@@ -87,7 +87,7 @@ def ship_to_draft_pr(
     from praisonai_code.ship import pr_text
 
     commits, diff = _branch_changes(run, base)
-    text = pr_text.write_pr_text(commits, diff)
+    text = pr_text.write_pr_text(commits, diff, llm=llm) if llm is not None else pr_text.write_pr_text(commits, diff)
     return _out(
         run,
         "gh", "pr", "create", "--draft",
