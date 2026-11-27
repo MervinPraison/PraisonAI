@@ -83,7 +83,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Streaming | 2 | 4 | 1211 |
 | ✅ Tasks | 8 | 1 | 320 |
 | ✅ Teams | 1 | 1 | 200 |
-| ✅ Telemetry | 6 | 2 | 269 |
+| ✅ Telemetry | 6 | 2 | 270 |
 | ✅ Templates | 1 | 2 | 598 |
 | ✅ Token Management | 1 | 1 | 159 |
 | ✅ Tools | 60 | 18 | 3754 |
