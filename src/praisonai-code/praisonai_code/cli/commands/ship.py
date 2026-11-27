@@ -11,8 +11,9 @@ def ship_main(
     target: Optional[str] = typer.Argument(None, help="PR number/URL, effort (low..max), +reviewer, or review|init|check|ui"),
     message: Optional[str] = typer.Option(None, "--message", "-m", help="Commit message (generated if not given)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the plan and change nothing"),
-    effort: str = typer.Option("high", "--effort", help="Self-review effort: low|medium|high|xhigh|max"),
+    effort: str = typer.Option("high", "--effort", help="Self-review effort: low|medium|high|xhigh|max (or quick|standard|deep)"),
     model: Optional[str] = typer.Option(None, "--model", help="Model name (e.g. gpt-4o-mini, ollama/llama3.2)"),
+    github: bool = typer.Option(False, "--github", help="With `ship init`, sync detected LLM key & model to GitHub Actions"),
     review: bool = typer.Option(True, "--review/--no-review", help="Run self-review after opening the PR"),
     post_review: bool = typer.Option(False, "--post-review", help="Post self-review findings as a PR comment"),
     watch: bool = typer.Option(False, "--watch", help="Watch the PR with steward after shipping"),
@@ -31,7 +32,7 @@ def ship_main(
             from praisonai_code.ship.onboard import format_init_result, init_repo
 
             try:
-                res = init_repo(dry_run=dry_run, model=model, effort=effort)
+                res = init_repo(dry_run=dry_run, github=github, model=model, effort=effort)
             except (ShipRefused, ValueError) as exc:
                 typer.echo(f"ship: {exc}", err=True)
                 raise typer.Exit(1)

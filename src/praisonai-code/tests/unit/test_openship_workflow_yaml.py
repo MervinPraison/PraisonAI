@@ -36,12 +36,16 @@ def test_openship_full_github_workflow_covers_all_three_pillars() -> None:
     assert 'git config user.name "openship[bot]"' in raw
     assert "is_fork == 'false'" in raw
     assert "pull_request_target" in triggers
+    assert "ready_for_review" in triggers["pull_request"]["types"]
+    assert "ready_for_review" in triggers["pull_request_target"]["types"]
+    assert "OPENSHIP_SKIP_DRAFTS" in raw
     assert "CONFLICTING" in raw
     assert "secrets.OPENSHIP_GH_TOKEN || secrets.GITHUB_TOKEN" in raw
     assert "GH_REPO: ${{ github.repository }}" in raw
     assert "praisonai-code ship" in raw
     assert "praisonai-code steward" in raw
     assert "praisonai-code approvals" in raw
+    assert "--comment" in raw
     assert "praisonai ship" not in raw
     assert "praisonai steward" not in raw
     assert "praisonai approvals" not in raw

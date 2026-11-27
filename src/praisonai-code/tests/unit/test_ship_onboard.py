@@ -380,3 +380,64 @@ def test_default_base_branch_resolves_master_and_gh_fallback_without_origin_head
     assert ui_service._default_base_branch(fake_missing_gh) is None
     with pytest.raises(ValueError, match="could not determine base branch"):
         ui_service.get_diff_bundle(Path("."), run=fake_missing_gh)
+
+
+def test_init_repo_github_syncs_secret_via_stdin_and_vars_without_leaking(tmp_path: Path) -> None:
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append((cmd, kw.get("input")))
+        if cmd[:3] == ["git", "rev-parse", "--show-toplevel"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=f"{tmp_path}\n", stderr="")
+        if cmd[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="main\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    res = onboard.init_repo(
+        tmp_path,
+        github=True,
+        effort="standard",
+        run=fake_run,
+        env={"ANTHROPIC_API_KEY": "sk-ant-super-secret"},
+        which=lambda name: f"/usr/bin/{name}" if name == "gh" else None,
+        find_spec=lambda _: None,
+    )
+    assert res.github_secrets == ["ANTHROPIC_API_KEY"]
+    assert res.github_vars == {"OPENSHIP_MODEL": "claude-sonnet-4-6", "OPENSHIP_EFFORT": "medium"}
+    secret_calls = [(c, inp) for c, inp in calls if c[:3] == ["gh", "secret", "set"]]
+    assert secret_calls == [(["gh", "secret", "set", "ANTHROPIC_API_KEY"], "sk-ant-super-secret")]
+    # Secret must NEVER appear in command args or formatted output
+    assert all("sk-ant-super-secret" not in " ".join(c) for c, _ in calls)
+    formatted = onboard.format_init_result(res)
+    assert "sk-ant-super-secret" not in formatted
+    assert "GitHub secret (synced): ANTHROPIC_API_KEY" in formatted
+    assert "gh secret set " not in formatted
+
+    # Mismatched provider key must NOT be synced for an explicit --model
+    calls.clear()
+    res_mismatch = onboard.init_repo(
+        tmp_path,
+        github=True,
+        model="claude-sonnet-4-6",
+        run=fake_run,
+        env={"OPENAI_API_KEY": "sk-openai-only"},
+        which=lambda name: f"/usr/bin/{name}" if name == "gh" else None,
+        find_spec=lambda _: None,
+    )
+    assert res_mismatch.github_secrets == []
+    assert any("ANTHROPIC_API_KEY not set locally" in n for n in res_mismatch.github_notes)
+    assert not any(c[:3] == ["gh", "secret", "set"] for c, _ in calls)
+
+    # Dry-run with --github never executes gh secret/variable mutations
+    calls.clear()
+    res_dry = onboard.init_repo(
+        tmp_path,
+        dry_run=True,
+        github=True,
+        run=fake_run,
+        env={"OPENAI_API_KEY": "sk-dry"},
+        which=lambda _: None,
+        find_spec=lambda _: None,
+    )
+    assert res_dry.github_secrets == ["OPENAI_API_KEY"]
+    assert not any(c[:2] == ["gh", "secret"] or c[:2] == ["gh", "variable"] for c, _ in calls)
