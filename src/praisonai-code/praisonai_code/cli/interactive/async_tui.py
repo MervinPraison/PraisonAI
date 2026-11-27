@@ -1128,6 +1128,7 @@ class AsyncTUI:
         "git-undo": "Undo the last commit (keeps changes staged)",
         "ship": "Commit, push, and open a draft PR (never merges)",
         "steward": "Run one PR steward cycle (status/CI/review check; --once)",
+        "approvals": "Check a PR against .praisonai/approvals.yml",
         "map": "Show a ranked repository map (operator overview)",
     }
 
@@ -1330,6 +1331,7 @@ class AsyncTUI:
   /git-undo        Undo the last commit (keeps changes staged)
   /ship [args]     Commit, push, and open a draft PR (never merges)
   /steward [args]  Run one PR steward cycle (--once)
+  /approvals [args] Check a PR against .praisonai/approvals.yml
   /multiline       Toggle multiline input mode
   /files           List workspace files for @ mentions
   /queue           Show pending prompts in queue
@@ -1753,7 +1755,7 @@ Example: /handoff code "refactor the auth module" """
             self._handle_revert(args)
             return True
 
-        elif cmd in ("ship", "steward"):
+        elif cmd in ("ship", "steward", "approvals"):
             from praisonai_code.cli.interactive._ship_slash import run_ship_slash
 
             output = run_ship_slash(cmd, args, cwd=self.config.workspace or None)
