@@ -84,8 +84,8 @@ See [`examples/ship_ollama.sh`](examples/ship_ollama.sh) for a ready-to-run shel
   ```python
   from praisonai_code.ship import ship
 
-  pr_url = ship(dry_run=True)
-  print(pr_url)
+  res = ship(dry_run=True)
+  print(res.dry_run_plan)
   ```
 
 - **Free GitHub Actions CI Steward** — copy [`workflows/steward.yml`](workflows/steward.yml) into `.github/workflows/steward.yml` to run `praisonai steward <PR> --once` automatically on CI failures and review comments.
@@ -95,7 +95,7 @@ See [`examples/ship_ollama.sh`](examples/ship_ollama.sh) for a ready-to-run shel
 
 OpenShip is built to keep a human firmly in control of every merge:
 
-- **Hard `before_tool` guard:** Blocks `gh pr merge`, `gh pr review --approve`, `gh pr ready`, and `git push --force` at the tool boundary — OpenShip **never merges, never approves, and never force-pushes**.
+- **Hard `before_tool` guard:** Blocks `gh pr merge` (including `--auto`), `gh pr review --approve`, `gh api` merge/approve calls, and `git push --force*` at the tool boundary — OpenShip **never merges, never approves, and never force-pushes**.
 - **Draft-by-default:** Every pull request is opened as a draft on your feature branch; running `praisonai ship` on `main` (or a fork) is refused before any commit or push.
 - **Secret-file refusal:** Refuses to commit `.env` files, private keys, or other secret paths detected by PraisonAI's shared secret-path guard.
 - **3-attempt circuit breaker:** PR Steward caps retries per failing check, conflict, or review thread so an unfixable issue never loops indefinitely.

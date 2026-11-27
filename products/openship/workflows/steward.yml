@@ -3,8 +3,6 @@ name: OpenShip PR Steward
 on:
   pull_request:
     types: [opened, synchronize, labeled]
-  check_suite:
-    types: [completed]
   pull_request_review_comment:
     types: [created]
 

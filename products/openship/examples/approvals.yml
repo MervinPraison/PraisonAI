@@ -2,7 +2,6 @@
 # OpenShip loads approval policy from the default branch so a PR cannot
 # weaken its own rules.
 
-version: 1
 mode: observe  # Switch to "enforce" once your team has verified rule matches
 
 protected_paths:
@@ -13,14 +12,19 @@ rules:
   - name: core-source
     paths:
       - "src/**"
-    min_approvals: 1
-    require_codeowners: false
-    note: "Standard review for application source changes."
+    seats: 1
+    reviewers:
+      - "@maintainers"
+    checks:
+      - "unit-tests"
 
   - name: security-sensitive
     paths:
       - "security/**"
       - "**/auth/**"
-    min_approvals: 2
-    require_codeowners: true
-    note: "Two human approvals required for security and auth changes."
+    seats: 2
+    reviewers:
+      - "@security-team"
+    checks:
+      - "unit-tests"
+      - "security-scan"
