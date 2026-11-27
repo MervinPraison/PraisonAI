@@ -5,8 +5,8 @@ from praisonai.persistence import create_conversation_store
 
 store = create_conversation_store("sqlite", path="/tmp/multi_agent.db")
 
-agent1 = Agent(name="Researcher", llm="gpt-4o-mini", memory={"backend": "sqlite", "session_id": "shared-session", "db": store})
-agent2 = Agent(name="Writer", llm="gpt-4o-mini", memory={"backend": "sqlite", "session_id": "shared-session", "db": store})
+agent1 = Agent(name="Researcher", model="gpt-4o-mini", memory={"backend": "sqlite", "session_id": "shared-session", "db": store})
+agent2 = Agent(name="Writer", model="gpt-4o-mini", memory={"backend": "sqlite", "session_id": "shared-session", "db": store})
 
 r1 = agent1.chat("Research topic: AI in healthcare. Key finding: reduces diagnosis time by 50%")
 print(f"Researcher: {r1[:50]}...")

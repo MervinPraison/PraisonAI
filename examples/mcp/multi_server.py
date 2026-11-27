@@ -88,7 +88,7 @@ def main():
         2. Calculator - for mathematical calculations
         
         Use the appropriate tool based on the user's request.""",
-        llm="openai/gpt-4o-mini",
+        model="openai/gpt-4o-mini",
         tools=[time_mcp, calculate]  # Mix MCP and regular tools
     )
     
@@ -156,7 +156,7 @@ def demo_multiple_mcp_servers():
     agent = Agent(
         name="MultiServerAgent",
         instructions="You have access to multiple MCP servers. Use the appropriate tools.",
-        llm="openai/gpt-4o-mini",
+        model="openai/gpt-4o-mini",
         tools=available_tools
     )
     

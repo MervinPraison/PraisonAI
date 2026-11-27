@@ -27,7 +27,7 @@ set_default_emitter(emitter)
 agent = Agent(
     name="Coder",
     instructions="You are a helpful coding assistant.",
-    llm="openai/gpt-4o-mini",
+    model="openai/gpt-4o-mini",
 )
 
 try:
