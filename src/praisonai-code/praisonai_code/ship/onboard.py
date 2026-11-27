@@ -53,10 +53,6 @@ permissions:
   pull-requests: write
   statuses: write
 
-concurrency:
-  group: openship-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
-  cancel-in-progress: false
-
 env:
   # Works with ANY LLM provider supported by PraisonAI:
   # OpenAI (gpt-4o-mini), Anthropic (claude-sonnet-4-6), Gemini (gemini/gemini-2.5-flash),
@@ -67,6 +63,9 @@ env:
 jobs:
   # Pillar 1: Inline AI Code Review (auto on PR open/push + on-demand via `@praisonai review`; reads REVIEW.md from default branch)
   review:
+    concurrency:
+      group: openship-review-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
+      cancel-in-progress: true
     if: >-
       !endsWith(github.actor, '[bot]') &&
       (
@@ -120,6 +119,9 @@ jobs:
 
   # Pillar 2: PR Steward (fixes failing CI, merge conflicts, review threads & @praisonai directives; 3-try circuit breaker; never merges)
   steward:
+    concurrency:
+      group: openship-steward-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
+      cancel-in-progress: false
     if: >-
       !endsWith(github.actor, '[bot]') &&
       (
@@ -190,6 +192,9 @@ jobs:
 
   # Pillar 3: Declarative PR Approvals Policy Check (.praisonai/approvals.yml on default branch; observe or enforce)
   approvals:
+    concurrency:
+      group: openship-approvals-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
+      cancel-in-progress: true
     if: >-
       (
         (github.event_name == 'pull_request' || github.event_name == 'pull_request_review') &&
