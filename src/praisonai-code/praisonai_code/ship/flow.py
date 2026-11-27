@@ -2,7 +2,7 @@
 
 import json
 import subprocess
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Tuple
 
 from praisonaiagents.errors import PraisonAIError
 from praisonaiagents.permissions import is_secret_path
@@ -30,6 +30,20 @@ def _changed_files(run: Callable) -> List[str]:
             if entry[0] in "RC":
                 next(entries, None)  # a rename's source path follows; skip it
     return files
+
+
+def _branch_changes(run: Callable, base: str) -> Tuple[List[str], str]:
+    """Commit subjects (oldest first) and diff on HEAD relative to ``base``."""
+    ref = f"origin/{base}"
+    raw = _out(run, "git", "log", "--reverse", "--format=%s", f"{ref}..HEAD", ok=True)
+    if raw is None:
+        ref = base
+        raw = _out(run, "git", "log", "--reverse", "--format=%s", f"{ref}..HEAD", ok=True) or ""
+    commits = [line for line in raw.splitlines() if line.strip()]
+    if not commits:
+        raise ShipRefused(f"no commits ahead of '{base}'; commit before opening a pull request")
+    diff = _out(run, "git", "diff", f"{ref}...HEAD", ok=True) or ""
+    return commits, diff
 
 
 def ship_to_draft_pr(
@@ -70,4 +84,13 @@ def ship_to_draft_pr(
     existing = _out(run, "gh", "pr", "view", "--json", "url,state", ok=True)
     if existing and json.loads(existing).get("state") == "OPEN":
         return json.loads(existing)["url"]
-    return _out(run, "gh", "pr", "create", "--draft", "--fill", "--base", base, "--head", branch)
+    from praisonai_code.ship import pr_text
+
+    commits, diff = _branch_changes(run, base)
+    text = pr_text.write_pr_text(commits, diff)
+    return _out(
+        run,
+        "gh", "pr", "create", "--draft",
+        "--base", base, "--head", branch,
+        "--title", text.title, "--body", text.body,
+    )
