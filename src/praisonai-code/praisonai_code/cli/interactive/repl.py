@@ -46,7 +46,7 @@ DEFAULT_COMMANDS: Dict[str, str] = {
     "btw": "Ask a side question in a throwaway context (main task untouched)",
     "undo": "Undo the last turn (files + conversation)",
     "revert": "Revert the last N turns (files + conversation)",
-    "ship": "Create a branch, commit, push, and open a draft PR (never merges)",
+    "ship": "Commit, push, and open a draft PR (never merges)",
     "steward": "Run one PR steward cycle (status/CI/review check; --once)",
 }
 

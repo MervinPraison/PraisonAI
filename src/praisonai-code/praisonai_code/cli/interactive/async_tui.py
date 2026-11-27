@@ -1126,7 +1126,7 @@ class AsyncTUI:
         "git-log": "Show recent commits",
         "git-commit": "Stage and commit (message auto-generated when omitted)",
         "git-undo": "Undo the last commit (keeps changes staged)",
-        "ship": "Create a branch, commit, push, and open a draft PR (never merges)",
+        "ship": "Commit, push, and open a draft PR (never merges)",
         "steward": "Run one PR steward cycle (status/CI/review check; --once)",
         "map": "Show a ranked repository map (operator overview)",
     }
@@ -1328,7 +1328,7 @@ class AsyncTUI:
   /git-log [n]     Show recent commits
   /git-commit [m]  Stage and commit (message auto-generated when omitted)
   /git-undo        Undo the last commit (keeps changes staged)
-  /ship [args]     Create a branch, commit, push, and open a draft PR
+  /ship [args]     Commit, push, and open a draft PR (never merges)
   /steward [args]  Run one PR steward cycle (--once)
   /multiline       Toggle multiline input mode
   /files           List workspace files for @ mentions
