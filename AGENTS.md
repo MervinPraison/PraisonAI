@@ -61,7 +61,7 @@ Check these before writing code. If a check fails, move the code or drop the cha
 - Base every PR on `main`. Never base a PR on another PR's branch: a child merged into a parent branch does not reach `main`.
 - Keep PRs small and independently testable. Auto-merge eligibility requires at most 5 non-test files and fewer than 100 changed non-test lines. Larger PRs require manual review.
 - PRs that edit the same lines (for example one sorted import) go in one PR or land one at a time.
-- A non-draft PR may be auto-merged by the merge gate once checks pass. Fork PRs require manual review. Open as a draft to hold a PR for human review.
+- The merge gate can auto-merge eligible non-draft PRs after it verifies checks and the review verdict for the current head SHA. A maintainer merges fork PRs manually. Open as a draft to hold a PR for human review.
 - Before merging several PRs together, merge them in a scratch worktree and run every touched test file; two green PRs can break `main` together.
 - No feature is removed without a deprecation cycle. Prefer delegate, shim or alias.
 - Guard and ratchet tests (`tests/unit/named_loggers/`, `test_silent_except_ratchet.py`, `tests/unit/contract/`, `tests/unit/security/`, `tools/test_outbound_fetch_guard.py`, `test_tier_dependencies.py`) encode decisions. Fix the code, not the guard.
