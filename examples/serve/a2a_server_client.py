@@ -52,7 +52,7 @@ def run_server():
         role="Helpful AI Assistant",
         goal="Help other agents and users with their questions",
         backstory="You are a knowledgeable assistant accessible via A2A protocol.",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # Create A2A interface

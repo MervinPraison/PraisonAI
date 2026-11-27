@@ -38,7 +38,7 @@ def demo_single_agent_launch():
         name="Assistant",
         role="Helpful AI Assistant",
         goal="Help users with their questions",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     print(f"Agent: {agent.name}")
@@ -73,14 +73,14 @@ def demo_multi_agent_launch():
         name="Researcher",
         role="Research Specialist",
         goal="Find accurate information",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     writer = Agent(
         name="Writer",
         role="Content Writer",
         goal="Create engaging content",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     agents = AgentTeam(agents=[researcher, writer])
