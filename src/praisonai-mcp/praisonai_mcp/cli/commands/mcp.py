@@ -39,6 +39,37 @@ def _require_code() -> None:
         raise typer.Exit(1)
 
 
+def _server_entry(srv_config, timeout: int, remote_cls=None) -> dict:
+    """Build a config-builder entry dict from an MCPLocalConfig or MCPRemoteConfig."""
+    is_remote = (
+        (remote_cls is not None and isinstance(srv_config, remote_cls))
+        or bool(getattr(srv_config, "url", None))
+    )
+    entry = {"enabled": getattr(srv_config, "enabled", True), "timeout": timeout}
+    if is_remote:
+        entry["url"] = srv_config.url
+        if getattr(srv_config, "headers", None):
+            entry["headers"] = dict(srv_config.headers)
+        oauth = getattr(srv_config, "oauth", None)
+        if oauth:
+            if isinstance(oauth, (bool, dict)):
+                entry["oauth"] = oauth
+            else:
+                oauth_dict = {
+                    k: v for k, v in (
+                        ("client_id", getattr(oauth, "client_id", None)),
+                        ("scopes", getattr(oauth, "scopes", None)),
+                    ) if v
+                }
+                entry["oauth"] = oauth_dict or True
+    else:
+        entry["command"] = srv_config.command
+        entry["args"] = list(getattr(srv_config, "args", None) or [])
+        if getattr(srv_config, "env", None):
+            entry["env"] = dict(srv_config.env)
+    return entry
+
+
 @app.command("list")
 def mcp_list(
     json_output: bool = typer.Option(False, "--json", help="Output JSON"),
@@ -328,34 +359,24 @@ def mcp_sync(
     failed_servers = []
     
     for srv in servers_to_sync:
-        output.print_info(f"Syncing {srv}...")
         srv_config = config.mcp.servers[srv]
+        if not getattr(srv_config, "enabled", True):
+            output.print_info(f"Skipping disabled server: {srv}")
+            continue
+        output.print_info(f"Syncing {srv}...")
         
         mcp = None
         try:
-            # Import schema types for checking
-            schema = configuration_schema()
-            MCPLocalConfig, MCPRemoteConfig = schema.MCPLocalConfig, schema.MCPRemoteConfig
-            # Actually connect to MCP server and fetch tools
+            MCPRemoteConfig = configuration_schema().MCPRemoteConfig
+            if isinstance(srv_config, MCPRemoteConfig) and not srv_config.url:
+                output.print_error(f"  Remote server {srv} has no URL configured")
+                failed_servers.append(srv)
+                continue
             from praisonaiagents.mcp import MCP
-            
-            # Handle different server types
-            if isinstance(srv_config, MCPRemoteConfig):
-                # Remote server - connect via URL
-                if not srv_config.url:
-                    output.print_error(f"  Remote server {srv} has no URL configured")
-                    failed_servers.append(srv)
-                    continue
-                    
-                # Create MCP instance for remote server
-                mcp = MCP(srv_config.url, timeout=int(timeout))
-            else:
-                # Local server - use command
-                cmd_parts = [srv_config.command] + srv_config.args
-                cmd_string = " ".join(cmd_parts)
-                
-                # Create MCP instance with env vars
-                mcp = MCP(cmd_string, timeout=int(timeout), env=srv_config.env or {})
+
+            # Shared builder: URL validation, SSE header rule, and arg list intact.
+            # Keep expand_env=False (default): ConfigLoader merges user and project files.
+            mcp = MCP.from_config(_server_entry(srv_config, int(timeout), MCPRemoteConfig), name=srv)
             
             # Get tools
             tools = mcp.get_tools()
@@ -604,10 +625,9 @@ def mcp_run(
             mcp = None
             try:
                 from praisonaiagents.mcp import MCP
-                
-                # Build command string
-                cmd_string = " ".join(cmd)
-                mcp = MCP(cmd_string, timeout=60, env=server.env or {})
+
+                # Shared builder keeps arguments intact; expand_env stays False.
+                mcp = MCP.from_config(_server_entry(server, 60), name=name)
                 
                 # Get tools and expose via SSE
                 tools = mcp.get_tools()
