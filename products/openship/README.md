@@ -19,23 +19,26 @@
 
 | Capability | OpenShip (PraisonAI) | Claude Ship |
 |---|---|---|
-| **Pillar 1 — Self-Review** | Lockfile-filtered diff, typed severity findings (`important` / `nit` / `pre_existing`), effort caps (`low`..`max`) | Built-in self-review |
-| **Pillar 2 — PR Steward** | Fixes merge conflicts, failing CI checks, and review threads with a **3-attempt circuit breaker** | Built-in PR steward |
-| **Pillar 3 — Declarative Approvals** | `.praisonai/approvals.yml` (`observe` / `enforce` modes, `protected_paths`, path-scoped rules) | Declarative approvals |
+| **Pillar 1 — Self-Review** | **Inline PR diff comments**, repo `REVIEW.md` guidelines, adversarial verification pass (`high`+), typed severities (`important` / `nit` / `pre_existing`), effort caps (`low`..`max`) | Built-in inline review + `REVIEW.md` |
+| **Pillar 2 — PR Steward** | Fixes failing CI (`workflow_run`), merge conflicts, review threads & `@praisonai` directives; **stateless-safe 3-attempt circuit breaker**; `@praisonai stop` / `openship-stop` label; `git revert <sha>` comment | Built-in PR steward |
+| **Pillar 3 — Declarative Approvals** | `.praisonai/approvals.yml` (`observe` / `enforce` modes, `protected_paths`, path-scoped rules, loaded strictly from `origin/<base>`) | Declarative approvals |
+| **Runs Directly in GitHub** | **Free drop-in 3-job GitHub Actions workflow** (`workflows/openship.yml` — zero external server, zero vendor fee) | Hosted Claude GitHub App (Team/Enterprise paid) |
 | **LLM Support** | **Any LLM** (OpenAI, Anthropic, Gemini, OpenRouter, vLLM, LM Studio, **100% local Ollama**) | Anthropic Claude only |
-| **License** | **MIT Open Source** (inspect, self-host, extend) | Proprietary |
-| **CI Automation** | **Free GitHub Actions CI Steward** (`workflows/steward.yml`) | Hosted / vendor-managed |
+| **Visual Web UI** | **Built-in PraisonAIUI plugin** (`aiui openship serve` — Overview, Self-Review, PR Steward, PR Policy) | claude.ai web settings |
+| **License** | **MIT Open Source** (inspect, self-host, extend — ships directly inside `praisonai-code`) | Proprietary |
 | **Human-in-the-Loop** | **Draft PR by default; never merges, approves, or force-pushes** | Human merge |
 
 ## Install
 
+OpenShip ships directly inside **`praisonai-code`** (included with `pip install praisonai`):
+
 ```bash
 pip install praisonai-code
-# Or via the thin meta-package (adds `praisonai-ship`, `praisonai-steward`, and `praisonai-approvals` aliases):
-pip install praisonai-ship
+# With the built-in PraisonAIUI visual web dashboard:
+pip install "praisonai-code[ui]"
 ```
 
-> **Command name note:** The CLI uses `praisonai ship` / `praisonai steward` / `praisonai approvals` (and the `praisonai-ship` / `praisonai-steward` / `praisonai-approvals` aliases from the thin meta-package) to intentionally avoid `$PATH` collisions with unrelated `openship` PaaS CLIs.
+> **Run directly in GitHub Actions (zero server):** Copy [`workflows/openship.yml`](workflows/openship.yml) into `.github/workflows/openship.yml` and add your preferred LLM API key (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `GEMINI_API_KEY`) as a repository secret. Every PR automatically gets inline self-review, CI-fixing PR Steward (`@praisonai stop` to halt), and `.praisonai/approvals.yml` policy checks.
 
 ## Quick Start (4 Ways)
 

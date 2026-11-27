@@ -678,8 +678,17 @@ class OpenShipPlugin:
             """Launch a focused PraisonAIUI app shell showing only OpenShip pages."""
             import uvicorn
             import praisonaiui as aiui
+            from praisonaiagents.agent.launch_security import require_bind_token
             from praisonaiui.server import create_app
 
+            token = require_bind_token(
+                host,
+                os.environ.get("GATEWAY_AUTH_TOKEN"),
+                server="aiui openship serve",
+                hint="Set GATEWAY_AUTH_TOKEN",
+            )
+            if token:
+                os.environ.setdefault("AIUI_REQUIRE_TOKEN", "1")
             if repo:
                 os.environ["OPENSHIP_REPO"] = str(Path(repo).expanduser().resolve())
             aiui.set_style("app")
