@@ -36,6 +36,9 @@ pip install praisonai-code
 # Verify git, gh auth, LLM key / Ollama, UI, and repo workflow files in one command
 praisonai-code ship check
 
+# Run local AI self-review on your current diff (uses REVIEW.md + verification; no PR needed)
+praisonai-code ship review
+
 # Preview the exact ship plan without changing anything
 praisonai-code ship --dry-run
 

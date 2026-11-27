@@ -8,7 +8,7 @@ app = typer.Typer(help="Commit, push and open a draft PR (never merges)")
 
 @app.command()
 def ship_main(
-    target: Optional[str] = typer.Argument(None, help="PR number/URL, effort (low..max), +reviewer, or init|check|ui"),
+    target: Optional[str] = typer.Argument(None, help="PR number/URL, effort (low..max), +reviewer, or review|init|check|ui"),
     message: Optional[str] = typer.Option(None, "--message", "-m", help="Commit message (generated if not given)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the plan and change nothing"),
     effort: str = typer.Option("high", "--effort", help="Self-review effort: low|medium|high|xhigh|max"),
@@ -21,7 +21,7 @@ def ship_main(
     """Commit all changes, push the branch, open a draft PR, and self-review. You merge it."""
     from praisonai_code.ship.flow import ShipRefused
 
-    if target in ("init", "check", "ui"):
+    if target in ("init", "check", "ui", "review"):
         if target == "check":
             from praisonai_code.ship.onboard import check_readiness, format_readiness
 
@@ -36,6 +36,42 @@ def ship_main(
                 typer.echo(f"ship: {exc}", err=True)
                 raise typer.Exit(1)
             typer.echo(format_init_result(res, dry_run=dry_run))
+            return
+        if target == "review":
+            from praisonai_code.ship import is_ship_disabled
+            from praisonai_code.ship import ui_service
+
+            if reason := is_ship_disabled():
+                typer.echo(f"ship: {reason}", err=True)
+                raise typer.Exit(1)
+            repo = ui_service.get_repo_root()
+            try:
+                if dry_run:
+                    diff_text, files, source = ui_service.get_diff_bundle(repo)
+                    if not diff_text.strip():
+                        typer.echo("ship review: no local changes to review")
+                    else:
+                        names = ", ".join(f.path for f in files) or "(diff)"
+                        typer.echo(f"Would review {len(files)} file(s) from {source} (effort={effort}): {names}")
+                    return
+                res = ui_service.run_review(repo, effort=effort, model=model)
+            except (ShipRefused, ValueError) as exc:
+                typer.echo(f"ship: {exc}", err=True)
+                raise typer.Exit(1)
+            if not res.get("diff"):
+                typer.echo("ship review: no local changes to review")
+                return
+            findings = res.get("findings") or []
+            if not findings:
+                typer.echo(f"ship review: no issues found (source: {res['source']}, effort: {effort})")
+                return
+            typer.echo(
+                f"ship review: found {len(findings)} issue(s) (severity: {res['severity']}, source: {res['source']})"
+            )
+            for f in findings:
+                loc = f"{f['path']}:{f['line']}" if f.get("line") else f["path"]
+                fix = f" — {f['fix']}" if f.get("fix") else ""
+                typer.echo(f"  [{f['severity']}] {loc}: {f['title']}{fix}")
             return
         import importlib.util
         import os

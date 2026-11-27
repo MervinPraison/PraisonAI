@@ -153,6 +153,17 @@ def resolve_policy_path(repo: Path, policy_path: Optional[str]) -> Optional[str]
     return str(resolved)
 
 
+def _default_base_branch(runner: Callable) -> str:
+    """Return the full default branch name (e.g. ``main`` or ``release/2.x``)."""
+    base_ref = runner(["git", "symbolic-ref", "refs/remotes/origin/HEAD"], capture_output=True, text=True)
+    if base_ref.returncode == 0:
+        ref = base_ref.stdout.strip()
+        prefix = "refs/remotes/origin/"
+        if ref.startswith(prefix) and ref[len(prefix):]:
+            return ref[len(prefix):]
+    return "main"
+
+
 def get_repo_status(repo: Path, run: Optional[Callable] = None) -> RepoStatus:
     runner = run or _run_in(repo)
     st = RepoStatus(repo=str(repo))
@@ -164,9 +175,7 @@ def get_repo_status(repo: Path, run: Optional[Callable] = None) -> RepoStatus:
     porcelain = runner(["git", "status", "--porcelain"], capture_output=True, text=True)
     if porcelain.returncode == 0:
         st.dirty_files = [ln[3:].strip() for ln in porcelain.stdout.splitlines() if ln.strip()]
-    base_ref = runner(["git", "symbolic-ref", "refs/remotes/origin/HEAD"], capture_output=True, text=True)
-    if base_ref.returncode == 0 and "/" in base_ref.stdout:
-        st.base = base_ref.stdout.strip().rsplit("/", 1)[-1]
+    st.base = _default_base_branch(runner)
     gh = runner(["gh", "pr", "view", "--json", "number,title,url,state,isDraft"], capture_output=True, text=True)
     if gh.returncode == 0 and gh.stdout.strip():
         try:
@@ -280,6 +289,16 @@ def get_diff_bundle(
                     )
             raw = "\n".join(chunks)
         label = "working branch"
+        if not raw.strip():
+            # Fall back to committed feature-branch diff against origin/<base> (or local <base> if remote missing)
+            base_name = _default_base_branch(runner)
+            for ref in (f"origin/{base_name}", base_name):
+                bdiff = runner(["git", "diff", f"{ref}...HEAD"], capture_output=True, text=True)
+                if bdiff.returncode == 0:
+                    if bdiff.stdout.strip():
+                        raw = bdiff.stdout
+                        label = f"branch vs {ref}"
+                    break
     cleaned = strip_noisy_diff(raw)[:_MAX_DIFF_CHARS]
     return cleaned, split_unified_diff(cleaned), label
 
@@ -301,16 +320,21 @@ def run_review(
     run: Optional[Callable] = None,
     review_fn: Optional[Callable] = None,
 ) -> Dict[str, Any]:
-    from praisonai_code.ship.review import review_diff, review_severity
+    from praisonai_code.ship.review import load_review_guidelines, review_diff, review_severity
 
     if effort not in _EFFORTS:
         raise ValueError(f"effort must be one of {', '.join(_EFFORTS)}")
+    runner = run or _run_in(repo)
     pr_num = normalize_pr(pr)
-    diff_text, file_diffs, label = get_diff_bundle(repo, pr=pr_num, run=run)
+    diff_text, file_diffs, label = get_diff_bundle(repo, pr=pr_num, run=runner)
     if not diff_text.strip():
         return {"source": label, "pr": pr_num, "severity": "none", "findings": [], "diff": "", "files": []}
-    fn = review_fn or review_diff
-    findings = fn(diff_text, effort=effort, llm=(model or None))
+    if review_fn is not None:
+        findings = review_fn(diff_text, effort=effort, llm=(model or None))
+    else:
+        base_name = _default_base_branch(runner)
+        guidelines = load_review_guidelines(base=base_name, repo_root=repo, run=runner)
+        findings = review_diff(diff_text, effort=effort, llm=(model or None), guidelines=(guidelines or None))
     sev = review_severity(findings)
     counts = Counter(f.severity for f in findings)
     append_ledger(
