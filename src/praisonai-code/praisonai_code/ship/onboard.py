@@ -137,11 +137,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          OPENSHIP_SKIP_DRAFTS: ${{ vars.OPENSHIP_SKIP_DRAFTS || 'false' }}
         run: |
           PR_NUM="${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}"
           echo "number=$PR_NUM" >> "$GITHUB_OUTPUT"
           HEAD_REF="$(gh pr view "$PR_NUM" --json headRefName --jq .headRefName)"
           IS_FORK="$(gh pr view "$PR_NUM" --json isCrossRepository --jq .isCrossRepository)"
+          IS_DRAFT="$(gh pr view "$PR_NUM" --json isDraft --jq .isDraft)"
           MERGEABLE="UNKNOWN"
           if [ "${{ github.event_name }}" = "pull_request_target" ]; then
             for _ in 1 2 3; do
@@ -153,7 +155,9 @@ jobs:
           SHOULD_RUN="false"
           if [ "$IS_FORK" = "false" ]; then
             if [ "${{ github.event_name }}" != "pull_request_target" ] || [ "$MERGEABLE" = "CONFLICTING" ]; then
-              SHOULD_RUN="true"
+              if [ "$OPENSHIP_SKIP_DRAFTS" != "true" ] || [ "$IS_DRAFT" != "true" ] || [ "${{ github.event_name }}" = "issue_comment" ]; then
+                SHOULD_RUN="true"
+              fi
             fi
           fi
           echo "head_ref=$HEAD_REF" >> "$GITHUB_OUTPUT"
@@ -510,9 +514,7 @@ def _sync_github_repo(
 ) -> None:
     """Sync detected LLM API key secret (via stdin, never argv) and model/effort vars to GitHub."""
     secret_var, expected_var = _secret_var_for_model(model, env)
-    vars_to_set: Dict[str, str] = {"OPENSHIP_MODEL": model}
-    if effort != "high":
-        vars_to_set["OPENSHIP_EFFORT"] = effort
+    vars_to_set: Dict[str, str] = {"OPENSHIP_MODEL": model, "OPENSHIP_EFFORT": effort}
     if dry_run:
         if secret_var:
             result.github_secrets.append(secret_var)

@@ -440,4 +440,5 @@ def test_init_repo_github_syncs_secret_via_stdin_and_vars_without_leaking(tmp_pa
         find_spec=lambda _: None,
     )
     assert res_dry.github_secrets == ["OPENAI_API_KEY"]
+    assert res_dry.github_vars == {"OPENSHIP_MODEL": "gpt-4o-mini", "OPENSHIP_EFFORT": "high"}
     assert not any(c[:2] == ["gh", "secret"] or c[:2] == ["gh", "variable"] for c, _ in calls)
