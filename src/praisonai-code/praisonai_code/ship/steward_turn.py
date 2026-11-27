@@ -31,9 +31,9 @@ def _git_head(run: Callable) -> Optional[str]:
 
 def _is_pushed(run: Callable, branch: str, sha: str) -> bool:
     if not branch:
-        return True
+        return False
     proc = run(["git", "rev-parse", "--verify", f"origin/{branch}"], capture_output=True, text=True)
-    return True if proc.returncode != 0 or not proc.stdout.strip() else proc.stdout.strip() == sha
+    return proc.returncode == 0 and proc.stdout.strip() == sha
 
 
 def _failed_check_log(run: Callable, state: PRState, check_name: str) -> str:
@@ -68,7 +68,7 @@ def _steward_agent(llm: Optional[str] = None):
         "approve, enable auto-merge, or force-push. End with a short summary of what changed."
     )
     return Agent(name="ship-steward", instructions=instructions,
-                 tools=[execute_command, read_file, write_file], hooks=registry, model=llm)
+                 tools=[execute_command, read_file, write_file], hooks=registry, model=llm, approval=True)
 
 
 def _build_prompt(state: PRState, action: Action, *, check_log: Optional[str] = None) -> str:

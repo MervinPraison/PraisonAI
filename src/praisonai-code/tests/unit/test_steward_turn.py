@@ -89,6 +89,7 @@ def test_unknown_action_kind_raises():
 
 def test_default_agent_installs_never_merge_guard_and_blocks_merge():
     agent = _steward_agent(llm="gpt-4o-mini")
+    assert "execute_command" not in (getattr(agent, "_perm_deny", None) or set())
     for cmd in ("gh pr merge 7 --squash", "gh pr review 7 --approve", "git push --force origin feat/x"):
         out = str(agent.execute_tool("execute_command", {"command": cmd}))
         assert "blocked" in out.lower() or "never merges" in out.lower()
@@ -173,6 +174,13 @@ def test_posts_revert_comment_when_remote_ref_matches_new_head():
     res = run_steward_turn(_state(), Action("fix_check", "check:CI/test", "CI/test"), agent=FakeAgent(), run=run)
     assert res.acted and res.pushed_sha == "bbb2222" and res.commented
     assert run.ran("gh", "pr", "comment")
+
+
+def test_skips_revert_comment_when_remote_ref_is_missing():
+    run = FakeRunner(heads=("aaa1111", "bbb2222"), remote_head=None)
+    res = run_steward_turn(_state(), Action("fix_check", "check:CI/test", "CI/test"), agent=FakeAgent(), run=run)
+    assert res.acted and res.pushed_sha is None and not res.commented
+    assert not run.ran("gh", "pr", "comment")
 
 
 def test_fix_check_fetches_and_fences_failed_run_log():
