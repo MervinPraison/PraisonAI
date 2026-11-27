@@ -51,6 +51,7 @@ class ServerSpec:
     args: Tuple[str, ...] = ()
     env: Tuple[str, ...] = ()
     url: Optional[str] = None
+    headers: Optional[Dict[str, str]] = None
 
     @property
     def argv(self) -> List[str]:
