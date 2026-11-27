@@ -1,0 +1,38 @@
+name: OpenShip PR Steward
+
+on:
+  pull_request:
+    types: [opened, synchronize, labeled]
+  pull_request_review_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  steward:
+    if: >-
+      github.actor != 'dependabot[bot]' &&
+      !endsWith(github.actor, '[bot]') &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      !contains(github.event.pull_request.labels.*.name, 'openship-stop')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install OpenShip (praisonai-code)
+        run: pip install --quiet praisonai-code
+
+      - name: Run one PR Steward cycle
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: praisonai steward "${{ github.event.pull_request.number }}" --once
