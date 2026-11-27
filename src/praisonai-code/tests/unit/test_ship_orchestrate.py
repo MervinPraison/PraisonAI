@@ -164,3 +164,42 @@ def test_cli_help_and_options_forward_to_ship(monkeypatch):
     assert res.exit_code == 0 and "pull/42" in res.output
     assert seen["target"] == "42" and seen["effort"] == "low"
     assert seen["model"] == "gpt-4o-mini" and seen["post_review"] is True
+    assert seen["on_event"] is not None
+
+
+def test_positional_effort_sets_effort_and_ships_current_branch(monkeypatch):
+    rev_seen = {}
+    monkeypatch.setattr(flow, "ship_to_draft_pr", lambda **kw: "https://github.com/o/r/pull/9")
+    ship("low", run=FakeRun(), review_fn=lambda diff, effort="high", llm=None: (rev_seen.update(effort=effort), [])[1])
+    assert rev_seen["effort"] == "low"
+
+
+def test_invalid_effort_fails_fast_before_any_git_or_gh_call(monkeypatch):
+    monkeypatch.setattr(
+        flow, "ship_to_draft_pr", lambda **kw: (_ for _ in ()).throw(AssertionError("must fail before flow"))
+    )
+    with pytest.raises(ValueError, match="effort"):
+        ship(effort="ultra")
+
+
+def test_watch_forwards_on_event_callback(monkeypatch):
+    monkeypatch.setattr(flow, "ship_to_draft_pr", lambda **kw: "https://github.com/o/r/pull/9")
+    got = {}
+    cb = lambda msg: None
+    ship(review=False, watch=True, run=FakeRun(), on_event=cb, watch_fn=lambda pr, **kw: got.update(kw))
+    assert got["on_event"] is cb
+
+
+def test_cli_prints_each_finding_detail(monkeypatch):
+    from praisonai_code.cli.commands import ship as ship_cmd
+    from praisonai_code.ship import orchestrate
+
+    finding = ReviewFinding(path="src/x.py", line=14, severity="important", title="off-by-one", fix="use < len")
+    monkeypatch.setattr(
+        orchestrate,
+        "ship",
+        lambda *a, **kw: ShipResult(pr_url="https://github.com/o/r/pull/9", findings=[finding], severity="high"),
+    )
+    res = CliRunner().invoke(ship_cmd.app, [])
+    assert res.exit_code == 0
+    assert "src/x.py:14" in res.output and "off-by-one" in res.output and "use < len" in res.output

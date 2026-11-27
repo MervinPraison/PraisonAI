@@ -1,7 +1,6 @@
 """``praisonai ship``: commit, push, open a draft PR, self-review, and optionally watch."""
 
 from typing import Optional
-
 import typer
 
 app = typer.Typer(help="Commit, push and open a draft PR (never merges)")
@@ -9,7 +8,7 @@ app = typer.Typer(help="Commit, push and open a draft PR (never merges)")
 
 @app.command()
 def ship_main(
-    target: Optional[str] = typer.Argument(None, help="PR number/URL, or +reviewer"),
+    target: Optional[str] = typer.Argument(None, help="PR number/URL, effort (low..max), or +reviewer"),
     message: Optional[str] = typer.Option(None, "--message", "-m", help="Commit message (generated if not given)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the plan and change nothing"),
     effort: str = typer.Option("high", "--effort", help="Self-review effort: low|medium|high|xhigh|max"),
@@ -22,13 +21,14 @@ def ship_main(
     """Commit all changes, push the branch, open a draft PR, and self-review. You merge it."""
     from praisonai_code.ship import orchestrate
     from praisonai_code.ship.flow import ShipRefused
-
     try:
         res = orchestrate.ship(target, message=message, dry_run=dry_run, effort=effort, model=model,
-                               review=review, post_review=post_review, watch=watch, reviewer=reviewer)
+                               review=review, post_review=post_review, watch=watch, reviewer=reviewer, on_event=typer.echo)
     except (ShipRefused, ValueError) as exc:
         typer.echo(f"ship: {exc}", err=True)
         raise typer.Exit(1)
     typer.echo(res.dry_run_plan or res.pr_url)
     if not res.dry_run_plan and res.findings:
         typer.echo(f"ship: self-review found {len(res.findings)} issue(s) (severity: {res.severity})")
+        for f in res.findings:
+            typer.echo(f"  [{f.severity}] {f.path}{f':{f.line}' if f.line else ''}: {f.title}" + (f" — {f.fix}" if f.fix else ""))
