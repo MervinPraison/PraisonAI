@@ -34,3 +34,10 @@ def is_ship_disabled(config: Any = None) -> Optional[str]:
     if enabled is False:
         return "ship is disabled in configuration (ship.enabled = false)"
     return None
+
+
+def __getattr__(name: str):
+    if name in ("ship", "ShipResult"):
+        from praisonai_code.ship import orchestrate
+        return getattr(orchestrate, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
