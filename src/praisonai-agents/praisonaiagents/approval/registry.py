@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import contextlib
 import contextvars
 import threading
 from praisonaiagents._logging import get_logger
@@ -194,6 +195,9 @@ class ApprovalRegistry:
         # mapping, replaced (never mutated) on every write. ``None`` = empty.
         self._approved_context: contextvars.ContextVar[Optional[Dict[str, str]]] = contextvars.ContextVar(
             "approved_context", default=None
+        )
+        self._active_scope: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+            "active_approval_scope", default=None
         )
         self._yaml_approved_tools: contextvars.ContextVar[Set[str]] = contextvars.ContextVar(
             "yaml_approved_tools", default=set()
@@ -418,6 +422,15 @@ class ApprovalRegistry:
                         del self._dead_scopes[old]
         return self._dead_scopes
 
+    @contextlib.contextmanager
+    def active_scope(self, scope_id: Optional[str]):
+        """Bind *scope_id* for the duration of a single approved tool call."""
+        token = self._active_scope.set(scope_id)
+        try:
+            yield
+        finally:
+            self._active_scope.reset(token)
+
     def is_already_approved(
         self,
         tool_name: str,
@@ -425,6 +438,8 @@ class ApprovalRegistry:
         agent_name: Optional[str] = None,
         scope_id: Optional[str] = None,
     ) -> bool:
+        if scope_id is None and agent_name is None:
+            scope_id = self._active_scope.get(None)
         # Honour an explicit mark_approved() from the agent approval path even
         # for critical tools (e.g. execute_command after AutoApproveBackend).
         if self._approval_cache_key(tool_name, arguments or {}, agent_name, scope_id) in (self._approved_context.get(None) or ()):
