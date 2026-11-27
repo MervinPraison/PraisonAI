@@ -22,12 +22,20 @@ dependencies = [
     "toml>=0.10.2",
 ]
 
+[project.optional-dependencies]
+ui = [
+    "aiui>=0.3.109",
+]
+
 [project.urls]
 Homepage = "https://docs.praison.ai"
 Repository = "https://github.com/mervinpraison/PraisonAI"
 
 [project.scripts]
 praisonai-code = "praisonai_code.__main__:main"
+
+[project.entry-points."praisonaiui.plugins"]
+openship = "praisonai_code.ship.ui_plugin:plugin"
 
 [tool.uv.sources]
 praisonaiagents = { path = "../praisonai-agents" }

@@ -96,13 +96,12 @@ See [`examples/ship_ollama.sh`](examples/ship_ollama.sh) for a ready-to-run shel
 - **Free GitHub Actions CI Steward** — copy [`workflows/steward.yml`](workflows/steward.yml) into `.github/workflows/steward.yml` to run `praisonai steward <PR> --once` automatically on CI failures and review comments.
 - **Declarative Approvals** — copy [`examples/approvals.yml`](examples/approvals.yml) to `.praisonai/approvals.yml` on your default branch to declare `protected_paths` and path-scoped reviewer rules.
 
-### 5. Visual Web UI (PraisonAIUI Plugin)
+### 5. Visual Web UI (Built Into `praisonai-code` via PraisonAIUI)
 
-`praisonai-ship` registers a native **`praisonaiui.plugins`** entry point (`openship = "praisonai_ship_ui:plugin"`) built purely on PraisonAIUI's built-in block SDK (zero custom JS build, automatic light/dark mode and mobile layout):
+`praisonai-code` ships a native **`praisonaiui.plugins`** entry point (`openship = "praisonai_code.ship.ui_plugin:plugin"`) built purely on PraisonAIUI's default block SDK (zero custom JS build, automatic light/dark mode and mobile layout):
 
 ```bash
-pip install "praisonai-ship[ui]"
-aiui plugins doctor          # verify plugin health (0 shadowed IDs)
+pip install "praisonai-code[ui]"
 aiui openship serve          # launch focused OpenShip UI at http://127.0.0.1:8765
 ```
 

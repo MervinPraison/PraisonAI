@@ -1,18 +1,13 @@
 [project]
 name = "praisonai-ship"
-version = "0.2.0"
-description = "OpenShip — open-source PR shipping, self-review, steward, declarative approvals, and PraisonAIUI plugin (never merges)."
+version = "0.1.0"
+description = "OpenShip — open-source PR shipping, self-review, steward, and declarative approvals powered by PraisonAI (never merges)."
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10,<3.15"
 authors = [{ name = "Mervin Praison" }]
 dependencies = [
     "praisonai-code>=0.2.3",
-]
-
-[project.optional-dependencies]
-ui = [
-    "aiui>=0.3.109",
 ]
 
 [project.urls]
@@ -24,12 +19,9 @@ praisonai-ship = "praisonai_code.cli.commands.ship:app"
 praisonai-steward = "praisonai_code.cli.commands.steward:app"
 praisonai-approvals = "praisonai_code.cli.commands.approvals:app"
 
-[project.entry-points."praisonaiui.plugins"]
-openship = "praisonai_ship_ui:plugin"
-
 [build-system]
 requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["praisonai_ship_ui"]
+py-modules = []
