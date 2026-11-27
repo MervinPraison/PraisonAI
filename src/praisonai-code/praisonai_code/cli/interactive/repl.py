@@ -48,6 +48,7 @@ DEFAULT_COMMANDS: Dict[str, str] = {
     "revert": "Revert the last N turns (files + conversation)",
     "ship": "Commit, push, and open a draft PR (never merges)",
     "steward": "Run one PR steward cycle (status/CI/review check; --once)",
+    "approvals": "Check a PR against .praisonai/approvals.yml",
 }
 
 
@@ -424,7 +425,7 @@ class InteractiveREPL:
             self._handle_revert(args)
             return True
 
-        elif cmd in ("ship", "steward"):
+        elif cmd in ("ship", "steward", "approvals"):
             from praisonai_code.cli.interactive._ship_slash import run_ship_slash
 
             output = run_ship_slash(cmd, args)

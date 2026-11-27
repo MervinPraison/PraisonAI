@@ -1,8 +1,8 @@
-"""Interactive ``/ship`` and ``/steward`` slash-command runner.
+"""Interactive ``/ship``, ``/steward``, and ``/approvals`` slash-command runner.
 
-Delegates directly to ``python -m praisonai_code <ship|steward>`` so interactive
-sessions inherit every standalone CLI flag, ``PRAISONAI_DISABLE_SHIP``, and the
-never-merge guard without duplicating flag parsing.
+Delegates directly to ``python -m praisonai_code <ship|steward|approvals>`` so
+interactive sessions inherit every standalone CLI flag, ``PRAISONAI_DISABLE_SHIP``,
+and the never-merge guard without duplicating flag parsing.
 """
 
 from __future__ import annotations
@@ -24,8 +24,8 @@ def run_ship_slash(
     cwd: Optional[str] = None,
     run: Callable = subprocess.run,
 ) -> str:
-    """Run ``ship`` or ``steward`` from an interactive slash command and return output."""
-    if cmd not in ("ship", "steward"):
+    """Run ``ship``, ``steward``, or ``approvals`` from an interactive slash command and return output."""
+    if cmd not in ("ship", "steward", "approvals"):
         return f"Unsupported command: /{cmd}"
     try:
         tokens = shlex.split(args) if args else []

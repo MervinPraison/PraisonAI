@@ -100,11 +100,29 @@ class TestRunShipSlash:
         out = run_ship_slash("ship", "--dry-run", run=boom)
         assert "spawn failed" in out
 
+    def test_approvals_forwards_exact_args_without_injecting_once(self):
+        from praisonai_code.cli.interactive._ship_slash import run_ship_slash
+
+        seen = []
+
+        def fake_run(argv, **kw):
+            seen.append((argv, kw))
+            return subprocess.CompletedProcess(argv, 0, stdout='{"passed": true}\n', stderr="")
+
+        out = run_ship_slash("approvals", "42 --json", cwd="/repo", run=fake_run)
+        assert out == '{"passed": true}'
+        assert seen == [
+            ([sys.executable, "-m", "praisonai_code", "approvals", "42", "--json"],
+             {"cwd": "/repo", "capture_output": True, "text": True})
+        ]
+        assert "--once" not in seen[0][0]
+
 
 class TestInteractiveRegistrationAndDispatch:
     def test_async_tui_registers_and_dispatches_ship_and_steward(self):
         assert "ship" in AsyncTUI._BUILTIN_COMMANDS
         assert "steward" in AsyncTUI._BUILTIN_COMMANDS
+        assert "approvals" in AsyncTUI._BUILTIN_COMMANDS
 
         tui = AsyncTUI(config=AsyncTUIConfig(workspace="/tmp/ws"))
         calls = []
@@ -119,19 +137,23 @@ class TestInteractiveRegistrationAndDispatch:
         ):
             assert tui._handle_command("/ship --dry-run") is True
             assert tui._handle_command("/steward 42") is True
+            assert tui._handle_command("/approvals 42 --json") is True
 
         assert calls == [
             ("ship", "--dry-run", "/tmp/ws"),
             ("steward", "42", "/tmp/ws"),
+            ("approvals", "42 --json", "/tmp/ws"),
         ]
-        assert [(m.role, m.content) for m in tui.messages[-2:]] == [
+        assert [(m.role, m.content) for m in tui.messages[-3:]] == [
             ("system", "ran ship --dry-run"),
             ("system", "ran steward 42"),
+            ("system", "ran approvals 42 --json"),
         ]
 
     def test_repl_registers_and_dispatches_ship_and_steward(self):
         assert "ship" in DEFAULT_COMMANDS
         assert "steward" in DEFAULT_COMMANDS
+        assert "approvals" in DEFAULT_COMMANDS
 
         repl = InteractiveREPL()
         repl.io = MagicMock()
@@ -147,7 +169,8 @@ class TestInteractiveRegistrationAndDispatch:
         ):
             assert repl._handle_command("/ship --dry-run") is True
             assert repl._handle_command("/steward 42") is True
+            assert repl._handle_command("/approvals 42 --json") is True
 
-        assert calls == [("ship", "--dry-run"), ("steward", "42")]
+        assert calls == [("ship", "--dry-run"), ("steward", "42"), ("approvals", "42 --json")]
         info_args = [call.args[0] for call in repl.io.info.call_args_list]
-        assert info_args == ["ran ship --dry-run", "ran steward 42"]
+        assert info_args == ["ran ship --dry-run", "ran steward 42", "ran approvals 42 --json"]

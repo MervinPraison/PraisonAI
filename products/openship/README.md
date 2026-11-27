@@ -31,11 +31,11 @@
 
 ```bash
 pip install praisonai-code
-# Or via the thin meta-package (adds `praisonai-ship` and `praisonai-steward` aliases):
+# Or via the thin meta-package (adds `praisonai-ship`, `praisonai-steward`, and `praisonai-approvals` aliases):
 pip install praisonai-ship
 ```
 
-> **Command name note:** The CLI uses `praisonai ship` / `praisonai steward` (and the `praisonai-ship` / `praisonai-steward` aliases from the thin meta-package) to intentionally avoid `$PATH` collisions with unrelated `openship` PaaS CLIs.
+> **Command name note:** The CLI uses `praisonai ship` / `praisonai steward` / `praisonai approvals` (and the `praisonai-ship` / `praisonai-steward` / `praisonai-approvals` aliases from the thin meta-package) to intentionally avoid `$PATH` collisions with unrelated `openship` PaaS CLIs.
 
 ## Quick Start (4 Ways)
 
@@ -53,6 +53,10 @@ praisonai ship --post-review --watch
 
 # Run a single PR steward cycle against the current branch's PR
 praisonai steward --once
+
+# Evaluate the current PR against declarative approval rules
+praisonai approvals --policy examples/approvals.yml
+praisonai approvals --enforce --json
 ```
 
 ### 2. Interactive CLI (`praisonai code` and `praisonai chat`)
@@ -62,6 +66,7 @@ Inside any interactive `praisonai code` or `praisonai chat` session, run the exa
 ```text
 /ship --dry-run
 /steward
+/approvals --json
 ```
 
 Interactive `/steward` automatically runs a single cycle (`--once`) so your session never blocks on a continuous watch loop.
