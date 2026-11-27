@@ -293,3 +293,23 @@ def test_answer_thread_posts_inline_graphql_reply_with_and_without_push():
     assert gql_calls == []
     assert len(run_unpushed.ran("gh", "pr", "comment")) == 1
     assert "Steward attempted (thread:T1)" in run_unpushed.ran("gh", "pr", "comment")[0][-1]
+
+    # Case 4: dirty working tree (edited file not committed/pushed) -> keeps thread eligible for retry
+    gql_calls.clear()
+    run_dirty = FakeRunner(heads=("aaa1111", "aaa1111"))
+
+    def dirty_runner(cmd, **kw):
+        if cmd[:3] == ["git", "status", "--porcelain"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=" M src/a.py\n", stderr="")
+        return tracking_runner(run_dirty)(cmd, **kw)
+
+    res4 = run_steward_turn(
+        _state(),
+        Action("answer_thread", "thread:T1", "please rename x"),
+        agent=FakeAgent("Edited src/a.py."),
+        run=dirty_runner,
+        record_attempt=True,
+    )
+    assert res4.pushed_sha is None and res4.commented
+    assert gql_calls == []
+    assert "Steward attempted (thread:T1)" in run_dirty.ran("gh", "pr", "comment")[0][-1]
