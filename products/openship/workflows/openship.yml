@@ -3,6 +3,8 @@ name: OpenShip (Review, Steward & Policy)
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
+  pull_request_target:
+    types: [opened, synchronize, reopened]
   pull_request_review:
     types: [submitted, dismissed]
   pull_request_review_comment:
@@ -21,10 +23,6 @@ permissions:
   pull-requests: write
   statuses: write
 
-concurrency:
-  group: openship-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
-  cancel-in-progress: false
-
 env:
   # Works with ANY LLM provider supported by PraisonAI:
   # OpenAI (gpt-4o-mini), Anthropic (claude-sonnet-4-6), Gemini (gemini/gemini-2.5-flash),
@@ -35,6 +33,9 @@ env:
 jobs:
   # Pillar 1: Inline AI Code Review (auto on PR open/push + on-demand via `@praisonai review`; reads REVIEW.md from default branch)
   review:
+    concurrency:
+      group: openship-review-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
+      cancel-in-progress: true
     if: >-
       !endsWith(github.actor, '[bot]') &&
       (
@@ -88,10 +89,14 @@ jobs:
 
   # Pillar 2: PR Steward (fixes failing CI, merge conflicts, review threads & @praisonai directives; 3-try circuit breaker; never merges)
   steward:
+    concurrency:
+      group: openship-steward-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
+      cancel-in-progress: false
     if: >-
       !endsWith(github.actor, '[bot]') &&
       (
         (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.pull_requests[0].number != null) ||
+        (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'openship-stop')) ||
         (github.event_name == 'pull_request_review_comment' && github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'openship-stop')) ||
         (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, '@praisonai') && !contains(github.event.comment.body, '@praisonai stop') && !contains(github.event.comment.body, '@praisonai review'))
       )
@@ -107,26 +112,42 @@ jobs:
           echo "number=$PR_NUM" >> "$GITHUB_OUTPUT"
           HEAD_REF="$(gh pr view "$PR_NUM" --json headRefName --jq .headRefName)"
           IS_FORK="$(gh pr view "$PR_NUM" --json isCrossRepository --jq .isCrossRepository)"
+          MERGEABLE="UNKNOWN"
+          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
+            for _ in 1 2 3; do
+              MERGEABLE="$(gh pr view "$PR_NUM" --json mergeable --jq .mergeable)"
+              [ "$MERGEABLE" != "UNKNOWN" ] && break
+              sleep 2
+            done
+          fi
+          SHOULD_RUN="false"
+          if [ "$IS_FORK" = "false" ]; then
+            if [ "${{ github.event_name }}" != "pull_request_target" ] || [ "$MERGEABLE" = "CONFLICTING" ]; then
+              SHOULD_RUN="true"
+            fi
+          fi
           echo "head_ref=$HEAD_REF" >> "$GITHUB_OUTPUT"
           echo "is_fork=$IS_FORK" >> "$GITHUB_OUTPUT"
+          echo "should_run=$SHOULD_RUN" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
-        if: steps.pr.outputs.is_fork == 'false'
+        if: steps.pr.outputs.is_fork == 'false' && steps.pr.outputs.should_run == 'true'
         with:
           ref: ${{ steps.pr.outputs.head_ref }}
+          token: ${{ secrets.OPENSHIP_GH_TOKEN || secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
-        if: steps.pr.outputs.is_fork == 'false'
+        if: steps.pr.outputs.is_fork == 'false' && steps.pr.outputs.should_run == 'true'
         with:
           python-version: "3.12"
 
       - name: Install PraisonAI Code (OpenShip)
-        if: steps.pr.outputs.is_fork == 'false'
+        if: steps.pr.outputs.is_fork == 'false' && steps.pr.outputs.should_run == 'true'
         run: pip install --quiet praisonai-code
 
       - name: Run one PR Steward cycle (stateless 3-attempt circuit breaker)
-        if: steps.pr.outputs.is_fork == 'false'
+        if: steps.pr.outputs.is_fork == 'false' && steps.pr.outputs.should_run == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
@@ -141,6 +162,9 @@ jobs:
 
   # Pillar 3: Declarative PR Approvals Policy Check (.praisonai/approvals.yml on default branch; observe or enforce)
   approvals:
+    concurrency:
+      group: openship-approvals-${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
+      cancel-in-progress: true
     if: >-
       (
         (github.event_name == 'pull_request' || github.event_name == 'pull_request_review') &&

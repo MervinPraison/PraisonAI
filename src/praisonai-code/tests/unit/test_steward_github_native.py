@@ -139,6 +139,14 @@ def test_github_token_graphql_fallback_without_viewer_and_ignores_self_checks():
                                 "line": 4,
                                 "comments": {"nodes": [{"author": {"login": "alice"}, "body": "please fix"}]},
                             },
+                            {
+                                "id": "T_steward_replied",
+                                "isResolved": False,
+                                "isOutdated": False,
+                                "path": "a.py",
+                                "line": 8,
+                                "comments": {"nodes": [{"author": {"login": "alice"}, "body": "Steward replied (thread:T_steward_replied):\n\nDone."}]},
+                            },
                         ]
                     }
                 }
