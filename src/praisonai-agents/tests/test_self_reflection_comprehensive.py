@@ -62,7 +62,6 @@ def test_self_reflection_with_tools():
         
         assert result, "Self-reflection with tools failed to produce a result."
         print("\n✅ SUCCESS: Self-reflection with tools is working!")
-        return result
         
     except Exception as e:
         print(f"\n❌ ERROR: {str(e)}")
@@ -103,7 +102,6 @@ def test_self_reflection_without_tools():
         
         assert result, "Self-reflection without tools failed to produce a result."
         print("\n✅ SUCCESS: Self-reflection without tools is working!")
-        return result
         
     except Exception as e:
         print(f"\n❌ ERROR: {str(e)}")
@@ -114,7 +112,7 @@ if __name__ == "__main__":
     
     # Test without tools (should work)
     try:
-        result_without_tools = test_self_reflection_without_tools()
+        test_self_reflection_without_tools()
         without_tools_success = True
     except Exception as e:
         print(f"Test without tools failed: {e}")
@@ -122,7 +120,7 @@ if __name__ == "__main__":
     
     # Test with tools (should work after fix)
     try:
-        result_with_tools = test_self_reflection_with_tools()
+        test_self_reflection_with_tools()
         with_tools_success = True
     except Exception as e:
         print(f"Test with tools failed: {e}")

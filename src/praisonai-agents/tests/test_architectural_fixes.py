@@ -286,8 +286,6 @@ class TestRealAgenticIntegration:
             assert len(async_response) > 10
             print(f"Async agent response: {async_response}")
             
-            return True  # Test passed
-            
         except Exception as e:
             print(f"Real agentic test failed (may be expected if no API key): {e}")
             # Don't fail the test if it's due to missing API credentials

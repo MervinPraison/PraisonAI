@@ -29,22 +29,16 @@ def test_memory_graph_config():
         }
     }
     
-    try:
-        memory = Memory(config=config, verbose=1)
-        print(f"✅ Memory initialized. Graph enabled: {getattr(memory, 'graph_enabled', False)}")
-        
-        # Test basic memory operations
-        memory.store_short_term("Alice loves hiking", {"category": "preference"})
-        memory.store_short_term("Alice's friend John also loves hiking", {"category": "social"})
-        
-        results = memory.search_short_term("hiking", limit=2)
-        print(f"✅ Short-term search returned {len(results)} results")
-        
-        return True
-        
-    except Exception as e:
-        print(f"⚠️  Graph memory test failed (expected if dependencies missing): {e}")
-        return False
+    memory = Memory(config=config, verbose=1)
+    print(f"✅ Memory initialized. Graph enabled: {getattr(memory, 'graph_enabled', False)}")
+
+    # Test basic memory operations
+    memory.store_short_term("Alice loves hiking", {"category": "preference"})
+    memory.store_short_term("Alice's friend John also loves hiking", {"category": "social"})
+
+    results = memory.search_short_term("hiking", limit=2)
+    print(f"✅ Short-term search returned {len(results)} results")
+    assert isinstance(results, list)
 
 def test_knowledge_graph_config():
     """Test Knowledge with graph configuration"""
@@ -68,20 +62,9 @@ def test_knowledge_graph_config():
         }
     }
     
-    try:
-        knowledge = Knowledge(config=config, verbose=0)
-        final_config = knowledge.config
-        
-        if "graph_store" in final_config:
-            print("✅ Graph store configuration preserved in Knowledge")
-        else:
-            print("❌ Graph store configuration missing")
-            
-        return True
-        
-    except Exception as e:
-        print(f"⚠️  Knowledge graph test failed: {e}")
-        return False
+    knowledge = Knowledge(config=config, verbose=0)
+    final_config = knowledge.config
+    assert "graph_store" in final_config, "Graph store configuration missing"
 
 def test_backward_compatibility():
     """Test that existing configurations still work"""
@@ -98,15 +81,10 @@ def test_backward_compatibility():
         }
     }
     
-    try:
-        memory = Memory(config=old_config, verbose=0)
-        print("✅ Backward compatibility maintained")
-        print(f"   Graph enabled: {getattr(memory, 'graph_enabled', False)}")
-        return True
-        
-    except Exception as e:
-        print(f"❌ Backward compatibility broken: {e}")
-        return False
+    memory = Memory(config=old_config, verbose=0)
+    assert memory is not None
+    print("✅ Backward compatibility maintained")
+    print(f"   Graph enabled: {getattr(memory, 'graph_enabled', False)}")
 
 if __name__ == "__main__":
     print("🧪 Graph Memory Integration Tests")
@@ -120,8 +98,11 @@ if __name__ == "__main__":
     
     passed = 0
     for test in tests:
-        if test():
+        try:
+            test()
             passed += 1
+        except Exception as e:
+            print(f"⚠️  {test.__name__} failed (expected if dependencies missing): {e}")
     
     print(f"\n📊 Results: {passed}/{len(tests)} tests passed")
     

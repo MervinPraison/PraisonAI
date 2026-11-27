@@ -50,7 +50,7 @@ def test_parallel_loop_execution():
     print(f"\n✅ Parallel loop completed in {duration:.2f}s")
     print(f"   Output preview: {str(result)[:200]}...")
     
-    return result
+    assert result is not None
 
 
 def test_sequential_vs_parallel():

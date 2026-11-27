@@ -157,8 +157,7 @@ def test_proactive_compaction_end_to_end():
         
         print(f"\n=== Follow-up Response ===")
         print(f"Response: {follow_up}")
-        
-        return True
+        assert isinstance(follow_up, str) and len(follow_up) > 0
         
     except Exception as e:
         print(f"\n=== Test Failed ===")
