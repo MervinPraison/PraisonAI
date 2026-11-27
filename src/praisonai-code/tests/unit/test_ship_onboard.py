@@ -232,3 +232,151 @@ def test_cli_ship_check_init_and_ui_core_only_safe(monkeypatch: pytest.MonkeyPat
     assert res_ui_ok.exit_code == 0
     assert called["host"] == "127.0.0.1"
     assert called["port"] == 8765
+
+
+def test_cli_ship_review_parity_dry_run_findings_and_kill_switch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from praisonai_code.ship import ui_service
+
+    runner = CliRunner()
+    monkeypatch.setattr(ui_service, "get_repo_root", lambda: tmp_path)
+
+    # 1. --dry-run previews files without calling any LLM
+    monkeypatch.setattr(
+        ui_service,
+        "get_diff_bundle",
+        lambda repo, **kw: ("diff --git a/app.py b/app.py\n+x = 1\n", [ui_service.FileDiff("app.py", "", "x = 1")], "working branch"),
+    )
+    res_dry = runner.invoke(ship_cmd.app, ["review", "--dry-run", "--effort", "low"])
+    assert res_dry.exit_code == 0
+    assert "Would review 1 file(s) from working branch (effort=low): app.py" in res_dry.output
+
+    # 2. Live findings output (typed severity + path:line + fix)
+    monkeypatch.setattr(
+        ui_service,
+        "run_review",
+        lambda repo, **kw: {
+            "source": "working branch",
+            "severity": "high",
+            "diff": "diff --git a/app.py b/app.py\n+KEY='secret'\n",
+            "findings": [
+                {"severity": "important", "path": "app.py", "line": 4, "title": "Hard-coded key", "fix": "Use env var"}
+            ],
+        },
+    )
+    res_found = runner.invoke(ship_cmd.app, ["review", "--model", "ollama/qwen3.5"])
+    assert res_found.exit_code == 0
+    assert "found 1 issue(s) (severity: high, source: working branch)" in res_found.output
+    assert "[important] app.py:4: Hard-coded key — Use env var" in res_found.output
+
+    # 3. Clean diff message
+    monkeypatch.setattr(
+        ui_service,
+        "run_review",
+        lambda repo, **kw: {"source": "working branch", "severity": "none", "diff": "", "findings": []},
+    )
+    res_empty = runner.invoke(ship_cmd.app, ["review"])
+    assert res_empty.exit_code == 0
+    assert "no local changes to review" in res_empty.output
+
+    # 4. Respects PRAISONAI_DISABLE_SHIP=1 kill switch
+    monkeypatch.setenv("PRAISONAI_DISABLE_SHIP", "1")
+    res_off = runner.invoke(ship_cmd.app, ["review"])
+    assert res_off.exit_code == 1
+    assert "disabled" in res_off.output
+
+
+def test_ui_service_diff_bundle_falls_back_to_branch_diff_and_loads_review_md(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from praisonai_code.ship import review as review_mod
+    from praisonai_code.ship import ui_service
+
+    monkeypatch.setenv("OPENSHIP_LEDGER_PATH", str(tmp_path / "ledger.jsonl"))
+    (tmp_path / "REVIEW.md").write_text("# Strict security rules\n", encoding="utf-8")
+
+    branch_diff = "diff --git a/src/auth.py b/src/auth.py\n--- a/src/auth.py\n+++ b/src/auth.py\n@@ -1 +1,2 @@\n def f():\n+    return 1\n"
+
+    def fake_run(cmd, **kw):
+        if cmd[:3] == ["git", "diff", "HEAD"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:2] == ["git", "symbolic-ref"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="refs/remotes/origin/release/2.x\n", stderr="")
+        if cmd[:3] == ["git", "diff", "origin/release/2.x...HEAD"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=branch_diff, stderr="")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    seen = {}
+
+    def fake_review_diff(diff, *, effort="high", llm=None, guidelines=None, **kw):
+        seen.update(diff=diff, effort=effort, llm=llm, guidelines=guidelines)
+        return []
+
+    # Launch from a different directory containing a competing REVIEW.md;
+    # repo's own REVIEW.md must win over process CWD.
+    other_cwd = tmp_path / "other_cwd"
+    other_cwd.mkdir()
+    (other_cwd / "REVIEW.md").write_text("# Wrong repo rules\n", encoding="utf-8")
+    monkeypatch.chdir(other_cwd)
+
+    monkeypatch.setattr(review_mod, "review_diff", fake_review_diff)
+    res = ui_service.run_review(tmp_path, effort="high", model="gpt-4o-mini", run=fake_run)
+    assert res["source"] == "branch vs origin/release/2.x"
+    assert "Strict security rules" in (seen["guidelines"] or "")
+    assert "Wrong repo rules" not in (seen["guidelines"] or "")
+    assert seen["llm"] == "gpt-4o-mini"
+
+
+def test_ui_service_empty_remote_diff_does_not_fall_back_to_stale_local_base(tmp_path: Path) -> None:
+    from praisonai_code.ship import ui_service
+
+    calls = []
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        if cmd[:3] == ["git", "diff", "HEAD"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:2] == ["git", "ls-files"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:2] == ["git", "symbolic-ref"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="refs/remotes/origin/main\n", stderr="")
+        if cmd[:3] == ["git", "diff", "origin/main...HEAD"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[:3] == ["git", "diff", "main...HEAD"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="diff --git a/stale.py b/stale.py\n+old\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    diff_text, files, _ = ui_service.get_diff_bundle(tmp_path, run=fake_run)
+    assert diff_text == ""
+    assert files == []
+    assert ["git", "diff", "main...HEAD"] not in calls
+
+
+def test_default_base_branch_resolves_master_and_gh_fallback_without_origin_head() -> None:
+    from praisonai_code.ship import ui_service
+
+    def fake_master(cmd, **kw):
+        if cmd[:4] == ["git", "rev-parse", "--verify", "--quiet"] and cmd[4] == "origin/master":
+            return subprocess.CompletedProcess(cmd, 0, stdout="abc\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    assert ui_service._default_base_branch(fake_master) == "master"
+
+    def fake_custom_gh(cmd, **kw):
+        if cmd[:3] == ["gh", "repo", "view"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="develop\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    assert ui_service._default_base_branch(fake_custom_gh) == "develop"
+
+    def fake_missing_gh(cmd, **kw):
+        if cmd[0] == "gh":
+            raise FileNotFoundError("gh")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    assert ui_service._default_base_branch(fake_missing_gh) is None
+    with pytest.raises(ValueError, match="could not determine base branch"):
+        ui_service.get_diff_bundle(Path("."), run=fake_missing_gh)

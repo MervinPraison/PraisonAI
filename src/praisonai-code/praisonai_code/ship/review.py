@@ -44,15 +44,21 @@ def review_severity(findings: List[ReviewFinding]) -> str:
     return "minimal" if findings else "none"
 
 
-def load_review_guidelines(base: str = "main", *, run: Callable = subprocess.run) -> str:
+def load_review_guidelines(
+    base: str = "main",
+    *,
+    repo_root: Optional[Path] = None,
+    run: Callable = subprocess.run,
+) -> str:
     """Load repo ``REVIEW.md`` (or ``.praisonai/REVIEW.md``) from ``origin/<base>`` first, else local."""
     for rel in _GUIDELINE_FILES:
         for ref in (f"origin/{base}", base):
             proc = run(["git", "show", f"{ref}:{rel}"], capture_output=True, text=True)
             if proc.returncode == 0 and (proc.stdout or "").strip():
                 return proc.stdout.strip()[:_MAX_GUIDELINES]
+    base_dir = Path(repo_root) if repo_root is not None else Path(".")
     for rel in _GUIDELINE_FILES:
-        p = Path(rel)
+        p = base_dir / rel
         if p.is_file():
             text = p.read_text(encoding="utf-8", errors="replace").strip()
             if text:
