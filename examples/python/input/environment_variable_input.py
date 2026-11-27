@@ -23,7 +23,7 @@ agent = Agent(
     role="Research Assistant",
     goal=f"Research {user_topic}",
     backstory="Expert researcher with configurable capabilities",
-    llm={
+    model={
         "model": llm_model,
         "temperature": temperature
     },
