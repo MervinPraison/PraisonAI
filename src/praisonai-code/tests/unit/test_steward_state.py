@@ -97,3 +97,36 @@ def test_attempt_cap_skips_a_stuck_item():
 def test_waits_when_nothing_to_do_or_mergeability_unknown():
     assert next_action(_state(), {}).kind == "wait"
     assert next_action(_state(mergeable="UNKNOWN"), {}).kind == "wait"
+
+
+def test_same_check_name_in_different_workflows_stays_distinct():
+    rollup = [
+        {"__typename": "CheckRun", "workflowName": "CI Python", "name": "test", "conclusion": "FAILURE"},
+        {"__typename": "CheckRun", "workflowName": "CI TypeScript", "name": "test", "conclusion": "FAILURE"},
+        {"__typename": "CheckRun", "workflowName": "CI Python", "name": "test", "conclusion": "FAILURE"},
+    ]
+    s = read_pr_state("7", run=Runner(_view(statusCheckRollup=rollup)))
+    assert s.failing == ["CI Python/test", "CI TypeScript/test"]
+    action = next_action(s, {"check:CI Python/test": 3})
+    assert (action.kind, action.key) == ("fix_check", "check:CI TypeScript/test")
+
+
+def test_check_without_workflow_and_status_context_stay_readable():
+    rollup = [
+        {"__typename": "CheckRun", "workflowName": "", "name": "unit", "conclusion": "FAILURE"},
+        {"__typename": "CheckRun", "name": "lint", "conclusion": "FAILURE"},
+        {"__typename": "StatusContext", "context": "ci/legacy", "state": "ERROR"},
+    ]
+    s = read_pr_state("7", run=Runner(_view(statusCheckRollup=rollup)))
+    assert s.failing == ["unit", "lint", "ci/legacy"]
+
+
+def test_nameless_or_null_check_entries_are_ignored():
+    rollup = [
+        None,
+        {"__typename": "CheckRun", "conclusion": "FAILURE"},
+        {"__typename": "StatusContext", "context": "   ", "state": "FAILURE"},
+        {"__typename": "CheckRun", "workflowName": "CI", "name": "build", "conclusion": "FAILURE"},
+    ]
+    s = read_pr_state("7", run=Runner(_view(statusCheckRollup=rollup)))
+    assert s.failing == ["CI/build"]
