@@ -5,11 +5,12 @@ from __future__ import annotations
 import importlib.util
 import os
 import re
+import shlex
 import shutil
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List, Mapping, Optional, Tuple
+from typing import Callable, Dict, List, Mapping, Optional, Tuple
 
 from praisonaiagents.tools.path_safety import resolve_inside
 from praisonai_code.ship import is_ship_disabled
@@ -17,12 +18,14 @@ from praisonai_code.ship.flow import ShipRefused
 from praisonai_code.ship.review import EFFORTS
 
 _MODEL_SAFE_RE = re.compile(r"^[A-Za-z0-9._:/@-]{1,128}$")
-_API_KEY_VARS: Tuple[str, ...] = (
-    "OPENAI_API_KEY",
-    "ANTHROPIC_API_KEY",
-    "GEMINI_API_KEY",
-    "OPENROUTER_API_KEY",
+_PROVIDER_DEFAULTS: Tuple[Tuple[str, str], ...] = (
+    ("OPENAI_API_KEY", "gpt-4o-mini"),
+    ("ANTHROPIC_API_KEY", "claude-sonnet-4-6"),
+    ("GEMINI_API_KEY", "gemini/gemini-2.5-flash"),
+    ("OPENROUTER_API_KEY", "openrouter/openai/gpt-4o-mini"),
 )
+_API_KEY_VARS: Tuple[str, ...] = tuple(k for k, _ in _PROVIDER_DEFAULTS)
+_PROVIDER_MODEL_MAP: Dict[str, str] = dict(_PROVIDER_DEFAULTS)
 
 OPENSHIP_WORKFLOW_YAML = """\
 name: OpenShip (Review, Steward & Policy)
@@ -103,6 +106,7 @@ jobs:
         id: pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           PR_NUM="${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}"
           echo "number=$PR_NUM" >> "$GITHUB_OUTPUT"
@@ -142,24 +146,46 @@ jobs:
   # Pillar 3: Declarative PR Approvals Policy Check (.praisonai/approvals.yml on default branch; observe or enforce)
   approvals:
     if: >-
-      (github.event_name == 'pull_request' || github.event_name == 'pull_request_review') &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      (
+        (github.event_name == 'pull_request' || github.event_name == 'pull_request_review') &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      ) ||
+      (
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.pull_requests[0].number != null
+      )
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve PR metadata
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          PR_NUM="${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}"
+          echo "number=$PR_NUM" >> "$GITHUB_OUTPUT"
+          BASE_REF="$(gh pr view "$PR_NUM" --json baseRefName --jq .baseRefName)"
+          IS_FORK="$(gh pr view "$PR_NUM" --json isCrossRepository --jq .isCrossRepository)"
+          echo "base_ref=$BASE_REF" >> "$GITHUB_OUTPUT"
+          echo "is_fork=$IS_FORK" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
+        if: steps.pr.outputs.is_fork == 'false'
         with:
           fetch-depth: 0
       - uses: actions/setup-python@v5
+        if: steps.pr.outputs.is_fork == 'false'
         with:
           python-version: "3.12"
       - name: Install PraisonAI Code (OpenShip)
+        if: steps.pr.outputs.is_fork == 'false'
         run: pip install --quiet praisonai-code
       - name: Evaluate .praisonai/approvals.yml
+        if: steps.pr.outputs.is_fork == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if git show "origin/${{ github.event.pull_request.base.ref }}:.praisonai/approvals.yml" >/dev/null 2>&1; then
-            praisonai-code approvals "${{ github.event.pull_request.number }}"
+          if git show "origin/${{ steps.pr.outputs.base_ref }}:.praisonai/approvals.yml" >/dev/null 2>&1; then
+            praisonai-code approvals "${{ steps.pr.outputs.number }}"
           else
             echo "No .praisonai/approvals.yml on base branch; skipping policy check."
           fi
@@ -214,6 +240,7 @@ OpenShip reads this file from the default branch (`origin/<base>`) on every PR r
 
 @dataclass
 class ReadinessReport:
+    git_installed: bool = True
     repo_root: Optional[Path] = None
     branch: str = ""
     disabled_reason: Optional[str] = None
@@ -237,7 +264,16 @@ class InitResult:
     created: List[str] = field(default_factory=list)
     would_create: List[str] = field(default_factory=list)
     kept: List[str] = field(default_factory=list)
+    model: str = "gpt-4o-mini"
     readiness: ReadinessReport = field(default_factory=ReadinessReport)
+
+
+def default_model_for_env(env: Mapping[str, str]) -> str:
+    """Choose a default LLM model matching the first configured provider API key."""
+    for var, model in _PROVIDER_DEFAULTS:
+        if (env.get(var) or "").strip():
+            return model
+    return "gpt-4o-mini"
 
 
 def render_workflow_yaml(model: Optional[str] = None, effort: str = "high") -> str:
@@ -255,14 +291,17 @@ def render_workflow_yaml(model: Optional[str] = None, effort: str = "high") -> s
     return text
 
 
-def _detect_repo_root(cwd: Path, run: Callable) -> Tuple[Optional[Path], str]:
-    proc = run(["git", "rev-parse", "--show-toplevel"], cwd=str(cwd), capture_output=True, text=True, check=False)
+def _detect_repo_root(cwd: Path, run: Callable) -> Tuple[bool, Optional[Path], str]:
+    try:
+        proc = run(["git", "rev-parse", "--show-toplevel"], cwd=str(cwd), capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        return False, None, ""
     if proc.returncode != 0 or not (proc.stdout or "").strip():
-        return None, ""
+        return True, None, ""
     root = Path(proc.stdout.strip()).resolve()
     br = run(["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=str(root), capture_output=True, text=True, check=False)
     branch = (br.stdout or "").strip() if br.returncode == 0 else ""
-    return root, branch
+    return True, root, branch
 
 
 def check_readiness(
@@ -276,13 +315,16 @@ def check_readiness(
     """Inspect local readiness across Terminal/CI, Visual Web UI, and GitHub Actions."""
     base = Path(cwd).expanduser().resolve() if cwd else Path.cwd().resolve()
     active_env = os.environ if env is None else env
-    repo_root, branch = _detect_repo_root(base, run)
+    git_installed, repo_root, branch = _detect_repo_root(base, run)
 
     gh_installed = bool(which("gh"))
     gh_authed = False
     if gh_installed:
-        auth = run(["gh", "auth", "status"], cwd=str(repo_root or base), capture_output=True, text=True, check=False)
-        gh_authed = auth.returncode == 0
+        try:
+            auth = run(["gh", "auth", "status"], cwd=str(repo_root or base), capture_output=True, text=True, check=False)
+            gh_authed = auth.returncode == 0
+        except FileNotFoundError:
+            gh_installed = False
 
     llm_vars = [k for k in _API_KEY_VARS if (active_env.get(k) or "").strip()]
     ollama_installed = bool(which("ollama"))
@@ -295,6 +337,7 @@ def check_readiness(
     )
 
     return ReadinessReport(
+        git_installed=git_installed,
         repo_root=repo_root,
         branch=branch,
         disabled_reason=is_ship_disabled(),
@@ -316,7 +359,12 @@ def format_readiness(report: ReadinessReport) -> str:
     if report.disabled_reason:
         lines.append(f"  [!!] Kill switch active: {report.disabled_reason}")
 
-    repo_desc = f"{report.repo_root} (branch: {report.branch or 'detached'})" if report.repo_root else "not in a git repo"
+    if not report.git_installed:
+        repo_desc = "missing `git` CLI (install git first)"
+    elif report.repo_root:
+        repo_desc = f"{report.repo_root} (branch: {report.branch or 'detached'})"
+    else:
+        repo_desc = "not in a git repo"
     gh_desc = "authenticated" if report.gh_authed else ("installed, run `gh auth login`" if report.gh_installed else "missing `gh` CLI")
     llm_parts = list(report.llm_env_vars) + (["ollama"] if report.ollama_installed else [])
     llm_desc = ", ".join(llm_parts) if llm_parts else "none set (export OPENAI_API_KEY or install Ollama)"
@@ -336,6 +384,8 @@ def format_readiness(report: ReadinessReport) -> str:
     ])
 
     next_steps: List[str] = []
+    if not report.git_installed:
+        next_steps.append("Install git (https://git-scm.com/downloads)")
     if not report.gh_authed:
         next_steps.append("gh auth login")
     if not report.has_llm:
@@ -345,6 +395,9 @@ def format_readiness(report: ReadinessReport) -> str:
     else:
         secret_var = report.llm_env_vars[0] if report.llm_env_vars else "OPENAI_API_KEY"
         next_steps.append(f'printf "%s" "${secret_var}" | gh secret set {secret_var}   # once per GitHub repo')
+        if secret_var != "OPENAI_API_KEY":
+            matched_model = _PROVIDER_MODEL_MAP[secret_var]
+            next_steps.append(f"gh variable set OPENSHIP_MODEL --body {shlex.quote(matched_model)}")
     if not report.ui_installed:
         next_steps.append('pip install "praisonai-code[ui]" && praisonai-code ship ui')
     else:
@@ -369,11 +422,15 @@ def init_repo(
 ) -> InitResult:
     """Scaffold GitHub Actions workflow, declarative policy, and REVIEW.md (idempotent)."""
     base = Path(cwd).expanduser().resolve() if cwd else Path.cwd().resolve()
-    repo_root, _ = _detect_repo_root(base, run)
+    active_env = os.environ if env is None else env
+    git_installed, repo_root, _ = _detect_repo_root(base, run)
+    if not git_installed:
+        raise ShipRefused("`git` is not installed or not on PATH — install git first")
     if repo_root is None:
         raise ShipRefused("not inside a git repository — run `git init` first")
 
-    workflow_content = render_workflow_yaml(model=model, effort=effort)
+    resolved_model = model if model else default_model_for_env(active_env)
+    workflow_content = render_workflow_yaml(model=resolved_model, effort=effort)
     targets: List[Tuple[str, str]] = [
         (".github/workflows/openship.yml", workflow_content),
         (".praisonai/approvals.yml", APPROVALS_POLICY_YAML),
@@ -381,7 +438,7 @@ def init_repo(
     if not (repo_root / ".praisonai" / "REVIEW.md").is_file():
         targets.append(("REVIEW.md", REVIEW_MD_TEMPLATE))
 
-    result = InitResult(repo_root=repo_root)
+    result = InitResult(repo_root=repo_root, model=resolved_model)
     for rel, content in targets:
         dest = Path(resolve_inside(repo_root, rel))
         if dest.exists():
@@ -395,14 +452,14 @@ def init_repo(
         result.created.append(rel)
 
     result.readiness = check_readiness(
-        repo_root, run=run, env=env, which=which, find_spec=find_spec
+        repo_root, run=run, env=active_env, which=which, find_spec=find_spec
     )
     return result
 
 
 def format_init_result(result: InitResult, *, dry_run: bool = False) -> str:
     """Render concise human output for ``ship init``."""
-    lines = [f"OpenShip init ({result.repo_root}):"]
+    lines = [f"OpenShip init ({result.repo_root}, default model: {result.model}):"]
     for rel in result.created:
         lines.append(f"  + created {rel}")
     for rel in result.would_create:
@@ -414,6 +471,11 @@ def format_init_result(result: InitResult, *, dry_run: bool = False) -> str:
     lines.append("")
     lines.append(format_readiness(result.readiness))
     if not dry_run and result.created:
-        joined = " ".join(result.created)
-        lines.append(f"  git add {joined} && git commit -m 'chore: enable OpenShip' && git push")
+        quoted_root = shlex.quote(str(result.repo_root))
+        joined = " ".join(shlex.quote(p) for p in result.created)
+        lines.append(
+            f"  git -C {quoted_root} add {joined} && "
+            f"git -C {quoted_root} commit -m 'chore: enable OpenShip' && "
+            f"git -C {quoted_root} push"
+        )
     return "\n".join(lines)

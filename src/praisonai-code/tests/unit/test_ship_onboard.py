@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import importlib.util
 import subprocess
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -47,18 +49,22 @@ def test_init_repo_creates_all_three_files_and_is_idempotent(tmp_path: Path) -> 
     assert (tmp_path / ".praisonai" / "approvals.yml").is_file()
     assert (tmp_path / "REVIEW.md").is_file()
 
-    # Generated YAML must be valid and use the praisonai-code CLI binary
-    wf = yaml.safe_load((tmp_path / ".github" / "workflows" / "openship.yml").read_text(encoding="utf-8"))
-    assert {"review", "steward", "approvals"}.issubset(wf["jobs"].keys())
+    # Generated YAML must be valid, use praisonai-code CLI, set GH_REPO before checkout,
+    # and re-evaluate approvals on workflow_run completion.
     wf_raw = (tmp_path / ".github" / "workflows" / "openship.yml").read_text(encoding="utf-8")
+    wf = yaml.safe_load(wf_raw)
+    assert {"review", "steward", "approvals"}.issubset(wf["jobs"].keys())
     assert "praisonai-code ship" in wf_raw
     assert "praisonai-code steward" in wf_raw
     assert "praisonai-code approvals" in wf_raw
+    assert "GH_REPO: ${{ github.repository }}" in wf_raw
+    assert "workflow_run" in wf["jobs"]["approvals"]["if"]
 
-    # Never echo secret values in formatted output
+    # Never echo secret values; use git -C <repo_root> so subdirectory invocations work
     formatted = onboard.format_init_result(res1)
     assert "sk-test-secret-do-not-print" not in formatted
     assert "OPENAI_API_KEY" in formatted
+    assert f"git -C {tmp_path}" in formatted or f"git -C '{tmp_path}'" in formatted
 
     # Re-running preserves user edits
     custom = "# my custom review rules\n"
@@ -77,6 +83,23 @@ def test_init_repo_creates_all_three_files_and_is_idempotent(tmp_path: Path) -> 
         "REVIEW.md",
     }
     assert (tmp_path / "REVIEW.md").read_text(encoding="utf-8") == custom
+
+
+def test_init_repo_matches_default_model_to_configured_provider_key(tmp_path: Path) -> None:
+    res = onboard.init_repo(
+        tmp_path,
+        run=_fake_git_run(tmp_path),
+        env={"ANTHROPIC_API_KEY": "sk-ant-test"},
+        which=lambda name: f"/usr/bin/{name}" if name == "gh" else None,
+        find_spec=lambda _: None,
+    )
+    assert res.model == "claude-sonnet-4-6"
+    wf_raw = (tmp_path / ".github" / "workflows" / "openship.yml").read_text(encoding="utf-8")
+    assert "vars.OPENSHIP_MODEL || 'claude-sonnet-4-6'" in wf_raw
+    out = onboard.format_init_result(res)
+    assert "sk-ant-test" not in out
+    assert "ANTHROPIC_API_KEY" in out
+    assert "gh variable set OPENSHIP_MODEL --body claude-sonnet-4-6" in out
 
 
 def test_init_repo_dry_run_writes_nothing(tmp_path: Path) -> None:
@@ -122,12 +145,24 @@ def test_init_repo_custom_model_and_validation(tmp_path: Path) -> None:
         onboard.render_workflow_yaml(effort="extreme")
 
 
-def test_init_repo_refuses_outside_git_repo(tmp_path: Path) -> None:
-    def _no_git(cmd, **kwargs):
+def test_init_and_check_handle_missing_git_distinct_from_non_repo(tmp_path: Path) -> None:
+    def _no_git_bin(cmd, **kwargs):
+        raise FileNotFoundError("git")
+
+    report = onboard.check_readiness(tmp_path, run=_no_git_bin, env={}, which=lambda _: None, find_spec=lambda _: None)
+    assert report.git_installed is False
+    assert report.repo_root is None
+    text = onboard.format_readiness(report)
+    assert "missing `git` CLI" in text
+
+    with pytest.raises(ShipRefused, match="not installed"):
+        onboard.init_repo(tmp_path, run=_no_git_bin)
+
+    def _not_a_repo(cmd, **kwargs):
         return subprocess.CompletedProcess(cmd, 128, stdout="", stderr="not a git repo")
 
     with pytest.raises(ShipRefused, match="not inside a git repository"):
-        onboard.init_repo(tmp_path, run=_no_git)
+        onboard.init_repo(tmp_path, run=_not_a_repo)
 
 
 def test_init_repo_respects_existing_dot_praisonai_review_md(tmp_path: Path) -> None:
@@ -145,7 +180,7 @@ def test_init_repo_respects_existing_dot_praisonai_review_md(tmp_path: Path) -> 
     assert res.readiness.has_review_md is True
 
 
-def test_cli_ship_check_and_init_and_ui(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_cli_ship_check_init_and_ui_core_only_safe(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     runner = CliRunner()
 
     # ship check
@@ -187,15 +222,12 @@ def test_cli_ship_check_and_init_and_ui(monkeypatch: pytest.MonkeyPatch, tmp_pat
     assert 'pip install "praisonai-code[ui]"' in res_ui_missing.output
 
     # ship ui when praisonaiui installed delegates to serve_openship on loopback
-    import praisonai_code.ship.ui_plugin as ui_plugin
-
+    # (works even in core-only CI environments without praisonaiui installed)
     called = {}
+    fake_plugin = types.ModuleType("praisonai_code.ship.ui_plugin")
+    fake_plugin.serve_openship = lambda **kw: called.update(kw)  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "praisonai_code.ship.ui_plugin", fake_plugin)
     monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
-    monkeypatch.setattr(
-        ui_plugin,
-        "serve_openship",
-        lambda **kw: called.update(kw),
-    )
     res_ui_ok = runner.invoke(ship_cmd.app, ["ui"])
     assert res_ui_ok.exit_code == 0
     assert called["host"] == "127.0.0.1"
