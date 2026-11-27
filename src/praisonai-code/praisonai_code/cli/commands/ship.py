@@ -8,7 +8,7 @@ app = typer.Typer(help="Commit, push and open a draft PR (never merges)")
 
 @app.command()
 def ship_main(
-    target: Optional[str] = typer.Argument(None, help="PR number/URL, effort (low..max), or +reviewer"),
+    target: Optional[str] = typer.Argument(None, help="PR number/URL, effort (low..max), +reviewer, or init|check|ui"),
     message: Optional[str] = typer.Option(None, "--message", "-m", help="Commit message (generated if not given)"),
     dry_run: bool = typer.Option(False, "--dry-run", help="Show the plan and change nothing"),
     effort: str = typer.Option("high", "--effort", help="Self-review effort: low|medium|high|xhigh|max"),
@@ -19,8 +19,37 @@ def ship_main(
     reviewer: Optional[str] = typer.Option(None, "--reviewer", help="Request a GitHub reviewer"),
 ):
     """Commit all changes, push the branch, open a draft PR, and self-review. You merge it."""
-    from praisonai_code.ship import orchestrate
     from praisonai_code.ship.flow import ShipRefused
+
+    if target in ("init", "check", "ui"):
+        if target == "check":
+            from praisonai_code.ship.onboard import check_readiness, format_readiness
+
+            typer.echo(format_readiness(check_readiness()))
+            return
+        if target == "init":
+            from praisonai_code.ship.onboard import format_init_result, init_repo
+
+            try:
+                res = init_repo(dry_run=dry_run, model=model, effort=effort)
+            except (ShipRefused, ValueError) as exc:
+                typer.echo(f"ship: {exc}", err=True)
+                raise typer.Exit(1)
+            typer.echo(format_init_result(res, dry_run=dry_run))
+            return
+        import importlib.util
+        import os
+
+        if importlib.util.find_spec("praisonaiui") is None:
+            typer.echo('ship: Visual Web UI requires PraisonAIUI. Install with: pip install "praisonai-code[ui]"', err=True)
+            raise typer.Exit(1)
+        from praisonai_code.ship.ui_plugin import serve_openship
+
+        port = int(os.environ.get("OPENSHIP_PORT", "8765"))
+        serve_openship(host="127.0.0.1", port=port, server_name="praisonai-code ship ui")
+        return
+
+    from praisonai_code.ship import orchestrate
     try:
         res = orchestrate.ship(target, message=message, dry_run=dry_run, effort=effort, model=model,
                                review=review, post_review=post_review, watch=watch, reviewer=reviewer, on_event=typer.echo)

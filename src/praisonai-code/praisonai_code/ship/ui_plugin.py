@@ -676,29 +676,7 @@ class OpenShipPlugin:
             with_chat: bool = typer.Option(False, "--with-chat/--no-chat", help="Include built-in Chat tab"),
         ) -> None:
             """Launch a focused PraisonAIUI app shell showing only OpenShip pages."""
-            import uvicorn
-            import praisonaiui as aiui
-            from praisonaiagents.agent.launch_security import require_bind_token
-            from praisonaiui.server import create_app
-
-            token = require_bind_token(
-                host,
-                os.environ.get("GATEWAY_AUTH_TOKEN"),
-                server="aiui openship serve",
-                hint="Set GATEWAY_AUTH_TOKEN",
-            )
-            if token:
-                os.environ.setdefault("AIUI_REQUIRE_TOKEN", "1")
-            if repo:
-                os.environ["OPENSHIP_REPO"] = str(Path(repo).expanduser().resolve())
-            aiui.set_style("app")
-            aiui.register_plugin(plugin)
-            if with_chat:
-                aiui.only_my_pages("chat")
-            else:
-                aiui.only_my_pages()
-            app = create_app(config={"site": {"title": "OpenShip — PraisonAI"}})
-            uvicorn.run(app, host=host, port=port)
+            serve_openship(repo=repo, host=host, port=port, with_chat=with_chat)
 
         @cli.command()
         def status() -> None:
@@ -712,3 +690,37 @@ class OpenShipPlugin:
 
 
 plugin = OpenShipPlugin()
+
+
+def serve_openship(
+    *,
+    repo: Optional[str] = None,
+    host: str = "127.0.0.1",
+    port: int = 8765,
+    with_chat: bool = False,
+    server_name: str = "aiui openship serve",
+) -> None:
+    """Launch a focused PraisonAIUI app shell showing only OpenShip pages."""
+    import uvicorn
+    import praisonaiui as aiui
+    from praisonaiagents.agent.launch_security import require_bind_token
+    from praisonaiui.server import create_app
+
+    token = require_bind_token(
+        host,
+        os.environ.get("GATEWAY_AUTH_TOKEN"),
+        server=server_name,
+        hint="Set GATEWAY_AUTH_TOKEN",
+    )
+    if token:
+        os.environ.setdefault("AIUI_REQUIRE_TOKEN", "1")
+    if repo:
+        os.environ["OPENSHIP_REPO"] = str(Path(repo).expanduser().resolve())
+    aiui.set_style("app")
+    aiui.register_plugin(plugin)
+    if with_chat:
+        aiui.only_my_pages("chat")
+    else:
+        aiui.only_my_pages()
+    app = create_app(config={"site": {"title": "OpenShip — PraisonAI"}})
+    uvicorn.run(app, host=host, port=port)
