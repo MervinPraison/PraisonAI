@@ -23,6 +23,7 @@ from typing import Any, Dict, Optional
 from urllib.parse import urlencode, urlparse, parse_qs
 
 from praisonaiagents._logging import get_logger
+from ..errors import PraisonAIError
 
 from .mcp_oauth_callback import (
     OAuthCallbackHandler,
@@ -37,7 +38,7 @@ from .mcp_oauth_callback import (
 logger = get_logger("mcp-oauth-provider")
 
 
-class InteractiveAuthRequired(RuntimeError):
+class InteractiveAuthRequired(RuntimeError, PraisonAIError):
     """Raised when interactive OAuth is needed but not possible (headless/CI)."""
 
 
@@ -141,6 +142,14 @@ class MCPOAuthProvider:
             entry = self.storage.get_for_url(self.mcp_name, self.server_url) or {}
         tokens = entry.get("tokens") or {}
         return tokens.get("access_token")
+
+    def refresh_token(self) -> Optional[str]:
+        """Force a refresh-token grant using stored credentials; return new token or None."""
+        entry = self.storage.get_for_url(self.mcp_name, self.server_url)
+        if not entry or not self._try_refresh(entry):
+            return None
+        refreshed = self.storage.get_for_url(self.mcp_name, self.server_url) or {}
+        return (refreshed.get("tokens") or {}).get("access_token")
 
     def ensure_authenticated(
         self,
