@@ -1,12 +1,22 @@
-"""``praisonai ship`` (S-5): orchestrate draft PR, self-review, reviewer request, and optional watch."""
+"""``praisonai ship`` (S-5): orchestrate draft PR, inline self-review, reviewer request, and optional watch."""
 
+import json
+import re
 import subprocess
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional
+from typing import Callable, Dict, List, Optional, Set
 
 from praisonai_code.ship import flow, is_ship_disabled
 from praisonai_code.ship.flow import ShipRefused
-from praisonai_code.ship.review import EFFORTS, ReviewFinding, review_diff, review_severity
+from praisonai_code.ship.review import (
+    EFFORTS,
+    ReviewFinding,
+    load_review_guidelines,
+    review_diff,
+    review_severity,
+)
+
+_HUNK_RE = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@")
 
 
 @dataclass
@@ -21,8 +31,103 @@ class ShipResult:
 
 
 def _format_review(findings: List[ReviewFinding], severity: str) -> str:
-    rows = [f"- **[{f.severity}]** `{f.path}{f':{f.line}' if f.line else ''}`: {f.title}" + (f" — {f.fix}" if f.fix else "") for f in findings]
+    rows = [
+        f"- **[{f.severity}]** `{f.path}{f':{f.line}' if f.line else ''}`: {f.title}"
+        + (f" — {f.fix}" if f.fix else "")
+        for f in findings
+    ]
     return f"### Ship self-review (severity: `{severity}`)\n\n" + "\n".join(rows)
+
+
+def _diff_right_lines(diff_text: str) -> Dict[str, Set[int]]:
+    """Map each file path in a unified diff to its valid new-file line numbers for inline comments."""
+    valid: Dict[str, Set[int]] = {}
+    cur_path: Optional[str] = None
+    new_line = 0
+    for line in diff_text.splitlines():
+        if line.startswith("diff --git "):
+            parts = line.split(" ")
+            cur_path = parts[-1][2:] if len(parts) >= 4 and parts[-1].startswith("b/") else parts[-1]
+            valid.setdefault(cur_path, set())
+            new_line = 0
+        elif line.startswith("+++ b/"):
+            cur_path = line[6:].strip()
+            valid.setdefault(cur_path, set())
+        elif m := _HUNK_RE.match(line):
+            new_line = int(m.group(1))
+        elif cur_path and new_line > 0:
+            if line.startswith("+") and not line.startswith("+++"):
+                valid[cur_path].add(new_line)
+                new_line += 1
+            elif line.startswith(" "):
+                valid[cur_path].add(new_line)
+                new_line += 1
+    return valid
+
+
+def post_inline_review(
+    pr_url: str,
+    findings: List[ReviewFinding],
+    severity: str,
+    diff_text: str = "",
+    *,
+    run: Callable = subprocess.run,
+) -> bool:
+    """Post inline diff comments via GitHub Pull Request Reviews API (event=COMMENT, never APPROVE).
+
+    Falls back cleanly to a summary ``gh pr comment`` if PR metadata is unavailable
+    or no finding lands on a diff hunk line.
+    """
+    if not findings:
+        return False
+    valid_lines = _diff_right_lines(diff_text) if diff_text else {}
+    inline_comments, overflow = [], []
+    for f in findings:
+        norm_path = f.path.lstrip("./")
+        if f.line and f.line in valid_lines.get(norm_path, set()):
+            body = f"**[{f.severity.upper()}] {f.title}**" + (f"\n\nSuggested fix: {f.fix}" if f.fix else "")
+            inline_comments.append({"path": norm_path, "line": f.line, "side": "RIGHT", "body": body})
+        else:
+            overflow.append(f)
+
+    if inline_comments:
+        meta = run(
+            ["gh", "pr", "view", pr_url, "--json", "number,url,headRefOid"],
+            capture_output=True,
+            text=True,
+        )
+        if meta.returncode == 0 and (meta.stdout or "").strip():
+            try:
+                info = json.loads(meta.stdout)
+                url_parts = str(info.get("url", "")).split("/")
+                owner, name, num = url_parts[3], url_parts[4], info["number"]
+                sha = info.get("headRefOid") or ""
+                summary = f"### OpenShip self-review (severity: `{severity}`)\n\nPosted {len(inline_comments)} inline finding(s)."
+                if overflow:
+                    summary += "\n\n**Additional findings:**\n" + "\n".join(
+                        f"- **[{f.severity}]** `{f.path}{f':{f.line}' if f.line else ''}`: {f.title}"
+                        + (f" — {f.fix}" if f.fix else "")
+                        for f in overflow
+                    )
+                payload: Dict[str, object] = {"event": "COMMENT", "body": summary, "comments": inline_comments}
+                if sha:
+                    payload["commit_id"] = sha
+                posted = run(
+                    ["gh", "api", f"repos/{owner}/{name}/pulls/{num}/reviews", "--method", "POST", "--input", "-"],
+                    input=json.dumps(payload),
+                    capture_output=True,
+                    text=True,
+                )
+                if posted.returncode == 0:
+                    return True
+            except (ValueError, KeyError, IndexError):
+                pass
+
+    return run(
+        ["gh", "pr", "comment", pr_url, "--body", _format_review(findings, severity)],
+        capture_output=True,
+        text=True,
+    ).returncode == 0
 
 
 def ship(
@@ -57,10 +162,15 @@ def ship(
     findings, severity, posted = [], "none", False
     if review:
         proc = run(["gh", "pr", "diff", pr_url], capture_output=True, text=True)
-        findings = (review_fn or review_diff)(proc.stdout if proc.returncode == 0 else "", effort=effort, llm=model)
+        diff_text = proc.stdout if proc.returncode == 0 else ""
+        if review_fn is not None:
+            findings = review_fn(diff_text, effort=effort, llm=model)
+        else:
+            guidelines = load_review_guidelines(run=run)
+            findings = review_diff(diff_text, effort=effort, llm=model, guidelines=(guidelines or None))
         severity = review_severity(findings)
         if post_review and findings:
-            posted = run(["gh", "pr", "comment", pr_url, "--body", _format_review(findings, severity)], capture_output=True, text=True).returncode == 0
+            posted = post_inline_review(pr_url, findings, severity, diff_text, run=run)
     if watch:
         if watch_fn is None:
             from praisonai_code.ship.steward_loop import watch_pr as watch_fn
