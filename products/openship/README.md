@@ -85,8 +85,8 @@ praisonai-code ship init
 printf '%s' "$OPENAI_API_KEY" | gh secret set OPENAI_API_KEY
 # (Or ANTHROPIC_API_KEY / GEMINI_API_KEY / OPENROUTER_API_KEY)
 
-# 3. Commit and push to your default branch
-git add .github/workflows/openship.yml .praisonai/approvals.yml REVIEW.md
+# 3. Commit and push the files created by `ship init` (exact command is also printed above)
+git add .github/workflows/openship.yml .praisonai/approvals.yml && [ ! -f REVIEW.md ] || git add REVIEW.md
 git commit -m "chore: enable OpenShip" && git push
 ```
 
