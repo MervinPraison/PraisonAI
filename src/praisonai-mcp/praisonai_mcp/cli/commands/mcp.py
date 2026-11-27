@@ -229,6 +229,78 @@ def mcp_remove(
         output.print_success(f"Removed MCP server: {name}")
 
 
+@app.command("import")
+def mcp_import(
+    editor: Optional[str] = typer.Argument(None, help="Editor id (e.g. cursor, claude-desktop, claude-code, vscode, codex)"),
+    file: Optional[str] = typer.Option(None, "--file", "-f", help="Explicit config file path to import (read-only)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview servers without modifying config"),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite existing server entries"),
+):
+    """Import MCP servers from an editor config file (read-only on the editor file)."""
+    _require_code()
+    output = get_output_controller()
+    if not editor and not file:
+        output.print_error("Provide an editor id (e.g. cursor, claude-desktop, codex) or --file PATH")
+        raise typer.Exit(1)
+
+    from pathlib import Path
+    from praisonaiagents.mcp.loader import parse_mcp_servers
+    from praisonai_mcp.connect import catalog, config_io
+
+    try:
+        client = catalog.get_client(editor) if editor else None
+        path = Path(file).expanduser() if file else catalog.config_path(client, Path.home())
+        if path is None:
+            raise config_io.ConfigError(f"{client.label} has no config file; pass --file PATH instead.")
+        data = config_io.load_file(path, fmt=None if file else catalog.file_format(client))
+        node = config_io._servers(data, client, create=False) if client is not None else None
+        has_std = any(isinstance(data.get(k), dict) for k in ("mcpServers", "servers", "mcp_servers")) or (
+            isinstance(data.get("mcp"), dict) and isinstance(data["mcp"].get("servers"), dict)
+        )
+        servers = parse_mcp_servers(node if isinstance(node, dict) else (data if (client is None or has_std) else {}))
+    except (KeyError, config_io.ConfigError, ValueError) as exc:
+        output.print_error(str(exc))
+        raise typer.Exit(1)
+
+    resolved, cwd = path.resolve(), Path.cwd().resolve()
+    project_level = file is not None and (resolved == cwd or cwd in resolved.parents)
+    blocked: List[str] = []
+    if project_level and servers:
+        from praisonaiagents.mcp.trust import drop_untrusted_mcp_servers
+        filtered = drop_untrusted_mcp_servers(servers, str(path))
+        blocked = [k for k in servers if k not in filtered]
+        servers = filtered
+        if blocked:
+            getattr(output, "print_warning", output.print_info)(
+                f"Project-level file {path}: skipped untrusted server(s): {', '.join(blocked)}"
+            )
+
+    loader = get_config_loader()
+    existing = set(loader.load().mcp.servers.keys())
+    imported, skipped = [], []
+    for name, entry in servers.items():
+        if name in existing and not overwrite:
+            skipped.append(name)
+            continue
+        stored: Dict[str, Any] = {**entry, "enabled": entry.get("enabled", True), "type": "remote" if "url" in entry else "local"}
+        if stored["type"] == "local":
+            stored.setdefault("args", [])
+            stored.setdefault("env", {})
+        if not dry_run:
+            loader.set(f"mcp.servers.{name}", stored)
+        imported.append(name)
+
+    if output.is_json_mode:
+        output.print_json({"source": str(path), "dry_run": dry_run, "project_level": project_level, "imported": imported, "skipped": skipped, "blocked": blocked})
+        return
+    if not imported and not skipped and not blocked:
+        output.print_info(f"No MCP servers found in {path}")
+    if imported:
+        output.print_success(f"{'Would import' if dry_run else 'Imported'} {len(imported)} MCP server(s) from {path}: {', '.join(imported)}")
+    if skipped:
+        output.print_info(f"Skipped {len(skipped)} existing server(s) (use --overwrite): {', '.join(skipped)}")
+
+
 @app.command("test")
 def mcp_test(
     name: str = typer.Argument(..., help="Server name to test"),
