@@ -86,3 +86,13 @@ def test_long_diff_is_truncated_before_the_model_sees_it():
     pr_text.write_pr_text(["add x"], "+" * (pr_text._MAX_DIFF * 3), agent=_Agent())
     assert "(diff truncated)" in seen["prompt"]
     assert len(seen["prompt"]) < pr_text._MAX_DIFF + 2_000
+
+
+def test_lockfile_hunk_does_not_crowd_out_real_code_diff():
+    agent = FakeAgent(PRText(title="Fix real bug", body="Summary."))
+    lock_hunk = "diff --git a/uv.lock b/uv.lock\n+" + ("L" * 30_000) + "\n"
+    real_hunk = "diff --git a/src/real.py b/src/real.py\n+def real_change():\n+    return 1\n"
+    write_pr_text(COMMITS, lock_hunk + real_hunk, agent=agent)
+    prompt = agent.prompts[0]
+    assert "src/real.py" in prompt and "real_change" in prompt
+    assert "uv.lock" not in prompt
