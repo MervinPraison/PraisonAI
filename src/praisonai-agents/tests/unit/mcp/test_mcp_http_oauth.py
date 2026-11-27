@@ -7,8 +7,9 @@ import os
 import time
 from unittest.mock import patch
 
-import httpx
 import pytest
+
+httpx = pytest.importorskip("httpx")
 
 
 def _make_storage(tmp_path):
