@@ -27,7 +27,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Autonomy | 3 | 7 | 3059 |
 | ✅ Bots | 7 | 41 | 17228 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 125 | 40422 |
+| ✅ CLI | 5 | 125 | 40615 |
 | ✅ Chunking | 2 | 2 | 435 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 5222 |
@@ -51,7 +51,7 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Knowledge | 4 | 20 | 6295 |
 | ✅ LLM | 3 | 17 | 6758 |
 | ✅ Loops | 4 | 5 | 1600 |
-| ✅ MCP | 1 | 68 | 15941 |
+| ✅ MCP | 1 | 68 | 15935 |
 | ✅ Memory | 6 | 17 | 6786 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2868 |
