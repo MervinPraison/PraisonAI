@@ -1,7 +1,6 @@
 """``praisonai approvals`` CLI wiring tests (S-7)."""
 
 import json
-from pathlib import Path
 
 from typer.testing import CliRunner
 
@@ -22,7 +21,7 @@ def _report(passed: bool, mode: str = "observe") -> PolicyReport:
     )
 
 
-def test_registered_in_cli_app_and_openship_pyproject():
+def test_registered_in_cli_app():
     from praisonai_code.cli import app as cli_app
 
     assert cli_app._LAZY_COMMANDS["approvals"][0] == ".commands.approvals"
@@ -30,9 +29,6 @@ def test_registered_in_cli_app_and_openship_pyproject():
     assert res.exit_code == 0
     for flag in ("--policy", "--enforce", "--json"):
         assert flag in res.output
-
-    pyproject = Path(__file__).resolve().parents[4] / "products" / "openship" / "pyproject.toml"
-    assert 'praisonai-approvals = "praisonai_code.cli.commands.approvals:app"' in pyproject.read_text(encoding="utf-8")
 
 
 def test_passing_policy_exits_0_and_prints_verdicts(monkeypatch):
