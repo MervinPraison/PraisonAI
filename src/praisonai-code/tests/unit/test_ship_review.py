@@ -164,3 +164,13 @@ def test_review_report_produces_valid_strict_responses_schema():
     finding = root["$defs"]["ReviewFinding"]
     assert finding["additionalProperties"] is False
     assert set(finding["required"]) == set(finding["properties"].keys())
+
+
+def test_lockfile_hunk_does_not_crowd_out_real_code_in_review():
+    agent = FakeAgent(ReviewReport())
+    lock_hunk = "diff --git a/uv.lock b/uv.lock\n+" + ("L" * 30_000) + "\n"
+    real_hunk = "diff --git a/src/real.py b/src/real.py\n+def real_bug(xs):\n+    return xs[len(xs)]\n"
+    review_diff(lock_hunk + real_hunk, agent=agent)
+    prompt = agent.prompts[0]
+    assert "src/real.py" in prompt and "real_bug" in prompt
+    assert "uv.lock" not in prompt
