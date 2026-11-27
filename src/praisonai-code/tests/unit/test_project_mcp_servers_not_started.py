@@ -141,6 +141,7 @@ SPAWN_SITES = {
     "praisonai-agents/praisonaiagents/mcp/mcp.py": "the client; its caller chooses the command",
     "praisonai-agents/praisonaiagents/memory/mcp_config.py": "user files; workspace files pass mcp.trust",
     "praisonai-agents/praisonaiagents/tools/web_search.py": "a fixed remote URL",
+    "praisonai-agents/praisonaiagents/workflows/yaml_parser.py": "the workflow YAML the operator runs",
     "praisonai-code/praisonai_code/cli/features/mcp.py": "--mcp (operator) and resolved config (filtered)",
     "praisonai-code/praisonai_code/cli/commands/serve.py": "ConfigLoader servers (filtered)",
     "praisonai-code/praisonai_code/cli/features/doctor/checks/mcp_checks.py": "_find_mcp_config (filtered)",
