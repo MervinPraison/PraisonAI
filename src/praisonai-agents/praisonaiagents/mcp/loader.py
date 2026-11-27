@@ -126,8 +126,15 @@ def build_mcp(entry: Any, name: str = "server", cls: type = MCP, expand_env: boo
             logger.warning("MCP server '%s': headers are not supported for legacy SSE URLs and are ignored", name)
         elif headers:
             kwargs["headers"] = _expand(headers, name)
-        if entry.get("oauth"):
-            logger.warning("MCP server '%s': oauth sign-in is not applied by this client yet", name)
+        oauth = entry.get("oauth")
+        if oauth is not None:
+            if sse:
+                if oauth:
+                    logger.warning("MCP server '%s': oauth is not supported for legacy SSE URLs", name)
+            else:
+                kwargs["oauth"] = oauth
+                if name:
+                    kwargs["server_name"] = name
     else:
         target = _expand(entry["command"], name)
         if isinstance(target, list):  # ["npx", "-y", "pkg"]

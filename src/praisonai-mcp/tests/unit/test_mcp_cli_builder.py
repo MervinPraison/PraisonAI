@@ -191,19 +191,19 @@ class TestMcpSyncSharedBuilder:
         assert len(calls) == 2
         assert "s3cret-value" not in repr(calls)
 
-    def test_remote_oauth_forwarded_to_shared_builder(self, caplog):
+    def test_remote_oauth_forwarded_to_shared_builder(self):
         from praisonai_code.cli.configuration.schema import MCPOAuthConfig, MCPRemoteConfig
 
         srv = MCPRemoteConfig(
             url="https://mcp.example/mcp",
             oauth=MCPOAuthConfig(client_id="cid", scopes=["read"]),
         )
-        with caplog.at_level("WARNING"):
-            calls, output = _invoke_sync({"gh": srv}, json_mode=True)
+        calls, output = _invoke_sync({"gh": srv}, json_mode=True)
 
         assert len(calls) == 1
         assert calls[0][0] == "https://mcp.example/mcp"
-        assert "oauth" in caplog.text.lower()
+        assert calls[0][2]["oauth"] == {"client_id": "cid", "scopes": ["read"]}
+        assert calls[0][2]["server_name"] == "gh"
         assert _json_result(output)["synced_servers"] == ["gh"]
 
     def test_project_config_loader_drops_untrusted_and_never_expands_env(self, tmp_path, monkeypatch):
