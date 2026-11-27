@@ -166,7 +166,8 @@ def read_pr_state(pr: Optional[str] = None, run: Callable = subprocess.run) -> P
             continue
         last = node["comments"]["nodes"][-1]
         author = (last.get("author") or {}).get("login", "")
-        if not node["isResolved"] and not node["isOutdated"] and author not in skip_authors:
+        last_body = (last.get("body") or "").strip()
+        if not node["isResolved"] and not node["isOutdated"] and author not in skip_authors and not last_body.startswith("Steward "):
             threads.append(Thread(node["id"], node["path"], node.get("line"), author, last.get("body", "")))
     return PRState(
         view["number"],

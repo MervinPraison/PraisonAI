@@ -235,3 +235,46 @@ def test_steward_prompt_includes_touched_files_and_records_attempt_on_agent_erro
     )
     assert res.acted and res.commented and "Steward attempted (check:CI/test)" in comments[0]
     assert "loop-guard" in comments[0]
+
+
+def test_answer_thread_posts_inline_graphql_reply_with_and_without_push():
+    gql_calls = []
+
+    def tracking_runner(base_runner):
+        def _run(cmd, **kw):
+            if cmd[:3] == ["gh", "api", "graphql"]:
+                gql_calls.append(cmd)
+                return subprocess.CompletedProcess(cmd, 0, stdout='{"data":{}}', stderr="")
+            return base_runner(cmd, **kw)
+        return _run
+
+    # Case 1: code fix pushed -> posts BOTH PR revert comment AND inline GraphQL thread reply
+    run_push = FakeRunner(heads=("aaa1111", "bbb2222"))
+    res1 = run_steward_turn(
+        _state(),
+        Action("answer_thread", "thread:T1", "please rename x"),
+        agent=FakeAgent("Renamed x to count."),
+        run=tracking_runner(run_push),
+        record_attempt=True,
+    )
+    assert res1.pushed_sha == "bbb2222" and res1.commented
+    assert len(gql_calls) == 1
+    assert "threadId=T1" in gql_calls[0]
+    assert any("git revert bbb2222" in arg for arg in gql_calls[0])
+    assert len(run_push.ran("gh", "pr", "comment")) == 1
+
+    # Case 2: answer-only (no push) -> posts inline GraphQL thread reply without duplicate PR comment
+    gql_calls.clear()
+    run_reply = FakeRunner(heads=("aaa1111", "aaa1111"))
+    res2 = run_steward_turn(
+        _state(),
+        Action("answer_thread", "thread:T1", "why use int here?"),
+        agent=FakeAgent("Because cents avoid float rounding errors."),
+        run=tracking_runner(run_reply),
+        record_attempt=True,
+    )
+    assert res2.pushed_sha is None and res2.commented
+    assert len(gql_calls) == 1
+    assert "threadId=T1" in gql_calls[0]
+    assert any("Steward replied (thread:T1)" in arg for arg in gql_calls[0])
+    assert not run_reply.ran("gh", "pr", "comment")

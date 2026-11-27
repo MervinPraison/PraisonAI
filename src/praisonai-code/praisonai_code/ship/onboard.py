@@ -122,6 +122,7 @@ jobs:
       !endsWith(github.actor, '[bot]') &&
       (
         (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.pull_requests[0].number != null) ||
+        (github.event_name == 'pull_request' && github.event.action != 'labeled' && github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'openship-stop')) ||
         (github.event_name == 'pull_request_review_comment' && github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'openship-stop')) ||
         (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, '@praisonai') && !contains(github.event.comment.body, '@praisonai stop') && !contains(github.event.comment.body, '@praisonai review'))
       )
@@ -137,26 +138,42 @@ jobs:
           echo "number=$PR_NUM" >> "$GITHUB_OUTPUT"
           HEAD_REF="$(gh pr view "$PR_NUM" --json headRefName --jq .headRefName)"
           IS_FORK="$(gh pr view "$PR_NUM" --json isCrossRepository --jq .isCrossRepository)"
+          MERGEABLE="UNKNOWN"
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            for _ in 1 2 3; do
+              MERGEABLE="$(gh pr view "$PR_NUM" --json mergeable --jq .mergeable)"
+              [ "$MERGEABLE" != "UNKNOWN" ] && break
+              sleep 2
+            done
+          fi
+          SHOULD_RUN="false"
+          if [ "$IS_FORK" = "false" ]; then
+            if [ "${{ github.event_name }}" != "pull_request" ] || [ "$MERGEABLE" = "CONFLICTING" ]; then
+              SHOULD_RUN="true"
+            fi
+          fi
           echo "head_ref=$HEAD_REF" >> "$GITHUB_OUTPUT"
           echo "is_fork=$IS_FORK" >> "$GITHUB_OUTPUT"
+          echo "should_run=$SHOULD_RUN" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
-        if: steps.pr.outputs.is_fork == 'false'
+        if: steps.pr.outputs.is_fork == 'false' && steps.pr.outputs.should_run == 'true'
         with:
           ref: ${{ steps.pr.outputs.head_ref }}
+          token: ${{ secrets.OPENSHIP_GH_TOKEN || secrets.GITHUB_TOKEN }}
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
-        if: steps.pr.outputs.is_fork == 'false'
+        if: steps.pr.outputs.is_fork == 'false' && steps.pr.outputs.should_run == 'true'
         with:
           python-version: "3.12"
 
       - name: Install PraisonAI Code (OpenShip)
-        if: steps.pr.outputs.is_fork == 'false'
+        if: steps.pr.outputs.is_fork == 'false' && steps.pr.outputs.should_run == 'true'
         run: pip install --quiet praisonai-code
 
       - name: Run one PR Steward cycle (stateless 3-attempt circuit breaker)
-        if: steps.pr.outputs.is_fork == 'false'
+        if: steps.pr.outputs.is_fork == 'false' && steps.pr.outputs.should_run == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}

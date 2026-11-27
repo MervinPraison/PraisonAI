@@ -130,6 +130,17 @@ def post_inline_review(
     ).returncode == 0
 
 
+def _pr_base_branch(pr_url: str, run: Callable) -> str:
+    """Resolve the PR's base branch via ``gh pr view``; falls back to ``main``."""
+    proc = run(
+        ["gh", "pr", "view", pr_url, "--json", "baseRefName", "--jq", ".baseRefName"],
+        capture_output=True,
+        text=True,
+    )
+    base = (proc.stdout or "").strip() if proc.returncode == 0 else ""
+    return base or "main"
+
+
 def ship(
     target: Optional[str] = None, *, message: Optional[str] = None, dry_run: bool = False,
     effort: str = "high", model: Optional[str] = None, review: bool = True,
@@ -169,7 +180,7 @@ def ship(
         if review_fn is not None:
             findings = review_fn(diff_text, effort=effort, llm=model)
         else:
-            guidelines = load_review_guidelines(run=run)
+            guidelines = load_review_guidelines(base=_pr_base_branch(pr_url, run), run=run)
             findings = review_diff(diff_text, effort=effort, llm=model, guidelines=(guidelines or None))
         severity = review_severity(findings)
         if post_review and findings:
