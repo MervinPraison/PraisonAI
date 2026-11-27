@@ -248,7 +248,8 @@ class MCPHandler(FlagHandler):
                 env = server.get("env")
                 entry.update(command=cmd, args=args,
                              env={str(k): str(v) for k, v in env.items()} if isinstance(env, dict) else None)
-            # One shared builder (MCP.from_config): URL check, SSE header rule, ${VAR}.
+            # One shared builder (MCP.from_config): URL check and SSE header rule. ${VAR} is
+            # not expanded here: the config loader has already interpolated it.
             from praisonaiagents.mcp.loader import build_mcp
             mcp = build_mcp(entry, name=str(server.get("name") or "server"), cls=MCP)
             self.print_status(f"🔌 MCP server connected: {server.get('url') or entry['command']}", "success")
