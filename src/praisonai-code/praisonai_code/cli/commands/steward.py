@@ -1,5 +1,6 @@
 """``praisonai steward``: watch a PR and fix checks, conflicts, and review threads."""
 
+import subprocess
 from typing import Optional
 
 import typer
@@ -23,6 +24,7 @@ def steward_main(
     try:
         watch_pr(pr, interval=interval, max_days=max_days, max_attempts=max_attempts,
                  once=once, llm=model, on_event=typer.echo)
-    except ShipRefused as exc:
-        typer.echo(f"steward: {exc}", err=True)
+    except (ShipRefused, ValueError, subprocess.CalledProcessError) as exc:
+        msg = (exc.stderr or exc.stdout or str(exc)).strip() if isinstance(exc, subprocess.CalledProcessError) else str(exc)
+        typer.echo(f"steward: {msg}", err=True)
         raise typer.Exit(1)

@@ -31,20 +31,17 @@ def watch_pr(
     monotonic: Callable[[], float] = time.monotonic, on_event: Optional[Callable[[str], None]] = None,
 ) -> StewardSummary:
     """Poll a PR until merged/closed, branch switch, Ctrl+C, ``once``, or ``max_days``."""
-    reason = is_ship_disabled()
-    if reason:
+    if reason := is_ship_disabled():
         raise ShipRefused(reason)
-    emit = on_event or (lambda _msg: None)
-    start_branch = _current_branch(run) if pr is None else None
-    attempts: Dict[str, int] = {}
-    cycles = turns = 0
-    deadline = monotonic() + max_days * 86400.0
+    if interval <= 0 or max_days <= 0 or max_attempts < 1:
+        raise ValueError("interval and max_days must be > 0, and max_attempts >= 1")
+    pr = pr.lstrip("#") if pr and pr.startswith("#") else pr
+    emit, start_branch = on_event or (lambda _msg: None), (_current_branch(run) if pr is None else None)
+    attempts, cycles, turns, deadline = {}, 0, 0, monotonic() + max_days * 86400.0
     while monotonic() < deadline:
-        if start_branch is not None:
-            cur = _current_branch(run)
-            if cur and cur != start_branch:
-                emit(f"steward: branch switched ({start_branch} -> {cur}); stopping")
-                return StewardSummary("branch switched", cycles, turns, attempts)
+        if start_branch is not None and (cur := _current_branch(run)) and cur != start_branch:
+            emit(f"steward: branch switched ({start_branch} -> {cur}); stopping")
+            return StewardSummary("branch switched", cycles, turns, attempts)
         cycles += 1
         state = read_pr_state(pr, run=run)
         action = next_action(state, attempts, max_attempts=max_attempts)

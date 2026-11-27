@@ -153,3 +153,38 @@ def test_steward_cli_exits_1_when_disabled(monkeypatch):
     )
     res = CliRunner().invoke(steward_cmd.app, ["--once"])
     assert res.exit_code == 1 and "disabled" in res.output.lower()
+
+
+def test_normalizes_hash_prefixed_pr_number(monkeypatch):
+    seen = []
+
+    def fake_read(pr, run=None):
+        seen.append(pr)
+        return _state(state="MERGED")
+
+    monkeypatch.setattr("praisonai_code.ship.steward_loop.read_pr_state", fake_read)
+    watch_pr("#42", once=True)
+    assert seen == ["42"]
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [{"interval": 0}, {"interval": -5}, {"max_days": 0}, {"max_attempts": 0}],
+)
+def test_invalid_numeric_bounds_raise_value_error(kwargs):
+    with pytest.raises(ValueError):
+        watch_pr("7", **kwargs)
+
+
+def test_steward_cli_exits_1_cleanly_on_called_process_error(monkeypatch):
+    from praisonai_code.cli.commands import steward as steward_cmd
+    from praisonai_code.ship import steward_loop
+
+    def fail(*a, **kw):
+        raise subprocess.CalledProcessError(1, ["gh", "pr", "view"], stderr="no pull requests found for branch")
+
+    monkeypatch.setattr(steward_loop, "watch_pr", fail)
+    res = CliRunner().invoke(steward_cmd.app, ["--once"])
+    assert res.exit_code == 1
+    assert "no pull requests found" in res.output
+    assert res.exception is None or isinstance(res.exception, SystemExit)
