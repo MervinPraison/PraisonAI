@@ -9,7 +9,7 @@ from praisonaiagents._logging import get_logger
 import os
 import re
 import platform
-from typing import Any, List, Optional, Callable, Iterable, Union
+from typing import Any, Dict, List, Optional, Callable, Iterable, Union
 from functools import wraps, partial
 
 logger = logging.getLogger(__name__)
@@ -612,7 +612,9 @@ class MCP:
         return base in cls._COLD_START_LAUNCHERS
 
     def __init__(self, command_or_string=None, args=None, *, command=None, timeout=None, debug=False,
-                 allowed_tools: Optional[List[str]] = None, disabled_tools: Optional[List[str]] = None, max_response_bytes: Optional[int] = None, **kwargs):
+                 allowed_tools: Optional[List[str]] = None, disabled_tools: Optional[List[str]] = None,
+                 max_response_bytes: Optional[int] = None, oauth: Optional[Union[bool, Dict[str, Any]]] = None,
+                 server_name: Optional[str] = None, **kwargs):
         """
         Initialize the MCP connection and get tools.
         
@@ -754,6 +756,14 @@ class MCP:
                     transport_options['resumability'] = kwargs.pop('resumability')
                 if max_response_bytes is not None:
                     transport_options['max_response_bytes'] = max_response_bytes
+                if oauth is not None:
+                    transport_options['oauth'] = oauth
+                if server_name:
+                    transport_options['name'] = server_name
+                elif 'name' in kwargs:
+                    transport_options['name'] = kwargs.pop('name')
+                if 'auth_storage' in kwargs:
+                    transport_options['auth_storage'] = kwargs.pop('auth_storage')
                 
                 self.http_stream_client = HTTPStreamMCPClient(
                     command_or_string, 
