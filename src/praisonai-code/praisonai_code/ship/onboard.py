@@ -46,6 +46,7 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  statuses: write
 
 concurrency:
   group: openship-${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number || github.run_id }}
@@ -165,8 +166,10 @@ jobs:
           PR_NUM="${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}"
           echo "number=$PR_NUM" >> "$GITHUB_OUTPUT"
           BASE_REF="$(gh pr view "$PR_NUM" --json baseRefName --jq .baseRefName)"
+          HEAD_SHA="$(gh pr view "$PR_NUM" --json headRefOid --jq .headRefOid)"
           IS_FORK="$(gh pr view "$PR_NUM" --json isCrossRepository --jq .isCrossRepository)"
           echo "base_ref=$BASE_REF" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
           echo "is_fork=$IS_FORK" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         if: steps.pr.outputs.is_fork == 'false'
@@ -183,9 +186,21 @@ jobs:
         if: steps.pr.outputs.is_fork == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           if git show "origin/${{ steps.pr.outputs.base_ref }}:.praisonai/approvals.yml" >/dev/null 2>&1; then
+            set +e
             praisonai-code approvals "${{ steps.pr.outputs.number }}"
+            RC=$?
+            set -e
+            STATE="success"
+            DESC="OpenShip approval policy satisfied"
+            if [ "$RC" -ne 0 ]; then
+              STATE="failure"
+              DESC="OpenShip approval policy checks/approvals pending"
+            fi
+            gh api "repos/${{ github.repository }}/statuses/${{ steps.pr.outputs.head_sha }}" -f state="$STATE" -f context="openship/approvals" -f description="$DESC"
+            exit "$RC"
           else
             echo "No .praisonai/approvals.yml on base branch; skipping policy check."
           fi

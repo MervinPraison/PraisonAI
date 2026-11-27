@@ -1,7 +1,7 @@
 name: OpenShip PR Steward
 
 # For the complete 3-agent GitHub-native suite (Inline Code Review + PR Steward + Declarative Approvals),
-# copy products/openship/workflows/openship.yml into .github/workflows/openship.yml.
+# run `praisonai-code ship init` or copy products/openship/workflows/openship.yml into .github/workflows/openship.yml.
 
 on:
   pull_request:
@@ -34,6 +34,7 @@ jobs:
         id: pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           PR_NUM="${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}"
           echo "number=$PR_NUM" >> "$GITHUB_OUTPUT"
@@ -64,4 +65,5 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        run: praisonai steward "${{ steps.pr.outputs.number }}" --once
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: praisonai-code steward "${{ steps.pr.outputs.number }}" --once
