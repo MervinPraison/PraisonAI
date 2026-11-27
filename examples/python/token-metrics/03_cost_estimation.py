@@ -13,7 +13,7 @@ def main():
         role="Senior Market Research Analyst", 
         goal="Conduct comprehensive market research",
         backstory="You are a seasoned market researcher with 10+ years of experience.",
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
         output={"metrics": True}
     )
     
@@ -22,7 +22,7 @@ def main():
         role="Strategic Business Consultant",
         goal="Develop actionable business strategies",
         backstory="You are a strategic consultant who translates research into business plans.",
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
         output={"metrics": True}
     )
     

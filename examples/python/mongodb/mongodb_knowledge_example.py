@@ -60,7 +60,7 @@ def main():
             "sources": [os.path.join(os.path.dirname(__file__), "llms.md")],
         },
         memory=True,
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # Create a research assistant agent
@@ -73,7 +73,7 @@ def main():
         knowledge base. You ensure information is accurate, well-structured, 
         and properly categorized.""",
         memory=True,
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # Create tasks for knowledge management
