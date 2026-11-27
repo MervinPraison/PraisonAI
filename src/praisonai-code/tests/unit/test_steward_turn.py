@@ -203,3 +203,35 @@ def test_fix_check_falls_back_cleanly_when_logs_unavailable():
     run_steward_turn(_state(), Action("fix_check", "check:CI/test", "CI/test"), agent=agent, run=run)
     assert "CI/test" in agent.prompts[0]
     assert not run.ran("gh", "run", "view")
+
+
+def test_steward_prompt_includes_touched_files_and_records_attempt_on_agent_error():
+    def runner(cmd, **kw):
+        if cmd[:3] == ["git", "diff", "--name-only"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="src/calc.py\ntests/test_calc.py\n", stderr="")
+        if cmd[:2] == ["git", "rev-parse"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="aaa1111\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    agent = FakeAgent("Fixed.")
+    run_steward_turn(_state(), Action("fix_check", "check:CI/test", "CI/test"), agent=agent, run=runner)
+    assert "Files changed in this PR" in agent.prompts[0]
+    assert "untrusted filenames" in agent.prompts[0]
+    assert "- src/calc.py" in agent.prompts[0]
+
+    class BoomAgent:
+        def chat(self, prompt, **kw):
+            raise RuntimeError("[loop-guard] stuck")
+
+    comments = []
+
+    def comment_runner(cmd, **kw):
+        if cmd[:3] == ["gh", "pr", "comment"]:
+            comments.append(cmd[cmd.index("--body") + 1])
+        return runner(cmd, **kw)
+
+    res = run_steward_turn(
+        _state(), Action("fix_check", "check:CI/test", "CI/test"), agent=BoomAgent(), run=comment_runner, record_attempt=True
+    )
+    assert res.acted and res.commented and "Steward attempted (check:CI/test)" in comments[0]
+    assert "loop-guard" in comments[0]
