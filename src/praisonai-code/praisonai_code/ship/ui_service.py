@@ -154,13 +154,24 @@ def resolve_policy_path(repo: Path, policy_path: Optional[str]) -> Optional[str]
 
 
 def _default_base_branch(runner: Callable) -> str:
-    """Return the full default branch name (e.g. ``main`` or ``release/2.x``)."""
+    """Return the full default branch name (e.g. ``main``, ``master``, or ``release/2.x``)."""
     base_ref = runner(["git", "symbolic-ref", "refs/remotes/origin/HEAD"], capture_output=True, text=True)
     if base_ref.returncode == 0:
         ref = base_ref.stdout.strip()
         prefix = "refs/remotes/origin/"
         if ref.startswith(prefix) and ref[len(prefix):]:
             return ref[len(prefix):]
+    for candidate in ("main", "master"):
+        for ref in (f"origin/{candidate}", candidate):
+            if runner(["git", "rev-parse", "--verify", "--quiet", ref], capture_output=True, text=True).returncode == 0:
+                return candidate
+    gh_base = runner(
+        ["gh", "repo", "view", "--json", "defaultBranchRef", "--jq", ".defaultBranchRef.name"],
+        capture_output=True,
+        text=True,
+    )
+    if gh_base.returncode == 0 and gh_base.stdout.strip():
+        return gh_base.stdout.strip()
     return "main"
 
 

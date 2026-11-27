@@ -353,3 +353,21 @@ def test_ui_service_empty_remote_diff_does_not_fall_back_to_stale_local_base(tmp
     assert diff_text == ""
     assert files == []
     assert ["git", "diff", "main...HEAD"] not in calls
+
+
+def test_default_base_branch_resolves_master_and_gh_fallback_without_origin_head() -> None:
+    from praisonai_code.ship import ui_service
+
+    def fake_master(cmd, **kw):
+        if cmd[:4] == ["git", "rev-parse", "--verify", "--quiet"] and cmd[4] == "origin/master":
+            return subprocess.CompletedProcess(cmd, 0, stdout="abc\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    assert ui_service._default_base_branch(fake_master) == "master"
+
+    def fake_custom_gh(cmd, **kw):
+        if cmd[:3] == ["gh", "repo", "view"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="develop\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    assert ui_service._default_base_branch(fake_custom_gh) == "develop"
