@@ -77,3 +77,52 @@ def test_ship_refused_exits_1_with_clean_stderr(monkeypatch):
     res = CliRunner().invoke(approvals_cmd.app, [])
     assert res.exit_code == 1
     assert "approvals: no .praisonai/approvals.yml found" in res.output
+
+
+def test_approvals_comment_flag_upserts_existing_or_posts_new(monkeypatch):
+    import subprocess
+
+    report = _report(False, "observe")
+    calls = []
+
+    def fake_run_existing(cmd, **kw):
+        calls.append(cmd)
+        if cmd[:3] == ["gh", "pr", "view"]:
+            return subprocess.CompletedProcess(
+                cmd, 0,
+                stdout=json.dumps({
+                    "number": 42,
+                    "url": "https://github.com/o/r/pull/42",
+                    "comments": [{"url": "https://github.com/o/r/pull/42#issuecomment-999", "body": "<!-- openship-approvals -->\nold"}],
+                }),
+                stderr="",
+            )
+        return subprocess.CompletedProcess(cmd, 0, stdout="{}", stderr="")
+
+    assert approvals_mod.post_policy_comment("42", report, run=fake_run_existing) is True
+    patch = [c for c in calls if "repos/o/r/issues/comments/999" in c]
+    assert len(patch) == 1 and "--method" in patch[0] and "PATCH" in patch[0]
+    assert any("OpenShip Approvals (observe mode)" in a and "python-core" in a for a in patch[0])
+
+    # Fresh PR with no prior marker comment -> posts new comment
+    calls.clear()
+
+    def fake_run_new(cmd, **kw):
+        calls.append(cmd)
+        if cmd[:3] == ["gh", "pr", "view"]:
+            return subprocess.CompletedProcess(
+                cmd, 0,
+                stdout=json.dumps({"number": 42, "url": "https://github.com/o/r/pull/42", "comments": []}),
+                stderr="",
+            )
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    assert approvals_mod.post_policy_comment("42", report, run=fake_run_new) is True
+    assert any(c[:3] == ["gh", "pr", "comment"] for c in calls)
+
+    # CLI --comment wires post_policy_comment without changing exit code
+    posted = []
+    monkeypatch.setattr(approvals_mod, "check_pr_policy", lambda pr=None, policy_path=None: report)
+    monkeypatch.setattr(approvals_mod, "post_policy_comment", lambda pr, rep: posted.append((pr, rep)) or True)
+    res = CliRunner().invoke(approvals_cmd.app, ["42", "--comment"])
+    assert res.exit_code == 0 and len(posted) == 1 and posted[0][0] == "42"

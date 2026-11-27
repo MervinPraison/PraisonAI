@@ -57,6 +57,16 @@ def test_at_praisonai_stop_and_resume_comments():
     assert not resumed_state.stopped
     assert next_action(resumed_state, {}).kind == "fix_check"
 
+    steward_trigger = read_pr_state(
+        "42",
+        run=_fake_gh(
+            comments=[{"id": "1", "body": "@praisonai stop"}, {"id": "2", "body": "@praisonai steward"}],
+            failing_checks=["CI/test"],
+        ),
+    )
+    assert not steward_trigger.stopped and steward_trigger.directives == []
+    assert next_action(steward_trigger, {}).kind == "fix_check"
+
 
 def test_stateless_ci_circuit_breaker_hydrates_attempts_from_pr_comments():
     comments = [

@@ -15,6 +15,7 @@ def approvals_main(
     policy: Optional[str] = typer.Option(None, "--policy", "-p", help="Local policy file override"),
     enforce: bool = typer.Option(False, "--enforce", help="Exit 1 on failure even when policy mode is observe"),
     as_json: bool = typer.Option(False, "--json", help="Emit machine-readable JSON"),
+    comment: bool = typer.Option(False, "--comment", help="Upsert a live approval status comment on the PR"),
 ):
     """Evaluate a pull request against ``.praisonai/approvals.yml`` (never merges)."""
     from praisonai_code.ship import approvals
@@ -25,6 +26,9 @@ def approvals_main(
     except (ShipRefused, ValueError) as exc:
         typer.echo(f"approvals: {exc}", err=True)
         raise typer.Exit(1)
+
+    if comment and not approvals.post_policy_comment(pr, report):
+        typer.echo("approvals: warning: failed to post status comment to PR", err=True)
 
     if as_json:
         typer.echo(json.dumps({**dataclasses.asdict(report), "blocking": report.blocking}, indent=2))

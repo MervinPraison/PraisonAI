@@ -103,7 +103,7 @@ def _parse_pr_comments(comments: list) -> Tuple[bool, str, Dict[str, int], List[
         first = (cmd.split(None, 1)[0].lower() if cmd else "")
         if first in ("stop", "pause", "halt"):
             stopped, stop_reason = True, "stopped by @praisonai stop comment"
-        elif first in ("resume", "start"):
+        elif first in ("resume", "start", "steward"):
             stopped, stop_reason = False, ""
         elif first == "review":
             # Owned by Pillar 1 (on-demand code review), not a PR Steward code-editing directive

@@ -174,3 +174,10 @@ def test_lockfile_hunk_does_not_crowd_out_real_code_in_review():
     prompt = agent.prompts[0]
     assert "src/real.py" in prompt and "real_bug" in prompt
     assert "uv.lock" not in prompt
+
+
+@pytest.mark.parametrize(("alias", "expected_cap"), [("quick", 3), ("standard", 5), ("deep", 10)])
+def test_claude_ship_effort_tier_aliases_work(alias, expected_cap):
+    many = ReviewReport(findings=[_f(title=str(i)) for i in range(20)])
+    findings = review_diff(DIFF, effort=alias, agent=FakeAgent(many))
+    assert len(findings) == expected_cap

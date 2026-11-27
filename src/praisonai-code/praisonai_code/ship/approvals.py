@@ -9,6 +9,8 @@ from praisonai_code.ship.flow import ShipRefused
 
 DEFAULT_PROTECTED = (".praisonai/approvals.yml", ".github/workflows/**")
 _POLICY_FILE = ".praisonai/approvals.yml"
+_COMMENT_MARKER = "<!-- openship-approvals -->"
+_ISSUE_COMMENT_ID_RE = re.compile(r"#issuecomment-(\d+)$")
 _GLOB_TOK = re.compile(r"\*\*/|/\*\*|\*\*|\*|\?|[^*?]+")
 _GLOB_MAP = {"**/": "(?:.*/)?", "/**": "/.*", "**": ".*", "*": "[^/]*", "?": "[^/]"}
 @dataclass
@@ -95,3 +97,53 @@ def check_pr_policy(pr: Optional[str] = None, *, policy_path: Optional[str] = No
     passing = {k for c in view.get("statusCheckRollup") or [] if isinstance(c, dict) and (c.get("conclusion") or c.get("state")) == "SUCCESS"
                for name in ((c.get("name") or c.get("context") or "").strip(),) if name for wf in ((c.get("workflowName") or "").strip(),) for k in ({name, f"{wf}/{name}"} if wf else {name})}
     return evaluate_policy(load_policy(policy_text), changed_files=[f["path"] for f in view.get("files") or [] if isinstance(f, dict) and f.get("path")], approvers=[u for u, s in latest.items() if s == "APPROVED"], passing_checks=passing)
+
+
+def format_policy_comment(report: PolicyReport) -> str:
+    """Render an upserted PR status comment matching Claude Approvals' observe/enforce clarity."""
+    status = "Passed" if report.passed else ("Blocking" if report.blocking else "Pending")
+    lines = [
+        _COMMENT_MARKER,
+        f"### OpenShip Approvals ({report.mode} mode) — {status}",
+        "",
+        "| Rule | Status | Details |",
+        "|---|---|---|",
+    ]
+    if report.verdicts:
+        for v in report.verdicts:
+            badge = "PASS" if v.passed else "PENDING"
+            detail = "; ".join(v.reasons) if v.reasons else "Satisfied"
+            lines.append(f"| `{v.rule}` | {badge} | {detail} |")
+    else:
+        lines.append("| *(no matching rules)* | PASS | No path-scoped rules matched this PR |")
+    lines.extend(["", "_Loaded from default branch `.praisonai/approvals.yml` · OpenShip never auto-merges or auto-approves._"])
+    return "\n".join(lines)
+
+
+def post_policy_comment(pr: Optional[str], report: PolicyReport, *, run: Callable = subprocess.run) -> bool:
+    """Upsert a single OpenShip Approvals status comment on the PR (never spams)."""
+    pr_arg = [pr.lstrip("#") if pr.startswith("#") else pr] if pr else []
+    body = format_policy_comment(report)
+    view_proc = run(["gh", "pr", "view", *pr_arg, "--json", "number,url,comments"], capture_output=True, text=True)
+    if view_proc.returncode == 0 and (view_proc.stdout or "").strip():
+        try:
+            view = json.loads(view_proc.stdout)
+            url_parts = str(view.get("url", "")).split("/")
+            owner, name = url_parts[3], url_parts[4]
+            for c in reversed(view.get("comments") or []):
+                if not isinstance(c, dict) or not (c.get("body") or "").lstrip().startswith(_COMMENT_MARKER):
+                    continue
+                cid = str(c.get("databaseId") or "")
+                if not cid and (m := _ISSUE_COMMENT_ID_RE.search(str(c.get("url") or ""))):
+                    cid = m.group(1)
+                if cid:
+                    upd = run(
+                        ["gh", "api", f"repos/{owner}/{name}/issues/comments/{cid}", "--method", "PATCH", "-f", f"body={body}"],
+                        capture_output=True,
+                        text=True,
+                    )
+                    if upd.returncode == 0:
+                        return True
+        except (ValueError, KeyError, IndexError):
+            pass
+    return run(["gh", "pr", "comment", *pr_arg, "--body", body], capture_output=True, text=True).returncode == 0

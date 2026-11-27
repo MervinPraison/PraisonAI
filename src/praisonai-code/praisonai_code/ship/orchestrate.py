@@ -10,8 +10,10 @@ from praisonai_code.ship import flow, is_ship_disabled
 from praisonai_code.ship.flow import ShipRefused
 from praisonai_code.ship.review import (
     EFFORTS,
+    EFFORT_ALIASES,
     ReviewFinding,
     load_review_guidelines,
+    normalize_effort,
     review_diff,
     review_severity,
 )
@@ -150,12 +152,12 @@ def ship(
     """Commit/push/open a draft PR (or target an existing PR), self-review, and optionally watch."""
     if reason := is_ship_disabled():
         raise ShipRefused(reason)
-    if target in EFFORTS:
+    if target in EFFORTS or target in EFFORT_ALIASES:
         effort, target = target, None
     elif target and target.startswith("+"):
         reviewer, target = target[1:].strip() or reviewer, None
-    if review and effort not in EFFORTS:
-        raise ValueError(f"unknown review effort {effort!r}; use one of {', '.join(EFFORTS)}")
+    if review:
+        effort = normalize_effort(effort)
     if target is None:
         out = flow.ship_to_draft_pr(message=message, dry_run=dry_run, run=run, llm=model)
         if dry_run:

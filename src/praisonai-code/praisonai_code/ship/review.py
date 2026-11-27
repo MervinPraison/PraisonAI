@@ -18,7 +18,20 @@ from praisonai_code.ship._text import MAX_UNTRUSTED, fence_untrusted
 Severity = Literal["important", "nit", "pre_existing"]
 # Effort level -> most findings reported (None = all). Low keeps important ones only.
 EFFORTS = {"low": 3, "medium": 5, "high": 10, "xhigh": 20, "max": None}
+EFFORT_ALIASES = {"quick": "low", "standard": "medium", "deep": "high"}
 _VERIFY_EFFORTS = frozenset({"high", "xhigh", "max"})
+
+
+def normalize_effort(effort: str) -> str:
+    """Resolve Claude Ship tiers (quick/standard/deep) or canonical efforts (low..max)."""
+    key = (effort or "").strip().lower()
+    canonical = EFFORT_ALIASES.get(key, key)
+    if canonical not in EFFORTS:
+        raise ValueError(
+            f"unknown review effort {effort!r}; use one of {', '.join(EFFORTS)} "
+            f"(or {', '.join(EFFORT_ALIASES)})"
+        )
+    return canonical
 _ORDER = {"important": 0, "pre_existing": 1, "nit": 2}
 _MAX_DIFF = MAX_UNTRUSTED
 _MAX_GUIDELINES = 8_000
@@ -128,8 +141,7 @@ def review_diff(
     verify: Optional[bool] = None,
 ) -> List[ReviewFinding]:
     """Review ``diff`` and return findings, important first, capped by ``effort``."""
-    if effort not in EFFORTS:
-        raise ValueError(f"unknown review effort {effort!r}; use one of {', '.join(EFFORTS)}")
+    effort = normalize_effort(effort)
     if not diff.strip():
         return []
     fenced = fence_untrusted(diff, lang="diff", max_chars=_MAX_DIFF, strip_noise=True)
