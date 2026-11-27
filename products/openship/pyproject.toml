@@ -17,6 +17,7 @@ Repository = "https://github.com/MervinPraison/PraisonAI"
 [project.scripts]
 praisonai-ship = "praisonai_code.cli.commands.ship:app"
 praisonai-steward = "praisonai_code.cli.commands.steward:app"
+praisonai-approvals = "praisonai_code.cli.commands.approvals:app"
 
 [build-system]
 requires = ["setuptools>=64"]

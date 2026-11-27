@@ -200,6 +200,7 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "commit": (".commands.commit", "app", "AI-assisted git commits"),
     "ship": (".commands.ship", "app", "Commit, push and open a draft PR (never merges)"),
     "steward": (".commands.steward", "app", "Watch a PR and fix checks, conflicts and comments (never merges)"),
+    "approvals": (".commands.approvals", "app", "Check a PR against .praisonai/approvals.yml"),
     "publish": (".commands.publish", "app", "Package publishing"),
     "hooks": (".commands.hooks", "app", "Hook management"),
     "rules": (".commands.rules", "app", "Rules management"),
