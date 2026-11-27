@@ -54,8 +54,9 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: >-
-          praisonai ship "${{ github.event.pull_request.number }}"
+          praisonai-code ship "${{ github.event.pull_request.number }}"
           --effort "${{ env.OPENSHIP_EFFORT }}"
           --model "${{ env.OPENSHIP_MODEL }}"
           --post-review
@@ -75,6 +76,7 @@ jobs:
         id: pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
         run: |
           PR_NUM="${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}"
           echo "number=$PR_NUM" >> "$GITHUB_OUTPUT"
@@ -105,32 +107,55 @@ jobs:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: >-
-          praisonai steward "${{ steps.pr.outputs.number }}"
+          praisonai-code steward "${{ steps.pr.outputs.number }}"
           --once
           --model "${{ env.OPENSHIP_MODEL }}"
 
   # Pillar 3: Declarative PR Approvals Policy Check (.praisonai/approvals.yml on default branch; observe or enforce)
   approvals:
     if: >-
-      (github.event_name == 'pull_request' || github.event_name == 'pull_request_review') &&
-      github.event.pull_request.head.repo.full_name == github.repository
+      (
+        (github.event_name == 'pull_request' || github.event_name == 'pull_request_review') &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      ) ||
+      (
+        github.event_name == 'workflow_run' &&
+        github.event.workflow_run.pull_requests[0].number != null
+      )
     runs-on: ubuntu-latest
     steps:
+      - name: Resolve PR metadata
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          PR_NUM="${{ github.event.pull_request.number || github.event.workflow_run.pull_requests[0].number }}"
+          echo "number=$PR_NUM" >> "$GITHUB_OUTPUT"
+          BASE_REF="$(gh pr view "$PR_NUM" --json baseRefName --jq .baseRefName)"
+          IS_FORK="$(gh pr view "$PR_NUM" --json isCrossRepository --jq .isCrossRepository)"
+          echo "base_ref=$BASE_REF" >> "$GITHUB_OUTPUT"
+          echo "is_fork=$IS_FORK" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
+        if: steps.pr.outputs.is_fork == 'false'
         with:
           fetch-depth: 0
       - uses: actions/setup-python@v5
+        if: steps.pr.outputs.is_fork == 'false'
         with:
           python-version: "3.12"
       - name: Install PraisonAI Code (OpenShip)
+        if: steps.pr.outputs.is_fork == 'false'
         run: pip install --quiet praisonai-code
       - name: Evaluate .praisonai/approvals.yml
+        if: steps.pr.outputs.is_fork == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          if git show "origin/${{ github.event.pull_request.base.ref }}:.praisonai/approvals.yml" >/dev/null 2>&1; then
-            praisonai approvals "${{ github.event.pull_request.number }}"
+          if git show "origin/${{ steps.pr.outputs.base_ref }}:.praisonai/approvals.yml" >/dev/null 2>&1; then
+            praisonai-code approvals "${{ steps.pr.outputs.number }}"
           else
             echo "No .praisonai/approvals.yml on base branch; skipping policy check."
           fi
