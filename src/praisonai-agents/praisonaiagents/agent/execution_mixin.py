@@ -43,7 +43,7 @@ def _swap_in_model_facing(result, holder):
             override = {"value": override, "_additional_context": annotation}
     return override
 
-from typing import List, Optional, Any, Dict, Union, Generator, TYPE_CHECKING
+from typing import List, Optional, Any, Dict, Union, Generator, Literal, Type, TypeVar, overload, TYPE_CHECKING
 
 
 class _TimeoutCancelToken:
@@ -99,6 +99,8 @@ def cleanup_launch_registration(agent_id: str) -> None:
 
 if TYPE_CHECKING:
     from pydantic import BaseModel  # return annotations only
+
+_OutputT = TypeVar("_OutputT", bound="BaseModel")
 
 
 class ExecutionMixin:
@@ -834,6 +836,15 @@ Write the complete compiled report:"""
             except ImportError:
                 # If LLM class not available, just update the model string
                 pass
+
+    @overload
+    def start(self, prompt: Optional[str] = None, *, stream: Literal[True], **kwargs: Any) -> Generator[str, None, None]: ...
+    @overload
+    def start(self, prompt: Optional[str] = None, *, output_pydantic: Type[_OutputT], stream: Literal[False] = ..., **kwargs: Any) -> Optional[_OutputT]: ...
+    @overload
+    def start(self, prompt: Optional[str] = None, *, output_pydantic: None = None, stream: Literal[False], **kwargs: Any) -> Optional[str]: ...
+    @overload
+    def start(self, prompt: Optional[str] = None, **kwargs: Any) -> Union[str, "BaseModel", Generator[str, None, None], None]: ...
 
     def start(self, prompt: Optional[str] = None, **kwargs: Any) -> Union[str, "BaseModel", Generator[str, None, None], None]:
         """Start the agent interactively with verbose output.
