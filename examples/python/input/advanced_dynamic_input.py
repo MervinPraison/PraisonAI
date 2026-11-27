@@ -41,7 +41,7 @@ class DynamicAgentSystem:
             backstory=f"Multilingual expert specializing in {inputs['depth']} analysis",
             tools=[duckduckgo],
             reflection=inputs['depth'] == 'detailed',
-            llm=self.llm_config
+            model=self.llm_config
         )
         agents.append(research_agent)
         
@@ -51,7 +51,7 @@ class DynamicAgentSystem:
             role=f"{inputs['output_format'].title()} Formatter",
             goal=f"Format research into {inputs['output_format']} style",
             backstory=f"Expert in creating {inputs['output_format']} documents",
-            llm=self.llm_config
+            model=self.llm_config
         )
         agents.append(format_agent)
         
@@ -62,7 +62,7 @@ class DynamicAgentSystem:
                 role="Quality Assurance Specialist",
                 goal="Verify accuracy and completeness",
                 backstory="Expert in fact-checking and quality control",
-                llm=self.llm_config
+                model=self.llm_config
             )
             agents.append(quality_agent)
         
