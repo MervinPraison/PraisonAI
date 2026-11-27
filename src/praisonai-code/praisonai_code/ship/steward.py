@@ -50,12 +50,24 @@ def _gh(run: Callable, *args: str) -> dict:
     return json.loads(run(["gh", *args], capture_output=True, text=True, check=True).stdout)
 
 
+def _check_key(check: dict) -> Optional[str]:
+    """Stable key for a CheckRun or StatusContext, prefixed with workflowName when present."""
+    name = (check.get("name") or check.get("context") or "").strip()
+    if not name:
+        return None
+    workflow = (check.get("workflowName") or "").strip()
+    return f"{workflow}/{name}" if workflow else name
+
+
 def read_pr_state(pr: Optional[str] = None, run: Callable = subprocess.run) -> PRState:
     """Read the PR (the current branch's when ``pr`` is None) with ``gh``. Never writes."""
     view = _gh(run, "pr", "view", *([pr] if pr else []), "--json",
                "number,url,state,mergeable,headRefName,baseRefName,statusCheckRollup")
-    failing = list(dict.fromkeys(c.get("name") or c.get("context") for c in view.get("statusCheckRollup") or []
-                                 if (c.get("conclusion") or c.get("state")) in _FAILED))
+    keys = [
+        _check_key(c) for c in view.get("statusCheckRollup") or []
+        if isinstance(c, dict) and (c.get("conclusion") or c.get("state")) in _FAILED
+    ]
+    failing = list(dict.fromkeys(k for k in keys if k))
     # owner/name from the PR's own URL, not gh's {owner}/{repo} (the cwd repo), so a PR URL from another repo works.
     owner, name = view["url"].split("/")[3:5]
     data = _gh(run, "api", "graphql", "-f", f"query={_THREADS_QUERY}", "-F", f"owner={owner}",
