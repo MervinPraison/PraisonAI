@@ -4,6 +4,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from praisonaiagents import tool
+from praisonaiagents.tools.registry import ToolRegistry
 from praisonaiagents.tools.resolver import (
     ToolResolutionError,
     resolve_tool_name,
@@ -12,6 +14,20 @@ from praisonaiagents.tools.resolver import (
 
 
 class TestResolveToolName:
+    def test_resolves_first_decorated_tool_in_empty_registry(self, monkeypatch):
+        registry = ToolRegistry(discovery_enabled=False)
+        monkeypatch.setattr(
+            "praisonaiagents.tools.registry.get_registry", lambda: registry
+        )
+
+        @tool
+        def echo_first_tool(value: str) -> str:
+            """Return the supplied value."""
+            return value
+
+        assert registry.get(echo_first_tool.name) is echo_first_tool
+        assert resolve_tool_name(echo_first_tool.name) is echo_first_tool
+
     def test_registry_takes_precedence(self):
         mock_tool = MagicMock()
         mock_registry = MagicMock()
