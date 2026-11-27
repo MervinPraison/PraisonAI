@@ -278,3 +278,18 @@ def test_answer_thread_posts_inline_graphql_reply_with_and_without_push():
     assert "threadId=T1" in gql_calls[0]
     assert any("Steward replied (thread:T1)" in arg for arg in gql_calls[0])
     assert not run_reply.ran("gh", "pr", "comment")
+
+    # Case 3: local commit created but git push failed -> must NOT mark thread answered; records attempt for retry
+    gql_calls.clear()
+    run_unpushed = FakeRunner(heads=("aaa1111", "bbb2222"), remote_head="aaa1111")
+    res3 = run_steward_turn(
+        _state(),
+        Action("answer_thread", "thread:T1", "please rename x"),
+        agent=FakeAgent("Renamed x locally."),
+        run=tracking_runner(run_unpushed),
+        record_attempt=True,
+    )
+    assert res3.pushed_sha is None and res3.commented
+    assert gql_calls == []
+    assert len(run_unpushed.ran("gh", "pr", "comment")) == 1
+    assert "Steward attempted (thread:T1)" in run_unpushed.ran("gh", "pr", "comment")[0][-1]

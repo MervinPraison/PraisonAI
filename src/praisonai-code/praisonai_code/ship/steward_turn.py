@@ -40,6 +40,14 @@ def _is_pushed(run: Callable, branch: str, sha: str) -> bool:
     return proc.returncode == 0 and proc.stdout.strip() == sha
 
 
+def _has_unpublished_changes(run: Callable, before: Optional[str], after: Optional[str]) -> bool:
+    """Return True if local commits or dirty working-tree changes remain unpushed."""
+    if before and after and after != before:
+        return True
+    proc = run(["git", "status", "--porcelain"], capture_output=True, text=True)
+    return proc.returncode == 0 and bool((proc.stdout or "").strip())
+
+
 def _failed_check_log(run: Callable, state: PRState, check_name: str) -> str:
     """Best-effort failed-log tail for ``check_name`` via ``gh``; falls back to ``check_name``."""
     proc = run(["gh", "pr", "checks", state.url or str(state.number), "--json", "name,workflow,link,bucket"],
@@ -186,7 +194,7 @@ def run_steward_turn(
         proc = run(["gh", "pr", "comment", target, "--body", body], capture_output=True, text=True)
         thread_replied = _reply_review_thread(run, thread_id, body) if thread_id else False
         return TurnResult(action.kind, True, summary, pushed_sha=after, commented=(proc.returncode == 0 or thread_replied))
-    if thread_id and not halted and summary:
+    if thread_id and not halted and summary and not _has_unpublished_changes(run, before, after):
         replied = _reply_review_thread(run, thread_id, f"Steward replied ({action.key}):\n\n{summary[:600]}")
         if replied:
             return TurnResult(action.kind, True, summary, commented=True)

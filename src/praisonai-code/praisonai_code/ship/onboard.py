@@ -33,6 +33,8 @@ name: OpenShip (Review, Steward & Policy)
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
+  pull_request_target:
+    types: [opened, synchronize, reopened]
   pull_request_review:
     types: [submitted, dismissed]
   pull_request_review_comment:
@@ -122,7 +124,7 @@ jobs:
       !endsWith(github.actor, '[bot]') &&
       (
         (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.pull_requests[0].number != null) ||
-        (github.event_name == 'pull_request' && github.event.action != 'labeled' && github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'openship-stop')) ||
+        (github.event_name == 'pull_request_target' && github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'openship-stop')) ||
         (github.event_name == 'pull_request_review_comment' && github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'openship-stop')) ||
         (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, '@praisonai') && !contains(github.event.comment.body, '@praisonai stop') && !contains(github.event.comment.body, '@praisonai review'))
       )
@@ -139,7 +141,7 @@ jobs:
           HEAD_REF="$(gh pr view "$PR_NUM" --json headRefName --jq .headRefName)"
           IS_FORK="$(gh pr view "$PR_NUM" --json isCrossRepository --jq .isCrossRepository)"
           MERGEABLE="UNKNOWN"
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
+          if [ "${{ github.event_name }}" = "pull_request_target" ]; then
             for _ in 1 2 3; do
               MERGEABLE="$(gh pr view "$PR_NUM" --json mergeable --jq .mergeable)"
               [ "$MERGEABLE" != "UNKNOWN" ] && break
@@ -148,7 +150,7 @@ jobs:
           fi
           SHOULD_RUN="false"
           if [ "$IS_FORK" = "false" ]; then
-            if [ "${{ github.event_name }}" != "pull_request" ] || [ "$MERGEABLE" = "CONFLICTING" ]; then
+            if [ "${{ github.event_name }}" != "pull_request_target" ] || [ "$MERGEABLE" = "CONFLICTING" ]; then
               SHOULD_RUN="true"
             fi
           fi
