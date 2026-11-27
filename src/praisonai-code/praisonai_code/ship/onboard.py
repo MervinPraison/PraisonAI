@@ -154,7 +154,7 @@ jobs:
           fi
           SHOULD_RUN="false"
           if [ "$IS_FORK" = "false" ]; then
-            if [ "${{ github.event_name }}" != "pull_request_target" ] || [ "$MERGEABLE" = "CONFLICTING" ]; then
+            if [ "${{ github.event_name }}" != "pull_request_target" ] || [ "${{ github.event.action }}" = "ready_for_review" ] || [ "$MERGEABLE" = "CONFLICTING" ]; then
               if [ "$OPENSHIP_SKIP_DRAFTS" != "true" ] || [ "$IS_DRAFT" != "true" ] || [ "${{ github.event_name }}" = "issue_comment" ]; then
                 SHOULD_RUN="true"
               fi
