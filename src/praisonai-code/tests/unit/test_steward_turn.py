@@ -215,7 +215,8 @@ def test_steward_prompt_includes_touched_files_and_records_attempt_on_agent_erro
 
     agent = FakeAgent("Fixed.")
     run_steward_turn(_state(), Action("fix_check", "check:CI/test", "CI/test"), agent=agent, run=runner)
-    assert "Files changed in this PR:" in agent.prompts[0]
+    assert "Files changed in this PR" in agent.prompts[0]
+    assert "untrusted filenames" in agent.prompts[0]
     assert "- src/calc.py" in agent.prompts[0]
 
     class BoomAgent:
