@@ -46,7 +46,7 @@ agent = Agent(
     instructions="You are a helpful documentation assistant. Answer questions based on the provided context.",
     knowledge=[sample_doc],
     memory={"user_id": "example_user"},
-    llm="openai/gpt-4o-mini",
+    model="openai/gpt-4o-mini",
     output="minimal",
 )
 

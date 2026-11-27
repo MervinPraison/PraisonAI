@@ -13,7 +13,7 @@ def main():
         role="Senior Data Analyst",
         goal="Analyze data and provide insights",
         backstory="You are an experienced data analyst with expertise in market research.",
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
         output={"metrics": True}
     )
     
@@ -22,7 +22,7 @@ def main():
         role="Technical Writer",
         goal="Create well-structured content",
         backstory="You are a skilled technical writer who creates clear, engaging content.",
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
         output={"metrics": True}
     )
     

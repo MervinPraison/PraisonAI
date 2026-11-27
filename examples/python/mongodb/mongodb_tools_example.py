@@ -38,7 +38,7 @@ def main():
         collections, and analyze data patterns. You excel at using MongoDB tools 
         for data management and retrieval.""",
         tools=[mongodb_tools],
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # Create a Data Analysis Agent
@@ -50,7 +50,7 @@ def main():
         from MongoDB databases. You can query data, perform aggregations, and 
         identify patterns and trends in the stored information.""",
         tools=[mongodb_tools],
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # Create tasks for MongoDB operations
