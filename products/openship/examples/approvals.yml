@@ -13,8 +13,6 @@ rules:
     paths:
       - "src/**"
     seats: 1
-    reviewers:
-      - "@maintainers"
     checks:
       - "unit-tests"
 
@@ -24,7 +22,8 @@ rules:
       - "**/auth/**"
     seats: 2
     reviewers:
-      - "@security-team"
+      - "alice"
+      - "bob"
     checks:
       - "unit-tests"
       - "security-scan"

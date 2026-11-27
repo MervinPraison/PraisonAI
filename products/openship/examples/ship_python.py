@@ -28,7 +28,12 @@ def main() -> None:
     policy_path = Path(".praisonai/approvals.yml")
     if policy_path.is_file():
         policy = load_policy(policy_path.read_text(encoding="utf-8"))
-        report = evaluate_policy(policy, changed_files=["src/app.py"], approvers=["alice"])
+        report = evaluate_policy(
+            policy,
+            changed_files=["src/app.py"],
+            approvers=["alice"],
+            passing_checks=["unit-tests"],
+        )
         print("Approval policy report:", report)
 
     # 4. Run one PR steward check cycle against a PR number (never merges).
