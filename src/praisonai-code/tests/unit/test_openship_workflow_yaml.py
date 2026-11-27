@@ -28,6 +28,10 @@ def test_openship_full_github_workflow_covers_all_three_pillars() -> None:
     assert {"review", "steward", "approvals"}.issubset(jobs.keys())
     assert "openship-stop" in raw
     assert "@praisonai stop" in raw
+    assert "@praisonai review" in raw
+    assert "openship/review" in raw
+    assert "openship/approvals" in raw
+    assert 'git config user.name "openship[bot]"' in raw
     assert "is_fork == 'false'" in raw
     assert "GH_REPO: ${{ github.repository }}" in raw
     assert "praisonai-code ship" in raw

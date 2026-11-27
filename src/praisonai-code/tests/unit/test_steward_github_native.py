@@ -99,3 +99,63 @@ def test_directive_comment_triggers_answer_directive_and_records_attempt_in_once
     res = run_steward_turn(state, act, agent=fake_agent, run=runner, record_attempt=True)
     assert res.acted and res.commented
     assert posted and "Steward attempted (directive:d1)" in posted[0]
+
+
+def test_github_token_graphql_fallback_without_viewer_and_ignores_self_checks():
+    view = {
+        "number": 42,
+        "url": "https://github.com/MervinPraison/PraisonAI/pull/42",
+        "state": "OPEN",
+        "mergeable": "MERGEABLE",
+        "headRefName": "feat/demo",
+        "baseRefName": "main",
+        "statusCheckRollup": [
+            {"name": "unit-tests", "conclusion": "FAILURE"},
+            {"context": "openship/approvals", "state": "FAILURE"},
+            {"workflowName": "OpenShip (Review, Steward & Policy)", "name": "approvals", "conclusion": "FAILURE"},
+        ],
+        "labels": [],
+        "comments": [{"id": "r1", "body": "@praisonai review"}],
+    }
+    no_viewer_gql = {
+        "data": {
+            "repository": {
+                "pullRequest": {
+                    "reviewThreads": {
+                        "nodes": [
+                            {
+                                "id": "T_bot",
+                                "isResolved": False,
+                                "isOutdated": False,
+                                "path": "a.py",
+                                "line": 2,
+                                "comments": {"nodes": [{"author": {"login": "github-actions"}, "body": "bot note"}]},
+                            },
+                            {
+                                "id": "T_human",
+                                "isResolved": False,
+                                "isOutdated": False,
+                                "path": "a.py",
+                                "line": 4,
+                                "comments": {"nodes": [{"author": {"login": "alice"}, "body": "please fix"}]},
+                            },
+                        ]
+                    }
+                }
+            }
+        }
+    }
+
+    def runner(cmd, **kw):
+        if cmd[:3] == ["gh", "pr", "view"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(view), stderr="")
+        if cmd[:3] == ["gh", "api", "graphql"]:
+            if "viewer{login}" in " ".join(cmd):
+                return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="Resource not accessible by integration")
+            return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(no_viewer_gql), stderr="")
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    state = read_pr_state("42", run=runner)
+    assert state.failing == ["unit-tests"]
+    assert state.directives == []
+    assert [t.id for t in state.threads] == ["T_human"]
