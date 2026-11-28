@@ -84,9 +84,10 @@ def test_windows_stdin_is_pipe_detects_fifo(monkeypatch):
         def fileno(self):
             return 0
 
-    monkeypatch.setattr(stdin_util.sys, "stdin", _HandleStdin())
-    monkeypatch.setattr(stdin_util.os, "fstat", lambda fd: _FakeStat())
-    assert stdin_util._windows_stdin_is_pipe() is True
+    with monkeypatch.context() as stdin_patch:
+        stdin_patch.setattr(stdin_util.sys, "stdin", _HandleStdin())
+        stdin_patch.setattr(stdin_util.os, "fstat", lambda fd: _FakeStat())
+        assert stdin_util._windows_stdin_is_pipe() is True
 
 
 def test_read_stdin_windows_reads_redirected_content(monkeypatch):

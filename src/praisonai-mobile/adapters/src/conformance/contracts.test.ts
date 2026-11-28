@@ -51,7 +51,7 @@ import {
   parseInsetPx,
   type InsetSource,
 } from "../tauri/shell.ts";
-import type { Namespace, StorageKey, StoragePort } from "../../../core/src/ports/storage.ts";
+import type { StoragePort } from "../../../core/src/ports/storage.ts";
 import type { SafeAreaInsets, ShellPort } from "../../../core/src/ports/shell.ts";
 
 /** A minimal in-memory `Storage`, so the web adapter can be exercised under
@@ -331,95 +331,6 @@ async function catches(check: () => Promise<void>): Promise<boolean> {
     return true;
   }
 }
-
-test("the contract catches an adapter that returns undefined for a missing key", async () => {
-  const broken: StoragePort = {
-    ...createFakeStorage(),
-    async read() {
-      return undefined as unknown as string | null;
-    },
-  };
-  const caught = await catches(async () => {
-    const value = await broken.read({ namespace: "chats", id: "nope" });
-    assert.notEqual(value, undefined);
-  });
-  assert.equal(caught, true, "undefined-for-missing must be caught");
-});
-
-test("the contract catches an adapter whose namespaces leak into each other", async () => {
-  // The classic bug: composing the key from the id alone.
-  const map = new Map<string, string>();
-  const leaky: StoragePort = {
-    async read(key: StorageKey) {
-      return map.get(key.id) ?? null;
-    },
-    async write(key: StorageKey, value: string) {
-      map.set(key.id, value);
-    },
-    async remove(key: StorageKey) {
-      map.delete(key.id);
-    },
-    async listIds(_ns: Namespace) {
-      return [...map.keys()];
-    },
-    async clear(_ns: Namespace) {
-      map.clear();
-    },
-  };
-
-  const caught = await catches(async () => {
-    await leaky.write({ namespace: "chats", id: "same" }, "chat value");
-    await leaky.write({ namespace: "settings", id: "same" }, "settings value");
-    assert.equal(await leaky.read({ namespace: "chats", id: "same" }), "chat value");
-  });
-  assert.equal(caught, true, "a namespace leak must be caught");
-});
-
-test("the contract catches an adapter that clears every other key", async () => {
-  // The index-shifting bug, written out: removing while iterating forward by
-  // index skips alternate entries and still reports success.
-  const map = new Map<string, string>();
-  const skipping: StoragePort = {
-    ...createWebStorage(memoryStorage()),
-    async write(key, value) {
-      map.set(`${key.namespace}.${key.id}`, value);
-    },
-    async listIds(ns) {
-      return [...map.keys()].filter((k) => k.startsWith(`${ns}.`)).map((k) => k.split(".")[1]!);
-    },
-    async clear(ns) {
-      const keys = [...map.keys()].filter((k) => k.startsWith(`${ns}.`));
-      for (let i = 0; i < keys.length; i += 2) map.delete(keys[i]!); // every other one
-    },
-  };
-
-  const caught = await catches(async () => {
-    for (const id of ["a", "b", "c", "d", "e"]) {
-      await skipping.write({ namespace: "chats", id }, id);
-    }
-    await skipping.clear("chats");
-    assert.deepEqual(await skipping.listIds("chats"), []);
-  });
-  assert.equal(caught, true, "a partial clear must be caught");
-});
-
-test("the contract catches an adapter that treats an empty string as absent", async () => {
-  // `||` instead of `??`. Turns a deliberately-empty setting back into its
-  // default on every read.
-  const inner = createFakeStorage();
-  const falsy: StoragePort = {
-    ...inner,
-    async read(key) {
-      const value = await inner.read(key);
-      return value || null;
-    },
-  };
-  const caught = await catches(async () => {
-    await falsy.write({ namespace: "settings", id: "empty" }, "");
-    assert.equal(await falsy.read({ namespace: "settings", id: "empty" }), "");
-  });
-  assert.equal(caught, true, "empty-as-absent must be caught");
-});
 
 // ---- the other web adapters ------------------------------------------------
 
@@ -1326,24 +1237,7 @@ test("zooming after construction does not report a phantom keyboard", async () =
   assert.deepEqual(seen, [0]);
 });
 
-// ---- (3) the contracts can FAIL --------------------------------------------
-//
-// The "the contract catches an adapter that ..." tests above build a broken
-// adapter and then RE-IMPLEMENT the contract's assertion inline. That proves
-// an assertion of that shape would catch the defect. It proves nothing about
-// whether the contract still contains it.
-//
-// Measured: deleting `assert.ok(fired >= 2)` from the time contract -- the one
-// assertion catching `setInterval` becoming `setTimeout`, which stops every
-// polling loop in the app after a single tick -- left the suite at 1035 pass,
-// 0 fail. Fourteen assertions across all four contracts could be deleted for
-// free, and removing a whole section merely reported one test fewer.
-//
-// These spawn the REAL contract against a deliberately broken adapter and
-// assert the matching case goes red BY NAME. The identical pattern already
-// existed in engines/src/contract-fixture.ts, written for the same reason; the
-// adapter contracts never got it.
-
+// Run the relevant case from the real contract against each broken adapter.
 function adapterChildEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
   delete env["NODE_TEST_CONTEXT"];
@@ -1355,20 +1249,17 @@ const FIXTURE = join(dirname(fileURLToPath(import.meta.url)), "contract-fixture.
 /** Spawn one fixture FILE in one break mode. Takes the path rather than
  *  assuming `contract-fixture.ts`, because the ledger probe below runs a
  *  generated copy of it beside the original. */
-function runAdapterFixtureAt(file: string, mode: string): { status: number | null; output: string } {
+function runAdapterFixtureAt(file: string, mode: string, caseName?: RegExp): { status: number | null; output: string } {
   // The reporter is FORCED: node 22 emits TAP when stdout is a pipe, node 24
   // emits the spec reporter, and a test grepping for "not ok" would pass on
   // one and fail on the other with identical code under it.
   const run = spawnSync(
     process.execPath,
-    ["--test-reporter=tap", file, mode],
+    ["--test-reporter=tap", ...(caseName ? ["--test-name-pattern", caseName.source] : []), file, mode],
     { encoding: "utf8", timeout: 120_000, env: adapterChildEnv() },
   );
+  assert.ifError(run.error);
   return { status: run.status, output: `${run.stdout ?? ""}${run.stderr ?? ""}` };
-}
-
-function runAdapterFixture(mode: string): { status: number | null; output: string } {
-  return runAdapterFixtureAt(FIXTURE, mode);
 }
 
 /** Each break mode, and the contract case that must go red because of it. */
@@ -1382,6 +1273,7 @@ const ADAPTER_BREAKS: readonly { readonly mode: string; readonly expects: RegExp
   { mode: "secrets_has_reads_the_value", expects: /has\(\) answers without reading the value/ },
   { mode: "storage_missing_is_undefined", expects: /a missing key reads as null, never undefined/ },
   { mode: "storage_namespaces_collide", expects: /namespaces are isolated/ },
+  { mode: "storage_clear_skips_keys", expects: /clear removes every key, not every other one/ },
   { mode: "time_every_fires_once", expects: /every\(\) repeats, rather than firing once/ },
   { mode: "time_clear_does_nothing", expects: /a cleared timer does not fire/ },
   // The shell contract is the largest of the four and was the one this fixture
@@ -1408,7 +1300,7 @@ const ADAPTER_BREAKS: readonly { readonly mode: string; readonly expects: RegExp
 
 for (const { mode, expects } of ADAPTER_BREAKS) {
   test(`the contracts can fail: "${mode}" reddens its own named case`, () => {
-    const { status, output } = runAdapterFixture(mode);
+    const { status, output } = runAdapterFixtureAt(FIXTURE, mode, expects);
     assert.notEqual(status, 0, `the fixture passed while broken as "${mode}"`);
 
     // The `not ok ` prefix is part of the PATTERN, not just of a filter applied
@@ -1435,7 +1327,7 @@ test("a contract cannot quietly shrink", () => {
   //
   // Raise these numbers when you add cases. If one drops, a contract lost
   // coverage, and that is exactly the event worth a red build.
-  const { status, output } = runAdapterFixture("none");
+  const { status, output } = runAdapterFixtureAt(FIXTURE, "none");
   assert.equal(status, 0, `the unbroken fixture failed:\n${output}`);
 
   // `# SKIP` and `# TODO` are reported as `ok` in TAP, so counting them lets a
@@ -1458,17 +1350,9 @@ test("a contract cannot quietly shrink", () => {
   // ADAPTER_BREAKS, or lowering a count above, removes a defence and the only
   // signal is a smaller number that nothing reads. Guarding the guard.
   assert.ok(
-    ADAPTER_BREAKS.length >= 18,
+    ADAPTER_BREAKS.length >= 19,
     `the break table shrank to ${ADAPTER_BREAKS.length} modes`,
   );
-});
-
-test("the contracts can PASS: an unbroken fixture is green", () => {
-  // The control. Without it, a fixture that failed everything -- a syntax
-  // error, a missing import, a runner that cannot start -- would satisfy every
-  // case above while proving nothing at all.
-  const { status, output } = runAdapterFixture("none");
-  assert.equal(status, 0, `an unbroken fixture failed:\n${output}`);
 });
 
 test("the tauri bridge subscribes to events for ANY target", () => {
@@ -1919,13 +1803,6 @@ for (const which of LEDGERED) {
     );
   });
 }
-
-test("an unhollowed fixture run is green", () => {
-  // The pair. A fixture that failed regardless would pass all four above and
-  // prove nothing; `none` is the mode in which every contract must pass.
-  const run = runAdapterFixture("none");
-  assert.equal(run.status, 0, `the untouched fixture must be green:\n${run.output}`);
-});
 
 test("a HALF-present Tauri global is treated as absent", () => {
   // `||` -> `&&` survived. A global carrying only one of the two functions is

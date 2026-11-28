@@ -132,6 +132,7 @@ def test_botos_reliability_off_no_drain_no_gate():
     # off → immediate teardown (drain coerced to None/0) and no admission gate.
     assert not os_._drain_timeout
     assert os_._admission_gate is None
+    assert os_.admission_stats is None
 
 
 def test_botos_unset_reliability_is_safe_by_default():

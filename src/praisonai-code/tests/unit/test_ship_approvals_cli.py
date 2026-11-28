@@ -2,6 +2,7 @@
 
 import json
 
+from rich.text import Text
 from typer.testing import CliRunner
 
 from praisonai_code.cli.commands import approvals as approvals_cmd
@@ -27,8 +28,9 @@ def test_registered_in_cli_app():
     assert cli_app._LAZY_COMMANDS["approvals"][0] == ".commands.approvals"
     res = CliRunner().invoke(approvals_cmd.app, ["--help"])
     assert res.exit_code == 0
+    help_text = Text.from_ansi(res.output).plain
     for flag in ("--policy", "--enforce", "--json"):
-        assert flag in res.output
+        assert flag in help_text
 
 
 def test_passing_policy_exits_0_and_prints_verdicts(monkeypatch):
