@@ -53,7 +53,7 @@ from ._streaming import (
     DraftStreamer,
     build_streaming_config,
 )
-from ._debounce import InboundDebouncer
+from ._debounce import InboundDebouncer, should_debounce_inbound
 from ._ack import AckReactor
 from ._unknown_user import BotContext, UnknownUserHandler, is_sender_allowed
 from ._pairing_ui import PairingUIBuilder, PairingCallbackHandler
@@ -513,7 +513,33 @@ class DiscordBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                         ack_ctx = await self._ack.ack(react_fn=_discord_react)
                     
                     async def _send_agent_response():
-                        text_to_send = await self._debouncer.debounce(user_id, bot_message.text)
+                        if should_debounce_inbound(
+                            bot_message.text,
+                            # Native attachments: ``_convert_message()`` does
+                            # not populate ``BotMessage.attachments``, so a
+                            # captioned upload must be detected here to stay
+                            # out of the text debounce window.
+                            has_media=bool(getattr(message, "attachments", None)),
+                        ):
+                            batch = await self._debouncer.debounce(
+                                user_id, bot_message.text
+                            )
+                            if batch is None:
+                                # Superseded by a later message in the same
+                                # burst: that caller's single turn already
+                                # carries this text. Clear this message's
+                                # processing indicator — it never gets its
+                                # own completion.
+                                if ack_ctx:
+                                    await self._ack.clear(
+                                        ack_ctx, unreact_fn=_discord_unreact
+                                    )
+                                return
+                            text_to_send = batch.final
+                        else:
+                            # Control/empty/media-bearing message: never held
+                            # in the debounce window, dispatch as its own turn.
+                            text_to_send = bot_message.text
                         channel_id = str(message.channel.id)
 
                         # Streaming path: progressively edit a placeholder in

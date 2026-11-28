@@ -10734,10 +10734,41 @@ class WebSocketGateway:
         # /new strictly one at a time, as PTB's sequential dispatch did before,
         # so staged profiles, debounce batches and resets never interleave.
         turn_lock = asyncio.Lock()
+        # Bumped by ``/new`` while it holds ``turn_lock``. A message that was
+        # buffered in the debounce window before the reset must not run its
+        # turn afterwards: it would replay pre-reset text into the fresh
+        # conversation (and the user already saw "Session reset").
+        # Keyed by the *session* the turn uses, not by the bot or by the
+        # debounce window: with ``session_scope='per_chat'`` a whole group
+        # shares one session across senders, and with ``per_user`` one sender
+        # shares one session across chats. Reusing the debounce key (which must
+        # stay per conversation) would let one member's ``/new`` drop another
+        # member's buffered text, or miss a reset issued from a sibling chat.
+        reset_generations: dict[str, int] = {}
+
+        def _session_key(message: Any, chat_id: str) -> str:
+            """The key ``chat()``/``reset()`` will use for this turn."""
+            user_id = message.sender.user_id if message.sender else "unknown"
+            session = getattr(bot, "_session", None)
+            storage_key = getattr(session, "_storage_key", None)
+            if storage_key is None:  # defensive: no session yet
+                return f"{user_id}|{chat_id}"
+            try:
+                return storage_key(
+                    user_id,
+                    account=getattr(bot.config, "account", "default"),
+                    chat_id=chat_id,
+                )
+            except Exception:  # pragma: no cover — defensive
+                return f"{user_id}|{chat_id}"
 
         async def handle_message(update: Update, context: Any):
-            async with turn_lock:
-                await _handle_message(update, context)
+            # ``turn_lock`` is taken inside ``_handle_message`` once the
+            # debounce window has resolved: a burst's callers must all reach
+            # ``debounce()`` before any of them runs a turn, otherwise the
+            # lock serialises the wait itself and every buffered message
+            # dispatches its own turn (Issue #6717).
+            await _handle_message(update, context)
 
         async def _handle_message(update: Update, context: Any):
             # Import the shared security pipeline from telegram.py
@@ -10796,19 +10827,6 @@ class WebSocketGateway:
             tool_policy = gateway._resolve_tool_policy_for_message(
                 channel_name, facts=facts
             )
-            # Per-tenant profile scope (Issue #4341): enter the resolved route's
-            # profile namespace on the session so this turn's memory/session
-            # state is keyed per tenant. ``None`` clears any prior scope so an
-            # unscoped route never inherits another tenant's namespace.
-            _tg_session = getattr(bot, "_session", None)
-            if _tg_session is not None and hasattr(
-                _tg_session, "set_profile_namespace"
-            ):
-                _tg_session.set_profile_namespace(
-                    gateway._resolve_profile_for_message(channel_name, facts=facts),
-                    agent,
-                )
-
             # Ack reaction — show processing indicator.
             # Scope-gated like the standalone Telegram adapter so ambient group
             # chatter the bot won't answer is not acked (Greptile #4293): a
@@ -10845,27 +10863,102 @@ class WebSocketGateway:
             }
 
             try:
-                message_text = await bot._debouncer.debounce(user_id, message_text)
-                
-                # Show typing indicator with renewal during long operation
-                if bot.config.typing_indicator:
-                    from praisonai_bot.bots._typing_indicator import with_typing_renewal
-                    
-                    async def _typing_action():
-                        await update.message.chat.send_action("typing")
-                    
-                    response = await with_typing_renewal(
-                        typing_func=_typing_action,
-                        operation_coro=bot._session.chat(
+                # The eligibility gate lives in the bot's debounce module, which
+                # binds the core predicate when the installed core has it and a
+                # dependency-free mirror otherwise, so this handler cannot fail
+                # to import on an older core.
+                from praisonai_bot.bots._debounce import should_debounce_inbound
+
+                # Media eligibility comes from the native update: this
+                # handler also serves voice/audio delegations whose
+                # transcripts cache nothing (Issue #6717 debounce contract).
+                _native_media = bool(
+                    getattr(update.message, "photo", None)
+                    or getattr(update.message, "video", None)
+                    or getattr(update.message, "document", None)
+                    or getattr(update.message, "voice", None)
+                    or getattr(update.message, "audio", None)
+                )
+                generation = reset_generations.get(
+                    _session_key(message, chat_id or ""), 0
+                )
+                if should_debounce_inbound(
+                    # Eligibility is judged on the raw inbound text, exactly as
+                    # the standalone adapter does: the prompt above has the
+                    # rendered quote block prepended, which would hide a plain
+                    # ``stop``/``cancel``/``status`` reply behind the block.
+                    # ``message_text`` stays the dispatched payload.
+                    message.content, has_media=_native_media
+                ):
+                    # Key the window by conversation, not by sender: the
+                    # same user can message the bot privately and in a group
+                    # within one window, and a buffer shared by sender alone
+                    # would hand the private text to the group caller's agent
+                    # and post its answer into the group.
+                    batch = await bot._debouncer.debounce(
+                        f"{user_id}|{chat_id or ''}", message_text
+                    )
+                    if batch is None:
+                        # Superseded by a later message in the same burst:
+                        # that caller's single turn already carries this
+                        # text. Clear this message's processing indicator
+                        # (it never gets its own completion).
+                        if ack_ctx:
+                            await bot._ack.clear(
+                                ack_ctx, unreact_fn=_tg_unreact
+                            )
+                        return
+                    message_text = batch.final
+                # Control/empty/media-bearing message: dispatch as its own
+                # turn, unchanged.
+                async with turn_lock:
+                    if generation != reset_generations.get(
+                        _session_key(message, chat_id or ""), 0
+                    ):
+                        # ``/new`` ran while this message waited in the window:
+                        # the session it was written for is gone, so drop the
+                        # batch instead of replaying it into the fresh one.
+                        if ack_ctx:
+                            await bot._ack.clear(
+                                ack_ctx, unreact_fn=_tg_unreact
+                            )
+                        return
+                    # Per-tenant profile scope (Issue #4341): enter the resolved
+                    # route's profile namespace on the session so this turn's
+                    # memory/session state is keyed per tenant. ``None`` clears
+                    # any prior scope so an unscoped route never inherits another
+                    # tenant's namespace. Staged here, not before the debounce
+                    # window: a superseded caller must not stage a scope it never
+                    # uses, and the scope must be set immediately before the
+                    # ``chat()`` that consumes it.
+                    _tg_session = getattr(bot, "_session", None)
+                    if _tg_session is not None and hasattr(
+                        _tg_session, "set_profile_namespace"
+                    ):
+                        _tg_session.set_profile_namespace(
+                            gateway._resolve_profile_for_message(channel_name, facts=facts),
+                            agent,
+                        )
+
+                    # Show typing indicator with renewal during long operation
+                    if bot.config.typing_indicator:
+                        from praisonai_bot.bots._typing_indicator import with_typing_renewal
+
+                        async def _typing_action():
+                            await update.message.chat.send_action("typing")
+
+                        response = await with_typing_renewal(
+                            typing_func=_typing_action,
+                            operation_coro=bot._session.chat(
+                                agent, user_id, message_text, tool_policy=tool_policy,
+                                **_session_ids,
+                            )
+                        )
+                    else:
+                        response = await bot._session.chat(
                             agent, user_id, message_text, tool_policy=tool_policy,
                             **_session_ids,
                         )
-                    )
-                else:
-                    response = await bot._session.chat(
-                        agent, user_id, message_text, tool_policy=tool_policy,
-                        **_session_ids,
-                    )
                 if hasattr(bot, '_send_response_with_media'):
                     # Issue #3623: this handler serves VOICE|AUDIO as well as
                     # TEXT (handle_voice delegates here), so thread whether the
@@ -10913,11 +11006,19 @@ class WebSocketGateway:
             if not message:
                 return
             user_id = message.sender.user_id if message.sender else "unknown"
+            chat_id = str(update.message.chat_id) if update.message.chat_id else ""
             # Same route chat() receives, so ``per_chat`` group sessions reset.
             bot._session.reset(
                 user_id,
                 account=getattr(bot.config, "account", "default"),
-                chat_id=str(update.message.chat_id) if update.message.chat_id else "",
+                chat_id=chat_id,
+            )
+            # Bump the generation of the session that was just cleared, so a
+            # message buffered for that same session is dropped while a
+            # different session's window keeps running.
+            session_key = _session_key(message, chat_id)
+            reset_generations[session_key] = (
+                reset_generations.get(session_key, 0) + 1
             )
             await update.message.reply_text("Session reset. Starting fresh conversation.")
 

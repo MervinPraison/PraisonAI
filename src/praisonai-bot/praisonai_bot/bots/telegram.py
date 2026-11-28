@@ -57,7 +57,7 @@ from ._commands import (
 )
 from . import _automations
 from ._session import BotSessionManager
-from ._debounce import InboundDebouncer
+from ._debounce import InboundDebouncer, should_debounce_inbound
 from ._album import (
     AlbumCoalescer,
     resolve_album_window_ms,
@@ -812,7 +812,40 @@ class TelegramBot(ChatCommandMixin, MessageHookMixin):
                     # latency ("inbound received -> reply delivered"). Cheap and
                     # unused unless config.footer is enabled.
                     turn_started_at = time.monotonic()
-                    message_text = await self._debouncer.debounce(user_id, message.content)
+                    # Media eligibility comes from the native update, not the
+                    # cached paths: a native voice/audio message is transcribed
+                    # upstream and caches nothing, and caching may be disabled
+                    # or fail — the message must still bypass the window.
+                    _native_media = bool(
+                        getattr(update.message, "photo", None)
+                        or getattr(update.message, "video", None)
+                        or getattr(update.message, "document", None)
+                        or getattr(update.message, "voice", None)
+                        or getattr(update.message, "audio", None)
+                    )
+                    if should_debounce_inbound(
+                        message.content,
+                        has_media=bool(attachments) or _native_media,
+                    ):
+                        batch = await self._debouncer.debounce(
+                            user_id, message.content
+                        )
+                        if batch is None:
+                            # Superseded by a later message in the same burst:
+                            # that caller's single turn already carries this
+                            # text. Clear this message's processing indicator
+                            # (it never gets its own completion); the finally
+                            # below still cleans this update's cached media.
+                            if ack_ctx:
+                                await self._ack.clear(
+                                    ack_ctx, unreact_fn=_tg_unreact
+                                )
+                            return
+                        message_text = batch.final
+                    else:
+                        # Control/empty/media-bearing message: never held in
+                        # the debounce window, dispatch as its own turn.
+                        message_text = message.content
 
                     # Render any resolved reply/quote context (Issue #5223) as a
                     # compact quoted block above the (possibly debounced) text so

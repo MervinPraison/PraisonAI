@@ -79,7 +79,7 @@ from ._streaming import (
     DraftStreamer,
     build_streaming_config,
 )
-from ._debounce import InboundDebouncer
+from ._debounce import InboundDebouncer, should_debounce_inbound
 from ._ack import AckReactor
 from ._unknown_user import BotContext, UnknownUserHandler, is_sender_allowed
 from ._pairing_ui import PairingUIBuilder, PairingCallbackHandler
@@ -757,7 +757,26 @@ class SlackBot(OutboundResilienceMixin, ChatCommandMixin, MessageHookMixin):
                 try:
                     user_id = event.get("user", "unknown")
                     logger.info(f"Message received: {text[:100]}...")
-                    text = await self._debouncer.debounce(user_id, text)
+                    if should_debounce_inbound(
+                        text, has_media=bool(event.get("files"))
+                    ):
+                        batch = await self._debouncer.debounce(user_id, text)
+                        if batch is None:
+                            # Superseded by a later message in the same
+                            # burst: that caller's single turn already
+                            # carries this text. Clear this message's
+                            # processing indicator — it never gets its
+                            # own completion.
+                            if ack_ctx:
+                                await self._ack.clear(
+                                    ack_ctx, unreact_fn=_slack_unreact
+                                )
+                            return
+                        text = batch.final
+                    else:
+                        # Control/empty/media-bearing message: never held
+                        # in the debounce window, dispatch as its own turn.
+                        pass
 
                     # Streaming path: progressively edit a placeholder in place
                     # using the shared DraftStreamer, mirroring Telegram/Discord
