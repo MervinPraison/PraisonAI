@@ -84,6 +84,93 @@ class TestServeUnifiedCommands:
         # Should show help for acp command
         assert "acp" in result.output.lower() or "ide" in result.output.lower() or result.exit_code == 0
     
+    @pytest.mark.parametrize("deprecated", [False, True], ids=["serve", "deprecated"])
+    def test_acp_command_reaches_wrapper_handler(self, deprecated, monkeypatch, tmp_path):
+        import importlib.util
+        from importlib.machinery import ModuleSpec
+
+        from praisonai import acp
+        from praisonai.cli.commands.acp import app as deprecated_app
+        from praisonai.cli.commands.serve import app
+
+        monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        find_spec = importlib.util.find_spec
+
+        def find_spec_with_acp(name, package=None):
+            if name == "acp":
+                return ModuleSpec(name, loader=None)
+            return find_spec(name, package)
+
+        monkeypatch.setattr(importlib.util, "find_spec", find_spec_with_acp)
+        calls = []
+        monkeypatch.setitem(acp.__dict__, "serve", lambda **kwargs: calls.append(kwargs))
+
+        args = [
+            "--workspace", str(tmp_path), "--agent", "test-agent",
+            "--model", "test-model", "--debug",
+        ]
+        result = (
+            runner.invoke(deprecated_app, args)
+            if deprecated
+            else runner.invoke(app, ["acp", *args])
+        )
+
+        assert result.exit_code == 0, result.output
+        assert len(calls) == 1
+        assert calls[0]["workspace"] == str(tmp_path)
+        assert calls[0]["agent"] == "test-agent"
+        assert calls[0]["model"] == "test-model"
+        assert calls[0]["debug"] is True
+
+    def test_legacy_argparse_acp_reaches_wrapper_handler(
+        self, monkeypatch, tmp_path
+    ):
+        import sys
+
+        from praisonai.cli.features import acp
+        from praisonai.cli.main import PraisonAI
+
+        monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        flags = ["--workspace", str(tmp_path), "--debug"]
+        instance = PraisonAI()
+        calls = []
+
+        def run_acp(args):
+            calls.append(args)
+            return 17
+
+        monkeypatch.setattr(acp, "run_acp_command", run_acp)
+        monkeypatch.delenv("PYTEST_CURRENT_TEST", raising=False)
+        monkeypatch.setattr(sys, "argv", ["praisonai", "acp", *flags])
+
+        with pytest.raises(SystemExit) as result:
+            instance.parse_args()
+
+        assert result.value.code == 17
+        assert calls == [flags]
+
+    def test_serve_acp_reports_missing_sdk(self, monkeypatch, tmp_path):
+        import importlib.util
+
+        from praisonai.cli.commands.serve import app
+
+        monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+        monkeypatch.chdir(tmp_path)
+        find_spec = importlib.util.find_spec
+
+        def find_spec_without_acp(name, package=None):
+            if name == "acp":
+                return None
+            return find_spec(name, package)
+
+        monkeypatch.setattr(importlib.util, "find_spec", find_spec_without_acp)
+        result = runner.invoke(app, ["acp"])
+
+        assert result.exit_code == 1, result.output
+        assert "agent-client-protocol package not installed" in result.output
+
     def test_serve_lsp_command_exists(self):
         """Test serve lsp command is registered."""
         from praisonai.cli.commands.serve import app
