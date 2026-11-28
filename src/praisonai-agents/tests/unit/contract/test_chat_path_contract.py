@@ -259,12 +259,7 @@ def test_tool_round_costs_two_model_calls(stub, mode, route):
     assert len(REQUESTS) == 2, [p for p, _ in REQUESTS]
 
 
-G_ACHAT_LITELLM_REPEAT = _drift(
-    "G-6748", "achat on litellm sends the second tool round's follow-up twice",
-    ("achat", "litellm_chat"))
-
-
-@pytest.mark.parametrize("mode,route", _cells(G_ACHAT_LITELLM_REPEAT))
+@pytest.mark.parametrize("mode,route", _cells())
 def test_turn_runs_more_than_one_tool_round(stub, mode, route):
     """A turn keeps calling tools until the model answers (Issue #6748)."""
     STATE["tool_rounds"] = 2
