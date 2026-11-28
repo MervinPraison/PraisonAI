@@ -109,7 +109,8 @@ jobs:
               ${{ github.workspace }}/src/praisonai-agents:${{ github.workspace }}/src/praisonai-code
           - shard: train
             workdir: src/praisonai-train
-            paths: tests/unit/
+            paths: >-
+              tests/unit/train/ tests/unit/data/ tests/unit/test_*.py
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents:${{ github.workspace }}/src/praisonai-code
           - shard: mcp

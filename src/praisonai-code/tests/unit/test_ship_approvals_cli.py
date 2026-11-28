@@ -25,7 +25,8 @@ def test_registered_in_cli_app():
     from praisonai_code.cli import app as cli_app
 
     assert cli_app._LAZY_COMMANDS["approvals"][0] == ".commands.approvals"
-    res = CliRunner().invoke(approvals_cmd.app, ["--help"])
+    runner = CliRunner(env={"NO_COLOR": "1", "FORCE_COLOR": None})
+    res = runner.invoke(approvals_cmd.app, ["--help"])
     assert res.exit_code == 0
     for flag in ("--policy", "--enforce", "--json"):
         assert flag in res.output

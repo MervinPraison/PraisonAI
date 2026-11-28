@@ -147,7 +147,8 @@ def test_cli_help_and_options_forward_to_ship(monkeypatch):
     from praisonai_code.cli.commands import ship as ship_cmd
     from praisonai_code.ship import orchestrate
 
-    help_res = CliRunner().invoke(ship_cmd.app, ["--help"])
+    runner = CliRunner(env={"NO_COLOR": "1", "FORCE_COLOR": None})
+    help_res = runner.invoke(ship_cmd.app, ["--help"])
     assert help_res.exit_code == 0
     for flag in ("--effort", "--model", "--post-review", "--watch", "--reviewer", "--dry-run"):
         assert flag in help_res.output
