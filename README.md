@@ -690,6 +690,9 @@ agent = Agent(tools=MCP("npx @modelcontextprotocol/server-memory"))
 # Streamable HTTP - Production servers
 agent = Agent(tools=MCP("https://api.example.com/mcp"))
 
+# Example public server (Lantern Works: hosted, free, no-key live GPU rental prices)
+agent = Agent(tools=MCP("https://lantern-works-mcp.lantern-works.workers.dev/mcp?ref=praisonai"))
+
 # WebSocket - Real-time bidirectional
 agent = Agent(tools=MCP("wss://api.example.com/mcp", auth_token="token"))
 
