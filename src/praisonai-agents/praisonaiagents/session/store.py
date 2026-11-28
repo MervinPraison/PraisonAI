@@ -243,6 +243,8 @@ class CompactionCheckpoint:
     tokens_after: int = 0
     timestamp: float = field(default_factory=time.time)
     metadata: Dict[str, Any] = field(default_factory=dict)
+    retained_messages: Optional[List[Dict[str, Any]]] = None
+    system_messages: Optional[List[Dict[str, Any]]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -253,6 +255,8 @@ class CompactionCheckpoint:
             "tokens_after": self.tokens_after,
             "timestamp": self.timestamp,
             "metadata": self.metadata,
+            "retained_messages": self.retained_messages,
+            "system_messages": self.system_messages,
         }
 
     @classmethod
@@ -265,6 +269,8 @@ class CompactionCheckpoint:
             tokens_after=data.get("tokens_after", 0),
             timestamp=data.get("timestamp", time.time()),
             metadata=data.get("metadata", {}),
+            retained_messages=data.get("retained_messages"),
+            system_messages=data.get("system_messages"),
         )
 
     def as_message(self) -> Dict[str, str]:
@@ -453,13 +459,16 @@ class SessionData:
         # Messages appended after the compaction point are the retained tail.
         index = max(0, min(checkpoint.message_index, len(self.messages)))
         tail = self.messages[index:]
-        history = [checkpoint.as_message()]
+        history = (checkpoint.system_messages or []) + [checkpoint.as_message()]
+        if checkpoint.retained_messages is not None:
+            history.extend(checkpoint.retained_messages)
         # Preserve tool-call / tool-result turns in the retained tail (#3089).
         history.extend(m.to_llm_message() for m in tail)
         if max_messages and len(history) > max_messages:
             # Always preserve the summary at the head, trim the tail.
-            head = history[:1]
-            body = history[1:][-(max_messages - 1):] if max_messages > 1 else []
+            prefix = (checkpoint.system_messages or [])
+            head = prefix[-max(0, max_messages - 1):] + [checkpoint.as_message()] if max_messages > 1 else [checkpoint.as_message()]
+            body = history[len(prefix) + 1:][-(max_messages - len(head)):] if max_messages > len(head) else []
             # Don't let the trimmed tail begin on an orphaned tool result whose
             # assistant tool-call was cut off (Issue #3089).
             while body and body[0].get("role") == "tool":
@@ -1940,6 +1949,9 @@ class DefaultSessionStore:
         tokens_before: int = 0,
         tokens_after: int = 0,
         metadata: Optional[Dict[str, Any]] = None,
+        retained_messages: Optional[List[Dict[str, Any]]] = None,
+        transcript_snapshot: Optional[List[Dict[str, Any]]] = None,
+        system_messages: Optional[List[Dict[str, Any]]] = None,
     ) -> bool:
         """Persist a compaction checkpoint so resume is cheap (Issue #2741).
 
@@ -1959,19 +1971,31 @@ class DefaultSessionStore:
         if not summary.strip():
             return False
 
+        applied = False
         def _apply(session: SessionData) -> None:
+            nonlocal applied
+            if transcript_snapshot is not None:
+                current = [message.to_dict() for message in session.messages]
+                if current[:len(transcript_snapshot)] != transcript_snapshot:
+                    return
             session.last_compaction = CompactionCheckpoint(
                 summary=summary,
-                message_index=len(session.messages),
+                message_index=len(transcript_snapshot) if transcript_snapshot is not None else len(session.messages),
                 role=role,
                 tokens_before=tokens_before,
                 tokens_after=tokens_after,
                 metadata=metadata or {},
+                retained_messages=retained_messages,
+                system_messages=system_messages,
             )
+            applied = True
 
-        return self._modify_session_locked(
+        saved = self._modify_session_locked(
             session_id, _apply, error_label="append compaction checkpoint"
         )
+        if saved and not applied:
+            logger.warning("Skipped compaction checkpoint for %s: transcript changed", session_id)
+        return saved and applied
 
     def get_working_history(
         self,

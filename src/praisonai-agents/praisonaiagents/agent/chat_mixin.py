@@ -1907,6 +1907,19 @@ Your Role: {self.role}"""
                 raise
 
         self._run_pre_compaction_memory_flush(messages, compactor)
+
+        from ..session.store import DefaultSessionStore
+        store = getattr(self, '_session_store', None)
+        session_id = getattr(self, '_history_session_id', None) or getattr(self, '_session_id', None)
+        snapshot = None
+        if isinstance(store, DefaultSessionStore) and session_id is not None:
+            session = store.get_session(session_id)
+            history = session.get_working_history()
+            # Only anchor a transcript that was actually included in this input.
+            if any(messages[i:i + len(history)] == history for i in range(len(messages) - len(history) + 1)):
+                snapshot = [message.to_dict() for message in session.messages]
+            else:
+                logger.warning("Skipped compaction checkpoint: session history is not present in the input")
         
         # Perform compaction (protected: interrupt busy-mode queues instead)
         with protect_turn(getattr(self, 'interrupt_controller', None)):
@@ -1921,7 +1934,10 @@ Your Role: {self.role}"""
         # session so `--continue`/resume reconstructs the compacted context
         # instead of replaying the raw transcript. Guarded so it only fires
         # when a session store + session_id are bound and a summary exists.
-        self._persist_compaction_checkpoint(result)
+        if snapshot is not None:
+            self._persist_compaction_checkpoint(result, compacted_msgs, snapshot, history)
+        elif not isinstance(store, DefaultSessionStore):
+            self._persist_compaction_checkpoint(result)
         
         try:
             self._hook_runner.execute_sync(_HookEvent.AFTER_COMPACTION, result)
@@ -1933,7 +1949,7 @@ Your Role: {self.role}"""
         from ..context.policy import CompactionRoute
         return CompactionRoute.COMPACT_NEEDED, compacted_msgs
 
-    def _persist_compaction_checkpoint(self, result) -> None:
+    def _persist_compaction_checkpoint(self, result, compacted_messages=None, transcript_snapshot=None, persisted_history=None) -> None:
         """Persist a compaction summary into the bound session (Issue #2741).
 
         No-op unless a JSON session store and session_id are bound and the
@@ -1957,11 +1973,25 @@ Your Role: {self.role}"""
         if not hasattr(store, "append_compaction_checkpoint"):
             return
         try:
+            kwargs = {}
+            if compacted_messages is not None:
+                summary_index = next(i for i in range(len(compacted_messages) - 1, -1, -1)
+                                     if compacted_messages[i].get('content') == summary)
+                kwargs['retained_messages'] = compacted_messages[summary_index + 1:]
+                kwargs['transcript_snapshot'] = transcript_snapshot
+                persisted_system = [m for m in persisted_history if m.get('role') == 'system']
+                system_messages = []
+                for message in compacted_messages[:summary_index]:
+                    if message in persisted_system:
+                        system_messages.append(message)
+                        persisted_system.remove(message)
+                kwargs['system_messages'] = system_messages
             store.append_compaction_checkpoint(
                 session_id,
                 summary,
                 tokens_before=getattr(result, "original_tokens", 0) or 0,
                 tokens_after=getattr(result, "compacted_tokens", 0) or 0,
+                **kwargs,
             )
         except Exception as e:
             logger.debug(f"Failed to persist compaction checkpoint: {e}")
