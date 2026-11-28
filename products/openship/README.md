@@ -2,9 +2,9 @@
 
 [![Star PraisonAI](https://img.shields.io/github/stars/MervinPraison/PraisonAI?style=social)](https://github.com/MervinPraison/PraisonAI)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../../LICENSE)
-[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Python 3.10–3.14](https://img.shields.io/badge/python-3.10--3.14-blue.svg)](https://www.python.org/downloads/)
 
-> **Enjoying OpenShip?** Star **[MervinPraison/PraisonAI](https://github.com/MervinPraison/PraisonAI)** — OpenShip ships natively inside `praisonai-code` with zero duplicated runtime code.
+> **Enjoying OpenShip?** Star **[MervinPraison/PraisonAI](https://github.com/MervinPraison/PraisonAI)** — MIT open source, runs natively inside GitHub Actions or your terminal with any LLM or local Ollama.
 
 **OpenShip turns every GitHub pull request into a self-reviewed, CI-green, policy-checked PR — automatically inside GitHub Actions, on any LLM or local Ollama — while humans always hold the merge button.**
 
@@ -24,18 +24,48 @@
 
 ---
 
-## Add OpenShip to Any GitHub Repo (3 Commands, Zero Manual Config)
+## Pick Your Surface (60-Second Onboarding)
+
+OpenShip ships inside **`praisonai-code`** (Python `3.10–3.14`, also included with `pip install praisonai`). Pick how you want to start:
+
+| Surface | Install | First Command | Jump To |
+|---|---|---|---|
+| **1. GitHub Actions (Automatic, Zero Server)** | `pip install praisonai-code` | `praisonai-code ship init --github` | [GitHub Setup](#1-add-openship-to-any-github-repo-3-commands) |
+| **2. Local Terminal & Any CI Runner** | `pip install praisonai-code` | `praisonai-code ship review --dry-run` | [Local & CI](#2-local-terminal--any-ci-runner) |
+| **3. Visual Web UI (PraisonAIUI)** | `pip install "praisonai-code[ui]"` | `praisonai-code ship ui` | [Visual Web UI](#3-visual-web-ui-built-into-praisonai-code) |
+
+<details>
+<summary><strong>Prefer an isolated virtual environment (macOS Homebrew / Linux PEP 668 / Windows)?</strong></summary>
+
+```bash
+# Option A: uv (fastest, works on macOS, Linux, Windows)
+uv tool install praisonai-code
+
+# Option B: standard venv (create outside your repo)
+python3 -m venv ~/.venvs/openship
+source ~/.venvs/openship/bin/activate   # Windows PowerShell: ~\.venvs\openship\Scripts\Activate.ps1
+python -m pip install praisonai-code
+```
+
+</details>
+
+---
+
+## 1. Add OpenShip to Any GitHub Repo (3 Commands)
+
+**Prerequisites:** GitHub CLI signed in (`gh auth login`) and one LLM API key exported in your shell (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `OPENROUTER_API_KEY`).
 
 ```bash
 # 1. Install the lean CLI (or `pip install praisonai` for the full suite)
 pip install praisonai-code
 
-# 2. Scaffold .github/workflows/openship.yml, .praisonai/approvals.yml, and REVIEW.md,
-#    AND automatically sync your detected LLM API key secret + OPENSHIP_MODEL to GitHub:
+# 2. Preview locally first (optional): `praisonai-code ship init --dry-run`
+#    Scaffold .github/workflows/openship.yml, .praisonai/approvals.yml, and REVIEW.md,
+#    AND sync your detected LLM API key secret + OPENSHIP_MODEL to GitHub:
 praisonai-code ship init --github
-# Optional model/tier: praisonai-code ship init --github --model claude-sonnet-4-6 --effort deep
+# Custom model/tier: praisonai-code ship init --github --model claude-sonnet-4-6 --effort deep
 
-# 3. Commit and push to your default branch (main)
+# 3. Commit and push the generated files to your default branch (main)
 git add .github/workflows/openship.yml .praisonai/approvals.yml && [ ! -f REVIEW.md ] || git add REVIEW.md
 git commit -m "chore: enable OpenShip" && git push
 ```
@@ -47,10 +77,10 @@ git commit -m "chore: enable OpenShip" && git push
 > [!TIP]
 > **Is GitHub Actions 100% automatic after these 3 commands?**
 > **Yes — zero GitHub Settings clicks, zero GitHub App install, zero webhooks, zero external servers.**
-> As soon as `.github/workflows/openship.yml` is pushed to `main`, GitHub automatically activates it in the **Actions** tab and runs all three OpenShip pillars on every new or updated PR using GitHub's built-in `GITHUB_TOKEN` (all required permissions are already declared inside the workflow file).
+> Once `.github/workflows/openship.yml` reaches your default branch (`main`), GitHub automatically enables it in the **Actions** tab and runs all three OpenShip pillars on every pull request using GitHub's built-in `GITHUB_TOKEN` (all required permissions are already declared inside the workflow file).
 
 <details>
-<summary><strong>Two optional power-ups (only if you want them)</strong></summary>
+<summary><strong>Optional GitHub Actions settings</strong></summary>
 
 1. **Auto-re-run your CI after Steward pushes a fix:** GitHub's built-in `GITHUB_TOKEN` intentionally prevents one workflow from triggering another. If you want your repo's `CI` workflow to re-run automatically when PR Steward pushes a fix commit, add one optional repository secret named `OPENSHIP_GH_TOKEN` (a repo Personal Access Token).
 2. **Custom CI workflow names:** `openship.yml` listens to failures from workflows named `CI`, `Tests`, or `Smoke` out of the box. If your test workflow has another name (e.g. `Build & Test`), add it to `on.workflow_run.workflows` in `.github/workflows/openship.yml`.
@@ -130,33 +160,26 @@ Control OpenShip straight from any GitHub pull request comment:
 
 ---
 
-## Use OpenShip Anywhere (Pick Your Surface)
+## 2. Local Terminal & Any CI Runner
 
-OpenShip ships directly inside **`praisonai-code`** (included with `pip install praisonai`; `praisonai-code` provides the `praisonai-code` CLI, while `pip install praisonai` also provides the `praisonai` alias).
-
-| Surface | Setup | First Command |
-|---|---|---|
-| **1. GitHub Actions (Automatic, Zero Server)** | `praisonai-code ship init --github` | `git commit && git push` |
-| **2. Terminal & Any CI Runner** | `pip install praisonai-code` | `praisonai-code ship check && praisonai-code ship --dry-run` |
-| **3. Visual Web UI (PraisonAIUI)** | `pip install "praisonai-code[ui]"` | `praisonai-code ship ui` |
-
-### Terminal & Headless CI (Cloud LLMs or 100% Offline Ollama)
+Run OpenShip locally on any Git working tree before pushing — with zero API calls during `--dry-run`:
 
 ```bash
-# Verify git, gh auth, LLM key / Ollama, UI, and repo workflow files in one command
+# Check git, gh auth, LLM keys / Ollama, UI, and repo workflow files in one command
 praisonai-code ship check
 
-# Run local AI self-review on your current diff (uses REVIEW.md + verification; no PR needed)
+# Preview the changed files without calling any LLM
+praisonai-code ship review --dry-run
+
+# Option A — Cloud LLM (uses OPENAI_API_KEY, ANTHROPIC_API_KEY, GEMINI_API_KEY, or OPENROUTER_API_KEY):
 praisonai-code ship review
 
-# Preview the exact ship plan without changing anything
-praisonai-code ship --dry-run
+# Option B — 100% Local Ollama (free, offline after one-time pull):
+ollama pull qwen3.5:9b && praisonai-code ship review --model ollama/qwen3.5:9b --effort low
 
-# Self-review and open a draft PR (never merges)
-praisonai-code ship --post-review
-
-# 100% Offline Local Ollama (zero cloud API key):
-ollama pull qwen3.5 && praisonai-code ship --model ollama/qwen3.5
+# Commit, push, open a draft PR, and post inline self-review (never merges)
+praisonai-code ship --dry-run         # preview plan first
+praisonai-code ship --post-review     # execute
 ```
 
 - **Interactive Slash Commands** inside `praisonai code` / `praisonai chat`: `/ship --dry-run`, `/ship check`, `/steward`, `/approvals --json`.
@@ -167,7 +190,9 @@ ollama pull qwen3.5 && praisonai-code ship --model ollama/qwen3.5
   praisonai-code approvals "$PR_NUMBER" --enforce --json            # declarative policy gate
   ```
 
-### Visual Web UI (Built Into `praisonai-code`)
+---
+
+## 3. Visual Web UI (Built Into `praisonai-code`)
 
 No separate frontend build or repo needed — `praisonai-code` ships a native `praisonaiui.plugins` entry point with automatic light/dark mode and mobile layout:
 
@@ -223,4 +248,4 @@ OpenShip keeps a human firmly in control of every merge:
 | [`workflows/steward.yml`](workflows/steward.yml) | Lightweight GitHub Actions workflow for PR Steward only |
 | [`examples/approvals.yml`](examples/approvals.yml) | Starter `.praisonai/approvals.yml` declarative approval policy |
 | [`examples/ship_python.py`](examples/ship_python.py) | Python API example (`ship`, `review_diff`, `watch_pr`, `evaluate_policy`) |
-| [`examples/ship_ollama.sh`](examples/ship_ollama.sh) | 100% local offline Ollama workflow |
+| [`examples/ship_ollama.sh`](examples/ship_ollama.sh) | Local diff review with Ollama |
