@@ -24,13 +24,13 @@ def code_interpreter(code: str):
 
 code_agent = Agent(
     name="code_agent",
-    llm="gpt-4o-mini",
+    model="gpt-4o-mini",
     backstory="Expert in writing Python scripts",
     reflection=False
 )
 execution_agent = Agent(
     name="execution_agent",
-    llm="gpt-4o-mini",
+    model="gpt-4o-mini",
     backstory="Expert in executing Python scripts",
     reflection=False,
     tools=[code_interpreter]

@@ -1,0 +1,76 @@
+name: OpenShip PR Steward
+
+# For the complete 3-agent GitHub-native suite (Inline Code Review + PR Steward + Declarative Approvals),
+# run `praisonai-code ship init` or copy products/openship/workflows/openship.yml into .github/workflows/openship.yml.
+
+on:
+  pull_request:
+    types: [opened, synchronize, labeled]
+  pull_request_review_comment:
+    types: [created]
+  issue_comment:
+    types: [created]
+  workflow_run:
+    workflows: ["CI", "Tests", "Smoke"]
+    types: [completed]
+
+permissions:
+  actions: read
+  checks: read
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  steward:
+    if: >-
+      github.actor != 'dependabot[bot]' &&
+      !endsWith(github.actor, '[bot]') &&
+      (
+        (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.pull_requests[0].number != null) ||
+        (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, '@praisonai') && !contains(github.event.comment.body, '@praisonai stop')) ||
+        (github.event_name != 'workflow_run' && github.event_name != 'issue_comment' && github.event.pull_request.head.repo.full_name == github.repository && !contains(github.event.pull_request.labels.*.name, 'openship-stop'))
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve PR number & head ref
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          PR_NUM="${{ github.event.pull_request.number || github.event.issue.number || github.event.workflow_run.pull_requests[0].number }}"
+          echo "number=$PR_NUM" >> "$GITHUB_OUTPUT"
+          HEAD_REF="$(gh pr view "$PR_NUM" --json headRefName --jq .headRefName)"
+          IS_FORK="$(gh pr view "$PR_NUM" --json isCrossRepository --jq .isCrossRepository)"
+          echo "head_ref=$HEAD_REF" >> "$GITHUB_OUTPUT"
+          echo "is_fork=$IS_FORK" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.pr.outputs.is_fork == 'false'
+        with:
+          ref: ${{ steps.pr.outputs.head_ref }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        if: steps.pr.outputs.is_fork == 'false'
+        with:
+          python-version: "3.12"
+
+      - name: Install OpenShip (praisonai-code)
+        if: steps.pr.outputs.is_fork == 'false'
+        run: pip install --quiet praisonai-code
+
+      - name: Run one PR Steward cycle
+        if: steps.pr.outputs.is_fork == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          git config user.name "openship[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          praisonai-code steward "${{ steps.pr.outputs.number }}" --once

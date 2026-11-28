@@ -95,8 +95,15 @@ def test_a_distinct_goal_is_still_stated(make):
     assert "Your Role: Editor" in prompt
 
 
-def test_a_tool_renamed_to_edit_file_counts(make):
+def test_a_tool_renamed_to_edit_file_counts(make, monkeypatch):
     from praisonaiagents import tool
+    from praisonaiagents.tools.registry import ToolRegistry
+
+    # The custom tool uses a built-in name, so keep its registration local to this test.
+    monkeypatch.setattr(
+        "praisonaiagents.tools.registry._global_registry",
+        ToolRegistry(discovery_enabled=False),
+    )
 
     @tool(name="edit_file")
     def my_editor(filepath: str, old_string: str, new_string: str) -> str:

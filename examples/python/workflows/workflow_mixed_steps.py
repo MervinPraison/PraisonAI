@@ -14,7 +14,7 @@ analyzer = Agent(
     name="Analyzer",
     role="Data Analyst",
     goal="Analyze and summarize data",
-    llm="gpt-4o-mini"
+    model="gpt-4o-mini"
 )
 
 # Custom handler functions

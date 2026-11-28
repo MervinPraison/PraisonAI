@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with Cloudflare AI
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="cloudflare/@cf/meta/llama-3.1-8b-instruct",
+    model="cloudflare/@cf/meta/llama-3.1-8b-instruct",
 )
 
 # Example conversation

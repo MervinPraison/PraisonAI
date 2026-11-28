@@ -28,7 +28,7 @@ def example_1_simple_enable():
     # Create agent with context management enabled
     agent = Agent(
         instructions="You are a helpful assistant. Keep responses concise.",
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
         context=True,  # Enable with safe defaults
     )
     
@@ -77,7 +77,7 @@ def example_2_custom_config():
     # Create agent with custom config
     agent = Agent(
         instructions="You are a code assistant.",
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
         context=config,
     )
     
@@ -104,7 +104,7 @@ def example_3_disabled():
     # Create agent without context management (default)
     agent = Agent(
         instructions="You are a simple assistant.",
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
         context=False,  # Explicit disable (same as default)
     )
     
@@ -129,7 +129,7 @@ def example_4_access_stats():
     
     agent = Agent(
         instructions="You are helpful.",
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
         context=True,
     )
     
@@ -167,13 +167,13 @@ def example_5_multi_agent():
     researcher = Agent(
         name="Researcher",
         instructions="You research topics thoroughly.",
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
     )
     
     writer = Agent(
         name="Writer", 
         instructions="You write clear summaries.",
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
     )
     
     # Create tasks

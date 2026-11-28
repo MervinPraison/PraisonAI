@@ -27,7 +27,7 @@ def main():
         Use the Google Search tool to find up-to-date information when answering questions.
         Always cite your sources and indicate when information comes from search results.""",
         
-        llm="gemini/gemini-2.0-flash",
+        model="gemini/gemini-2.0-flash",
         
         # Enable Google Search internal tool
         tools=[{"googleSearch": {}}])

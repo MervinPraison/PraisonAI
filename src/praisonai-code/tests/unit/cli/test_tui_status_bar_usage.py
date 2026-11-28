@@ -84,6 +84,16 @@ def test_new_conversation_clears_readout(collector):
     assert "tok" not in tui._status_bar_text()
 
 
+def test_later_probe_replaces_a_stale_budgeter_window(collector, monkeypatch):
+    import praisonaiagents.context.budgeter as budgeter
+
+    monkeypatch.setattr(budgeter, "resolved_model_limit", lambda model: 131072)
+    tui = AsyncTUI(config=AsyncTUIConfig(model="llama3.1"))
+    tui._conversation_history = [{"role": "user", "content": "hello " * 200}]
+    tui._refresh_usage_status()
+    assert "/131.1k (" in tui._usage_status
+
+
 def test_unknown_model_limit_hides_fallback(collector):
     tui = AsyncTUI(config=AsyncTUIConfig(model="totally-unknown-model-xyz"))
     tui._conversation_history = [{"role": "user", "content": "hello " * 200}]

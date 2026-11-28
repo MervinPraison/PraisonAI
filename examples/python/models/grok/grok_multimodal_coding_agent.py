@@ -4,7 +4,7 @@ agent = Agent(
     instructions="You are a multimodal coding AI agent. "
                  "Help users with code generation, review, and debugging "
                  "by analyzing both text and visual inputs like screenshots and diagrams.",
-    llm="xai/grok-4"
+    model="xai/grok-4"
 )
 
 response = agent.start(

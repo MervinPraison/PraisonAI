@@ -21,8 +21,8 @@ because a placeholder ``.commands.*`` path resolves into ``praisonai_code``.
 import importlib
 import importlib.util
 
-import click
 import pytest
+from typer.testing import CliRunner
 
 from praisonai_code.cli import app as cli_app
 
@@ -94,11 +94,6 @@ def test_schedule_dispatches_from_table_when_wrapper_installed():
     """End-to-end: the reported command still resolves through the real dispatcher."""
     if not cli_app.wrapper_available():
         pytest.skip("requires the praisonai wrapper (schedule is wrapper-resident)")
-    from typer.main import get_command as typer_get_command
-
-    root = typer_get_command(cli_app.app)
-    ctx = click.Context(root)
-    cmd = root.get_command(ctx, "schedule")
-    assert isinstance(cmd, click.Command)
-    assert cmd.name == "schedule"
-    assert "schedule" in root.list_commands(ctx)
+    result = CliRunner().invoke(cli_app.app, ["schedule", "--help"])
+    assert result.exit_code == 0, result.output
+    assert "schedule" in result.output

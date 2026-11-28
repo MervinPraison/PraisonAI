@@ -44,6 +44,31 @@ class TestA2UIAdapterSmoke:
         part = create_a2ui_part({"messages": [{"createSurface": {"surfaceId": "m"}}]})
         assert is_a2ui_part(part) is True
 
+    def test_create_a2ui_part_without_a2a_parts_module(self, monkeypatch):
+        pytest.importorskip("a2ui", reason="a2ui-agent-sdk not installed")
+        from praisonaiagents.ui.a2ui import adapter
+
+        def _fake_import(name: str):
+            if name in ("a2ui.a2a.parts", "a2ui.a2a"):
+                raise ImportError("no a2a module in SDK 0.12")
+            import importlib
+
+            return importlib.import_module(name)
+
+        monkeypatch.setattr(adapter, "_import", _fake_import)
+
+        part = adapter.create_a2ui_part(
+            {"createSurface": {"surfaceId": "main", "catalogId": "basic"}}
+        )
+        assert adapter.is_a2ui_part(part) is True
+
+        from praisonaiagents.tools.a2ui_tools import send_a2ui_messages
+
+        result = send_a2ui_messages(
+            messages=[{"createSurface": {"surfaceId": "x", "catalogId": "c"}}]
+        )
+        assert result["mime_type"] == "application/json+a2ui"
+
     def test_missing_sdk_import_error_message(self):
         from unittest.mock import patch
 
@@ -56,5 +81,22 @@ class TestA2UIAdapterSmoke:
             )
 
         with patch.object(adapter, "_import", side_effect=_raise):
-            with pytest.raises(ImportError, match="praisonaiagents\\[a2ui\\]"):
-                adapter.create_a2ui_part({"messages": []})
+            with patch.object(adapter.importlib.util, "find_spec", return_value=None):
+                with pytest.raises(ImportError, match="praisonaiagents\\[a2ui\\]"):
+                    adapter.create_a2ui_part({"messages": []})
+
+    def test_newer_sdk_without_a2a_module_still_returns_a_part(self):
+        from unittest.mock import patch
+
+        from praisonaiagents.ui.a2ui import adapter
+
+        def find_spec(name):
+            if name == "a2ui":
+                return object()
+            return None
+
+        with patch.object(adapter.importlib.util, "find_spec", side_effect=find_spec):
+            part = adapter.create_a2ui_part({"messages": [{"createSurface": {"surfaceId": "main"}}]})
+        assert part.root.data["messages"][0]["createSurface"]["surfaceId"] == "main"
+        assert part.root.metadata["mimeType"] == "application/json+a2ui"
+        assert adapter.is_a2ui_part(part) is True

@@ -316,8 +316,8 @@ def serve_mcp(
                 proc.wait()
             else:  # transport == "sse", guaranteed by _validate_mcp_transport
                 from praisonaiagents.mcp import MCP, ToolsMCPServer
-                cmd_string = " ".join(cmd)
-                mcp = MCP(cmd_string, timeout=60, env=server.env or {})
+                mcp = MCP.from_config({"command": server.command, "args": server.args,
+                                       "env": server.env, "timeout": 60}, name=name)
                 tools = mcp.get_tools()
                 output.print(f"  Exposing {len(tools)} tools via {transport}")
                 mcp_server = ToolsMCPServer(name=name, tools=tools)
@@ -364,7 +364,12 @@ def serve_acp(
     output = get_output_controller()
     
     try:
-        from praisonai_code.cli.features.acp import ACPHandler
+        # The ACP handler stays in the praisonai wrapper (its dependency
+        # `praisonai.acp.serve` lives there), so reach it through the wrapper
+        # bridge, the same pattern used for `recipe` in legacy/praison_ai.py.
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+
+        ACPHandler = import_wrapper_module("praisonai.cli.features.acp").ACPHandler
         args_list = ["--workspace", workspace, "--agent", agent]
         if model:
             args_list.extend(["--model", model])

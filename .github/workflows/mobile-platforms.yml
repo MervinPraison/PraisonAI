@@ -41,6 +41,10 @@ on:
     paths: &watched
       - 'src/praisonai-mobile/**'
       - 'src/praisonai-ts/src/**'
+      - 'src/praisonai-ts/scripts/**'
+      - 'src/praisonai-ts/package.json'
+      - 'src/praisonai-ts/package-lock.json'
+      - 'src/praisonai-ts/tsconfig*.json'
       - '.github/workflows/mobile-platforms.yml'
   # Without this, no platform build had ever run on main -- so a break
   # introduced by two PRs that were each green apart could sit on main
@@ -84,7 +88,9 @@ jobs:
         with:
           node-version: '22.18'
           cache: npm
-          cache-dependency-path: src/praisonai-mobile/package-lock.json
+          cache-dependency-path: |
+            src/praisonai-ts/package-lock.json
+            src/praisonai-mobile/package-lock.json
       - uses: dtolnay/rust-toolchain@stable
         with:
           # Both: `tauri ios init` installs whatever it thinks is missing via
@@ -96,18 +102,10 @@ jobs:
         with:
           workspaces: src/praisonai-mobile/src-tauri
           key: ios-sim
-      - name: "Build praisonai-ts (the file: dependency)"
-        # praisonai-mobile depends on praisonai by `file:`, so `npm ci`
-        # here runs praisonai-ts's own `prepare` -> `rimraf dist`. On a
-        # fresh runner praisonai-ts has no node_modules, so rimraf is not
-        # installed and `npm ci` dies with code 127 before a single
-        # platform step runs. mobile.yml gives all four of its jobs this
-        # step; these two were written against the tree from before the
-        # dependency existed and never got it.
+      # Install the file: dependency first. npm runs its prepare build.
+      - name: Install praisonai-ts
         working-directory: src/praisonai-ts
-        run: |
-          npm install --no-audit --no-fund --legacy-peer-deps
-          npm run build
+        run: npm ci --no-audit --no-fund --legacy-peer-deps
       - run: npm ci
 
       - name: Generate the Xcode project (only if gen/apple is not committed)
@@ -140,7 +138,7 @@ jobs:
           dest=src-tauri/gen/apple/Assets.xcassets/AppIcon.appiconset
           test -d "$dest" || { echo "::error::$dest does not exist"; find src-tauri/gen/apple -maxdepth 3 -print; exit 1; }
           cp src-tauri/icons/ios/*.png "$dest/"
-          ls "$dest" | wc -l
+          find "$dest" -maxdepth 1 -type f | wc -l
 
       - name: Build the simulator app, unsigned
         # --target aarch64-sim: the iphonesimulator SDK, arm64 (the runner is
@@ -262,7 +260,9 @@ jobs:
         with:
           node-version: '22.18'
           cache: npm
-          cache-dependency-path: src/praisonai-mobile/package-lock.json
+          cache-dependency-path: |
+            src/praisonai-ts/package-lock.json
+            src/praisonai-mobile/package-lock.json
       - uses: actions/setup-java@v4
         with:
           # 17, not the runner's default 21 or a laptop's 25: Gradle 8.14.3's
@@ -291,18 +291,10 @@ jobs:
         with:
           workspaces: src/praisonai-mobile/src-tauri
           key: android-apk
-      - name: "Build praisonai-ts (the file: dependency)"
-        # praisonai-mobile depends on praisonai by `file:`, so `npm ci`
-        # here runs praisonai-ts's own `prepare` -> `rimraf dist`. On a
-        # fresh runner praisonai-ts has no node_modules, so rimraf is not
-        # installed and `npm ci` dies with code 127 before a single
-        # platform step runs. mobile.yml gives all four of its jobs this
-        # step; these two were written against the tree from before the
-        # dependency existed and never got it.
+      # Install the file: dependency first. npm runs its prepare build.
+      - name: Install praisonai-ts
         working-directory: src/praisonai-ts
-        run: |
-          npm install --no-audit --no-fund --legacy-peer-deps
-          npm run build
+        run: npm ci --no-audit --no-fund --legacy-peer-deps
       - run: npm ci
 
       - name: Generate the Android project (only if gen/android is not committed)

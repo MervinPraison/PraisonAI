@@ -25,7 +25,7 @@ agent = Agent(
     
     Focus on being helpful, thorough, and providing clear updates.
     """,
-    llm="gpt-4o-mini",
+    model="gpt-4o-mini",
     tools=[
         "linear_search_issues",
         "linear_get_issue", 

@@ -8,7 +8,7 @@ It automatically handles agent creation, task setup, and execution flow.
 from .agents import AgentManager
 from ..agent.agent import Agent
 from ..task.task import Task
-from typing import List, Any, Optional, Dict, Tuple
+from typing import List, Any, Optional, Dict, Tuple, Union
 import logging
 from praisonaiagents._logging import get_logger
 import os
@@ -174,7 +174,7 @@ class AutoAgents(AgentManager):
             tasks=tasks,
             process=process,
             manager_llm=manager_llm or self.llm,
-            llm=self.llm,  # Pass llm to parent for API consistency
+            model=self.llm,  # Default model for the generated members
             output=self._output,  # Consolidated output param
             execution=self._execution,
             hooks=self._hooks,
@@ -501,7 +501,7 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
                 backstory=agent_config.backstory,
                 tools=agent_tools,  # Use assigned tools
                 memory=self.memory,
-                llm=self.llm,  # Consolidated LLM param
+                model=self.llm,  # model= is canonical; llm= warns as deprecated
                 base_url=self.base_url,
                 api_key=self.api_key,
                 # Consolidated params (new SDK contract)
@@ -538,7 +538,7 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
         
         return agents, tasks
 
-    async def astart(self):
+    async def astart(self) -> Union[str, Dict[str, Any]]:
         """
         Async version of start() method.
         Creates tasks based on the instructions, then starts execution.
@@ -546,7 +546,7 @@ DO NOT use strings for tasks. Each task MUST be a complete object with all four 
         """
         return await super().astart()
 
-    def start(self):
+    def start(self) -> Union[str, Dict[str, Any]]:
         """
         Creates tasks based on the instructions, then starts execution.
         Returns the task status and results dictionary.

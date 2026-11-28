@@ -61,6 +61,7 @@ _LAZY_IMPORTS = {
     "MCPClientProtocol": _t("praisonaiagents.mcp.protocols", "MCPClientProtocol"),
     # Loader (lazy loaded)
     "load_mcp_tools": _t("praisonaiagents.mcp.loader", "load_mcp_tools"),
+    "parse_mcp_servers": _t("praisonaiagents.mcp.loader", "parse_mcp_servers"),
     # Resource/prompt normalisation helpers (lazy loaded)
     "normalize_resource_result": _t("praisonaiagents.mcp.resources", "normalize_resource_result"),
     "normalize_prompt_result": _t("praisonaiagents.mcp.resources", "normalize_prompt_result"),
@@ -75,6 +76,7 @@ __all__ = [
     "MCPClientProtocol",
     # Loader (lazy loaded)
     "load_mcp_tools",
+    "parse_mcp_servers",
     # Resource/prompt normalisation helpers (lazy loaded)
     "normalize_resource_result",
     "normalize_prompt_result",

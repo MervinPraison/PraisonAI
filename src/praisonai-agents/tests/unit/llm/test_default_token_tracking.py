@@ -5,7 +5,9 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 from collections import defaultdict
 
-from praisonaiagents.llm.llm import LLM
+import pytest
+
+from praisonaiagents.llm.llm import LLM, TokenUsage
 from praisonaiagents.telemetry.token_collector import get_token_collector
 
 
@@ -77,6 +79,44 @@ def test_nested_usage_details_are_collected():
     assert metrics["reasoning_tokens"] == 1
     assert metrics["audio_input_tokens"] == 2
     assert metrics["audio_output_tokens"] == 1
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        pytest.param(
+            {"usage": {
+                "prompt_tokens": 30,
+                "completion_tokens": 11,
+                "total_tokens": 41,
+                "prompt_tokens_details": {"cached_tokens": 10},
+                "completion_tokens_details": {"reasoning_tokens": 7},
+            }},
+            id="chat-completions",
+        ),
+        pytest.param(
+            SimpleNamespace(usage=SimpleNamespace(
+                input_tokens=30,
+                output_tokens=11,
+                total_tokens=41,
+                input_tokens_details=SimpleNamespace(cached_tokens=10),
+                output_tokens_details=SimpleNamespace(reasoning_tokens=7),
+            )),
+            id="responses",
+        ),
+    ],
+)
+def test_extract_token_usage_reads_nested_cache_and_reasoning(response):
+    llm = LLM.__new__(LLM)
+    llm.verbose = False
+
+    assert llm._extract_token_usage(response) == TokenUsage(
+        prompt_tokens=30,
+        completion_tokens=11,
+        total_tokens=41,
+        cached_tokens=10,
+        reasoning_tokens=7,
+    )
 
 
 def test_responses_api_tracks_tokens_when_metrics_display_is_disabled(

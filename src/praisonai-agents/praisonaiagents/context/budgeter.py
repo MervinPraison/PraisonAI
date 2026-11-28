@@ -15,10 +15,10 @@ logger = logging.getLogger(__name__)
 
 # Model token limits (context window sizes)
 MODEL_LIMITS: Dict[str, int] = {
-    # OpenAI — gpt-5 family (1M context window)
-    "gpt-5": 1047576,
-    "gpt-5-mini": 1047576,
-    "gpt-5-nano": 1047576,
+    # OpenAI — gpt-5 family (272K input context window)
+    "gpt-5": 272000,
+    "gpt-5-mini": 272000,
+    "gpt-5-nano": 272000,
     # OpenAI — gpt-4.1 family (1M context window)
     "gpt-4.1": 1047576,
     "gpt-4.1-mini": 1047576,
@@ -43,7 +43,7 @@ MODEL_LIMITS: Dict[str, int] = {
     # Google
     "gemini-2.0-flash": 1048576,
     "gemini-1.5-pro": 2097152,
-    "gemini-1.5-flash": 1048576,
+    "gemini-1.5-flash": 1000000,
     # Defaults
     "default": 128000,
 }
@@ -122,6 +122,51 @@ def _litellm_model_info(model: str) -> Optional[Dict[str, Any]]:
 litellm_model_info = _litellm_model_info  # public name for other PraisonAI packages (G-22); the private name stays
 
 
+def resolved_model_limit(model: Optional[str]) -> Optional[int]:
+    """Full context window for ``model``, or None when it is unknown.
+
+    The same lookup order as :func:`get_model_limit`, without the generic
+    ``MODEL_LIMITS["default"]`` stand-in. A model whose real window happens
+    to be 128000 (``gpt-4o``) still resolves. An unrecognised name returns
+    None so a meter does not pretend the window is 128000.
+    """
+    if not model or not isinstance(model, str):
+        return None
+
+    # A local server told us the real window when it was probed. litellm knows no
+    # local tag, so without this a 40960-token model inherits the generic 128000
+    # default and compaction budgets it at three times its real room -- the
+    # server then truncates silently. No probing here: this is a cached read.
+    try:
+        from ..local.embed import context_length_for
+        probed = context_length_for(model)
+        if probed:
+            return int(probed)
+    except Exception:  # noqa: BLE001 -- budgeting must never fail on a lookup
+        logger.debug("Local context-window lookup failed for %s", model, exc_info=True)
+
+    # Prefer data-driven lookup via litellm (context window = max_input_tokens)
+    info = _litellm_model_info(model)
+    if info:
+        limit = info.get("max_input_tokens") or info.get("max_tokens")
+        if limit:
+            return int(limit)
+
+    # Exact match. "default" is the stand-in, not a model.
+    if model in MODEL_LIMITS and model != "default":
+        return MODEL_LIMITS[model]
+
+    # Partial match (e.g., "gpt-4o-2024-05-13" matches "gpt-4o")
+    model_lower = model.lower()
+    for key, limit in MODEL_LIMITS.items():
+        if key == "default":
+            continue
+        if key in model_lower or model_lower.startswith(key):
+            return limit
+
+    return None
+
+
 def get_model_limit(model: str) -> int:
     """
     Get context window limit for a model.
@@ -136,36 +181,118 @@ def get_model_limit(model: str) -> int:
     Returns:
         Context window size in tokens
     """
-    # A local server told us the real window when it was probed. litellm knows no
-    # local tag, so without this a 40960-token model inherits the generic 128000
-    # default and compaction budgets it at three times its real room -- the
-    # server then truncates silently. No probing here: this is a cached read.
+    return resolved_model_limit(model) or MODEL_LIMITS["default"]
+
+
+def _non_negative_int(value: Any) -> int:
+    """Token counts from providers are integers. Anything else counts as zero."""
     try:
-        from ..local.embed import context_length_for
-        probed = context_length_for(model)
-        if probed:
-            return probed
-    except Exception:  # noqa: BLE001 -- budgeting must never fail on a lookup
-        logger.debug("Local context-window lookup failed for %s", model, exc_info=True)
+        number = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return number if number > 0 else 0
 
-    # Prefer data-driven lookup via litellm (context window = max_input_tokens)
-    info = _litellm_model_info(model)
-    if info:
-        limit = info.get("max_input_tokens") or info.get("max_tokens")
-        if limit:
-            return limit
 
-    # Exact match
-    if model in MODEL_LIMITS:
-        return MODEL_LIMITS[model]
-    
-    # Partial match (e.g., "gpt-4o-2024-05-13" matches "gpt-4o")
-    model_lower = model.lower()
-    for key, limit in MODEL_LIMITS.items():
-        if key in model_lower or model_lower.startswith(key):
-            return limit
-    
-    return MODEL_LIMITS["default"]
+def _usage_field(usage: Any, name: str) -> Any:
+    """Read one field from a dict or an object. Missing is None, not zero."""
+    if usage is None:
+        return None
+    if isinstance(usage, dict):
+        return usage.get(name)
+    return getattr(usage, name, None)
+
+
+def occupancy_tokens(usage: Any) -> int:
+    """Prompt tokens that fill the window. Output tokens are ignored.
+
+    LiteLLM's Anthropic adapter already adds ``cache_read_input_tokens`` and
+    ``cache_creation_input_tokens`` into ``prompt_tokens``, so that total is
+    used as-is. A raw Anthropic usage object has only ``input_tokens`` (the
+    uncached tail) plus those cache fields, and the cache is added. OpenAI's
+    ``prompt_tokens`` already includes ``cached_tokens``; that subset is not
+    read here, so it cannot be added twice.
+    """
+    if usage is None:
+        return 0
+    prompt_raw = _usage_field(usage, "prompt_tokens")
+    input_raw = _usage_field(usage, "input_tokens")
+    prompt = _non_negative_int(prompt_raw) if prompt_raw is not None else None
+    inputted = _non_negative_int(input_raw) if input_raw is not None else None
+    extra = _non_negative_int(
+        _usage_field(usage, "cache_read_input_tokens")
+    ) + _non_negative_int(_usage_field(usage, "cache_creation_input_tokens"))
+    if prompt is not None and inputted is not None and extra:
+        if prompt >= inputted + extra:
+            return prompt
+        # prompt_tokens was copied from the uncached tail and is no larger
+        # than the cache itself. The cache is not in the total yet.
+        if prompt <= inputted and prompt <= extra:
+            return inputted + extra
+        return prompt
+    if inputted is not None and extra and prompt is None:
+        return inputted + extra
+    if prompt is not None:
+        return prompt
+    if inputted is not None:
+        return inputted
+    return 0
+
+
+def context_window_usage(
+    prompt_tokens: int,
+    model: Optional[str],
+    *,
+    cache_read_tokens: int = 0,
+    cache_creation_tokens: int = 0,
+) -> Optional[Dict[str, int]]:
+    """Occupancy of the full context window for one prompt.
+
+    ``prompt_tokens`` is the provider's input count. Output tokens are not
+    included. Pass Anthropic ``cache_read_input_tokens`` and
+    ``cache_creation_input_tokens``: those are excluded from Anthropic's
+    ``input_tokens`` and must be added. Do not pass OpenAI ``cached_tokens``;
+    those are already inside ``prompt_tokens``.
+
+    Returns None when there is nothing to report, or when the model window
+    is only the unknown-model default. ``percent`` is integer division of
+    the full window and may exceed 100 when the prompt is over the limit.
+
+    The dict keys are ``used``, ``limit``, and ``percent``.
+    """
+    limit = resolved_model_limit(model)
+    if not limit:
+        return None
+    used = (
+        _non_negative_int(prompt_tokens)
+        + _non_negative_int(cache_read_tokens)
+        + _non_negative_int(cache_creation_tokens)
+    )
+    if used <= 0:
+        return None
+    return {"used": used, "limit": limit, "percent": used * 100 // limit}
+
+
+def compaction_context_payload(
+    context_tokens: int,
+    model: Optional[str],
+    message_count: int = 0,
+) -> Dict[str, Any]:
+    """Snapshot passed to ``BEFORE_COMPACTION``.
+
+    ``context_tokens`` is the size of the messages about to be compacted.
+    ``context_window_size`` and ``context_usage_percent`` are present only
+    when the model window is known.
+    """
+    tokens = _non_negative_int(context_tokens)
+    payload: Dict[str, Any] = {
+        "context_tokens": tokens,
+        "message_count": _non_negative_int(message_count),
+    }
+    usage = context_window_usage(tokens, model)
+    if usage:
+        payload["context_window_size"] = usage["limit"]
+        payload["context_usage_percent"] = usage["percent"]
+    return payload
 
 
 def get_output_reserve(model: str) -> int:

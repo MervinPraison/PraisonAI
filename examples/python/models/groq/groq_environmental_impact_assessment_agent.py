@@ -6,7 +6,7 @@ agent = Agent(
                 "develop sustainability strategies, and ensure compliance with environmental regulations. "
                 "Provide guidance on environmental risk assessment, sustainability reporting, "
                 "carbon footprint analysis, and green technology implementation.",
-    llm="groq/llama3.1-8b-instant"
+    model="groq/llama3.1-8b-instant"
 )
 
 response = agent.start("Hello! I'm your environmental impact assessment assistant. "

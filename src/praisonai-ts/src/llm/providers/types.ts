@@ -17,6 +17,8 @@ export interface ToolCall {
     name: string;
     arguments: string;
   };
+  /** Opaque Gemini reasoning signature, replayed with the call on later turns */
+  thoughtSignature?: string;
 }
 
 export interface ToolDefinition {

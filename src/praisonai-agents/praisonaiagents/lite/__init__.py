@@ -258,14 +258,19 @@ def create_openai_llm_fn(
     return llm_fn
 
 
+_ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-5-5"
+
+
 def create_anthropic_llm_fn(
-    model: str = "claude-3-5-sonnet-20241022",
+    model: str = _ANTHROPIC_DEFAULT_MODEL,
     api_key: Optional[str] = None,
     max_tokens: int = 4096,
     **kwargs
 ) -> Callable[[List[Dict]], str]:
     """
     Create an LLM function using the Anthropic SDK.
+
+    Claude Sonnet 5.5 rejects temperature, top_p, and top_k.
     
     Args:
         model: Anthropic model name
@@ -276,6 +281,16 @@ def create_anthropic_llm_fn(
     Returns:
         LLM function compatible with LiteAgent
     """
+    if model == _ANTHROPIC_DEFAULT_MODEL and any(
+        param in kwargs for param in ("temperature", "top_p", "top_k")
+    ):
+        from ..errors import ValidationError
+
+        raise ValidationError(
+            f"{model} does not support sampling parameters. "
+            "Omit temperature, top_p, and top_k or select another model."
+        )
+
     def llm_fn(messages: List[Dict]) -> str:
         try:
             import anthropic
@@ -303,7 +318,8 @@ def create_anthropic_llm_fn(
             messages=chat_messages,
             **kwargs
         )
-        return response.content[0].text
+        # Responses can start with a thinking block, which has no text
+        return "".join(b.text for b in response.content if b.type == "text")
     
     return llm_fn
 

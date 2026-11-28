@@ -57,30 +57,12 @@ class TestDoctorEngine:
         assert result.status == CheckStatus.PASS
         assert result.duration_ms >= 0
     
-    def test_run_check_timeout(self, monkeypatch):
-        """Test check timeout handling.
-        
-        Note: We need to restore real time.sleep since fast_sleep fixture
-        patches it to be near-instant, which would prevent timeout testing.
-        """
-        import time
-        
-        # Restore real sleep for this test (fast_sleep fixture patches it)
-        import importlib
-        time_module = importlib.import_module('time')
-        real_sleep = time_module.sleep.__wrapped__ if hasattr(time_module.sleep, '__wrapped__') else None
-        
-        # Create a check that simulates slow execution via a loop instead of sleep
-        # This avoids the fast_sleep fixture interference
-        call_count = [0]
+    def test_run_check_timeout(self):
+        """Report a check that runs past its timeout."""
+        from threading import Event
         
         def slow_check(config):
-            call_count[0] += 1
-            # Use a busy loop that takes real time
-            import time as t
-            start = t.perf_counter()
-            while t.perf_counter() - start < 5:
-                pass  # Busy wait
+            Event().wait(0.25)
             return CheckResult(
                 id="slow",
                 title="Slow Check",

@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with Mistral
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="mistral/mistral-large-latest",
+    model="mistral/mistral-large-latest",
 )
 
 # Example conversation

@@ -1126,6 +1126,9 @@ class AsyncTUI:
         "git-log": "Show recent commits",
         "git-commit": "Stage and commit (message auto-generated when omitted)",
         "git-undo": "Undo the last commit (keeps changes staged)",
+        "ship": "Commit, push, and open a draft PR (never merges)",
+        "steward": "Run one PR steward cycle (status/CI/review check; --once)",
+        "approvals": "Check a PR against .praisonai/approvals.yml",
         "map": "Show a ranked repository map (operator overview)",
     }
 
@@ -1326,6 +1329,9 @@ class AsyncTUI:
   /git-log [n]     Show recent commits
   /git-commit [m]  Stage and commit (message auto-generated when omitted)
   /git-undo        Undo the last commit (keeps changes staged)
+  /ship [args]     Commit, push, and open a draft PR (never merges)
+  /steward [args]  Run one PR steward cycle (--once)
+  /approvals [args] Check a PR against .praisonai/approvals.yml
   /multiline       Toggle multiline input mode
   /files           List workspace files for @ mentions
   /queue           Show pending prompts in queue
@@ -1748,6 +1754,13 @@ Example: /handoff code "refactor the auth module" """
         elif cmd == "revert":
             self._handle_revert(args)
             return True
+
+        elif cmd in ("ship", "steward", "approvals"):
+            from praisonai_code.cli.interactive._ship_slash import run_ship_slash
+
+            output = run_ship_slash(cmd, args, cwd=self.config.workspace or None)
+            self.messages.append(ChatMessage(role="system", content=output))
+            return True
         
         else:
             # Not a built-in: consult the unified command registry so custom
@@ -1913,26 +1926,19 @@ Example: /handoff code "refactor the auth module" """
     def _fmt_tokens(n: int) -> str:
         return f"{n / 1000:.1f}k" if n >= 1000 else str(n)
 
-    def _limit_is_known(self, limit: int) -> bool:
-        """False when ``limit`` is only the budgeter's generic fallback.
+    def _resolved_window(self) -> Optional[int]:
+        """Current full window for the status bar, or None when unknown.
 
-        ``get_model_limit()`` returns ``MODEL_LIMITS["default"]`` for models it
-        cannot resolve; showing that as ``/128.0k (N%)`` would understate usage
-        on a smaller custom model, so the limit is shown only when resolved.
+        Reads the live resolver rather than the budgeter cached at session
+        start, so a local probe that arrives later (Ollama context length)
+        is shown. The generic 128000 default is not a resolved window.
         """
         try:
-            from praisonaiagents.context.budgeter import MODEL_LIMITS, _litellm_model_info
+            from praisonaiagents.context.budgeter import resolved_model_limit
         except Exception:  # noqa: BLE001
-            return False
-        if limit != MODEL_LIMITS.get("default"):
-            return True
+            return None
         # Same default ``_get_context_manager`` builds the budgeter with.
-        model = (self.config.model or "gpt-4o-mini").lower()
-        if _litellm_model_info(model):
-            return True
-        return any(
-            k != "default" and (k in model or model.startswith(k)) for k in MODEL_LIMITS
-        )
+        return resolved_model_limit(self.config.model or "gpt-4o-mini")
 
     def _refresh_usage_status(self) -> None:
         """Recompute the context-window / cost readout shown in the status bar.
@@ -1949,10 +1955,10 @@ Example: /handoff code "refactor the auth module" """
             if mgr is not None and history:
                 mgr.track_history(history)
                 used = mgr.ledger.get_total()
-                limit = mgr.budgeter.model_limit
+                limit = self._resolved_window()
                 if used:
                     text = f"ctx {self._fmt_tokens(used)}"
-                    if limit and self._limit_is_known(limit):
+                    if limit:
                         text += f"/{self._fmt_tokens(limit)} ({used * 100 // limit}%)"
                     parts.append(text)
         except Exception as exc:  # noqa: BLE001

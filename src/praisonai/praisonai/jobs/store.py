@@ -11,7 +11,7 @@ import threading
 import uuid
 from abc import ABC, abstractmethod
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from .models import Job, JobStatus
 
@@ -270,11 +270,16 @@ class InMemoryJobStore(JobStore):
     async def cleanup_old_jobs(self, max_age_seconds: int = 86400) -> int:
         """Remove jobs older than max_age_seconds."""
         async with self._get_lock():
-            cutoff = datetime.utcnow() - timedelta(seconds=max_age_seconds)
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=max_age_seconds)
             to_remove = []
             
             for job_id, job in self._jobs.items():
-                if job.is_terminal and job.completed_at and job.completed_at < cutoff:
+                completed_at = job.completed_at
+                if not job.is_terminal or completed_at is None:
+                    continue
+                if completed_at.tzinfo is None:
+                    completed_at = completed_at.replace(tzinfo=timezone.utc)
+                if completed_at < cutoff:
                     to_remove.append(job_id)
             
             for job_id in to_remove:

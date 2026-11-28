@@ -127,25 +127,15 @@ def test_the_dataset_reaches_the_trainer_via_the_written_config(tmp_path, monkey
     the [{name: ...}] shape the trainer requires. Assert that end state so the
     dataset can never again be silently dropped.
     """
-    import types
-
     import yaml
 
     monkeypatch.chdir(tmp_path)
 
-    # Replace the heavy runner with a stub whose main() records that it ran; the
-    # config.yaml it would read has already been written by the time it is called.
+    # Replace the trainer launch with a stub that records that it ran; the
+    # config.yaml the trainer reads has already been written by then.
     ran = []
-
-    class _StubPraisonAI:
-        def main(self):
-            ran.append(Path.cwd() / "config.yaml")
-
-    fake_module = types.SimpleNamespace(PraisonAI=_StubPraisonAI)
-
-    import praisonai_train._code_bridge as bridge
-    monkeypatch.setattr(bridge, "import_code_module", lambda _name: fake_module)
-    monkeypatch.setattr(bridge, "code_available", lambda: True)
+    import praisonai_train.train.llm.launch as launch_mod
+    monkeypatch.setattr(launch_mod, "launch", lambda config: ran.append(Path.cwd() / "config.yaml"))
 
     result = runner.invoke(app_mod.app, ["llm", "data.jsonl", "--lora-r", "8"])
     assert result.exit_code == 0, result.output

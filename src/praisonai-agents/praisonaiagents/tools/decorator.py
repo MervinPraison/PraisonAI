@@ -415,7 +415,7 @@ def tool(
             logger.debug("Successfully imported get_registry")
             registry = get_registry()
             logger.debug(f"Got registry: {registry}, type: {type(registry)}")
-            if registry:
+            if registry is not None:
                 logger.debug(f"Registering tool {tool_instance.name}")
                 registry.register(tool_instance)
                 logger.debug(f"Tool {tool_instance.name} registered successfully")

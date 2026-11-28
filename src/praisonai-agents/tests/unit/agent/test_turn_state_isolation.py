@@ -114,10 +114,12 @@ def test_concurrent_turns_see_their_own_cancel_token(monkeypatch):
         return "ok"
 
     monkeypatch.setattr(agent, "_chat_impl", fake_impl)
-    th = threading.Thread(target=agent.chat, args=("A",), kwargs={"cancel_token": tokens["A"]})
+    # Overlap on purpose: call past the per-agent turn lock (X-18) to test per-turn isolation.
+    chat = type(agent).chat.__wrapped__
+    th = threading.Thread(target=chat, args=(agent, "A"), kwargs={"cancel_token": tokens["A"]})
     th.start()
     assert started_a.wait(5)
-    agent.chat("B", cancel_token=tokens["B"])  # B starts (and ends) while A is in flight
+    chat(agent, "B", cancel_token=tokens["B"])  # B starts (and ends) while A is in flight
     release_a.set()
     th.join(5)
 
@@ -145,10 +147,12 @@ def test_overlapping_turn_does_not_reset_in_flight_turns_guard(monkeypatch):
 
     monkeypatch.setattr(agent, "_chat_impl", impl)
     monkeypatch.setattr(agent, "_chat_completion", _boom)
-    th = threading.Thread(target=agent.chat, args=("A",))
+    # Overlap on purpose: call past the per-agent turn lock (X-18) to test per-turn isolation.
+    chat = type(agent).chat.__wrapped__
+    th = threading.Thread(target=chat, args=(agent, "A"))
     th.start()
     assert started_a.wait(5)
-    agent.chat("B")  # B runs fully while A is in flight
+    chat(agent, "B")  # B runs fully while A is in flight
     assert guard._tool_counts.get("lookup") == 1  # A's tracking survives B's turn start
     release_a.set()
     th.join(5)
@@ -190,9 +194,11 @@ def test_overlapping_achat_tool_worker_sees_own_cancel_token(monkeypatch):
     async def main():
         nonlocal b_done
         b_done = asyncio.Event()
+        # Overlap on purpose: call past the per-agent turn lock (X-18) to test per-turn isolation.
+        achat = type(agent).achat.__wrapped__
         await asyncio.gather(
-            agent.achat("A", cancel_token=tokens["A"]),
-            agent.achat("B", cancel_token=tokens["B"]),
+            achat(agent, "A", cancel_token=tokens["A"]),
+            achat(agent, "B", cancel_token=tokens["B"]),
         )
 
     asyncio.run(main())

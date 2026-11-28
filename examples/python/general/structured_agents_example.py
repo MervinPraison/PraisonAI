@@ -12,7 +12,7 @@ researcher = Agent(
     role="Technology Research Analyst",
     goal="Analyze and structure information about AI developments",
     backstory="Expert analyst specializing in AI technology trends",
-    llm="gpt-4o-mini",
+    model="gpt-4o-mini",
     tools=[Tools.internet_search],
     reflection=False
 )
@@ -23,7 +23,7 @@ analyst = Agent(
     role="Data Insights Specialist",
     goal="Structure and analyze research findings",
     backstory="Senior data analyst with expertise in pattern recognition",
-    llm="gpt-4o-mini",
+    model="gpt-4o-mini",
     reflection=False
 )
 

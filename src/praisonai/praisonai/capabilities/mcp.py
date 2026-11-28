@@ -27,6 +27,33 @@ class MCPToolCallResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+def _build_mcp(
+    command: str,
+    args: Optional[List[str]] = None,
+    env: Optional[Dict[str, str]] = None,
+    timeout: Optional[float] = None,
+    **extra: Any,
+):
+    """Build an MCP client through the shared core config builder."""
+    from praisonaiagents.mcp import MCP
+    from praisonaiagents.mcp.loader import build_mcp
+    from praisonaiagents.mcp.trust import is_mcp_url
+
+    entry: Dict[str, Any] = dict(extra)
+    if "url" not in entry:
+        if is_mcp_url(command):
+            entry["url"] = command
+        else:
+            entry["command"] = command
+            entry["args"] = list(args or [])
+            if env:
+                entry["env"] = env
+    if timeout is not None and "timeout" not in entry:
+        entry["timeout"] = timeout
+    # Keep expand_env=False (default): direct Python args must not expand ${VAR}.
+    return build_mcp(entry, name=str(command or entry.get("url") or "server"), cls=MCP)
+
+
 def mcp_list_tools(
     command: str,
     args: Optional[List[str]] = None,
@@ -54,9 +81,7 @@ def mcp_list_tools(
         ...     print(tool['name'])
     """
     try:
-        from praisonaiagents.mcp import MCP
-        
-        mcp = MCP(command=command, args=args or [], env=env)
+        mcp = _build_mcp(command=command, args=args, env=env, timeout=timeout, **kwargs)
         tools = mcp.get_tools()
         
         tool_list = []
@@ -128,9 +153,7 @@ def mcp_call_tool(
         MCPToolCallResult with tool result
     """
     try:
-        from praisonaiagents.mcp import MCP
-        
-        mcp = MCP(command=command, args=args or [], env=env)
+        mcp = _build_mcp(command=command, args=args, env=env, timeout=timeout, **kwargs)
         
         # Get the tool and call it
         tools = mcp.get_tools()

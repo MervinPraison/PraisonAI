@@ -19,7 +19,7 @@ from praisonaiagents import Agent
 # Basic usage with RouteLLM routing
 agent = Agent(
     instructions="You are a helpful assistant.",
-    llm="router-mf-0.5",
+    model="router-mf-0.5",
     base_url="http://localhost:6060/v1"
 )
 

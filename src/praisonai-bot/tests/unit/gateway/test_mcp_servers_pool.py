@@ -89,3 +89,107 @@ def test_prune_retires_unreferenced_clients(monkeypatch):
     gw._prune_mcp_pool(None)
     assert shutdowns == ["http://b/sse", "http://a/sse"]
     assert gw._mcp_pool == {}
+
+
+def test_editor_field_aliases_supported(monkeypatch):
+    calls = []
+    monkeypatch.setattr(praisonaiagents, "MCP", _fake_mcp_factory(calls), raising=False)
+    gw = WebSocketGateway()
+
+    client = gw._get_pooled_mcp(
+        "docs",
+        {
+            "httpUrl": "https://mcp.example/mcp",
+            "http_headers": {"Authorization": "Bearer tok"},
+            "includeTools": ["read"],
+            "excludeTools": ["delete"],
+        },
+    )
+
+    assert client is not None
+    assert client.prefix == "docs"
+    assert calls == [(
+        "https://mcp.example/mcp",
+        {
+            "args": None,
+            "headers": {"Authorization": "Bearer tok"},
+            "allowed_tools": ["read"],
+            "disabled_tools": ["delete"],
+        },
+    )]
+
+
+def test_disabled_server_is_skipped(monkeypatch):
+    calls = []
+    monkeypatch.setattr(praisonaiagents, "MCP", _fake_mcp_factory(calls), raising=False)
+    gw = WebSocketGateway()
+
+    assert gw._get_pooled_mcp("off1", {"command": "npx", "enabled": False}) is None
+    assert gw._get_pooled_mcp("off2", {"command": "npx", "disabled": True}) is None
+    assert calls == []
+    assert gw._mcp_pool == {}
+
+
+def test_bad_url_never_starts_as_command(monkeypatch):
+    calls = []
+    monkeypatch.setattr(praisonaiagents, "MCP", _fake_mcp_factory(calls), raising=False)
+    gw = WebSocketGateway()
+
+    assert gw._get_pooled_mcp("bad", {"url": "touch MARKER"}) is None
+    assert calls == []
+    assert gw._mcp_pool == {}
+
+
+def test_legacy_sse_headers_handled_by_shared_builder(monkeypatch, caplog):
+    calls = []
+    monkeypatch.setattr(praisonaiagents, "MCP", _fake_mcp_factory(calls), raising=False)
+    gw = WebSocketGateway()
+
+    assert gw._get_pooled_mcp(
+        "auth_sse",
+        {"url": "https://mcp.example/sse", "headers": {"Authorization": "Bearer tok"}},
+    ) is None
+    assert calls == []
+
+    with caplog.at_level("WARNING"):
+        client = gw._get_pooled_mcp(
+            "hdr_sse",
+            {"url": "https://mcp.example/sse", "headers": {"X-Trace": "1"}},
+        )
+    assert client is not None
+    assert "headers" not in calls[0][1]
+    assert "SSE" in caplog.text
+
+
+def test_does_not_double_expand_env_vars(monkeypatch):
+    calls = []
+    monkeypatch.setattr(praisonaiagents, "MCP", _fake_mcp_factory(calls), raising=False)
+    monkeypatch.setenv("SOME_SECRET", "s3cret-value")
+    gw = WebSocketGateway()
+
+    client = gw._get_pooled_mcp(
+        "srv",
+        {
+            "url": "https://mcp.example/mcp",
+            "headers": {"X": "${SOME_SECRET}", "Y": "${env:SOME_SECRET}"},
+        },
+    )
+
+    assert client is not None
+    assert calls[0][1]["headers"] == {"X": "${SOME_SECRET}", "Y": "${env:SOME_SECRET}"}
+    assert "s3cret-value" not in repr(calls)
+
+
+def test_command_as_list_and_ms_timeout(monkeypatch):
+    calls = []
+    monkeypatch.setattr(praisonaiagents, "MCP", _fake_mcp_factory(calls), raising=False)
+    gw = WebSocketGateway()
+
+    client = gw._get_pooled_mcp(
+        "fs",
+        {"command": ["npx", "-y", "pkg"], "args": ["/my docs"], "timeout": 30000},
+    )
+
+    assert client is not None
+    assert client.prefix == "fs"
+    assert calls == [("npx", {"args": ["-y", "pkg", "/my docs"], "timeout": 30.0})]

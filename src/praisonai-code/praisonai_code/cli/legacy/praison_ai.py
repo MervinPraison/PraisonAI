@@ -261,6 +261,24 @@ def __getattr__(name):
         return value
     raise AttributeError(name)
 
+
+def _run_acp(acp_args):
+    """Run the ACP handler on ``acp_args`` and exit with its code.
+
+    The handler stays in the praisonai wrapper (its dependency
+    ``praisonai.acp.serve`` lives there), so it is reached through the wrapper
+    bridge, the same pattern the recipe command uses. A missing wrapper prints
+    the install hint and exits non-zero instead of raising.
+    """
+    from praisonai_code._wrapper_bridge import import_wrapper_module
+    try:
+        _acp_mod = import_wrapper_module("praisonai.cli.features.acp")
+    except ImportError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        sys.exit(1)
+    sys.exit(_acp_mod.run_acp_command(acp_args))
+
+
 class PraisonAI:
     def __init__(self, agent_file="agents.yaml", framework="", auto=False, init=False, agent_yaml=None, tools=None):
         """
@@ -990,6 +1008,17 @@ class PraisonAI:
             default_args.no_rules = False
             return default_args
         
+        # ACP parses its own flags, and two of them collide with legacy ones:
+        # `--model` would be consumed by this parser (the handler would start on
+        # its default model) and `--resume --last` is rejected outright because
+        # the legacy `--resume` requires a value. The documented invocation puts
+        # the verb first (`praisonai acp ...`, `praisonai-code acp ...`), so that
+        # shape is dispatched here with its arguments exactly as typed, before
+        # the parser runs. Any other shape keeps the legacy parse and reaches
+        # ACP below with the arguments the parser did not consume.
+        if not in_test_env and sys.argv[1:2] == ["acp"]:
+            _run_acp(sys.argv[2:])
+
         from praisonai_code._wrapper_bridge import import_wrapper_module
         _ab = import_wrapper_module("praisonai.cli.legacy.dispatch.argparse_builder")
         args, unknown_args, special_commands = _ab.build_argument_parser(in_test_env)
@@ -1021,11 +1050,12 @@ class PraisonAI:
             sys.exit(0)
 
         # Handle ACP command - Agent Client Protocol server for IDE integration
+        # The verb-first shape was dispatched before the parse; this catches the
+        # shapes it did not cover and forwards the arguments the legacy parser
+        # left unconsumed (the same tail the branch has always used).
         if args.command == 'acp':
-            from ..features.acp import run_acp_command
-            exit_code = run_acp_command(unknown_args)
-            sys.exit(exit_code)
-        
+            _run_acp(unknown_args)
+
         # Handle debug command - Debug and test interactive flows
         if args.command == 'debug':
             from ..features.debug import run_debug_command

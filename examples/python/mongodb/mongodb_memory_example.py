@@ -49,7 +49,7 @@ def main():
         You excel at maintaining context across multiple research sessions and can 
         retrieve relevant information from your persistent memory store.""",
         memory=True,
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # Create research tasks

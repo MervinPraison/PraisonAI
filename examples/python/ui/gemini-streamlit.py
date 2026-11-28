@@ -14,7 +14,7 @@ def get_agent():
     
     return Agent(
         instructions="You are a helpful assistant",
-        llm=llm_config
+        model=llm_config
     )
 
 agent = get_agent()

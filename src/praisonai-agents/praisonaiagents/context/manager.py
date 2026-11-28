@@ -526,8 +526,8 @@ class ContextManager:
             role = msg.get("role", "")
             content = msg.get("content", "")
             
-            # Always keep system messages (usually unique)
-            if role == "system":
+            # Tool results must remain paired with their calls, even if identical.
+            if role in ("system", "tool"):
                 result.append(msg)
                 continue
             
@@ -536,7 +536,7 @@ class ContextManager:
                 result.append(msg)
                 continue
             
-            # For tool results and user/assistant content, check for duplicates
+            # For user/assistant content, check for duplicates
             if isinstance(content, str) and len(content) > 100:
                 # Hash the content (first 2000 chars to avoid hashing huge content)
                 content_key = content[:2000]

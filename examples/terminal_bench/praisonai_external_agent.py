@@ -149,7 +149,7 @@ class PraisonAIExternalAgent(BaseAgent):
                     "   Keep calling bash_tool until the test PASSES or you have exhausted all approaches."
                 ),
                 tools=[bash_tool],
-                llm=self.model_name or "openai/gpt-4o-mini",
+                model=self.model_name or "openai/gpt-4o-mini",
                 execution=TB_EXECUTION,
             )
 

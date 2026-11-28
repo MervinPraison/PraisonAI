@@ -31,7 +31,7 @@ def basic_message_steering():
         name="researcher", 
         instructions="You are a helpful research assistant",
         message_steering=True,  # Enable real-time message steering
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     print("✅ Agent created with message steering enabled")
@@ -60,7 +60,7 @@ def threaded_message_steering():
         name="writer",
         instructions="You are a content writer", 
         message_steering=True,
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     result_holder = [None]
@@ -103,7 +103,7 @@ async def async_message_steering():
         name="analyst",
         instructions="You are a data analyst",
         message_steering=True,
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # Start async task

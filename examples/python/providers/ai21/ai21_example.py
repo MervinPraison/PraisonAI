@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with AI21
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="ai21/j2-ultra",
+    model="ai21/j2-ultra",
 )
 
 # Example conversation

@@ -7,6 +7,7 @@ Spec: https://github.com/google/A2UI
 
 from __future__ import annotations
 
+import importlib.util
 from typing import Any, Dict, List, Optional
 
 
@@ -29,15 +30,45 @@ def _import(name: str):
         ) from exc
 
 
+class _LocalA2uiPart:
+    """Part shape used when the A2A helper module is not installed.
+
+    ``a2ui-agent-sdk`` 0.12 moved ``a2ui.a2a`` into a separate package.
+    ``send_a2ui_messages`` only reads ``root.data`` and ``root.metadata``.
+    """
+
+    def __init__(self, data: Dict[str, Any]) -> None:
+        self.data = data
+        self.metadata = {"mimeType": "application/json+a2ui"}
+        self.root = self
+
+
+def _a2a_parts():
+    """Return the 0.2.x A2A helper module, or None when that layout is absent."""
+    if importlib.util.find_spec("a2ui") is None:
+        raise ImportError(_A2UI_INSTALL_HINT)
+    if importlib.util.find_spec("a2ui.a2a.parts") is None:
+        return None
+    return _import("a2ui.a2a.parts")
+
+
 def create_a2ui_part(a2ui_data: Dict[str, Any]) -> Any:
     """Wrap A2UI payload for A2A transport (MIME: application/json+a2ui)."""
-    parts = _import("a2ui.a2a.parts")
+    parts = _a2a_parts()
+    if parts is None:
+        return _LocalA2uiPart(a2ui_data)
     return parts.create_a2ui_part(a2ui_data)
 
 
 def is_a2ui_part(part: Any) -> bool:
     """Return True if an A2A part contains A2UI data."""
-    parts = _import("a2ui.a2a.parts")
+    root = getattr(part, "root", part)
+    metadata = getattr(root, "metadata", None) or {}
+    if isinstance(metadata, dict) and metadata.get("mimeType") == "application/json+a2ui":
+        return True
+    parts = _a2a_parts()
+    if parts is None:
+        return False
     return parts.is_a2ui_part(part)
 
 

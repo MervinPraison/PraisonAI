@@ -436,6 +436,12 @@ class SessionData:
                 0, self.last_compaction.message_index - overflow
             )
 
+    def _truncate_messages(self, keep: int) -> None:
+        """Keep the first messages and drop a summary that covers removed turns."""
+        self.messages = self.messages[:keep]
+        if self.last_compaction is not None and self.last_compaction.message_index > keep:
+            self.last_compaction = None
+
     def get_working_history(
         self, max_messages: Optional[int] = None
     ) -> List[Dict[str, str]]:

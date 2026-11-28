@@ -25,69 +25,51 @@ Example:
     result = apply_diff("path/to/file.py", diff_content)
 """
 
-from .tools import (
-    read_file,
-    write_file,
-    list_files,
-    apply_diff,
-    search_replace,
-    execute_command,
-)
+from importlib import import_module as _import_module
 
-from .diff import (
-    DiffResult,
-    apply_search_replace_diff,
-    parse_diff_blocks,
-)
 
-from .utils import (
-    FileAccessController,
-    add_line_numbers,
-    strip_line_numbers,
-)
-
-from .agent_tools import (
-    set_workspace,
-    get_workspace,
-    code_read_file,
-    code_write_file,
-    code_list_files,
-    code_apply_diff,
-    code_search_replace,
-    code_execute_command,
-    CODE_TOOLS,
-    create_diff_block,
-    create_multi_diff,
-)
-
-__all__ = [
+_EXPORT_MODULES = {
     # Main tools (low-level)
-    "read_file",
-    "write_file", 
-    "list_files",
-    "apply_diff",
-    "search_replace",
-    "execute_command",
+    "read_file": ".tools",
+    "write_file": ".tools",
+    "list_files": ".tools",
+    "apply_diff": ".tools",
+    "search_replace": ".tools",
+    "execute_command": ".tools",
     # Agent tools (high-level, string returns)
-    "set_workspace",
-    "get_workspace",
-    "code_read_file",
-    "code_write_file",
-    "code_list_files",
-    "code_apply_diff",
-    "code_search_replace",
-    "code_execute_command",
-    "CODE_TOOLS",
-    "create_diff_block",
-    "create_multi_diff",
+    "set_workspace": ".agent_tools",
+    "get_workspace": ".agent_tools",
+    "code_read_file": ".agent_tools",
+    "code_write_file": ".agent_tools",
+    "code_list_files": ".agent_tools",
+    "code_apply_diff": ".agent_tools",
+    "code_search_replace": ".agent_tools",
+    "code_execute_command": ".agent_tools",
+    "CODE_TOOLS": ".agent_tools",
+    "create_diff_block": ".agent_tools",
+    "create_multi_diff": ".agent_tools",
     # Diff utilities
-    "DiffResult",
-    "apply_search_replace_diff",
-    "parse_diff_blocks",
+    "DiffResult": ".diff",
+    "apply_search_replace_diff": ".diff",
+    "parse_diff_blocks": ".diff",
     # Utilities
-    "FileAccessController",
-    "add_line_numbers",
-    "strip_line_numbers",
-]
+    "FileAccessController": ".utils",
+    "add_line_numbers": ".utils",
+    "strip_line_numbers": ".utils",
+}
 
+__all__ = list(_EXPORT_MODULES)
 __version__ = "0.1.0"
+
+
+def __getattr__(name: str):
+    module_name = _EXPORT_MODULES.get(name)
+    if module_name is None:
+        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+    value = getattr(_import_module(module_name, __name__), name)
+    globals()[name] = value
+    return value
+
+
+def __dir__() -> list[str]:
+    return sorted(set(globals()).union(__all__))

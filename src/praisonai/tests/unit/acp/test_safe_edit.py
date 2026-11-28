@@ -107,7 +107,7 @@ class TestSafeEditPipeline:
         """Test creating a pipeline."""
         pipeline = SafeEditPipeline(workspace=temp_workspace)
         
-        assert pipeline.workspace == temp_workspace
+        assert pipeline.workspace == temp_workspace.resolve()
         assert pipeline.auto_approve is False
     
     def test_propose_edit(self, pipeline, temp_workspace):

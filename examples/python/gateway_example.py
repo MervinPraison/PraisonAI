@@ -24,13 +24,13 @@ gateway_config = GatewayConfig(
 researcher = Agent(
     name="researcher",
     instructions="You research topics thoroughly and provide detailed information.",
-    llm="gpt-4o-mini"
+    model="gpt-4o-mini"
 )
 
 writer = Agent(
     name="writer",
     instructions="You write clear, engaging content based on research.",
-    llm="gpt-4o-mini"
+    model="gpt-4o-mini"
 )
 
 # Example: Simple agent interaction
