@@ -91,7 +91,7 @@ jobs:
           name: ${{ steps.context.outputs.artifact }}
           path: ${{ runner.temp }}/claude-handoff/publish/
           if-no-files-found: error
-          retention-days: 1
+          retention-days: 30
 
   verify-fix:
     needs: prepare

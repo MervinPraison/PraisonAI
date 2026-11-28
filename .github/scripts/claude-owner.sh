@@ -133,12 +133,14 @@ stage_result() {
 }
 
 publish_review() {
-  local current marker
+  local current marker reviews
   current=$(gh api "repos/$repo/pulls/$number" --jq 'select(.state == "open") | .head.sha')
   [[ "$current" == "${REVIEW_HEAD:?missing reviewed SHA}" ]] ||
     { echo "PR head changed or closed. Dispatch a new review." >&2; exit 1; }
-  marker="<!-- claude-owner-review:$GITHUB_RUN_ID -->"
-  if gh api --paginate "repos/$repo/pulls/$number/reviews?per_page=100" --jq '.[].body' | grep -F "$marker" > /dev/null; then
+  marker="<!-- claude-owner-review:$GITHUB_RUN_ID:$REVIEW_HEAD -->"
+  reviews=$(gh api --paginate "repos/$repo/pulls/$number/reviews?per_page=100" \
+    --jq '.[] | select(.user.login == "github-actions[bot]") | .body')
+  if grep -F "$marker" <<< "$reviews" > /dev/null; then
     return
   fi
   validate_grade "$publish/review.md"
@@ -165,10 +167,15 @@ stage_fix_patch() {
 }
 
 verify_fix() {
+  local command="${VALIDATION_COMMAND:-}"
+  if [[ -n "$command" && ! "$command" =~ [^[:space:]] ]]; then
+    echo "Validation must contain a command or be omitted." >&2
+    exit 1
+  fi
   stage_fix_patch
-  if [[ -n "${VALIDATION_COMMAND:-}" ]]; then
+  if [[ -n "$command" ]]; then
     git apply "$publish/fix.patch"
-    bash --noprofile --norc -e -o pipefail -c "$VALIDATION_COMMAND"
+    bash --noprofile --norc -e -o pipefail -c "$command"
   fi
 }
 

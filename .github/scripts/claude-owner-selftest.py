@@ -28,7 +28,10 @@ elif command == ["pr", "create"]:
 elif command == ["api", "--method"]:
     print("https://example.invalid/review")
 elif command == ["api", "--paginate"]:
-    pass
+    if "/reviews?" in args[2]:
+        if os.environ.get("GH_REVIEW_HISTORY_FAILURE"):
+            raise SystemExit(3)
+        print(os.environ.get("GH_REVIEW_HISTORY", ""))
 elif args[1].endswith("/pulls/17"):
     head = os.environ["PR_HEAD"]
     if "--jq" in args:
@@ -175,6 +178,18 @@ class OwnerClaudeTest(unittest.TestCase):
         self.assertIn("Trusted main rules", policy)
         self.assertNotIn("New main rules", policy)
 
+    def test_review_deduplication_uses_head_and_requires_a_successful_lookup(self):
+        self.run_handler("review-pr", "prepare")
+        self.run_handler("review-pr", "run")
+        self.run_handler("review-pr", "stage")
+        self.run_handler("review-pr", "publish-review", cwd=self.publisher, expected=3, GH_REVIEW_HISTORY_FAILURE="true")
+        self.run_handler("review-pr", "publish-review", cwd=self.publisher,
+                         GH_REVIEW_HISTORY=f"<!-- claude-owner-review:42:{self.pr_head} -->")
+        self.assertFalse(any("POST" in call for call in self.calls()))
+        self.run_handler("review-pr", "publish-review", cwd=self.publisher,
+                         GH_REVIEW_HISTORY=f"<!-- claude-owner-review:42:{self.base} -->")
+        self.assertTrue(any("POST" in call for call in self.calls()))
+
     def test_issue_patch_publishes_on_new_branch_as_draft(self):
         self.run_handler("fix-issue", "prepare")
         self.run_handler("fix-issue", "run")
@@ -200,6 +215,10 @@ class OwnerClaudeTest(unittest.TestCase):
         self.run_handler("fix-issue", "stage")
         self.run_handler("fix-issue", "verify-fix", cwd=self.verifier, expected=23, VALIDATION_COMMAND="exit 23")
         self.assertFalse(any(call[:2] == ["pr", "create"] for call in self.calls()))
+
+    def test_whitespace_cannot_be_reported_as_passing_validation(self):
+        result = self.run_handler("fix-issue", "verify-fix", cwd=self.verifier, expected=1, VALIDATION_COMMAND=" \t\n")
+        self.assertIn("Validation must contain a command or be omitted", result.stderr)
 
     def test_issue_cannot_publish_agent_instructions(self):
         self.run_handler("fix-issue", "prepare")
