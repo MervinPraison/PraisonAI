@@ -1775,7 +1775,7 @@ Your Role: {self.role}"""
             # No execution config - use safe default
             return get_default_policy()
 
-    def _compute_context_budget_core(self, messages, tools=None, system_prompt=None):
+    def _compute_context_budget_core(self, messages, tools=None, system_prompt=None, model=None):
         """
         Core context budget computation logic shared by sync and async versions.
         
@@ -1790,7 +1790,8 @@ Your Role: {self.role}"""
             return None, None
         
         # Get model name for context window lookup
-        model_name = self.llm if isinstance(self.llm, str) else "gpt-4o-mini"
+        active_model = model if model is not None else self.llm
+        model_name = active_model if isinstance(active_model, str) else "gpt-4o-mini"
         
         # Compute budget using the policy
         budget_result = policy.compute_context_budget(
@@ -1809,7 +1810,7 @@ Your Role: {self.role}"""
         
         return policy, budget_result
 
-    def _compute_context_budget_and_route(self, messages, tools=None, system_prompt=None):
+    def _compute_context_budget_and_route(self, messages, tools=None, system_prompt=None, model=None):
         """
         Compute context budget and determine proactive route BEFORE LLM call.
         
@@ -1822,7 +1823,8 @@ Your Role: {self.role}"""
         from ..compaction import ContextCompactor
         
         # Use shared core logic
-        policy, budget_result = self._compute_context_budget_core(messages, tools, system_prompt)
+        model_override = {"model": model} if model is not None else {}
+        policy, budget_result = self._compute_context_budget_core(messages, tools, system_prompt, **model_override)
         
         # If compaction disabled, return unchanged
         if policy is None:
@@ -2384,18 +2386,10 @@ Your Role: {self.role}"""
                 llm, index, current = self._fallback_llm_for(next_model), index + 1, next_model
 
     def _get_model_fallback_lock(self):
-        """Lazily create the per-instance lock guarding model-fallback swaps.
+        """Lazily create the per-instance lock used by explicit model switches.
 
-        Async fallback now runs against a per-call throwaway dispatcher
-        (``_build_fallback_dispatcher``), so it does not mutate shared state and
-        ordinary async turns can never observe the fallback model. The sync
-        fallback path still recurses through the full ``_chat_completion``
-        wrapper (which reads ``self.llm`` for BEFORE_LLM hook attribution and
-        budget), so it temporarily overrides ``self.llm`` /
-        ``self._unified_dispatcher`` for a single retry. This dual (sync/async)
-        lock serialises that mutate/restore window; normal, non-fallback turns
-        never acquire it and stay fully concurrent. Created on demand so no
-        extra state is added for agents without ``fallback_models``.
+        Per-call fallback uses a separate dispatcher and does not mutate the
+        shared model or dispatcher cache.
         """
         lock = getattr(self, '_model_fallback_lock', None)
         if lock is None:
@@ -2524,9 +2518,10 @@ Your Role: {self.role}"""
             return self.context_manager.emergency_truncate(messages, target)
         return compactor.shrink_to_fit(messages, target)
 
-    def _fit_overflow_ceiling(self, messages, tools):
+    def _fit_overflow_ceiling(self, messages, tools, model=None):
         """Shrink to the size remembered from an earlier overflow, if over it."""
-        model_name = self.llm if isinstance(self.llm, str) else "unknown"
+        active_model = model if model is not None else self.llm
+        model_name = active_model if isinstance(active_model, str) else "unknown"
         ceiling = self.__dict__.get("_overflow_ceilings", {}).get(model_name)
         if not ceiling or not isinstance(messages, list) or not self._can_restart_after_overflow(tools):
             return messages
@@ -2594,7 +2589,7 @@ Your Role: {self.role}"""
             error_message=str(exc), operation=operation, delay_seconds=delay, attempt=retry_depth,
         )
 
-    def _loop_usage_kwargs(self):
+    def _loop_usage_kwargs(self, model=None):
         """OpenAI-client route: have the tool loop report each earlier call (F-07).
 
         The loop makes one billed request per tool round; the agent records the
@@ -2603,7 +2598,8 @@ Your Role: {self.role}"""
         """
         if getattr(self, "_using_custom_llm", False):
             return {}
-        return {"usage_callback": lambda response: self._record_llm_usage(*self._extract_llm_usage(response))}
+        model_override = {"model": model} if model is not None else {}
+        return {"usage_callback": lambda response: self._record_llm_usage(*self._extract_llm_usage(response, **model_override))}
 
     def _extract_llm_usage(self, response, model=None):
         """Return ``(prompt_tokens, completion_tokens, cost_usd)`` for one LLM response priced as ``model``."""
@@ -2684,15 +2680,18 @@ Your Role: {self.role}"""
         finally:
             _usage_sink.reset(token)
 
-    def _chat_completion(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0, _fallback_index=0, cancel_token=None):
+    def _chat_completion(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, _retry_depth=0, _fallback_index=0, cancel_token=None, _fallback_model=None, _dispatcher=None):
         start_time = time.time()
+        active_model = _fallback_model if _fallback_model is not None else self.llm
+        dispatch_override = {"_dispatcher": _dispatcher, "_model": active_model} if _dispatcher is not None else {}
 
         # Reset the agent-level finish-reason classification at the start of each
         # OpenAI-native turn so a provider block/refusal recorded on a previous
         # run (see ``_extract_llm_response_content``) never leaks into this one.
         # The LiteLLM path resets its own backend flag independently.
         self._last_stop_reason = "completed"
-        messages = self._fit_overflow_ceiling(messages, tools)
+        model_override = {"model": _fallback_model} if _fallback_model is not None else {}
+        messages = self._fit_overflow_ceiling(messages, tools, **model_override)
 
         # --- Proactive Context Budget Management (default-on) ---
         # Analyzes token budget BEFORE LLM call and applies appropriate strategy
@@ -2700,7 +2699,8 @@ Your Role: {self.role}"""
             route, compacted_messages = self._compute_context_budget_and_route(
                 messages=messages, 
                 tools=tools,
-                system_prompt=None  # Already included in messages from _build_messages()
+                system_prompt=None,  # Already included in messages from _build_messages()
+                **model_override,
             )
             # Update messages in-place so callers see the changes
             messages[:] = compacted_messages
@@ -2713,7 +2713,7 @@ Your Role: {self.role}"""
         # --- Context compaction (opt-in via ExecutionConfig.context_compaction) ---
         # Compacts message history before sending to LLM. Zero overhead when disabled.
         from ..hooks import HookEvent as _HookEvent
-        self._apply_context_compaction(messages, _HookEvent)
+        self._apply_context_compaction(messages, _HookEvent, **model_override)
 
         # Trigger BEFORE_LLM hook
         # Only build the input if a BEFORE_LLM hook is actually registered
@@ -2726,7 +2726,7 @@ Your Role: {self.role}"""
                 timestamp=str(time.time()),
                 agent_name=self.name,
                 messages=messages,
-                model=self.llm if isinstance(self.llm, str) else str(self.llm),
+                model=active_model if isinstance(active_model, str) else str(active_model),
                 temperature=temperature
             )
             _before_llm_results = self._hook_runner.execute_sync(HookEvent.BEFORE_LLM, before_llm_input)
@@ -2753,9 +2753,8 @@ Your Role: {self.role}"""
         # it would breach the ceiling. This turns max_budget into a genuine hard
         # cap instead of one that can be overshot by a whole LLM call.
         if self._max_budget and self._on_budget_exceeded == "stop":
-            _est_min_cost = self._estimate_min_call_cost(
-                messages, getattr(self, 'max_tokens', None)
-            )
+            _cost_model = {"model": active_model} if _fallback_model is not None else {}
+            _est_min_cost = self._estimate_min_call_cost(messages, getattr(self, 'max_tokens', None), **_cost_model)
             with self._cost_lock:
                 _projected_cost = self._total_cost + _est_min_cost
                 _current_cost = self._total_cost
@@ -2779,7 +2778,7 @@ Your Role: {self.role}"""
             self.name,
             messages_count=len(messages),
             tokens_used=0,  # Estimated before call
-            model=self.llm if isinstance(self.llm, str) else None,
+            model=active_model if isinstance(active_model, str) else None,
             messages=messages,  # Include full messages for context replay
         )
 
@@ -2798,6 +2797,7 @@ Your Role: {self.role}"""
                 # First attempt: try with streaming enabled for better user experience
                 stream_callback = self.stream_emitter.emit if hasattr(self, 'stream_emitter') else None
                 streaming_response = self._chat_completion_with_retry(
+                    **dispatch_override,
                     cancel_token=cancel_token,
                     messages=messages,
                     temperature=temperature,
@@ -2846,6 +2846,7 @@ Your Role: {self.role}"""
             else:
                 try:
                     final_response = self._chat_completion_with_retry(
+                        **dispatch_override,
                         cancel_token=cancel_token,
                         messages=messages,
                         temperature=temperature,
@@ -2868,6 +2869,7 @@ Your Role: {self.role}"""
                         logger.debug(f"{self.name}: Streaming not supported by adapter, falling back to non-streaming")
                         self._emit_stream_unavailable()
                         final_response = self._chat_completion_with_retry(
+                            **dispatch_override,
                             cancel_token=cancel_token,
                             messages=messages,
                             temperature=temperature,
@@ -2886,7 +2888,7 @@ Your Role: {self.role}"""
 
             # Emit LLM response trace event with token usage
             _duration_ms = (time.time() - start_time) * 1000
-            _prompt_tokens, _completion_tokens, _cost_usd = self._extract_llm_usage(final_response)
+            _prompt_tokens, _completion_tokens, _cost_usd = self._extract_llm_usage(final_response, **model_override)
 
             _trace_emitter.llm_response(
                 self.name,
@@ -2911,7 +2913,7 @@ Your Role: {self.role}"""
                     agent_name=self.name,
                     messages=messages,
                     response=str(final_response),
-                    model=self.llm if isinstance(self.llm, str) else str(self.llm),
+                    model=active_model if isinstance(active_model, str) else str(active_model),
                     tokens_used=_prompt_tokens + _completion_tokens,
                     latency_ms=(time.time() - start_time) * 1000
                 )
@@ -2938,7 +2940,7 @@ Your Role: {self.role}"""
             # Use structured error classification for all error types (replaces legacy heuristic checks)
             from ..llm.error_classifier import classify_llm_error
             
-            model_name = self.llm if isinstance(self.llm, str) else "unknown"
+            model_name = active_model if isinstance(active_model, str) else "unknown"
             session_id = getattr(self, '_session_id', 'unknown')
             
             # Determine provider from model name or use default
@@ -2982,7 +2984,7 @@ Your Role: {self.role}"""
                             reasoning_steps, task_name, task_description, task_id, response_format, 
                             _retry_depth=_retry_depth + 1,
                             _fallback_index=_fallback_index,
-                            cancel_token=cancel_token
+                            cancel_token=cancel_token, _fallback_model=_fallback_model, _dispatcher=_dispatcher
                         )
                 except Exception as compression_error:
                     logger.error(f"[{self.name}] Context compression failed: {compression_error}")
@@ -2997,7 +2999,7 @@ Your Role: {self.role}"""
                 # Try next model in the fallback chain
                 next_model = self._get_next_fallback_model(_fallback_index)
                 if next_model:
-                    current_model = self.llm if isinstance(self.llm, str) else str(self.llm)
+                    current_model = active_model if isinstance(active_model, str) else str(active_model)
                     logger.info(f"[{self.name}] {current_model} unavailable — falling back to {next_model}")
 
                     # Surface the otherwise-silent switch as an observable event.
@@ -3022,26 +3024,13 @@ Your Role: {self.role}"""
                             cancel_token if cancel_token is not None else getattr(self, "interrupt_controller", None),
                         )
                     
-                    # Temporarily override the model and clear dispatcher cache
-                    # for this call. Serialise the mutate/restore window so a
-                    # concurrent turn on a shared Agent can't observe the wrong
-                    # model; only fallback turns contend on this lock.
-                    with self._get_model_fallback_lock().sync():
-                        original_llm = self.llm
-                        original_dispatcher = getattr(self, '_unified_dispatcher', None)
-                        try:
-                            self.llm = next_model
-                            self._unified_dispatcher = None  # Force recreation with new model
-                            return self._chat_completion(
-                                messages, temperature, tools, stream,
-                                reasoning_steps, task_name, task_description, task_id, response_format,
-                                _retry_depth=_retry_depth + 1,
-                                _fallback_index=_fallback_index + 1,
-                                cancel_token=cancel_token
-                            )
-                        finally:
-                            self.llm = original_llm
-                            self._unified_dispatcher = original_dispatcher  # Restore original dispatcher
+                    dispatcher = self._build_fallback_dispatcher(next_model)
+                    return self._chat_completion(
+                        messages, temperature, tools, stream,
+                        reasoning_steps, task_name, task_description, task_id, response_format,
+                        _retry_depth=_retry_depth + 1, _fallback_index=_fallback_index + 1,
+                        cancel_token=cancel_token, _fallback_model=next_model, _dispatcher=dispatcher,
+                    )
                 else:
                     logger.warning(f"[{self.name}] {classification.user_message} (no more fallback models available)")
                     # Continue to error handling without retry
@@ -3065,7 +3054,7 @@ Your Role: {self.role}"""
                     reasoning_steps, task_name, task_description, task_id, response_format, 
                     _retry_depth=_retry_depth + 1,
                     _fallback_index=_fallback_index,
-                    cancel_token=cancel_token
+                    cancel_token=cancel_token, _fallback_model=_fallback_model, _dispatcher=_dispatcher
                 )
             
             # Include remediation hints for unimplemented recovery actions
@@ -3314,6 +3303,7 @@ Your Role: {self.role}"""
         stream_callback=None,
         emit_events=True,
         cancel_token=None,
+        _dispatcher=None,
     ):
         """
         Execute unified chat completion using composition instead of runtime class mutation.
@@ -3324,7 +3314,8 @@ Your Role: {self.role}"""
         from ..llm import create_llm_dispatcher
         
         # Get or create unified dispatcher
-        if not hasattr(self, '_unified_dispatcher') or self._unified_dispatcher is None:
+        dispatcher = _dispatcher
+        if dispatcher is None and (not hasattr(self, '_unified_dispatcher') or self._unified_dispatcher is None):
             # Provider selection based on existing agent configuration
             if self._using_custom_llm and hasattr(self, 'llm_instance'):
                 dispatcher = create_llm_dispatcher(llm_instance=self.llm_instance)
@@ -3337,6 +3328,8 @@ Your Role: {self.role}"""
             
             # Cache the dispatcher
             self._unified_dispatcher = dispatcher
+        elif dispatcher is None:
+            dispatcher = self._unified_dispatcher
         
         # Smart fallback for streaming: try streaming first, fall back to non-streaming if unsupported
         if stream is None or stream is True:
@@ -3346,8 +3339,8 @@ Your Role: {self.role}"""
                 # First attempt: try with streaming enabled for better user experience
                 if stream_callback is None and hasattr(self, 'stream_emitter'):
                     stream_callback = getattr(self.stream_emitter, 'emit', None)
-                final_response = self._unified_dispatcher.chat_completion(
-                    **self._loop_usage_kwargs(),
+                final_response = dispatcher.chat_completion(
+                    **self._loop_usage_kwargs(getattr(dispatcher, 'model', None)),
                     cancel_token=cancel_token,
                     messages=messages,
                     tools=tools,
@@ -3355,7 +3348,7 @@ Your Role: {self.role}"""
                     temperature=temperature,
                     max_tokens=getattr(self, 'max_tokens', None),
                     stream=True,  # Try streaming first
-                    **self._native_reasoning_kwargs(getattr(self._unified_dispatcher, 'model', None)),
+                    **self._native_reasoning_kwargs(getattr(dispatcher, 'model', None)),
                     response_format=response_format,
                     execute_tool_fn=self._durable_sync_tool_executor(
                         getattr(self, 'execute_tool', None)
@@ -3399,8 +3392,8 @@ Your Role: {self.role}"""
         try:
             if stream_callback is None and hasattr(self, 'stream_emitter'):
                 stream_callback = getattr(self.stream_emitter, 'emit', None)
-            final_response = self._unified_dispatcher.chat_completion(
-                **self._loop_usage_kwargs(),
+            final_response = dispatcher.chat_completion(
+                **self._loop_usage_kwargs(getattr(dispatcher, 'model', None)),
                 cancel_token=cancel_token,
                 messages=messages,
                 tools=tools,
@@ -3408,7 +3401,7 @@ Your Role: {self.role}"""
                 temperature=temperature,
                 max_tokens=getattr(self, 'max_tokens', None),
                 stream=stream,
-                **self._native_reasoning_kwargs(getattr(self._unified_dispatcher, 'model', None)),
+                **self._native_reasoning_kwargs(getattr(dispatcher, 'model', None)),
                 response_format=response_format,
                 execute_tool_fn=self._durable_sync_tool_executor(
                     getattr(self, 'execute_tool', None)
@@ -7010,7 +7003,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         
         return llm_summarize_async
 
-    def _resolve_compaction_max_tokens(self, execution_cfg):
+    def _resolve_compaction_max_tokens(self, execution_cfg, model=None):
         """
         Resolve the compaction trigger budget.
 
@@ -7025,14 +7018,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             return _explicit
         try:
             from ..context.budgeter import get_model_limit, get_output_reserve
-            model_name = self.llm if isinstance(self.llm, str) else "gpt-4o-mini"
+            active_model = model if model is not None else self.llm
+            model_name = active_model if isinstance(active_model, str) else "gpt-4o-mini"
             limit = get_model_limit(model_name)
             reserve = get_output_reserve(model_name)
             return max(1, int(limit * 0.8) - reserve)
         except Exception:
             return 8000
 
-    def _apply_context_compaction(self, messages, hook_event_class):
+    def _apply_context_compaction(self, messages, hook_event_class, model=None):
         """
         Apply context compaction to messages if enabled (sync version).
         
@@ -7051,7 +7045,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             from ..compaction import ContextCompactor
             from ..compaction.strategy import CompactionStrategy
             
-            _max_tok = self._resolve_compaction_max_tokens(_execution_cfg)
+            model_override = {"model": model} if model is not None else {}
+            _max_tok = self._resolve_compaction_max_tokens(_execution_cfg, **model_override)
             _strategy = getattr(_execution_cfg, 'compaction_strategy', None) or CompactionStrategy.TRUNCATE
             
             # Create LLM summarization function if strategy is LLM_SUMMARIZE
@@ -7330,7 +7325,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             return raw
         return response.content
 
-    def _chat_completion_with_retry(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True, cancel_token=None):
+    def _chat_completion_with_retry(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True, cancel_token=None, _dispatcher=None, _model=None):
         """
         Wrapper for _execute_unified_chat_completion that adds jittered exponential backoff retry logic.
         
@@ -7341,6 +7336,8 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # before_model/after_model/wrap_model_call hooks are registered. The
         # retry/backoff logic below becomes the middleware chain's final handler.
         manager = self._get_model_middleware_manager()
+        dispatch_override = {"_dispatcher": _dispatcher} if _dispatcher is not None else {}
+        active_model = _model if _model is not None else getattr(self, 'llm', '')
         if manager is not None:
             from ..hooks import ModelRequest, ModelResponse, InvocationContext
 
@@ -7354,24 +7351,24 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     req.messages, effective_temperature, effective_tools, stream,
                     reasoning_steps, task_name, task_description, task_id,
                     response_format, stream_callback=stream_callback,
-                    emit_events=emit_events, cancel_token=cancel_token,
+                    emit_events=emit_events, cancel_token=cancel_token, **dispatch_override,
                 )
                 return ModelResponse(
                     content=result if isinstance(result, str) else (result or ""),
-                    model=str(getattr(self, 'llm', '') or ''),
+                    model=str(active_model or ''),
                     extra={"raw": result},
                 )
 
             request = ModelRequest(
                 messages=messages,
-                model=str(getattr(self, 'llm', '') or ''),
+                model=str(active_model or ''),
                 temperature=temperature if temperature is not None else 1.0,
                 tools=tools,
                 context=InvocationContext(
                     agent_id=self.name,
                     run_id=getattr(self, '_current_run_id', 'unknown'),
                     session_id=getattr(self, '_session_id', None) or 'default',
-                    model_name=str(getattr(self, 'llm', '') or ''),
+                    model_name=str(active_model or ''),
                 ),
             )
             response = manager.execute_model_call(request, _model_fn)
@@ -7381,17 +7378,18 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
             messages, temperature, tools, stream, reasoning_steps,
             task_name, task_description, task_id, response_format,
             stream_callback=stream_callback, emit_events=emit_events,
-            cancel_token=cancel_token,
+            cancel_token=cancel_token, **dispatch_override,
         )
 
-    def _chat_completion_with_retry_core(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True, cancel_token=None):
+    def _chat_completion_with_retry_core(self, messages, temperature=None, tools=None, stream=None, reasoning_steps=False, task_name=None, task_description=None, task_id=None, response_format=None, stream_callback=None, emit_events=True, cancel_token=None, _dispatcher=None):
         """Retry/backoff core for chat completion (middleware-agnostic)."""
+        dispatch_override = {"_dispatcher": _dispatcher} if _dispatcher is not None else {}
         retry_config = getattr(self, '_retry_config', None)
         if not retry_config:
             return self._execute_unified_chat_completion(messages, temperature, tools, stream, reasoning_steps, 
                                        task_name, task_description, task_id, response_format,
                                        stream_callback=stream_callback, emit_events=emit_events,
-                                       cancel_token=cancel_token)
+                                       cancel_token=cancel_token, **dispatch_override)
         
         from .retry_utils import jittered_backoff
         from ..hooks import HookEvent, OnRetryInput
@@ -7405,7 +7403,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 return self._execute_unified_chat_completion(messages, temperature, tools, stream, reasoning_steps, 
                                            task_name, task_description, task_id, response_format,
                                            stream_callback=stream_callback, emit_events=emit_events,
-                                           cancel_token=cancel_token)
+                                           cancel_token=cancel_token, **dispatch_override)
             
             except Exception as e:
                 from ..errors import LLMError

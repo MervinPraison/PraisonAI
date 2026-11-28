@@ -2424,7 +2424,7 @@ class ToolExecutionMixin:
 
     DEFAULT_OUTPUT_RESERVATION_TOKENS = 1024
 
-    def _estimate_min_call_cost(self, messages, max_tokens=None) -> float:
+    def _estimate_min_call_cost(self, messages, max_tokens=None, model=None) -> float:
         """Estimate the minimum cost of an upcoming LLM call before dispatch.
 
         Uses the known input size (messages) plus an output-token reservation
@@ -2473,7 +2473,7 @@ class ToolExecutionMixin:
             completion_tokens = self.DEFAULT_OUTPUT_RESERVATION_TOKENS
         else:
             completion_tokens = 0
-        return self._calculate_llm_cost(prompt_tokens, completion_tokens)
+        return self._calculate_llm_cost(prompt_tokens, completion_tokens, model=model)
 
     def _truncate_dict_fields(self, data: dict, tool_name: str, max_field_chars: int = None, tool_call_id: str = None) -> dict:
         """Truncate large string fields in a dict to prevent context overflow."""
