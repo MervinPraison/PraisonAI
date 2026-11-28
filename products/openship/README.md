@@ -15,6 +15,13 @@
   </picture>
 </p>
 
+## Watch OpenShip Live in GitHub
+
+| 1. Setup & Initialization (`1:56`) | 2. Full Push-to-Merge Walkthrough (`2:39`) |
+|---|---|
+| [![OpenShip GitHub Setup & Initialization](https://mer.vin/wp-content/uploads/openship/openship-github-setup-guide-thumb.jpg)](https://mer.vin/wp-content/uploads/openship/openship-github-setup-guide.mp4) | [![OpenShip Live GitHub Walkthrough: Push to Full Merge](https://mer.vin/wp-content/uploads/openship/openship-github-full-push-to-merge-thumb.jpg)](https://mer.vin/wp-content/uploads/openship/openship-github-full-push-to-merge.mp4) |
+| Run `praisonai-code ship init --github` to scaffold `.github/workflows/openship.yml`, `.praisonai/approvals.yml`, `REVIEW.md`, and sync your LLM secret in one command. | Live PR from `git push` → Red CI → Pillar 1 inline review → Pillar 2 Steward auto-fixes CI & inline thread → Pillar 3 live approvals table → human merge into `main`. |
+
 ## 60-Second Onboarding (Pick Your Surface)
 
 OpenShip ships directly inside **`praisonai-code`** (included with `pip install praisonai`; `praisonai-code` provides the `praisonai-code` CLI, while `pip install praisonai` also provides the `praisonai` alias).
