@@ -2114,14 +2114,22 @@ Write the complete compiled report:"""
                             return await call_target(**call_arguments)
                     logger.debug(f"Executing sync function in executor: {function_name}")
                     from ..trace.context_events import copy_context_to_callable
+
+                    async def _invoke_sync():
+                        result = await _run_sync(
+                            copy_context_to_callable(lambda: call_target(**call_arguments))
+                        )
+                        # Sync wrappers such as FunctionTool.run can return an awaitable.
+                        return await result if inspect.isawaitable(result) else result
+
                     # copy_context_to_callable snapshots the CURRENT context (incl.
                     # the injection contextvar) into the executor thread, so setting
                     # it here propagates cancel_event to the sync tool body too.
                     if _inject_state is not None:
                         with _scope_cm, with_injection_context(_inject_state), tool_progress_channel(_progress_sink):
-                            return await _run_sync(copy_context_to_callable(lambda: call_target(**call_arguments)))
+                            return await _invoke_sync()
                     with _scope_cm, tool_progress_channel(_progress_sink):
-                        return await _run_sync(copy_context_to_callable(lambda: call_target(**call_arguments)))
+                        return await _invoke_sync()
 
                 async def _run_sync(fn):
                     # With a tool timeout, a timed-out sync tool keeps its thread
