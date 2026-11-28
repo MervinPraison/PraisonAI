@@ -10,7 +10,7 @@ This module uses FULL LAZY LOADING for all heavy dependencies:
 
 This ensures minimal import-time overhead.
 """
-from typing import Any, Awaitable, Dict, List, Optional, Type, TypeVar
+from typing import Any, Awaitable, Dict, List, Optional, Type, TypeVar, Union
 import os
 import json
 import re
@@ -1070,6 +1070,40 @@ class BaseAutoGenerator:
 # Pydantic Models for Structured Output - Lazy Loaded
 # =============================================================================
 
+def _index_named_items(
+    items: Union[Dict[str, Any], List[Dict[str, Any]]], *, value_key: Optional[str] = None
+) -> Dict[str, Any]:
+    """Restore keyed YAML data from strict-provider named lists.
+
+    Accept legacy mappings from registered providers without changing them.
+    Reject duplicate IDs instead of silently dropping generated entries.
+    """
+    if isinstance(items, dict):
+        return items
+    indexed = {}
+    for item in items:
+        value = dict(item)
+        item_id = value.pop('id')
+        if item_id in indexed:
+            raise ValueError(f"Duplicate generated ID: {item_id!r}")
+        indexed[item_id] = value[value_key] if value_key else value
+    return indexed
+
+
+def _restore_workflow_steps(value: Any) -> Any:
+    """Restore route maps through nested loop, branch and parallel steps."""
+    if isinstance(value, list):
+        return [_restore_workflow_steps(item) for item in value]
+    if isinstance(value, dict):
+        return {
+            key: _index_named_items(item, value_key='targets')
+            if key == 'route' and isinstance(item, list)
+            else _restore_workflow_steps(item)
+            for key, item in value.items()
+        }
+    return value
+
+
 def _get_team_models():
     """Get team structure models, creating them on first use."""
 
@@ -1092,6 +1126,20 @@ def _get_team_models():
         class TeamStructure(BaseModel):
             """Structure for multi-agent team."""
             roles: Dict[str, RoleDetails]
+
+        class NamedTask(TaskDetails):
+            id: str
+
+        class NamedRole(BaseModel):
+            id: str
+            role: str
+            goal: str
+            backstory: str
+            tasks: List[NamedTask]
+            tools: List[str]
+
+        class TeamOutput(BaseModel):
+            roles: List[NamedRole]
 
         class SingleAgentStructure(BaseModel):
             """Structure for single-agent generation (Anthropic's 'start simple' principle)."""
@@ -1120,6 +1168,7 @@ def _get_team_models():
             "TaskDetails": TaskDetails,
             "RoleDetails": RoleDetails,
             "TeamStructure": TeamStructure,
+            "TeamOutput": TeamOutput,
             "SingleAgentStructure": SingleAgentStructure,
             "PatternRecommendation": PatternRecommendation,
             "ValidationGate": ValidationGate,
@@ -1246,14 +1295,20 @@ class AutoGenerator(BaseAutoGenerator):
         path while keeping merge/save/path-resolution logic in one place.
         """
         response = await self._structured_completion_async(
-            response_model=_get_team_models()['TeamStructure'],
+            response_model=_get_team_models()['TeamOutput'],
             messages=[
-                {"role": "system", "content": "You are a helpful assistant designed to output complex team structures."},
+                {"role": "system", "content": (
+                    "Design a team. Return roles and their tasks as lists, each item "
+                    "with a unique id; the keyed examples describe the resulting YAML."
+                )},
                 {"role": "user", "content": self.get_user_content()}
             ],
             is_async=is_async,
         )
         json_data = json.loads(response.model_dump_json())
+        json_data['roles'] = _index_named_items(json_data['roles'])
+        for role in json_data['roles'].values():
+            role['tasks'] = _index_named_items(role['tasks'])
         # Off-loop the blocking merge/YAML-dump/fsync so a running event loop
         # (e.g. under `praisonai serve`) is not parked; mirrors the run path's
         # asyncio.to_thread offload in AgentsGenerator._aload_config.
@@ -1630,8 +1685,12 @@ def _get_workflow_models():
     thread-safe optional-dep loading) so exception caching and ``lazy_reset``
     semantics match ``_get_team_models`` instead of drifting.
     """
+    # lazy_get uses a shared non-reentrant lock: resolve the team model before
+    # entering the workflow factory so a cold workflow import cannot deadlock.
+    validation_gate = _get_team_models()['ValidationGate']
+
     def _create():
-        from pydantic import BaseModel
+        from pydantic import BaseModel, Field
 
         class WorkflowStepDetails(BaseModel):
             """Details for a workflow step."""
@@ -1665,7 +1724,89 @@ def _get_workflow_models():
             steps: List[Dict]  # Can be agent steps, route, parallel, etc.
             gates: Optional[List[Any]] = None  # Optional validation gates, ValidationGate type resolved at runtime
 
+        class NamedAgent(WorkflowAgentDetails):
+            id: str
+
+        class NamedRoute(BaseModel):
+            id: str
+            targets: List[str]
+
+        class LoopOutput(BaseModel):
+            model_config = {'extra': 'forbid'}
+            over: Optional[str] = None
+            from_csv: Optional[str] = None
+            from_file: Optional[str] = None
+            var_name: Optional[str] = None
+            parallel: Optional[bool] = None
+            context: Optional[str] = None
+            max_workers: Optional[Union[int, str]] = None
+            step: Optional[str] = None
+            steps: Optional[List['StepOutput']] = None
+
+        class RepeatOutput(BaseModel):
+            model_config = {'extra': 'forbid'}
+            until: Optional[str] = None
+            max_iterations: int = 5
+
+        class IncludeOutput(BaseModel):
+            model_config = {'extra': 'forbid'}
+            recipe: str
+            input: Optional[str] = None
+
+        class IfOutput(BaseModel):
+            model_config = {'extra': 'forbid'}
+            condition: str
+            then: List['StepOutput']
+            otherwise: Optional[List['StepOutput']] = Field(default=None, alias='else')
+
+        class StepOptions(BaseModel):
+            # Reject unsupported options instead of silently discarding them.
+            model_config = {'extra': 'forbid'}
+            name: Optional[str] = None
+            expected_output: Optional[str] = None
+            output_file: Optional[str] = None
+            output_json: Optional[str] = None
+            output_pydantic: Optional[str] = None
+            output_variable: Optional[str] = None
+            context: Optional[Union[str, List[str]]] = None
+            guardrail: Optional[str] = None
+            callback: Optional[str] = None
+            max_retries: Optional[int] = None
+            create_directory: Optional[bool] = None
+            async_execution: Optional[bool] = None
+            skip_on_failure: Optional[bool] = None
+            retry_delay: Optional[float] = None
+            on_failure: Optional[str] = None
+
+        class AgentStepOutput(StepOptions):
+            agent: str
+            action: Optional[str] = None
+
+        class StepOutput(StepOptions):
+            agent: Optional[str] = None
+            action: Optional[str] = None
+            route: Optional[List[NamedRoute]] = None
+            parallel: Optional[List[AgentStepOutput]] = None
+            loop: Optional[LoopOutput] = None
+            repeat: Optional[RepeatOutput] = None
+            include: Optional[Union[str, IncludeOutput]] = None
+            branching: Optional[IfOutput] = Field(default=None, alias='if')
+            step: Optional[Union[str, AgentStepOutput]] = None
+            steps: Optional[List['StepOutput']] = None
+
+        namespace = {'StepOutput': StepOutput}
+        for model in (LoopOutput, IfOutput, StepOutput):
+            model.model_rebuild(_types_namespace=namespace)
+
+        class WorkflowOutput(BaseModel):
+            name: str
+            description: str
+            agents: List[NamedAgent]
+            steps: List[StepOutput]
+            gates: Optional[List[validation_gate]] = None
+
         return {
+            'WorkflowOutput': WorkflowOutput,
             'WorkflowStepDetails': WorkflowStepDetails,
             'WorkflowRouteDetails': WorkflowRouteDetails,
             'WorkflowParallelDetails': WorkflowParallelDetails,
@@ -1852,15 +1993,21 @@ Respond with:
         logic in one place.
         """
         response = await self._structured_completion_async(
-            response_model=_get_workflow_models()['WorkflowStructure'],
+            response_model=_get_workflow_models()['WorkflowOutput'],
             messages=[
-                {"role": "system", "content": "You are a helpful assistant that designs workflow structures."},
+                {"role": "system", "content": (
+                    "Design a workflow. Return agents as a list with unique id fields; "
+                    "routes as lists of {id, targets}. Steps must reference agent IDs, "
+                    "never display names. The keyed examples describe the resulting YAML."
+                )},
                 {"role": "user", "content": self._get_prompt(pattern)}
             ],
             is_async=is_async,
         )
         
-        json_data = json.loads(response.model_dump_json())
+        json_data = json.loads(response.model_dump_json(exclude_none=True, by_alias=True))
+        json_data['agents'] = _index_named_items(json_data['agents'])
+        json_data['steps'] = _restore_workflow_steps(json_data['steps'])
 
         # Off-loop the blocking merge/read + YAML-dump/fsync so a running event
         # loop (e.g. under `praisonai serve`) is not parked; mirrors the run
@@ -1936,7 +2083,7 @@ Respond with:
                 if isinstance(ref, str):
                     step[key] = rename_map.get(ref, ref)
             # Routing/parallel/loop payloads also carry agent refs — recurse.
-            for key in ("parallel", "route", "loop", "branches"):
+            for key in ("parallel", "route", "loop", "branches", "if", "then", "else", "steps", "step"):
                 nested = step.get(key)
                 if nested is None:
                     continue
@@ -1950,6 +2097,8 @@ Respond with:
                         }
                     elif isinstance(nested, list):
                         step[key] = _rewrite_agent_refs(nested, route_target=True)
+                elif key == "step" and isinstance(nested, str):
+                    step[key] = rename_map.get(nested, nested)
                 elif isinstance(nested, list):
                     step[key] = [_rewrite_agent_refs(s) for s in nested]
                 elif isinstance(nested, dict):
@@ -2085,25 +2234,23 @@ Example structure:
 """
         elif pattern == "evaluator-optimizer":
             base_prompt += """
-Create an evaluator-optimizer workflow where one agent generates content and another evaluates it in a loop.
-The generator improves based on evaluator feedback until quality criteria are met.
+Generate content once, evaluate it with bounded retries until APPROVED, then finalize using the feedback.
+The YAML repeat form retries one agent, not a generator/evaluator pair. Do not claim
+feedback-driven regeneration inside the repeat; that requires a Python composite workflow.
 
 Example structure:
 {
   "name": "Evaluator-Optimizer Workflow",
-  "description": "Iterative refinement through generation and evaluation",
+  "description": "Generation, bounded evaluation and finalization",
   "agents": {
     "generator": {"name": "Generator", "role": "Content Generator", "goal": "Generate high-quality content", "instructions": "Create content based on the input. If feedback is provided, improve the content accordingly."},
     "evaluator": {"name": "Evaluator", "role": "Quality Evaluator", "goal": "Evaluate content quality", "instructions": "Evaluate the content on: clarity, accuracy, completeness, and relevance. Score 1-10 for each. If average score < 7, provide specific improvement feedback. If score >= 7, respond with 'APPROVED'."}
   },
   "steps": [
     {"agent": "generator", "action": "Generate initial content for: {{input}}"},
-    {"name": "evaluation_loop", "loop": {
-      "agent": "evaluator",
-      "action": "Evaluate the generated content",
-      "condition": "output does not contain 'APPROVED'",
-      "max_iterations": 3,
-      "feedback_to": "generator"
+    {"name": "evaluation_loop", "agent": "evaluator",
+     "action": "Evaluate the generated content", "repeat": {
+      "until": "APPROVED", "max_iterations": 3
     }},
     {"agent": "generator", "action": "Finalize content based on all feedback"}
   ]
