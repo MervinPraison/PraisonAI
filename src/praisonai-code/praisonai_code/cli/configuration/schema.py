@@ -114,6 +114,12 @@ class RulesConfig:
 
 
 @dataclass
+class ShipConfig:
+    """Ship/steward workflow configuration."""
+    enabled: bool = True
+
+
+@dataclass
 class ConfigSchema:
     """
     Complete configuration schema.
@@ -128,6 +134,7 @@ class ConfigSchema:
     llm: LLMConfig = field(default_factory=LLMConfig)
     session: SessionConfig = field(default_factory=SessionConfig)
     rules: RulesConfig = field(default_factory=RulesConfig)
+    ship: ShipConfig = field(default_factory=ShipConfig)
     
     # Additional settings stored as dict for flexibility
     extra: Dict[str, Any] = field(default_factory=dict)
@@ -185,6 +192,9 @@ class ConfigSchema:
                 "auto": self.rules.auto,
                 "max_chars": self.rules.max_chars,
             },
+            "ship": {
+                "enabled": self.ship.enabled,
+            },
             **self.extra,
         }
     
@@ -227,9 +237,10 @@ class ConfigSchema:
         llm_data = data.get("llm", {})
         session_data = data.get("session", {})
         rules_data = data.get("rules", {})
+        ship_data = data.get("ship", {})
         
         # Extract known keys
-        known_keys = {"agent", "output", "traces", "mcp", "model", "llm", "session", "rules"}
+        known_keys = {"agent", "output", "traces", "mcp", "model", "llm", "session", "rules", "ship"}
         extra = {k: v for k, v in data.items() if k not in known_keys}
         
         # Parse MCP servers
@@ -308,6 +319,9 @@ class ConfigSchema:
             rules=RulesConfig(
                 auto=rules_data.get("auto", True),
                 max_chars=rules_data.get("max_chars", 32000),
+            ),
+            ship=ShipConfig(
+                enabled=ship_data.get("enabled", True) if isinstance(ship_data, dict) else True,
             ),
             extra=extra,
         )

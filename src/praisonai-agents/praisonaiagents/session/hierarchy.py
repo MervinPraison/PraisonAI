@@ -857,10 +857,8 @@ class HierarchicalSessionStore(DefaultSessionStore):
                 session.last_compaction = restored.last_compaction
             elif snapshot.message_index >= len(session.messages):
                 raise ValueError("Legacy snapshot position is outside the retained history")
-            elif snapshot.message_index >= 0:
-                session.messages = session.messages[:snapshot.message_index + 1]
             else:
-                session.messages = []
+                session._truncate_messages(max(0, snapshot.message_index + 1))
                 
         try:
             return self._modify_session_locked(
@@ -888,7 +886,7 @@ class HierarchicalSessionStore(DefaultSessionStore):
                 logger.warning(f"Invalid message index {message_index}")
                 raise ValueError(f"Invalid message index {message_index}")
             
-            session.messages = session.messages[:message_index + 1]
+            session._truncate_messages(message_index + 1)
             
         try:
             return self._modify_session_locked(session_id, _apply, error_label="revert to message")

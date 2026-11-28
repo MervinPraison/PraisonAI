@@ -360,7 +360,7 @@ class TestConfigSchema:
     def test_unknown_channel_fails(self):
         from praisonai_bot.bots._config_schema import validate_bot_config
         with pytest.raises(ValueError, match="Unknown channel"):
-            validate_bot_config({"channels": {"signal": {"token": "x"}}})
+            validate_bot_config({"channels": {"unregistered-test-channel": {"token": "x"}}})
 
     def test_multi_channel_custom_keys_with_platform(self, monkeypatch):
         """Onboard multi-telegram YAML uses telegram_<role> keys plus platform field."""

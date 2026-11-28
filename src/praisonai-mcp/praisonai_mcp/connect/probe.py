@@ -48,10 +48,10 @@ def _init_msg() -> Dict[str, Any]:
     }
 
 
-def verify(spec: ServerSpec, timeout: float = 30.0) -> ProbeResult:
+def verify(spec: ServerSpec, timeout: float = 30.0, headers: Optional[Dict[str, str]] = None) -> ProbeResult:
     """Handshake with the server ``spec`` describes; never raises."""
     try:
-        return _verify_url(spec, timeout) if spec.url else _verify_stdio(spec, timeout)
+        return _verify_url(spec, timeout, headers=headers) if spec.url else _verify_stdio(spec, timeout)
     except Exception as exc:  # report, do not crash the CLI
         return ProbeResult(False, error=str(exc) or type(exc).__name__)
 
@@ -117,13 +117,15 @@ def _verify_stdio(spec: ServerSpec, timeout: float) -> ProbeResult:
         errlog.close()
 
 
-def _verify_url(spec: ServerSpec, timeout: float) -> ProbeResult:
+def _verify_url(spec: ServerSpec, timeout: float, headers: Optional[Dict[str, str]] = None) -> ProbeResult:
     session: Dict[str, str] = {}
+    custom = {**(spec.headers or {}), **(headers or {})}
 
     def post(msg: Dict[str, Any]) -> Dict[str, Any]:
-        headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream",
-                   "MCP-Protocol-Version": PROTOCOL, **session}
-        req = urllib.request.Request(spec.url, data=json.dumps(msg).encode(), headers=headers, method="POST")
+        req_headers = {**custom, "Content-Type": "application/json",
+                       "Accept": "application/json, text/event-stream",
+                       "MCP-Protocol-Version": PROTOCOL, **session}
+        req = urllib.request.Request(spec.url, data=json.dumps(msg).encode(), headers=req_headers, method="POST")
         with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 - user-given URL
             if resp.headers.get("Mcp-Session-Id"):
                 session["Mcp-Session-Id"] = resp.headers["Mcp-Session-Id"]

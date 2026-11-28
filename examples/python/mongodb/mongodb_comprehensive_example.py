@@ -71,7 +71,7 @@ def main():
         indexing, and ensure data quality and accessibility across the organization.""",
         tools=[mongodb_tools],
         memory=True,
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # 2. Knowledge Curator Agent - manages knowledge base
@@ -84,7 +84,7 @@ def main():
         You ensure that knowledge is properly stored, indexed, and accessible.""",
         knowledge=mongodb_knowledge_config,
         memory=True,
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # 3. Business Analyst Agent - analyzes data and provides insights
@@ -97,7 +97,7 @@ def main():
         and provide strategic recommendations based on data analysis.""",
         tools=[mongodb_tools],
         memory=True,
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # 4. Customer Service Agent - handles customer interactions
@@ -111,7 +111,7 @@ def main():
         knowledge=mongodb_knowledge_config,
         tools=[mongodb_tools],
         memory=True,
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # Create comprehensive business tasks

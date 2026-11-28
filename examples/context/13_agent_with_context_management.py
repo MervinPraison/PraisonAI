@@ -44,7 +44,7 @@ def main():
     # Create an agent
     agent = Agent(
         instructions="You are a helpful AI assistant. Keep responses concise.",
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
     )
     
     # Track the system prompt

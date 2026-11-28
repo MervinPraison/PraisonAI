@@ -28,7 +28,7 @@ _FIELD_ALIASES = {
 # Harmless editor fields with no meaning here: dropped without a warning.
 _QUIET_FIELDS = {"name", "description", "trust", "alwaysAllow", "autoApprove", "startup_timeout_sec"}
 _FIELDS = {"type", "command", "args", "env", "cwd", "url", "headers", "oauth",
-           "allowed_tools", "disabled_tools", "timeout", "enabled"}
+           "allowed_tools", "disabled_tools", "timeout", "enabled", "approval"}
 _TYPE_ALIASES = {"local": "stdio", "remote": "http", "streamable-http": "http",
                  "streamable_http": "http", "streamableHttp": "http", "websocket": "ws"}
 _ENV_VAR = re.compile(r"\$\{(?:env:)?([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
@@ -126,8 +126,15 @@ def build_mcp(entry: Any, name: str = "server", cls: type = MCP, expand_env: boo
             logger.warning("MCP server '%s': headers are not supported for legacy SSE URLs and are ignored", name)
         elif headers:
             kwargs["headers"] = _expand(headers, name)
-        if entry.get("oauth"):
-            logger.warning("MCP server '%s': oauth sign-in is not applied by this client yet", name)
+        oauth = entry.get("oauth")
+        if oauth is not None:
+            if sse:
+                if oauth:
+                    logger.warning("MCP server '%s': oauth is not supported for legacy SSE URLs", name)
+            else:
+                kwargs["oauth"] = oauth
+                if name:
+                    kwargs["server_name"] = name
     else:
         target = _expand(entry["command"], name)
         if isinstance(target, list):  # ["npx", "-y", "pkg"]
@@ -142,6 +149,11 @@ def build_mcp(entry: Any, name: str = "server", cls: type = MCP, expand_env: boo
     for key in ("allowed_tools", "disabled_tools"):
         if entry.get(key):
             kwargs[key] = entry[key]
+    approval = entry.get("approval")
+    if approval is not None:
+        if not isinstance(approval, str) or approval not in ("never", "always"):
+            raise ValueError(f"MCP server '{name}': approval must be 'never' or 'always' (got {approval!r})")
+        kwargs["approval"] = approval
     return cls(target, args=args, **kwargs)
 
 

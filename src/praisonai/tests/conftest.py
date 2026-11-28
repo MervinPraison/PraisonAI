@@ -92,15 +92,11 @@ def _reset_framework_availability_cache():
 
 @pytest.fixture(autouse=True)
 def cleanup_async_resources():
-    """Clean up async resources after each test to prevent unclosed session warnings.
-    
-    Note: We only do garbage collection here. Event loop management is handled
-    by pytest-asyncio's event_loop fixture. Calling run_until_complete here
-    can corrupt the event loop state and cause subsequent tests to fail.
-    """
+    """Collect newly unreachable cycles after each test without touching its event loop."""
     yield
-    # Force garbage collection to clean up any lingering async resources
-    gc.collect()
+    # Scan newly allocated objects. The automatic collector handles older
+    # generations without rescanning the entire suite's live heap per test.
+    gc.collect(0)
 
 # Correct paths for src/praisonai/tests/conftest.py
 # Go up 3 levels to reach root (tests -> praisonai -> src -> root)

@@ -51,7 +51,7 @@ agent = Agent(
     instructions="You are a technical support assistant.",
     knowledge=[sample_doc],
     memory={"user_id": "comparison_user"},
-    llm="openai/gpt-4o-mini",
+    model="openai/gpt-4o-mini",
     output="minimal",
 )
 

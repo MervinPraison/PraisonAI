@@ -1,10 +1,15 @@
 """Async dispatch must execute awaitables returned by synchronous wrappers."""
 
 import asyncio
+import json
 
+import httpx
 import pytest
+from openai import AsyncOpenAI
 
 from praisonaiagents import Agent, tool
+from praisonaiagents.config import ToolConfig
+from praisonaiagents.llm.openai_client import OpenAIClient
 from praisonaiagents.tools.base import BaseTool
 from praisonaiagents.tools.injected import get_current_state
 
@@ -61,8 +66,8 @@ async def test_wrapped_coroutine_obeys_tool_timeout(isolated_home):
             cancelled.set()
 
     with Agent(instructions="Wait for records", tools=[wait_for_record],
-               reflection=False, rules=False, output="silent") as agent:
-        agent._tool_timeout = 1
+               reflection=False, rules=False, output="silent",
+               tool_config=ToolConfig(timeout=1)) as agent:
         result = await agent.execute_tool_async("wait_for_record", {})
     assert started.is_set() and cancelled.is_set()
     assert result["timeout"] is True
@@ -79,3 +84,53 @@ async def test_wrapped_coroutine_error_reaches_caller(isolated_home):
                reflection=False, rules=False, output="silent") as agent:
         result = await agent.execute_tool_async("lookup_record", {})
     assert "record service unavailable" in result["error"]
+
+
+@pytest.mark.asyncio
+async def test_astart_sends_wrapped_tool_result(isolated_home):
+    tool_messages = []
+
+    @tool
+    async def lookup_record(value: int) -> str:
+        """Look up a record by its numeric ID."""
+        return f"record:{value}"
+
+    def reply(request):
+        payload = json.loads(request.content)
+        results = [m["content"] for m in payload["messages"] if m["role"] == "tool"]
+        if results:
+            tool_messages.extend(results)
+            message = {"role": "assistant", "content": "done"}
+        else:
+            message = {
+                "role": "assistant",
+                "tool_calls": [{
+                    "id": "lookup-1",
+                    "type": "function",
+                    "function": {"name": "lookup_record", "arguments": '{"value": 7}'},
+                }],
+            }
+        return httpx.Response(200, json={
+            "id": "completion-1", "object": "chat.completion",
+            "created": 1, "model": "gpt-4o-mini",
+            "choices": [{"index": 0, "message": message,
+                         "finish_reason": "stop" if results else "tool_calls"}],
+            "usage": {"prompt_tokens": 4, "completion_tokens": 2, "total_tokens": 6},
+        })
+
+    client = OpenAIClient(api_key="fixture-key", base_url="https://fixture.invalid/v1")
+    client._async_client = AsyncOpenAI(
+        api_key="fixture-key",
+        base_url="https://fixture.invalid/v1",
+        http_client=httpx.AsyncClient(transport=httpx.MockTransport(reply)),
+    )
+    async with client._async_client:
+        with Agent(
+            instructions="Look up records", llm="gpt-4o-mini", tools=[lookup_record],
+            reflection=False, rules=False, output="silent",
+        ) as agent:
+            agent._Agent__openai_client = client
+            result = await agent.astart("Look up record 7", stream=False)
+
+    assert result == "done"
+    assert len(tool_messages) == 1 and "record:7" in tool_messages[0]

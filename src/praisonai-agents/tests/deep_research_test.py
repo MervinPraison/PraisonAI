@@ -11,13 +11,14 @@ Usage:
 import os
 import sys
 
+import pytest
+
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from praisonaiagents import (
     DeepResearchAgent,
     DeepResearchResponse,
-    Citation,
     ReasoningStep,
     WebSearchCall,
     CodeExecutionStep,
@@ -25,76 +26,53 @@ from praisonaiagents import (
     FileSearchCall,
     Provider
 )
+from praisonaiagents.agent.deep_research_agent import Citation
 
 
 def test_basic_import():
     """Test that all classes can be imported."""
-    print("✓ All Deep Research classes imported successfully")
-    print(f"  - DeepResearchAgent: {DeepResearchAgent}")
-    print(f"  - DeepResearchResponse: {DeepResearchResponse}")
-    print(f"  - Citation: {Citation}")
-    print(f"  - ReasoningStep: {ReasoningStep}")
-    print(f"  - WebSearchCall: {WebSearchCall}")
-    print(f"  - CodeExecutionStep: {CodeExecutionStep}")
-    print(f"  - MCPCall: {MCPCall}")
-    print(f"  - FileSearchCall: {FileSearchCall}")
-    print(f"  - Provider: {Provider}")
-    print(f"  - Provider.OPENAI: {Provider.OPENAI}")
-    print(f"  - Provider.GEMINI: {Provider.GEMINI}")
-    print(f"  - Provider.LITELLM: {Provider.LITELLM}")
-    return True
+    assert DeepResearchAgent is not None
+    assert DeepResearchResponse is not None
+    assert Citation is not None
+    assert ReasoningStep is not None
+    assert WebSearchCall is not None
+    assert CodeExecutionStep is not None
+    assert MCPCall is not None
+    assert FileSearchCall is not None
+    assert Provider.OPENAI is not None
+    assert Provider.GEMINI is not None
+    assert Provider.LITELLM is not None
 
 
 def test_agent_initialization():
     """Test DeepResearchAgent initialization."""
-    # Check if API key is available
-    if not os.environ.get("OPENAI_API_KEY"):
-        print("⚠ Skipping initialization test - OPENAI_API_KEY not set")
-        return True
-    
     agent = DeepResearchAgent(
         name="Test Researcher",
         instructions="You are a professional researcher.",
         model="o3-deep-research",
+        api_key=os.environ.get("OPENAI_API_KEY") or "sk-test",
         verbose=True
     )
-    
-    print(f"✓ Agent initialized: {agent}")
-    print(f"  - Name: {agent.name}")
-    print(f"  - Model: {agent.model}")
-    print(f"  - Web search enabled: {agent.enable_web_search}")
-    print(f"  - Code interpreter enabled: {agent.enable_code_interpreter}")
-    return True
+
+    assert agent.name == "Test Researcher"
+    assert agent.model == DeepResearchAgent.DEFAULT_OPENAI_MODEL
+    assert agent.enable_web_search is True
+    assert agent.enable_code_interpreter is False
 
 
 def test_data_classes():
     """Test data class creation and methods."""
-    # Test Citation
     citation = Citation(
         title="Test Source",
         url="https://example.com",
         start_index=0,
         end_index=100
     )
-    print(f"✓ Citation created: {citation}")
-    
-    # Test ReasoningStep
     reasoning = ReasoningStep(text="Analyzing the query...")
-    print(f"✓ ReasoningStep created: {reasoning}")
-    
-    # Test WebSearchCall
     search = WebSearchCall(query="test query", status="completed")
-    print(f"✓ WebSearchCall created: {search}")
-    
-    # Test CodeExecutionStep
     code = CodeExecutionStep(input_code="print('hello')", output="hello")
-    print(f"✓ CodeExecutionStep created: {code}")
-    
-    # Test MCPCall
     mcp = MCPCall(name="fetch", server_label="internal", arguments={"file_id": "123"})
-    print(f"✓ MCPCall created: {mcp}")
-    
-    # Test DeepResearchResponse
+
     response = DeepResearchResponse(
         report="This is a test report about AI.",
         citations=[citation],
@@ -103,19 +81,20 @@ def test_data_classes():
         code_executions=[code],
         mcp_calls=[mcp]
     )
-    print(f"✓ DeepResearchResponse created")
-    print(f"  - Report length: {len(response.report)} chars")
-    print(f"  - Citations: {len(response.citations)}")
-    print(f"  - Sources: {response.get_all_sources()}")
-    
-    return True
+    assert response.report == "This is a test report about AI."
+    assert len(response.citations) == 1
+    assert len(response.reasoning_steps) == 1
+    assert len(response.web_searches) == 1
+    assert len(response.code_executions) == 1
+    assert len(response.mcp_calls) == 1
+    assert response.get_all_sources()
 
 
+@pytest.mark.live
 def test_research_query():
     """Test actual research query (requires API key)."""
     if not os.environ.get("OPENAI_API_KEY"):
-        print("⚠ Skipping research test - OPENAI_API_KEY not set")
-        return True
+        pytest.skip("OPENAI_API_KEY not set")
     
     agent = DeepResearchAgent(
         name="Healthcare Researcher",
@@ -129,87 +108,38 @@ def test_research_query():
         enable_code_interpreter=False
     )
     
-    print("\n🔍 Starting deep research query...")
-    print("   (This may take several minutes)")
-    
-    try:
-        result = agent.research(
-            "What are the key trends in AI adoption in healthcare in 2024?",
-            summary_mode="concise"
-        )
-        
-        print(f"\n✓ Research completed!")
-        print(f"  - Report length: {len(result.report)} characters")
-        print(f"  - Citations found: {len(result.citations)}")
-        print(f"  - Reasoning steps: {len(result.reasoning_steps)}")
-        print(f"  - Web searches: {len(result.web_searches)}")
-        print(f"  - Code executions: {len(result.code_executions)}")
-        
-        # Print first 500 chars of report
-        print(f"\n📄 Report excerpt:")
-        print(f"   {result.report[:500]}...")
-        
-        # Print some citations
-        if result.citations:
-            print(f"\n📚 Sample citations:")
-            for i, c in enumerate(result.citations[:3]):
-                print(f"   {i+1}. {c.title}: {c.url}")
-        
-        # Print web searches
-        if result.web_searches:
-            print(f"\n🔎 Web searches performed:")
-            for s in result.web_searches[:5]:
-                print(f"   - {s.query} ({s.status})")
-        
-        return True
-        
-    except Exception as e:
-        print(f"✗ Research failed: {e}")
-        return False
+    result = agent.research(
+        "What are the key trends in AI adoption in healthcare in 2024?",
+        summary_mode="concise"
+    )
+    assert result is not None
+    assert result.report
 
 
+@pytest.mark.live
 def test_clarify_and_rewrite():
     """Test clarifying questions and query rewriting."""
     if not os.environ.get("OPENAI_API_KEY"):
-        print("⚠ Skipping clarify/rewrite test - OPENAI_API_KEY not set")
-        return True
+        pytest.skip("OPENAI_API_KEY not set")
     
     agent = DeepResearchAgent(
         name="Research Assistant",
         verbose=True
     )
     
-    print("\n🤔 Testing clarifying questions...")
-    try:
-        questions = agent.clarify("Help me research AI trends")
-        print(f"✓ Clarifying questions generated:")
-        print(f"   {questions[:300]}...")
-    except Exception as e:
-        print(f"✗ Clarify failed: {e}")
-        return False
-    
-    print("\n✍️ Testing query rewriting...")
-    try:
-        rewritten = agent.rewrite_query("Research AI in healthcare")
-        print(f"✓ Query rewritten:")
-        print(f"   {rewritten[:300]}...")
-    except Exception as e:
-        print(f"✗ Rewrite failed: {e}")
-        return False
-    
-    return True
+    questions = agent.clarify("Help me research AI trends")
+    assert questions
+
+    rewritten = agent.rewrite_query("Research AI in healthcare")
+    assert rewritten
 
 
 def test_mcp_configuration():
     """Test MCP server configuration."""
-    if not os.environ.get("OPENAI_API_KEY"):
-        print("⚠ Skipping MCP test - OPENAI_API_KEY not set")
-        return True
-    
-    # Test agent with MCP configuration
     agent = DeepResearchAgent(
         name="MCP Researcher",
         instructions="You are a researcher with access to internal documents.",
+        api_key=os.environ.get("OPENAI_API_KEY") or "sk-test",
         mcp_servers=[
             {
                 "label": "internal_docs",
@@ -220,21 +150,14 @@ def test_mcp_configuration():
         verbose=True
     )
     
-    print(f"✓ Agent with MCP configured: {agent}")
-    print(f"  - MCP servers: {len(agent.mcp_servers)}")
-    
-    # Test tool building
-    tools = agent._build_tools(
+    assert len(agent.mcp_servers) == 1
+    tools = agent._build_openai_tools(
         web_search=True,
         code_interpreter=True,
         mcp_servers=agent.mcp_servers
     )
-    
-    print(f"✓ Tools built: {len(tools)} tools")
-    for t in tools:
-        print(f"  - {t.get('type', 'unknown')}")
-    
-    return True
+    tool_types = {t.get("type") for t in tools}
+    assert tool_types == {"web_search_preview", "code_interpreter", "mcp"}
 
 
 def run_all_tests():
@@ -258,8 +181,11 @@ def run_all_tests():
         print(f"Running: {name}")
         print(f"{'─' * 40}")
         try:
-            success = test_fn()
-            results.append((name, success))
+            test_fn()
+            results.append((name, True))
+        except pytest.skip.Exception as e:
+            print(f"⚠ Skipped: {e}")
+            results.append((name, True))
         except Exception as e:
             print(f"✗ Test failed with exception: {e}")
             results.append((name, False))

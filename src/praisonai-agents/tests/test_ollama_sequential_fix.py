@@ -92,7 +92,6 @@ def test_ollama_argument_validation():
     print("✅ Empty tools test passed")
     
     print("\n🎉 All Ollama argument validation tests passed!")
-    return True
 
 def test_provider_detection():
     """
@@ -111,7 +110,6 @@ def test_provider_detection():
     print("✅ Non-Ollama provider detection works")
     
     print("✅ Provider detection tests passed!")
-    return True
 
 if __name__ == "__main__":
     print("Running Ollama sequential tool calling fix tests...")

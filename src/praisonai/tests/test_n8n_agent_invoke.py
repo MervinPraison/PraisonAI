@@ -2,6 +2,7 @@
 
 import pytest
 import json
+from types import SimpleNamespace
 from unittest.mock import Mock, patch, AsyncMock
 
 
@@ -179,7 +180,7 @@ class TestAgentInvokeFastAPI:
     """Test the FastAPI agent invoke endpoints."""
     
     @pytest.fixture
-    def client(self):
+    def client(self, monkeypatch):
         """Create a test client for the agent invoke API."""
         try:
             from fastapi.testclient import TestClient
@@ -188,7 +189,9 @@ class TestAgentInvokeFastAPI:
             
             app = FastAPI()
             app.include_router(router)
-            return TestClient(app)
+            monkeypatch.delenv("PRAISONAI_CALL_AUTH", raising=False)
+            monkeypatch.setenv("CALL_SERVER_TOKEN", "test-call-token")
+            return TestClient(app, headers={"Authorization": "Bearer test-call-token"})
         except (ImportError, RuntimeError):
             pytest.skip("FastAPI test dependencies not available")
     
@@ -217,11 +220,11 @@ class TestAgentInvokeFastAPI:
         """Test the get agent info endpoint."""
         from praisonai.api.agent_invoke import register_agent, unregister_agent
         
-        # Create mock agent with attributes
-        mock_agent = Mock()
-        mock_agent.name = "Test Agent"
-        mock_agent.instructions = "You are a test agent for unit testing."
-        mock_agent.tools = [Mock(), Mock()]  # Two mock tools
+        mock_agent = SimpleNamespace(
+            name="Test Agent",
+            instructions="You are a test agent for unit testing.",
+            tools=[SimpleNamespace(name="search"), SimpleNamespace(name="calculate")],
+        )
         
         register_agent("info-agent", mock_agent)
         
@@ -235,7 +238,7 @@ class TestAgentInvokeFastAPI:
             assert data["name"] == "Test Agent"
             assert data["status"] == "registered"
             assert "instructions" in data
-            assert "tools" in data
+            assert data["tools"] == ["search", "calculate"]
             
         finally:
             unregister_agent("info-agent")

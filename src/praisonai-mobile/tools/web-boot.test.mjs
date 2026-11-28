@@ -24,7 +24,7 @@
  * suite rather than skipping it: a boot proof that skips is a page nobody has
  * seen boot.
  */
-import test from "node:test";
+import test, { before } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
@@ -104,10 +104,12 @@ async function launch() {
   }
 }
 
-test("the built web app boots, installs, and survives going offline", async (t) => {
+before(() => {
   const built = spawnSync(process.execPath, [join(pkg, "tools/build-webview.mjs")], { encoding: "utf8" });
   assert.equal(built.status, 0, `the build must succeed before it can be booted:\n${built.stdout}${built.stderr}`);
+});
 
+test("the built web app boots, installs, and survives going offline", async (t) => {
   const server = await serveDist();
   const origin = `http://127.0.0.1:${server.address().port}`;
   const site = origin + BASE;
@@ -238,9 +240,6 @@ test("a redeployed site replaces the cached one instead of being pinned behind i
   // one build, one cache, so "exactly one cache" was true whether or not
   // anything was ever deleted. This one deploys a SECOND version under a
   // browser that already holds the first.
-  const built = spawnSync(process.execPath, [join(pkg, "tools/build-webview.mjs")], { encoding: "utf8" });
-  assert.equal(built.status, 0, `${built.stdout}${built.stderr}`);
-
   const v1Html = await readFile(join(dist, "index.html"), "utf8");
   const v1Sw = await readFile(join(dist, "sw.js"), "utf8");
   const v1Cache = /const CACHE = "(praisonai-mobile-[0-9a-f]{16})";/.exec(v1Sw)?.[1];
@@ -362,9 +361,6 @@ test("the boot screen paints before the app, goes when the app arrives, and repo
   //      one failure app/src/crash.ts cannot cover, because the crash handler
   //      is installed by `mount()` inside the module that just failed -- and a
   //      static "Starting…" left alone in that state is a page that lies.
-  const built = spawnSync(process.execPath, [join(pkg, "tools/build-webview.mjs")], { encoding: "utf8" });
-  assert.equal(built.status, 0, `the build must succeed before it can be booted:\n${built.stdout}${built.stderr}`);
-
   const overrides = new Map();
   const server = await serveDist(overrides);
   const site = `http://127.0.0.1:${server.address().port}` + BASE;

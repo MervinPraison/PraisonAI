@@ -246,8 +246,8 @@ class TestToolOutputLimits:
 class TestMessageDeduplication:
     """Tests for message deduplication in ContextManager."""
     
-    def test_deduplicate_messages_removes_duplicates(self):
-        """Should remove duplicate content from messages."""
+    def test_deduplicate_messages_preserves_tool_results(self):
+        """Identical tool results still belong to separate calls."""
         from praisonaiagents.context import ContextManager
         
         manager = ContextManager(model="gpt-4o-mini")
@@ -263,8 +263,7 @@ class TestMessageDeduplication:
         
         deduped = manager._deduplicate_messages(messages)
         
-        # Should have removed one duplicate
-        assert len(deduped) == 4
+        assert deduped == messages
     
     def test_deduplicate_preserves_system_messages(self):
         """Should always keep system messages."""

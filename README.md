@@ -165,6 +165,9 @@ vLLM and LM Studio work the same way: use `hosted_vllm/` (vLLM) or `lm_studio/` 
 </tr>
 </table>
 
+> **Open Products** — Built directly on PraisonAI with zero duplicated code:
+> **[OpenShip](products/openship/)** — open-source PR shipping, self-review, PR Steward, and declarative `.praisonai/approvals.yml` on any LLM or local Ollama (draft PRs only; never merges). Browse all [`products/`](products/).
+
 ## The Five-Layer Agent Stack
 
 Most frameworks hand you one or two layers and leave the rest as homework. PraisonAI covers **all five** — plus the outer layer that decides *where* your agent actually runs.

@@ -43,7 +43,7 @@ def _swap_in_model_facing(result, holder):
             override = {"value": override, "_additional_context": annotation}
     return override
 
-from typing import List, Optional, Any, Dict, Union, Generator, TYPE_CHECKING
+from typing import List, Optional, Any, Dict, Union, Generator, Literal, Type, TypeVar, overload, TYPE_CHECKING
 
 
 class _TimeoutCancelToken:
@@ -99,6 +99,8 @@ def cleanup_launch_registration(agent_id: str) -> None:
 
 if TYPE_CHECKING:
     from pydantic import BaseModel  # return annotations only
+
+_OutputT = TypeVar("_OutputT", bound="BaseModel")
 
 
 class ExecutionMixin:
@@ -834,6 +836,15 @@ Write the complete compiled report:"""
             except ImportError:
                 # If LLM class not available, just update the model string
                 pass
+
+    @overload
+    def start(self, prompt: Optional[str] = None, *, stream: Literal[True], **kwargs: Any) -> Generator[str, None, None]: ...
+    @overload
+    def start(self, prompt: Optional[str] = None, *, output_pydantic: Type[_OutputT], stream: Literal[False] = ..., **kwargs: Any) -> Optional[_OutputT]: ...
+    @overload
+    def start(self, prompt: Optional[str] = None, *, output_pydantic: None = None, stream: Literal[False], **kwargs: Any) -> Optional[str]: ...
+    @overload
+    def start(self, prompt: Optional[str] = None, **kwargs: Any) -> Union[str, "BaseModel", Generator[str, None, None], None]: ...
 
     def start(self, prompt: Optional[str] = None, **kwargs: Any) -> Union[str, "BaseModel", Generator[str, None, None], None]:
         """Start the agent interactively with verbose output.
@@ -2086,32 +2097,38 @@ Write the complete compiled report:"""
                     from ..tools.injected import inject_into_plain_callable
                     call_arguments = inject_into_plain_callable(call_target, call_arguments, _inject_state)
 
+                from ..approval import get_approval_registry
+                _approval_scope = getattr(self, "_approval_scope_id", None) or getattr(self, "name", None)
+
                 async def _invoke():
-                    # Set the tool-progress channel BEFORE dispatch so the sink
-                    # propagates into the executor thread via contextvars, mirroring
-                    # the sync execute_tool path.
+                    # Set the tool-progress channel and active approval scope BEFORE
+                    # dispatch so both propagate into the executor thread via contextvars,
+                    # mirroring the sync execute_tool path.
+                    _scope_cm = get_approval_registry().active_scope(_approval_scope)
                     if inspect.iscoroutinefunction(call_target):
                         logger.debug(f"Executing async function: {function_name}")
                         if _inject_state is not None:
-                            with with_injection_context(_inject_state), tool_progress_channel(_progress_sink):
+                            with _scope_cm, with_injection_context(_inject_state), tool_progress_channel(_progress_sink):
                                 return await call_target(**call_arguments)
-                        with tool_progress_channel(_progress_sink):
+                        with _scope_cm, tool_progress_channel(_progress_sink):
                             return await call_target(**call_arguments)
                     logger.debug(f"Executing sync function in executor: {function_name}")
                     from ..trace.context_events import copy_context_to_callable
 
                     async def _invoke_sync():
-                        result = await _run_sync(copy_context_to_callable(lambda: call_target(**call_arguments)))
-                        # Sync wrappers (including FunctionTool.run) can return a coroutine.
+                        result = await _run_sync(
+                            copy_context_to_callable(lambda: call_target(**call_arguments))
+                        )
+                        # Sync wrappers such as FunctionTool.run can return an awaitable.
                         return await result if inspect.isawaitable(result) else result
 
                     # copy_context_to_callable snapshots the CURRENT context (incl.
                     # the injection contextvar) into the executor thread, so setting
                     # it here propagates cancel_event to the sync tool body too.
                     if _inject_state is not None:
-                        with with_injection_context(_inject_state), tool_progress_channel(_progress_sink):
+                        with _scope_cm, with_injection_context(_inject_state), tool_progress_channel(_progress_sink):
                             return await _invoke_sync()
-                    with tool_progress_channel(_progress_sink):
+                    with _scope_cm, tool_progress_channel(_progress_sink):
                         return await _invoke_sync()
 
                 async def _run_sync(fn):

@@ -20,13 +20,17 @@ on:
     paths:
       - 'src/praisonai-ts/src/**'
       - 'src/praisonai-ts/package.json'
-      - 'src/praisonai-ts/scripts/webview-gate.mjs'
+      - 'src/praisonai-ts/package-lock.json'
+      - 'src/praisonai-ts/scripts/**'
+      - 'src/praisonai-ts/tsconfig*.json'
       - '.github/workflows/praisonai-ts-webview.yml'
   pull_request:
     paths:
       - 'src/praisonai-ts/src/**'
       - 'src/praisonai-ts/package.json'
-      - 'src/praisonai-ts/scripts/webview-gate.mjs'
+      - 'src/praisonai-ts/package-lock.json'
+      - 'src/praisonai-ts/scripts/**'
+      - 'src/praisonai-ts/tsconfig*.json'
       - '.github/workflows/praisonai-ts-webview.yml'
 
 concurrency:
@@ -45,18 +49,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.18'
-      # `npm install`, not `npm ci`: praisonai-ts gitignores its lockfile
-      # (src/praisonai-ts/.gitignore), so `npm ci` has nothing to install from.
-      # `--legacy-peer-deps` because the dependency tree does not otherwise
-      # resolve -- bedrock-agentcore wants a peer of @strands-agents/sdk that
-      # is not installed. That is pre-existing and out of scope here; without
-      # the flag this job fails on something unrelated to what it checks.
+          cache: npm
+          cache-dependency-path: src/praisonai-ts/package-lock.json
+      # The prepare build includes the ESM shim used in the published output.
       - name: Install
-        run: npm install --no-audit --no-fund --legacy-peer-deps
-      # Build first: the gate must see what actually SHIPS. The esm-shim adds
-      # a CJS banner that does not exist in the TypeScript sources, and that
-      # banner is what broke the published entry while the sources passed.
-      - name: Build
-        run: npm run build
+        run: npm ci --no-audit --no-fund --legacy-peer-deps
       - name: Check
         run: npm run check:webview

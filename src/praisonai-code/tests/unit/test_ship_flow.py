@@ -5,17 +5,46 @@ import subprocess
 
 import pytest
 
+from praisonai_code.ship import pr_text
 from praisonai_code.ship.flow import ShipRefused, ship_to_draft_pr
+
+_REAL_WRITE_PR_TEXT = pr_text.write_pr_text
+
+
+@pytest.fixture(autouse=True)
+def _stub_pr_text(monkeypatch):
+    """Avoid network/LLM calls in flow unit tests unless a test exercises write_pr_text directly."""
+    monkeypatch.setattr(
+        pr_text,
+        "write_pr_text",
+        lambda commits, diff: pr_text.PRText(
+            title=commits[0], body="\n".join(f"- {c}" for c in commits)
+        ),
+    )
 
 
 class FakeRunner:
     """Answers git/gh calls from a table and records every call."""
 
-    def __init__(self, *, branch="feat/x", default="main", fork=False, status="", pr=None, gh_ok=True):
+    def __init__(
+        self,
+        *,
+        branch="feat/x",
+        default="main",
+        fork=False,
+        status="",
+        pr=None,
+        gh_ok=True,
+        commits=("feat: x",),
+        origin_base=True,
+    ):
         self.calls = []
+        log_out = "\n".join(commits) + ("\n" if commits else "")
         self.answers = {
             ("git", "rev-parse"): branch,
             ("git", "status"): status,
+            ("git", "log", "--reverse", "--format=%s", f"origin/{default}..HEAD"): log_out if origin_base else None,
+            ("git", "log"): log_out,
             ("git", "diff"): "diff --git a/a.py b/a.py\n+x = 1\n",
             ("gh", "repo"): json.dumps({"defaultBranchRef": {"name": default}, "isFork": fork}) if gh_ok else None,
             ("gh", "pr", "view"): json.dumps({"url": pr, "state": "OPEN"}) if pr else None,
@@ -125,3 +154,81 @@ def test_ship_is_a_registered_command():
     from praisonai_code.cli import app as cli_app
 
     assert cli_app._LAZY_COMMANDS["ship"][0] == ".commands.ship"
+
+
+def test_draft_pr_uses_write_pr_text_title_and_body_not_fill(monkeypatch):
+    seen = {}
+
+    def fake_write(commits, diff):
+        seen["commits"] = commits
+        seen["diff"] = diff
+        return pr_text.PRText(title="Add feature X", body="What changed and why.")
+
+    monkeypatch.setattr(pr_text, "write_pr_text", fake_write)
+    run = FakeRunner(commits=("feat: first", "test: second"))
+    url = ship_to_draft_pr(run=run)
+    assert url == "https://github.com/o/r/pull/9"
+    assert seen["commits"] == ["feat: first", "test: second"]
+    assert "+x = 1" in seen["diff"]
+    assert run.ran("git", "log", "--reverse", "--format=%s", "origin/main..HEAD")
+    assert run.ran("git", "diff", "origin/main...HEAD")
+    create = run.ran("gh", "pr", "create")[0]
+    assert "--fill" not in create
+    assert "--draft" in create
+    assert create[create.index("--title") + 1] == "Add feature X"
+    assert create[create.index("--body") + 1] == "What changed and why."
+
+
+def test_falls_back_to_local_base_ref_when_origin_base_is_missing():
+    run = FakeRunner(origin_base=False, commits=("fix: local ref",))
+    assert ship_to_draft_pr(run=run) == "https://github.com/o/r/pull/9"
+    assert run.ran("git", "log", "--reverse", "--format=%s", "main..HEAD")
+    assert run.ran("git", "diff", "main...HEAD")
+    create = run.ran("gh", "pr", "create")[0]
+    assert "--fill" not in create
+    assert create[create.index("--title") + 1] == "fix: local ref"
+
+
+def test_refuses_when_no_commits_ahead_of_base(monkeypatch):
+    called = []
+    monkeypatch.setattr(pr_text, "write_pr_text", lambda c, d: called.append((c, d)))
+    run = FakeRunner(commits=())
+    with pytest.raises(ShipRefused, match="no commits"):
+        ship_to_draft_pr(run=run)
+    assert not called
+    assert not run.ran("gh", "pr", "create")
+
+
+def test_dry_run_does_not_call_write_pr_text(monkeypatch):
+    def boom(commits, diff):
+        raise AssertionError("write_pr_text must not run during --dry-run")
+
+    monkeypatch.setattr(pr_text, "write_pr_text", boom)
+    plan = ship_to_draft_pr(dry_run=True, run=FakeRunner(status=" M a.py\0"))
+    assert "feat/x" in plan and "a.py" in plan
+
+
+def test_existing_open_pr_does_not_call_write_pr_text(monkeypatch):
+    def boom(commits, diff):
+        raise AssertionError("write_pr_text must not run when an open PR already exists")
+
+    monkeypatch.setattr(pr_text, "write_pr_text", boom)
+    assert ship_to_draft_pr(run=FakeRunner(pr="https://github.com/o/r/pull/3")) == "https://github.com/o/r/pull/3"
+
+
+def test_model_failure_falls_back_to_commit_list_in_pr_create(monkeypatch):
+    import praisonaiagents
+
+    monkeypatch.setattr(pr_text, "write_pr_text", _REAL_WRITE_PR_TEXT)
+
+    class _DownAgent:
+        def __init__(self, **kwargs):
+            raise RuntimeError("offline")
+
+    monkeypatch.setattr(praisonaiagents, "Agent", _DownAgent)
+    run = FakeRunner(commits=("feat: a", "fix: b"))
+    assert ship_to_draft_pr(run=run) == "https://github.com/o/r/pull/9"
+    create = run.ran("gh", "pr", "create")[0]
+    assert "--fill" not in create
+    assert create[create.index("--title") + 1] == "feat: a"
+    assert create[create.index("--body") + 1] == "- feat: a\n- fix: b"

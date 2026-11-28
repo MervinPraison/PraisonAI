@@ -1,6 +1,6 @@
 # Feature Parity Tracker
 
-> **Version:** 1.7.6 | **Last Updated:** 2026-10-08
+> **Version:** 1.7.6 | **Last Updated:** 2026-11-28
 > **Source of Truth:** Python SDK (praisonaiagents)
 
 > [!IMPORTANT]
@@ -23,7 +23,7 @@
 | Metric | Count |
 |--------|-------|
 | Python Core Features | 433 |
-| Python Wrapper Features | 20 |
+| Python Wrapper Features | 21 |
 | TypeScript Features | 2115 |
 | **Gap Count** | **3** |
 | Stub Exported (parity shim only) | 0 |

@@ -140,7 +140,6 @@ OPERATOR = frozenset({
     "praisonai-code/praisonai_code/cli/features/n8n.py::N8nHandler._activate_workflow::requests.post",
     "praisonai-code/praisonai_code/cli/features/n8n.py::N8nHandler._create_workflow_via_api::requests.post",
     "praisonai-deploy/praisonai_deploy/api.py::check_api_health::urlopen",
-    "praisonai-mcp/praisonai_mcp/cli/commands/mcp.py::mcp_test::httpx.Client",
     # `praisonai connect --url`: the operator probes a server URL they typed.
     "praisonai-mcp/praisonai_mcp/connect/probe.py::_verify_url.post::urlopen",
     "praisonai-mcp/praisonai_mcp/mcp_server/auth/oauth.py::OAuthManager._token_request::httpx.AsyncClient",

@@ -40,7 +40,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Criteria | 1 | 1 | 162 |
 | ✅ Database | 17 | 2 | 483 |
 | ✅ Display | 22 | 1 | 342 |
-| ✅ Embeddings | 13 | 3 | 946 |
+| ✅ Embeddings | 13 | 3 | 947 |
 | ✅ Evaluation | 10 | 4 | 866 |
 | ✅ Events | 4 | 1 | 161 |
 | ✅ Execution | 6 | 1 | 184 |
@@ -67,7 +67,7 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Planning | 11 | 2 | 529 |
 | ✅ Plugins | 9 | 2 | 749 |
 | ✅ Prompts | 4 | 2 | 262 |
-| ✅ Providers | 26 | 116 | 8349 |
+| ✅ Providers | 26 | 116 | 8350 |
 | ✅ PubSub | 1 | 1 | 149 |
 | ✅ Query | 7 | 2 | 246 |
 | ✅ RAG | 16 | 2 | 386 |
@@ -83,10 +83,10 @@ This report compares **TypeScript/JavaScript SDK feature categories** against **
 | ✅ Streaming | 2 | 4 | 1211 |
 | ✅ Tasks | 8 | 1 | 320 |
 | ✅ Teams | 1 | 1 | 200 |
-| ✅ Telemetry | 6 | 2 | 269 |
+| ✅ Telemetry | 6 | 2 | 270 |
 | ✅ Templates | 1 | 2 | 598 |
 | ✅ Token Management | 1 | 1 | 159 |
-| ✅ Tools | 60 | 18 | 3754 |
+| ✅ Tools | 60 | 18 | 3755 |
 | ✅ Tracing | 11 | 3 | 477 |
 | ✅ Vector Store | 9 | 2 | 530 |
 | ✅ Video | 4 | 1 | 150 |

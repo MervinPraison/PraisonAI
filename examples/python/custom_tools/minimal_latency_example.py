@@ -24,7 +24,7 @@ def handle_mcp_request(query: str, request_id: str = "mcp_1"):
         name="Assistant",
         role="MCP Handler",
         goal="Process requests",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     plan = f"I will search for information about {query}"
     time.sleep(0.1)  # Simulate planning time

@@ -105,8 +105,6 @@ def test_conversation_optimizer_real_agentic():
         print(f"Agent response: {response[:100]}...")
         print("✓ Real agentic conversation test passed!")
         
-        return True
-        
     except Exception as e:
         # If LLM call fails (no API key, network issues, etc.), mark as skipped
         print(f"⚠ Real agentic test skipped due to LLM unavailability: {e}")

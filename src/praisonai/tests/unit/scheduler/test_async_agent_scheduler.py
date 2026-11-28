@@ -32,6 +32,19 @@ def _make_scheduler(task="Test task"):
     return AsyncAgentScheduler(mock_agent, task)
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("run_immediately", [True, False])
+async def test_interval_start_runs_once_before_first_wait(run_immediately):
+    scheduler = _make_scheduler()
+    with patch.object(scheduler, "_execute_with_retry", new_callable=AsyncMock) as execute:
+        try:
+            assert await scheduler.start("hourly", run_immediately=run_immediately)
+            await asyncio.sleep(0)
+            execute.assert_awaited_once()
+        finally:
+            await scheduler.stop()
+
+
 # ---------------------------------------------------------------------------
 # Initialization
 # ---------------------------------------------------------------------------

@@ -194,10 +194,9 @@ class TestMCPAuthStorage:
 class TestMCPAuthStorageDefaults:
     """Tests for default file path behavior."""
     
-    def test_default_filepath(self):
-        """Default filepath is in user's praison config directory."""
+    def test_default_filepath(self, tmp_path, monkeypatch):
+        """The default auth file follows the configured PraisonAI home."""
         from praisonaiagents.mcp.mcp_auth_storage import get_default_auth_filepath
         
-        default_path = get_default_auth_filepath()
-        assert "praison" in str(default_path).lower() or ".praison" in str(default_path)
-        assert default_path.endswith("mcp-auth.json")
+        monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+        assert get_default_auth_filepath() == str(tmp_path / "mcp-auth.json")

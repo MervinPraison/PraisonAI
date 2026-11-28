@@ -100,7 +100,7 @@ def main():
         role="Data Processing Specialist",
         goal="Process and analyze data efficiently",
         backstory="You specialize in data processing with focus on accuracy and efficiency.",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     monitor_agent = Agent(
@@ -108,7 +108,7 @@ def main():
         role="System Performance Analyst",
         goal="Monitor and optimize system performance",
         backstory="You analyze system metrics and provide optimization recommendations.",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # Create tasks that generate trackable metrics

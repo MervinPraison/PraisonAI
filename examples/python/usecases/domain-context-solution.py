@@ -162,7 +162,7 @@ manager_agent = Agent(
     Your primary responsibility is to ensure all agents maintain focus on {domain} throughout the workflow.
     """,
     tools=[],
-    llm="gpt-4o-mini",
+    model="gpt-4o-mini",
     output=OutputConfig(markdown=True),
     memory=True,
 )
@@ -185,7 +185,7 @@ tool_agent = Agent(
     Remember: You are a specialist for {domain} only. No generic examples or other domains.
     """,
     tools=domain_tools,  # Use domain-aware tools
-    llm="gpt-4o-mini",
+    model="gpt-4o-mini",
     output=OutputConfig(markdown=True),
     memory=True,
 )
@@ -207,7 +207,7 @@ sr_pentester_agent = Agent(
     Your expertise is domain-specific to {domain}. All analysis must be relevant to this domain only.
     """,
     tools=[],
-    llm="gpt-4o-mini",
+    model="gpt-4o-mini",
     output=OutputConfig(markdown=True),
     memory=True,
 )
@@ -229,7 +229,7 @@ ciso_agent = Agent(
     Your strategic insights must be domain-specific to {domain}. No generic recommendations.
     """,
     tools=[],
-    llm="gpt-4o-mini",
+    model="gpt-4o-mini",
     output=OutputConfig(markdown=True),
     memory=True,
 )
