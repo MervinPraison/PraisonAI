@@ -11,7 +11,7 @@ from unittest.mock import patch, Mock
 from praisonai_browser.cli.commands.browser import app
 
 
-runner = CliRunner()
+runner = CliRunner(env={"NO_COLOR": "1", "FORCE_COLOR": None})
 
 
 class TestCLIHelp:

@@ -3,9 +3,12 @@
 Test script to validate the gateway configuration unification.
 """
 
+import asyncio
 import os
-import yaml
 from pathlib import Path
+
+import pytest
+import yaml
 
 import praisonai
 
@@ -304,7 +307,33 @@ def test_gateway_server_block_accepts_full_valid_config():
     print("✓ Full valid gateway block validates and stays dict-accessible")
 
 
-def test_gateway_block_accepts_and_propagates_undelivered_opt_in():
+@pytest.fixture
+def apply_gateway_config(tmp_path, monkeypatch):
+    """Apply gateway settings without opening sockets or sharing local state."""
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path / ".praisonai"))
+    monkeypatch.delenv("GATEWAY_AUTH_TOKEN", raising=False)
+
+    class StopBeforeServing(Exception):
+        pass
+
+    async def stop_before_serving(*args, **kwargs):
+        raise StopBeforeServing
+
+    def apply(gateway, settings):
+        monkeypatch.setattr(gateway, "load_gateway_config", lambda path: {
+            "channels": {"telegram": {"token": "fake-token"}},
+            "gateway": settings,
+        })
+        monkeypatch.setattr(gateway, "start_channels", stop_before_serving)
+        monkeypatch.setattr(gateway, "start", stop_before_serving)
+        with pytest.raises(StopBeforeServing):
+            asyncio.run(gateway.start_with_config("ignored.yaml"))
+
+    return apply
+
+
+def test_gateway_block_accepts_and_propagates_undelivered_opt_in(apply_gateway_config):
     """``gateway.notify_on_undelivered``/``undelivered_template`` load end-to-end (#3297).
 
     Regression: the schema forbids unknown keys, and the core ``GatewayConfig``
@@ -319,8 +348,6 @@ def test_gateway_block_accepts_and_propagates_undelivered_opt_in():
         import pydantic  # noqa: F401
     except ImportError:
         return
-
-    import pytest
 
     from praisonai_bot.bots._config_schema import GatewayConfigSchema
 
@@ -339,37 +366,20 @@ def test_gateway_block_accepts_and_propagates_undelivered_opt_in():
     # 2. start_with_config propagates the block onto self.config so the router
     #    (which reads them via getattr) actually turns on. Drive only the
     #    config-application prologue by aborting once start_channels is reached.
-    import asyncio
-
     from praisonai_bot.gateway.server import WebSocketGateway
 
-    class _StopEarly(Exception):
-        pass
-
     gw = WebSocketGateway()
-    gw.load_gateway_config = lambda _p: {  # type: ignore[assignment]
-        "channels": {"telegram": {"token": "fake-token"}},
-        "gateway": {
-            "notify_on_undelivered": True,
-            "undelivered_template": "Reply undelivered.",
-        },
-    }
-
-    async def _stop(*_a, **_k):
-        raise _StopEarly
-
-    gw.start_channels = _stop  # type: ignore[assignment]
-    gw.start = _stop  # type: ignore[assignment]
-
-    with pytest.raises(_StopEarly):
-        asyncio.run(gw.start_with_config("ignored.yaml"))
+    apply_gateway_config(gw, {
+        "notify_on_undelivered": True,
+        "undelivered_template": "Reply undelivered.",
+    })
 
     assert getattr(gw.config, "notify_on_undelivered", None) is True
     assert getattr(gw.config, "undelivered_template", None) == "Reply undelivered."
     print("✓ Undelivered opt-in loads via schema and reaches gateway config")
 
 
-def test_start_with_config_applies_session_persist_opt_out():
+def test_start_with_config_applies_session_persist_opt_out(apply_gateway_config):
     """``gateway.session.persist: false`` opt-out reaches the store (#3593).
 
     Regression: the multi-bot CLI builds ``WebSocketGateway(config=...)`` with a
@@ -379,31 +389,12 @@ def test_start_with_config_applies_session_persist_opt_out():
     silently ignored now that persistence is durable-by-default. This guards
     that the block is re-read and the store re-selected (None for opt-out).
     """
-    import asyncio
-
-    import pytest
-
     from praisonai_bot.gateway.server import WebSocketGateway
-
-    class _StopEarly(Exception):
-        pass
 
     gw = WebSocketGateway()
     # Durable-by-default: a store exists before YAML is applied.
     assert gw._session_store is not None
-    gw.load_gateway_config = lambda _p: {  # type: ignore[assignment]
-        "channels": {"telegram": {"token": "fake-token"}},
-        "gateway": {"session": {"persist": False}},
-    }
-
-    async def _stop(*_a, **_k):
-        raise _StopEarly
-
-    gw.start_channels = _stop  # type: ignore[assignment]
-    gw.start = _stop  # type: ignore[assignment]
-
-    with pytest.raises(_StopEarly):
-        asyncio.run(gw.start_with_config("ignored.yaml"))
+    apply_gateway_config(gw, {"session": {"persist": False}})
 
     # The explicit opt-out took effect: no persistent store, in-memory only.
     assert gw._session_store is None
@@ -411,33 +402,14 @@ def test_start_with_config_applies_session_persist_opt_out():
     print("✓ session.persist:false opt-out reaches the store via start_with_config")
 
 
-def test_explicit_session_store_survives_start_with_config():
+def test_explicit_session_store_survives_start_with_config(apply_gateway_config):
     """A constructor-supplied store is explicit and wins over YAML (#3593)."""
-    import asyncio
-
-    import pytest
-
     from praisonai_bot.gateway.server import WebSocketGateway
-
-    class _StopEarly(Exception):
-        pass
 
     sentinel = object()
     gw = WebSocketGateway(session_store=sentinel)  # type: ignore[arg-type]
     assert gw._session_store is sentinel
-    gw.load_gateway_config = lambda _p: {  # type: ignore[assignment]
-        "channels": {"telegram": {"token": "fake-token"}},
-        "gateway": {"session": {"persist": False}},
-    }
-
-    async def _stop(*_a, **_k):
-        raise _StopEarly
-
-    gw.start_channels = _stop  # type: ignore[assignment]
-    gw.start = _stop  # type: ignore[assignment]
-
-    with pytest.raises(_StopEarly):
-        asyncio.run(gw.start_with_config("ignored.yaml"))
+    apply_gateway_config(gw, {"session": {"persist": False}})
 
     # YAML session block must not clobber an explicit store.
     assert gw._session_store is sentinel
