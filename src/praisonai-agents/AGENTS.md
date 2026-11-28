@@ -664,6 +664,8 @@ Connectors in PraisonAI-Tools are used via `Agent(tools=[...])`. Placement/regis
 
 ### 6.2 Hooks & Middleware
 
+Put reusable lifecycle integrations in [PraisonAI-Plugins](https://github.com/MervinPraison/PraisonAI-Plugins). These integrations subscribe to events such as agent startup, before or after a tool call, and session completion. Core owns the shared event contracts, registration, and dispatch. Reuse an existing event before extending the hook API. An integration the agent selects and calls belongs in [PraisonAI-Tools](https://github.com/MervinPraison/PraisonAI-Tools) under §6.1.1.
+
 ```python
 from praisonaiagents.hooks import add_hook, before_tool, after_tool
 

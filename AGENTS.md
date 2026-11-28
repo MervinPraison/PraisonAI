@@ -32,7 +32,7 @@ Read the [Python SDK guide](src/praisonai-agents/AGENTS.md) for Python changes a
 | Desktop app | [src/praisonai-desktop/](src/praisonai-desktop/) | [Desktop CI](.github/workflows/desktop.yml) and [release checks](.github/workflows/desktop-release.yml) |
 | Mobile app | [src/praisonai-mobile/](src/praisonai-mobile/) | [Mobile CI](.github/workflows/mobile.yml), including the TypeScript SDK build used by the app |
 | Agent-callable tools and new vendor `*_tools.py` | [PraisonAI-Tools](https://github.com/MervinPraison/PraisonAI-Tools) | Add new vendor tools in PraisonAI-Tools. Existing core tools are legacy. Run repo tests. |
-| Lifecycle plugins | [PraisonAI-Plugins](https://github.com/MervinPraison/PraisonAI-Plugins) | Repo tests |
+| Lifecycle plugin implementations | [PraisonAI-Plugins](https://github.com/MervinPraison/PraisonAI-Plugins) | Reuse existing hooks for lifecycle behavior. See the Python SDK guide §6.2 and run the plugin repo tests. |
 | Documentation | [PraisonAIDocs](https://github.com/MervinPraison/PraisonAIDocs) | `nav-check` |
 
 For TS/JS issues and PRs, always read the TypeScript SDK guide. Implement fixes in this monorepo. The **Sync to praisonai-js** workflow updates the [npm mirror](https://github.com/MervinPraison/praisonai-js) from here. Include Mobile CI when changing SDK exports consumed by the app.
@@ -42,6 +42,7 @@ For TS/JS issues and PRs, always read the TypeScript SDK guide. Implement fixes 
 - Use the review instructions from `main` and record the PR head SHA you reviewed. Read the full diff and the guides for each package it affects.
 - Trace changes to public APIs, dependencies, entry points or shared protocols into the packages and legacy paths that consume them.
 - Report actionable findings with file and line references. List which tests ran, their results and any unavailable checks. A green shard establishes coverage only for the tests it collects.
+- Grade SDK value as **Strong** for a material, evidenced user or framework benefit in the owning package, **Marginal** for a limited or weakly evidenced benefit, or **Insufficient** for duplicate behavior, unjustified API surface, or work in the wrong package. Report merge readiness separately from SDK value.
 - Keep review-only requests read-only. Apply or push fixes only when asked.
 - The repository owner can dispatch **Claude Assistant** from `main`. `review-pr` posts an advisory comment with an SDK value grade (Strong, Marginal, or Insufficient) for the reviewed commit. `fix-issue` can open a draft PR. Supply a `validation` command to run the affected package tests before publication. When the command is omitted, the draft records that package tests are pending.
 
