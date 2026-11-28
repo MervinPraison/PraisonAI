@@ -32,7 +32,7 @@ Read the [Python SDK guide](src/praisonai-agents/AGENTS.md) for Python changes a
 | Desktop app | [src/praisonai-desktop/](src/praisonai-desktop/) | [Desktop CI](.github/workflows/desktop.yml) and [release checks](.github/workflows/desktop-release.yml) |
 | Mobile app | [src/praisonai-mobile/](src/praisonai-mobile/) | [Mobile CI](.github/workflows/mobile.yml), including the TypeScript SDK build used by the app |
 | Agent-callable tools and new vendor `*_tools.py` | [PraisonAI-Tools](https://github.com/MervinPraison/PraisonAI-Tools) | Add new vendor tools in PraisonAI-Tools. Existing core tools are legacy. Run repo tests. |
-| Lifecycle plugin implementations | [PraisonAI-Plugins](https://github.com/MervinPraison/PraisonAI-Plugins) | Reuse existing hooks for lifecycle behavior. See the Python SDK guide §6.2 and run the plugin repo tests. |
+| Lifecycle plugins and optional sandbox extensions | [PraisonAI-Plugins](https://github.com/MervinPraison/PraisonAI-Plugins) | Use `praisonai.plugins` for lifecycle hooks and `praisonai.sandbox` for optional sandbox backends. See the Python SDK guide §6.2 and run the plugin repo tests. |
 | Documentation | [PraisonAIDocs](https://github.com/MervinPraison/PraisonAIDocs) | `nav-check` |
 
 For TS/JS issues and PRs, always read the TypeScript SDK guide. Implement fixes in this monorepo. The **Sync to praisonai-js** workflow updates the [npm mirror](https://github.com/MervinPraison/praisonai-js) from here. Include Mobile CI when changing SDK exports consumed by the app.
