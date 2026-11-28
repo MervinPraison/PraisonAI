@@ -1,36 +1,36 @@
-# OpenShip — Open-Source Claude Ship, Powered by PraisonAI
+# PraisonAI Ship (OpenShip) — Open-Source PR Review, Steward & Approvals
 
 [![Star PraisonAI](https://img.shields.io/github/stars/MervinPraison/PraisonAI?style=social)](https://github.com/MervinPraison/PraisonAI)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](../../LICENSE)
 [![Python 3.10–3.14](https://img.shields.io/badge/python-3.10--3.14-blue.svg)](https://www.python.org/downloads/)
 
-> **Enjoying OpenShip?** Star **[MervinPraison/PraisonAI](https://github.com/MervinPraison/PraisonAI)** — MIT open source, runs natively inside GitHub Actions or your terminal with any LLM or local Ollama.
+> **Enjoying PraisonAI Ship?** Star **[MervinPraison/PraisonAI](https://github.com/MervinPraison/PraisonAI)** — MIT open source, runs natively inside GitHub Actions or your terminal with any LLM or local Ollama.
 
-**OpenShip turns every GitHub pull request into a self-reviewed, CI-green, policy-checked PR — automatically inside GitHub Actions, on any LLM or local Ollama — while humans always hold the merge button.**
+**PraisonAI Ship** *(shown as OpenShip in the demos)* reviews pull requests, fixes failing CI checks and inline threads with PR Steward, and checks repo-owned approval rules — on any LLM or local Ollama — while leaving every merge decision to the maintainer.
 
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="images/architecture-dark.svg" />
-    <img src="images/architecture-light.svg" alt="OpenShip architecture" width="880" />
+    <img src="images/architecture-light.svg" alt="PraisonAI Ship architecture" width="880" />
   </picture>
 </p>
 
-## Watch OpenShip Live in GitHub
+## Watch PraisonAI Ship Live in GitHub
 
 | 1. Setup & Initialization (`1:56`) | 2. Full Push-to-Merge Walkthrough (`2:39`) |
 |---|---|
-| [![OpenShip GitHub Setup & Initialization](https://mer.vin/wp-content/uploads/openship/openship-github-setup-guide-thumb.jpg)](https://mer.vin/wp-content/uploads/openship/openship-github-setup-guide.mp4) | [![OpenShip Live GitHub Walkthrough: Push to Full Merge](https://mer.vin/wp-content/uploads/openship/openship-github-full-push-to-merge-thumb.jpg)](https://mer.vin/wp-content/uploads/openship/openship-github-full-push-to-merge.mp4) |
-| Run `praisonai-code ship init --github` to scaffold the workflow, policy, review guide, and sync your LLM secret in one command. | Watch a real PR go from `git push` → Red CI → Pillar 1 inline review → Pillar 2 Steward auto-fixes → Pillar 3 approvals table → human merge into `main`. |
+| [![PraisonAI Ship GitHub Setup & Initialization](https://mer.vin/wp-content/uploads/openship/openship-github-setup-guide-thumb.jpg)](https://mer.vin/wp-content/uploads/openship/openship-github-setup-guide.mp4) | [![PraisonAI Ship Live GitHub Walkthrough: Push to Full Merge](https://mer.vin/wp-content/uploads/openship/openship-github-full-push-to-merge-thumb.jpg)](https://mer.vin/wp-content/uploads/openship/openship-github-full-push-to-merge.mp4) |
+| Run `praisonai-code ship init --github` to scaffold the workflow, policy, review guide, and sync your LLM secret. | Watch a real PR go from failing CI → inline finding → PR Steward fix & thread reply → human merge into `main`. |
 
 ---
 
-## Pick Your Surface (60-Second Onboarding)
+## Pick Your Surface
 
-OpenShip ships inside **`praisonai-code`** (Python `3.10–3.14`, also included with `pip install praisonai`). Pick how you want to start:
+PraisonAI Ship ships inside **`praisonai-code`** (Python `3.10–3.14`, also included with `pip install praisonai`). Pick how you want to start:
 
 | Surface | Install | First Command | Jump To |
 |---|---|---|---|
-| **1. GitHub Actions (Automatic, Zero Server)** | `pip install praisonai-code` | `praisonai-code ship init --github` | [GitHub Setup](#1-add-openship-to-any-github-repo-3-commands) |
+| **1. GitHub Actions (Zero Server)** | `pip install praisonai-code` | `praisonai-code ship init --github` | [GitHub Setup](#1-add-praisonai-ship-to-any-github-repo) |
 | **2. Local Terminal & Any CI Runner** | `pip install praisonai-code` | `praisonai-code ship review --dry-run` | [Local & CI](#2-local-terminal--any-ci-runner) |
 | **3. Visual Web UI (PraisonAIUI)** | `pip install "praisonai-code[ui]"` | `praisonai-code ship ui` | [Visual Web UI](#3-visual-web-ui-built-into-praisonai-code) |
 
@@ -51,7 +51,7 @@ python -m pip install praisonai-code
 
 ---
 
-## 1. Add OpenShip to Any GitHub Repo (3 Commands)
+## 1. Add PraisonAI Ship to Any GitHub Repo
 
 **Prerequisites:** GitHub CLI signed in (`gh auth login`) and one LLM API key exported in your shell (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or `OPENROUTER_API_KEY`).
 
@@ -65,9 +65,11 @@ pip install praisonai-code
 praisonai-code ship init --github
 # Custom model/tier: praisonai-code ship init --github --model claude-sonnet-4-6 --effort deep
 
-# 3. Commit and push the generated files to your default branch (main)
-git add .github/workflows/openship.yml .praisonai/approvals.yml && [ ! -f REVIEW.md ] || git add REVIEW.md
-git commit -m "chore: enable OpenShip" && git push
+# 3. Stage the generated files explicitly, inspect the staged diff, then commit and push to main
+git add .github/workflows/openship.yml .praisonai/approvals.yml
+if [ -f REVIEW.md ]; then git add REVIEW.md; fi
+git diff --cached --stat
+git commit -m "chore: enable PraisonAI Ship" && git push
 ```
 
 <p align="center">
@@ -75,9 +77,9 @@ git commit -m "chore: enable OpenShip" && git push
 </p>
 
 > [!TIP]
-> **Is GitHub Actions 100% automatic after these 3 commands?**
-> **Yes — zero GitHub Settings clicks, zero GitHub App install, zero webhooks, zero external servers.**
-> Once `.github/workflows/openship.yml` reaches your default branch (`main`), GitHub automatically enables it in the **Actions** tab and runs all three OpenShip pillars on every pull request using GitHub's built-in `GITHUB_TOKEN` (all required permissions are already declared inside the workflow file).
+> **How GitHub Actions triggers after you push to `main`**
+> Once `.github/workflows/openship.yml` reaches your default branch (`main`), GitHub enables it in the **Actions** tab using its built-in `GITHUB_TOKEN` (required `permissions:` are already declared in the workflow — no GitHub App install or external server needed).
+> Each job runs on **eligible same-repository pull request events**: forks and PRs labeled `openship-stop` are skipped, drafts can be skipped with `OPENSHIP_SKIP_DRAFTS=true`, and PR Steward watches failing runs of the CI workflow names configured in `on.workflow_run.workflows` (`CI`, `Tests`, `Smoke` by default).
 
 <details>
 <summary><strong>Optional GitHub Actions settings</strong></summary>
@@ -90,9 +92,9 @@ git commit -m "chore: enable OpenShip" && git push
 
 ---
 
-## How OpenShip Works in GitHub: Push → Full Merge
+## How PraisonAI Ship Works in GitHub: Push → Full Merge
 
-Everything below happens **automatically** the next time you push a feature branch and open a pull request — no extra commands needed.
+In the recorded demo below, PraisonAI Ship *(shown as OpenShip)* reviewed a failing PR, pushed targeted fixes, and left the merge decision to the maintainer.
 
 ### Step 1 · Push a Feature Branch & GitHub Actions Auto-Triggers
 
@@ -205,9 +207,9 @@ Opens **http://127.0.0.1:8765** with 4 focused pages: **Overview** (PR queue, 4-
 
 ---
 
-## OpenShip vs Claude Ship
+## PraisonAI Ship vs Claude Ship
 
-| Capability | OpenShip (PraisonAI) | Claude Ship |
+| Capability | PraisonAI Ship (`praisonai-code`) | Claude Ship |
 |---|---|---|
 | **Pillar 1 — Self-Review** | **Inline PR diff comments**, repo `REVIEW.md` from base branch, adversarial verification (`deep`/`high`+), typed severities (`important` / `nit` / `pre_existing`), **`quick` / `standard` / `deep` (`low`..`max`) tiers**, `@praisonai review` | Built-in inline review + `REVIEW.md` + Quick/Standard/Deep |
 | **Pillar 2 — PR Steward** | Fixes failing CI (`workflow_run`), merge conflicts (`pull_request_target`), **inline review threads (with direct thread replies)** & `@praisonai` directives; **stateless 3-attempt circuit breaker**; `@praisonai stop` / `resume` / `steward` / `openship-stop`; `git revert <sha>` comment; optional `OPENSHIP_SKIP_DRAFTS=true` | Built-in PR steward |
