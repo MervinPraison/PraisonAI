@@ -8,6 +8,25 @@ from dataclasses import dataclass, field
 from typing import Optional, Any, Dict, List
 
 
+_DEFAULT_MODEL = "claude-sonnet-5-5"
+_ANTHROPIC_MODEL = f"anthropic/{_DEFAULT_MODEL}"
+
+
+def _message_model_options(
+    model: str, temperature: float, kwargs: Dict[str, Any]
+) -> Dict[str, Any]:
+    if model in (_DEFAULT_MODEL, _ANTHROPIC_MODEL) and kwargs.get(
+        "custom_llm_provider"
+    ) in (None, "anthropic"):
+        if temperature not in (None, 1.0) or any(
+            kwargs.get(param) is not None for param in ("top_p", "top_k")
+        ):
+            raise ValueError(f"{_DEFAULT_MODEL} does not support sampling parameters")
+        # Older supported LiteLLM releases need the explicit provider route.
+        return {"model": _ANTHROPIC_MODEL}
+    return {"model": model, "temperature": temperature}
+
+
 @dataclass
 class MessageResult:
     """Result from message operations."""
@@ -30,7 +49,7 @@ class TokenCountResult:
 
 def messages_create(
     messages: List[Dict[str, Any]],
-    model: str = "claude-sonnet-5-5",
+    model: str = _DEFAULT_MODEL,
     max_tokens: int = 1024,
     system: Optional[str] = None,
     temperature: float = 1.0,
@@ -49,7 +68,8 @@ def messages_create(
         model: Model to use (e.g., "claude-sonnet-5-5")
         max_tokens: Maximum tokens to generate
         system: System prompt
-        temperature: Sampling temperature
+        temperature: Sampling temperature for models that support it. The
+            default Sonnet 5.5 request omits sampling parameters.
         tools: List of tools
         timeout: Request timeout in seconds
         api_key: Optional API key override
@@ -72,10 +92,9 @@ def messages_create(
     litellm_messages.extend(messages)
     
     call_kwargs = {
-        'model': model,
+        **_message_model_options(model, temperature, kwargs),
         'messages': litellm_messages,
         'max_tokens': max_tokens,
-        'temperature': temperature,
         'timeout': timeout,
     }
     
@@ -121,7 +140,7 @@ def messages_create(
 
 async def amessages_create(
     messages: List[Dict[str, Any]],
-    model: str = "claude-sonnet-5-5",
+    model: str = _DEFAULT_MODEL,
     max_tokens: int = 1024,
     system: Optional[str] = None,
     temperature: float = 1.0,
@@ -145,10 +164,9 @@ async def amessages_create(
     litellm_messages.extend(messages)
     
     call_kwargs = {
-        'model': model,
+        **_message_model_options(model, temperature, kwargs),
         'messages': litellm_messages,
         'max_tokens': max_tokens,
-        'temperature': temperature,
         'timeout': timeout,
     }
     

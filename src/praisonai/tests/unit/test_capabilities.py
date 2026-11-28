@@ -714,22 +714,54 @@ class TestNewCapabilities:
         assert result.id == "msg-abc123"
         assert len(result.content) == 1
     
-    def test_messages_create_default_model(self):
-        """messages_create and amessages_create default to a served model."""
+    @pytest.mark.parametrize("model_kwargs", [{}, {"model": "anthropic/claude-sonnet-5-5"}])
+    def test_messages_create_routes_sonnet_55(self, model_kwargs):
         import asyncio
         from unittest.mock import AsyncMock, MagicMock, patch
         from praisonai.capabilities.messages import amessages_create, messages_create
-        
+
         litellm = MagicMock()
         litellm.acompletion = AsyncMock()
         messages = [{"role": "user", "content": "Hello"}]
         with patch.dict("sys.modules", {"litellm": litellm}):
-            messages_create(messages)
-            asyncio.run(amessages_create(messages))
-        
-        assert litellm.completion.call_args.kwargs["model"] == "claude-sonnet-5-5"
-        assert litellm.acompletion.call_args.kwargs["model"] == "claude-sonnet-5-5"
-    
+            messages_create(messages, **model_kwargs)
+            asyncio.run(amessages_create(messages, **model_kwargs))
+
+        for complete in (litellm.completion, litellm.acompletion):
+            request = complete.call_args.kwargs
+            assert request["model"] == "anthropic/claude-sonnet-5-5"
+            assert "temperature" not in request
+
+    def test_messages_create_preserves_sampling_for_another_model(self):
+        from unittest.mock import MagicMock, patch
+        from praisonai.capabilities.messages import messages_create
+
+        litellm = MagicMock()
+        with patch.dict("sys.modules", {"litellm": litellm}):
+            messages_create(
+                [{"role": "user", "content": "Hello"}],
+                model="claude-sonnet-4-6",
+                temperature=0.3,
+                top_p=0.8,
+            )
+
+        request = litellm.completion.call_args.kwargs
+        assert request["model"] == "claude-sonnet-4-6"
+        assert request["temperature"] == 0.3
+        assert request["top_p"] == 0.8
+
+    @pytest.mark.parametrize("sampling", [{"temperature": 0.5}, {"top_p": 0.8}, {"top_k": 5}])
+    def test_messages_create_rejects_unsupported_sonnet_55_sampling(self, sampling):
+        from unittest.mock import MagicMock, patch
+        from praisonai.capabilities.messages import messages_create
+
+        litellm = MagicMock()
+        with patch.dict("sys.modules", {"litellm": litellm}):
+            with pytest.raises(ValueError, match="does not support sampling"):
+                messages_create([{"role": "user", "content": "Hello"}], **sampling)
+
+        litellm.completion.assert_not_called()
+
     def test_guardrail_result_dataclass(self):
         """Test GuardrailResult dataclass."""
         from praisonai.capabilities.guardrails import GuardrailResult
