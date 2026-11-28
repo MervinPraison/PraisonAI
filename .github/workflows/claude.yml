@@ -15,6 +15,9 @@ on:
       instructions:
         description: Optional instructions for Claude
         type: string
+      validation:
+        description: Optional test command for the issue fix, run without Claude or write credentials
+        type: string
 
 permissions: {}
 
@@ -43,7 +46,7 @@ jobs:
       pull-requests: read
       checks: read
     outputs:
-      publish: ${{ steps.claude.outputs.publish }}
+      publish: ${{ steps.stage.outputs.publish }}
       head_sha: ${{ steps.context.outputs.head_sha }}
       artifact: ${{ steps.context.outputs.artifact }}
     steps:
@@ -74,22 +77,48 @@ jobs:
           active_slot: ${{ vars.CLAUDE_OAUTH_ACTIVE }}
 
       - name: Run Claude
-        id: claude
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ steps.oauth.outputs.token }}
         run: bash .github/scripts/claude-owner.sh run
 
+      - name: Stage review or patch
+        id: stage
+        run: bash .github/scripts/claude-owner.sh stage
+
       - uses: actions/upload-artifact@v4
-        if: steps.claude.outputs.publish == 'true'
+        if: steps.stage.outputs.publish == 'true'
         with:
           name: ${{ steps.context.outputs.artifact }}
           path: ${{ runner.temp }}/claude-handoff/publish/
           if-no-files-found: error
           retention-days: 1
 
-  publish:
+  verify-fix:
     needs: prepare
-    if: needs.prepare.outputs.publish == 'true' && github.triggering_actor == 'MervinPraison'
+    if: inputs.mode == 'fix-issue' && needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.prepare.outputs.artifact }}
+          path: ${{ runner.temp }}/claude-handoff/publish
+
+      - name: Check the patch and run maintainer-provided validation
+        env:
+          VALIDATION_COMMAND: ${{ inputs.validation }}
+        run: bash .github/scripts/claude-owner.sh verify-fix
+
+  publish-review:
+    needs: prepare
+    if: inputs.mode == 'review-pr' && needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -106,24 +135,31 @@ jobs:
           path: ${{ runner.temp }}/claude-handoff/publish
 
       - name: Post advisory review on the reviewed commit
-        if: inputs.mode == 'review-pr'
         env:
           GH_TOKEN: ${{ github.token }}
           REVIEW_HEAD: ${{ needs.prepare.outputs.head_sha }}
         run: bash .github/scripts/claude-owner.sh publish-review
 
-      - name: Mint a repository-scoped token for the fix PR
-        if: inputs.mode == 'fix-issue'
-        uses: actions/create-github-app-token@v2
-        id: app-token
+  publish-fix:
+    needs: [prepare, verify-fix]
+    if: inputs.mode == 'fix-issue' && needs.prepare.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
         with:
-          app-id: ${{ secrets.CLAUDE_APP_ID }}
-          private-key: ${{ secrets.CLAUDE_APP_PRIVATE_KEY }}
-          permission-contents: write
-          permission-pull-requests: write
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.prepare.outputs.artifact }}
+          path: ${{ runner.temp }}/claude-handoff/publish
 
       - name: Open draft fix PR
-        if: inputs.mode == 'fix-issue'
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
+          PACKAGE_VALIDATION_RAN: ${{ inputs.validation != '' }}
         run: bash .github/scripts/claude-owner.sh publish-fix

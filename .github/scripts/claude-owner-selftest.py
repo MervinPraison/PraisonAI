@@ -52,9 +52,14 @@ args = sys.argv[1:]
 data = {"args": args, "cwd": str(Path.cwd()), "prompt": sys.stdin.read()}
 Path(os.environ["CLAUDE_LOG"]).write_text(json.dumps(data))
 assert "GH_TOKEN" not in os.environ
+assert "--restricted" in args and "--strict-mcp-config" in args
 if os.environ["CLAUDE_MODE"] == "fix-issue":
+    assert set(args[args.index("--tools") + 1].split(",")) == {"Read", "Edit", "Write", "Glob", "Grep"}
+    assert not Path(".git").exists()
+    permissions = json.loads(args[args.index("--settings") + 1])["permissions"]
+    assert all(permissions[f"block{operation}OutsideWorkingDirectories"] for operation in ("Reads", "Writes"))
     Path(os.environ.get("FIX_PATH", "app.py")).write_text("fixed\n")
-    print("Status: FIXED\nTested the owning suite.")
+    print("Status: PATCH_READY\nSuggested test: pytest tests/unit.")
 else:
     print(os.environ.get("CLAUDE_RESULT", "SDK value: Strong") + "\nProvides a simpler API.")
 """
@@ -67,6 +72,7 @@ class OwnerClaudeTest(unittest.TestCase):
         self.root = Path(workspace.name).resolve()
         self.origin = self.root / "origin.git"
         self.checkout = self.root / "checkout"
+        self.verifier = self.root / "verifier"
         self.publisher = self.root / "publisher"
         self.handoff = self.root / "handoff"
         self.git("init", "--bare", "--initial-branch=main", str(self.origin), cwd=self.root)
@@ -85,6 +91,7 @@ class OwnerClaudeTest(unittest.TestCase):
         self.pr_head = self.git("rev-parse", "HEAD").strip()
         self.git("push", "origin", "HEAD:refs/pull/17/head")
         self.git("switch", "main")
+        self.git("clone", str(self.origin), str(self.verifier), cwd=self.root)
         self.git("clone", str(self.origin), str(self.publisher), cwd=self.root)
 
         programs = self.root / "bin"
@@ -130,6 +137,7 @@ class OwnerClaudeTest(unittest.TestCase):
         self.assertEqual(self.git("rev-parse", "HEAD").strip(), self.base)
         self.assertIn(f"head_sha={self.pr_head}", (self.root / "output").read_text())
         self.run_handler("review-pr", "run")
+        self.run_handler("review-pr", "stage")
         call = json.loads((self.root / "claude.json").read_text())
         self.assertEqual(call["args"][call["args"].index("--tools") + 1], "")
         self.assertEqual(call["cwd"], str(self.handoff))
@@ -147,25 +155,43 @@ class OwnerClaudeTest(unittest.TestCase):
 
     def test_moved_head_and_missing_grade_are_rejected(self):
         self.run_handler("review-pr", "prepare")
-        self.run_handler("review-pr", "run", expected=1, CLAUDE_RESULT="No grade")
+        self.run_handler("review-pr", "run", CLAUDE_RESULT="No grade")
+        self.run_handler("review-pr", "stage", expected=1)
         self.run_handler("review-pr", "run")
+        self.run_handler("review-pr", "stage")
         self.run_handler("review-pr", "publish-review", cwd=self.publisher, expected=1, PR_HEAD=self.base)
         self.assertFalse(any("POST" in call for call in self.calls()))
 
     def test_issue_patch_publishes_on_new_branch_as_draft(self):
         self.run_handler("fix-issue", "prepare")
         self.run_handler("fix-issue", "run")
-        result = self.run_handler("fix-issue", "publish-fix", cwd=self.publisher)
+        self.run_handler("fix-issue", "stage")
+        self.assertEqual((self.checkout / "app.py").read_text(), "original\n")
+        self.run_handler(
+            "fix-issue", "verify-fix", cwd=self.verifier,
+            VALIDATION_COMMAND='test "$(cat app.py)" = fixed && test -z "${GH_TOKEN:-}${CLAUDE_CODE_OAUTH_TOKEN:-}"',
+        )
+        result = self.run_handler("fix-issue", "publish-fix", cwd=self.publisher, PACKAGE_VALIDATION_RAN="true")
         self.assertIn("https://example.invalid/draft", result.stdout)
         self.assertEqual(self.git("show", "main:app.py", cwd=self.origin), "original\n")
         self.assertEqual(self.git("show", "claude/issue-17-42:app.py", cwd=self.origin), "fixed\n")
         create = next(args for args in self.calls() if args[:2] == ["pr", "create"])
         self.assertIn("--draft", create)
         self.assertEqual(create[create.index("--base") + 1], "main")
+        self.assertIn("maintainer-provided command passed", (self.handoff / "fix-body.md").read_text())
+
+    def test_failed_validation_does_not_publish(self):
+        self.run_handler("fix-issue", "prepare")
+        self.run_handler("fix-issue", "run")
+        self.run_handler("fix-issue", "stage")
+        self.run_handler("fix-issue", "verify-fix", cwd=self.verifier, expected=23, VALIDATION_COMMAND="exit 23")
+        self.assertFalse(any(call[:2] == ["pr", "create"] for call in self.calls()))
 
     def test_issue_cannot_publish_agent_instructions(self):
         self.run_handler("fix-issue", "prepare")
         self.run_handler("fix-issue", "run", FIX_PATH="AGENTS.md")
+        self.run_handler("fix-issue", "stage")
+        self.run_handler("fix-issue", "verify-fix", cwd=self.verifier, expected=1, VALIDATION_COMMAND="exit 23")
         result = self.run_handler("fix-issue", "publish-fix", cwd=self.publisher, expected=1)
         self.assertIn("Maintainer review required", result.stderr)
         self.assertFalse(any(call[:2] == ["pr", "create"] for call in self.calls()))

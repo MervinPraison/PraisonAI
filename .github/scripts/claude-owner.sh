@@ -32,12 +32,12 @@ prepare() {
       cat >> "$handoff/prompt" <<'PROMPT'
 
 Assess SDK value and package ownership. If an in-scope fix is justified, implement
-the smallest fix, run the owning package and compatibility tests, and summarize
-what changed and exact validation. Keep GitHub and agent instructions outside
-the patch. If the issue needs redirection, human intervention, or you cannot
-validate the fix, explain why. Start your final response with exactly one line
-Status: FIXED or Status: NO_CHANGE. A separate job publishes a verified fix as a
-draft PR against main. Leave GitHub operations to that job.
+the smallest fix and include focused regression coverage where appropriate.
+Summarize the change, affected packages and exact recommended test commands.
+Keep GitHub and agent instructions outside the patch. Route security reports
+through SECURITY.md. If the issue needs redirection or human intervention,
+explain why. Start with exactly Status: PATCH_READY or Status: NO_CHANGE.
+Workflow jobs handle test execution and draft PR publication.
 
 --- Issue context ---
 PROMPT
@@ -90,19 +90,25 @@ validate_grade() {
 run_claude() {
   local tools="" workdir="$handoff"
   if [[ "$mode" == fix-issue ]]; then
-    tools="Read,Edit,Write,Glob,Grep,Bash"
-    workdir="$PWD"
+    tools="Read,Edit,Write,Glob,Grep"
+    workdir="$handoff/source"
+    mkdir -p "$workdir"
+    git checkout-index --all --prefix="$workdir/"
   fi
   # A fresh config directory keeps host settings out while preserving OAuth.
   mkdir -p "$handoff/claude-config"
   (
     cd "$workdir"
     export CLAUDE_CONFIG_DIR="$handoff/claude-config"
-    timeout 1600 claude -p --setting-sources user --strict-mcp-config \
+    timeout 1600 claude -p --restricted --strict-mcp-config \
       --no-session-persistence --disable-slash-commands --permission-mode acceptEdits \
+      --settings '{"permissions":{"blockReadsOutsideWorkingDirectories":true,"blockWritesOutsideWorkingDirectories":true}}' \
       --model claude-opus-5-5 --output-format text --tools "$tools" \
-      --allowedTools "$tools" < "$handoff/prompt" > "$handoff/result"
+      < "$handoff/prompt" > "$handoff/result"
   )
+}
+
+stage_result() {
   if [[ "$mode" == review-pr ]]; then
     validate_grade "$handoff/result"
     cp "$handoff/result" "$publish/review.md"
@@ -113,9 +119,9 @@ run_claude() {
       cat "$handoff/result" >> "$GITHUB_STEP_SUMMARY"
       return
     fi
-    [[ "$status" == 'Status: FIXED' ]] ||
-      { echo "Claude did not report a validated fix" >&2; exit 1; }
-    git add -A
+    [[ "$status" == 'Status: PATCH_READY' ]] ||
+      { echo "Claude did not report a proposed patch" >&2; exit 1; }
+    git --work-tree="$handoff/source" add -A
     git diff --cached --binary --no-ext-diff --no-textconv "$base" > "$publish/fix.patch"
     [[ -s "$publish/fix.patch" ]] || { echo "Claude reported a fix but produced no patch" >&2; exit 1; }
     cp "$handoff/result" "$publish/fix.md"
@@ -142,8 +148,29 @@ publish_review() {
     -f event=COMMENT -f "commit_id=$REVIEW_HEAD" -F "body=@$handoff/review-body.md" --jq .html_url
 }
 
+stage_fix_patch() {
+  local path
+  git apply --cached "$publish/fix.patch"
+  git diff --cached --check
+  while IFS= read -r -d '' path; do
+    case "$path" in
+      .github|.github/*|.claude|.claude/*|*/.claude|*/.claude/*|AGENTS.md|*/AGENTS.md|CLAUDE.md|*/CLAUDE.md|CLAUDE.local.md|*/CLAUDE.local.md|.mcp.json|*/.mcp.json)
+        echo "Maintainer review required for a fix touching repository automation or agent instructions." >&2
+        exit 1 ;;
+    esac
+  done < <(git diff --cached --name-only --no-renames -z)
+}
+
+verify_fix() {
+  stage_fix_patch
+  if [[ -n "${VALIDATION_COMMAND:-}" ]]; then
+    git apply "$publish/fix.patch"
+    bash --noprofile --norc -e -o pipefail -c "$VALIDATION_COMMAND"
+  fi
+}
+
 publish_fix() {
-  local branch="claude/issue-$number-$GITHUB_RUN_ID" path existing remote_head
+  local branch="claude/issue-$number-$GITHUB_RUN_ID" existing remote_head
   existing=$(gh pr list --repo "$repo" --head "$branch" --state all --json url --jq '.[0].url // empty')
   if [[ -n "$existing" ]]; then
     printf '%s\n' "$existing"
@@ -151,17 +178,9 @@ publish_fix() {
   fi
   gh api "repos/$repo/issues/$number" --jq .state | grep -x open > /dev/null
   git switch -c "$branch"
-  git apply --cached "$publish/fix.patch"
-  git diff --cached --check
-  while IFS= read -r -d '' path; do
-    case "$path" in
-      .github/*|.claude/*|*/.claude/*|AGENTS.md|*/AGENTS.md|CLAUDE.md|*/CLAUDE.md|CLAUDE.local.md|*/CLAUDE.local.md|.mcp.json|*/.mcp.json)
-        echo "Maintainer review required for a fix touching repository automation or agent instructions." >&2
-        exit 1 ;;
-    esac
-  done < <(git diff --cached --name-only --no-renames -z)
-  git -c core.hooksPath=/dev/null -c user.name='praisonai-triage-agent[bot]' \
-    -c user.email='praisonai-triage-agent[bot]@users.noreply.github.com' \
+  stage_fix_patch
+  git -c core.hooksPath=/dev/null -c user.name='github-actions[bot]' \
+    -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
     commit -m "fix: address issue #$number"
   gh auth setup-git
   remote_head=$(git ls-remote --heads origin "refs/heads/$branch")
@@ -175,6 +194,11 @@ publish_fix() {
   {
     printf 'Fixes #%s\n\n' "$number"
     cat "$publish/fix.md"
+    if [[ "${PACKAGE_VALIDATION_RAN:-false}" == true ]]; then
+      printf '\n\nValidation: patch checks and the maintainer-provided command passed in the Actions run.\n'
+    else
+      printf '\n\nValidation: patch checks passed. Package tests are pending.\n'
+    fi
   } > "$handoff/fix-body.md"
   gh pr create --repo "$repo" --draft --base main --head "$branch" \
     --title "Fix #$number" --body-file "$handoff/fix-body.md"
@@ -183,6 +207,8 @@ publish_fix() {
 case "${1:-}" in
   prepare) prepare ;;
   run) run_claude ;;
+  stage) stage_result ;;
+  verify-fix) verify_fix ;;
   publish-review) publish_review ;;
   publish-fix) publish_fix ;;
   *) exit 2 ;;
