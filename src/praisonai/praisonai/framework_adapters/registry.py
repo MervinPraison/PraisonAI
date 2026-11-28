@@ -36,6 +36,17 @@ _BUILTIN_ADAPTERS = {
     "praisonai": _praisonai_loader,
 }
 
+# Frameworks that were once accepted but whose adapter is an unimplemented
+# stub, so accepting the name only leads users into a dead end. ``ag2`` is
+# removed (see https://github.com/MervinPraison/PraisonAI/issues/6661):
+# AG2Adapter has ``implemented = False`` here and in praisonai-frameworks,
+# and AgentsGenerator._run_ag2 was removed, so no install can make
+# framework='ag2' run. Reject the name with a clear error naming the
+# supported frameworks instead of an install hint.
+REMOVED_FRAMEWORKS: dict[str, str] = {
+    "ag2": "the AG2 adapter is not implemented",
+}
+
 class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
     """
     Registry for framework adapters.
@@ -213,6 +224,9 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
         *owning* registry rather than reaching into the process-default one,
         honouring the ``adapter_registry`` DI seam for multi-tenant/test setups.
         """
+        message = removed_framework_message(name, registry=self)
+        if message is not None:
+            raise ValueError(message)
         adapter = super().create(name, *args, **kwargs)
         try:
             adapter._owning_registry = self
@@ -342,6 +356,53 @@ class FrameworkAdapterRegistry(PluginRegistry[FrameworkAdapter]):
                 self._avail_cache.pop(name.lower(), None)
 
 
+def removed_framework_message(name: str, *, registry: Optional[FrameworkAdapterRegistry] = None) -> Optional[str]:
+    """Clear rejection message for a removed framework name, or ``None``.
+
+    A removed framework (see :data:`REMOVED_FRAMEWORKS`) must fail with an
+    error naming the supported frameworks, never with an install hint:
+    installing the extra cannot make it run. The supported list comes from
+    the given registry when available, falling back to the default priority
+    (so mocked registries in tests still get a usable message).
+    """
+    reason = REMOVED_FRAMEWORKS.get(str(name).strip().lower())
+    if reason is None:
+        return None
+    supported = ""
+    supported_names: list[str] = []
+    if registry is not None:
+        try:
+            names = registry.list_registered()
+        except Exception:  # noqa: BLE001 -- mocked/partial registries
+            names = []
+        if names:
+            try:
+                # Removed frameworks are never valid choices, even when a
+                # third-party entry point still registers one (same filter
+                # list_framework_choices() applies).
+                supported_names = sorted(
+                    n for n in names if str(n).lower() not in REMOVED_FRAMEWORKS
+                )
+                supported = ", ".join(supported_names)
+            except Exception:  # noqa: BLE001 -- non-iterable mock
+                supported = ""
+    if not supported:
+        supported = ", ".join(FrameworkAdapterRegistry.DEFAULT_PRIORITY)
+        supported_names = list(FrameworkAdapterRegistry.DEFAULT_PRIORITY)
+    # Only point at autogen when it is actually among the supported names;
+    # otherwise the message suggests a framework the user may not have.
+    suggestion = (
+        " Use framework='autogen' instead."
+        if "autogen" in supported_names
+        else ""
+    )
+    return (
+        f"Framework '{name}' is not supported: {reason} "
+        f"(see https://github.com/MervinPraison/PraisonAI/issues/6661). "
+        f"Supported frameworks: {supported}.{suggestion}"
+    )
+
+
 # Default registry access - replaced by FrameworkAdapterRegistry.default()
 def get_default_registry() -> FrameworkAdapterRegistry:
     """Return the process-default registry. Prefer DI; use this only at the edge."""
@@ -365,8 +426,12 @@ def list_framework_choices(*, include_unavailable: bool = False) -> list[str]:
     """
     registry = get_default_registry()
     if include_unavailable:
-        return sorted(registry.list_names())
-    return registry.list_available_frameworks()
+        names = registry.list_names()
+    else:
+        names = registry.list_available_frameworks()
+    # Removed frameworks (e.g. 'ag2', #6661) are not accepted values even when
+    # a third-party package still registers an adapter under the name.
+    return sorted(name for name in names if name.lower() not in REMOVED_FRAMEWORKS)
 
 
 def list_available_frameworks() -> list[str]:
