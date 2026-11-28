@@ -28,7 +28,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      PRAISONAI_ALLOW_NETWORK: '0'
+      PRAISONAI_LIVE_TESTS: '0'
+      OPENAI_API_KEY: 'sk-not-a-real-key'
       OPENAI_MODEL_NAME: gpt-4o-mini
     strategy:
       matrix:
@@ -55,19 +57,11 @@ jobs:
       run: |
         uv pip install --system duckduckgo_search
         uv pip install --system pytest pytest-asyncio pytest-cov pytest-benchmark pytest-timeout
-        uv pip install --system "praisonaiagents[knowledge]"
     - uses: ./.github/actions/install-monorepo-packages
       with:
         use-uv: "true"
+        agents-extras: ".[knowledge]"
         wrapper-extras: ".[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
-
-    - name: Verify environment variables
-      run: |
-        if [ -n "$OPENAI_API_KEY" ]; then
-          echo "✅ OPENAI_API_KEY is set (length: ${#OPENAI_API_KEY})"
-        else
-          echo "⚠️ OPENAI_API_KEY is NOT set"
-        fi
 
     - name: Run Comprehensive Test Suite
       id: comprehensive_tests
