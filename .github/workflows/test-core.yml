@@ -117,6 +117,7 @@ jobs:
             workdir: src/praisonai-mcp
             paths: >-
               tests/mcp_server/
+              tests/unit/test_connectors_cli.py
             pythonpath: >-
               ${{ github.workspace }}/src/praisonai-agents
           - shard: sandbox
