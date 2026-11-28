@@ -145,6 +145,7 @@ export class AnthropicProvider extends BaseProvider {
         let buffer = '';
         const toolCalls: ToolCall[] = [];
         let currentToolCall: Partial<ToolCall> | null = null;
+        let promptTokens = 0;
 
         while (true) {
           const { done, value } = await reader.read();
@@ -162,7 +163,9 @@ export class AnthropicProvider extends BaseProvider {
             try {
               const event = JSON.parse(data);
               
-              if (event.type === 'content_block_delta') {
+              if (event.type === 'message_start') {
+                promptTokens = event.message.usage.input_tokens;
+              } else if (event.type === 'content_block_delta') {
                 if (event.delta?.type === 'text_delta') {
                   const text = event.delta.text;
                   if (options.onToken) options.onToken(text);
@@ -193,9 +196,9 @@ export class AnthropicProvider extends BaseProvider {
                   finishReason: self.mapStopReason(event.delta?.stop_reason),
                   toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
                   usage: event.usage ? {
-                    promptTokens: 0,
+                    promptTokens,
                     completionTokens: event.usage.output_tokens,
-                    totalTokens: event.usage.output_tokens,
+                    totalTokens: promptTokens + event.usage.output_tokens,
                   } : undefined,
                 };
               }
