@@ -14,7 +14,7 @@ You are working on the PraisonAI project.
 
 ## Issue and PR routing
 
-Read the [Python SDK guide](src/praisonai-agents/AGENTS.md) for Python changes and the linked manifest when a package boundary is involved. Run the affected tests from the owning package and the wrapper compatibility tests for any changed legacy entry points. See the Python SDK guide §9 for test isolation and live test requirements.
+Read the [Python SDK guide](src/praisonai-agents/AGENTS.md) for Python changes and the linked manifest when a package boundary is involved. Run the commands below from the listed package directory and run wrapper compatibility tests for any changed legacy entry points. See the Python SDK guide §9 for test isolation and live test requirements.
 
 | Area | Source | Package guidance and validation |
 |------|--------|---------------------------------|
@@ -43,6 +43,7 @@ For TS/JS issues and PRs, always read the TypeScript SDK guide. Implement fixes 
 - Trace changes to public APIs, dependencies, entry points or shared protocols into the packages and legacy paths that consume them.
 - Report actionable findings with file and line references. List which tests ran, their results and any unavailable checks. A green shard establishes coverage only for the tests it collects.
 - Keep review-only requests read-only. Apply or push fixes only when asked.
+- The repository owner can dispatch **Claude Assistant** from `main`. `review-pr` posts an advisory comment with an SDK value grade (Strong, Marginal, or Insufficient) for the reviewed commit. `fix-issue` can open a draft PR. Supply a `validation` command to run the affected package tests before publication. When the command is omitted, the draft records that package tests are pending.
 
 ## Before you build
 
@@ -59,9 +60,9 @@ Check these before writing code. If a check fails, move the code or drop the cha
 ## Pull request rules
 
 - Base every PR on `main`. Never base a PR on another PR's branch: a child merged into a parent branch does not reach `main`.
-- Keep PRs small and independently testable. Auto-merge eligibility requires at most 5 non-test files and fewer than 100 changed non-test lines. Larger PRs require manual review.
+- Keep PRs small and independently testable. Aim for at most 5 non-test files and fewer than 100 non-test lines added or removed in total.
 - PRs that edit the same lines (for example one sorted import) go in one PR or land one at a time.
-- The merge gate can auto-merge eligible non-draft PRs after it verifies checks and the review verdict for the current head SHA. A maintainer merges fork PRs manually. Open as a draft to hold a PR for human review.
+- Maintainers verify checks and reviews for the current head SHA before merging. Open as a draft to hold a PR for human review.
 - Before merging several PRs together, merge them in a scratch worktree and run every touched test file; two green PRs can break `main` together.
 - No feature is removed without a deprecation cycle. Prefer delegate, shim or alias.
 - Guard and ratchet tests (`tests/unit/named_loggers/`, `test_silent_except_ratchet.py`, `tests/unit/contract/`, `tests/unit/security/`, `tools/test_outbound_fetch_guard.py`, `test_tier_dependencies.py`) encode decisions. Fix the code, not the guard.
