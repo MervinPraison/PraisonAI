@@ -48,7 +48,7 @@ jobs:
     - name: Install UV
       run: |
         curl -LsSf https://astral.sh/uv/install.sh | sh
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
 
     - name: Install dependencies
@@ -114,21 +114,23 @@ jobs:
         EVENT_NAME: ${{ github.event_name }}
         TEST_OUTCOME: ${{ steps.comprehensive_tests.outcome }}
       run: |
-        echo "# 📋 Comprehensive Test Report" > comprehensive_report.md
-        echo "" >> comprehensive_report.md
-        echo "**Python Version:** ${{ matrix.python-version }}" >> comprehensive_report.md
-        echo "**Test Type:** $INPUT_TEST_TYPE" >> comprehensive_report.md
-        echo "**Trigger:** $EVENT_NAME" >> comprehensive_report.md
-        echo "**Test step outcome:** ${TEST_OUTCOME:-not run}" >> comprehensive_report.md
-        echo "" >> comprehensive_report.md
-        
-        echo "See the test step log for collected, passed, skipped and failed tests." >> comprehensive_report.md
+        {
+          echo "# Comprehensive Test Report"
+          echo
+          echo "**Python Version:** ${{ matrix.python-version }}"
+          echo "**Test Type:** $INPUT_TEST_TYPE"
+          echo "**Trigger:** $EVENT_NAME"
+          echo "**Test step outcome:** ${TEST_OUTCOME:-not run}"
+          echo
+          echo "See the test step log for collected, passed, skipped and failed tests."
+        } > comprehensive_report.md
 
     - name: Upload coverage reports to Codecov
+      if: hashFiles('src/praisonai/coverage.xml') != ''
       uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
-        file: src/praisonai/coverage.xml
+        files: src/praisonai/coverage.xml
         flags: comprehensive-tests
         name: comprehensive-tests-coverage
         fail_ci_if_error: false
@@ -154,18 +156,12 @@ jobs:
     steps:
     - name: Generate Matrix Summary
       run: |
-        echo "# 🎯 Test Matrix Summary" > matrix_summary.md
-        echo "" >> matrix_summary.md
-        echo "## Python Version Results:" >> matrix_summary.md
-        echo "- Python 3.11: ${{ needs.comprehensive-test.result }}" >> matrix_summary.md
-        echo "" >> matrix_summary.md
-        echo "## Overall Status:" >> matrix_summary.md
-        if [ "${{ needs.comprehensive-test.result }}" == "success" ]; then
-          echo "✅ **The comprehensive test job succeeded.**" >> matrix_summary.md
-        else
-          echo "❌ **Some tests failed. Check individual job logs for details.**" >> matrix_summary.md
-        fi
-        
+        {
+          echo "# Test Matrix Summary"
+          echo
+          echo "- Python 3.11: ${{ needs.comprehensive-test.result }}"
+        } > matrix_summary.md
+
     - name: Upload Matrix Summary
       uses: actions/upload-artifact@v4
       with:
