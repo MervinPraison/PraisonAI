@@ -259,7 +259,7 @@ def create_openai_llm_fn(
 
 
 def create_anthropic_llm_fn(
-    model: str = "claude-3-5-sonnet-20241022",
+    model: str = "claude-sonnet-5-5",
     api_key: Optional[str] = None,
     max_tokens: int = 4096,
     **kwargs
@@ -303,7 +303,8 @@ def create_anthropic_llm_fn(
             messages=chat_messages,
             **kwargs
         )
-        return response.content[0].text
+        # Responses can start with a thinking block, which has no text
+        return "".join(b.text for b in response.content if b.type == "text")
     
     return llm_fn
 

@@ -30,7 +30,7 @@ class TokenCountResult:
 
 def messages_create(
     messages: List[Dict[str, Any]],
-    model: str = "claude-3-5-sonnet-20241022",
+    model: str = "claude-sonnet-5-5",
     max_tokens: int = 1024,
     system: Optional[str] = None,
     temperature: float = 1.0,
@@ -46,7 +46,7 @@ def messages_create(
     
     Args:
         messages: List of messages
-        model: Model to use (e.g., "claude-3-5-sonnet-20241022")
+        model: Model to use (e.g., "claude-sonnet-5-5")
         max_tokens: Maximum tokens to generate
         system: System prompt
         temperature: Sampling temperature
@@ -121,7 +121,7 @@ def messages_create(
 
 async def amessages_create(
     messages: List[Dict[str, Any]],
-    model: str = "claude-3-5-sonnet-20241022",
+    model: str = "claude-sonnet-5-5",
     max_tokens: int = 1024,
     system: Optional[str] = None,
     temperature: float = 1.0,

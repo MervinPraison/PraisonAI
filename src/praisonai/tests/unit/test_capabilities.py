@@ -714,6 +714,22 @@ class TestNewCapabilities:
         assert result.id == "msg-abc123"
         assert len(result.content) == 1
     
+    def test_messages_create_default_model(self):
+        """messages_create and amessages_create default to a served model."""
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from praisonai.capabilities.messages import amessages_create, messages_create
+        
+        litellm = MagicMock()
+        litellm.acompletion = AsyncMock()
+        messages = [{"role": "user", "content": "Hello"}]
+        with patch.dict("sys.modules", {"litellm": litellm}):
+            messages_create(messages)
+            asyncio.run(amessages_create(messages))
+        
+        assert litellm.completion.call_args.kwargs["model"] == "claude-sonnet-5-5"
+        assert litellm.acompletion.call_args.kwargs["model"] == "claude-sonnet-5-5"
+    
     def test_guardrail_result_dataclass(self):
         """Test GuardrailResult dataclass."""
         from praisonai.capabilities.guardrails import GuardrailResult
