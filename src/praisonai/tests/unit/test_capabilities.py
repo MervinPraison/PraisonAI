@@ -714,6 +714,78 @@ class TestNewCapabilities:
         assert result.id == "msg-abc123"
         assert len(result.content) == 1
     
+    @pytest.mark.offline
+    @pytest.mark.asyncio
+    async def test_messages_create_routes_sonnet_55(self, monkeypatch):
+        import json
+        import httpx
+        import litellm
+        from praisonai.capabilities.messages import amessages_create, messages_create
+
+        # Force the same route selection as a model map missing this model.
+        monkeypatch.setattr(litellm, "anthropic_models", [])
+        requests = []
+
+        def reply(request):
+            body = json.loads(request.content)
+            requests.append((str(request.url), body))
+            return httpx.Response(200, request=request, json={
+                "id": "msg_fixture", "model": body["model"], "type": "message",
+                "role": "assistant", "content": [{"type": "text", "text": "hello"}],
+                "stop_reason": "end_turn", "stop_sequence": None,
+                "usage": {"input_tokens": 9, "output_tokens": 3},
+            })
+
+        async def async_reply(client, request, **kwargs):
+            return reply(request)
+
+        monkeypatch.setattr(httpx.Client, "send", lambda client, request, **kwargs: reply(request))
+        monkeypatch.setattr(httpx.AsyncClient, "send", async_reply)
+        options = {
+            "messages": [{"role": "user", "content": "Hello"}],
+            "api_base": "https://fixture.invalid",
+            "api_key": "fixture-key",
+        }
+        assert messages_create(**options).content == [{"type": "text", "text": "hello"}]
+        assert (await amessages_create(**options)).content == [{"type": "text", "text": "hello"}]
+
+        assert len(requests) == 2
+        for url, body in requests:
+            assert url == "https://fixture.invalid/v1/messages"
+            assert body["model"] == "claude-sonnet-5-5"
+            assert not {"temperature", "top_p", "top_k"}.intersection(body)
+
+    def test_messages_create_preserves_sampling_for_another_model(self):
+        from unittest.mock import MagicMock, patch
+        from praisonai.capabilities.messages import messages_create
+
+        litellm = MagicMock()
+        with patch.dict("sys.modules", {"litellm": litellm}):
+            messages_create(
+                [{"role": "user", "content": "Hello"}],
+                model="claude-sonnet-4-6",
+                temperature=0.3,
+                top_p=0.8,
+            )
+
+        request = litellm.completion.call_args.kwargs
+        assert request["model"] == "claude-sonnet-4-6"
+        assert request["temperature"] == 0.3
+        assert request["top_p"] == 0.8
+
+    @pytest.mark.parametrize("sampling", [{"temperature": 0.5}, {"top_p": 0.8}, {"top_k": 5}])
+    def test_messages_create_rejects_unsupported_sonnet_55_sampling(self, sampling):
+        from unittest.mock import MagicMock, patch
+        from praisonai.capabilities.messages import messages_create
+        from praisonaiagents.errors import ValidationError
+
+        litellm = MagicMock()
+        with patch.dict("sys.modules", {"litellm": litellm}):
+            with pytest.raises(ValidationError, match="does not support sampling"):
+                messages_create([{"role": "user", "content": "Hello"}], **sampling)
+
+        litellm.completion.assert_not_called()
+
     def test_guardrail_result_dataclass(self):
         """Test GuardrailResult dataclass."""
         from praisonai.capabilities.guardrails import GuardrailResult
