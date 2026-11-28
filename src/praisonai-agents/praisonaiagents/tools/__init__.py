@@ -196,6 +196,18 @@ TOOL_MAPPINGS = {
     'schedule_update': ('.schedule_tools', None),
     'schedule_tools': ('.schedule_tools', None),
 
+    # Studio: whiteboard and sheets (Claude-style artifacts the agent edits)
+    'whiteboard_create': ('.whiteboard_tools', None),
+    'whiteboard_add': ('.whiteboard_tools', None),
+    'whiteboard_update': ('.whiteboard_tools', None),
+    'whiteboard_get': ('.whiteboard_tools', None),
+    'sheet_create': ('.sheet_tools', None),
+    'sheet_set_cells': ('.sheet_tools', None),
+    'sheet_add_tab': ('.sheet_tools', None),
+    'sheet_get': ('.sheet_tools', None),
+    'excalidraw_create': ('.excalidraw_tools', None),
+    'excalidraw_get': ('.excalidraw_tools', None),
+
     # Computer Use Tools (agent-centric screen control - Issue #516)
     'computer_screenshot': ('.computer_tools', None),
     'computer_screen_size': ('.computer_tools', None),
