@@ -4,7 +4,7 @@ Focused, open-source developer products built directly on PraisonAI. Every produ
 
 | Product | What it does | Install / Entry | Directory |
 |---|---|---|---|
-| **OpenShip** | Open-source Claude Ship alternative: self-review, PR Steward with 3-try circuit breaker, and declarative `.praisonai/approvals.yml` on any LLM or local Ollama — draft PRs only, never merges | `python -m pip install praisonai-code` then `praisonai-code ship review --dry-run` | [`./openship/`](./openship/) |
+| **PraisonAI Ship** *(OpenShip)* | Open-source PR review, PR Steward with 3-try circuit breaker, and declarative `.praisonai/approvals.yml` on any LLM or local Ollama — draft PRs only, never merges | `python -m pip install praisonai-code` then `praisonai-code ship review --dry-run` | [`./openship/`](./openship/) |
 
 ## Why Inside the Monorepo?
 
