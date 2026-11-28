@@ -42,6 +42,25 @@ from ..llm.model_providers import default_auxiliary_model
 
 logger = get_logger(__name__)
 
+@dataclass
+class _YAMLAgentStep:
+    agent: Any
+    settings: Dict[str, Any]
+
+    @property
+    def name(self):
+        return self.settings.get('name', self.agent.name)
+
+    def __getattr__(self, name):
+        if name.startswith('_yaml_'):
+            key = name[6:]
+            if key == 'step_name':
+                key = 'name'
+            if key in self.settings:
+                return self.settings[key]
+        raise AttributeError(name)
+
+
 # Default maximum parallel workers to prevent rate limiting issues
 DEFAULT_MAX_PARALLEL_WORKERS = 3
 
@@ -217,6 +236,8 @@ def _step_agents(step: Any, _seen: Optional[set] = None) -> List[Any]:
     if step is None or id(step) in seen:
         return []
     seen.add(id(step))
+    if isinstance(step, _YAMLAgentStep):
+        return _step_agents(step.agent, seen)
     if isinstance(step, Task):
         agent = step.agent
         return [agent] if hasattr(agent, "_fork_history") else []
@@ -3030,7 +3051,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             Output from the agent execution
         """
         # Get yaml_action which specifies the method to call
-        yaml_action = getattr(agent, '_yaml_action', None) or action
+        yaml_action = _substitute_action_variables(step.action or action, variables, None, variables.get('input', ''))
         
         # AudioAgent - TTS (speech) or STT (transcribe)
         if agent_class_name == 'AudioAgent':
@@ -3136,6 +3157,16 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         if isinstance(step, Task):
             return step
         
+        yaml_settings = None
+        if isinstance(step, _YAMLAgentStep):
+            yaml_settings = step.settings
+            step = step.agent
+
+        def yaml_value(name):
+            if yaml_settings is not None:
+                return yaml_settings.get(name)
+            return getattr(step, '_yaml_' + name, None)
+
         # Check for standard Agent (has chat method) or specialized agents
         agent_class_name = step.__class__.__name__
         is_specialized_agent = agent_class_name in ('AudioAgent', 'VideoAgent', 'ImageAgent', 'OCRAgent', 'DeepResearchAgent')
@@ -3144,15 +3175,15 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             # It's an Agent - wrap with agent reference and preserve tools
             agent_tools = getattr(step, 'tools', None)
             # Check for _yaml_action from YAML parser (canonical: action, alias: description)
-            yaml_action = getattr(step, '_yaml_action', None)
+            yaml_action = yaml_value('action')
             # Check for _yaml_output_variable from YAML parser
-            yaml_output_variable = getattr(step, '_yaml_output_variable', None)
+            yaml_output_variable = yaml_value('output_variable')
             # Check for _yaml_output_json from YAML parser (structured output - Option A)
-            yaml_output_json = getattr(step, '_yaml_output_json', None)
+            yaml_output_json = yaml_value('output_json')
             # Check for _yaml_output_pydantic from YAML parser (structured output - Option B)
-            yaml_output_pydantic = getattr(step, '_yaml_output_pydantic', None)
+            yaml_output_pydantic = yaml_value('output_pydantic')
             # Check for _yaml_step_name from YAML parser
-            yaml_step_name = getattr(step, '_yaml_step_name', None)
+            yaml_step_name = yaml_value('name') if yaml_settings is not None else getattr(step, '_yaml_step_name', None)
             # Use yaml_action if set, otherwise fall back to previous_output/input
             default_action = "{{previous_output}}" if index > 0 else "{{input}}"
             action = yaml_action if yaml_action else default_action
@@ -3168,15 +3199,15 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
             output_json_model = output_config.get('json_model') if output_config else None
             output_pydantic_model = output_config.get('pydantic_model') if output_config else None
             # Extract remaining YAML step-level attributes (previously dead stores)
-            yaml_guardrail = getattr(step, '_yaml_guardrail', None)
-            yaml_max_retries = getattr(step, '_yaml_max_retries', None)
-            yaml_expected_output = getattr(step, '_yaml_expected_output', None)
-            yaml_output_file = getattr(step, '_yaml_output_file', None)
-            yaml_skip_on_failure = getattr(step, '_yaml_skip_on_failure', None)
-            yaml_retry_delay = getattr(step, '_yaml_retry_delay', None)
-            yaml_create_directory = getattr(step, '_yaml_create_directory', None)
-            yaml_callback = getattr(step, '_yaml_callback', None)
-            yaml_async_execution = getattr(step, '_yaml_async_execution', None)
+            yaml_guardrail = yaml_value('guardrail')
+            yaml_max_retries = yaml_value('max_retries')
+            yaml_expected_output = yaml_value('expected_output')
+            yaml_output_file = yaml_value('output_file')
+            yaml_skip_on_failure = yaml_value('skip_on_failure')
+            yaml_retry_delay = yaml_value('retry_delay')
+            yaml_create_directory = yaml_value('create_directory')
+            yaml_callback = yaml_value('callback')
+            yaml_async_execution = yaml_value('async_execution')
 
             # Build Task kwargs — only include YAML overrides when present
             task_kwargs = dict(
@@ -3187,6 +3218,8 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 output_json=output_json_model,
                 output_pydantic=output_pydantic_model,
             )
+            if yaml_output_variable is not None:
+                task_kwargs['output_variable'] = yaml_output_variable
             if yaml_guardrail is not None:
                 task_kwargs['guardrails'] = yaml_guardrail
             if yaml_max_retries is not None:
@@ -3228,7 +3261,8 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         verbose: bool,
         index: int = 0,
         stream: bool = True,
-        depth: int = 0
+        depth: int = 0,
+        _replay_raw_step: Any = None,
     ) -> Dict[str, Any]:
         """Cache wrapper. The uncached body is _execute_single_step_uncached."""
         # Patterns are control flow, not deterministic leaf results. Re-enter
@@ -3240,7 +3274,7 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 step, previous_output, input, all_variables, model, verbose, index,
                 stream=stream, depth=depth,
             )
-        span = _replay_step_begin(self, step, index=index)
+        span = _replay_step_begin(self, step if _replay_raw_step is None else _replay_raw_step, index=index)
         if span is None:
             return self._execute_leaf_step(
                 step, previous_output, input, all_variables, model, verbose, index,
@@ -3268,7 +3302,8 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
                 k: v for k, v in (result.get("variables") or {}).items()
                 if k not in before or _differs(before[k], v)
             }
-            step_vars.pop(getattr(step, "output_variable", None) or f"{result.get('step')}_output", None)
+            output_variable = self._normalize_single_step(step, index).output_variable
+            step_vars.pop(output_variable or f"{result.get('step')}_output", None)
         _replay_step_end(span, status, result.get("output") if is_dict else None, step_vars)
         return result
 
@@ -3747,8 +3782,10 @@ Create a brief execution plan (2-3 sentences) describing how to best accomplish 
         # Execute matched route steps
         route_stopped = False
         for idx, step in enumerate(matched_route):
+            execution_step = _YAMLAgentStep(step, {}) if getattr(route_step, '_yaml_agent_routes', False) else step
             step_result = self._execute_single_step_internal(
-                step, output, input, all_variables, model, verbose, idx, stream=stream, depth=depth+1
+                execution_step, output, input, all_variables, model, verbose, idx, stream=stream, depth=depth+1,
+                _replay_raw_step=step,
             )
             results.append({"step": step_result["step"], "output": step_result["output"]})
             output = step_result["output"]

@@ -15,7 +15,7 @@ from pathlib import Path
 
 from .._logging import get_logger
 from ..agent.agent import Agent
-from .workflows import Workflow, route, parallel, loop, repeat, Include, include
+from .workflows import Workflow, route, parallel, loop, repeat, Include, include, _YAMLAgentStep
 from ..task.task import Task
 
 logger = get_logger(__name__)
@@ -936,101 +936,20 @@ class YAMLWorkflowParser:
             # Generic step
             return self._parse_generic_step(step_data)
     
-    def _parse_agent_step(self, step_data: Dict) -> Agent:
-        """
-        Parse an agent step.
-        
-        Args:
-            step_data: Step definition with 'agent' key
-            
-        Returns:
-            Agent object
-        """
+    def _parse_agent_step(self, step_data: Dict) -> _YAMLAgentStep:
+        """Keep YAML overrides on the step, not on a reused agent."""
         agent_id = step_data['agent']
-        
-        if agent_id in self._agents:
-            agent = self._agents[agent_id]
-            
-            # Store step name if provided
-            step_name = step_data.get('name')
-            if step_name:
-                agent._yaml_step_name = step_name
-            
-            # If there's an action, we need to handle it
-            action = step_data.get('action')
-            if action:
-                # Store action as task for the agent
-                agent._yaml_action = action
-            
-            # Handle guardrail
-            guardrail = step_data.get('guardrail')
-            if guardrail:
-                agent._yaml_guardrail = guardrail
-            
-            # Handle max_retries
-            max_retries = step_data.get('max_retries')
-            if max_retries:
-                agent._yaml_max_retries = max_retries
-            
-            # Handle expected_output (feature parity with agents.yaml tasks)
-            expected_output = step_data.get('expected_output')
-            if expected_output:
-                agent._yaml_expected_output = expected_output
-            
-            # Handle context/dependencies (feature parity with agents.yaml tasks)
-            context = step_data.get('context')
-            if context:
-                agent._yaml_context = context
-            
-            # Handle output_file
-            output_file = step_data.get('output_file')
-            if output_file:
-                agent._yaml_output_file = output_file
-            
-            # Handle output_json (structured output)
-            output_json = step_data.get('output_json')
-            if output_json:
-                agent._yaml_output_json = output_json
-            
-            # Handle output_pydantic
-            output_pydantic = step_data.get('output_pydantic')
-            if output_pydantic:
-                agent._yaml_output_pydantic = output_pydantic
-            
-            # Handle create_directory
-            create_directory = step_data.get('create_directory')
-            if create_directory is not None:
-                agent._yaml_create_directory = create_directory
-            
-            # Handle callback
-            callback = step_data.get('callback')
-            if callback:
-                agent._yaml_callback = callback
-            
-            # Handle async_execution
-            async_execution = step_data.get('async_execution')
-            if async_execution is not None:
-                agent._yaml_async_execution = async_execution
-            
-            # Handle output_variable (store output in named variable for loop iteration)
-            output_variable = step_data.get('output_variable')
-            if output_variable:
-                agent._yaml_output_variable = output_variable
-            
-            # Handle skip_on_failure (robustness: allow workflow to continue if step fails)
-            skip_on_failure = step_data.get('skip_on_failure')
-            if skip_on_failure is not None:
-                agent._yaml_skip_on_failure = skip_on_failure
-            
-            # Handle retry_delay (robustness: seconds between retries)
-            retry_delay = step_data.get('retry_delay')
-            if retry_delay is not None:
-                agent._yaml_retry_delay = retry_delay
-            
-            return agent
-        else:
+        if agent_id not in self._agents:
             raise ValueError(f"Agent '{agent_id}' not defined in agents section")
-    
+        agent = self._agents[agent_id]
+        for key in ('name', 'action', 'guardrail', 'max_retries', 'expected_output',
+                    'context', 'output_file', 'output_json', 'output_pydantic',
+                    'create_directory', 'callback', 'async_execution',
+                    'output_variable', 'skip_on_failure', 'retry_delay'):
+            if key in step_data:
+                setattr(agent, '_yaml_' + ('step_name' if key == 'name' else key), step_data[key])
+        return _YAMLAgentStep(agent, dict(step_data))
+
     def _parse_include_step(self, step_data: Dict) -> Include:
         """
         Parse an include pattern step.
@@ -1134,7 +1053,9 @@ class YAMLWorkflowParser:
                     "not defined in agents section"
                 ) from exc
         
-        return route(routes)
+        parsed_route = route(routes)
+        parsed_route._yaml_agent_routes = True
+        return parsed_route
     
     def _parse_parallel_step(self, step_data: Dict) -> Dict:
         """
@@ -1154,11 +1075,7 @@ class YAMLWorkflowParser:
             if 'agent' in item:
                 agent_id = item['agent']
                 if agent_id in self._agents:
-                    agent = self._agents[agent_id]
-                    # Store action if present
-                    if 'action' in item:
-                        agent._yaml_action = item['action']
-                    parallel_steps.append(agent)
+                    parallel_steps.append(self._parse_agent_step(item))
         
         # Forward optional fan-out controls so YAML has parity with the Python
         # API. context defaults to "full" (exact pass-through, no data loss);
@@ -1266,10 +1183,7 @@ class YAMLWorkflowParser:
         # First check for agent at step level (original syntax)
         agent_id = step_data.get('agent')
         if agent_id and agent_id in self._agents:
-            agent_or_step = self._agents[agent_id]
-            # Store action if present
-            if 'action' in step_data:
-                agent_or_step._yaml_action = step_data['action']
+            agent_or_step = self._parse_agent_step({key: step_data[key] for key in ('agent', 'action') if key in step_data})
         
         # Check for step: syntax (nested form)
         if 'step' in step_data:
@@ -1277,19 +1191,17 @@ class YAMLWorkflowParser:
             if isinstance(step_def, dict) and 'agent' in step_def:
                 agent_id = step_def['agent']
                 if agent_id in self._agents:
-                    agent_or_step = self._agents[agent_id]
-                    if 'action' in step_def:
-                        agent_or_step._yaml_action = step_def['action']
+                    agent_or_step = self._parse_agent_step(step_def)
             elif isinstance(step_def, str):
                 # step: agent_name shorthand
                 if step_def in self._agents:
-                    agent_or_step = self._agents[step_def]
+                    agent_or_step = self._parse_agent_step({'agent': step_def})
         
         # Check for step inside loop config
         if 'step' in loop_config:
             step_def = loop_config['step']
             if isinstance(step_def, str) and step_def in self._agents:
-                agent_or_step = self._agents[step_def]
+                agent_or_step = self._parse_agent_step({'agent': step_def})
         
         # Check for include at step level (include inside loop)
         if agent_or_step is None and 'include' in step_data:
@@ -1334,11 +1246,7 @@ class YAMLWorkflowParser:
         agent_id = step_data.get('agent')
         
         if agent_id and agent_id in self._agents:
-            agent = self._agents[agent_id]
-            
-            # Store action if present
-            if 'action' in step_data:
-                agent._yaml_action = step_data['action']
+            agent = self._parse_agent_step({key: step_data[key] for key in ('agent', 'action') if key in step_data})
             
             # Get repeat parameters
             until = repeat_config.get('until')
