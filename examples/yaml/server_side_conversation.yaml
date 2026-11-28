@@ -1,0 +1,12 @@
+# Run: praisonai workflow run examples/yaml/server_side_conversation.yaml
+# Opts into provider-side response storage for this agent's Responses calls.
+name: Stored Responses
+agents:
+  assistant:
+    instructions: Answer briefly.
+    llm:
+      model: gpt-4o-mini
+      server_side_conversation: true
+steps:
+  - agent: assistant
+    action: Explain when server-side conversation state is useful for an agent.

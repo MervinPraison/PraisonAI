@@ -705,6 +705,7 @@ Respond with ONLY a valid JSON tool call in this format:
         failover_manager: Optional[FailoverManagerProtocol] = None,
         auth: Optional[str] = None,           # NEW: "claude-code", "codex", "gemini-cli", "qwen-cli"
         max_iter: Optional[int] = None,       # NEW: maximum iterations for tool calling loops
+        server_side_conversation: bool = False,
         **extra_settings
     ):
         # Configure logging only once at the class level
@@ -741,6 +742,8 @@ Respond with ONLY a valid JSON tool call in this format:
         self.base_url = base_url
         self.events = events
         self.extra_settings = extra_settings
+        self.server_side_conversation = server_side_conversation
+        self._responses_continuation = None
         self.web_search = web_search
         self.web_fetch = web_fetch
         self.prompt_caching = prompt_caching
@@ -7385,6 +7388,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         clone = cls.__new__(cls)
         memo[id(self)] = clone
         for key, value in self.__dict__.items():
+            if key == "_responses_continuation":
+                clone.__dict__[key] = None
+                continue
             if key == "_current_agent_name_var":
                 clone.__dict__[key] = contextvars.ContextVar(
                     "praison_llm_current_agent_name", default=None
@@ -7939,6 +7945,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if instructions:
             params["instructions"] = instructions
         params["input"] = input_items
+        extra_settings = getattr(self, "extra_settings", {})
+        if "store" in extra_settings:
+            params["store"] = extra_settings["store"]
 
         # ── Tools ───────────────────────────────────────────────────────
         if tools:
@@ -8062,6 +8071,22 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
         return params
 
+    def _prepare_responses_continuation(self, params: Dict[str, Any]) -> Any:
+        if not getattr(self, "server_side_conversation", False):
+            return None
+        if self._responses_continuation is None:
+            from ._responses_continuation import ResponsesContinuation
+            self._responses_continuation = ResponsesContinuation()
+        from ..trace.context_events import get_context_emitter
+        scope = (self.current_agent_id, get_context_emitter()._session_id)
+        return self._responses_continuation.prepare(params, scope)
+
+    def _remember_responses_continuation(self, request, response, text, calls) -> None:
+        if request is not None:
+            message = {"role": "assistant", "content": text, "tool_calls": calls}
+            output = self._build_responses_params([message])["input"]
+            request.complete(response, output)
+
     def _call_responses_api(self, **params) -> Any:
         """``litellm.responses()`` with retry, recorded on the replay trace."""
         span = _replay_llm_begin(self, params)
@@ -8100,7 +8125,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """
         check_model_request(self.model, "litellm.responses")
         import litellm
-        return self._call_with_retry(litellm.responses, **params)
+
+        def call_responses(**provider_params):
+            request = self._prepare_responses_continuation(provider_params)
+            if request is None:
+                return litellm.responses(**provider_params)
+            response = request.call(litellm.responses)
+            text, calls, _reasoning = self._extract_from_responses_output(response)
+            message = {"role": "assistant", "content": text, "tool_calls": calls}
+            output = self._build_responses_params([message])["input"]
+            request.complete(response, output)
+            return response
+
+        return self._call_with_retry(call_responses, **params)
 
     async def _call_responses_api_async(self, **params) -> Any:
         """``litellm.aresponses()`` with retry, recorded on the replay trace."""
@@ -8127,7 +8164,19 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         """
         check_model_request(self.model, "litellm.aresponses")
         import litellm
-        response = await self._call_with_retry_async(litellm.aresponses, **params)
+
+        async def call_responses(**provider_params):
+            request = self._prepare_responses_continuation(provider_params)
+            if request is None:
+                return await litellm.aresponses(**provider_params)
+            response = await request.acall(litellm.aresponses)
+            text, calls, _reasoning = self._extract_from_responses_output(response)
+            message = {"role": "assistant", "content": text, "tool_calls": calls}
+            output = self._build_responses_params([message])["input"]
+            request.complete(response, output)
+            return response
+
+        response = await self._call_with_retry_async(call_responses, **params)
         self._track_token_usage(response, self._response_model_for_tracking(response))
         return response
 
@@ -8323,7 +8372,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if _emit:
             from ..streaming.events import StreamEvent, StreamEventType
 
-        response_stream = litellm.responses(**params)
+        request = self._prepare_responses_continuation(params)
+        response_stream = (
+            request.call(litellm.responses)
+            if request is not None else litellm.responses(**params)
+        )
         try:
             for event in response_stream:
                 # Access event type — handle both object and dict
@@ -8445,6 +8498,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 },
             })
 
+        self._remember_responses_continuation(request, _final_response, response_text, tool_calls)
         return response_text, tool_calls if tool_calls else None, _final_response
 
     async def _stream_responses_api_async(self, params: Dict[str, Any], *args: Any, **kwargs: Any) -> tuple:
@@ -8486,7 +8540,11 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         if _emit:
             from ..streaming.events import StreamEvent, StreamEventType
 
-        response_stream = await litellm.aresponses(**params)
+        request = self._prepare_responses_continuation(params)
+        if request is not None:
+            response_stream = await request.acall(litellm.aresponses)
+        else:
+            response_stream = await litellm.aresponses(**params)
         try:
             async for event in response_stream:
                 if isinstance(event, dict):
@@ -8587,6 +8645,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 "function": {"name": tc["name"], "arguments": tc["arguments"]},
             })
 
+        self._remember_responses_continuation(request, _final_response, response_text, tool_calls)
         return response_text, tool_calls if tool_calls else None, _final_response
 
     def _process_streaming_chunk(self, chunk) -> Optional[str]:
