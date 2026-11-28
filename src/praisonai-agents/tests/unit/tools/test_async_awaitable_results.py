@@ -1,11 +1,9 @@
 """Async dispatch must execute awaitables returned by synchronous wrappers."""
 
 import asyncio
-import json
+from types import SimpleNamespace
 
-import httpx
 import pytest
-from openai import AsyncOpenAI
 
 from praisonaiagents import Agent, tool
 from praisonaiagents.config import ToolConfig
@@ -88,6 +86,8 @@ async def test_wrapped_coroutine_error_reaches_caller(isolated_home):
 
 @pytest.mark.asyncio
 async def test_astart_sends_wrapped_tool_result(isolated_home):
+    from openai.types.chat import ChatCompletion
+
     tool_messages = []
 
     @tool
@@ -95,9 +95,8 @@ async def test_astart_sends_wrapped_tool_result(isolated_home):
         """Look up a record by its numeric ID."""
         return f"record:{value}"
 
-    def reply(request):
-        payload = json.loads(request.content)
-        results = [m["content"] for m in payload["messages"] if m["role"] == "tool"]
+    async def reply(*, messages, **kwargs):
+        results = [m["content"] for m in messages if m["role"] == "tool"]
         if results:
             tool_messages.extend(results)
             message = {"role": "assistant", "content": "done"}
@@ -110,7 +109,7 @@ async def test_astart_sends_wrapped_tool_result(isolated_home):
                     "function": {"name": "lookup_record", "arguments": '{"value": 7}'},
                 }],
             }
-        return httpx.Response(200, json={
+        return ChatCompletion.model_validate({
             "id": "completion-1", "object": "chat.completion",
             "created": 1, "model": "gpt-4o-mini",
             "choices": [{"index": 0, "message": message,
@@ -119,18 +118,15 @@ async def test_astart_sends_wrapped_tool_result(isolated_home):
         })
 
     client = OpenAIClient(api_key="fixture-key", base_url="https://fixture.invalid/v1")
-    client._async_client = AsyncOpenAI(
-        api_key="fixture-key",
-        base_url="https://fixture.invalid/v1",
-        http_client=httpx.AsyncClient(transport=httpx.MockTransport(reply)),
+    client._async_client = SimpleNamespace(
+        chat=SimpleNamespace(completions=SimpleNamespace(create=reply)),
     )
-    async with client._async_client:
-        with Agent(
-            instructions="Look up records", llm="gpt-4o-mini", tools=[lookup_record],
-            reflection=False, rules=False, output="silent",
-        ) as agent:
-            agent._Agent__openai_client = client
-            result = await agent.astart("Look up record 7", stream=False)
+    with Agent(
+        instructions="Look up records", llm="gpt-4o-mini", tools=[lookup_record],
+        reflection=False, rules=False, output="silent",
+    ) as agent:
+        agent._Agent__openai_client = client
+        result = await agent.astart("Look up record 7", stream=False)
 
     assert result == "done"
     assert len(tool_messages) == 1 and "record:7" in tool_messages[0]
