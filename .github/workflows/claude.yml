@@ -95,7 +95,9 @@ jobs:
 
   verify-fix:
     needs: prepare
-    if: inputs.mode == 'fix-issue' && needs.prepare.outputs.publish == 'true'
+    if: >-
+      github.triggering_actor == 'MervinPraison' &&
+      inputs.mode == 'fix-issue' && needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:
@@ -118,8 +120,11 @@ jobs:
 
   publish-review:
     needs: prepare
-    if: inputs.mode == 'review-pr' && needs.prepare.outputs.publish == 'true'
+    if: >-
+      github.triggering_actor == 'MervinPraison' &&
+      inputs.mode == 'review-pr' && needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: write
@@ -142,8 +147,11 @@ jobs:
 
   publish-fix:
     needs: [prepare, verify-fix]
-    if: inputs.mode == 'fix-issue' && needs.prepare.outputs.publish == 'true'
+    if: >-
+      github.triggering_actor == 'MervinPraison' &&
+      inputs.mode == 'fix-issue' && needs.prepare.outputs.publish == 'true'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       contents: write
       pull-requests: write

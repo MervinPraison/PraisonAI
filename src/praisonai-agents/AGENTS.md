@@ -258,7 +258,7 @@ Python guidelines in this file do **not** replace the TypeScript SDK guide. For 
 3. Verify with `cd src/praisonai-ts && npm install && npm run build && npm test`.
 4. After merge, maintainers sync the npm mirror: `gh workflow run "Sync to praisonai-js" --repo MervinPraison/PraisonAI`.
 
-[MervinPraison/praisonai-js](https://github.com/MervinPraison/praisonai-js) is the public npm checkout; direction is **monorepo → praisonai-js** only. Claude merge gate and `@claude` review TS changes under `src/praisonai-ts/` using the TS AGENTS.md criteria (lightweight, type-safe, Python parity where applicable).
+[MervinPraison/praisonai-js](https://github.com/MervinPraison/praisonai-js) is the public npm checkout; direction is **monorepo → praisonai-js** only. Owner-dispatched Claude reviews use the TS AGENTS.md criteria for changes in `src/praisonai-ts/`, including lightweight design, type safety and Python parity where applicable.
 
 ---
 
