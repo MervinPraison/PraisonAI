@@ -35,7 +35,7 @@ elif args[1].endswith("/pulls/17"):
         print(head)
     else:
         print(json.dumps({"state": "open", "head": {"sha": head},
-                          "base": {"sha": os.environ["GITHUB_SHA"], "ref": "main"}}))
+                          "base": {"sha": os.environ.get("PR_BASE", os.environ["GITHUB_SHA"]), "ref": "main"}}))
 elif args[1].endswith("/issues/17"):
     print("open" if "--jq" in args else json.dumps({"state": "open", "title": "Test issue"}))
 else:
@@ -162,6 +162,19 @@ class OwnerClaudeTest(unittest.TestCase):
         self.run_handler("review-pr", "publish-review", cwd=self.publisher, expected=1, PR_HEAD=self.base)
         self.assertFalse(any("POST" in call for call in self.calls()))
 
+    def test_review_fetches_a_newer_base_without_changing_policy(self):
+        (self.publisher / "AGENTS.md").write_text("New main rules\n")
+        self.git("-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+                 "commit", "-am", "advance main", cwd=self.publisher)
+        new_base = self.git("rev-parse", "HEAD", cwd=self.publisher).strip()
+        self.git("push", "origin", "main", cwd=self.publisher)
+        self.run_handler("review-pr", "prepare", PR_BASE=new_base)
+        self.assertEqual(self.git("rev-parse", "HEAD").strip(), self.base)
+        self.assertEqual(self.git("cat-file", "-t", new_base).strip(), "commit")
+        policy = (self.handoff / "prompt").read_text().split("--- PR diff ---")[0]
+        self.assertIn("Trusted main rules", policy)
+        self.assertNotIn("New main rules", policy)
+
     def test_issue_patch_publishes_on_new_branch_as_draft(self):
         self.run_handler("fix-issue", "prepare")
         self.run_handler("fix-issue", "run")
@@ -179,6 +192,7 @@ class OwnerClaudeTest(unittest.TestCase):
         self.assertIn("--draft", create)
         self.assertEqual(create[create.index("--base") + 1], "main")
         self.assertIn("maintainer-provided command passed", (self.handoff / "fix-body.md").read_text())
+        self.assertIn("Approve workflows to run", (self.handoff / "fix-body.md").read_text())
 
     def test_failed_validation_does_not_publish(self):
         self.run_handler("fix-issue", "prepare")

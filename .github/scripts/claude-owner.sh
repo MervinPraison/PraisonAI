@@ -50,6 +50,9 @@ PROMPT
       pr=$(gh api "repos/$repo/pulls/$number")
       head_sha=$(jq -er 'select(.state == "open") | .head.sha | select(test("^[0-9a-f]{40}$"))' <<< "$pr")
       base_sha=$(jq -er '.base.sha | select(test("^[0-9a-f]{40}$"))' <<< "$pr")
+      if ! git cat-file -e "$base_sha^{commit}" 2>/dev/null; then
+        git fetch --no-tags origin "$base_sha"
+      fi
       git fetch --no-tags origin "refs/pull/$number/head"
       [[ "$(git rev-parse FETCH_HEAD)" == "$head_sha" ]] ||
         { echo "PR moved while fetching. Dispatch again for the new head." >&2; exit 1; }
@@ -199,6 +202,7 @@ publish_fix() {
     else
       printf '\n\nValidation: patch checks passed. Package tests are pending.\n'
     fi
+    printf '\nA maintainer can start the PR check runs with **Approve workflows to run** in the merge box.\n'
   } > "$handoff/fix-body.md"
   gh pr create --repo "$repo" --draft --base main --head "$branch" \
     --title "Fix #$number" --body-file "$handoff/fix-body.md"
