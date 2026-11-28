@@ -1797,7 +1797,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3950",
+        "location": "src/praisonai-agents/praisonaiagents/agent/chat_mixin.py:3961",
         "resolved_class": "ChatMixin"
       },
       "ts_only": [
@@ -1876,7 +1876,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:838",
+        "location": "src/praisonai-agents/praisonaiagents/agent/execution_mixin.py:849",
         "resolved_class": "ExecutionMixin"
       },
       "ts_only": [
@@ -2100,11 +2100,11 @@
         "exact": 20,
         "flattened": 0,
         "mismatches": 1,
-        "missing": 0,
-        "params": 23,
+        "missing": 1,
+        "params": 24,
         "ts_only": 3,
         "ts_total": 26,
-        "waived": 1
+        "waived": 2
       },
       "params": [
         {
@@ -2707,6 +2707,26 @@
           "type_text": "Optional[Any]",
           "waived": null,
           "warnings": []
+        },
+        {
+          "canonical": "managerModel",
+          "default": null,
+          "default_kind": "literal",
+          "gap": {
+            "detail": "is missing from TypeScript (looked for `managerModel`)",
+            "kind": "missing"
+          },
+          "kind": "positional",
+          "match": "missing",
+          "name": "manager_model",
+          "required": false,
+          "ts": null,
+          "ts_members": null,
+          "ts_name": null,
+          "type_class": "string",
+          "type_text": "Optional[str]",
+          "waived": "AgentTeam.__init__.manager_model",
+          "warnings": []
         }
       ],
       "python": {
@@ -2852,7 +2872,7 @@
         }
       ],
       "python": {
-        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2691",
+        "location": "src/praisonai-agents/praisonaiagents/agents/agents.py:2710",
         "resolved_class": "AgentTeam"
       },
       "ts_only": [
@@ -7405,12 +7425,12 @@
     "exact": 123,
     "flattened": 3,
     "mismatches": 29,
-    "missing": 0,
-    "params": 226,
+    "missing": 1,
+    "params": 227,
     "surfaces": 17,
     "ts_only": 85,
     "ts_total": 317,
-    "waived": 29
+    "waived": 30
   },
   "waivers": [
     {
@@ -7468,6 +7488,13 @@
       "key": "Agent.__init__.role",
       "owner": "praisonai-ts",
       "reason": "Same value, resolved at a different moment. TS now stores `config.role || 'Assistant'` in the constructor, matching Python's `self.role = role or \"Assistant\"`, so `agent.role` reads back the same string on both sides. The system-prompt TEXT built from role/goal/ backstory still differs between the two SDKs -- that is a separate, untracked gap, not covered by this waiver."
+    },
+    {
+      "expires": null,
+      "issue": null,
+      "key": "AgentTeam.__init__.manager_model",
+      "owner": "praisonai-ts",
+      "reason": "Python-only spelling of manager_llm (D-10), added so the manager model is named like model=. TS already has `managerLlm`, the parity of manager_llm; a `managerModel` alias can follow if TS adopts the same naming."
     },
     {
       "expires": null,

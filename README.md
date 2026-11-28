@@ -165,6 +165,9 @@ vLLM and LM Studio work the same way: use `hosted_vllm/` (vLLM) or `lm_studio/` 
 </tr>
 </table>
 
+> **Open Products** — Built directly on PraisonAI with zero duplicated code:
+> **[PraisonAI Ship](products/openship/)** *(OpenShip)* — open-source PR shipping, self-review, PR Steward, and declarative `.praisonai/approvals.yml` on any LLM or local Ollama (draft PRs only; never merges). Browse all [`products/`](products/).
+
 ## The Five-Layer Agent Stack
 
 Most frameworks hand you one or two layers and leave the rest as homework. PraisonAI covers **all five** — plus the outer layer that decides *where* your agent actually runs.
@@ -379,6 +382,53 @@ Sandboxes shut themselves down when idle (`auto_shutdown`, `idle_timeout_s`), an
 <sub>Stack framing adapted from [The Five-Layer Agent Stack](https://mer.vin/2026/07/five-layer-agent-stack-match-bug-to-right-layer/) and [Agent Harnesses vs Orbs](https://mer.vin/2026/08/agent-harnesses-vs-orbs-why-remote-sandboxes-beat-local-agent-loops/).</sub>
 
 </details>
+
+## How the main features work
+
+**Multi-agent patterns.** One `AgentFlow`, seven ways to run its steps. [Docs](https://praison.ai/docs/concepts/agentflow)
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/images/readme/multi-agent-patterns-dark.svg" />
+    <img src=".github/images/readme/multi-agent-patterns-light.svg" alt="An AgentFlow runs steps in order, and seven patterns change how: route picks one branch, parallel runs steps at once, loop runs once per item, repeat runs until a condition holds, when or If branches on a check, include reuses another flow, and handoffs pass work to another agent." width="880" />
+  </picture>
+</p>
+
+**Agent teams.** One `AgentTeam`, three ways to run the same tasks: in order, under a manager agent, or as a workflow. [Docs](https://praison.ai/docs/concepts/process)
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/images/readme/agent-team-dark.svg" />
+    <img src=".github/images/readme/agent-team-light.svg" alt="AgentTeam runs the same tasks three ways. Sequential: Research, Write and Review run in list order. Hierarchical: a manager agent tells each agent to execute or stop and reads their status back. Workflow: a start task, a decision that routes to Publish or Revise, and Revise routes back to the start." width="880" />
+  </picture>
+</p>
+
+**One agent turn.** What happens between your prompt and the answer, and what stops it. [Docs](https://praison.ai/docs/features/doom-loop-detection)
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/images/readme/agent-turn-dark.svg" />
+    <img src=".github/images/readme/agent-turn-light.svg" alt="One agent turn as a loop: build the prompt, call the model, approve risky tools, run the tool locally or in a sandbox, check it with guardrails and the loop guard, then answer or go round again, up to max_steps." width="880" />
+  </picture>
+</p>
+
+**Bot gateway.** Ten channels in, one agent, team or flow behind them. [Docs](https://praison.ai/docs/features/bot-gateway)
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/images/readme/bot-gateway-dark.svg" />
+    <img src=".github/images/readme/bot-gateway-light.svg" alt="Ten channels on the left (Telegram, Discord, Slack, WhatsApp, Signal, Email, AgentMail, Linear, Webhook, Local) feed the praisonai-bot gateway. Incoming messages get pairing, rate limits and one session per chat; replies get streaming, voice and an outbox with retries. Approvals, media and rooms are built in. The gateway runs an Agent, AgentTeam or AgentFlow." width="880" />
+  </picture>
+</p>
+
+**MCP both ways.** Your agents use MCP servers, and your editor uses your agents. [Docs](https://praison.ai/docs/mcp/transports)
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/images/readme/mcp-both-ways-dark.svg" />
+    <img src=".github/images/readme/mcp-both-ways-light.svg" alt="MCP both ways. Left: agents use any MCP server over stdio, SSE, Streamable HTTP or WebSocket, with OAuth sign-in and trust checks. Right: praisonai-mcp serves 85 tools to 22 clients such as Cursor, Claude Desktop, Claude Code, VS Code and Codex." width="880" />
+  </picture>
+</p>
 
 ## How the handover works (early access)
 

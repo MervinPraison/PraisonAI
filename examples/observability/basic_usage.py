@@ -24,7 +24,7 @@ obs.init()
 # Create an agent
 agent = Agent(
     instructions="You are a helpful assistant.",
-    llm="gpt-4o-mini",
+    model="gpt-4o-mini",
 )
 
 # Use trace context manager for complete workflow tracing

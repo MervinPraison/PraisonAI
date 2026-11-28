@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Comprehensive test script to verify self-reflection works with tools after the fix"""
 
+import pytest
+
 from praisonaiagents import Agent, Task, AgentTeam
 
 # Define duckduckgo_search tool locally to avoid import issues
@@ -26,6 +28,7 @@ def duckduckgo_search(query: str) -> str:
     except Exception as e:
         return f"Search error: {str(e)}"
 
+@pytest.mark.live
 def test_self_reflection_with_tools():
     """Test self-reflection with tools - should work after the fix"""
     print("=== Testing Self-Reflection WITH Tools ===")
@@ -62,12 +65,12 @@ def test_self_reflection_with_tools():
         
         assert result, "Self-reflection with tools failed to produce a result."
         print("\n✅ SUCCESS: Self-reflection with tools is working!")
-        return result
         
     except Exception as e:
         print(f"\n❌ ERROR: {str(e)}")
         raise AssertionError(f"Test with tools failed: {str(e)}")
 
+@pytest.mark.live
 def test_self_reflection_without_tools():
     """Test self-reflection without tools - should work (baseline)"""
     print("\n=== Testing Self-Reflection WITHOUT Tools ===")
@@ -103,7 +106,6 @@ def test_self_reflection_without_tools():
         
         assert result, "Self-reflection without tools failed to produce a result."
         print("\n✅ SUCCESS: Self-reflection without tools is working!")
-        return result
         
     except Exception as e:
         print(f"\n❌ ERROR: {str(e)}")
@@ -114,7 +116,7 @@ if __name__ == "__main__":
     
     # Test without tools (should work)
     try:
-        result_without_tools = test_self_reflection_without_tools()
+        test_self_reflection_without_tools()
         without_tools_success = True
     except Exception as e:
         print(f"Test without tools failed: {e}")
@@ -122,7 +124,7 @@ if __name__ == "__main__":
     
     # Test with tools (should work after fix)
     try:
-        result_with_tools = test_self_reflection_with_tools()
+        test_self_reflection_with_tools()
         with_tools_success = True
     except Exception as e:
         print(f"Test with tools failed: {e}")

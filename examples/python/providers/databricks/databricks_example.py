@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with Databricks
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="databricks/databricks-llama-3.1-8b-instruct",
+    model="databricks/databricks-llama-3.1-8b-instruct",
 )
 
 # Example conversation

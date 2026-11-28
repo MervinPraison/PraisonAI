@@ -553,7 +553,9 @@ def validate_dependencies(
     return False
 
 
-def release(version: str, use_frozen_lock: bool = False, no_add_all: bool = False):
+def release(
+    version: str, use_frozen_lock: bool = False, no_add_all: bool = False, *, smoke_wheel: bool = False
+):
     """Run the release process."""
     root = get_project_root()
     praisonai_dir = get_praisonai_dir()
@@ -585,6 +587,9 @@ def release(version: str, use_frozen_lock: bool = False, no_add_all: bool = Fals
     # 3. uv build
     print("\n🔨 Running uv build...")
     run(["uv", "build"], cwd=praisonai_dir)
+    if smoke_wheel:
+        script = root / ".github/scripts/smoke-pypi-wheel.sh"
+        run(["bash", str(script), "praisonai", version], cwd=praisonai_dir)
     
     # 4. Git add and commit
     print("\n📝 Committing changes...")
@@ -857,6 +862,12 @@ Examples:
         help="Do NOT run 'git add -A'. Instead, only stage explicitly updated release files."
     )
     
+    parser.add_argument(
+        "--smoke-wheel",
+        action="store_true",
+        help="Verify a fresh wheel install and an upgrade before committing the release"
+    )
+
     args = parser.parse_args()
     
     # Validate version format
@@ -1040,7 +1051,10 @@ Examples:
         sys.exit(1)
     
     # Run release
-    release(args.version, use_frozen_lock=patch_release, no_add_all=args.no_add_all)
+    release(
+        args.version, use_frozen_lock=patch_release, no_add_all=args.no_add_all,
+        smoke_wheel=args.smoke_wheel,
+    )
 
 
 if __name__ == "__main__":

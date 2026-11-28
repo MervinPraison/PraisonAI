@@ -36,7 +36,7 @@ agent = Agent(
         "embedder": config["embedder"],
     },
     memory={"user_id": "user1"},
-    llm="deepseek-r1"
+    model="deepseek-r1"
 )
 
 agent.start("What is KAG in one line?") # Retrieval

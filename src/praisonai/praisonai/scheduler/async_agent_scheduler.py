@@ -270,7 +270,7 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
 
             # Start background task
             self._task = asyncio.create_task(
-                self._run_schedule(ticker, max_retries)
+                self._run_schedule(ticker, max_retries, wait_for_interval=run_immediately)
             )
             
             logger.info("Async agent scheduler started successfully")
@@ -387,27 +387,28 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
     # surfaces return the same dict shape (incl. runtime_seconds /
     # cost_per_execution) and read the delivery counters under the delivery lock.
     
-    async def _run_schedule(self, ticker: "ScheduleTicker", max_retries: int):
+    async def _run_schedule(
+        self, ticker: "ScheduleTicker", max_retries: int, *, wait_for_interval: bool = False
+    ):
         """Internal method to run scheduled agent executions.
 
         For a wall-clock cron schedule this sleeps until the next real
         occurrence (running once immediately if a slot was already missed
-        during downtime); for a plain interval it sleeps the fixed interval —
-        preserving the previous behaviour.
+        during downtime). A plain schedule waits the fixed interval after each
+        execution, including one performed by start().
         """
         try:
             self._ensure_async_primitives()
             while not self._stop_event.is_set():
-                # For cron, sleep until the next wall-clock slot *before*
-                # running (unless a missed slot is already due → catch up once).
-                if ticker.is_cron and not ticker.is_due():
+                should_wait = not ticker.is_due() if ticker.is_cron else wait_for_interval
+                if should_wait:
                     delay = ticker.seconds_until_next()
-                    logger.info(f"Next execution in {delay:.0f} seconds (cron)")
+                    logger.info(f"Next execution in {delay:.0f} seconds")
                     try:
                         await asyncio.wait_for(self._stop_event.wait(), timeout=delay)
                         break  # Stop event was set
                     except asyncio.TimeoutError:
-                        pass  # Slot reached
+                        pass  # Schedule reached
                     if self._stop_event.is_set():
                         break
 
@@ -421,19 +422,7 @@ class AsyncAgentScheduler(_BaseAgentScheduler):
                 self._last_run_at = ticker.last_run_at
 
                 await self._execute_with_retry(max_retries)
-
-                if ticker.is_cron:
-                    # Loop back: the top of the loop computes the next slot.
-                    continue
-
-                # Interval schedule: wait the fixed interval then run again.
-                interval = ticker.seconds_until_next()
-                logger.info(f"Next execution in {interval:.0f} seconds ({interval/3600:.1f} hours)")
-                try:
-                    await asyncio.wait_for(self._stop_event.wait(), timeout=interval)
-                    break  # Stop event was set
-                except asyncio.TimeoutError:
-                    continue  # Timeout reached, continue with next execution
+                wait_for_interval = True
         finally:
             self.is_running = False
     

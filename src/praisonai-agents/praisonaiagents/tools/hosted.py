@@ -24,7 +24,7 @@ is why they are dicts and not FunctionTools, and why the LLM layer forwards
 them untouched.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 __all__ = [
     "HOSTED_TOOL_TYPES",
@@ -109,11 +109,69 @@ def FileSearchTool(
     return spec
 
 
+_SECRET_KEYS = frozenset({"authorization", "authorization_token"})
+ANTHROPIC_MCP_BETA_HEADER = "mcp-client-2025-11-20"
+
+
+class _HostedToolSpec(dict):
+    """Dict for a hosted MCP tool whose secret fields are redacted in repr/str."""
+
+    def __repr__(self) -> str:
+        if not any(k in self for k in _SECRET_KEYS):
+            return super().__repr__()
+        return repr({k: ("***" if k in _SECRET_KEYS else v) for k, v in self.items()})
+
+    __str__ = __repr__
+
+    def copy(self) -> "_HostedToolSpec":
+        return _HostedToolSpec(self)
+
+    def to_openai_dict(self) -> Dict[str, Any]:
+        return hosted_mcp_to_openai(self)
+
+    def to_anthropic_dict(self) -> Dict[str, Any]:
+        return hosted_mcp_to_anthropic(self)
+
+
+def hosted_mcp_to_openai(spec: Dict[str, Any]) -> Dict[str, Any]:
+    """Serialize a hosted MCP tool spec to OpenAI Responses ``mcp`` format."""
+    out = _HostedToolSpec()
+    for k, v in spec.items():
+        if v is None or (k == "authorization" and not v):
+            continue
+        out[k] = list(v) if k == "allowed_tools" else (bool(v) if k == "defer_loading" else v)
+    return out
+
+
+def hosted_mcp_to_anthropic(spec: Dict[str, Any]) -> Dict[str, Any]:
+    """Serialize a hosted MCP tool spec to Anthropic ``mcp_servers`` + ``mcp_toolset``."""
+    name = spec.get("server_label") or "mcp_server"
+    server = _HostedToolSpec(type="url", url=spec["server_url"], name=name)
+    auth = spec.get("authorization")
+    if auth:
+        server["authorization_token"] = auth[7:] if isinstance(auth, str) and auth.startswith("Bearer ") else auth
+
+    toolset: Dict[str, Any] = {"type": "mcp_toolset", "mcp_server_name": name}
+    default_config: Dict[str, Any] = {}
+    if spec.get("allowed_tools") is not None:
+        default_config["enabled"] = False
+        if spec["allowed_tools"]:
+            toolset["configs"] = {t: {"enabled": True} for t in spec["allowed_tools"]}
+    if spec.get("defer_loading") is not None:
+        default_config["defer_loading"] = bool(spec["defer_loading"])
+    if default_config:
+        toolset["default_config"] = default_config
+    return {"mcp_server": server, "mcp_toolset": toolset}
+
+
 def HostedMCPTool(
     *,
     server_url: str,
     server_label: str = "mcp_server",
-    require_approval: str = "never",
+    require_approval: Optional[Union[str, Dict[str, Any]]] = "never",
+    authorization: Optional[str] = None,
+    allowed_tools: Optional[List[str]] = None,
+    defer_loading: Optional[bool] = None,
 ) -> Dict[str, Any]:
     """An MCP server the PROVIDER connects to, not this process.
 
@@ -121,9 +179,12 @@ def HostedMCPTool(
     """
     if not server_url:
         raise ValueError("HostedMCPTool needs a server_url: the provider connects to it, not this process.")
-    return {
+    return hosted_mcp_to_openai({
         "type": "mcp",
         "server_label": server_label,
         "server_url": server_url,
         "require_approval": require_approval,
-    }
+        "authorization": authorization,
+        "allowed_tools": allowed_tools,
+        "defer_loading": defer_loading,
+    })

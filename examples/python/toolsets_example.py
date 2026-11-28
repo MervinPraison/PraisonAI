@@ -48,7 +48,7 @@ def demo_agent_with_toolsets():
         goal="Research topics thoroughly using web tools",
         instructions="You are a research specialist with access to web search and file tools.",
         toolsets=["research"],  # includes web tools + file tools
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     print(f"Research agent has {len(researcher.tools)} tools available")
@@ -61,7 +61,7 @@ def demo_agent_with_toolsets():
         goal="Help users safely without risky operations",
         instructions="You are a helpful assistant with access to only safe, read-only tools.",
         toolsets=["safe"],
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     print(f"\nSafe agent has {len(safe_agent.tools)} tools available")
@@ -87,7 +87,7 @@ def demo_custom_toolsets():
         goal="Analyze data files and generate reports",
         instructions="You specialize in data analysis. Read files, process data, and write reports.",
         toolsets=["data_analysis"],
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     print(f"Data analyst has {len(analyst.tools)} tools available")
@@ -106,7 +106,7 @@ def demo_mixed_tools_and_toolsets():
         instructions="You can research topics and perform custom analysis tasks.",
         tools=["write_file"],  # Explicit tool
         toolsets=["research"],  # Toolset with web + file tools
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     print(f"Hybrid agent has {len(hybrid_agent.tools)} tools available")
@@ -127,7 +127,7 @@ def demo_multi_agent_with_toolsets():
         role="Research Specialist",
         goal="Research topics and gather information",
         toolsets=["research"],
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     writer = Agent(
@@ -135,7 +135,7 @@ def demo_multi_agent_with_toolsets():
         role="Content Writer",  
         goal="Write content based on research",
         toolsets=["safe"],  # Safe tools for writing
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # Create tasks for each agent

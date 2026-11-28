@@ -47,7 +47,7 @@ assistant = Agent(
     name="assistant",
     instructions="""You are a helpful assistant that responds to messages 
     from users on messaging platforms. Be friendly and concise.""",
-    llm="gpt-4o-mini"
+    model="gpt-4o-mini"
 )
 
 if __name__ == "__main__":

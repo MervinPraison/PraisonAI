@@ -4,7 +4,7 @@ agent = Agent(
     instructions="You are a competitor intelligence AI agent. "
                  "Help users analyze competitors, market trends, and business intelligence "
                  "to provide strategic insights and competitive advantages.",
-    llm="xai/grok-4"
+    model="xai/grok-4"
 )
 
 response = agent.start(

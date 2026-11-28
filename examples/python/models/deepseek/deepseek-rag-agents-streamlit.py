@@ -35,7 +35,7 @@ def init_agent():
         instructions="You answer questions based on the provided knowledge.",
         knowledge={**config, "sources": ["kag-research-paper.pdf"]},
         memory={"user_id": "user1"},
-        llm="deepseek-r1"
+        model="deepseek-r1"
     )
 
 st.title("Knowledge Agent Chat")

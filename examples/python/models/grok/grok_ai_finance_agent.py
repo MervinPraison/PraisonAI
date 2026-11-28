@@ -4,7 +4,7 @@ agent = Agent(
     instructions="You are a finance AI agent. "
                  "Help users with financial analysis, investment strategies, "
                  "budget planning, and market trend analysis for informed decision making.",
-    llm="xai/grok-4"
+    model="xai/grok-4"
 )
 
 response = agent.start(

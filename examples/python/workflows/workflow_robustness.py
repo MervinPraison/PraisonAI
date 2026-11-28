@@ -21,7 +21,7 @@ def main():
         role="Research Expert",
         goal="Find accurate information",
         instructions="Research topics thoroughly and provide accurate information.",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     enricher = Agent(
@@ -29,7 +29,7 @@ def main():
         role="Data Enricher",
         goal="Add additional context to research",
         instructions="Enrich research with additional context and examples.",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     writer = Agent(
@@ -37,7 +37,7 @@ def main():
         role="Content Writer",
         goal="Create engaging content",
         instructions="Write clear, engaging content based on research.",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # Create tasks with robustness features
@@ -111,7 +111,7 @@ def example_with_conditional():
         role="Quality Scorer",
         goal="Score content quality",
         instructions="Analyze content and return a quality score from 0-100.",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     approver = Agent(
@@ -119,7 +119,7 @@ def example_with_conditional():
         role="Content Approver",
         goal="Approve high-quality content",
         instructions="Approve the content for publication.",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     improver = Agent(
@@ -127,7 +127,7 @@ def example_with_conditional():
         role="Content Improver",
         goal="Improve low-quality content",
         instructions="Suggest improvements for the content.",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # Workflow with conditional branching

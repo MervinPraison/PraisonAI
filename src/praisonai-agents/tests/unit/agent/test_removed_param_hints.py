@@ -9,7 +9,8 @@ import pytest
 
 from praisonaiagents import Agent
 from praisonaiagents.config.feature_configs import (
-    CachingConfig, ExecutionConfig, OutputConfig, ReflectionConfig, TemplateConfig, WebConfig,
+    CachingConfig, ExecutionConfig, MemoryConfig, OutputConfig, ReflectionConfig, TemplateConfig,
+    WebConfig,
 )
 
 REPLACEMENTS = {
@@ -26,6 +27,15 @@ REPLACEMENTS = {
     "max_iter": ("execution=", ExecutionConfig, "max_iter"),
     "temperature": ("model=", None, "temperature"),
     "max_tokens": ("model=", None, "max_tokens"),
+    # Grouped into the same config objects; their errors gave no hint.
+    "prompt_template": ("templates=", TemplateConfig, "prompt"),
+    "response_template": ("templates=", TemplateConfig, "response"),
+    "use_system_prompt": ("templates=", TemplateConfig, "use_system_prompt"),
+    "prompt_caching": ("caching=", CachingConfig, "prompt_caching"),
+    "web_fetch": ("web=", WebConfig, "fetch"),
+    "max_retry_limit": ("execution=", ExecutionConfig, "max_retry_limit"),
+    "max_execution_time": ("execution=", ExecutionConfig, "max_execution_time"),
+    "user_id": ("memory=", MemoryConfig, "user_id"),
 }
 
 

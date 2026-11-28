@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with Moonshot AI
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="moonshot/moonshot-v1-8k",
+    model="moonshot/moonshot-v1-8k",
 )
 
 # Example conversation

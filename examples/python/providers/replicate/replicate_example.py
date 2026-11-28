@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with Replicate
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="replicate/meta/llama-3.1-8b-instruct",
+    model="replicate/meta/llama-3.1-8b-instruct",
 )
 
 # Example conversation

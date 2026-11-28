@@ -58,6 +58,9 @@ def embedding(
         'input': input,
         'encoding_format': encoding_format,
         'timeout': timeout,
+        # Ollama and others reject encoding_format; let litellm drop what the
+        # provider does not support instead of failing the call.
+        'drop_params': True,
     }
     
     if dimensions:
@@ -127,6 +130,9 @@ async def aembedding(
         'input': input,
         'encoding_format': encoding_format,
         'timeout': timeout,
+        # Ollama and others reject encoding_format; let litellm drop what the
+        # provider does not support instead of failing the call.
+        'drop_params': True,
     }
     
     if dimensions:

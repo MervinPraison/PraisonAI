@@ -4,7 +4,7 @@ agent = Agent(
     instructions="You are a recruitment AI agent. "
                  "Help users with candidate screening, job posting optimization, "
                  "and recruitment process automation to find the best talent.",
-    llm="xai/grok-4"
+    model="xai/grok-4"
 )
 
 response = agent.start(

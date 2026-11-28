@@ -19,7 +19,7 @@ import { getEnv } from '../openaiClientOptions';
 
 interface GeminiContent {
   role: 'user' | 'model';
-  parts: Array<{ text?: string; functionCall?: any; functionResponse?: any }>;
+  parts: Array<{ text?: string; functionCall?: any; functionResponse?: any; thoughtSignature?: string }>;
 }
 
 export class GoogleProvider extends BaseProvider {
@@ -85,6 +85,7 @@ export class GoogleProvider extends BaseProvider {
               name: part.functionCall.name,
               arguments: JSON.stringify(part.functionCall.args || {}),
             },
+            thoughtSignature: part.thoughtSignature,
           });
         }
       }
@@ -168,6 +169,7 @@ export class GoogleProvider extends BaseProvider {
                       name: part.functionCall.name,
                       arguments: JSON.stringify(part.functionCall.args || {}),
                     },
+                    thoughtSignature: part.thoughtSignature,
                   });
                 }
               }
@@ -291,6 +293,8 @@ export class GoogleProvider extends BaseProvider {
               name: tc.function.name,
               args: JSON.parse(tc.function.arguments),
             },
+            // Gemini 3 rejects the next turn if the signature is not sent back
+            thoughtSignature: tc.thoughtSignature,
           });
         }
         result.push({ role: 'model', parts });

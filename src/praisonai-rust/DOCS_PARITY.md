@@ -31,7 +31,7 @@ This report compares **Rust SDK feature categories** against **Rust documentatio
 | ✅ Citations | 2 | 1 | 71 |
 | ✅ Code Execution | 5 | 1 | 104 |
 | ✅ Conditions | 1 | 1 | 132 |
-| ✅ Configuration | 2 | 1 | 130 |
+| ✅ Configuration | 2 | 1 | 128 |
 | ✅ Context Management | 21 | 1 | 83 |
 | ✅ Criteria | 4 | 1 | 70 |
 | ✅ Database | 2 | 1 | 198 |
@@ -49,10 +49,10 @@ This report compares **Rust SDK feature categories** against **Rust documentatio
 | ✅ Handoffs | 13 | 1 | 276 |
 | ✅ Hooks | 12 | 1 | 339 |
 | ✅ Image | 4 | 1 | 85 |
-| ✅ Knowledge | 12 | 1 | 146 |
+| ✅ Knowledge | 12 | 1 | 150 |
 | ✅ LLM | 10 | 1 | 151 |
 | ✅ Loops | 7 | 1 | 134 |
-| ✅ MCP | 11 | 1 | 196 |
+| ✅ MCP | 11 | 1 | 200 |
 | ✅ Memory | 11 | 1 | 273 |
 | ✅ OCR | 5 | 1 | 70 |
 | ✅ Optimizer | 1 | 1 | 317 |
@@ -90,7 +90,7 @@ This report compares **Rust SDK feature categories** against **Rust documentatio
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ CLI (1 docs, 123 lines)
+- ℹ️ CLI (1 docs, 122 lines)
 
 ---
 

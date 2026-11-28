@@ -86,3 +86,32 @@ def test_help_does_not_advertise_an_unsupported_transport():
     flat = " ".join(result.output.split())
     assert "http-stream" not in flat
     assert "stdio, sse" in flat
+
+
+def test_named_server_keeps_each_arg_intact(transport_calls, monkeypatch):
+    """`serve mcp --name X --transport sse` builds the client through the shared
+    config builder, so an argument with a space stays one argument."""
+    import praisonai_code.cli.configuration.loader as loader_mod
+
+    built = []
+    fake = sys.modules["praisonaiagents.mcp"]
+
+    class FakeMCP:
+        @classmethod
+        def from_config(cls, entry, name=None):
+            built.append((name, entry))
+            return types.SimpleNamespace(get_tools=lambda: [])
+
+    fake.MCP = FakeMCP
+    server = types.SimpleNamespace(command="npx", args=["-y", "pkg", "/my docs"], env={"K": "v"})
+    config = types.SimpleNamespace(mcp=types.SimpleNamespace(servers={"docs": server}))
+    monkeypatch.setattr(loader_mod, "get_config_loader",
+                        lambda: types.SimpleNamespace(load=lambda: config))
+
+    from praisonai_code.cli.commands.serve import app
+
+    result = runner.invoke(app, ["mcp", "--name", "docs", "--transport", "sse"])
+    assert result.exit_code == 0, result.output
+    assert built == [("docs", {"command": "npx", "args": ["-y", "pkg", "/my docs"],
+                               "env": {"K": "v"}, "timeout": 60})]
+    assert transport_calls == ["sse"]

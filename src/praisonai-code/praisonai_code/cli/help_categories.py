@@ -96,10 +96,14 @@ COMMAND_CATEGORIES: dict[str, str] = {
     "recipe": CATEGORY_TOOLS,
     "workflow": CATEGORY_TOOLS,
     "mcp": CATEGORY_TOOLS,
+    "connectors": CATEGORY_TOOLS,
     "connect": CATEGORY_TOOLS,
     "browser": CATEGORY_TOOLS,
     "browser-tool": CATEGORY_TOOLS,
     "commit": CATEGORY_TOOLS,
+    "ship": CATEGORY_TOOLS,
+    "steward": CATEGORY_TOOLS,
+    "approvals": CATEGORY_TOOLS,
     "docs": CATEGORY_TOOLS,
 
     # Serve & integrate — servers, gateways, deployment, integrations.
@@ -141,6 +145,7 @@ COMMAND_CATEGORIES: dict[str, str] = {
     "train": CATEGORY_ADVANCED,
     "tracker": CATEGORY_ADVANCED,
     "audit": CATEGORY_ADVANCED,
+    "decisions": CATEGORY_ADVANCED,
     "managed": CATEGORY_ADVANCED,
     "plugins": CATEGORY_ADVANCED,
     "sandbox": CATEGORY_ADVANCED,

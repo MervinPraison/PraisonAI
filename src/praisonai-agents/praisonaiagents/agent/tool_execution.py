@@ -942,8 +942,16 @@ class ToolExecutionMixin:
                                             rule_name,
                                         )
                                         continue
-                                except Exception:  # pragma: no cover
-                                    logger.debug("Could not look up existing policy %r", rule_name, exc_info=True)
+                                except Exception:
+                                    # Fail closed: if we cannot tell whether a user
+                                    # policy has this name, adding the plugin rule
+                                    # could overwrite it, so skip the rule.
+                                    logger.warning(
+                                        "Skipping plugin policy %r: could not check for "
+                                        "an existing policy with that name.",
+                                        rule_name, exc_info=True,
+                                    )
+                                    continue
                             if rule_name is not None and rule_name in existing:
                                 logger.warning(
                                     "Skipping duplicate plugin policy %r.",
@@ -2573,6 +2581,7 @@ class ToolExecutionMixin:
         if mode_decision is not None:
             return mode_decision
         manager_forces_approval = self._permission_manager_requires_approval(tool_name)
+        mcp_risk = self._mcp_tool_approval_risk(tool_name)
 
         backend = getattr(self, '_approval_backend', None)
         approve_all = getattr(self, '_approve_all_tools', False)
@@ -2597,6 +2606,7 @@ class ToolExecutionMixin:
                 or tool_name in DEFAULT_DANGEROUS_TOOLS
                 or registry_required
                 or manager_forces_approval  # explicit PermissionManager ``ask`` rule
+                or bool(mcp_risk)  # MCP tool annotations / per-server approval override
                 or (trust_level == "external")  # External tools need approval
             )
             if needs_approval:
@@ -2655,6 +2665,7 @@ class ToolExecutionMixin:
                     arguments=tool_args,
                     risk_level=(
                         approval_registry.get_risk_level(tool_name, getattr(self, 'name', None))
+                        or mcp_risk
                         or DEFAULT_DANGEROUS_TOOLS.get(tool_name, "medium")
                     ),
                     agent_name=getattr(self, 'name', None),
@@ -2795,18 +2806,20 @@ class ToolExecutionMixin:
             if is_async:
                 return get_approval_registry().approve_async(
                     getattr(self, 'name', None), tool_name, tool_args,
-                    force=manager_forces_approval,
+                    force=manager_forces_approval or bool(mcp_risk),
                     auto_approve_scope=auto_approve_scope,
                     scope_id=auto_approve_scope,
                     liveness=self._current_turn_liveness(),
+                    risk_level=mcp_risk,
                 )
             else:
                 return get_approval_registry().approve_sync(
                     getattr(self, 'name', None), tool_name, tool_args,
-                    force=manager_forces_approval,
+                    force=manager_forces_approval or bool(mcp_risk),
                     auto_approve_scope=auto_approve_scope,
                     scope_id=auto_approve_scope,
                     liveness=self._current_turn_liveness(),
+                    risk_level=mcp_risk,
                 )
 
     def _doom_loop_approved(self, function_name, arguments, verdict) -> bool:
@@ -3057,19 +3070,39 @@ class ToolExecutionMixin:
 
         return None
 
+    def _mcp_tool_approval_risk(self, tool_name: str) -> Optional[str]:
+        """Return annotation/override-derived risk level for an active MCP tool, or None."""
+        if not hasattr(self, "tools") and not self._turn_scope_tools():
+            return None
+        for name, tool in self._iter_active_named_tools():
+            if name == tool_name or getattr(tool, "__name__", None) == tool_name:
+                risk = getattr(tool, "_approval_risk_level", None)
+                if risk is not None:
+                    return risk
+                if getattr(tool, "_mcp_approval_mode", None) == "never":
+                    return None
+                ann = getattr(tool, "annotations", None)
+                if ann is not None:
+                    flag = ann.get("destructiveHint") if isinstance(ann, dict) else getattr(ann, "destructiveHint", None)
+                    if flag is True:
+                        return "high"
+        return None
+
     def _tool_would_prompt(self, function_name) -> bool:
         """Return ``True`` when *function_name* would trigger an approval prompt.
 
         Mirrors the ``needs_approval`` criteria in ``_resolve_approval_decision``
         so ``DONT_ASK`` and ``PLAN`` see the same set of prompt-worthy tools:
         an explicit ``ask`` rule, a built-in dangerous tool, a registry-required
-        tool, or an ``external`` trust level.
+        tool, an MCP annotation/override requirement, or an ``external`` trust level.
         """
         try:
             from ..approval.registry import DEFAULT_DANGEROUS_TOOLS
             if function_name in DEFAULT_DANGEROUS_TOOLS:
                 return True
             if self._permission_manager_requires_approval(function_name):
+                return True
+            if self._mcp_tool_approval_risk(function_name):
                 return True
             from ..approval import get_approval_registry
             if get_approval_registry().is_required(
@@ -4010,6 +4043,13 @@ class ToolExecutionMixin:
                         return run_async_in_sync_context(value)
                     return value
 
+                from ..approval import get_approval_registry
+                _approval_scope = getattr(self, "_approval_scope_id", None) or getattr(self, "name", None)
+
+                def _invoke_approved(target, kw):
+                    with get_approval_registry().active_scope(_approval_scope):
+                        return _resolve_result(target(**kw))
+
                 # BaseTool instances (plugin system) - call run() method
                 from ..tools.base import BaseTool
                 if isinstance(func, BaseTool):
@@ -4021,7 +4061,7 @@ class ToolExecutionMixin:
                     keyed_arguments = _with_durable_key(sig_target, arguments)
                     casted_arguments = self._cast_arguments(sig_target, keyed_arguments)
                     bind_arguments = casted_arguments
-                    return _resolve_result(func.run(**casted_arguments))
+                    return _invoke_approved(func.run, casted_arguments)
                 
                 # Langchain: If it's a class with run but not _run, instantiate and call run
                 if inspect.isclass(func) and hasattr(func, 'run') and not hasattr(func, '_run'):
@@ -4035,7 +4075,7 @@ class ToolExecutionMixin:
                     from ..tools.injected import inject_into_plain_callable
                     casted_params = inject_into_plain_callable(instance.run, casted_params)
                     bind_arguments = casted_params
-                    return _resolve_result(instance.run(**casted_params))
+                    return _invoke_approved(instance.run, casted_params)
 
                 # CrewAI: If it's a class with an _run method, instantiate and call _run
                 elif inspect.isclass(func) and hasattr(func, '_run'):
@@ -4049,7 +4089,7 @@ class ToolExecutionMixin:
                     from ..tools.injected import inject_into_plain_callable
                     casted_params = inject_into_plain_callable(instance._run, casted_params)
                     bind_arguments = casted_params
-                    return _resolve_result(instance._run(**casted_params))
+                    return _invoke_approved(instance._run, casted_params)
 
                 # Otherwise treat as regular function
                 elif callable(func):
@@ -4059,7 +4099,7 @@ class ToolExecutionMixin:
                     from ..tools.injected import inject_into_plain_callable
                     casted_arguments = inject_into_plain_callable(func, casted_arguments)
                     bind_arguments = casted_arguments
-                    return _resolve_result(func(**casted_arguments))
+                    return _invoke_approved(func, casted_arguments)
             except Exception as e:
                 error_msg = str(e)
                 logger.error(f"Error executing tool {function_name}: {error_msg}")

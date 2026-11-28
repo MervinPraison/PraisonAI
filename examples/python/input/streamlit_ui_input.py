@@ -106,7 +106,7 @@ if st.button("🚀 Submit", type="primary", use_container_width=True):
                         goal=f"Answer: {user_query}",
                         backstory="Knowledgeable assistant with configurable capabilities",
                         tools=[duckduckgo] if use_tools else [],
-                        llm={
+                        model={
                             "model": model,
                             "temperature": temperature
                         }

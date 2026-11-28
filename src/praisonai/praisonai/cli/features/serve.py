@@ -24,6 +24,10 @@ from typing import Any, Dict, List, Optional
 _MAX_QUERY_CHARS = 32_000
 
 
+class ServeArgumentError(ValueError):
+    """Raised when ``praisonai serve`` options cannot be parsed."""
+
+
 def _query_from_body(body: Any) -> str:
     """Extract a bounded ``query``/``message`` string from a JSON request body."""
     from fastapi import HTTPException
@@ -177,7 +181,11 @@ class ServeHandler:
         }
         
         if command in commands:
-            return commands[command](remaining)
+            try:
+                return commands[command](remaining)
+            except ServeArgumentError as e:
+                self._print_error(str(e))
+                return self.EXIT_VALIDATION_ERROR
         else:
             self._print_error(f"Unknown command: {command}")
             self._print_help()
@@ -271,31 +279,38 @@ Launch PraisonAI servers with unified discovery support.
             print(f"✓ {message}")
     
     def _parse_args(self, args: List[str], spec: Dict[str, Any]) -> Dict[str, Any]:
-        """Parse command arguments based on spec."""
-        result = {k: v.get("default") for k, v in spec.items()}
-        
-        i = 0
-        while i < len(args):
-            arg = args[i]
-            
-            if arg.startswith("--"):
-                key = arg[2:].replace("-", "_")
-                if key in spec:
-                    if spec[key].get("flag"):
-                        result[key] = True
-                    elif i + 1 < len(args):
-                        value = args[i + 1]
-                        # Type conversion
-                        if spec[key].get("type") == "int":
-                            value = int(value)
-                        result[key] = value
-                        i += 1
-                i += 1
-            else:
-                i += 1
-        
+        """Parse and validate ``--key value`` and ``--key=value`` options."""
+        result = {key: details.get("default") for key, details in spec.items()}
+        tokens = iter(args)
+        for arg in tokens:
+            if not arg.startswith("--"):
+                raise ServeArgumentError("unexpected positional argument")
+
+            name, separator, value = arg[2:].partition("=")
+            key = name.replace("-", "_")
+            if key not in spec:
+                raise ServeArgumentError(f"unrecognized option: --{name}")
+            option = spec[key]
+            if option.get("flag"):
+                if separator:
+                    raise ServeArgumentError(f"option --{name} does not take a value")
+                result[key] = True
+                continue
+
+            if not separator:
+                value = next(tokens, None)
+                if value is None or value.startswith("--"):
+                    raise ServeArgumentError(f"option --{name} expects a value")
+            if option.get("type") == "int":
+                try:
+                    value = int(value)
+                except ValueError:
+                    raise ServeArgumentError(
+                        f"option --{name}: invalid int value: {value!r}"
+                    ) from None
+            result[key] = value
         return result
-    
+
     def cmd_agents(self, args: List[str]) -> int:
         """Launch agents as HTTP API."""
         spec = {
@@ -588,6 +603,9 @@ Launch PraisonAI servers with unified discovery support.
             "host": {"default": self.DEFAULT_HOST},
             "port": {"default": self.DEFAULT_PORT, "type": "int"},
             "recipe": {"default": None},
+            # Preserve the legacy options advertised by the wrapper and Code CLI.
+            "config": {"default": None},
+            "preload": {"flag": True, "default": False},
             "reload": {"flag": True, "default": False},
         }
         parsed = self._parse_args(args, spec)
@@ -623,19 +641,18 @@ Launch PraisonAI servers with unified discovery support.
         print("[yellow]'praisonai serve mcp' is deprecated and will be removed in a future version.[/yellow]", file=sys.stderr)
         print("[yellow]Please use 'praisonai mcp serve' instead.[/yellow]\n", file=sys.stderr)
         
+        spec = {
+            "host": {"default": self.DEFAULT_HOST},
+            "port": {"default": 8080, "type": "int"},
+            "transport": {"default": "http-stream"},
+        }
+        parsed = self._parse_args(args, spec)
+
         # Redirect to new MCP server CLI
         try:
             from praisonai.mcp_server.cli import handle_mcp_command
-            
-            # Convert args to new format
+
             new_args = ["serve"]
-            spec = {
-                "host": {"default": self.DEFAULT_HOST},
-                "port": {"default": 8080, "type": "int"},
-                "transport": {"default": "http-stream"},
-            }
-            parsed = self._parse_args(args, spec)
-            
             new_args.extend(["--host", parsed["host"]])
             new_args.extend(["--port", str(parsed["port"])])
             new_args.extend(["--transport", parsed["transport"]])
@@ -658,18 +675,17 @@ Launch PraisonAI servers with unified discovery support.
         print("[yellow]'praisonai serve tools' is deprecated and will be removed in a future version.[/yellow]", file=sys.stderr)
         print("[yellow]Please use 'praisonai mcp serve' instead.[/yellow]\n", file=sys.stderr)
         
+        spec = {
+            "host": {"default": self.DEFAULT_HOST},
+            "port": {"default": 8080, "type": "int"},
+        }
+        parsed = self._parse_args(args, spec)
+
         # Redirect to new MCP server CLI
         try:
             from praisonai.mcp_server.cli import handle_mcp_command
-            
-            # Convert args to new format
+
             new_args = ["serve"]
-            spec = {
-                "host": {"default": self.DEFAULT_HOST},
-                "port": {"default": 8080, "type": "int"},
-            }
-            parsed = self._parse_args(args, spec)
-            
             new_args.extend(["--host", parsed["host"]])
             new_args.extend(["--port", str(parsed["port"])])
             new_args.extend(["--transport", "http-stream"])

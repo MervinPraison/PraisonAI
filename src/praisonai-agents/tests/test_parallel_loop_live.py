@@ -9,10 +9,13 @@ This demonstrates the parallel loop pattern works correctly by:
 """
 
 import time
+
+import pytest
 from praisonaiagents.workflows import Workflow, loop
 from praisonaiagents import Agent
 
 
+@pytest.mark.live
 def test_parallel_loop_execution():
     """Test parallel loop executes items concurrently."""
     
@@ -50,9 +53,10 @@ def test_parallel_loop_execution():
     print(f"\n✅ Parallel loop completed in {duration:.2f}s")
     print(f"   Output preview: {str(result)[:200]}...")
     
-    return result
+    assert result is not None
 
 
+@pytest.mark.live
 def test_sequential_vs_parallel():
     """Compare sequential vs parallel loop execution."""
     

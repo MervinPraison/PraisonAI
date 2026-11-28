@@ -71,7 +71,12 @@ def acp_main(
         args.extend(["--profile", profile])
     
     try:
-        from praisonai_code.cli.features.acp import run_acp_command
+        # The ACP handler stays in the praisonai wrapper (its dependency
+        # `praisonai.acp.serve` lives there), so reach it through the wrapper
+        # bridge, the same pattern used for `recipe` in legacy/praison_ai.py.
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+
+        run_acp_command = import_wrapper_module("praisonai.cli.features.acp").run_acp_command
         exit_code = run_acp_command(args)
         raise typer.Exit(exit_code)
     except ImportError as e:

@@ -1,0 +1,29 @@
+# Copy this file to .praisonai/approvals.yml on your default branch.
+# OpenShip loads approval policy from the default branch so a PR cannot
+# weaken its own rules.
+
+mode: observe  # Switch to "enforce" once your team has verified rule matches
+
+protected_paths:
+  - ".praisonai/approvals.yml"
+  - ".github/workflows/**"
+
+rules:
+  - name: core-source
+    paths:
+      - "src/**"
+    seats: 1
+    checks:
+      - "unit-tests"
+
+  - name: security-sensitive
+    paths:
+      - "security/**"
+      - "**/auth/**"
+    seats: 2
+    reviewers:
+      - "alice"
+      - "bob"
+    checks:
+      - "unit-tests"
+      - "security-scan"

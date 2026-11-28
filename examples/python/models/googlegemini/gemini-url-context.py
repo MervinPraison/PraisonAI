@@ -28,7 +28,7 @@ def main():
         Use the URL Context tool to access and analyze content from provided URLs.
         Provide detailed summaries, extract key information, and answer questions about the content.""",
         
-        llm="gemini/gemini-2.0-flash",
+        model="gemini/gemini-2.0-flash",
         
         # Enable URL Context internal tool
         tools=[{"urlContext": {}}])

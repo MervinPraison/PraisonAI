@@ -1,6 +1,6 @@
 [project]
 name = "praisonai-code"
-version = "0.2.0"
+version = "0.2.3"
 description = "Agentic terminal CLI for PraisonAI — the terminal-native agent (run, chat, code, runtime, cli backends) extracted from the praisonai wrapper."
 readme = "README.md"
 license = {text = "MIT"}
@@ -22,12 +22,20 @@ dependencies = [
     "toml>=0.10.2",
 ]
 
+[project.optional-dependencies]
+ui = [
+    "aiui>=0.3.109",
+]
+
 [project.urls]
 Homepage = "https://docs.praison.ai"
 Repository = "https://github.com/mervinpraison/PraisonAI"
 
 [project.scripts]
 praisonai-code = "praisonai_code.__main__:main"
+
+[project.entry-points."praisonaiui.plugins"]
+openship = "praisonai_code.ship.ui_plugin:plugin"
 
 [tool.uv.sources]
 praisonaiagents = { path = "../praisonai-agents" }

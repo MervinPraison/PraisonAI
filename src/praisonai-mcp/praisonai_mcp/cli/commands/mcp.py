@@ -4,7 +4,8 @@ MCP command group for PraisonAI CLI.
 Provides MCP (Model Context Protocol) server management.
 """
 
-from typing import Optional
+from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 
 import typer
 
@@ -37,6 +38,37 @@ def _require_code() -> None:
     if not code_available():
         typer.echo(_CONFIG_INSTALL_HINT, err=True)
         raise typer.Exit(1)
+
+
+def _server_entry(srv_config, timeout: int, remote_cls=None) -> dict:
+    """Build a config-builder entry dict from an MCPLocalConfig or MCPRemoteConfig."""
+    is_remote = (
+        (remote_cls is not None and isinstance(srv_config, remote_cls))
+        or bool(getattr(srv_config, "url", None))
+    )
+    entry = {"enabled": getattr(srv_config, "enabled", True), "timeout": timeout}
+    if is_remote:
+        entry["url"] = srv_config.url
+        if getattr(srv_config, "headers", None):
+            entry["headers"] = dict(srv_config.headers)
+        oauth = getattr(srv_config, "oauth", None)
+        if oauth:
+            if isinstance(oauth, (bool, dict)):
+                entry["oauth"] = oauth
+            else:
+                oauth_dict = {
+                    k: v for k, v in (
+                        ("client_id", getattr(oauth, "client_id", None)),
+                        ("scopes", getattr(oauth, "scopes", None)),
+                    ) if v
+                }
+                entry["oauth"] = oauth_dict or True
+    else:
+        entry["command"] = srv_config.command
+        entry["args"] = list(getattr(srv_config, "args", None) or [])
+        if getattr(srv_config, "env", None):
+            entry["env"] = dict(srv_config.env)
+    return entry
 
 
 @app.command("list")
@@ -97,39 +129,60 @@ def mcp_list(
 @app.command("add")
 def mcp_add(
     name: str = typer.Argument(..., help="Server name"),
-    command: str = typer.Argument(..., help="Command to run"),
+    command: Optional[str] = typer.Argument(None, help="Command to run (stdio servers)"),
     args: Optional[str] = typer.Option(None, "--args", "-a", help="Command arguments (space-separated)"),
     env: Optional[str] = typer.Option(None, "--env", "-e", help="Environment variables (KEY=VALUE,...)"),
+    url: Optional[str] = typer.Option(None, "--url", "-u", help="Remote MCP server URL (http/https/ws/wss)"),
+    header: Optional[List[str]] = typer.Option(None, "--header", "-H", help="HTTP header (KEY=VALUE, repeatable)"),
+    oauth: bool = typer.Option(False, "--oauth", help="Enable OAuth 2.1 authentication"),
+    allow: Optional[List[str]] = typer.Option(None, "--allow", help="Allowed tool names (comma-separated or repeatable)"),
 ):
-    """Add an MCP server."""
+    """Add a local (stdio) or remote (HTTP/SSE/WebSocket) MCP server."""
     _require_code()
     output = get_output_controller()
     loader = get_config_loader()
-    
-    # Parse args
-    arg_list = args.split() if args else []
-    
-    # Parse env
-    env_dict = {}
-    if env:
-        for pair in env.split(","):
+
+    if url and (command or args):
+        output.print_error("Cannot combine --url with a stdio command or --args")
+        raise typer.Exit(1)
+    if not url and not command:
+        output.print_error("Provide either a stdio <command> or --url <URL>")
+        raise typer.Exit(1)
+
+    allowed_tools = [t.strip() for item in (allow or []) for t in item.split(",") if t.strip()]
+    if url:
+        clean_url = url.strip()
+        parsed = urlparse(clean_url)
+        if parsed.scheme.lower() not in ("http", "https", "ws", "wss") or not parsed.netloc:
+            output.print_error(f"Invalid MCP URL '{url}': expected http://, https://, ws://, or wss://")
+            raise typer.Exit(1)
+        headers_dict: Dict[str, str] = {}
+        for pair in header or []:
+            if "=" not in pair or not pair.split("=", 1)[0].strip():
+                output.print_error(f"Invalid --header '{pair}': expected KEY=VALUE")
+                raise typer.Exit(1)
+            k, v = pair.split("=", 1)
+            headers_dict[k.strip()] = v.strip()
+        server_config: Dict[str, Any] = {"type": "remote", "url": clean_url, "enabled": True}
+        if headers_dict:
+            server_config["headers"] = headers_dict
+        if oauth:
+            server_config["oauth"] = True
+    else:
+        arg_list = args.split() if args else []
+        env_dict = {}
+        for pair in (env.split(",") if env else []):
             if "=" in pair:
-                key, value = pair.split("=", 1)
-                env_dict[key.strip()] = value.strip()
-    
-    # Build server config
-    server_config = {
-        "command": command,
-        "args": arg_list,
-        "env": env_dict,
-        "enabled": True,
-    }
-    
-    # Save to config
+                k, v = pair.split("=", 1)
+                env_dict[k.strip()] = v.strip()
+        server_config = {"command": command, "args": arg_list, "env": env_dict, "enabled": True}
+    if allowed_tools:
+        server_config["allowed_tools"] = allowed_tools
+
     loader.set(f"mcp.servers.{name}", server_config)
-    
     if output.is_json_mode:
-        output.print_json({"added": name, "config": server_config})
+        safe_cfg = {**server_config, "headers": list(server_config["headers"])} if "headers" in server_config else server_config
+        output.print_json({"added": name, "config": safe_cfg})
     else:
         output.print_success(f"Added MCP server: {name}")
 
@@ -176,127 +229,120 @@ def mcp_remove(
         output.print_success(f"Removed MCP server: {name}")
 
 
+@app.command("import")
+def mcp_import(
+    editor: Optional[str] = typer.Argument(None, help="Editor id (e.g. cursor, claude-desktop, claude-code, vscode, codex)"),
+    file: Optional[str] = typer.Option(None, "--file", "-f", help="Explicit config file path to import (read-only)"),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview servers without modifying config"),
+    overwrite: bool = typer.Option(False, "--overwrite", help="Overwrite existing server entries"),
+):
+    """Import MCP servers from an editor config file (read-only on the editor file)."""
+    _require_code()
+    output = get_output_controller()
+    if not editor and not file:
+        output.print_error("Provide an editor id (e.g. cursor, claude-desktop, codex) or --file PATH")
+        raise typer.Exit(1)
+
+    from pathlib import Path
+    from praisonaiagents.mcp.loader import parse_mcp_servers
+    from praisonai_mcp.connect import catalog, config_io
+
+    try:
+        client = catalog.get_client(editor) if editor else None
+        path = Path(file).expanduser() if file else catalog.config_path(client, Path.home())
+        if path is None:
+            raise config_io.ConfigError(f"{client.label} has no config file; pass --file PATH instead.")
+        data = config_io.load_file(path, fmt=None if file else catalog.file_format(client))
+        node = config_io._servers(data, client, create=False) if client is not None else None
+        has_std = any(isinstance(data.get(k), dict) for k in ("mcpServers", "servers", "mcp_servers")) or (
+            isinstance(data.get("mcp"), dict) and isinstance(data["mcp"].get("servers"), dict)
+        )
+        servers = parse_mcp_servers(node if isinstance(node, dict) else (data if (client is None or has_std) else {}))
+    except (KeyError, config_io.ConfigError, ValueError) as exc:
+        output.print_error(str(exc))
+        raise typer.Exit(1)
+
+    resolved, cwd = path.resolve(), Path.cwd().resolve()
+    project_level = file is not None and (resolved == cwd or cwd in resolved.parents)
+    blocked: List[str] = []
+    if project_level and servers:
+        from praisonaiagents.mcp.trust import drop_untrusted_mcp_servers
+        filtered = drop_untrusted_mcp_servers(servers, str(path))
+        blocked = [k for k in servers if k not in filtered]
+        servers = filtered
+        if blocked:
+            getattr(output, "print_warning", output.print_info)(
+                f"Project-level file {path}: skipped untrusted server(s): {', '.join(blocked)}"
+            )
+
+    loader = get_config_loader()
+    existing = set(loader.load().mcp.servers.keys())
+    imported, skipped = [], []
+    for name, entry in servers.items():
+        if name in existing and not overwrite:
+            skipped.append(name)
+            continue
+        stored: Dict[str, Any] = {**entry, "enabled": entry.get("enabled", True), "type": "remote" if "url" in entry else "local"}
+        if stored["type"] == "local":
+            stored.setdefault("args", [])
+            stored.setdefault("env", {})
+        if not dry_run:
+            loader.set(f"mcp.servers.{name}", stored)
+        imported.append(name)
+
+    if output.is_json_mode:
+        output.print_json({"source": str(path), "dry_run": dry_run, "project_level": project_level, "imported": imported, "skipped": skipped, "blocked": blocked})
+        return
+    if not imported and not skipped and not blocked:
+        output.print_info(f"No MCP servers found in {path}")
+    if imported:
+        output.print_success(f"{'Would import' if dry_run else 'Imported'} {len(imported)} MCP server(s) from {path}: {', '.join(imported)}")
+    if skipped:
+        output.print_info(f"Skipped {len(skipped)} existing server(s) (use --overwrite): {', '.join(skipped)}")
+
+
 @app.command("test")
 def mcp_test(
     name: str = typer.Argument(..., help="Server name to test"),
     timeout: float = typer.Option(10.0, "--timeout", "-t", help="Timeout in seconds"),
 ):
-    """Test an MCP server connection."""
+    """Test an MCP server connection using a real initialize + tools/list handshake."""
     _require_code()
-    schema = configuration_schema()
-    MCPLocalConfig, MCPRemoteConfig = schema.MCPLocalConfig, schema.MCPRemoteConfig
-    
+    MCPRemoteConfig = configuration_schema().MCPRemoteConfig
     output = get_output_controller()
     loader = get_config_loader()
-    
+
     config = loader.load()
     if name not in config.mcp.servers:
         output.print_error(f"Server not found: {name}")
         raise typer.Exit(1)
-    
+
     server = config.mcp.servers[name]
-    
-    if isinstance(server, MCPRemoteConfig):
-        # Test remote server
+    from praisonai_mcp.connect import probe
+    from praisonai_mcp.connect.catalog import ServerSpec
+
+    if isinstance(server, MCPRemoteConfig) or bool(getattr(server, "url", None)):
         output.print_info(f"Testing remote MCP server: {name}")
         output.print(f"  URL: {server.url}")
-        
-        try:
-            import httpx
-            
-            # Simple HTTP probe to check if server is reachable
-            with httpx.Client(timeout=timeout) as client:
-                response = client.get(server.url)
-                
-                if response.status_code == 200:
-                    if output.is_json_mode:
-                        output.print_json({"name": name, "status": "ok", "message": "Remote server reachable"})
-                    else:
-                        output.print_success(f"Remote server '{name}' is reachable")
-                else:
-                    if output.is_json_mode:
-                        output.print_json({"name": name, "status": "error", "message": f"HTTP {response.status_code}"})
-                    else:
-                        output.print_error(f"Remote server returned HTTP {response.status_code}")
-                        raise typer.Exit(1)
-        except ImportError:
-            if output.is_json_mode:
-                output.print_json({"name": name, "status": "error", "message": "httpx not available for remote testing"})
-            else:
-                output.print_error("httpx package not available. Install with: pip install httpx")
-                raise typer.Exit(1)
-        except typer.Exit:
-            # Let typer.Exit propagate, don't catch it
-            raise
-        except Exception as e:
-            if output.is_json_mode:
-                output.print_json({"name": name, "status": "error", "message": str(e)})
-            else:
-                output.print_error(f"Failed to connect to remote server: {e}")
-                raise typer.Exit(1)
+        hdrs = dict(server.headers) if getattr(server, "headers", None) else None
+        spec = ServerSpec(name=name, url=server.url, headers=hdrs)
     else:
-        # Test local server
         output.print_info(f"Testing local MCP server: {name}")
         output.print(f"  Command: {server.command} {' '.join(server.args)}")
-        
-        # Try to start the server and check if it responds
-        import subprocess
-        import time
-        
-        try:
-            cmd = [server.command] + server.args
-            # Fix environment inheritance - merge with current env instead of replacing
-            env = None
-            if server.env:
-                import os
-                env = {**os.environ, **server.env}
-            
-            # Start process
-            proc = subprocess.Popen(
-                cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env=env,
-            )
-            
-            # Wait briefly and check if it's running
-            time.sleep(0.5)
-            
-            if proc.poll() is None:
-                # Process is running
-                proc.terminate()
-                try:
-                    proc.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait()
-                
-                if output.is_json_mode:
-                    output.print_json({"name": name, "status": "ok", "message": "Server started successfully"})
-                else:
-                    output.print_success(f"Server '{name}' started successfully")
-            else:
-                # Process exited
-                stderr = proc.stderr.read().decode() if proc.stderr else ""
-                if output.is_json_mode:
-                    output.print_json({"name": name, "status": "error", "message": stderr or "Server exited immediately"})
-                else:
-                    output.print_error(f"Server exited immediately: {stderr}")
-                    raise typer.Exit(1)
-        
-        except FileNotFoundError:
-            if output.is_json_mode:
-                output.print_json({"name": name, "status": "error", "message": f"Command not found: {server.command}"})
-            else:
-                output.print_error(f"Command not found: {server.command}")
-                raise typer.Exit(1)
-        except Exception as e:
-            if output.is_json_mode:
-                output.print_json({"name": name, "status": "error", "message": str(e)})
-            else:
-                output.print_error(f"Test failed: {e}")
-                raise typer.Exit(1)
+        spec = ServerSpec(name=name, command=server.command, args=tuple(server.args or ()))
+
+    result = probe.verify(spec, timeout=timeout)
+    if result.ok:
+        if output.is_json_mode:
+            output.print_json({"name": name, "status": "ok", "tools": result.tools, "server": result.server})
+        else:
+            output.print_success(f"MCP server '{name}' OK ({result.tools} tool(s))")
+    else:
+        if output.is_json_mode:
+            output.print_json({"name": name, "status": "error", "message": result.error})
+        else:
+            output.print_error(f"MCP server '{name}' failed: {result.error}")
+        raise typer.Exit(1)
 
 
 @app.command("sync")
@@ -328,34 +374,24 @@ def mcp_sync(
     failed_servers = []
     
     for srv in servers_to_sync:
-        output.print_info(f"Syncing {srv}...")
         srv_config = config.mcp.servers[srv]
+        if not getattr(srv_config, "enabled", True):
+            output.print_info(f"Skipping disabled server: {srv}")
+            continue
+        output.print_info(f"Syncing {srv}...")
         
         mcp = None
         try:
-            # Import schema types for checking
-            schema = configuration_schema()
-            MCPLocalConfig, MCPRemoteConfig = schema.MCPLocalConfig, schema.MCPRemoteConfig
-            # Actually connect to MCP server and fetch tools
+            MCPRemoteConfig = configuration_schema().MCPRemoteConfig
+            if isinstance(srv_config, MCPRemoteConfig) and not srv_config.url:
+                output.print_error(f"  Remote server {srv} has no URL configured")
+                failed_servers.append(srv)
+                continue
             from praisonaiagents.mcp import MCP
-            
-            # Handle different server types
-            if isinstance(srv_config, MCPRemoteConfig):
-                # Remote server - connect via URL
-                if not srv_config.url:
-                    output.print_error(f"  Remote server {srv} has no URL configured")
-                    failed_servers.append(srv)
-                    continue
-                    
-                # Create MCP instance for remote server
-                mcp = MCP(srv_config.url, timeout=int(timeout))
-            else:
-                # Local server - use command
-                cmd_parts = [srv_config.command] + srv_config.args
-                cmd_string = " ".join(cmd_parts)
-                
-                # Create MCP instance with env vars
-                mcp = MCP(cmd_string, timeout=int(timeout), env=srv_config.env or {})
+
+            # Shared builder: URL validation, SSE header rule, and arg list intact.
+            # Keep expand_env=False (default): ConfigLoader merges user and project files.
+            mcp = MCP.from_config(_server_entry(srv_config, int(timeout), MCPRemoteConfig), name=srv)
             
             # Get tools
             tools = mcp.get_tools()
@@ -604,10 +640,9 @@ def mcp_run(
             mcp = None
             try:
                 from praisonaiagents.mcp import MCP
-                
-                # Build command string
-                cmd_string = " ".join(cmd)
-                mcp = MCP(cmd_string, timeout=60, env=server.env or {})
+
+                # Shared builder keeps arguments intact; expand_env stays False.
+                mcp = MCP.from_config(_server_entry(server, 60), name=name)
                 
                 # Get tools and expose via SSE
                 tools = mcp.get_tools()

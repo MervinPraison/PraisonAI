@@ -2,7 +2,7 @@ from praisonaiagents import Agent, MCP
 
 search_agent = Agent(
     instructions="""You help book apartments on Airbnb.""",
-    llm="gpt-4o-mini",
+    model="gpt-4o-mini",
     tools=MCP("npx -y @openbnb/mcp-server-airbnb --ignore-robots-txt")
 )
 

@@ -6,8 +6,8 @@
 from praisonaiagents import Agent, AgentTeam, Task
 from praisonai.replay import watch
 
-researcher = Agent(name="Researcher", instructions="Give 3 short facts.", llm="gpt-4o-mini")
-writer = Agent(name="Writer", instructions="Write one short paragraph from the facts.", llm="gpt-4o-mini")
+researcher = Agent(name="Researcher", instructions="Give 3 short facts.", model="gpt-4o-mini")
+writer = Agent(name="Writer", instructions="Write one short paragraph from the facts.", model="gpt-4o-mini")
 team = AgentTeam(
     agents=[researcher, writer],
     tasks=[

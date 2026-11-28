@@ -194,27 +194,40 @@ def discover_class(tree: ast.Module, init_first_param: str) -> Optional[str]:
     return None
 
 
+def _is_overload(node: ast.AST) -> bool:
+    """Return True when a function/method AST node is a typing @overload stub."""
+    if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return False
+    for dec in node.decorator_list:
+        if (isinstance(dec, ast.Name) and dec.id == 'overload') or (
+            isinstance(dec, ast.Attribute) and dec.attr == 'overload'
+        ):
+            return True
+    return False
+
+
 def _find_function(
     tree: ast.Module, class_name: Optional[str], function: str,
 ) -> Tuple[Optional[ast.AST], Optional[str]]:
     """
     Locate ``function``. With ``class_name`` look only inside that class; without
     it, take the first module-level function or method (source order) with that
-    name. Closures nested inside function bodies are never considered.
+    name. Typing ``@overload`` stubs are skipped in favour of the implementation.
+    Closures nested inside function bodies are never considered.
     """
     if class_name is not None:
         for node in tree.body:
             if isinstance(node, ast.ClassDef) and node.name == class_name:
                 for item in node.body:
-                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == function:
+                    if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == function and not _is_overload(item):
                         return item, class_name
         return None, None
     for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function and not _is_overload(node):
             return node, None
         if isinstance(node, ast.ClassDef):
             for item in node.body:
-                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == function:
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name == function and not _is_overload(item):
                     return item, node.name
     return None, None
 

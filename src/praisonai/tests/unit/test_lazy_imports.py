@@ -169,22 +169,46 @@ class TestLazyImports(unittest.TestCase):
         """Test that praisonai package meets < 200ms import target."""
         # This is the critical performance test per AGENTS.md
         
-        # Clear any cached modules that might affect timing
-        praisonai_modules = [m for m in sys.modules.keys() if m.startswith('praisonai')]
-        for module in praisonai_modules:
-            if 'test' not in module:  # Don't remove test modules
+        # Clear any cached modules that might affect timing. The prefix also
+        # matches every praisonaiagents module, so the originals are put back
+        # afterwards: later tests in this worker hold references to them (a
+        # patch.object on a module they imported must reach the live code).
+        def _ours(name):
+            return name.startswith('praisonai') and 'test' not in name  # Don't remove test modules
+
+        saved = {m: sys.modules[m] for m in list(sys.modules) if _ours(m)}
+        for module in saved:
+            del sys.modules[module]
+        try:
+            start_time = time.time()
+
+            # Import the main package
+            import praisonai
+
+            total_import_time = time.time() - start_time
+        finally:
+            for module in [m for m in sys.modules if _ours(m)]:
                 del sys.modules[module]
-        
-        start_time = time.time()
-        
-        # Import the main package
-        import praisonai
-        
-        total_import_time = time.time() - start_time
-        
+            sys.modules.update(saved)
+
         # Must meet AGENTS.md performance requirement
         self.assertLess(total_import_time, 0.2,
             f"Package import took {total_import_time:.3f}s, exceeds 200ms target")
+
+
+    def test_import_timing_restores_the_modules_it_cleared(self):
+        """The timing test must not leave fresh copies of core modules behind.
+
+        Later tests patch modules they imported at load time; a stale copy made
+        `require_bind_token` look uncalled in test_wrapper_server_binds (CI).
+        """
+        from praisonaiagents.agent import launch_security
+
+        try:
+            self.test_package_import_performance_target()
+        except AssertionError:
+            pass  # the 200ms budget is asserted by its own test, not here
+        self.assertIs(sys.modules["praisonaiagents.agent.launch_security"], launch_security)
 
 
 if __name__ == '__main__':

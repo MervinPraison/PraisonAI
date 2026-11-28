@@ -72,6 +72,8 @@ def test_agentserver_without_token_stays_open():
 # ── A2A ──────────────────────────────────────────────────────────────────────
 
 def _a2a_client():
+    pytest.importorskip("fastapi")
+    pytest.importorskip("httpx")  # required by fastapi.testclient
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
 
@@ -121,6 +123,7 @@ def _sse_status(app, auth):
 
 
 def test_mcp_sse_middleware_uses_constant_time(monkeypatch, digest_calls):
+    pytest.importorskip("starlette")
     from starlette.applications import Starlette
     from starlette.responses import PlainTextResponse
     from starlette.routing import Route

@@ -364,3 +364,44 @@ class TestLazyLoadingPreserved:
         
         # litellm should NOT be loaded
         assert 'litellm' not in sys.modules, "litellm should not be loaded on EmbeddingResult import"
+
+
+class TestUnsupportedParamsDropped:
+    """Ollama and other providers reject ``encoding_format``.
+
+    ``embedding("x", model="ollama/nomic-embed-text")`` raised
+    ``UnsupportedParamsError`` unless an LLM had already set litellm's global
+    ``drop_params``; every call now asks litellm to drop what the provider
+    does not support. A caller can still pass ``drop_params=False``.
+    """
+
+    @staticmethod
+    def _response():
+        item = Mock()
+        item.embedding = [0.1]
+        return Mock(data=[item], usage=Mock(prompt_tokens=1, total_tokens=1))
+
+    @patch('litellm.embedding')
+    def test_sync_drops_unsupported_params(self, mock_litellm):
+        from praisonaiagents.embedding import embedding
+
+        mock_litellm.return_value = self._response()
+        embedding("x", model="ollama/nomic-embed-text")
+        assert mock_litellm.call_args.kwargs["drop_params"] is True
+
+    @patch('litellm.embedding')
+    def test_caller_can_turn_it_off(self, mock_litellm):
+        from praisonaiagents.embedding import embedding
+
+        mock_litellm.return_value = self._response()
+        embedding("x", drop_params=False)
+        assert mock_litellm.call_args.kwargs["drop_params"] is False
+
+    @pytest.mark.asyncio
+    @patch('litellm.aembedding')
+    async def test_async_drops_unsupported_params(self, mock_aembedding):
+        from praisonaiagents.embedding import aembedding
+
+        mock_aembedding.return_value = self._response()
+        await aembedding("x", model="ollama/nomic-embed-text")
+        assert mock_aembedding.call_args.kwargs["drop_params"] is True

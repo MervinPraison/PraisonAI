@@ -38,7 +38,7 @@ def main():
         1. Use the sequential thinking tool to analyze it step by step
         2. Provide clear, actionable steps
         3. Explain your reasoning at each step""",
-        llm="openai/gpt-4o-mini",
+        model="openai/gpt-4o-mini",
         tools=sequential_mcp
     )
     

@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 166" width="880" height="166" role="img" aria-label="OpenShip turns a feature branch into a reviewed, CI-green draft PR — on any LLM or local Ollama — and never merges.">
+<style>.bgr{fill:#0d1117}
+.eb{font:500 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9198a1;letter-spacing:.12em}
+.ebA{font:600 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#e0b25a;letter-spacing:.12em}
+.h1{font:650 22px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#e6edf3}
+.h2{font:600 15px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#e6edf3}
+.tx{font:400 13px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#c9d1d9}
+.sm{font:400 12px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#9198a1}
+.mono{font:500 12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#e6edf3}
+.pill{fill:#161b22;stroke:#3d444d;stroke-width:1}
+.pillHi{fill:#2d2716;stroke:#e0b25a;stroke-width:1.2}
+.card{fill:#161b22;stroke:#e6edf3;stroke-width:1.4}
+.soft{fill:#1c2128;stroke:#3d444d;stroke-width:1}
+.dash{fill:none;stroke:#e0b25a;stroke-width:1.4;stroke-dasharray:6 6}
+.wire{fill:none;stroke:#3d444d;stroke-width:1.4}
+.flow{fill:none;stroke:#e0b25a;stroke-width:1.6;stroke-dasharray:4 10;animation:flow 1.6s linear infinite}
+.flowR{fill:none;stroke:#e0b25a;stroke-width:1.6;stroke-dasharray:4 10;animation:flowR 1.6s linear infinite}
+.okb{fill:#1f3326} .okt{font:600 11px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#8fc39b}
+.acb{fill:#3a2f1a} .act{font:600 11px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#e0b25a}
+.dot{fill:#e0b25a}
+@keyframes flow{to{stroke-dashoffset:-28}}
+@keyframes flowR{to{stroke-dashoffset:28}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+
+.box{fill:#161b22;stroke:#e6edf3;stroke-width:1.4}
+.boxHi{fill:#2d2716;stroke:#e0b25a;stroke-width:1.6}
+.boxBack{fill:#161b22;stroke:#e38d7f;stroke-width:1.6;stroke-dasharray:4 3}
+.back{fill:none;stroke:#e38d7f;stroke-width:1.6;stroke-dasharray:6 6;animation:flowR 1.6s linear infinite}
+.bt{font:600 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#e38d7f;letter-spacing:.08em}
+.num{font:650 12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#e0b25a}
+</style>
+<rect class="bgr" x="0" y="0" width="880" height="166" rx="12"/>
+<text class="eb" x="20" y="24">OPENSHIP · POWERED BY PRAISONAI</text>
+<rect class="box" x="20.0" y="48" width="189.0" height="98" rx="10"/>
+<text class="h2" x="114.5" y="74" text-anchor="middle">01 praisonai ship</text>
+<text class="sm" x="114.5" y="114" text-anchor="middle">Secret guard, AI PR text,</text>
+<text class="sm" x="114.5" y="130" text-anchor="middle">draft PR</text>
+<rect class="box" x="237.0" y="48" width="189.0" height="98" rx="10"/>
+<text class="h2" x="331.5" y="74" text-anchor="middle">02 Self-Review</text>
+<text class="sm" x="331.5" y="114" text-anchor="middle">Lockfile-filtered diff,</text>
+<text class="sm" x="331.5" y="130" text-anchor="middle">typed findings</text>
+<path class="flow" d="M211.0 97.0 H235.0"/>
+<rect class="boxHi" x="454.0" y="48" width="189.0" height="98" rx="10"/>
+<text class="h2" x="548.5" y="74" text-anchor="middle">03 PR Steward</text>
+<text class="sm" x="548.5" y="114" text-anchor="middle">Fix CI, conflicts &amp;</text>
+<text class="sm" x="548.5" y="130" text-anchor="middle">threads (3-try cap)</text>
+<path class="flow" d="M428.0 97.0 H452.0"/>
+<rect class="box" x="671.0" y="48" width="189.0" height="98" rx="10"/>
+<text class="h2" x="765.5" y="74" text-anchor="middle">04 Approvals &amp; You</text>
+<text class="h2" x="765.5" y="92" text-anchor="middle">Merge</text>
+<text class="sm" x="765.5" y="114" text-anchor="middle">.praisonai/approvals.yml;</text>
+<text class="sm" x="765.5" y="130" text-anchor="middle">human merges</text>
+<path class="flow" d="M645.0 97.0 H669.0"/>
+</svg>
