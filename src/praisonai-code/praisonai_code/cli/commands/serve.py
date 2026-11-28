@@ -364,7 +364,12 @@ def serve_acp(
     output = get_output_controller()
     
     try:
-        from praisonai_code.cli.features.acp import ACPHandler
+        # The ACP handler stays in the praisonai wrapper (its dependency
+        # `praisonai.acp.serve` lives there), so reach it through the wrapper
+        # bridge, the same pattern used for `recipe` in legacy/praison_ai.py.
+        from praisonai_code._wrapper_bridge import import_wrapper_module
+
+        ACPHandler = import_wrapper_module("praisonai.cli.features.acp").ACPHandler
         args_list = ["--workspace", workspace, "--agent", agent]
         if model:
             args_list.extend(["--model", model])
