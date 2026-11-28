@@ -258,14 +258,19 @@ def create_openai_llm_fn(
     return llm_fn
 
 
+_ANTHROPIC_DEFAULT_MODEL = "claude-sonnet-5-5"
+
+
 def create_anthropic_llm_fn(
-    model: str = "claude-sonnet-5-5",
+    model: str = _ANTHROPIC_DEFAULT_MODEL,
     api_key: Optional[str] = None,
     max_tokens: int = 4096,
     **kwargs
 ) -> Callable[[List[Dict]], str]:
     """
     Create an LLM function using the Anthropic SDK.
+
+    Claude Sonnet 5.5 rejects temperature, top_p, and top_k.
     
     Args:
         model: Anthropic model name
@@ -276,6 +281,11 @@ def create_anthropic_llm_fn(
     Returns:
         LLM function compatible with LiteAgent
     """
+    if model == _ANTHROPIC_DEFAULT_MODEL and any(
+        param in kwargs for param in ("temperature", "top_p", "top_k")
+    ):
+        raise ValueError(f"{model} does not support sampling parameters")
+
     def llm_fn(messages: List[Dict]) -> str:
         try:
             import anthropic
