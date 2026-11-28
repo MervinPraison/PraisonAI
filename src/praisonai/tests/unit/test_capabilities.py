@@ -777,10 +777,11 @@ class TestNewCapabilities:
     def test_messages_create_rejects_unsupported_sonnet_55_sampling(self, sampling):
         from unittest.mock import MagicMock, patch
         from praisonai.capabilities.messages import messages_create
+        from praisonaiagents.errors import ValidationError
 
         litellm = MagicMock()
         with patch.dict("sys.modules", {"litellm": litellm}):
-            with pytest.raises(ValueError, match="does not support sampling"):
+            with pytest.raises(ValidationError, match="does not support sampling"):
                 messages_create([{"role": "user", "content": "Hello"}], **sampling)
 
         litellm.completion.assert_not_called()

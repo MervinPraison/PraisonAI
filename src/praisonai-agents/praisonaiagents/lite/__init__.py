@@ -284,7 +284,12 @@ def create_anthropic_llm_fn(
     if model == _ANTHROPIC_DEFAULT_MODEL and any(
         param in kwargs for param in ("temperature", "top_p", "top_k")
     ):
-        raise ValueError(f"{model} does not support sampling parameters")
+        from ..errors import ValidationError
+
+        raise ValidationError(
+            f"{model} does not support sampling parameters. "
+            "Omit temperature, top_p, and top_k or select another model."
+        )
 
     def llm_fn(messages: List[Dict]) -> str:
         try:

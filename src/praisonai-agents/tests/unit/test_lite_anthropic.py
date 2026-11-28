@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from praisonaiagents.errors import ValidationError
 from praisonaiagents.lite import create_anthropic_llm_fn
 
 
@@ -29,7 +30,7 @@ def test_default_model_and_leading_thinking_block():
 def test_sonnet_55_rejects_sampling_before_calling_provider(sampling):
     anthropic = MagicMock()
     with patch.dict(sys.modules, {"anthropic": anthropic}):
-        with pytest.raises(ValueError, match="does not support sampling"):
+        with pytest.raises(ValidationError, match="does not support sampling"):
             create_anthropic_llm_fn(api_key="k", **sampling)(
                 [{"role": "user", "content": "hi"}]
             )

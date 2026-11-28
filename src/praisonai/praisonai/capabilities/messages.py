@@ -21,7 +21,12 @@ def _message_model_options(
         if temperature not in (None, 1.0) or any(
             kwargs.get(param) is not None for param in ("top_p", "top_k")
         ):
-            raise ValueError(f"{_DEFAULT_MODEL} does not support sampling parameters")
+            from praisonaiagents.errors import ValidationError
+
+            raise ValidationError(
+                f"{_DEFAULT_MODEL} does not support sampling parameters. "
+                "Omit temperature, top_p, and top_k or select another model."
+            )
         # Older supported LiteLLM releases need the explicit provider route.
         return {"model": _ANTHROPIC_MODEL}
     return {"model": model, "temperature": temperature}
