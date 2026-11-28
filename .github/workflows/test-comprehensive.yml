@@ -30,6 +30,7 @@ jobs:
     env:
       PRAISONAI_ALLOW_NETWORK: '0'
       PRAISONAI_LIVE_TESTS: '0'
+      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
       OPENAI_API_KEY: 'sk-not-a-real-key'
       OPENAI_MODEL_NAME: gpt-4o-mini
     strategy:
@@ -62,6 +63,12 @@ jobs:
         use-uv: "true"
         agents-extras: ".[knowledge]"
         wrapper-extras: ".[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
+
+    - name: Install the TypeScript parser for parity fixtures
+      if: contains(fromJSON('["all", "unit", "fast", "performance"]'), github.event.inputs.test_type || 'all')
+      run: |
+        npm install --prefix "$RUNNER_TEMP/parity-ts" --no-audit --no-fund typescript@5.7.3
+        echo "PARITY_TS_NODE_MODULES=$RUNNER_TEMP/parity-ts/node_modules" >> "$GITHUB_ENV"
 
     - name: Run Comprehensive Test Suite
       id: comprehensive_tests
