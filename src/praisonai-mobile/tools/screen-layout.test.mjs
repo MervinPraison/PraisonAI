@@ -623,12 +623,13 @@ test("the two speakers are told apart by shape and side, not only by colour", as
     const text = document.querySelector(".row-text");
     const transcript = document.querySelector(".transcript");
     const us = getComputedStyle(user), ts = getComputedStyle(text);
+    const transcriptStyle = getComputedStyle(transcript);
     return {
-      userAlign: us.alignSelf,
+      transcriptRight: transcript.getBoundingClientRect().right
+        - parseFloat(transcriptStyle.paddingRight) - parseFloat(transcriptStyle.borderRightWidth),
       userFilled: ratio(backdrop(user), backdrop(transcript)),
       assistantOwnBackground: parse(ts.backgroundColor).a,
       userRight: user.getBoundingClientRect().right,
-      assistantRight: text.getBoundingClientRect().right,
       userLeft: user.getBoundingClientRect().left,
       assistantLeft: text.getBoundingClientRect().left,
       userCorners: [us.borderTopLeftRadius, us.borderTopRightRadius,
@@ -636,7 +637,10 @@ test("the two speakers are told apart by shape and side, not only by colour", as
     };
   })()`);
 
-  assert.equal(shape.userAlign, "flex-end", "the user's row must hug the trailing edge");
+  assert.ok(
+    Math.abs(shape.userRight - shape.transcriptRight) <= 1,
+    `the user's row ends at ${shape.userRight}, and the transcript ends at ${shape.transcriptRight}`,
+  );
   assert.ok(
     shape.userLeft > shape.assistantLeft + 8,
     `the user's row starts at ${shape.userLeft} and the assistant's at ${shape.assistantLeft}: ` +

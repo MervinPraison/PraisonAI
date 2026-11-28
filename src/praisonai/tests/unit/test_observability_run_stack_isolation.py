@@ -14,8 +14,8 @@ from praisonai.observability import hooks
 
 class TestRunStackIsolation(unittest.TestCase):
     def setUp(self):
-        # Start each test from a clean, empty stack in this context.
-        hooks._run_stack.set(None)
+        token = hooks._run_stack.set(None)
+        self.addCleanup(hooks._run_stack.reset, token)
 
     def test_push_does_not_mutate_a_copied_context(self):
         """A run pushed in a copied context is invisible to the origin context."""

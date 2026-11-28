@@ -1,0 +1,25 @@
+name: Claude Assistant Tests
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/claude*.yml
+      - .github/scripts/claude-owner*
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/claude*.yml
+      - .github/scripts/claude-owner*
+
+permissions:
+  contents: read
+
+jobs:
+  owner-workflow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: python3 .github/scripts/claude-owner-selftest.py

@@ -98,15 +98,15 @@ def _save_toml(path: Path, data: Dict[str, Any]) -> None:
     """Save data to a TOML file."""
     try:
         import tomli_w
-        with open(path, "wb") as f:
-            tomli_w.dump(data, f)
-        return
     except ImportError:
         # toml ships with the CLI and can write nested MCP server tables.
         import toml
 
-        with open(path, "w", encoding="utf-8") as f:
-            toml.dump(data, f)
+        with path.open("w", encoding="utf-8") as file:
+            toml.dump(data, file)
+    else:
+        with path.open("wb") as file:
+            tomli_w.dump(data, file)
 
 
 def _merge_dicts(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:

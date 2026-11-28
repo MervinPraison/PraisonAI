@@ -1,11 +1,19 @@
 """Tests for standardise engine."""
 
+from pathlib import Path
+
+import pytest
+
 from praisonai.standardise.config import StandardiseConfig
 from praisonai.standardise.engine import StandardiseEngine
 
 
 class TestStandardiseEngine:
     """Tests for StandardiseEngine class."""
+
+    @pytest.fixture(autouse=True)
+    def isolated_home(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path))
     
     def test_check_returns_report(self, tmp_path):
         """Test that check returns a valid report."""

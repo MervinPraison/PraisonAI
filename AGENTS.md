@@ -7,27 +7,44 @@ You are working on the PraisonAI project.
 - Be concise and helpful in responses  
 - Test implementation thoroughly
 - Ensure backward compatibility with existing APIs
-- Follow protocol-driven design across the nine Python PyPI packages plus the TypeScript SDK: core protocols in `praisonaiagents/`, agentic terminal CLI in `praisonai-code/`, bots/gateway in `praisonai-bot/`, LLM fine-tuning + agent training in `praisonai-train/`, browser automation in `praisonai-browser/`, MCP server host in `praisonai-mcp/`, sandbox backends in `praisonai-sandbox/`, deployment in `praisonai-deploy/`, integrations/serve/dashboard in the `praisonai/` wrapper, TypeScript/JavaScript SDK in `src/praisonai-ts/` (`npm: praisonai`)
-- **TypeScript review routing:** For TS/JS issues and PRs, read [`src/praisonai-ts/AGENTS.md`](src/praisonai-ts/AGENTS.md) (not just this file). Canonical source is `src/praisonai-ts/` in this monorepo; [MervinPraison/praisonai-js](https://github.com/MervinPraison/praisonai-js) is the npm mirror only (sync: monorepo → praisonai-js via workflow **Sync to praisonai-js**). Do not implement TS fixes in praisonai-js for PraisonAI issues.
-- Preserve old `praisonai.*` import paths via shims when moving code between packages (see §2.3 in `src/praisonai-agents/AGENTS.md`; shim helpers in `src/praisonai/praisonai/cli/_shim.py`)
-- Package boundaries and dependency rules: `ARCHITECTURE.md` §2 (Tier 2 packages must never PyPI-depend on the wrapper; cross-tier access goes through lazy `_*_bridge` modules)
-- Boundary manifests: `src/praisonai/tests/PRAISONAI_BOT_MANIFEST.md` (C9), `src/praisonai/tests/PRAISONAI_TRAIN_MANIFEST.md` (C10), `src/praisonai/tests/PRAISONAI_BROWSER_MANIFEST.md` (C11), `src/praisonai/tests/PRAISONAI_MCP_MANIFEST.md` (C12), `src/praisonai/tests/PRAISONAI_SANDBOX_MANIFEST.md` (C13), `src/praisonai/tests/PRAISONAI_DEPLOY_MANIFEST.md` (C14)
+- Follow protocol-driven design. Use the routing table to find the owning package and [ARCHITECTURE.md](ARCHITECTURE.md) §2 for dependency direction.
+- Preserve old `praisonai.*` imports and CLI entry points when moving code between packages. See §2.3 of the [Python SDK guide](src/praisonai-agents/AGENTS.md) and the [shim helpers](src/praisonai/praisonai/cli/_shim.py).
 - When reviewing a PR or an issue, evaluate whether the change addresses a framework concern or a user goal, and design its surface (params, naming, defaults) accordingly
 - The aim of this package is to stay **lightweight and powerful**. Do a critical review at each stage — when triaging an issue, when planning a fix, and when reviewing/implementing a PR. Reject scope creep for the sake of adding features: if a capability already exists (e.g. via existing Agent params like `instructions`/`backstory`/`tools`/`hooks`/`memory`), prefer it over a new API surface. A change must genuinely strengthen the SDK (simpler, more robust, more user-friendly) — do not add knobs, params, modules, or exports that have no live consumer or that merely duplicate existing behaviour.
 
 ## Issue and PR routing
 
-| Area | Where to implement | AGENTS.md to read | Tests |
-|------|-------------------|-------------------|-------|
-| Python core SDK | `src/praisonai-agents/praisonaiagents/` | `src/praisonai-agents/AGENTS.md` | `pytest` in `src/praisonai-agents/tests/` |
-| Python wrapper / CLI | `src/praisonai/`, `src/praisonai-code/`, etc. | `src/praisonai-agents/AGENTS.md` | `pytest` under `src/praisonai/tests/` |
-| **TypeScript / JavaScript SDK** | **`src/praisonai-ts/`** | **`src/praisonai-ts/AGENTS.md`** | `cd src/praisonai-ts && npm run build && npm test` |
-| Agent-callable tools / new vendor `*_tools.py` | [PraisonAI-Tools](https://github.com/MervinPraison/PraisonAI-Tools) — **not** new modules under `praisonaiagents/tools/` (legacy bundled tools are not precedent) | — | repo tests |
-| Lifecycle plugins | [PraisonAI-Plugins](https://github.com/MervinPraison/PraisonAI-Plugins) | — | repo tests |
-| Documentation | [PraisonAIDocs](https://github.com/MervinPraison/PraisonAIDocs) | — | `nav-check` |
-| Rust SDK | `src/praisonai-rust/` | `src/praisonai-rust/AGENTS.md` | `cargo test` in `src/praisonai-rust/` |
-| Bots / gateway | `src/praisonai-bot/` (wrapper `praisonai.bots`/`gateway` are shims) | `src/praisonai-agents/AGENTS.md` §2.3, §12 | `pytest` in the package's tests |
-| npm mirror (read-only for fixes) | [praisonai-js](https://github.com/MervinPraison/praisonai-js) | mirror of `src/praisonai-ts/AGENTS.md` | CI on praisonai-js |
+Read the [Python SDK guide](src/praisonai-agents/AGENTS.md) for Python changes and the linked manifest when a package boundary is involved. Run the commands below from the listed package directory and run wrapper compatibility tests for any changed legacy entry points. See the Python SDK guide §9 for test isolation and live test requirements.
+
+| Area | Source | Package guidance and validation |
+|------|--------|---------------------------------|
+| Python core SDK and protocols (`praisonaiagents`) | [src/praisonai-agents/](src/praisonai-agents/) | `pytest tests/unit/` |
+| Wrapper, classic CLI, integrations, serve and dashboard (`praisonai`) | [src/praisonai/](src/praisonai/) | `pytest tests/unit/` or the affected suites |
+| Agentic terminal CLI and OpenShip runtime (`praisonai-code`) | [src/praisonai-code/](src/praisonai-code/) | Python SDK guide §2.3 and `pytest tests/unit/` |
+| Bots and gateway (`praisonai-bot`) | [src/praisonai-bot/](src/praisonai-bot/) | Python SDK guide §12, [C9 manifest](src/praisonai/tests/PRAISONAI_BOT_MANIFEST.md), `pytest tests/unit/` |
+| Fine-tuning and agent training (`praisonai-train`) | [src/praisonai-train/](src/praisonai-train/) | [C10 manifest](src/praisonai/tests/PRAISONAI_TRAIN_MANIFEST.md), `pytest tests/unit/` |
+| Browser automation (`praisonai-browser`) | [src/praisonai-browser/](src/praisonai-browser/) | [C11 manifest](src/praisonai/tests/PRAISONAI_BROWSER_MANIFEST.md), `pytest tests/browser/` |
+| MCP server host (`praisonai-mcp`) | [src/praisonai-mcp/](src/praisonai-mcp/) | [C12 manifest](src/praisonai/tests/PRAISONAI_MCP_MANIFEST.md), `pytest tests/unit/ tests/mcp_server/` |
+| Sandbox backends (`praisonai-sandbox`) | [src/praisonai-sandbox/](src/praisonai-sandbox/) | [C13 manifest](src/praisonai/tests/PRAISONAI_SANDBOX_MANIFEST.md), `pytest tests/ -m 'not network and not local_service'` |
+| Deployment (`praisonai-deploy`) | [src/praisonai-deploy/](src/praisonai-deploy/) | [C14 manifest](src/praisonai/tests/PRAISONAI_DEPLOY_MANIFEST.md), `pytest tests/ -m 'not network and not local_service'` |
+| TypeScript and JavaScript SDK (npm `praisonai`) | [src/praisonai-ts/](src/praisonai-ts/) | [TypeScript SDK guide](src/praisonai-ts/AGENTS.md), `npm run build && npm test` |
+| Rust SDK and CLI | [src/praisonai-rust/](src/praisonai-rust/) | [Rust SDK guide](src/praisonai-rust/AGENTS.md), `cargo test --workspace` |
+| Desktop app | [src/praisonai-desktop/](src/praisonai-desktop/) | [Desktop CI](.github/workflows/desktop.yml) and [release checks](.github/workflows/desktop-release.yml) |
+| Mobile app | [src/praisonai-mobile/](src/praisonai-mobile/) | [Mobile CI](.github/workflows/mobile.yml), including the TypeScript SDK build used by the app |
+| Agent-callable tools and new vendor `*_tools.py` | [PraisonAI-Tools](https://github.com/MervinPraison/PraisonAI-Tools) | Add new vendor tools in PraisonAI-Tools. Existing core tools are legacy. Run repo tests. |
+| Lifecycle plugins and optional sandbox extensions | [PraisonAI-Plugins](https://github.com/MervinPraison/PraisonAI-Plugins) | Use `praisonai.plugins` for lifecycle hooks and `praisonai.sandbox` for optional sandbox backends. See the Python SDK guide §6.2 and run the plugin repo tests. |
+| Documentation | [PraisonAIDocs](https://github.com/MervinPraison/PraisonAIDocs) | `nav-check` |
+
+For TS/JS issues and PRs, always read the TypeScript SDK guide. Implement fixes in this monorepo. The **Sync to praisonai-js** workflow updates the [npm mirror](https://github.com/MervinPraison/praisonai-js) from here. Include Mobile CI when changing SDK exports consumed by the app.
+
+## Reviewing a pull request
+
+- Use the review instructions from `main` and record the PR head SHA you reviewed. Read the full diff and the guides for each package it affects.
+- Trace changes to public APIs, dependencies, entry points or shared protocols into the packages and legacy paths that consume them.
+- Report actionable findings with file and line references. List which tests ran, their results and any unavailable checks. A green shard establishes coverage only for the tests it collects.
+- Grade SDK value as **Strong** for a material, evidenced user or framework benefit in the owning package, **Marginal** for a limited or weakly evidenced benefit, or **Insufficient** for duplicate behavior, unjustified API surface, or work in the wrong package. Report merge readiness separately from SDK value.
+- Keep review-only requests read-only. Apply or push fixes only when asked.
+- The repository owner can dispatch **Claude Assistant** from `main`. `review-pr` posts an advisory comment with an SDK value grade (Strong, Marginal, or Insufficient) for the reviewed commit. `fix-issue` can open a draft PR. Supply a `validation` command to run the affected package tests before publication. When the command is omitted, the draft records that package tests are pending.
 
 ## Before you build
 
@@ -44,9 +61,9 @@ Check these before writing code. If a check fails, move the code or drop the cha
 ## Pull request rules
 
 - Base every PR on `main`. Never base a PR on another PR's branch: a child merged into a parent branch does not reach `main`.
-- Keep a PR small: aim for at most 5 non-test files and under 100 non-test lines. Split larger work into steps, each with its own test.
+- Keep PRs small and independently testable. Aim for at most 5 non-test files and fewer than 100 non-test lines added or removed in total.
 - PRs that edit the same lines (for example one sorted import) go in one PR or land one at a time.
-- A non-draft PR may be auto-merged by the merge gate once checks pass. Open as a draft when a human must merge.
+- Maintainers verify checks and reviews for the current head SHA before merging. Open as a draft to hold a PR for human review.
 - Before merging several PRs together, merge them in a scratch worktree and run every touched test file; two green PRs can break `main` together.
 - No feature is removed without a deprecation cycle. Prefer delegate, shim or alias.
 - Guard and ratchet tests (`tests/unit/named_loggers/`, `test_silent_except_ratchet.py`, `tests/unit/contract/`, `tests/unit/security/`, `tools/test_outbound_fetch_guard.py`, `test_tier_dependencies.py`) encode decisions. Fix the code, not the guard.

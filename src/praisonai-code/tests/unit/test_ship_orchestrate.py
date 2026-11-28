@@ -3,6 +3,7 @@
 import subprocess
 
 import pytest
+from rich.text import Text
 from typer.testing import CliRunner
 
 from praisonai_code.ship import ShipResult, ship
@@ -149,8 +150,9 @@ def test_cli_help_and_options_forward_to_ship(monkeypatch):
 
     help_res = CliRunner().invoke(ship_cmd.app, ["--help"])
     assert help_res.exit_code == 0
+    help_text = Text.from_ansi(help_res.output).plain
     for flag in ("--effort", "--model", "--post-review", "--watch", "--reviewer", "--dry-run"):
-        assert flag in help_res.output
+        assert flag in help_text
 
     seen = {}
 
@@ -203,3 +205,20 @@ def test_cli_prints_each_finding_detail(monkeypatch):
     res = CliRunner().invoke(ship_cmd.app, [])
     assert res.exit_code == 0
     assert "src/x.py:14" in res.output and "off-by-one" in res.output and "use < len" in res.output
+
+
+def test_review_raises_ship_refused_when_diff_or_post_fails():
+    def fail_diff(cmd, **kw):
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="network error")
+
+    with pytest.raises(ShipRefused, match="failed to fetch diff"):
+        ship("42", run=fail_diff, review_fn=lambda *a, **kw: [])
+
+    def fail_post(cmd, **kw):
+        if cmd[:3] == ["gh", "pr", "diff"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="diff --git a/a.py b/a.py\n+x = 1\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="forbidden")
+
+    finding = ReviewFinding(path="a.py", line=1, severity="important", title="bug", fix="fix")
+    with pytest.raises(ShipRefused, match="failed to post self-review"):
+        ship("42", post_review=True, run=fail_post, review_fn=lambda *a, **kw: [finding])

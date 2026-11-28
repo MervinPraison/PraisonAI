@@ -292,7 +292,7 @@ class TestConfigurationSystem:
         assert config.output.verbose == True
         assert config.traces.enabled == True
     
-    def test_config_paths(self):
+    def test_config_paths(self, monkeypatch):
         """Test config paths."""
         from praisonai.cli.configuration.paths import (
             get_user_config_path,
@@ -300,6 +300,7 @@ class TestConfigurationSystem:
             get_sessions_dir,
         )
         
+        monkeypatch.delenv("PRAISONAI_HOME", raising=False)
         user_path = get_user_config_path()
         assert user_path.name == "config.toml"
         assert ".praison" in str(user_path)

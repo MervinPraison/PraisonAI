@@ -174,3 +174,39 @@ def test_lockfile_hunk_does_not_crowd_out_real_code_in_review():
     prompt = agent.prompts[0]
     assert "src/real.py" in prompt and "real_bug" in prompt
     assert "uv.lock" not in prompt
+
+
+@pytest.mark.parametrize(("alias", "expected_cap"), [("quick", 3), ("standard", 5), ("deep", 10)])
+def test_claude_ship_effort_tier_aliases_work(alias, expected_cap):
+    many = ReviewReport(findings=[_f(title=str(i)) for i in range(20)])
+    findings = review_diff(DIFF, effort=alias, agent=FakeAgent(many))
+    assert len(findings) == expected_cap
+
+
+def test_ui_service_and_cli_ship_review_accept_tier_aliases(monkeypatch, tmp_path):
+    from typer.testing import CliRunner
+    from praisonai_code.cli.commands import ship as ship_cmd
+    from praisonai_code.ship import ui_service
+
+    monkeypatch.setenv("OPENSHIP_LEDGER_PATH", str(tmp_path / "ledger.jsonl"))
+    monkeypatch.setattr(ui_service, "get_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        ui_service,
+        "get_diff_bundle",
+        lambda repo, **kw: (DIFF, [ui_service.FileDiff("a.py", "", "x=1")], "working branch"),
+    )
+    seen = {}
+    res_svc = ui_service.run_review(
+        tmp_path,
+        effort="deep",
+        review_fn=lambda d, effort="high", llm=None: (seen.update(effort=effort), [])[1],
+    )
+    assert res_svc["effort"] == "high" and seen["effort"] == "high"
+
+    monkeypatch.setattr(
+        ui_service,
+        "run_review",
+        lambda repo, **kw: {"source": "working branch", "severity": "none", "diff": DIFF, "findings": []},
+    )
+    res_cli = CliRunner().invoke(ship_cmd.app, ["review", "--effort", "standard"])
+    assert res_cli.exit_code == 0 and "no issues found" in res_cli.output

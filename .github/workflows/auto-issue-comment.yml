@@ -1,46 +1,83 @@
-name: Auto Issue Comment
+name: Issue Intake
 
 on:
-  workflow_dispatch:
-#   issues:
-#     types: [opened]
+  issues:
+    types: [opened]
 
 jobs:
-  # Trigger Claude by adding the 'claude' label (only if not already labeled)
-  # Note: @claude in comments only works from human users (not bots)
-  # The claude.yml workflow listens for issues:labeled event with 'claude' label
-  trigger-claude:
-    # Skip if issue was already created with 'claude' label to avoid double-trigger
-    if: |
-      !contains(toJSON(github.event.issue.labels), 'claude')
+  issue-triage:
     runs-on: ubuntu-latest
     permissions:
       issues: write
+      contents: read
     steps:
-      - name: Add claude label to trigger analysis
+      - name: Triage and acknowledge issue
         uses: actions/github-script@v7
         with:
-          github-token: ${{ secrets.GH_TOKEN }}
           script: |
-            // Check if 'claude' label already exists on this issue
-            const labels = context.payload.issue.labels.map(l => l.name);
-            if (labels.includes('claude')) {
-              console.log('Issue already has claude label, skipping');
-              return;
+            const issue = context.payload.issue;
+            const title = (issue.title || '').toLowerCase();
+            const body = (issue.body || '').toLowerCase();
+            const content = title + ' ' + body;
+            const isOwner = ['OWNER', 'MEMBER', 'COLLABORATOR'].includes(
+              issue.author_association
+            );
+
+            // --- Label triage ---
+            const labels = [];
+
+            // Kind labels (bug before "how to" — bug reports often include "## How to fix")
+            if (content.includes('feature request') || content.includes('[feature')) {
+              labels.push('enhancement');
+            } else if (!title.includes('[question]') && (content.includes('bug') || content.includes('error') || content.includes('crash') || content.includes('traceback'))) {
+              labels.push('bug');
+            } else if (title.includes('[question]') || content.includes('how do i') || (content.includes('how to') && !content.includes('how to fix'))) {
+              labels.push('question');
+            } else if (content.includes('question')) {
+              labels.push('question');
             }
 
-            // Add label to trigger claude.yml via issues:labeled event
-            await github.rest.issues.addLabels({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              labels: ['claude']
-            });
+            // Area labels
+            if (content.includes('security') || content.includes('cve') || content.includes('vulnerability')) {
+              labels.push('security');
+            }
+            if (content.includes('performance') || content.includes('slow') || content.includes('memory leak')) {
+              labels.push('performance');
+            }
+            if (content.includes('documentation') || content.includes('docs')) {
+              labels.push('documentation');
+            }
+            if (content.includes('typescript') || content.includes('javascript') || content.includes('npm')) {
+              labels.push('javascript');
+            }
 
-            // Also post instructions as a comment for context
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: '🤖 Auto-triaging with Claude. Analyzing issue and implementing a fix...\n\nClaude will:\n1. Route correctly: TypeScript → src/praisonai-ts/; agent tools → PraisonAI-Tools; lifecycle plugins → PraisonAI-Plugins\n2. Search codebase for root cause\n3. Implement a minimal fix following AGENTS.md\n4. Create a PR with the changes'
-            });
+            // Apply labels
+            if (labels.length > 0) {
+              await github.rest.issues.addLabels({
+                issue_number: issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels
+              });
+            }
+
+            // --- Acknowledgment comment (external users only) ---
+            if (!isOwner) {
+              await github.rest.issues.createComment({
+                issue_number: issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: [
+                  `👋 Thanks for opening this issue, @${issue.user.login}!`,
+                  '',
+                  'A maintainer will review this shortly. In the meantime:',
+                  '- Make sure you\'ve included steps to reproduce (for bugs)',
+                  '- Check [existing issues](https://github.com/MervinPraison/PraisonAI/issues) for duplicates',
+                  '- Review the [documentation](https://docs.praison.ai) for related guides',
+                  '',
+                  '_A maintainer will decide whether to investigate or request an automated fix._',
+                  '',
+                  '**Routing:** Agent-callable tools → [PraisonAI-Tools](https://github.com/MervinPraison/PraisonAI-Tools); lifecycle plugins (tracing/hooks/guardrails) → [PraisonAI-Plugins](https://github.com/MervinPraison/PraisonAI-Plugins). TypeScript/JavaScript SDK fixes land in `src/praisonai-ts/` in this repo.'
+                ].join('\n')
+              });
+            }

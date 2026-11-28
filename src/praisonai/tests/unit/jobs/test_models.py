@@ -207,7 +207,7 @@ class TestJobSubmitRequest:
         request = JobSubmitRequest(prompt="Do something")
         
         assert request.prompt == "Do something"
-        assert request.framework == "praisonai"
+        assert request.framework is None
         assert request.timeout == 3600
     
     def test_submit_request_full(self):
