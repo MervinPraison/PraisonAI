@@ -48,7 +48,7 @@ def main():
         role="Helpful AI Assistant",
         goal="Help users with their questions accurately and concisely",
         backstory="You are a knowledgeable assistant who provides clear, helpful answers.",
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
         output="verbose"
     )
     

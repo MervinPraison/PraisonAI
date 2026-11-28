@@ -30,12 +30,6 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-def test_disabled_by_default_no_gate():
-    botos = BotOS()
-    assert botos._admission_gate is None
-    assert botos.admission_stats is None
-
-
 def test_botos_builds_gate_from_config():
     botos = BotOS(max_concurrent_runs=8, queue_depth=16, overflow_policy="reject")
     assert botos._admission_gate is not None

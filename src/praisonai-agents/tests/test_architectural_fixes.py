@@ -227,6 +227,7 @@ class TestGap2ParallelToolExecution:
 class TestRealAgenticIntegration:
     """Real agentic tests as required by AGENTS.md."""
     
+    @pytest.mark.live
     @pytest.mark.asyncio
     async def test_real_agent_with_architectural_fixes(self):
         """
@@ -285,8 +286,6 @@ class TestRealAgenticIntegration:
             assert async_response is not None
             assert len(async_response) > 10
             print(f"Async agent response: {async_response}")
-            
-            return True  # Test passed
             
         except Exception as e:
             print(f"Real agentic test failed (may be expected if no API key): {e}")

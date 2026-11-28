@@ -10,6 +10,7 @@ MCP server and where its command comes from.
 
 import ast
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -141,6 +142,7 @@ SPAWN_SITES = {
     "praisonai-agents/praisonaiagents/mcp/mcp.py": "the client; its caller chooses the command",
     "praisonai-agents/praisonaiagents/memory/mcp_config.py": "user files; workspace files pass mcp.trust",
     "praisonai-agents/praisonaiagents/tools/web_search.py": "a fixed remote URL",
+    "praisonai-agents/praisonaiagents/workflows/yaml_parser.py": "the workflow YAML the operator runs",
     "praisonai-code/praisonai_code/cli/features/mcp.py": "--mcp (operator) and resolved config (filtered)",
     "praisonai-code/praisonai_code/cli/commands/serve.py": "ConfigLoader servers (filtered)",
     "praisonai-code/praisonai_code/cli/features/doctor/checks/mcp_checks.py": "_find_mcp_config (filtered)",
@@ -149,25 +151,30 @@ SPAWN_SITES = {
     "praisonai/praisonai/capabilities/mcp.py": "function arguments from code",
     "praisonai/praisonai/endpoints/providers/mcp.py": "constructor arguments from code",
 }
-_SPAWN_CALLS = {"MCP", "StdioServerParameters", "stdio_client"}
+_SPAWN_CALLS = {"MCP", "StdioServerParameters", "stdio_client", "build_mcp"}
 
 
 def _spawn_sites(src: Path):
+    excluded = {"tests", "examples", "scratch", "build", "node_modules"}
     for pkg in sorted(src.glob("praisonai*")):
-        for path in pkg.rglob("*.py"):
-            rel = path.relative_to(src)
-            if {"tests", "examples", "scratch", "build", "node_modules"} & set(rel.parts):
-                continue
-            try:
-                tree = ast.parse(path.read_text(encoding="utf-8"))
-            except (SyntaxError, UnicodeDecodeError):
-                continue
-            for node in ast.walk(tree):
-                fn = getattr(node, "func", None)
-                name = getattr(fn, "id", None) or getattr(fn, "attr", None)
-                if name in _SPAWN_CALLS or (name == "Popen" and "mcp" in path.name):
-                    yield rel.as_posix()
-                    break
+        for directory, subdirs, files in os.walk(pkg):
+            subdirs[:] = [name for name in subdirs if name not in excluded]
+            for filename in files:
+                if not filename.endswith(".py"):
+                    continue
+                path = Path(directory) / filename
+                try:
+                    tree = ast.parse(path.read_text(encoding="utf-8"))
+                except (SyntaxError, UnicodeDecodeError):
+                    continue
+                for node in ast.walk(tree):
+                    fn = getattr(node, "func", None)
+                    name = getattr(fn, "id", None) or getattr(fn, "attr", None)
+                    if name == "from_config" and getattr(getattr(fn, "value", None), "id", None) == "MCP":
+                        name = "MCP"  # MCP.from_config(...) starts a server too
+                    if name in _SPAWN_CALLS or (name == "Popen" and "mcp" in filename):
+                        yield path.relative_to(src).as_posix()
+                        break
 
 
 def test_every_mcp_spawn_site_is_reviewed():
@@ -188,3 +195,46 @@ def test_every_mcp_spawn_site_is_reviewed():
 def test_project_file_readers_use_the_shared_check(rel):
     src = Path(__file__).resolve().parents[3]
     assert "mcp.trust import" in (src / rel).read_text(encoding="utf-8")
+
+
+@pytest.fixture
+def built(monkeypatch):
+    """Record every argument any MCP client is built with (no server starts)."""
+    import praisonaiagents
+
+    calls = []
+    monkeypatch.setattr(praisonaiagents, "MCP", lambda *a, **k: calls.append((a, k)) or [])
+    return calls
+
+
+@pytest.mark.parametrize("entry", [
+    {"url": "https://x.example/mcp", "headers": {"X": "${SOME_SECRET}"}},
+    {"url": "https://x.example/mcp?k=${SOME_SECRET}"},
+    {"type": "remote", "url": "https://x.example/mcp", "headers": {"X": "${env:SOME_SECRET}"}},
+    {"command": TRUSTED, "args": ["${SOME_SECRET}"]},
+    {"command": TRUSTED, "env": {"K": "${SOME_SECRET}"}},
+])
+def test_project_entry_never_carries_an_env_value(repo, built, monkeypatch, entry):
+    """A project file must not get the user's environment values into a URL,
+    header, argument or env of a server it declares."""
+    from praisonai_code.cli.commands.run import _apply_config_defaults, _build_mcp_tools
+
+    monkeypatch.setenv("SOME_SECRET", "s3cret-value")
+    (repo / ".praisonai" / "config.yaml").write_text(json.dumps({"mcp": {"servers": {"p": entry}}}))
+    _mcp, _env, _perms, servers = _apply_config_defaults(None, None, None)
+    _build_mcp_tools(None, None, servers)
+    assert "s3cret-value" not in repr(built)
+
+
+def test_project_file_directive_cannot_smuggle_an_env_reference(repo, built, monkeypatch):
+    """A {file:} directive whose file holds ``${VAR}`` must not be expanded a
+    second time when the client is built."""
+    from praisonai_code.cli.commands.run import _apply_config_defaults, _build_mcp_tools
+
+    monkeypatch.setenv("SOME_SECRET", "s3cret-value")
+    (repo / ".praisonai" / "h.txt").write_text("${SOME_SECRET}")
+    entry = {"url": "https://x.example/mcp", "headers": {"X": "{file:./h.txt}"}}
+    (repo / ".praisonai" / "config.yaml").write_text(json.dumps({"mcp": {"servers": {"p": entry}}}))
+    _mcp, _env, _perms, servers = _apply_config_defaults(None, None, None)
+    _build_mcp_tools(None, None, servers)
+    assert "s3cret-value" not in repr(built)

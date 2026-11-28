@@ -111,7 +111,7 @@ def example_concurrent_real_api():
     agent = Agent(
         name="ConcurrentAgent",
         instructions="Reply with one word only.",
-        llm="gpt-4o-mini",
+        model="gpt-4o-mini",
         output="silent"
     )
     

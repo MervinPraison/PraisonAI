@@ -75,6 +75,8 @@ class YAMLWorkflowParser:
         self.tool_registry = tool_registry or {}
         self._agents: Dict[str, Agent] = {}
         self._callbacks: Dict[str, Callable] = {}
+        self._mcp_server_specs: Dict[str, Dict[str, Any]] = {}
+        self._mcp_clients: Dict[str, Any] = {}
     
     def parse_file(self, file_path: Union[str, Path], extra_vars: Optional[Dict[str, Any]] = None) -> Workflow:
         """
@@ -281,6 +283,11 @@ class YAMLWorkflowParser:
                 topic_value = substitute_variables(str(topic_value), variables)
             variables['topic'] = topic_value
         
+        # Parse top-level MCP server specs (``mcp_servers:`` or ``mcp:`` alias)
+        # before building agents so agent ``tools:`` lists can reference them.
+        self._mcp_server_specs = self._parse_mcp_servers(data)
+        self._mcp_clients = {}
+
         # Parse agents - support both 'agents' and 'roles' keys for backward compatibility
         agents_data = data.get('agents', {})
         if not agents_data and 'roles' in data:
@@ -771,6 +778,35 @@ class YAMLWorkflowParser:
         )
         return agent
     
+    def _parse_mcp_servers(self, data: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+        """Parse top-level ``mcp_servers:`` (or ``mcp:`` alias) using the shared loader."""
+        raw = data.get("mcp_servers") if data.get("mcp_servers") is not None else data.get("mcp")
+        if not raw:
+            return {}
+        from ..mcp.loader import parse_mcp_servers
+        return parse_mcp_servers(raw)
+
+    def _get_mcp_server(self, name: str) -> Any:
+        """Build (and cache per parse) the MCP client for a declared server name."""
+        if name in self._mcp_clients:
+            return self._mcp_clients[name]
+        spec = self._mcp_server_specs.get(name)
+        if not spec or spec.get("enabled") is False:
+            return None
+        try:
+            from ..mcp import MCP
+            from ..mcp.loader import build_mcp
+
+            # Keep expand_env=False (default): workflow YAML must not expand ${VAR}.
+            client = build_mcp(spec, name=name, cls=MCP)
+            if len(self._mcp_server_specs) > 1 and hasattr(client, "with_tool_prefix"):
+                client = client.with_tool_prefix(name)
+        except Exception as exc:
+            logger.warning("Failed to start MCP server '%s': %s", name, exc)
+            return None
+        self._mcp_clients[name] = client
+        return client
+
     def _resolve_tools(self, tools_config: List[str]) -> List[Callable]:
         """
         Resolve tool names to callable functions.
@@ -785,6 +821,10 @@ class YAMLWorkflowParser:
         for tool_name in tools_config:
             if tool_name in self.tool_registry:
                 tools.append(self.tool_registry[tool_name])
+            elif isinstance(tool_name, str) and tool_name in self._mcp_server_specs:
+                mcp_client = self._get_mcp_server(tool_name)
+                if mcp_client is not None:
+                    tools.append(mcp_client)
             else:
                 # Fallback: try to import from praisonaiagents.tools
                 try:

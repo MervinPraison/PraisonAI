@@ -39,7 +39,7 @@ writer = Agent(
     name="writer",
     role=writer_cfg["role"],
     goal=writer_cfg["goal"],
-    llm=writer_cfg["llm"],
+    model=writer_cfg["llm"],
 )
 
 step_cfg = workflow_config["steps"][0]

@@ -39,7 +39,7 @@ def main():
         role="Information Researcher",
         goal="Research and store important information about topics",
         backstory="Expert at analyzing and documenting information with semantic understanding",
-        llm="gpt-4o-mini"  # Using GPT for chat, Gemini for embeddings
+        model="gpt-4o-mini"  # Using GPT for chat, Gemini for embeddings
     )
     
     retriever = Agent(
@@ -47,7 +47,7 @@ def main():
         role="Information Retriever",
         goal="Retrieve relevant information from memory using semantic search",
         backstory="Specialist in finding and presenting stored information",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # Task 1: Store information with semantic meaning

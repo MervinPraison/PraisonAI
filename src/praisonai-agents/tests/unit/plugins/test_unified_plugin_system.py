@@ -35,36 +35,19 @@ class TestPathCentralization:
             assert d.name == "plugins", f"Expected 'plugins' dir, got {d}"
     
     def test_skills_discovery_uses_paths_module(self, tmp_path, monkeypatch, request):
-        """skills/discovery.py should use paths.get_skills_dir().
-
-        This asserted every returned directory is named "skills". Remote-skill
-        caching later added entries like
-        ``~/.praisonai/cache/remote-skills/<hash>/current``, so the assertion
-        stopped holding -- and because it ran against the real home it was
-        checking whatever the developer happened to have cached (84 such
-        directories on this machine, none of them named "skills").
-
-        HOME is redirected and the paths cache cleared, so the result depends
-        only on the paths module. The original intent -- discovery derives its
-        location from paths rather than hardcoding one -- is asserted directly.
-        """
+        """Discover the skills directory selected by shared paths in a clean home."""
         from praisonaiagents import paths as paths_mod
         from praisonaiagents.skills.discovery import get_default_skill_dirs
 
-        monkeypatch.setenv("HOME", str(tmp_path))
-        monkeypatch.setattr(pathlib.Path, "home", lambda: tmp_path)
+        monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path / ".praisonai"))
+        monkeypatch.setattr(pathlib.Path, "home", classmethod(lambda cls: tmp_path))
         paths_mod._clear_cache()
         monkeypatch.chdir(tmp_path)
 
-        # The paths module caches its resolved directories process-wide. Clearing
-        # only on entry would leave this test's tmp_path cached after monkeypatch
-        # restores HOME, handing a deleted directory to later tests in the same
-        # process. Clear again on teardown so the cache is rebuilt from the real
-        # environment.
+        # Clear the process-wide cache before the next test uses it.
         request.addfinalizer(paths_mod._clear_cache)
 
-        # discovery only returns directories that exist, so create the one the
-        # paths module designates.
+        # Discovery only returns directories that exist.
         skills_dir = paths_mod.get_skills_dir()
         skills_dir.mkdir(parents=True, exist_ok=True)
 
@@ -76,15 +59,17 @@ class TestPathCentralization:
         stray = [d for d in dirs if tmp_path not in d.parents and d != tmp_path]
         assert not stray, f"discovery returned paths outside the paths module: {stray}"
 
-    def test_paths_module_returns_praisonai_dir(self):
+    def test_paths_module_returns_praisonai_dir(self, tmp_path, monkeypatch, request):
         """paths.py should return ~/.praisonai/ as default."""
-        from praisonaiagents.paths import get_data_dir, DEFAULT_DIR_NAME
-        
-        assert DEFAULT_DIR_NAME == ".praisonai"
-        
-        # Without env override, should use .praisonai
-        data_dir = get_data_dir()
-        assert data_dir.name in [".praisonai", ".praison"]  # .praison for legacy
+        from praisonaiagents import paths
+
+        monkeypatch.delenv("PRAISONAI_HOME", raising=False)
+        monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+        monkeypatch.setattr(pathlib.Path, "home", classmethod(lambda cls: tmp_path))
+        paths._clear_cache()
+        request.addfinalizer(paths._clear_cache)
+
+        assert paths.get_data_dir() == tmp_path / ".praisonai"
 
 
 class TestHookUnification:

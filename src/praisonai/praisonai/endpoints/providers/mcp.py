@@ -66,12 +66,23 @@ class MCPProvider(BaseProvider):
         else:
             return self._list_http_tools(tags)
     
+    def _build_stdio_mcp(self):
+        """Build a stdio MCP client through the shared core config builder."""
+        from praisonaiagents.mcp import MCP
+        from praisonaiagents.mcp.loader import build_mcp
+
+        entry: Dict[str, Any] = {"command": self.command, "args": list(self.args)}
+        if self.env:
+            entry["env"] = dict(self.env)
+        if self.timeout is not None:
+            entry["timeout"] = self.timeout
+        # Keep expand_env=False (default): constructor args must not expand ${VAR}.
+        return build_mcp(entry, name=str(self.command or "mcp"), cls=MCP)
+
     def _list_stdio_tools(self, tags: Optional[List[str]] = None) -> List[EndpointInfo]:
         """List tools from stdio MCP server."""
         try:
-            from praisonaiagents.mcp import MCP
-            
-            mcp = MCP(command=self.command, args=self.args, env=self.env)
+            mcp = self._build_stdio_mcp()
             tools = mcp.get_tools()
             
             endpoints = []
@@ -157,9 +168,7 @@ class MCPProvider(BaseProvider):
     def _invoke_stdio(self, name: str, input_data: Optional[Dict[str, Any]] = None) -> InvokeResult:
         """Invoke tool via stdio MCP."""
         try:
-            from praisonaiagents.mcp import MCP
-            
-            mcp = MCP(command=self.command, args=self.args, env=self.env)
+            mcp = self._build_stdio_mcp()
             tools = mcp.get_tools()
             
             for tool in tools:

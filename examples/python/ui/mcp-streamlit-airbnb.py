@@ -73,7 +73,7 @@ def initialize_agent():
                 instructions="""You are a helpful Airbnb assistant. Help users find and book apartments. 
                 Use the available tools to search for accommodations, get property details, and provide helpful recommendations.
                 Always be polite and provide comprehensive information about properties.""",
-                llm=llm_model,
+                model=llm_model,
                 tools=mcp_tools,
                 output="verbose" if debug_mode else None
             )

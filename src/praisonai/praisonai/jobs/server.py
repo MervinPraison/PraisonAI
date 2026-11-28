@@ -4,6 +4,7 @@ Server for PraisonAI Async Jobs API.
 Provides FastAPI application setup and server startup.
 """
 
+from inspect import isawaitable
 import logging
 import os
 import threading
@@ -237,7 +238,8 @@ def create_app(
         }
         
         if hasattr(store, "get_stats"):
-            stats["store"] = store.get_stats()
+            store_stats = store.get_stats()
+            stats["store"] = await store_stats if isawaitable(store_stats) else store_stats
         
         return stats
     

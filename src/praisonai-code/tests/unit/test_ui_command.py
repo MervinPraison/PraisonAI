@@ -1,3 +1,4 @@
+from hashlib import sha256
 from pathlib import Path
 from unittest.mock import patch
 
@@ -24,9 +25,7 @@ def test_launch_aiui_copies_default_app_using_utf8(tmp_path, monkeypatch):
     ), patch(
         "importlib.util.find_spec",
         return_value=object(),
-    ), patch(
-        "subprocess.run"
-    ):
+    ), patch("praisonai_code.cli.commands.ui._run_server") as run_server:
         _launch_aiui_app(
             app_dir="ui",
             default_app_name="ui_chat",
@@ -39,5 +38,7 @@ def test_launch_aiui_copies_default_app_using_utf8(tmp_path, monkeypatch):
 
     created = tmp_path / ".praisonai" / "ui" / "app.py"
 
-    assert created.exists()
-    assert created.read_text(encoding="utf-8") == expected
+    run_server.assert_called_once()
+    stamp, content = created.read_text(encoding="utf-8").split("\n", 1)
+    assert content == expected
+    assert stamp == f"# praisonai-default-app sha256={sha256(expected.encode('utf-8')).hexdigest()}"

@@ -9059,15 +9059,13 @@ class WebSocketGateway:
         client = self._mcp_pool.get(key)
         if client is not None:
             return client
-        opts = dict(spec)
-        target = opts.pop("url", None) or opts.pop("command", None)
-        if not target:
-            logger.warning("mcp_servers.%s needs a 'command' or 'url'; skipping", name)
-            return None
         try:
             from praisonaiagents import MCP
+            from praisonaiagents.mcp.loader import build_mcp
 
-            client = MCP(target, **opts).with_tool_prefix(name)
+            # Shared builder: aliases, disabled check, URL/SSE rules.
+            # Keep expand_env=False (default): load_gateway_config already resolved ${VAR}.
+            client = build_mcp(spec, name=name, cls=MCP).with_tool_prefix(name)
         except Exception as exc:
             logger.warning("Failed to start MCP server '%s': %s", name, exc)
             return None

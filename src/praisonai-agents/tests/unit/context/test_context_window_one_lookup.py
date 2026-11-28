@@ -12,7 +12,9 @@ import sys
 
 import pytest
 
+from praisonaiagents.context import budgeter
 from praisonaiagents.context.budgeter import litellm_model_info
+from praisonaiagents.eval import tokens as eval_tokens
 from praisonaiagents.rag import budget as rag_budget
 
 
@@ -20,16 +22,49 @@ def _window(info):
     return info.get("max_input_tokens") or info.get("max_tokens")
 
 
-def test_rag_window_follows_litellm_data_where_the_static_table_drifted():
+def test_rag_window_prefers_litellm_data_over_static_table(monkeypatch):
+    monkeypatch.setattr(
+        rag_budget,
+        "_litellm_model_info",
+        lambda name: {"max_input_tokens": 999999} if name == "gpt-4o" else None,
+    )
+    assert rag_budget.get_model_context_window("gpt-4o") == 999999
+
+
+def test_static_fallback_tables_match_litellm_bundled_data():
+    if not budgeter._bundled_model_cost():
+        pytest.skip("litellm bundled model data not installed")
+    tables = {
+        "context.budgeter.MODEL_LIMITS": {
+            k: v for k, v in budgeter.MODEL_LIMITS.items() if k != "default"
+        },
+        "rag.budget.MODEL_CONTEXT_WINDOWS": rag_budget.MODEL_CONTEXT_WINDOWS,
+        "eval.tokens.DEFAULT_CONTEXT_LENGTHS": eval_tokens.DEFAULT_CONTEXT_LENGTHS,
+    }
     drifted = {}
-    for name, static in rag_budget.MODEL_CONTEXT_WINDOWS.items():
-        info = litellm_model_info(name)
-        if info and _window(info) and _window(info) != static:
-            drifted[name] = int(_window(info))
-    if not drifted:
-        pytest.skip("litellm data not installed, or no drift to check")
-    got = {name: rag_budget.get_model_context_window(name) for name in drifted}
-    assert got == drifted
+    for table_name, table in tables.items():
+        for model, static_val in table.items():
+            info = litellm_model_info(model)
+            win = _window(info) if info else None
+            if win and int(win) != static_val:
+                drifted[f"{table_name}[{model!r}]"] = (static_val, int(win))
+    assert not drifted, f"Static fallback table entries drifted from litellm data: {drifted}"
+
+
+def test_fallback_tables_return_synced_values_when_litellm_is_absent(monkeypatch):
+    monkeypatch.setattr(budgeter, "_litellm_model_info", lambda _name: None)
+    monkeypatch.setattr(rag_budget, "_litellm_model_info", lambda _name: None)
+    monkeypatch.setattr(eval_tokens, "_litellm_model_info", lambda _name: None)
+
+    assert budgeter.resolved_model_limit("gpt-5") == 272000
+    assert budgeter.resolved_model_limit("gpt-5-mini") == 272000
+    assert budgeter.resolved_model_limit("gpt-5-nano") == 272000
+    assert rag_budget.get_model_context_window("gpt-5") == 272000
+    assert rag_budget.get_model_context_window("gemini-2.5-pro") == 1048576
+    assert rag_budget.get_model_context_window("gemini-2.5-flash") == 1048576
+    assert rag_budget.get_model_context_window("deepseek-chat") == 131072
+    assert eval_tokens.get_context_length("gpt-5") == 272000
+    assert eval_tokens.get_context_length("deepseek-chat") == 131072
 
 
 def test_eval_context_length_does_not_import_litellm():

@@ -16,7 +16,7 @@ rag_agent = Agent(
     name="RAG Agent",
     role="Information Specialist",
     goal="Retrieve knowledge efficiently",
-    llm="gpt-4o-mini"
+    model="gpt-4o-mini"
 )
 
 # Define a task for the agent

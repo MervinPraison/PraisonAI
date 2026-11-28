@@ -13,7 +13,7 @@ if "agent" not in st.session_state:
             # Initialize agent only once and store in session state
             st.session_state.agent = Agent(
                 instructions="You help book apartments on Airbnb.",
-                llm="gpt-4o-mini",  # ✅ Use standard format instead of "ollama/llama3.2"
+                model="gpt-4o-mini",  # ✅ Use standard format instead of "ollama/llama3.2"
                 tools=MCP("npx -y @openbnb/mcp-server-airbnb --ignore-robots-txt"),
                 output="verbose"  # Enable debugging
             )

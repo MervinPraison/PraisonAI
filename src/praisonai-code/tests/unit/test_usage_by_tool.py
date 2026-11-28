@@ -137,7 +137,10 @@ def test_real_agent_tool_call_is_reported(store):
     assert rows["add"]["errors"] == 0
 
 
-@pytest.mark.skipif(not os.environ.get("OPENAI_API_KEY"), reason="needs OPENAI_API_KEY")
+@pytest.mark.skipif(
+    os.environ.get("PRAISONAI_LIVE_TESTS") != "1" or not os.environ.get("OPENAI_API_KEY"),
+    reason="needs PRAISONAI_LIVE_TESTS=1 and OPENAI_API_KEY",
+)
 def test_real_agentic_llm_tool_run_is_reported(store):
     from praisonaiagents import Agent
 

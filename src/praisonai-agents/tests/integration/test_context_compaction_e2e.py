@@ -91,7 +91,8 @@ def create_long_conversation():
     return messages
 
 
-@pytest.mark.integration  
+@pytest.mark.live
+@pytest.mark.integration
 def test_proactive_compaction_end_to_end():
     """
     REAL agentic test: Agent runs end-to-end with proactive context compaction.
@@ -157,8 +158,7 @@ def test_proactive_compaction_end_to_end():
         
         print(f"\n=== Follow-up Response ===")
         print(f"Response: {follow_up}")
-        
-        return True
+        assert isinstance(follow_up, str) and len(follow_up) > 0
         
     except Exception as e:
         print(f"\n=== Test Failed ===")
@@ -167,6 +167,7 @@ def test_proactive_compaction_end_to_end():
         raise
 
 
+@pytest.mark.live
 @pytest.mark.integration
 def test_compaction_disabled_still_works():
     """Test that explicitly disabling compaction still works."""
@@ -187,7 +188,8 @@ def test_compaction_disabled_still_works():
     print(f"Response: {response}")
 
 
-@pytest.mark.integration  
+@pytest.mark.live
+@pytest.mark.integration
 def test_default_agent_has_compaction():
     """Test that new agents get compaction by default (after deprecation period)."""
     
@@ -214,6 +216,7 @@ def test_default_agent_has_compaction():
     print(f"Response: {response}")
 
 
+@pytest.mark.live
 @pytest.mark.integration
 def test_sync_async_compaction_parity():
     """Test that sync and async paths both apply compaction consistently."""

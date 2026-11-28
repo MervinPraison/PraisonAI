@@ -18,48 +18,48 @@ This report compares **Python SDK feature categories** against **Python document
 | Category | Features | Docs | Lines |
 |----------|----------|------|-------|
 | ✅ AGUI | 1 | 2 | 640 |
-| ✅ Agent | 22 | 66 | 20713 |
-| ✅ Agent-to-Agent (A2A) | 1 | 7 | 3175 |
-| ✅ Agent-to-User (A2U) | 1 | 3 | 701 |
+| ✅ Agent | 22 | 66 | 20865 |
+| ✅ Agent-to-Agent (A2A) | 1 | 7 | 3183 |
+| ✅ Agent-to-User (A2U) | 1 | 3 | 706 |
 | ✅ Approval | 1 | 8 | 4227 |
 | ✅ Audio | 2 | 12 | 1000 |
-| ✅ Auto Generation | 5 | 12 | 4106 |
+| ✅ Auto Generation | 5 | 12 | 4118 |
 | ✅ Autonomy | 3 | 7 | 3059 |
 | ✅ Bots | 7 | 41 | 17228 |
 | ✅ Budget | 1 | 1 | 287 |
-| ✅ CLI | 5 | 124 | 39994 |
+| ✅ CLI | 5 | 125 | 40615 |
 | ✅ Chunking | 2 | 2 | 435 |
 | ✅ Citations | 2 | 1 | 202 |
 | ✅ Code Execution | 2 | 14 | 5222 |
 | ✅ Conditions | 1 | 3 | 1386 |
 | ✅ Configuration | 3 | 8 | 3436 |
-| ✅ Context Management | 16 | 37 | 14759 |
+| ✅ Context Management | 16 | 37 | 14799 |
 | ✅ Deep Research | 8 | 2 | 591 |
 | ✅ Display | 6 | 3 | 848 |
 | ✅ Embeddings | 6 | 23 | 2074 |
 | ✅ Evaluation | 1 | 9 | 3727 |
 | ✅ Events | 1 | 2 | 788 |
-| ✅ Execution | 3 | 5 | 1868 |
+| ✅ Execution | 3 | 5 | 1860 |
 | ✅ Failover | 2 | 1 | 576 |
 | ✅ Files | 2 | 7 | 2528 |
 | ✅ Flow | 1 | 3 | 811 |
 | ✅ Gateway | 7 | 110 | 43032 |
 | ✅ Guardrails | 5 | 5 | 2967 |
 | ✅ Handoffs | 11 | 6 | 2860 |
-| ✅ Hooks | 2 | 9 | 5341 |
+| ✅ Hooks | 2 | 9 | 5348 |
 | ✅ Image | 1 | 11 | 1574 |
 | ✅ Knowledge | 4 | 20 | 6295 |
-| ✅ LLM | 3 | 17 | 6754 |
+| ✅ LLM | 3 | 17 | 6758 |
 | ✅ Loops | 4 | 5 | 1600 |
-| ✅ MCP | 1 | 67 | 15750 |
-| ✅ Memory | 6 | 21 | 8633 |
+| ✅ MCP | 1 | 68 | 15854 |
+| ✅ Memory | 6 | 17 | 6786 |
 | ✅ OCR | 2 | 1 | 237 |
 | ✅ Observability | 2 | 23 | 2868 |
 | ✅ Optimizer | 1 | 2 | 794 |
 | ✅ Output | 3 | 6 | 1575 |
 | ✅ Parallel Execution | 3 | 2 | 546 |
-| ✅ Planning | 6 | 7 | 1834 |
-| ✅ Plugins | 8 | 6 | 4615 |
+| ✅ Planning | 6 | 7 | 1838 |
+| ✅ Plugins | 8 | 6 | 4616 |
 | ✅ Prompts | 2 | 9 | 2046 |
 | ✅ Providers | 1 | 58 | 8999 |
 | ✅ Query | 1 | 2 | 736 |
@@ -69,25 +69,25 @@ This report compares **Python SDK feature categories** against **Python document
 | ✅ Retrieval | 2 | 5 | 1105 |
 | ✅ Routing | 1 | 2 | 430 |
 | ✅ Sandbox | 5 | 7 | 3718 |
-| ✅ Security | 1 | 3 | 3733 |
-| ✅ Sessions | 4 | 22 | 9064 |
+| ✅ Security | 1 | 3 | 3765 |
+| ✅ Sessions | 4 | 20 | 8663 |
 | ✅ Skills | 6 | 16 | 6064 |
 | ✅ Tasks | 2 | 10 | 3595 |
 | ✅ Telemetry | 1 | 2 | 681 |
-| ✅ Templates | 1 | 9 | 1859 |
-| ✅ Tools | 12 | 149 | 46666 |
+| ✅ Templates | 1 | 8 | 1803 |
+| ✅ Tools | 12 | 140 | 45868 |
 | ✅ Tracing | 3 | 2 | 139 |
 | ✅ Vector Store | 1 | 12 | 1219 |
 | ✅ Video | 2 | 11 | 1458 |
 | ✅ Vision | 2 | 1 | 329 |
 | ✅ Web | 3 | 10 | 2909 |
-| ✅ Workflows | 5 | 22 | 9632 |
+| ✅ Workflows | 5 | 22 | 9633 |
 
 ## Documentation Without Features
 
 These docs exist but don't match any implemented feature category:
 
-- ℹ️ Database (44 docs, 8461 lines)
+- ℹ️ Database (43 docs, 8041 lines)
 - ℹ️ Documents (1 docs, 810 lines)
 - ℹ️ Teams (1 docs, 214 lines)
 

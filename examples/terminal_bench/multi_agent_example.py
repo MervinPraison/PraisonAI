@@ -102,7 +102,7 @@ class MultiAgentPraisonAI(BaseAgent):
                     "Consider potential issues and edge cases. "
                     "Output your plan as a numbered list of specific actions."
                 ),
-                llm=self.model_name or "openai/gpt-4o-mini",
+                model=self.model_name or "openai/gpt-4o-mini",
             )
             
             executor = Agent(
@@ -115,7 +115,7 @@ class MultiAgentPraisonAI(BaseAgent):
                     "If a step fails, try alternative approaches."
                 ),
                 tools=[bash_tool],
-                llm=self.model_name or "openai/gpt-4o-mini", 
+                model=self.model_name or "openai/gpt-4o-mini", 
             )
             
             verifier = Agent(
@@ -128,7 +128,7 @@ class MultiAgentPraisonAI(BaseAgent):
                     "If issues are found, suggest specific fixes."
                 ),
                 tools=[bash_tool],
-                llm=self.model_name or "openai/gpt-4o-mini",
+                model=self.model_name or "openai/gpt-4o-mini",
             )
 
             print(f"🚀 Multi-Agent PraisonAI starting: {instruction[:100]}...")
@@ -253,14 +253,14 @@ class AgentTeamPraisonAI(BaseAgent):
             planner = Agent(
                 name="planner",
                 instructions="Create detailed execution plans for terminal tasks",
-                llm=self.model_name or "openai/gpt-4o-mini"
+                model=self.model_name or "openai/gpt-4o-mini"
             )
             
             executor = Agent(
                 name="executor",
                 instructions="Execute terminal commands based on plans",
                 tools=[bash_tool],
-                llm=self.model_name or "openai/gpt-4o-mini"
+                model=self.model_name or "openai/gpt-4o-mini"
             )
             
             # Create tasks
