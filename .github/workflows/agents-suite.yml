@@ -1,35 +1,18 @@
-# Why this exists
-#
-# praisonai-agents has ~11,900 tests. Until this gate, CI executed 15 of them:
-# one smoke step in test-optimized.yml naming two files. Everything else was
-# collected by nobody.
-#
-# The cost of that showed up as two test modules that could not even be
-# IMPORTED -- they referenced symbols moved or replaced months earlier, so 19
-# tests silently contributed nothing while still appearing to exist. A failing
-# test is loud; a test that never collects is not.
-#
-# This job started as collection-only, because running the suite would have gone
-# red on arrival: 297 pre-existing failures nothing had been enforcing, and a job
-# that is red the day it lands teaches people to ignore it. Then a curated
-# green-set, ratcheted upward.
-#
-# Both are gone. The unit suite now runs in full and passes: 9373 tests, 0
-# failures. The `collect` job stays because it is the cheaper, stricter signal --
-# it cannot pass while a test file is unimportable, and it says so in 40s.
-#
 name: agents-suite
 
 on:
-  push:
-    branches: [ main ]
-    paths:
-      - 'src/praisonai-agents/**'
-      - '.github/workflows/agents-suite.yml'
-  pull_request:
-    paths:
-      - 'src/praisonai-agents/**'
-      - '.github/workflows/agents-suite.yml'
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  PRAISONAI_ALLOW_NETWORK: '0'
+  PRAISONAI_LIVE_TESTS: '0'
+  LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+  HF_HUB_OFFLINE: '1'
+  # Some imports require a key even when the suite runs offline.
+  OPENAI_API_KEY: 'sk-not-a-real-key'
 
 jobs:
   collect:
@@ -38,6 +21,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -49,10 +34,6 @@ jobs:
           pip install pytest pytest-asyncio pytest-timeout
       - name: Collect the whole suite
         working-directory: src/praisonai-agents
-        env:
-          # A key must be present or some modules bail at import; it is never
-          # used, because collection does not execute test bodies.
-          OPENAI_API_KEY: 'sk-collect-only-not-a-real-key'
         run: |
           set -euo pipefail
           # No pipe here: piping pytest into tail discards its exit code, which
@@ -62,9 +43,11 @@ jobs:
   unit:
     name: praisonai-agents unit tests
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
@@ -72,72 +55,14 @@ jobs:
         run: |
           set -euo pipefail
           python -m pip install --upgrade pip
-          # Extras, not decoration. Tests across workflows/embedding/eval/context
-          # patch litellm and construct LLM(...), and the knowledge suite needs
-          # chonkie for chunking -- without [knowledge] 22 tests fail on
-          # "chonkie package not found", an install gap that reads as 22 code
-          # failures.
-          pip install -e "src/praisonai-agents[llm,knowledge]"
-          # praisonai-sandbox is a MONOREPO sibling, not a third-party optional.
-          # Without it 47 tests fail with "No module named
-          # praisonai_sandbox.compute" -- an install gap reported as 47 code
-          # failures. Installing it took the suite from 297 failures to 250.
-          pip install -e src/praisonai-sandbox
-          # Same story: a stale praisonai-bot in the environment made 22 gateway
-          # tests fail on a malformed pairing file. The monorepo version already
-          # handles it; the INSTALLED one did not.
-          pip install -e src/praisonai-bot
-          # The wrapper. tests/unit/test_managed_backend.py imports
-          # praisonai.integrations.managed_agents; without it 47 tests fail with
-          # "No module named 'praisonai'". Found by running the suite on 3.11 in
-          # a CI-shaped environment rather than trusting a developer machine
-          # where every sibling is already installed.
-          pip install -e src/praisonai
-          pip install pytest pytest-asyncio pytest-timeout pytest-rerunfailures aiofiles
+          pip install pytest pytest-asyncio pytest-timeout pytest-rerunfailures aiofiles psutil
+      - uses: ./.github/actions/install-monorepo-packages
+        with:
+          agents-extras: ".[llm,knowledge]"
       - name: Run the unit suite
         working-directory: src/praisonai-agents
-        env:
-          # Never used: PRAISONAI_ALLOW_NETWORK=0 and the live marker keep these
-          # offline. Present because some modules bail at import without a key.
-          OPENAI_API_KEY: 'sk-not-a-real-key'
-          PRAISONAI_ALLOW_NETWORK: '0'
         run: |
           set -euo pipefail
-          # The whole suite, not a curated subset. tests/green-set.txt and
-          # tests/known-failures.txt are gone: 9373 pass, 0 fail.
-          #
-          # The 297 failures this job was built around were, in the end:
-          #   83  environment  -- monorepo siblings not installed, dirty HOME
-          #   19  ONE line     -- a module-level os.environ.setdefault in
-          #                       tests/unit/tools/test_delegation_tools.py that
-          #                       turned auto-approval on for the whole process
-          #                       at COLLECTION time
-          #   ~5  deprecation warnings that fire once per process
-          #  ~85  tests asserting contracts the product had deliberately changed
-          #    5  real product bugs
-          #  the rest: tests built on Mocks whose auto-created attributes
-          #            defeated the very code path under test
-          #
-          # Three traps worth knowing before adding a test here, each of which
-          # cost a full-suite bisect:
-          #   1. Module-level env mutation persists for the entire process, and
-          #      runs at collection. Use monkeypatch.
-          #   2. The approval registry is a process-global singleton. Anything
-          #      you add_requirement() stays for every later test.
-          #   3. `'litellm' in module_name` also matches praisonai's own
-          #      _litellm_loader; evicting it from sys.modules creates a second
-          #      module object with separate globals.
-          #
-          # No pipe: piping pytest into anything discards its exit code, which is
-          # how a gate silently stops gating.
-          #
-          # Nothing is excluded. test_prefetch.py used to be, recorded as "passes
-          # on macOS, fails on Linux" -- wrong variable. It was Python 3.12 vs the
-          # 3.11 pinned above: isinstance() against a runtime_checkable Protocol
-          # used hasattr on 3.11 (which any MagicMock satisfies) and
-          # inspect.getattr_static from 3.12 (which does not see Mock's
-          # auto-created attributes). The mock now names its methods, so both
-          # versions take the same branch.
           python -m pytest tests/unit/ -q -p no:randomly --timeout=120 \
             --disable-warnings -m "not perf"
           # Wall-clock timing tests (marker ``perf``) run on their own, serially,
@@ -145,3 +70,81 @@ jobs:
           # is a real slowdown.
           python -m pytest tests/unit/ -q -p no:randomly --timeout=120 \
             --disable-warnings -m perf --reruns 1
+
+      - name: Run isolated placement lifecycle tests
+        working-directory: src/praisonai-agents
+        run: |
+          python -m pytest \
+            tests/unit/test_placement.py::test_a_dropped_agent_releases_its_sandbox \
+            tests/unit/test_placement.py::test_a_team_run_provisions_exactly_one_sandbox \
+            tests/unit/test_placement.py::test_an_async_team_run_provisions_its_sandbox \
+            tests/unit/test_placement.py::test_a_batch_shares_one_sandbox_across_every_row \
+            -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+            -q --tb=line --disable-warnings --timeout=60
+
+      - name: Run isolated thread safety tests
+        working-directory: src/praisonai-agents
+        run: |
+          python -m pytest \
+            tests/unit/test_thread_safety.py::TestLiteAgentThreadSafety \
+            tests/unit/test_thread_safety.py::TestAgentThreadSafety \
+            -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+            -q --tb=line --disable-warnings --timeout=60
+      - name: Run isolated approval registration test
+        working-directory: src/praisonai-agents
+        run: |
+          python -m pytest tests/unit/test_security_audit_fixes.py::test_ast_grep_rewrite_requires_approval \
+            -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+            -q --tb=line --disable-warnings --timeout=60
+      - name: Run isolated path reload tests
+        working-directory: src/praisonai-agents
+        run: |
+          python -m pytest \
+            tests/unit/test_paths_wiring.py::TestPolicyConfigWiring::test_default_rules_dir_matches_paths \
+            tests/unit/test_paths_wiring.py::TestSchedulerStoreWiring::test_default_dir_matches_paths \
+            -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+            -q --tb=line --disable-warnings --timeout=60
+      - name: Run isolated timeout-worker tests
+        working-directory: src/praisonai-agents
+        run: |
+          python -m pytest \
+            tests/unit/test_async_bridge_invariants.py::test_tool_timeout_uses_daemon_worker_and_does_not_leak \
+            tests/unit/test_async_bridge_invariants.py::test_many_concurrent_healthy_timed_calls_are_not_refused \
+            tests/unit/test_async_bridge_invariants.py::test_saturated_orphan_pool_reports_capacity_not_timeout \
+            -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+            -q --tb=line --disable-warnings --timeout=60
+      - name: Run isolated lazy import tests
+        working-directory: src/praisonai-agents
+        run: |
+          python -m pytest \
+            tests/unit/test_lazy_imports.py::TestLazyImports::test_autonomy_not_loaded_on_agent_import \
+            tests/unit/test_lazy_imports.py::TestLazyImports::test_autonomy_config_still_importable_from_feature_configs \
+            tests/unit/test_lazy_imports.py::TestLazyImports::test_autonomy_config_lazy_import_matches_tool_search_pattern \
+            tests/unit/test_lazy_imports.py::TestLazyImports::test_litellm_not_loaded_on_import \
+            tests/unit/test_lazy_imports.py::TestLazyImports::test_requests_not_loaded_on_import \
+            tests/unit/test_lazy_imports.py::TestLazyImports::test_agent_available_via_getattr \
+            tests/unit/test_lazy_imports.py::TestLazyImports::test_session_available_via_getattr \
+            tests/unit/test_lazy_imports.py::TestLazyImports::test_knowledge_available_via_getattr \
+            tests/unit/test_lazy_imports.py::TestLazyImports::test_memory_available_via_getattr \
+            tests/unit/test_lazy_imports.py::TestLazyImports::test_tools_loaded_eagerly \
+            tests/unit/test_lazy_imports.py::TestLitePackage::test_lite_agent_no_litellm \
+            tests/unit/test_lazy_imports.py::TestLitePackage::test_lite_agent_with_custom_llm \
+            tests/unit/test_lazy_imports.py::TestLazyImports::test_all_exports_accessible \
+            -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+            -q --tb=line --disable-warnings --timeout=60
+
+      - name: Run isolated callback failure tests
+        working-directory: src/praisonai-agents
+        run: |
+          python -m pytest \
+            tests/unit/test_robustness_issue_5870.py::test_raising_sync_callback_does_not_propagate \
+            tests/unit/test_robustness_issue_5870.py::test_raising_callbacks_do_not_propagate_async \
+            -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+            -q --tb=line --disable-warnings --timeout=60
+
+      - name: Run isolated telemetry configuration tests
+        working-directory: src/praisonai-agents
+        run: |
+          python -m pytest tests/unit/test_lazy_imports.py::TestTelemetryConfig \
+            -m "not slow and not network and not local_service and not provider_anthropic and not provider_google and not provider_ollama and not provider_grok_xai and not provider_groq and not provider_cohere" \
+            -q --tb=line --disable-warnings --timeout=60

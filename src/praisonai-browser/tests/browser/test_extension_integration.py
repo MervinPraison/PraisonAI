@@ -6,6 +6,7 @@ via the bridge server, with fallback to CDP when extension is unavailable.
 
 import pytest
 from unittest.mock import patch, Mock, AsyncMock, MagicMock
+from rich.text import Text
 from typer.testing import CliRunner
 
 from praisonai_browser.cli.commands.browser import app
@@ -26,32 +27,13 @@ def _skip_extension_wait(monkeypatch):
     monkeypatch.setenv("PRAISONAI_BROWSER_SKIP_EXTENSION_WAIT", "1")
 
 
-class TestLaunchCommandEngineFlag:
-    """Test that --engine flag is properly exposed in launch command."""
-    
-    def test_launch_help_shows_engine_flag(self):
-        """Test launch command help shows --engine option."""
-        result = runner.invoke(app, ["launch", "--help"])
-        assert result.exit_code == 0
-        assert "--engine" in result.output
-    
-    def test_launch_help_documents_engine_modes(self):
-        """Test launch help documents extension, cdp, auto modes."""
-        result = runner.invoke(app, ["launch", "--help"])
-        assert result.exit_code == 0
-        # Check that engine modes are documented
-        output_lower = result.output.lower()
-        assert "extension" in output_lower
-        assert "cdp" in output_lower
-        assert "auto" in output_lower
-    
-    def test_launch_help_shows_extension_benefits(self):
-        """Test help explains extension mode benefits."""
-        result = runner.invoke(app, ["launch", "--help"])
-        assert result.exit_code == 0
-        # Should mention reliability, visual feedback, or similar
-        output_lower = result.output.lower()
-        assert "reliab" in output_lower or "visual" in output_lower or "bridge" in output_lower
+def test_launch_help_explains_engine_modes():
+    result = runner.invoke(app, ["launch", "--help"])
+    assert result.exit_code == 0
+    help_text = Text.from_ansi(result.output).plain.lower()
+    for name in ("--engine", "extension", "cdp", "auto"):
+        assert name in help_text
+    assert any(word in help_text for word in ("reliab", "visual", "bridge"))
 
 
 class TestEngineSelectionLogic:

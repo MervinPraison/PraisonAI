@@ -350,10 +350,9 @@ def run_review(
     run: Optional[Callable] = None,
     review_fn: Optional[Callable] = None,
 ) -> Dict[str, Any]:
-    from praisonai_code.ship.review import load_review_guidelines, review_diff, review_severity
+    from praisonai_code.ship.review import load_review_guidelines, normalize_effort, review_diff, review_severity
 
-    if effort not in _EFFORTS:
-        raise ValueError(f"effort must be one of {', '.join(_EFFORTS)}")
+    effort = normalize_effort(effort)
     runner = run or _run_in(repo)
     pr_num = normalize_pr(pr)
     diff_text, file_diffs, label = get_diff_bundle(repo, pr=pr_num, run=runner)

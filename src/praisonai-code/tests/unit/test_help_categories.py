@@ -32,7 +32,7 @@ def _invoke_help():
     CLI rather than the CliRunner capture buffer's locale encoding (cp1252 on
     Windows, which otherwise makes Rich raise and the command exit 1).
     """
-    runner = CliRunner(env={"PYTHONIOENCODING": "utf-8", "NO_COLOR": "1"})
+    runner = CliRunner(env={"PYTHONIOENCODING": "utf-8", "NO_COLOR": "1", "FORCE_COLOR": None})
     return runner.invoke(app, ["--help"], color=False)
 
 
@@ -104,14 +104,45 @@ def test_resolved_commands_keep_their_typeable_name():
 
 
 def test_help_output_is_grouped_not_flat():
-    """The rendered help groups commands into categorised panels."""
+    """Rendered help groups commands and works on legacy Windows terminals."""
     result = _invoke_help()
     assert result.exit_code == 0, result.exception
     # At least a couple of the category panel titles must appear.
     assert "Get started" in result.output
     assert "Run & chat" in result.output
+    assert _cp1252_unsafe_chars(result.output) == []
 
 
-def test_help_still_exits_zero():
-    result = _invoke_help()
-    assert result.exit_code == 0, result.exception
+# Rich renders panels/tables using Unicode box-drawing characters. These are NOT
+# the cause of the #2699 crash: Rich detects legacy (cp1252) Windows consoles and
+# automatically substitutes ASCII box characters at render time, so they never
+# reach the encoder. The CliRunner captures the rich box output regardless of the
+# host terminal, so we exclude the box-drawing block (U+2500-U+257F) when checking
+# for characters that would genuinely break a cp1252 console.
+_BOX_DRAWING_RANGE = range(0x2500, 0x2580)
+
+
+def _cp1252_unsafe_chars(text: str) -> list:
+    """Return codepoints that a cp1252 (legacy Windows) console cannot encode.
+
+    Box-drawing characters that Rich downgrades automatically are ignored.
+    """
+    unsafe = []
+    for c in text:
+        if ord(c) in _BOX_DRAWING_RANGE:
+            continue
+        try:
+            c.encode("cp1252")
+        except UnicodeEncodeError:
+            unsafe.append(hex(ord(c)))
+    return sorted(set(unsafe))
+
+
+def test_lazy_commands_help_strings_are_ascii():
+    from praisonai_code.cli.app import _LAZY_COMMANDS
+
+    for name, entry in _LAZY_COMMANDS.items():
+        help_text = entry[2]
+        assert all(ord(c) < 128 for c in help_text), (
+            f"non-ASCII in help for command {name!r}: {help_text!r}"
+        )

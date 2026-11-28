@@ -10,8 +10,10 @@ from praisonai_code.ship import flow, is_ship_disabled
 from praisonai_code.ship.flow import ShipRefused
 from praisonai_code.ship.review import (
     EFFORTS,
+    EFFORT_ALIASES,
     ReviewFinding,
     load_review_guidelines,
+    normalize_effort,
     review_diff,
     review_severity,
 )
@@ -130,6 +132,17 @@ def post_inline_review(
     ).returncode == 0
 
 
+def _pr_base_branch(pr_url: str, run: Callable) -> str:
+    """Resolve the PR's base branch via ``gh pr view``; falls back to ``main``."""
+    proc = run(
+        ["gh", "pr", "view", pr_url, "--json", "baseRefName", "--jq", ".baseRefName"],
+        capture_output=True,
+        text=True,
+    )
+    base = (proc.stdout or "").strip() if proc.returncode == 0 else ""
+    return base or "main"
+
+
 def ship(
     target: Optional[str] = None, *, message: Optional[str] = None, dry_run: bool = False,
     effort: str = "high", model: Optional[str] = None, review: bool = True,
@@ -139,12 +152,12 @@ def ship(
     """Commit/push/open a draft PR (or target an existing PR), self-review, and optionally watch."""
     if reason := is_ship_disabled():
         raise ShipRefused(reason)
-    if target in EFFORTS:
+    if target in EFFORTS or target in EFFORT_ALIASES:
         effort, target = target, None
     elif target and target.startswith("+"):
         reviewer, target = target[1:].strip() or reviewer, None
-    if review and effort not in EFFORTS:
-        raise ValueError(f"unknown review effort {effort!r}; use one of {', '.join(EFFORTS)}")
+    if review:
+        effort = normalize_effort(effort)
     if target is None:
         out = flow.ship_to_draft_pr(message=message, dry_run=dry_run, run=run, llm=model)
         if dry_run:
@@ -162,15 +175,20 @@ def ship(
     findings, severity, posted = [], "none", False
     if review:
         proc = run(["gh", "pr", "diff", pr_url], capture_output=True, text=True)
-        diff_text = proc.stdout if proc.returncode == 0 else ""
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "").strip() or f"exit {proc.returncode}"
+            raise ShipRefused(f"failed to fetch diff for PR {pr_url}: {detail}")
+        diff_text = proc.stdout
         if review_fn is not None:
             findings = review_fn(diff_text, effort=effort, llm=model)
         else:
-            guidelines = load_review_guidelines(run=run)
+            guidelines = load_review_guidelines(base=_pr_base_branch(pr_url, run), run=run)
             findings = review_diff(diff_text, effort=effort, llm=model, guidelines=(guidelines or None))
         severity = review_severity(findings)
         if post_review and findings:
             posted = post_inline_review(pr_url, findings, severity, diff_text, run=run)
+            if not posted:
+                raise ShipRefused(f"failed to post self-review findings to PR {pr_url}")
     if watch:
         if watch_fn is None:
             from praisonai_code.ship.steward_loop import watch_pr as watch_fn

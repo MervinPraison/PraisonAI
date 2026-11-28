@@ -115,3 +115,26 @@ def test_ship_post_review_passes_diff_to_inline_review():
     assert res.posted_review and len(api_payloads) == 1
     assert api_payloads[0]["event"] == "COMMENT"
     assert api_payloads[0]["comments"][0]["line"] == 2
+
+
+def test_ship_loads_review_md_from_pr_actual_base_branch(monkeypatch):
+    from praisonai_code.ship import orchestrate
+
+    seen = {}
+
+    def fake_run(cmd, **kw):
+        if cmd[:3] == ["gh", "pr", "diff"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="diff --git a/a.py b/a.py\n+x = 1\n", stderr="")
+        if cmd[:3] == ["gh", "pr", "view"] and "baseRefName" in cmd:
+            return subprocess.CompletedProcess(cmd, 0, stdout="master\n", stderr="")
+        if cmd == ["git", "show", "origin/master:REVIEW.md"]:
+            return subprocess.CompletedProcess(cmd, 0, stdout="Master branch rule.\n", stderr="")
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    monkeypatch.setattr(
+        orchestrate,
+        "review_diff",
+        lambda diff, **kw: (seen.update(kw), [])[1],
+    )
+    ship("55", run=fake_run)
+    assert seen["guidelines"] == "Master branch rule."

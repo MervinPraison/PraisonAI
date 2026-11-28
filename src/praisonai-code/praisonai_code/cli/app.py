@@ -163,7 +163,7 @@ _LAZY_COMMANDS: Dict[str, Tuple[str, str, str]] = {
     "acp": (".commands.acp", "app", "Agent Client Protocol server"),
     "mcp": ("praisonai_mcp.cli.commands.mcp", "app", "MCP server management"),
     "connectors": ("praisonai_mcp.cli.commands.connectors", "app", "Connect remote MCP services (GitHub, Linear, Notion...)"),
-    "connect": ("praisonai_mcp.cli.commands.connect", "app", "Connect editors and agents (Cursor, Claude, Codex…) to PraisonAI"),
+    "connect": ("praisonai_mcp.cli.commands.connect", "app", "Connect editors and agents (Cursor, Claude, Codex...) to PraisonAI"),
     "serve": (".commands.serve", "app", "API server management"),
     "daemon": (".commands.daemon", "app", "Warm local runtime (keeps MCP/provider clients hot)"),
     "attach": (".commands.attach", "app", "Attach to a live session on the warm runtime"),

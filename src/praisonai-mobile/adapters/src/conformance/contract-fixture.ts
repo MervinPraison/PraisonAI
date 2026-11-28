@@ -141,7 +141,10 @@ function storage(files: Map<string, string> = new Map()): StoragePort {
     async clear(namespace) {
       if (mode === "storage_namespaces_collide") return void files.clear();
       const prefix = `${namespace}/`;
-      for (const k of [...files.keys()]) if (k.startsWith(prefix)) files.delete(k);
+      const keys = [...files.keys()].filter((key) => key.startsWith(prefix));
+      for (const [index, key] of keys.entries()) {
+        if (mode !== "storage_clear_skips_keys" || index % 2 === 0) files.delete(key);
+      }
     },
   };
 }
@@ -176,7 +179,8 @@ function time(): TimePort {
       if (mode === "time_unsubscribe_does_nothing") {
         // The defect: the interval leaks for the app's lifetime, and nothing
         // the caller does can stop it.
-        const handle = setInterval(cb, ms);
+        // The timer still fires while the child is testing, but lets it exit.
+        setInterval(cb, ms).unref();
         return () => {};
       }
       if (mode === "time_every_fires_once") {

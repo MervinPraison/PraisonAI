@@ -3,18 +3,25 @@ name: Optimized Test Suite
 on: 
   push:
     branches: [ main, develop ]
-    paths:
-      - 'src/**'
+    paths: &watched
+      - 'src/praisonai/**'
+      - 'src/praisonai-agents/**'
+      - 'src/praisonai-code/**'
+      - 'src/praisonai-bot/**'
+      - 'src/praisonai-train/**'
+      - 'src/praisonai-browser/**'
+      - 'src/praisonai-mcp/**'
+      - 'src/praisonai-sandbox/**'
+      - 'src/praisonai-deploy/**'
+      - 'scripts/check_c*_imports.sh'
+      - 'scripts/audit_hybrid_modules.py'
       - 'pyproject.toml'
       - '.github/workflows/test-optimized.yml'
+      - '.github/actions/install-monorepo-packages/**'
   pull_request:
     branches: [ main, develop ]
-    paths:
-      - 'src/**'
-      - 'pyproject.toml'
-      - '.github/workflows/test-optimized.yml'
+    paths: *watched
   schedule:
-    # Nightly extended tests at 3 AM UTC
     - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
@@ -28,6 +35,10 @@ on:
           - main
           - extended
           - nightly
+
+concurrency:
+  group: optimized-tests-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   PYTHONPATH: ${{ github.workspace }}/src/praisonai-agents
@@ -90,14 +101,20 @@ jobs:
           tests/unit/test_c13_sandbox_backward_compat.py \
           tests/unit/test_c14_deploy_backward_compat.py \
           -q --tb=line --timeout=30 --maxfail=5
-        python -m pytest tests/unit/cli/ \
+        # Core Tests runs the full CLI suite. Exercise startup and command
+        # routing here with the smaller wrapper install used by smoke.
+        python -m pytest \
+          tests/unit/cli/test_main_dispatcher.py::TestVersionShortCircuit \
+          tests/unit/cli/test_main_dispatcher.py::TestCommandRegistryNoDrift \
+          tests/unit/cli/test_main_dispatcher_unknown_command.py \
+          tests/unit/cli/test_main_utf8_stdio.py \
+          tests/unit/cli/test_typer_cli.py::TestTyperApp \
           ../praisonai-bot/tests/unit/cli/test_onboard_command.py \
           ../praisonai-bot/tests/unit/cli/test_onboard_non_interactive.py \
           -m "not slow and not network" \
           -q --tb=line \
           --timeout=30 \
           --ignore=tests/fixtures \
-          --ignore=tests/unit/cli/test_message_queue.py \
           --maxfail=5
 
     - name: Run praisonai-agents subscription-auth smoke tests
@@ -262,8 +279,9 @@ jobs:
         "
         /tmp/praisonai-browser-standalone/bin/praisonai-browser --help
         bash "$GITHUB_WORKSPACE/scripts/check_c11_browser_imports.sh"
-        python -m pytest src/praisonai-browser/tests/browser/test_protocol_compliance.py src/praisonai-browser/tests/browser/test_server.py -q -m "not network"
+        python -m pytest src/praisonai-browser/tests -q -m "not network"
 
+    # Core Tests runs the MCP server, sandbox, and deployment suites.
     - name: Standalone praisonai-mcp smoke (C12)
       run: |
         set -euo pipefail
@@ -280,7 +298,6 @@ jobs:
         "
         /tmp/praisonai-mcp-standalone/bin/praisonai-mcp --help
         bash "$GITHUB_WORKSPACE/scripts/check_c12_mcp_imports.sh"
-        python -m pytest src/praisonai-mcp/tests/mcp_server -q -m "not network"
 
     - name: Standalone praisonai-sandbox smoke (C13)
       run: |
@@ -297,7 +314,6 @@ jobs:
         "
         /tmp/praisonai-sandbox-standalone/bin/praisonai-sandbox --help
         bash "$GITHUB_WORKSPACE/scripts/check_c13_sandbox_imports.sh"
-        python -m pytest src/praisonai-sandbox/tests -q -m "not network"
 
     - name: Standalone praisonai-deploy smoke (C14)
       run: |
@@ -313,23 +329,18 @@ jobs:
         "
         /tmp/praisonai-deploy-standalone/bin/praisonai-deploy --help
         bash "$GITHUB_WORKSPACE/scripts/check_c14_deploy_imports.sh"
-        python -m pytest src/praisonai-deploy/tests -q -m "not network"
 
     - name: Audit hybrid module imports (C8 full stack)
-      run: |
-        set -euo pipefail
-        pip install -q -e src/praisonai-agents -e src/praisonai-code -e src/praisonai-bot -e src/praisonai-train -e src/praisonai-browser -e src/praisonai-mcp -e src/praisonai-sandbox -e src/praisonai-deploy -e src/praisonai
-        python scripts/audit_hybrid_modules.py
+      run: python scripts/audit_hybrid_modules.py
     
     - name: Smoke Test Summary
       if: always()
       run: echo "✅ Smoke tests completed"
 
-  # ============================================
-  # MAIN TESTS - Unit + safe integration
-  # Target: <= 5 minutes
-  # ============================================
+  # Core Tests runs the wrapper units in PRs. Publish coverage from branch,
+  # scheduled and manual runs.
   main:
+    if: github.event_name != 'pull_request' && github.event.inputs.tier != 'smoke'
     needs: smoke
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -363,6 +374,10 @@ jobs:
       with:
         agents-extras: ".[all]"
         wrapper-extras: ".[crewai,autogen,ui,chat]"
+    - name: Install the TypeScript parser for parity fixtures
+      run: |
+        npm install --prefix "$RUNNER_TEMP/parity-ts" --no-audit --no-fund typescript@5.7.3
+        echo "PARITY_TS_NODE_MODULES=$RUNNER_TEMP/parity-ts/node_modules" >> "$GITHUB_ENV"
     
     - name: Run Main Tests
       env:
@@ -383,7 +398,6 @@ jobs:
           --ignore=tests/fixtures \
           --ignore=tests/e2e \
           --ignore=tests/live \
-          --ignore=tests/unit/jobs \
           --ignore=tests/unit/test_langflow_components.py \
           --cov=praisonai \
           --cov-report=xml \
@@ -412,21 +426,23 @@ jobs:
     needs: smoke
     if: >-
       github.event_name == 'schedule' ||
-      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.tier != 'smoke') ||
       (github.event_name == 'pull_request' &&
        contains(github.event.pull_request.labels.*.name, 'run-live'))
     runs-on: ubuntu-latest
     timeout-minutes: 8
-    # This job always runs but steps are conditional on secret availability
+    # Unconfigured repositories skip the live steps.
     
     steps:
     - name: Check if OpenAI key is available
       id: check-key
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       run: |
-        if [ -n "${{ secrets.OPENAI_API_KEY }}" ]; then
-          echo "has_key=true" >> $GITHUB_OUTPUT
+        if [ -n "$OPENAI_API_KEY" ]; then
+          echo "has_key=true" >> "$GITHUB_OUTPUT"
         else
-          echo "has_key=false" >> $GITHUB_OUTPUT
+          echo "has_key=false" >> "$GITHUB_OUTPUT"
           echo "⚠️ OPENAI_API_KEY not set - skipping live tests"
         fi
     
@@ -496,11 +512,13 @@ jobs:
     steps:
     - name: Check if Anthropic key is available
       id: check-key
+      env:
+        ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       run: |
-        if [ -n "${{ secrets.ANTHROPIC_API_KEY }}" ]; then
-          echo "has_key=true" >> $GITHUB_OUTPUT
+        if [ -n "$ANTHROPIC_API_KEY" ]; then
+          echo "has_key=true" >> "$GITHUB_OUTPUT"
         else
-          echo "has_key=false" >> $GITHUB_OUTPUT
+          echo "has_key=false" >> "$GITHUB_OUTPUT"
           echo "⚠️ ANTHROPIC_API_KEY not set - skipping tests"
         fi
     
@@ -558,9 +576,9 @@ jobs:
         GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
       run: |
         if [ -n "$GOOGLE_API_KEY" ]; then
-          echo "has_key=true" >> $GITHUB_OUTPUT
+          echo "has_key=true" >> "$GITHUB_OUTPUT"
         else
-          echo "has_key=false" >> $GITHUB_OUTPUT
+          echo "has_key=false" >> "$GITHUB_OUTPUT"
           echo "⚠️ GOOGLE_API_KEY not set - skipping tests"
         fi
     
@@ -618,9 +636,9 @@ jobs:
         GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       run: |
         if [ -n "$GROQ_API_KEY" ]; then
-          echo "has_key=true" >> $GITHUB_OUTPUT
+          echo "has_key=true" >> "$GITHUB_OUTPUT"
         else
-          echo "has_key=false" >> $GITHUB_OUTPUT
+          echo "has_key=false" >> "$GITHUB_OUTPUT"
           echo "⚠️ GROQ_API_KEY not set - skipping tests"
         fi
     
@@ -677,9 +695,9 @@ jobs:
         XAI_API_KEY: ${{ secrets.XAI_API_KEY }}
       run: |
         if [ -n "$XAI_API_KEY" ]; then
-          echo "has_key=true" >> $GITHUB_OUTPUT
+          echo "has_key=true" >> "$GITHUB_OUTPUT"
         else
-          echo "has_key=false" >> $GITHUB_OUTPUT
+          echo "has_key=false" >> "$GITHUB_OUTPUT"
           echo "⚠️ XAI_API_KEY not set - skipping tests"
         fi
     
@@ -736,9 +754,9 @@ jobs:
         COHERE_API_KEY: ${{ secrets.COHERE_API_KEY }}
       run: |
         if [ -n "$COHERE_API_KEY" ]; then
-          echo "has_key=true" >> $GITHUB_OUTPUT
+          echo "has_key=true" >> "$GITHUB_OUTPUT"
         else
-          echo "has_key=false" >> $GITHUB_OUTPUT
+          echo "has_key=false" >> "$GITHUB_OUTPUT"
           echo "⚠️ COHERE_API_KEY not set - skipping tests"
         fi
     
@@ -983,22 +1001,19 @@ jobs:
   # TEST SUMMARY
   # ============================================
   test-summary:
-    needs: [smoke, main, extended-ollama]
+    needs: [smoke, main, openai-live, extended-anthropic, extended-google, extended-groq, extended-xai, extended-cohere, extended-ollama, legacy-unit]
     if: always()
     runs-on: ubuntu-latest
     
     steps:
     - name: Test Summary
       run: |
-        echo "# 📊 Test Suite Summary" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
-        echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
-        echo "| Smoke | ${{ needs.smoke.result }} |" >> $GITHUB_STEP_SUMMARY
-        echo "| Main | ${{ needs.main.result }} |" >> $GITHUB_STEP_SUMMARY
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "## Test Tiers" >> $GITHUB_STEP_SUMMARY
-        echo "- **smoke**: Fast unit tests, no network (≤2 min)" >> $GITHUB_STEP_SUMMARY
-        echo "- **main**: Unit + integration, no network (≤5 min)" >> $GITHUB_STEP_SUMMARY
-        echo "- **openai-live**: OpenAI API tests (when key available)" >> $GITHUB_STEP_SUMMARY
-        echo "- **extended-***: Provider-specific tests (nightly)" >> $GITHUB_STEP_SUMMARY
+        {
+          echo "## Test jobs"
+          echo
+          echo '| Job | Status |'
+          echo '|-----|--------|'
+          jq -r 'to_entries[] | "| \(.key) | \(.value.result) |"' <<< "$JOB_RESULTS"
+        } >> "$GITHUB_STEP_SUMMARY"
+      env:
+        JOB_RESULTS: ${{ toJSON(needs) }}
