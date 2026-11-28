@@ -5,13 +5,14 @@ They don't require external services (server, Chrome, etc).
 """
 
 import pytest
+from rich.text import Text
 from typer.testing import CliRunner
 from unittest.mock import patch, Mock
 
 from praisonai_browser.cli.commands.browser import app
 
 
-runner = CliRunner(env={"NO_COLOR": "1", "FORCE_COLOR": None})
+runner = CliRunner()
 
 
 class TestCLIHelp:
@@ -33,7 +34,7 @@ class TestCLIHelp:
         """Test sessions command help."""
         result = runner.invoke(app, ["sessions", "--help"])
         assert result.exit_code == 0
-        assert "--limit" in result.output
+        assert "--limit" in Text.from_ansi(result.output).plain
     
     def test_history_help(self):
         """Test history command help."""

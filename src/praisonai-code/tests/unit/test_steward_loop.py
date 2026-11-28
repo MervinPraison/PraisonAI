@@ -3,6 +3,7 @@
 import subprocess
 
 import pytest
+from rich.text import Text
 from typer.testing import CliRunner
 
 from praisonai_code.ship.flow import ShipRefused
@@ -125,11 +126,11 @@ def test_steward_is_registered_in_cli_app_and_cli_options(monkeypatch):
 
     assert cli_app._LAZY_COMMANDS["steward"][0] == ".commands.steward"
 
-    runner = CliRunner(env={"NO_COLOR": "1", "FORCE_COLOR": None})
-    help_res = runner.invoke(steward_cmd.app, ["--help"])
+    help_res = CliRunner().invoke(steward_cmd.app, ["--help"])
     assert help_res.exit_code == 0
+    help_text = Text.from_ansi(help_res.output).plain
     for flag in ("--once", "--interval", "--max-days", "--max-attempts", "--model"):
-        assert flag in help_res.output
+        assert flag in help_text
 
     seen = {}
 

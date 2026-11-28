@@ -6,6 +6,7 @@ import subprocess
 import sys
 
 import pytest
+from rich.text import Text
 from typer.testing import CliRunner
 
 
@@ -29,8 +30,9 @@ def run_doctor(*args):
 def test_doctor_help():
     result = run_doctor("--help")
     assert result.returncode == 0, result.stderr
-    assert "--quick" in result.stdout
-    assert "--json" in result.stdout
+    help_text = Text.from_ansi(result.stdout).plain
+    assert "--quick" in help_text
+    assert "--json" in help_text
 
 
 @pytest.mark.parametrize("args", [("env", "--json"), ("--quick", "--json")])
