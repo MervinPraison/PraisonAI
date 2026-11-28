@@ -13,6 +13,7 @@ assertion that let the original defect through.
 
 import os
 import pathlib
+import shlex
 import signal
 import subprocess
 import sys
@@ -39,7 +40,7 @@ class LocalHost:
     def run(self, command, timeout=None):
         proc = subprocess.run(
             ["/bin/sh", "-c", command],
-            capture_output=True, text=True, timeout=timeout,
+            capture_output=True, text=True, timeout=timeout, start_new_session=True,
         )
         return _Completed(proc.returncode, proc.stdout or "", proc.stderr or "")
 
@@ -76,12 +77,7 @@ def _launch_wrapper_with_child(tmp_path, host):
         f"sleep 120' >/dev/null 2>&1 & "
         f"echo $! > {run.pid_path}"
     )
-    script = (
-        f"cd {remote_dir} && "
-        f"if command -v setsid >/dev/null 2>&1; then "
-        f"setsid sh -c {_sh_quote(inner)}; else {inner}; fi"
-    )
-    host.run(script)
+    host.run(f"cd {shlex.quote(remote_dir)} || exit 1\n{inner}", timeout=5)
     # Give the backgrounded child a moment to record its pid.
     for _ in range(50):
         if pathlib.Path(child_pidfile).exists():
@@ -89,16 +85,6 @@ def _launch_wrapper_with_child(tmp_path, host):
         time.sleep(0.05)
     child_pid = int(pathlib.Path(child_pidfile).read_text().strip())
     return run, child_pid
-
-
-def _sh_quote(s):
-    import shlex
-    return shlex.quote(s)
-
-
-def _has_setsid():
-    import shutil
-    return shutil.which("setsid") is not None
 
 
 @pytest.mark.skipif(os.name != "posix", reason="POSIX signals only")
@@ -147,8 +133,6 @@ class TestStopKillsTheWork:
         # The defect one level up: the recorded wrapper exits promptly, but a
         # child in the same group traps SIGTERM and lives on. Probing only the
         # wrapper pid would report `stopped` while the child keeps the GPU.
-        if not _has_setsid():
-            pytest.skip("setsid required to isolate the run's process group")
         host = LocalHost()
         runner = _runner_over(host)
         remote_dir = str(tmp_path)
@@ -164,12 +148,14 @@ class TestStopKillsTheWork:
             f"sleep 120' >/dev/null 2>&1 & "
             f"echo $! > {run.pid_path}"
         )
-        host.run(f"cd {remote_dir} && setsid sh -c {_sh_quote(inner)}")
+        host.run(f"cd {shlex.quote(remote_dir)} || exit 1\n{inner}", timeout=5)
         for _ in range(50):
             if pathlib.Path(child_pidfile).exists():
                 break
             time.sleep(0.05)
         child_pid = int(pathlib.Path(child_pidfile).read_text().strip())
+        group = os.getpgid(child_pid)
+        assert group != os.getpgrp()
         try:
             assert _alive(child_pid), "child never started; test inconclusive"
             with pytest.raises(RemoteError, match="did not stop"):
@@ -177,7 +163,7 @@ class TestStopKillsTheWork:
             assert _alive(child_pid), "child should have survived SIGTERM"
         finally:
             try:
-                os.kill(child_pid, signal.SIGKILL)
+                os.killpg(group, signal.SIGKILL)
             except OSError:
                 pass
 
@@ -191,7 +177,7 @@ class TestStopKillsTheWork:
         # A process in its own group that traps SIGTERM: stop must not lie.
         stubborn = subprocess.Popen(
             ["/bin/sh", "-c", "trap '' TERM; while true; do sleep 1; done"],
-            preexec_fn=os.setsid,
+            start_new_session=True,
         )
         try:
             pathlib.Path(run.pid_path).write_text(str(stubborn.pid))

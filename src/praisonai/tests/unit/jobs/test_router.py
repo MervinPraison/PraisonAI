@@ -1,5 +1,7 @@
 """Integration tests for jobs router."""
 
+import asyncio
+
 import pytest
 fastapi = pytest.importorskip("fastapi")
 from fastapi.testclient import TestClient
@@ -22,10 +24,13 @@ def executor(store):
 
 
 @pytest.fixture
-def client(store, executor):
-    """Create test client."""
-    app = create_app(store=store, executor=executor)
-    return TestClient(app)
+def client(store, executor, monkeypatch):
+    async def pending_agent(job):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(executor, "_run_agent", pending_agent)
+    with TestClient(create_app(store=store, executor=executor)) as test_client:
+        yield test_client
 
 
 class TestHealthEndpoint:
@@ -52,6 +57,7 @@ class TestStatsEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert "executor" in data
+        assert data["store"]["total_jobs"] == 0
 
 
 class TestSubmitEndpoint:
@@ -287,7 +293,7 @@ class TestListEndpoint:
 class TestResultEndpoint:
     """Tests for job results."""
     
-    def test_get_result_job_lifecycle(self, client):
+    def test_get_result_while_job_is_pending(self, client):
         """Test getting result follows job lifecycle."""
         # Submit a job
         submit_response = client.post(
@@ -296,11 +302,9 @@ class TestResultEndpoint:
         )
         job_id = submit_response.json()["job_id"]
         
-        # Result endpoint should work (may return 409 if not complete, or 200 if complete/failed)
         response = client.get(f"/api/v1/runs/{job_id}/result")
         
-        # Either 200 (completed) or 409 (not complete) is valid
-        assert response.status_code in (200, 409)
+        assert response.status_code == 409
     
     def test_get_result_not_found(self, client):
         """Test getting result of nonexistent job."""
@@ -321,11 +325,10 @@ class TestCancelEndpoint:
         )
         job_id = submit_response.json()["job_id"]
         
-        # Cancel the job - may succeed (200) or fail if job already completed (409)
         response = client.post(f"/api/v1/runs/{job_id}/cancel")
         
-        # Either 200 (cancelled) or 409 (already complete) is valid due to async execution
-        assert response.status_code in (200, 409)
+        assert response.status_code == 200
+        assert response.json()["status"] == "cancelled"
     
     def test_cancel_job_not_found(self, client):
         """Test cancelling nonexistent job."""
@@ -337,7 +340,7 @@ class TestCancelEndpoint:
 class TestDeleteEndpoint:
     """Tests for job deletion."""
     
-    def test_delete_job_lifecycle(self, client):
+    def test_delete_active_job_is_rejected(self, client):
         """Test deleting a job follows lifecycle rules."""
         # Submit a job
         submit_response = client.post(
@@ -346,11 +349,9 @@ class TestDeleteEndpoint:
         )
         job_id = submit_response.json()["job_id"]
         
-        # Try to delete - may fail (409) if running, or succeed (204) if already complete
         response = client.delete(f"/api/v1/runs/{job_id}")
         
-        # Either 204 (deleted) or 409 (still running) is valid
-        assert response.status_code in (204, 409)
+        assert response.status_code == 409
     
     def test_delete_cancelled_job(self, client):
         """Test deleting a cancelled job."""

@@ -162,7 +162,7 @@ def test_plan_mode_denies_writes():
     assert _B is not None
 
 
-def test_plan_exit_restores_prior_mode_async_tui():
+def test_plan_exit_restores_prior_mode_async_tui(monkeypatch):
     """Exiting PLAN must restore the launch-time policy, not force DEFAULT.
 
     Greptile P1: a session started with ``accept-edits``/``bypass`` that enters
@@ -176,7 +176,7 @@ def test_plan_exit_restores_prior_mode_async_tui():
 
     backend = InteractiveCLIApprovalBackend(non_interactive=True)
     backend.set_permission_mode(PermissionMode.ACCEPT_EDITS)
-    get_approval_registry().set_backend(backend)
+    monkeypatch.setattr(get_approval_registry(), "_global_backend", backend)
 
     tui = AsyncTUI()
     # Startup sync should reflect the live (non-PLAN) backend.
@@ -192,7 +192,7 @@ def test_plan_exit_restores_prior_mode_async_tui():
     assert tui.config.plan_mode is False
 
 
-def test_async_tui_syncs_plan_mode_from_backend():
+def test_async_tui_syncs_plan_mode_from_backend(monkeypatch):
     """Launching with a PLAN backend must light up the [PLAN] indicator.
 
     Greptile P1: when the backend already enforces PLAN at startup, the TUI's
@@ -206,7 +206,7 @@ def test_async_tui_syncs_plan_mode_from_backend():
 
     backend = InteractiveCLIApprovalBackend(non_interactive=True)
     backend.set_permission_mode(PermissionMode.PLAN)
-    get_approval_registry().set_backend(backend)
+    monkeypatch.setattr(get_approval_registry(), "_global_backend", backend)
 
     tui = AsyncTUI()
     assert tui.config.plan_mode is True

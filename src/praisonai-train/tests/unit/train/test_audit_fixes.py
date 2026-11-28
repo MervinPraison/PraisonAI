@@ -131,7 +131,9 @@ def test_the_recorded_pid_owns_the_trainer_signalable_by_group(tmp_path):
                        log_path=str(tmp_path / "train.log"))
 
     script = runner._launch_script(run, "", None)
-    subprocess.run(["/bin/sh", "-c", script], cwd=str(tmp_path), check=True)
+    subprocess.run(
+        ["/bin/sh", "-c", script], cwd=tmp_path, check=True, start_new_session=True,
+    )
 
     pid_file = tmp_path / "train.pid"
     trainer_pid_file = tmp_path / "trainer_pid"
@@ -172,7 +174,9 @@ def test_the_recorded_pid_owns_the_trainer_signalable_by_group(tmp_path):
         # A TERM to the recorded pid's group must actually stop the trainer:
         # prove `stop`'s group signal reaches the work, not a non-forwarding
         # wrapper that would leave the trainer orphaned.
-        os.killpg(os.getpgid(int(recorded)), signal.SIGTERM)
+        group = os.getpgid(int(recorded))
+        assert group != os.getpgrp(), "trainer must run in an isolated process group"
+        os.killpg(group, signal.SIGTERM)
         for _ in range(50):
             try:
                 os.kill(int(trainer_pid), 0)

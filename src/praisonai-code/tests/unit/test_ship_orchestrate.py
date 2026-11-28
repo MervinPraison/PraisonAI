@@ -3,6 +3,7 @@
 import subprocess
 
 import pytest
+from rich.text import Text
 from typer.testing import CliRunner
 
 from praisonai_code.ship import ShipResult, ship
@@ -149,8 +150,9 @@ def test_cli_help_and_options_forward_to_ship(monkeypatch):
 
     help_res = CliRunner().invoke(ship_cmd.app, ["--help"])
     assert help_res.exit_code == 0
+    help_text = Text.from_ansi(help_res.output).plain
     for flag in ("--effort", "--model", "--post-review", "--watch", "--reviewer", "--dry-run"):
-        assert flag in help_res.output
+        assert flag in help_text
 
     seen = {}
 

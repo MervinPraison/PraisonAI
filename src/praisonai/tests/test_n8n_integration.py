@@ -143,7 +143,7 @@ class TestN8nConverter:
         assert "nodes" in result
         assert "connections" in result
         assert "settings" in result
-        assert "staticData" not in result
+        assert result["staticData"] == {}
         assert "tags" not in result
         assert "updatedAt" not in result
         assert "versionId" not in result

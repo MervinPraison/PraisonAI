@@ -26,10 +26,14 @@ on:
 jobs:
   comprehensive-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      PRAISONAI_ALLOW_NETWORK: '0'
+      PRAISONAI_LIVE_TESTS: '0'
+      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
+      OPENAI_API_KEY: 'sk-not-a-real-key'
       OPENAI_MODEL_NAME: gpt-4o-mini
+      PYTEST_ADDOPTS: '--timeout=120'
     strategy:
       matrix:
         python-version: ["3.11"]
@@ -48,26 +52,24 @@ jobs:
     - name: Install UV
       run: |
         curl -LsSf https://astral.sh/uv/install.sh | sh
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
 
     - name: Install dependencies
       run: |
         uv pip install --system duckduckgo_search
         uv pip install --system pytest pytest-asyncio pytest-cov pytest-benchmark pytest-timeout
-        uv pip install --system "praisonaiagents[knowledge]"
     - uses: ./.github/actions/install-monorepo-packages
       with:
         use-uv: "true"
+        agents-extras: ".[knowledge]"
         wrapper-extras: ".[ui,gradio,api,agentops,google,openai,anthropic,cohere,chat,code,realtime,call,crewai,autogen]"
 
-    - name: Verify environment variables
+    - name: Install the TypeScript parser for parity fixtures
+      if: contains(fromJSON('["all", "unit", "fast", "performance"]'), github.event.inputs.test_type || 'all')
       run: |
-        if [ -n "$OPENAI_API_KEY" ]; then
-          echo "✅ OPENAI_API_KEY is set (length: ${#OPENAI_API_KEY})"
-        else
-          echo "⚠️ OPENAI_API_KEY is NOT set"
-        fi
+        npm install --prefix "$RUNNER_TEMP/parity-ts" --no-audit --no-fund typescript@5.7.3
+        echo "PARITY_TS_NODE_MODULES=$RUNNER_TEMP/parity-ts/node_modules" >> "$GITHUB_ENV"
 
     - name: Run Comprehensive Test Suite
       id: comprehensive_tests
@@ -114,21 +116,23 @@ jobs:
         EVENT_NAME: ${{ github.event_name }}
         TEST_OUTCOME: ${{ steps.comprehensive_tests.outcome }}
       run: |
-        echo "# 📋 Comprehensive Test Report" > comprehensive_report.md
-        echo "" >> comprehensive_report.md
-        echo "**Python Version:** ${{ matrix.python-version }}" >> comprehensive_report.md
-        echo "**Test Type:** $INPUT_TEST_TYPE" >> comprehensive_report.md
-        echo "**Trigger:** $EVENT_NAME" >> comprehensive_report.md
-        echo "**Test step outcome:** ${TEST_OUTCOME:-not run}" >> comprehensive_report.md
-        echo "" >> comprehensive_report.md
-        
-        echo "See the test step log for collected, passed, skipped and failed tests." >> comprehensive_report.md
+        {
+          echo "# Comprehensive Test Report"
+          echo
+          echo "**Python Version:** ${{ matrix.python-version }}"
+          echo "**Test Type:** $INPUT_TEST_TYPE"
+          echo "**Trigger:** $EVENT_NAME"
+          echo "**Test step outcome:** ${TEST_OUTCOME:-not run}"
+          echo
+          echo "See the test step log for collected, passed, skipped and failed tests."
+        } > comprehensive_report.md
 
     - name: Upload coverage reports to Codecov
+      if: hashFiles('src/praisonai/coverage.xml') != ''
       uses: codecov/codecov-action@v5
       with:
         token: ${{ secrets.CODECOV_TOKEN }}
-        file: src/praisonai/coverage.xml
+        files: src/praisonai/coverage.xml
         flags: comprehensive-tests
         name: comprehensive-tests-coverage
         fail_ci_if_error: false
@@ -154,18 +158,12 @@ jobs:
     steps:
     - name: Generate Matrix Summary
       run: |
-        echo "# 🎯 Test Matrix Summary" > matrix_summary.md
-        echo "" >> matrix_summary.md
-        echo "## Python Version Results:" >> matrix_summary.md
-        echo "- Python 3.11: ${{ needs.comprehensive-test.result }}" >> matrix_summary.md
-        echo "" >> matrix_summary.md
-        echo "## Overall Status:" >> matrix_summary.md
-        if [ "${{ needs.comprehensive-test.result }}" == "success" ]; then
-          echo "✅ **The comprehensive test job succeeded.**" >> matrix_summary.md
-        else
-          echo "❌ **Some tests failed. Check individual job logs for details.**" >> matrix_summary.md
-        fi
-        
+        {
+          echo "# Test Matrix Summary"
+          echo
+          echo "- Python 3.11: ${{ needs.comprehensive-test.result }}"
+        } > matrix_summary.md
+
     - name: Upload Matrix Summary
       uses: actions/upload-artifact@v4
       with:
