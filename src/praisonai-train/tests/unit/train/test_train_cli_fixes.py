@@ -40,22 +40,8 @@ def test_train_llm_forwards_dataset_as_option(tmp_path, monkeypatch):
     from praisonai_train.cli.commands import train as train_cmd
 
     captured = {}
-
-    class _FakePraisonAI:
-        def __init__(self, *a, **k):
-            import sys
-            captured["argv"] = list(sys.argv)
-
-        def main(self):
-            pass
-
-    class _FakeModule:
-        PraisonAI = _FakePraisonAI
-
-    # ``import_code_module``/``code_available`` are imported inside the function
-    # from the bridge module, so patch them at their source.
-    with patch("praisonai_train._code_bridge.import_code_module",
-               return_value=_FakeModule()):
+    with patch("praisonai_train.train.llm.launch.launch",
+               side_effect=lambda config: captured.setdefault("config", dict(config))):
         train_cmd.train_llm(
             "/data/my_tamil_sft.jsonl", model="unsloth/Llama-3.1-8B", verbose=False)
 
@@ -67,61 +53,38 @@ def test_train_llm_forwards_dataset_as_option(tmp_path, monkeypatch):
         f"the dataset did not reach the config the trainer reads: {written}")
     assert written.get("model_name") == "unsloth/Llama-3.1-8B"
 
-    # And the flags that trigger the destructive branch must NOT be forwarded.
-    argv = captured["argv"]
-    assert "--dataset" not in argv and "--model" not in argv, (
-        "forwarding these puts the dispatcher on the branch that rewrites "
-        f"config.yaml from defaults: {argv}")
+    # The trainer is launched with that same resolved config.
+    assert captured["config"].get("model_name") == "unsloth/Llama-3.1-8B"
 
 
-def test_train_llm_propagates_nonzero_exit():
-    """A failed router run (e.g. missing deps) must not be swallowed as exit 0.
+def test_train_llm_propagates_nonzero_exit(tmp_path, monkeypatch):
+    """A failed trainer run must not be swallowed as exit 0.
 
-    The router raises ``SystemExit(1)`` when training dependencies are absent;
-    ``train_llm`` must re-raise a non-zero ``typer.Exit`` so callers / CI gating
+    ``train_llm`` re-raises a non-zero ``typer.Exit`` so callers and CI gating
     on ``$?`` see the failure instead of a false green.
     """
+    import subprocess
+
+    monkeypatch.chdir(tmp_path)
     from praisonai_train.cli.commands import train as train_cmd
 
-    class _ExitingPraisonAI:
-        def __init__(self, *a, **k):
-            pass
-
-        def main(self):
-            raise SystemExit(1)
-
-    class _FakeModule:
-        PraisonAI = _ExitingPraisonAI
-
-    with patch("praisonai_train._code_bridge.import_code_module",
-               return_value=_FakeModule()):
+    failure = subprocess.CalledProcessError(1, ["python", "-m", "praisonai_train.train.llm.trainer"])
+    with patch("praisonai_train.train.llm.launch.launch", side_effect=failure):
         with pytest.raises(typer.Exit) as excinfo:
             train_cmd.train_llm("/data/ds.jsonl", model=None, verbose=False)
 
     assert excinfo.value.exit_code == 1
 
 
-def test_train_llm_swallows_clean_exit():
-    """A clean ``SystemExit(0)`` from the router still returns 0 (no raise)."""
+def test_train_llm_swallows_clean_exit(tmp_path, monkeypatch):
+    """A successful trainer run returns normally (exit 0)."""
+    monkeypatch.chdir(tmp_path)
     from praisonai_train.cli.commands import train as train_cmd
 
-    class _CleanExitPraisonAI:
-        def __init__(self, *a, **k):
-            pass
-
-        def main(self):
-            raise SystemExit(0)
-
-    class _FakeModule:
-        PraisonAI = _CleanExitPraisonAI
-
-    with patch("praisonai_train._code_bridge.import_code_module",
-               return_value=_FakeModule()):
-        # Must not raise: a clean exit is a success.
+    with patch("praisonai_train.train.llm.launch.launch", return_value=None) as launched:
         train_cmd.train_llm("/data/ds.jsonl", model=None, verbose=False)
+    launched.assert_called_once()
 
-
-# --- Bug 2: an all-failures generate run must not destroy an existing file ----
 
 def test_generate_all_failures_does_not_truncate_existing_output(tmp_path):
     """When no rows are produced, a pre-existing corpus is left byte-for-byte."""

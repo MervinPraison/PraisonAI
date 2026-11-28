@@ -49,14 +49,14 @@ def main():
         name="Assistant",
         role="Helpful AI Assistant",
         goal="Help users with their questions",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     researcher = Agent(
         name="Researcher",
         role="Research Specialist",
         goal="Find accurate information",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     agents = [assistant, researcher]

@@ -265,7 +265,7 @@ batch_processor = Agent(
     goal="Process all batches successfully with retry logic",
     backstory="A batch processing expert",
     tools=[process_batch, process_retry_batch],
-    llm="gpt-4o-mini")
+    model="gpt-4o-mini")
 
 data_collector = Agent(
     name="DataCollector",
@@ -273,7 +273,7 @@ data_collector = Agent(
     goal="Collect all data from paginated source",
     backstory="A data collection specialist",
     tools=[collect_paginated_data],
-    llm="gpt-4o-mini")
+    model="gpt-4o-mini")
 
 validator = Agent(
     name="Validator",
@@ -281,7 +281,7 @@ validator = Agent(
     goal="Validate all collected items in batches",
     backstory="A data validation expert",
     tools=[validate_collected_items],
-    llm="gpt-4o-mini")
+    model="gpt-4o-mini")
 
 reporter = Agent(
     name="Reporter",
@@ -289,7 +289,7 @@ reporter = Agent(
     goal="Create comprehensive reports on loop operations",
     backstory="A reporting specialist",
     tools=[generate_loop_report],
-    llm="gpt-4o-mini")
+    model="gpt-4o-mini")
 
 # Create loop tasks
 batch_loop_task = Task(

@@ -1,0 +1,71 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 539" width="880" height="539" role="img" aria-label="One agent turn - build the prompt, call the model, approve and run any tool, check the result, and repeat until the model answers without a tool or max_steps is reached.">
+<style>.bgr{fill:#ffffff}
+.eb{font:500 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#74756e;letter-spacing:.12em}
+.ebA{font:600 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9a6a12;letter-spacing:.12em}
+.h1{font:650 22px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#20211e}
+.h2{font:600 15px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#20211e}
+.tx{font:400 13px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#3c3d38}
+.sm{font:400 12px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#74756e}
+.mono{font:500 12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#20211e}
+.pill{fill:#fffef8;stroke:#b8b7ab;stroke-width:1}
+.pillHi{fill:#efe6cf;stroke:#9a6a12;stroke-width:1.2}
+.card{fill:#fffef8;stroke:#20211e;stroke-width:1.4}
+.soft{fill:#f3f0e6;stroke:#b8b7ab;stroke-width:1}
+.dash{fill:none;stroke:#9a6a12;stroke-width:1.4;stroke-dasharray:6 6}
+.wire{fill:none;stroke:#b8b7ab;stroke-width:1.4}
+.flow{fill:none;stroke:#9a6a12;stroke-width:1.6;stroke-dasharray:4 10;animation:flow 1.6s linear infinite}
+.flowR{fill:none;stroke:#9a6a12;stroke-width:1.6;stroke-dasharray:4 10;animation:flowR 1.6s linear infinite}
+.okb{fill:#e1eedf} .okt{font:600 11px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#2f6b45}
+.acb{fill:#f6ead0} .act{font:600 11px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#9a6a12}
+.dot{fill:#9a6a12}
+@keyframes flow{to{stroke-dashoffset:-28}}
+@keyframes flowR{to{stroke-dashoffset:28}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+
+.box{fill:#fffef8;stroke:#20211e;stroke-width:1.4}
+.boxHi{fill:#efe6cf;stroke:#9a6a12;stroke-width:1.6}
+.boxBack{fill:#fffef8;stroke:#9b3b2e;stroke-width:1.6;stroke-dasharray:4 3}
+.back{fill:none;stroke:#9b3b2e;stroke-width:1.6;stroke-dasharray:6 6;animation:flowR 1.6s linear infinite}
+.bt{font:600 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9b3b2e;letter-spacing:.08em}
+.num{font:650 12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9a6a12}
+
+.orbit{fill:none;stroke:#b8b7ab;stroke-width:1.4}
+.orbitF{fill:none;stroke:#9a6a12;stroke-width:2;stroke-dasharray:3 12;animation:flow 1.8s linear infinite}
+.spin{transform-origin:440.0px 286px;animation:spin 10s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+.node{fill:#fffef8;stroke:#20211e;stroke-width:1.4}
+.nodeHi{fill:#efe6cf;stroke:#9a6a12;stroke-width:1.6}
+.nodeBack{fill:#fffef8;stroke:#9b3b2e;stroke-width:1.6;stroke-dasharray:4 3}
+</style>
+<rect class="bgr" x="0" y="0" width="880" height="539" rx="12"/>
+<circle class="orbit" cx="440" cy="286" r="150"/>
+<circle class="orbitF" cx="440" cy="286" r="150"/>
+<g class="spin"><circle class="dot" cx="440" cy="136" r="6"/></g>
+<text class="ebA" x="440.0" y="260" text-anchor="middle">UNTIL NO TOOL CALL</text>
+<text class="h1" x="440.0" y="290.0" text-anchor="middle" style="font-size:22px">One turn</text>
+<circle class="node" cx="440.0" cy="136.0" r="20"/>
+<text class="num" x="440.0" y="140.0" text-anchor="middle">01</text>
+<text class="h2" x="440.0" y="76.0" text-anchor="middle">Build prompt</text>
+<text class="sm" x="440.0" y="94.0" text-anchor="middle">instructions, memory,</text>
+<text class="sm" x="440.0" y="109.0" text-anchor="middle">knowledge</text>
+<circle class="node" cx="569.9" cy="211.0" r="20"/>
+<text class="num" x="569.9" y="215.0" text-anchor="middle">02</text>
+<text class="h2" x="599.9" y="205.0" text-anchor="start">Call model</text>
+<text class="sm" x="599.9" y="223.0" text-anchor="start">before_llm / after_llm hooks</text>
+<circle class="nodeHi" cx="569.9" cy="361.0" r="20"/>
+<text class="num" x="569.9" y="365.0" text-anchor="middle">03</text>
+<text class="h2" x="599.9" y="355.0" text-anchor="start">Approve</text>
+<text class="sm" x="599.9" y="373.0" text-anchor="start">risky tools ask first</text>
+<circle class="node" cx="440.0" cy="436.0" r="20"/>
+<text class="num" x="440.0" y="440.0" text-anchor="middle">04</text>
+<text class="h2" x="440.0" y="476.0" text-anchor="middle">Run tool</text>
+<text class="sm" x="440.0" y="494.0" text-anchor="middle">locally or in a sandbox</text>
+<circle class="node" cx="310.1" cy="361.0" r="20"/>
+<text class="num" x="310.1" y="365.0" text-anchor="middle">05</text>
+<text class="h2" x="280.1" y="355.0" text-anchor="end">Check</text>
+<text class="sm" x="280.1" y="373.0" text-anchor="end">guardrails, loop guard</text>
+<circle class="node" cx="310.1" cy="211.0" r="20"/>
+<text class="num" x="310.1" y="215.0" text-anchor="middle">06</text>
+<text class="h2" x="280.1" y="205.0" text-anchor="end">Answer</text>
+<text class="sm" x="280.1" y="223.0" text-anchor="end">or go round again, up to</text>
+<text class="sm" x="280.1" y="238.0" text-anchor="end">max_steps</text>
+</svg>

@@ -12,21 +12,21 @@ researcher = Agent(
     name="Researcher",
     role="Research Specialist",
     goal="Find accurate information",
-    llm="gpt-4o-mini"
+    model="gpt-4o-mini"
 )
 
 writer = Agent(
     name="Writer", 
     role="Content Writer",
     goal="Write engaging content",
-    llm="gpt-4o-mini"
+    model="gpt-4o-mini"
 )
 
 editor = Agent(
     name="Editor",
     role="Content Editor", 
     goal="Polish and improve content",
-    llm="gpt-4o-mini"
+    model="gpt-4o-mini"
 )
 
 # Create workflow with agents as steps

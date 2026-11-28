@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 434" width="880" height="434" role="img" aria-label="The five-layer agent stack: Prompt inside Context inside Harness inside Loop inside Graph, all inside Managed Agents, each with the PraisonAI parameters that control it">
+<style>.bgr{fill:#ffffff}
+.eb{font:500 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#74756e;letter-spacing:.12em}
+.ebA{font:600 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9a6a12;letter-spacing:.12em}
+.h1{font:650 22px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#20211e}
+.h2{font:600 15px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#20211e}
+.tx{font:400 13px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#3c3d38}
+.sm{font:400 12px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#74756e}
+.mono{font:500 12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#20211e}
+.pill{fill:#fffef8;stroke:#b8b7ab;stroke-width:1}
+.pillHi{fill:#efe6cf;stroke:#9a6a12;stroke-width:1.2}
+.card{fill:#fffef8;stroke:#20211e;stroke-width:1.4}
+.soft{fill:#f3f0e6;stroke:#b8b7ab;stroke-width:1}
+.dash{fill:none;stroke:#9a6a12;stroke-width:1.4;stroke-dasharray:6 6}
+.wire{fill:none;stroke:#b8b7ab;stroke-width:1.4}
+.flow{fill:none;stroke:#9a6a12;stroke-width:1.6;stroke-dasharray:4 10;animation:flow 1.6s linear infinite}
+.flowR{fill:none;stroke:#9a6a12;stroke-width:1.6;stroke-dasharray:4 10;animation:flowR 1.6s linear infinite}
+.okb{fill:#e1eedf} .okt{font:600 11px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#2f6b45}
+.acb{fill:#f6ead0} .act{font:600 11px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#9a6a12}
+.dot{fill:#9a6a12}
+@keyframes flow{to{stroke-dashoffset:-28}}
+@keyframes flowR{to{stroke-dashoffset:28}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+
+.ring{fill:none;stroke:#20211e;stroke-width:1.3}
+.ring.m{stroke-dasharray:7 6;stroke:#9a6a12;animation:flow 2.4s linear infinite}
+.inner{fill:#efe6cf;stroke:#9a6a12;stroke-width:1.4}
+.lab{font:650 12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#20211e;letter-spacing:.06em}
+.q{font:italic 400 12.5px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#74756e}
+.p{font:500 11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9a6a12}
+.hl{fill:none;stroke:#9a6a12;stroke-width:2.6;opacity:0;animation:glow 9s infinite}
+@keyframes glow{0%{opacity:0}3%,13%{opacity:1}17%,100%{opacity:0}}
+.d0{animation-delay:6.5s}.d1{animation-delay:5.2s}.d2{animation-delay:3.9s}.d3{animation-delay:2.6s}.d4{animation-delay:1.3s}.d5{animation-delay:0s}
+</style>
+<rect class="bgr" x="0" y="0" width="880" height="434" rx="12"/>
+<rect class="ring m" x="8" y="8" width="864" height="416" rx="12"/>
+<rect class="hl d0" x="8" y="8" width="864" height="416" rx="12"/>
+<text class="lab" x="24" y="28">⬡ MANAGED AGENTS</text>
+<text class="q" x="24" y="45">Where does it actually run?</text>
+<text class="p" x="856" y="36" text-anchor="end">tools_run_on="docker" · run_on=</text>
+<rect class="ring" x="34" y="60" width="812" height="342" rx="11"/>
+<rect class="hl d1" x="34" y="60" width="812" height="342" rx="11"/>
+<text class="lab" x="50" y="80">5 · GRAPH</text>
+<text class="q" x="50" y="97">Who runs when, and who checks whom?</text>
+<text class="p" x="830" y="88" text-anchor="end">AgentFlow · route() · parallel() · loop()</text>
+<rect class="ring" x="60" y="112" width="760" height="268" rx="10"/>
+<rect class="hl d2" x="60" y="112" width="760" height="268" rx="10"/>
+<text class="lab" x="76" y="132">4 · LOOP</text>
+<text class="q" x="76" y="149">When do we stop?</text>
+<text class="p" x="804" y="140" text-anchor="end">execution= · reflection= · autonomy=</text>
+<rect class="ring" x="86" y="164" width="708" height="194" rx="9"/>
+<rect class="hl d3" x="86" y="164" width="708" height="194" rx="9"/>
+<text class="lab" x="102" y="184">3 · HARNESS</text>
+<text class="q" x="102" y="201">Can it act, and be checked?</text>
+<text class="p" x="778" y="192" text-anchor="end">tools= · MCP() · guardrails= · approval=</text>
+<rect class="ring" x="112" y="216" width="656" height="120" rx="8"/>
+<rect class="hl d4" x="112" y="216" width="656" height="120" rx="8"/>
+<text class="lab" x="128" y="236">2 · CONTEXT</text>
+<text class="q" x="128" y="253">Is the right thing in the window?</text>
+<text class="p" x="752" y="244" text-anchor="end">memory= · knowledge= · context=</text>
+<rect class="inner" x="138" y="268" width="604" height="46" rx="7"/>
+<rect class="hl d5" x="138" y="268" width="604" height="46" rx="7"/>
+<text class="lab" x="154" y="288">1 · PROMPT</text>
+<text class="q" x="154" y="305">Did I say it clearly?</text>
+<text class="p" x="726" y="296" text-anchor="end">instructions= · role · goal · output=</text>
+</svg>

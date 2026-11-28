@@ -31,7 +31,7 @@ llm_config = {
 agent = Agent(
     instructions="You are a helpful Assistant specialized in scientific explanations. "
                 "Provide clear, accurate, and engaging responses.",
-    llm=llm_config,
+    model=llm_config,
     output={"markdown": True},
     reflection=True,
 )

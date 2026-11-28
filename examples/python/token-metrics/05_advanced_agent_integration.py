@@ -149,7 +149,7 @@ def main():
         role="Senior Research Analyst", 
         goal="Conduct thorough research and analysis",
         backstory="You are a meticulous researcher who produces comprehensive reports.",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     summarizer_agent = Agent(
@@ -157,7 +157,7 @@ def main():
         role="Information Synthesis Expert",
         goal="Create concise, accurate summaries",
         backstory="You excel at distilling complex information into clear, actionable insights.",
-        llm="gpt-4o-mini"  # Same model for fair comparison
+        model="gpt-4o-mini"  # Same model for fair comparison
     )
     
     optimizer_agent = Agent(
@@ -165,7 +165,7 @@ def main():
         role="Efficiency Consultant",
         goal="Optimize workflows and processes",
         backstory="You identify inefficiencies and recommend improvements.",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # Create tasks with varying complexity

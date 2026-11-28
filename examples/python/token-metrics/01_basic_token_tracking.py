@@ -13,7 +13,7 @@ def main():
         role="Research Specialist", 
         goal="Find information about a topic",
         backstory="You are an expert researcher who finds comprehensive information.",
-        llm="gpt-4o-mini",  # Use a cost-effective model for examples
+        model="gpt-4o-mini",  # Use a cost-effective model for examples
         output={"metrics": True}  # Token metrics via consolidated output config
     )
     

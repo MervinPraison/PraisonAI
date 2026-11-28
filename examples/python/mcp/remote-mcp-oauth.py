@@ -25,7 +25,7 @@ if not entry or not entry.get("tokens"):
 agent = Agent(
     name="Remote Assistant",
     instructions="You help with tasks using the remote MCP server.",
-    llm="gpt-4o-mini",
+    model="gpt-4o-mini",
     tools=MCP("https://mcp.example.com/mcp")
 )
 

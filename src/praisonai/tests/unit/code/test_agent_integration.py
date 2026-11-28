@@ -3,8 +3,40 @@ Integration tests for praisonai.code agent tools.
 """
 
 import os
+import subprocess
 import sys
 import tempfile
+from textwrap import dedent
+
+
+def test_code_package_defers_tool_imports():
+    script = dedent("""\
+        import sys
+        import praisonai
+
+        tool_modules = {
+            "praisonai.code.agent_tools",
+            "praisonai.code.tools",
+            "praisonaiagents.tools.shell_tools",
+        }
+        deferred = tool_modules | {"praisonai.code.diff", "praisonai.code.utils"}
+        had_subprocess = "subprocess" in sys.modules
+        import praisonai.code as code
+
+        assert deferred.isdisjoint(sys.modules), deferred.intersection(sys.modules)
+        assert ("subprocess" in sys.modules) == had_subprocess
+        assert set(code.__all__) <= set(dir(code))
+
+        from praisonai.code import DiffResult
+
+        assert code.DiffResult is DiffResult
+        assert "praisonai.code.diff" in sys.modules
+        assert tool_modules.isdisjoint(sys.modules), tool_modules.intersection(sys.modules)
+    """)
+    result = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, timeout=30
+    )
+    assert result.returncode == 0, result.stderr
 
 
 class TestAgentTools:

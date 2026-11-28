@@ -11,7 +11,7 @@ allowed_dirs = [
 filesystem_agent = Agent(
     instructions="""You are a helpful assistant that can interact with the filesystem.
     Use the available tools when relevant to manage files and directories.""",
-    llm="gpt-4o-mini",
+    model="gpt-4o-mini",
     tools=MCP("npx", args=["-y", "@modelcontextprotocol/server-filesystem", *allowed_dirs])
 )
 

@@ -85,6 +85,7 @@
     "AgentTeam.aexecute_task",
     "AgentTeam.announce_completion",
     "AgentTeam.append_to_state",
+    "AgentTeam.arun",
     "AgentTeam.arun_all_tasks",
     "AgentTeam.arun_task",
     "AgentTeam.aspawn_sub_agent",

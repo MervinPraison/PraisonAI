@@ -9,7 +9,7 @@ from praisonaiagents._logging import get_logger
 import os
 import re
 import platform
-from typing import Any, List, Optional, Callable, Iterable, Union
+from typing import Any, Dict, List, Optional, Callable, Iterable, Union
 from functools import wraps, partial
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,27 @@ except ImportError:
     ClientSession = None
     StdioServerParameters = None
     stdio_client = None
+
+_APPROVAL_MODES = ("never", "always")
+
+
+def resolve_mcp_approval_risk(annotations: Any, approval: Optional[str] = None) -> Optional[str]:
+    """Map MCP tool annotations and per-server ``approval`` override to a risk level."""
+    if approval is not None and (not isinstance(approval, str) or approval not in _APPROVAL_MODES):
+        raise ValueError(f"MCP approval must be 'never', 'always', or None (got {approval!r})")
+    if approval == "never":
+        return None
+    destructive = (
+        annotations.get("destructiveHint")
+        if isinstance(annotations, dict)
+        else getattr(annotations, "destructiveHint", None)
+    )
+    if destructive is True:
+        return "high"
+    if approval == "always":
+        return "medium"
+    return None
+
 
 def _is_transport_closed(exc):
     """True when ``exc`` means the stdio session is gone for good."""
@@ -588,6 +609,17 @@ class MCP:
             lock.release()
 
     @classmethod
+    def from_config(cls, entry, name: str = "server", expand_env: bool = False) -> "MCP":
+        """Build a client from one config entry, e.g. ``{"url": ..., "headers": ...}``.
+
+        Accepts the entry shapes read by :func:`praisonaiagents.mcp.parse_mcp_servers`.
+        ``${VAR}`` is passed through as written unless ``expand_env=True``; only
+        enable it for a user's own config that no loader has interpolated yet.
+        """
+        from .loader import build_mcp
+        return build_mcp(entry, name=name, cls=cls, expand_env=expand_env)
+
+    @classmethod
     def _is_cold_start_launcher(cls, cmd) -> bool:
         """True when ``cmd`` is a package launcher (npx/uvx/...) whose first run
         downloads the server before the MCP handshake starts."""
@@ -601,7 +633,9 @@ class MCP:
         return base in cls._COLD_START_LAUNCHERS
 
     def __init__(self, command_or_string=None, args=None, *, command=None, timeout=None, debug=False,
-                 allowed_tools: Optional[List[str]] = None, disabled_tools: Optional[List[str]] = None, max_response_bytes: Optional[int] = None, **kwargs):
+                 allowed_tools: Optional[List[str]] = None, disabled_tools: Optional[List[str]] = None,
+                 max_response_bytes: Optional[int] = None, oauth: Optional[Union[bool, Dict[str, Any]]] = None,
+                 server_name: Optional[str] = None, approval: Optional[str] = None, **kwargs):
         """
         Initialize the MCP connection and get tools.
         
@@ -679,6 +713,9 @@ class MCP:
         self.debug = debug
         self.allowed_tools = allowed_tools
         self.disabled_tools = disabled_tools
+        if approval is not None and (not isinstance(approval, str) or approval not in _APPROVAL_MODES):
+            raise ValueError(f"MCP approval must be 'never', 'always', or None (got {approval!r})")
+        self.approval = approval
 
         # Optional prefix applied to tool names to avoid cross-server collisions
         # when multiple MCP servers are loaded together (see load_mcp_tools).
@@ -743,6 +780,14 @@ class MCP:
                     transport_options['resumability'] = kwargs.pop('resumability')
                 if max_response_bytes is not None:
                     transport_options['max_response_bytes'] = max_response_bytes
+                if oauth is not None:
+                    transport_options['oauth'] = oauth
+                if server_name:
+                    transport_options['name'] = server_name
+                elif 'name' in kwargs:
+                    transport_options['name'] = kwargs.pop('name')
+                if 'auth_storage' in kwargs:
+                    transport_options['auth_storage'] = kwargs.pop('auth_storage')
                 
                 self.http_stream_client = HTTPStreamMCPClient(
                     command_or_string, 
@@ -1084,6 +1129,7 @@ class MCP:
             )
 
         wrapper.get_schema = get_schema
+        wrapper.annotations = getattr(tool, 'annotations', None)
 
         return wrapper
     
@@ -1117,6 +1163,18 @@ class MCP:
             return name in allowed
         return name not in (getattr(self, "disabled_tools", None) or ())
 
+    def _apply_tool_approvals(self, tools: List[Any]) -> List[Any]:
+        """Attach annotation/override approval risk metadata onto each wrapped MCP tool."""
+        mode = getattr(self, "approval", None)
+        for tool in tools or ():
+            risk = resolve_mcp_approval_risk(getattr(tool, "annotations", None), mode)
+            try:
+                tool._mcp_approval_mode = mode
+                tool._approval_risk_level = risk
+            except (AttributeError, TypeError):
+                pass
+        return tools
+
     def _apply_tool_filters(self, raw_tools: List[Any]) -> List[Any]:
         """
         Apply tool filtering based on allowed_tools and disabled_tools.
@@ -1127,6 +1185,7 @@ class MCP:
         Returns:
             Filtered tool list
         """
+        self._apply_tool_approvals(raw_tools)
         if not self.allowed_tools and not self.disabled_tools:
             return raw_tools
             

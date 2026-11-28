@@ -1,0 +1,14 @@
+type: flow
+label: "OpenShip turns a feature branch into a reviewed, CI-green draft PR — on any LLM or local Ollama — and never merges."
+eyebrow: OpenShip · Powered by PraisonAI
+numbered: true
+steps:
+  - title: praisonai ship
+    note: "Secret guard, AI PR text, draft PR"
+  - title: Self-Review
+    note: "Lockfile-filtered diff, typed findings"
+  - title: PR Steward
+    note: "Fix CI, conflicts & threads (3-try cap)"
+    highlight: true
+  - title: Approvals & You Merge
+    note: ".praisonai/approvals.yml; human merges"

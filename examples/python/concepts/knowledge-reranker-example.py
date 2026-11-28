@@ -151,7 +151,7 @@ def main():
         name="AI Research Assistant",
         instructions="You are an AI research assistant. Use your knowledge base to answer questions about artificial intelligence topics.",
         knowledge={"sources": sample_documents, "rerank": True},
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     print("7. Agent with reranking knowledge:")

@@ -176,6 +176,29 @@ def _path(client: Client, home: Path) -> Path:
     return path
 
 
+def load_file(path: Path, fmt: Optional[str] = None) -> Dict[str, Any]:
+    """Read a JSON, JSONC, TOML, or YAML config file strictly read-only."""
+    text = _read(path)
+    if text is None:
+        raise ConfigError(f"Config file not found: {path}")
+    if not text.strip():
+        return {}
+    kind = fmt or {".toml": "toml", ".yaml": "yaml", ".yml": "yaml", ".jsonc": "jsonc"}.get(path.suffix.lower(), "json")
+    if kind == "yaml":
+        return _load_yaml(text, path)
+    try:
+        if kind == "toml":
+            import sys
+            data = __import__("tomllib" if sys.version_info >= (3, 11) else "tomli").loads(text)
+        else:
+            data = json.loads(_strip_comments(text))
+    except Exception as exc:
+        raise ConfigError(f"{path} is not valid {kind.upper()}: {exc}") from None
+    if not isinstance(data, dict):
+        raise ConfigError(f"{path} does not hold a config mapping.")
+    return data
+
+
 def read_entry(client: Client, home: Path, name: str) -> Optional[Any]:
     """Our entry as stored, or ``None``. Never raises for a missing file."""
     path = config_path(client, home)

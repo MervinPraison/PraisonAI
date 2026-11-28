@@ -2,7 +2,7 @@ from praisonaiagents import Agent, MCP
 
 whatsapp_agent = Agent(
     instructions="Whatsapp Agent",
-    llm="ollama/llama3.2",
+    model="ollama/llama3.2",
     tools=MCP("python /Users/praison/whatsapp-mcp/whatsapp-mcp-server/main.py")
 )
 

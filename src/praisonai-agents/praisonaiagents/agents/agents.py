@@ -7,7 +7,7 @@ import contextlib
 import contextvars
 import threading
 from praisonaiagents._logging import get_logger
-from typing import Any, Deque, Dict, Optional, List, Tuple, Callable
+from typing import Any, Deque, Dict, Literal, Optional, List, Tuple, Callable, Union, overload
 from ..main import display_error, TaskOutput
 from ..agent.agent import Agent
 from ..task.task import Task
@@ -895,6 +895,7 @@ class AgentTeam(SpawnAnnounceProtocol):
         tools_run_on: Optional[Any] = None,
         # Accepted only to fail with a useful message -- see resolve_placement.
         run_on: Optional[Any] = None,
+        manager_model: Optional[str] = None,  # Same as manager_llm=, named like model=
     ):
         """
         Initialize AgentManager with consolidated feature parameters.
@@ -907,6 +908,7 @@ class AgentTeam(SpawnAnnounceProtocol):
                 objects within a "workflow" or "sequential" process.
             manager_llm: Model for the hierarchical manager agent. Unrelated to
                 model=/llm=; it never touches the members.
+            manager_model: Same as manager_llm=. Passing both raises TypeError.
             llm: Deprecated alias for model=. Passing both raises TypeError.
             model: Default model for members that did not name one themselves.
                 An agent constructed with its own llm=/model=/auth= keeps it.
@@ -937,6 +939,15 @@ class AgentTeam(SpawnAnnounceProtocol):
         # inside chat() with "'LLMConfig' object has no attribute 'lower'".
         from ..utils.model_alias import resolve_model_name
         self.llm = resolve_model_name(llm, model, type(self).__name__)
+        if llm is not None and model is None:
+            from ..utils.deprecation import warn_deprecated_param
+            warn_deprecated_param(
+                "llm", since="1.0.0", removal="2.0.0", stacklevel=3,
+                alternative="use 'model' instead. Example: AgentTeam(agents=[...], model='gpt-4o-mini')")
+        if manager_llm is not None and manager_model is not None:
+            raise TypeError(f"{type(self).__name__}() received both manager_llm= and manager_model=; "
+                            "they are the same parameter. Pass only manager_model=.")
+        manager_llm = manager_model if manager_model is not None else manager_llm
         if self.llm:
             for _member in (agents.values() if isinstance(agents, dict) else (agents or [])):
                 _apply = getattr(_member, "_apply_default_llm", None)
@@ -2349,7 +2360,11 @@ class AgentTeam(SpawnAnnounceProtocol):
             "starting -- pass agents=[...] or call spawn_sub_agent() first."
         )
 
-    async def astart(self, content=None, return_dict=False, **kwargs):
+    @overload
+    async def astart(self, content: Any = None, *, return_dict: Literal[True], **kwargs: Any) -> Dict[str, Any]: ...
+    @overload
+    async def astart(self, content: Any = None, return_dict: bool = ..., **kwargs: Any) -> Union[str, Dict[str, Any]]: ...
+    async def astart(self, content=None, return_dict=False, **kwargs) -> Union[str, Dict[str, Any]]:
         """Async version of start method.
         
         Args:
@@ -2688,7 +2703,11 @@ class AgentTeam(SpawnAnnounceProtocol):
 
         return explain(self, shared=True)
 
-    def start(self, content=None, return_dict=False, output=None, **kwargs):
+    @overload
+    def start(self, content: Any = None, *, return_dict: Literal[True], output: Optional[str] = None, **kwargs: Any) -> Dict[str, Any]: ...
+    @overload
+    def start(self, content: Any = None, return_dict: bool = ..., output: Optional[str] = None, **kwargs: Any) -> Union[str, Dict[str, Any]]: ...
+    def start(self, content=None, return_dict=False, output=None, **kwargs) -> Union[str, Dict[str, Any]]:
         """Start agent execution with verbose output (beginner-friendly).
         
         Shows Rich panels with workflow progress when in TTY. Use .run() for
@@ -2957,7 +2976,11 @@ class AgentTeam(SpawnAnnounceProtocol):
                     
         return results
 
-    def run(self, content=None, return_dict=False, **kwargs):
+    @overload
+    def run(self, content: Any = None, *, return_dict: Literal[True], **kwargs: Any) -> Dict[str, Any]: ...
+    @overload
+    def run(self, content: Any = None, return_dict: bool = ..., **kwargs: Any) -> Union[str, Dict[str, Any]]: ...
+    def run(self, content=None, return_dict=False, **kwargs) -> Union[str, Dict[str, Any]]:
         """Run agents silently (production use).
         
         Unlike .start() which shows verbose output, .run() executes silently
@@ -2970,6 +2993,17 @@ class AgentTeam(SpawnAnnounceProtocol):
         """
         # Always run silently - no verbose output
         return self.start(content=content, return_dict=return_dict, output="silent", **kwargs)
+
+    @overload
+    async def arun(self, content: Any = None, *, return_dict: Literal[True], **kwargs: Any) -> Dict[str, Any]: ...
+    @overload
+    async def arun(self, content: Any = None, return_dict: bool = ..., **kwargs: Any) -> Union[str, Dict[str, Any]]: ...
+    async def arun(self, content=None, return_dict=False, **kwargs) -> Union[str, Dict[str, Any]]:
+        """Async version of run(): same as astart(), which shows no progress panels.
+
+        Gives AgentTeam the same start/astart/run/arun set as Agent and AgentFlow.
+        """
+        return await self.astart(content=content, return_dict=return_dict, **kwargs)
 
     def _snapshot_task_state(self):
         """Snapshot per-task run state so a batch can restore it afterwards.

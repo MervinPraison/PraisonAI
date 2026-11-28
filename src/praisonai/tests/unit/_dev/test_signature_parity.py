@@ -503,6 +503,23 @@ class TestPythonExtractor:
         assert split_top_level('Dict[str, Any] | List[int]', '|') == ['Dict[str, Any] ', ' List[int]']
         assert split_top_level("'a|b' | int", '|') == ["'a|b' ", ' int']
 
+    def test_skips_typing_overload_stubs_for_implementation(self):
+        src = (
+            "from typing import Any, Literal, Optional, overload\n"
+            "class Demo:\n"
+            "    @overload\n"
+            "    def start(self, prompt: Optional[str] = None, *, stream: Literal[True]) -> Any: ...\n"
+            "    @overload\n"
+            "    def start(self, prompt: Optional[str] = None, *, stream: Literal[False]) -> Optional[str]: ...\n"
+            "    def start(self, prompt: Optional[str] = None, stream: bool = False) -> Any:\n"
+            "        return prompt\n"
+        )
+        sig = extract_python_source(src, 'start', class_name='Demo', surface='Demo.start')
+        by_name = {p.name: p for p in sig.params}
+        assert 'stream' in by_name
+        assert by_name['stream'].required is False
+        assert by_name['stream'].default is False
+
 
 # -------------------------------------------------------------- ts extractor
 

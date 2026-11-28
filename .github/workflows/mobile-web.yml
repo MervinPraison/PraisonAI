@@ -29,6 +29,8 @@ on:
       - 'src/praisonai-ts/src/**'
       - 'src/praisonai-ts/scripts/**'
       - 'src/praisonai-ts/package.json'
+      - 'src/praisonai-ts/package-lock.json'
+      - 'src/praisonai-ts/tsconfig*.json'
   pull_request:
     paths: *watched
 
@@ -52,33 +54,23 @@ jobs:
         with:
           node-version: '22.18'
           cache: npm
-          cache-dependency-path: src/praisonai-mobile/package-lock.json
-      # `praisonai` is a `file:` link to ../praisonai-ts, so its dist/ must
-      # exist before this package can even INSTALL: npm runs the linked
-      # package's prepare/prebuild, which fails without its own node_modules.
-      # `npm install`, not `npm ci`: praisonai-ts gitignores its lockfile.
-      # `--legacy-peer-deps` for the bedrock-agentcore -> @strands-agents/sdk
-      # peer conflict, exactly as mobile.yml and praisonai-ts-webview.yml do.
-      - name: "Build praisonai-ts (the file: dependency)"
+          cache-dependency-path: |
+            src/praisonai-ts/package-lock.json
+            src/praisonai-mobile/package-lock.json
+      # Install the file: dependency first. npm runs its prepare build.
+      - name: Install praisonai-ts
         working-directory: src/praisonai-ts
-        run: |
-          npm install --no-audit --no-fund --legacy-peer-deps
-          npm run build
+        run: npm ci --no-audit --no-fund --legacy-peer-deps
       - run: npm ci
       - name: Cache the Playwright browser
         uses: actions/cache@v4
         with:
           path: ~/.cache/ms-playwright
-          key: playwright-${{ runner.os }}-${{ hashFiles('src/praisonai-mobile/package-lock.json') }}
+          key: playwright-shell-${{ runner.os }}-${{ hashFiles('src/praisonai-mobile/package-lock.json') }}
       - name: Install Chromium for the boot proof
-        run: npx playwright install --with-deps chromium
-      - name: Build
-        run: npm run build
-      - name: Boot proof
-        # Serves dist/ under /PraisonAI/ in headless Chromium: composer and
-        # Send render, manifest served as application/manifest+json, service
-        # worker activates with the subpath as scope, an offline reload still
-        # renders, and an injected inline script is blocked by the CSP.
+        run: npx playwright install --with-deps --only-shell chromium
+      - name: Verify boot, offline reload, and layout in Chromium
+        # The boot test builds the dist/ uploaded below.
         run: npm run test:web
       - name: dist contents
         run: ls -lR dist

@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with AWS Bedrock (Claude)
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0",
+    model="bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0",
 )
 
 # Example conversation

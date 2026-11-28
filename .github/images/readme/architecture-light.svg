@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 540" width="880" height="540" role="img" aria-label="How PraisonAI fits together: chat apps and your tools on the left, the PraisonAI core with Bot, Code, MCP and Train in the middle, cloud models or your own offline models on the right, and Private AI for regulated teams underneath">
+<style>.bgr{fill:#ffffff}
+.eb{font:500 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#74756e;letter-spacing:.12em}
+.ebA{font:600 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9a6a12;letter-spacing:.12em}
+.h1{font:650 22px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#20211e}
+.h2{font:600 15px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#20211e}
+.tx{font:400 13px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#3c3d38}
+.sm{font:400 12px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#74756e}
+.mono{font:500 12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#20211e}
+.pill{fill:#fffef8;stroke:#b8b7ab;stroke-width:1}
+.pillHi{fill:#efe6cf;stroke:#9a6a12;stroke-width:1.2}
+.card{fill:#fffef8;stroke:#20211e;stroke-width:1.4}
+.soft{fill:#f3f0e6;stroke:#b8b7ab;stroke-width:1}
+.dash{fill:none;stroke:#9a6a12;stroke-width:1.4;stroke-dasharray:6 6}
+.wire{fill:none;stroke:#b8b7ab;stroke-width:1.4}
+.flow{fill:none;stroke:#9a6a12;stroke-width:1.6;stroke-dasharray:4 10;animation:flow 1.6s linear infinite}
+.flowR{fill:none;stroke:#9a6a12;stroke-width:1.6;stroke-dasharray:4 10;animation:flowR 1.6s linear infinite}
+.okb{fill:#e1eedf} .okt{font:600 11px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#2f6b45}
+.acb{fill:#f6ead0} .act{font:600 11px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#9a6a12}
+.dot{fill:#9a6a12}
+@keyframes flow{to{stroke-dashoffset:-28}}
+@keyframes flowR{to{stroke-dashoffset:28}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+<rect class="bgr" x="0" y="0" width="880" height="540" rx="12"/>
+<text class="eb" x="20" y="22">WHERE YOU USE IT</text>
+<text class="eb" x="262" y="22">ONE FRAMEWORK, SIX PRODUCTS</text>
+<text class="eb" x="664" y="22">THE MODEL IS YOUR CHOICE</text>
+<text class="eb" x="20" y="50">CHAT APPS</text>
+<rect class="pill" x="20" y="60" width="170" height="28" rx="14.0"/><text class="tx" x="105.0" y="78.5" text-anchor="middle">Telegram</text>
+<rect class="pill" x="20" y="96" width="170" height="28" rx="14.0"/><text class="tx" x="105.0" y="114.5" text-anchor="middle">Discord</text>
+<rect class="pill" x="20" y="132" width="170" height="28" rx="14.0"/><text class="tx" x="105.0" y="150.5" text-anchor="middle">Slack</text>
+<rect class="pill" x="20" y="168" width="170" height="28" rx="14.0"/><text class="tx" x="105.0" y="186.5" text-anchor="middle">WhatsApp</text>
+<text class="eb" x="20" y="218">YOUR TOOLS</text>
+<rect class="pill" x="20" y="228" width="170" height="28" rx="14.0"/><text class="tx" x="105.0" y="246.5" text-anchor="middle">Terminal</text>
+<rect class="pill" x="20" y="264" width="170" height="28" rx="14.0"/><text class="tx" x="105.0" y="282.5" text-anchor="middle">Cursor · Claude Desktop</text>
+<rect class="pill" x="20" y="300" width="170" height="28" rx="14.0"/><text class="tx" x="105.0" y="318.5" text-anchor="middle">Dashboard</text>
+<rect class="pill" x="20" y="336" width="170" height="28" rx="14.0"/><text class="tx" x="105.0" y="354.5" text-anchor="middle">Python · YAML · JS</text>
+<path class="wire" d="M190 74 H206 V350 H190"/>
+<path class="wire" d="M190 110 H206"/>
+<path class="wire" d="M190 146 H206"/>
+<path class="wire" d="M190 182 H206"/>
+<path class="wire" d="M190 242 H206"/>
+<path class="wire" d="M190 278 H206"/>
+<path class="wire" d="M190 314 H206"/>
+<path class="flow" d="M206 214 H262"/>
+<rect class="card" x="262" y="34" width="356" height="364" rx="14"/>
+<text class="h1" x="284" y="70">PraisonAI</text>
+<rect class="okb" x="398" y="55" width="122.80000000000001" height="20" rx="10"/><circle class="okt" cx="408" cy="65" r="2.6"/><text class="okt" x="415" y="69">MIT · Open source</text>
+<rect class="soft" x="282" y="86" width="316" height="160" rx="10"/>
+<text class="h2" x="298" y="112">Agents</text><text class="sm" x="356" y="112">the core framework</text>
+<circle class="dot" cx="304" cy="132" r="2.6"/><text class="tx" x="314" y="136">Agents and multi-agent teams</text>
+<circle class="dot" cx="304" cy="154" r="2.6"/><text class="tx" x="314" y="158">Workflows: route, parallel, loop</text>
+<circle class="dot" cx="304" cy="176" r="2.6"/><text class="tx" x="314" y="180">Memory, knowledge and RAG</text>
+<circle class="dot" cx="304" cy="198" r="2.6"/><text class="tx" x="314" y="202">Tools and MCP servers</text>
+<circle class="dot" cx="304" cy="220" r="2.6"/><text class="tx" x="314" y="224">Guardrails and human approval</text>
+<text class="eb" x="284" y="272">REACH PEOPLE AND TOOLS</text>
+<rect class="soft" x="282" y="282" width="100" height="50" rx="9"/><text class="h2" x="294" y="304">Bot</text><text class="sm" x="294" y="322">chat apps</text>
+<rect class="soft" x="390" y="282" width="100" height="50" rx="9"/><text class="h2" x="402" y="304">Code</text><text class="sm" x="402" y="322">terminal</text>
+<rect class="soft" x="498" y="282" width="100" height="50" rx="9"/><text class="h2" x="510" y="304">MCP</text><text class="sm" x="510" y="322">editors</text>
+<rect class="soft" x="282" y="342" width="316" height="40" rx="9"/><text class="h2" x="298" y="367">Train</text><text class="sm" x="346" y="367">fine-tune an open model on your own GPUs</text>
+<path class="flowR" d="M618 214 H660"/>
+<text class="eb" x="664" y="50">RENTED, IN THE CLOUD</text>
+<rect class="pill" x="674" y="60" width="186" height="28" rx="14.0"/><text class="tx" x="767.0" y="78.5" text-anchor="middle">OpenAI</text>
+<rect class="pill" x="674" y="96" width="186" height="28" rx="14.0"/><text class="tx" x="767.0" y="114.5" text-anchor="middle">Anthropic</text>
+<rect class="pill" x="674" y="132" width="186" height="28" rx="14.0"/><text class="tx" x="767.0" y="150.5" text-anchor="middle">Google Gemini</text>
+<rect class="pill" x="674" y="168" width="186" height="28" rx="14.0"/><text class="tx" x="767.0" y="186.5" text-anchor="middle">+ 20 more providers</text>
+<text class="ebA" x="664" y="218">YOUR OWN, FULLY OFFLINE</text>
+<rect class="pillHi" x="674" y="228" width="186" height="28" rx="14.0"/><text class="tx" x="767.0" y="246.5" text-anchor="middle">Ollama</text>
+<rect class="pillHi" x="674" y="264" width="186" height="28" rx="14.0"/><text class="tx" x="767.0" y="282.5" text-anchor="middle">vLLM</text>
+<rect class="pillHi" x="674" y="300" width="186" height="28" rx="14.0"/><text class="tx" x="767.0" y="318.5" text-anchor="middle">LM Studio</text>
+<rect class="pillHi" x="674" y="336" width="186" height="28" rx="14.0"/><text class="tx" x="767.0" y="354.5" text-anchor="middle">Your fine-tuned model</text>
+<path class="wire" d="M674 74 H660 V350 H674"/>
+<path class="wire" d="M674 110 H660"/>
+<path class="wire" d="M674 146 H660"/>
+<path class="wire" d="M674 182 H660"/>
+<path class="wire" d="M674 242 H660"/>
+<path class="wire" d="M674 278 H660"/>
+<path class="wire" d="M674 314 H660"/>
+<path class="flow" d="M440 398 V432"/>
+<rect class="dash" x="20" y="432" width="840" height="98" rx="12"/>
+<text class="ebA" x="40" y="458">FOR REGULATED TEAMS</text>
+<text class="h1" x="40" y="488">Private AI</text>
+<rect class="acb" x="156" y="472" width="90.80000000000001" height="20" rx="10"/><circle class="act" cx="166" cy="482" r="2.6"/><text class="act" x="173" y="486">Early access</text>
+<text class="sm" x="40" y="514">Each task moves to your own AI only after it passes a test.</text>
+<rect class="pill" x="420" y="466" width="80" height="30" rx="15.0"/><text class="tx" x="460.0" y="485.5" text-anchor="middle">Watch</text>
+<rect class="pill" x="508" y="466" width="80" height="30" rx="15.0"/><text class="tx" x="548.0" y="485.5" text-anchor="middle">Test</text>
+<path class="wire" d="M500 481 H508"/>
+<rect class="pillHi" x="596" y="466" width="80" height="30" rx="15.0"/><text class="tx" x="636.0" y="485.5" text-anchor="middle">Hand over</text>
+<path class="wire" d="M588 481 H596"/>
+<rect class="pill" x="684" y="466" width="80" height="30" rx="15.0"/><text class="tx" x="724.0" y="485.5" text-anchor="middle">Roll back</text>
+<path class="wire" d="M676 481 H684"/>
+<rect class="pill" x="772" y="466" width="80" height="30" rx="15.0"/><text class="tx" x="812.0" y="485.5" text-anchor="middle">Record</text>
+<path class="wire" d="M764 481 H772"/>
+<text class="sm" x="420" y="518">Built on tracing, evaluation, fine-tuning and model routing.</text>
+</svg>

@@ -54,7 +54,7 @@ def setup_praisonai_agents():
             Always be helpful and provide clear explanations.
             """,
             tools=[n8n_workflow, n8n_list_workflows],
-            llm="gpt-4o-mini"
+            model="gpt-4o-mini"
         )
         
         # Create notification agent focused on messaging
@@ -72,7 +72,7 @@ def setup_praisonai_agents():
             Be efficient and reliable with notifications.
             """,
             tools=[n8n_workflow],
-            llm="gpt-4o-mini"
+            model="gpt-4o-mini"
         )
         
         return {

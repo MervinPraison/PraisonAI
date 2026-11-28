@@ -16,13 +16,13 @@ pytestmark = pytest.mark.skipif(
 
 @pytest.fixture
 def notify_socket(tmp_path, monkeypatch):
-    path = str(tmp_path / "notify.sock")
-    sock = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-    sock.bind(path)
-    sock.settimeout(2)
-    monkeypatch.setenv("NOTIFY_SOCKET", path)
-    yield sock
-    sock.close()
+    # A relative Unix socket path fits even when pytest's temp path is long.
+    monkeypatch.chdir(tmp_path)
+    with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+        sock.bind("notify.sock")
+        sock.settimeout(2)
+        monkeypatch.setenv("NOTIFY_SOCKET", "notify.sock")
+        yield sock
 
 
 def _drain(sock):

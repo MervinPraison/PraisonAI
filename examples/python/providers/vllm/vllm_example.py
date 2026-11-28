@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with vLLM
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="vllm/meta-llama/Llama-3.1-8B-Instruct",
+    model="vllm/meta-llama/Llama-3.1-8B-Instruct",
 )
 
 # Example conversation

@@ -33,7 +33,7 @@ def main():
         Use these tools strategically to provide comprehensive, well-researched, and 
         analytically sound responses. Always show your work and cite sources.""",
         
-        llm="gemini/gemini-2.0-flash",
+        model="gemini/gemini-2.0-flash",
         
         # Enable all three Gemini internal tools
         tools=[
@@ -89,7 +89,7 @@ def demonstrate_tool_synergy():
         instructions="""You are a market research analyst. Use all available tools 
         to gather information, analyze content, and perform calculations as needed.""",
         
-        llm="gemini/gemini-2.0-flash",
+        model="gemini/gemini-2.0-flash",
         tools=[
             {"googleSearch": {}},
             {"urlContext": {}}, 

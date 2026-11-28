@@ -660,7 +660,7 @@ jobs:
             echo "Would publish praisonai-deploy ${{ steps.versions.outputs.deploy_version }}"
           fi
           if [ "${{ steps.flags.outputs.skip_wrapper }}" != "true" ]; then
-            echo "Would run bump_and_release.py ${{ steps.versions.outputs.wrapper_version }} --agents ${{ steps.versions.outputs.agents_version }} --code-pin ${{ steps.versions.outputs.code_version }} --bot-pin ${{ steps.versions.outputs.bot_version }} --train-pin ${{ steps.versions.outputs.train_version }} --browser-pin ${{ steps.versions.outputs.browser_version }} --mcp-pin ${{ steps.versions.outputs.mcp_version }} --sandbox-pin ${{ steps.versions.outputs.sandbox_version }} --deploy-pin ${{ steps.versions.outputs.deploy_version }}"
+            echo "Would run bump_and_release.py ${{ steps.versions.outputs.wrapper_version }} --agents ${{ steps.versions.outputs.agents_version }} --code-pin ${{ steps.versions.outputs.code_version }} --bot-pin ${{ steps.versions.outputs.bot_version }} --train-pin ${{ steps.versions.outputs.train_version }} --browser-pin ${{ steps.versions.outputs.browser_version }} --mcp-pin ${{ steps.versions.outputs.mcp_version }} --sandbox-pin ${{ steps.versions.outputs.sandbox_version }} --deploy-pin ${{ steps.versions.outputs.deploy_version }} --smoke-wheel"
             echo "Would uv publish praisonai ${{ steps.versions.outputs.wrapper_version }}"
           fi
 
@@ -688,6 +688,7 @@ jobs:
           rm -rf dist
           uv lock
           uv build
+          bash "$GITHUB_WORKSPACE/.github/scripts/smoke-pypi-wheel.sh" praisonaiagents "$NEW_VERSION"
           # --check-url makes re-uploads idempotent: files already on PyPI are
           # skipped instead of failing the publish (partial-upload recovery).
           uv publish --check-url https://pypi.org/simple/
@@ -747,6 +748,7 @@ jobs:
           rm -rf dist
           uv lock
           uv build
+          bash "$GITHUB_WORKSPACE/.github/scripts/smoke-pypi-wheel.sh" praisonai-code "$NEW_VERSION"
           # --check-url makes re-uploads idempotent: files already on PyPI are
           # skipped instead of failing the publish (partial-upload recovery).
           uv publish --check-url https://pypi.org/simple/
@@ -806,6 +808,7 @@ jobs:
           rm -rf dist
           uv lock
           uv build
+          bash "$GITHUB_WORKSPACE/.github/scripts/smoke-pypi-wheel.sh" praisonai-bot "$NEW_VERSION"
           # --check-url makes re-uploads idempotent: files already on PyPI are
           # skipped instead of failing the publish (partial-upload recovery).
           uv publish --check-url https://pypi.org/simple/
@@ -865,6 +868,7 @@ jobs:
           rm -rf dist
           uv lock
           uv build
+          bash "$GITHUB_WORKSPACE/.github/scripts/smoke-pypi-wheel.sh" praisonai-train "$NEW_VERSION"
           # --check-url makes re-uploads idempotent: files already on PyPI are
           # skipped instead of failing the publish (partial-upload recovery).
           uv publish --check-url https://pypi.org/simple/
@@ -924,6 +928,7 @@ jobs:
           rm -rf dist
           uv lock
           uv build
+          bash "$GITHUB_WORKSPACE/.github/scripts/smoke-pypi-wheel.sh" praisonai-browser "$NEW_VERSION"
           # --check-url makes re-uploads idempotent: files already on PyPI are
           # skipped instead of failing the publish (partial-upload recovery).
           uv publish --check-url https://pypi.org/simple/
@@ -983,6 +988,7 @@ jobs:
           rm -rf dist
           uv lock
           uv build
+          bash "$GITHUB_WORKSPACE/.github/scripts/smoke-pypi-wheel.sh" praisonai-mcp "$NEW_VERSION"
           # --check-url makes re-uploads idempotent: files already on PyPI are
           # skipped instead of failing the publish (partial-upload recovery).
           uv publish --check-url https://pypi.org/simple/
@@ -1042,6 +1048,7 @@ jobs:
           rm -rf dist
           uv lock
           uv build
+          bash "$GITHUB_WORKSPACE/.github/scripts/smoke-pypi-wheel.sh" praisonai-sandbox "$NEW_VERSION"
           # --check-url makes re-uploads idempotent: files already on PyPI are
           # skipped instead of failing the publish (partial-upload recovery).
           uv publish --check-url https://pypi.org/simple/
@@ -1101,6 +1108,7 @@ jobs:
           rm -rf dist
           uv lock
           uv build
+          bash "$GITHUB_WORKSPACE/.github/scripts/smoke-pypi-wheel.sh" praisonai-deploy "$NEW_VERSION"
           # --check-url makes re-uploads idempotent: files already on PyPI are
           # skipped instead of failing the publish (partial-upload recovery).
           uv publish --check-url https://pypi.org/simple/
@@ -1183,7 +1191,7 @@ jobs:
             --mcp-pin "${{ steps.versions.outputs.mcp_version }}" \
             --sandbox-pin "${{ steps.versions.outputs.sandbox_version }}" \
             --deploy-pin "${{ steps.versions.outputs.deploy_version }}" \
-            --wait --max-wait 600 --no-add-all --force
+            --wait --max-wait 600 --no-add-all --force --smoke-wheel
 
       - name: Publish praisonai wrapper to PyPI
         if: >-

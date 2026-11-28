@@ -48,7 +48,7 @@ def main():
         role="Research Specialist",
         goal="Find accurate and relevant information",
         backstory="Expert at finding and synthesizing information from various sources.",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     writer = Agent(
@@ -56,7 +56,7 @@ def main():
         role="Content Writer",
         goal="Create engaging content from research",
         backstory="Skilled writer who transforms research into readable content.",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     analyst = Agent(
@@ -64,7 +64,7 @@ def main():
         role="Data Analyst",
         goal="Analyze data and provide insights",
         backstory="Expert at analyzing data and extracting meaningful insights.",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     agents = [researcher, writer, analyst]

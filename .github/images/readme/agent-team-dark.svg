@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 372" width="880" height="372" role="img" aria-label="AgentTeam runs the same tasks three ways. Sequential: tasks run in list order. Hierarchical: a manager agent reads every task's status and picks the next task and agent, or stops. Workflow: starts at the start task, decision tasks route on a condition, and loop tasks repeat.">
+<style>.bgr{fill:#0d1117}
+.eb{font:500 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9198a1;letter-spacing:.12em}
+.ebA{font:600 11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#e0b25a;letter-spacing:.12em}
+.h1{font:650 22px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#e6edf3}
+.h2{font:600 15px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#e6edf3}
+.tx{font:400 13px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#c9d1d9}
+.sm{font:400 12px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#9198a1}
+.mono{font:500 12px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#e6edf3}
+.pill{fill:#161b22;stroke:#3d444d;stroke-width:1}
+.pillHi{fill:#2d2716;stroke:#e0b25a;stroke-width:1.2}
+.card{fill:#161b22;stroke:#e6edf3;stroke-width:1.4}
+.soft{fill:#1c2128;stroke:#3d444d;stroke-width:1}
+.dash{fill:none;stroke:#e0b25a;stroke-width:1.4;stroke-dasharray:6 6}
+.wire{fill:none;stroke:#3d444d;stroke-width:1.4}
+.flow{fill:none;stroke:#e0b25a;stroke-width:1.6;stroke-dasharray:4 10;animation:flow 1.6s linear infinite}
+.flowR{fill:none;stroke:#e0b25a;stroke-width:1.6;stroke-dasharray:4 10;animation:flowR 1.6s linear infinite}
+.okb{fill:#1f3326} .okt{font:600 11px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#8fc39b}
+.acb{fill:#3a2f1a} .act{font:600 11px -apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;fill:#e0b25a}
+.dot{fill:#e0b25a}
+@keyframes flow{to{stroke-dashoffset:-28}}
+@keyframes flowR{to{stroke-dashoffset:28}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important}}
+
+.box{fill:#161b22;stroke:#e6edf3;stroke-width:1.4}
+.boxHi{fill:#2d2716;stroke:#e0b25a;stroke-width:1.6}
+.dia{fill:#161b22;stroke:#e0b25a;stroke-width:1.6}
+.back{fill:none;stroke:#e38d7f;stroke-width:1.6;stroke-dasharray:6 6;animation:flowR 1.6s linear infinite}
+.bt{font:600 10.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#e38d7f;letter-spacing:.06em}
+.code{font:500 11.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#e0b25a}
+.cap{font:500 10.5px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;fill:#9198a1}
+</style>
+<rect class="bgr" x="0" y="0" width="880" height="372" rx="12"/>
+<text class="eb" x="20" y="26">AGENTTEAM · THREE WAYS TO RUN THE SAME TASKS</text>
+<text class="code" x="860" y="26" text-anchor="end">AgentTeam(agents=[...], tasks=[...], process=...)</text>
+<rect class="soft" x="20" y="48" width="268" height="306" rx="12"/>
+<rect class="soft" x="306" y="48" width="268" height="306" rx="12"/>
+<rect class="soft" x="592" y="48" width="268" height="306" rx="12"/>
+<text class="h2" x="36" y="76">Sequential</text>
+<text class="code" x="36" y="94">process="sequential"</text>
+<rect class="box" x="64" y="120" width="180" height="36" rx="8"/>
+<text class="tx" x="154.0" y="142.5" text-anchor="middle">Research</text>
+<rect class="box" x="64" y="178" width="180" height="36" rx="8"/>
+<text class="tx" x="154.0" y="200.5" text-anchor="middle">Write</text>
+<path class="flow" d="M154.0 156 V176"/>
+<rect class="box" x="64" y="236" width="180" height="36" rx="8"/>
+<text class="tx" x="154.0" y="258.5" text-anchor="middle">Review</text>
+<path class="flow" d="M154.0 214 V234"/>
+<text class="sm" x="36" y="308">Tasks run one after another, in the</text>
+<text class="sm" x="36" y="323">order you list them.</text>
+<text class="h2" x="322" y="76">Hierarchical</text>
+<text class="code" x="322" y="94">process="hierarchical"</text>
+<rect class="boxHi" x="360" y="120" width="160" height="38" rx="8"/>
+<text class="tx" x="440.0" y="143.5" text-anchor="middle">Manager agent</text>
+<path class="flow" d="M440.0 158 V184 H358.0 V214"/>
+<rect class="box" x="322.0" y="216" width="72" height="34" rx="8"/>
+<text class="tx" x="358.0" y="237.5" text-anchor="middle">Research</text>
+<path class="flow" d="M440.0 158 V184 H440.0 V214"/>
+<rect class="box" x="404.0" y="216" width="72" height="34" rx="8"/>
+<text class="tx" x="440.0" y="237.5" text-anchor="middle">Write</text>
+<path class="flow" d="M440.0 158 V184 H522.0 V214"/>
+<rect class="box" x="486.0" y="216" width="72" height="34" rx="8"/>
+<text class="tx" x="522.0" y="237.5" text-anchor="middle">Review</text>
+<text class="cap" x="432.0" y="176" text-anchor="end">execute or stop</text>
+<path class="back" d="M564.0 233 H564 V139 H522"/>
+<text class="bt" x="560" y="204" text-anchor="end">STATUS</text>
+<text class="sm" x="322" y="308">A manager agent reads every task's</text>
+<text class="sm" x="322" y="323">status, then picks the next task</text>
+<text class="sm" x="322" y="338">and agent, or stops.</text>
+<text class="h2" x="608" y="76">Workflow</text>
+<text class="code" x="608" y="94">process="workflow"</text>
+<rect class="box" x="646" y="114" width="160" height="34" rx="8"/>
+<text class="tx" x="726.0" y="135.5" text-anchor="middle">Start task</text>
+<path class="flow" d="M726.0 148 V164"/>
+<path class="dia" d="M726.0 166 L758.0 190 L726.0 214 L694.0 190 Z"/>
+<text class="cap" x="726.0" y="194" text-anchor="middle">decision</text>
+<path class="flow" d="M694.0 190 H664.0 V236"/>
+<path class="flow" d="M758.0 190 H788.0 V236"/>
+<rect class="boxHi" x="616" y="238" width="96" height="34" rx="8"/>
+<text class="tx" x="664.0" y="259.5" text-anchor="middle">Publish</text>
+<rect class="box" x="740" y="238" width="96" height="34" rx="8"/>
+<text class="tx" x="788.0" y="259.5" text-anchor="middle">Revise</text>
+<path class="back" d="M836.0 255 H850 V131 H808"/>
+<text class="bt" x="846" y="290" text-anchor="end">ROUTES BACK</text>
+<text class="sm" x="608" y="308">Starts at is_start. Decision tasks</text>
+<text class="sm" x="608" y="323">route on a condition; loop tasks</text>
+<text class="sm" x="608" y="338">repeat per row.</text>
+</svg>

@@ -22,6 +22,7 @@ from praisonaiagents._logging import get_logger
 from typing import Dict, Optional, Union
 
 from ..context.budgeter import MODEL_LIMITS as _CANONICAL_LIMITS
+from ..context.budgeter import litellm_model_info as _litellm_model_info
 
 logger = get_logger(__name__)
 
@@ -58,7 +59,7 @@ _EVAL_EXTRA_LENGTHS: Dict[str, int] = {
     "codestral-latest": 32000,
 
     # DeepSeek models
-    "deepseek-chat": 64000,
+    "deepseek-chat": 131072,
     "deepseek-coder": 64000,
 
     # Groq models
@@ -180,33 +181,13 @@ def get_context_length(
     # Try litellm's model_cost first if available and requested
     # Note: get_max_tokens returns OUTPUT limit, model_cost has INPUT context window
     if use_litellm:
-        try:
-            from litellm import model_cost
-            model_lower = model.lower()
-            
-            # Direct lookup
-            if model_lower in model_cost:
-                info = model_cost[model_lower]
-                # Prefer max_input_tokens (context window), fallback to max_tokens
-                if 'max_input_tokens' in info and info['max_input_tokens']:
-                    return info['max_input_tokens']
-                if 'max_tokens' in info and info['max_tokens']:
-                    return info['max_tokens']
-            
-            # Try with provider prefix removed
-            if "/" in model:
-                base_model = model.split("/")[-1].lower()
-                if base_model in model_cost:
-                    info = model_cost[base_model]
-                    if 'max_input_tokens' in info and info['max_input_tokens']:
-                        return info['max_input_tokens']
-                    if 'max_tokens' in info and info['max_tokens']:
-                        return info['max_tokens']
-        except ImportError:
-            pass  # litellm not installed
-        except Exception as e:
-            logger.debug(f"litellm.model_cost lookup failed for {model}: {e}")
-    
+        # Same data as litellm.model_cost, read without importing litellm (X-03).
+        info = _litellm_model_info(model)
+        if info:
+            limit = info.get("max_input_tokens") or info.get("max_tokens")
+            if limit:
+                return int(limit)
+
     # Normalize model name for lookup
     model_lower = model.lower()
     

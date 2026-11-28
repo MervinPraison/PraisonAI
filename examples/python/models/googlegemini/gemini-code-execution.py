@@ -28,7 +28,7 @@ def main():
         Use the Code Execution tool to perform calculations, analyze data, create visualizations,
         and validate logic. Always show your work by executing relevant code snippets.""",
         
-        llm="gemini/gemini-2.0-flash",
+        model="gemini/gemini-2.0-flash",
         
         # Enable Code Execution internal tool
         tools=[{"codeExecution": {}}])

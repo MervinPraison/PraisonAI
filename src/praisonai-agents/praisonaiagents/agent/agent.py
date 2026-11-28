@@ -896,6 +896,14 @@ class Agent(GoalLoopMixin, SteeringMixin, SandboxMixin, SkillReviewMixin, Unifie
                     "(or pass temperature= to chat())."
                 ),
                 "max_tokens": "set it on the model; use model={'model': 'gpt-4o-mini', 'max_tokens': ...}.",
+                "prompt_template": "moved into templates=; use templates=TemplateConfig(prompt=...).",
+                "response_template": "moved into templates=; use templates=TemplateConfig(response=...).",
+                "use_system_prompt": "moved into templates=; use templates=TemplateConfig(use_system_prompt=...).",
+                "prompt_caching": "moved into caching=; use caching=CachingConfig(prompt_caching=True).",
+                "web_fetch": "moved into web=; use web=WebConfig(fetch=True) (fetch is Claude-only).",
+                "max_retry_limit": "moved into execution=; use execution=ExecutionConfig(max_retry_limit=...).",
+                "max_execution_time": "moved into execution=; use execution=ExecutionConfig(max_execution_time=...).",
+                "user_id": "moved into memory=; use memory=MemoryConfig(user_id=...).",
                 # Same migration, different container: these two were flat
                 # kwargs before they were grouped into tool_config. Without a
                 # hint the user gets a bare "unexpected keyword argument" and
@@ -2418,6 +2426,9 @@ Your Role: {self.role}
                 continue
             elif k == "_tool_executor":
                 # Thread pools can't be copied; the clone lazily builds its own.
+                continue
+            elif k in ("_turn_lock", "_turn_loop_locks"):
+                # Per-agent turn locks (turn_lock.py); the clone builds its own.
                 continue
             elif k == "_Agent__hook_runner":
                 # Holds locks; rebuilt lazily on first use.
