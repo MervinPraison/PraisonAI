@@ -13,7 +13,7 @@ Design principles:
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional, Protocol
+from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol
 import time
 import logging
 
@@ -341,6 +341,25 @@ _tool_progress_sink: "_contextvars.ContextVar[Optional[StreamCallback]]" = (
 )
 
 
+def _forward_tool_progress(
+    sink: Optional[StreamCallback],
+    output: Optional[str],
+    progress: Optional[float],
+    metadata: Optional[Dict[str, Any]],
+) -> bool:
+    if sink is None:
+        return False
+    md: Dict[str, Any] = dict(metadata) if metadata else {}
+    if progress is not None:
+        md["progress"] = progress
+    try:
+        sink(StreamEvent(type=StreamEventType.TOOL_PROGRESS, content=output, metadata=md or None))
+    except Exception as e:  # never break tool execution on a progress failure
+        logger.debug("emit_tool_progress sink failed: %s", e)
+        return False
+    return True
+
+
 def emit_tool_progress(
     output: Optional[str] = None,
     *,
@@ -361,22 +380,36 @@ def emit_tool_progress(
     Returns:
         ``True`` if the progress was forwarded to an active sink, else ``False``.
     """
+    return _forward_tool_progress(
+        _tool_progress_sink.get(), output, progress, metadata
+    )
+
+
+def mcp_progress_callback(
+    tool_name: str,
+) -> Optional[Callable[[float, Optional[float], Optional[str]], Awaitable[None]]]:
+    """Capture this tool's stream sink for MCP's transport callback."""
     sink = _tool_progress_sink.get()
     if sink is None:
-        return False
-    md: Dict[str, Any] = dict(metadata) if metadata else {}
-    if progress is not None:
-        md["progress"] = progress
-    try:
-        sink(StreamEvent(
-            type=StreamEventType.TOOL_PROGRESS,
-            content=output,
-            metadata=md or None,
-        ))
-    except Exception as e:  # never break tool execution on a progress failure
-        logger.debug("emit_tool_progress sink failed: %s", e)
-        return False
-    return True
+        return None
+
+    last_emit = [0.0]
+
+    async def report(current: float, total: Optional[float], message: Optional[str]) -> None:
+        now = time.monotonic()
+        if now - last_emit[0] < 0.1:
+            return
+        last_emit[0] = now
+        ratio = current / total if isinstance(current, (int, float)) and total else None
+        _forward_tool_progress(
+            sink,
+            output=message,
+            progress=ratio,
+            metadata={"source": "mcp", "tool": tool_name, "mcp_progress": current,
+                      "mcp_total": total},
+        )
+
+    return report
 
 
 def emit_todo_update(

@@ -4324,7 +4324,13 @@ class ToolExecutionMixin:
             if hasattr(mcp_instance, 'runner'):
                 for mcp_tool in mcp_instance.runner.tools:
                     if hasattr(mcp_tool, 'name') and mcp_tool.name == func_name:
-                        return True, mcp_instance.runner.call_tool(func_name, args)
+                        from ..streaming.events import mcp_progress_callback
+                        progress_sink = mcp_progress_callback(func_name)
+                        if progress_sink is None:
+                            return True, mcp_instance.runner.call_tool(func_name, args)
+                        return True, mcp_instance.runner.call_tool(
+                            func_name, args, progress_sink=progress_sink
+                        )
             return False, None
 
         # Per-turn ``tools=`` take precedence (same order as _dispatch_tools):

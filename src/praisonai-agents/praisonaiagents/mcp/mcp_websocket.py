@@ -305,7 +305,14 @@ class WebSocketMCPTool:
         logger.debug(f"Async calling tool {self.name} with args: {kwargs}")
         
         try:
-            result = await self.session.call_tool(self.name, kwargs)
+            from ..streaming.events import mcp_progress_callback
+            progress_callback = mcp_progress_callback(self.name)
+            if progress_callback is None:
+                result = await self.session.call_tool(self.name, kwargs)
+            else:
+                result = await self.session.call_tool(
+                    self.name, kwargs, progress_callback=progress_callback
+                )
             
             # Extract text from result
             if hasattr(result, 'content') and result.content:

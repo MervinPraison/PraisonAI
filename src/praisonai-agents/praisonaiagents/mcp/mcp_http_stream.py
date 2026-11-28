@@ -243,7 +243,14 @@ class HTTPStreamMCPTool:
         """Call the tool with the provided arguments."""
         logger.debug(f"Async calling tool {self.name} with args: {kwargs}")
         try:
-            result = await self.session.call_tool(self.name, kwargs)
+            from ..streaming.events import mcp_progress_callback
+            progress_callback = mcp_progress_callback(self.name)
+            if progress_callback is None:
+                result = await self.session.call_tool(self.name, kwargs)
+            else:
+                result = await self.session.call_tool(
+                    self.name, kwargs, progress_callback=progress_callback
+                )
             if getattr(result, 'isError', False):
                 raise RuntimeError(f"MCP tool {self.name} failed: {result.content}")
             
