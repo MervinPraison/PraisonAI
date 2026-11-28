@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Protocol, runtime_checkable
 
 from ..context.budgeter import MODEL_LIMITS as _CANONICAL_LIMITS
+from ..context.budgeter import litellm_model_info as _litellm_model_info
 from ..context.tokens import estimate_tokens_heuristic
 
 
@@ -34,10 +35,10 @@ _RAG_EXTRA_CONTEXT_WINDOWS: Dict[str, int] = {
     "claude-sonnet-4": 200000,
 
     # Google models
-    "gemini-pro": 32768,
-    "gemini-1.0-pro": 32768,
-    "gemini-2.5-pro": 1000000,
-    "gemini-2.5-flash": 1000000,
+    "gemini-pro": 32760,
+    "gemini-1.0-pro": 32760,
+    "gemini-2.5-pro": 1048576,
+    "gemini-2.5-flash": 1048576,
 
     # Mistral models
     "mistral-large": 128000,
@@ -56,7 +57,7 @@ _RAG_EXTRA_CONTEXT_WINDOWS: Dict[str, int] = {
     "llama-4-scout": 10000000,
 
     # DeepSeek models
-    "deepseek-chat": 64000,
+    "deepseek-chat": 131072,
     "deepseek-coder": 64000,
     "deepseek-r1": 64000,
 
@@ -103,7 +104,15 @@ def get_model_context_window(model_name: Optional[str]) -> int:
     """
     if not model_name:
         return DEFAULT_CONTEXT_WINDOW
-    
+
+    # litellm's model data first (no litellm import), as the budgeter does;
+    # the static table below is only the fallback (X-03).
+    info = _litellm_model_info(model_name.strip())
+    if info:
+        limit = info.get("max_input_tokens") or info.get("max_tokens")
+        if limit:
+            return int(limit)
+
     # Normalize model name
     model_lower = model_name.lower().strip()
     

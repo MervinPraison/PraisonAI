@@ -1,24 +1,10 @@
-"""
-End-to-End Tests for CLI Features with Real API Keys.
-
-These tests require actual API keys to be set in environment variables:
-- OPENAI_API_KEY
-- ANTHROPIC_API_KEY (optional)
-- GEMINI_API_KEY (optional)
-
-Run with: pytest tests/e2e/test_cli_features_e2e.py -v --tb=short
-"""
+"""Offline integration tests for CLI feature handlers."""
 
 import pytest
-import os
 import time
 from unittest.mock import patch
 
-# Skip all tests if no API key is available
-pytestmark = pytest.mark.skipif(
-    not os.environ.get("OPENAI_API_KEY"),
-    reason="OPENAI_API_KEY not set"
-)
+pytestmark = pytest.mark.offline
 
 
 class TestSlashCommandsE2E:
@@ -270,15 +256,9 @@ class TestIntegratedFeaturesE2E:
         assert approval.approved is True  # Auto-approved in auto_edit mode
 
 
-class TestRealAPIIntegration:
-    """Tests that use real API calls."""
-    
-    @pytest.mark.skipif(
-        not os.environ.get("OPENAI_API_KEY"),
-        reason="OPENAI_API_KEY required for this test"
-    )
-    def test_cost_tracking_with_real_agent(self):
-        """Test cost tracking with a real agent call."""
+class TestResponseCostTracking:
+    def test_cost_tracking_with_simulated_usage(self):
+        """Track the token usage reported by a model response."""
         from praisonai.cli.features import CostTrackerHandler
         
         handler = CostTrackerHandler()

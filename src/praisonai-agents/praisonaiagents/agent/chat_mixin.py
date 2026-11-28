@@ -20,6 +20,7 @@ from praisonaiagents._logging import get_logger
 from ..errors import BudgetExceededError, ToolExecutionError
 from .tool_execution import _active_turn_cancel
 from .interrupt import protect_turn
+from .turn_lock import serial_aturn, serial_stream_turn, serial_turn
 
 # Shared lazy display helpers (cached, thread-safe; avoid circular imports)
 from ._lazy_display import _get_console, _get_live, _get_display_functions
@@ -104,10 +105,12 @@ def _reset_loop_guard_for_turn(agent):
 
 
 
-from typing import List, Optional, Any, Dict, Union, Generator, TYPE_CHECKING
+from typing import List, Optional, Any, Dict, Union, Generator, Type, TypeVar, overload, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    pass
+    from pydantic import BaseModel  # return annotations only
+
+_OutputT = TypeVar("_OutputT", bound="BaseModel")
 
 
 def _sleep_unless_cancelled(seconds: float, cancel_token: Any = None, step: float = 0.2) -> None:
@@ -3947,7 +3950,15 @@ Your Role: {self.role}"""
             )
         return rendered
 
-    def chat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None) -> Optional[str]:
+    @overload
+    def chat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, *, output_pydantic: Type[_OutputT], reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None) -> Optional[_OutputT]: ...
+    @overload
+    def chat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: None = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None) -> Optional[str]: ...
+    @overload
+    def chat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Type[_OutputT]] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None) -> Optional[Union[str, _OutputT]]: ...
+
+    @serial_turn
+    def chat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None) -> Optional[Union[str, "BaseModel"]]:
         """
         Chat with the agent.
         
@@ -4803,7 +4814,15 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
 
         return clean_triple_backticks(output)
 
-    async def achat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None):
+    @overload
+    async def achat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, *, output_pydantic: Type[_OutputT], reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None) -> Optional[_OutputT]: ...
+    @overload
+    async def achat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: None = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None) -> Optional[str]: ...
+    @overload
+    async def achat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Type[_OutputT]] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None) -> Optional[Union[str, _OutputT]]: ...
+
+    @serial_aturn
+    async def achat(self, prompt: str, temperature: Optional[float] = None, tools: Optional[List[Any]] = None, output_json: Optional[Any] = None, output_pydantic: Optional[Any] = None, reasoning_steps: bool = False, stream: Optional[bool] = None, task_name: Optional[str] = None, task_description: Optional[str] = None, task_id: Optional[str] = None, config: Optional[Dict[str, Any]] = None, force_retrieval: bool = False, skip_retrieval: bool = False, attachments: Optional[List[str]] = None, tool_choice: Optional[str] = None, seed: Optional[int] = None, cancel_token: Optional[Any] = None) -> Optional[Union[str, "BaseModel"]]:
         """Async version of chat method with self-reflection support.
         
         Args:
@@ -5944,6 +5963,7 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
         # Auto-save session if enabled
         self._auto_save_session()
 
+    @serial_stream_turn
     def _start_stream(self, prompt: str, **kwargs) -> Generator[str, None, None]:
         """Own the durable context for the complete streaming generator."""
         # A stream is a turn too: give it its own loop guard (as chat/achat get

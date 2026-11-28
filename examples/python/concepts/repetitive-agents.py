@@ -3,7 +3,7 @@ from praisonaiagents import Agent, Task, AgentTeam
 
 agent = Agent(
     instructions="You are a loop agent that creating a loop of tasks.",
-    llm="gpt-4o-mini"
+    model="gpt-4o-mini"
 )
 
 task = Task(

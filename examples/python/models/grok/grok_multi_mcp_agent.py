@@ -4,7 +4,7 @@ agent = Agent(
     instructions="You are a multi MCP AI agent. "
                  "Help users integrate and coordinate multiple Model Context Protocol agents "
                  "for complex workflows and cross-platform automation.",
-    llm="xai/grok-4"
+    model="xai/grok-4"
 )
 
 response = agent.start(

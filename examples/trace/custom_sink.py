@@ -188,7 +188,7 @@ def example_with_real_agent():
         agent = Agent(
             name="demo_agent",
             instructions="You are a helpful assistant. Be brief.",
-            llm="gpt-4o-mini",
+            model="gpt-4o-mini",
         )
         
         # This chat will emit events to ConsoleSink

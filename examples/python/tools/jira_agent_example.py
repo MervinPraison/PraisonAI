@@ -60,7 +60,7 @@ def main():
         Be helpful and provide clear summaries of JIRA activity.
         """,
         tools=jira_tools(),  # Add all JIRA tools
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     print("🎯 JIRA Agent Watch Example")

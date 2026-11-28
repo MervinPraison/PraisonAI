@@ -13,7 +13,7 @@ researcher = Agent(
     name="Researcher",
     role="Research Assistant",
     goal="Find and summarize information",
-    llm="gpt-4o-mini"
+    model="gpt-4o-mini"
 )
 
 # Create tasks with variables

@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with Azure OpenAI
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="azure/gpt-4",
+    model="azure/gpt-4",
 )
 
 # Example conversation

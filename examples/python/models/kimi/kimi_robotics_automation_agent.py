@@ -6,7 +6,7 @@ agent = Agent(
                 "and industrial applications. Provide guidance on "
                 "robot programming, automation workflows, "
                 "sensor integration, and robotic process automation.",
-    llm="openrouter/moonshotai/kimi-k2"
+    model="openrouter/moonshotai/kimi-k2"
 )
 
 response = agent.start("Hello! I'm your robotics and automation assistant. "

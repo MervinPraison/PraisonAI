@@ -20,7 +20,7 @@ researcher = Agent(
     name="Researcher",
     role="Research analyst",
     goal="Find and analyze information",
-    llm="router-mf-0.5",
+    model="router-mf-0.5",
     base_url=ROUTELLM_URL
 )
 
@@ -28,7 +28,7 @@ writer = Agent(
     name="Writer",
     role="Content writer",
     goal="Write clear and engaging content",
-    llm="router-mf-0.5",
+    model="router-mf-0.5",
     base_url=ROUTELLM_URL
 )
 

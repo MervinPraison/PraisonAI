@@ -23,14 +23,14 @@ workflow = AgentFlow(
             name="Analyzer",
             role="Data analyst",
             goal="Analyze data and extract insights",
-            llm="router-mf-0.5",
+            model="router-mf-0.5",
             base_url=ROUTELLM_URL
         ),
         Agent(
             name="Reporter",
             role="Report writer",
             goal="Create clear reports from analysis",
-            llm="router-mf-0.5",
+            model="router-mf-0.5",
             base_url=ROUTELLM_URL
         )
     ]

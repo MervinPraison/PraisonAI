@@ -45,7 +45,7 @@ agent = Agent(
     instructions="You are a research assistant. Always cite your sources.",
     knowledge=[doc1, doc2],
     memory={"user_id": "citation_user"},
-    llm="openai/gpt-4o-mini",
+    model="openai/gpt-4o-mini",
     output="minimal",
 )
 

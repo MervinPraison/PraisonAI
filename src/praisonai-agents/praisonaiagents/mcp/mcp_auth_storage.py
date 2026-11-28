@@ -169,6 +169,13 @@ class MCPAuthStorage:
             return None
         
         return entry
+
+    def find_by_url(self, server_url: str) -> Optional[tuple]:
+        """Return ``(mcp_name, entry)`` for the first stored entry matching ``server_url``."""
+        for name, entry in self._read().items():
+            if isinstance(entry, dict) and entry.get("server_url") == server_url:
+                return name, entry
+        return None
     
     def all(self) -> Dict[str, Dict[str, Any]]:
         """

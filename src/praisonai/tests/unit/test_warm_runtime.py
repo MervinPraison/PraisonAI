@@ -5,8 +5,6 @@ transparent fall-back, and an end-to-end loopback round-trip against the
 stdlib HTTP runtime server using a stubbed warm agent.
 """
 
-import pytest
-
 import os
 import threading
 import time
@@ -250,6 +248,7 @@ def test_run_skips_warm_runtime_when_thinking_budget_set(monkeypatch):
     assert attach_calls == []
 
 
+@pytest.mark.allow_sleep
 def test_server_roundtrip(monkeypatch):
     """Boot the real stdlib server with a stubbed agent and round-trip a prompt."""
     from praisonai.runtime import server as server_mod
@@ -454,6 +453,7 @@ def _wait_subscribed(seen, session_id, timeout=5.0):
     assert event.wait(timeout), f"attach client never subscribed to {session_id!r}"
 
 
+@pytest.mark.allow_sleep
 def test_attach_streams_live_session_events(monkeypatch):
     """End-to-end: a run with session_id is observable via client.attach()."""
     from praisonai.runtime import server as server_mod
@@ -512,6 +512,7 @@ def test_attach_streams_live_session_events(monkeypatch):
         RuntimeDescriptor.remove()
 
 
+@pytest.mark.allow_sleep
 def test_attach_session_id_with_reserved_chars_round_trips(monkeypatch):
     """A session id with path/query-reserved chars must encode and route back.
 

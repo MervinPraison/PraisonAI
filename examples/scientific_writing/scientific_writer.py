@@ -70,7 +70,7 @@ def build_scientific_writer(
     return Agent(
         name="Scientific Writer",
         instructions=SCIENTIFIC_INSTRUCTIONS,
-        llm=model,
+        model=model,
         tools=[format_latex_section, format_citation],
     )
 

@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with Google Gemini
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="google/gemini-1.5-pro",
+    model="google/gemini-1.5-pro",
 )
 
 # Example conversation

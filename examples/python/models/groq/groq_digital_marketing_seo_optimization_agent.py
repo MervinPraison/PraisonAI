@@ -6,7 +6,7 @@ agent = Agent(
                 "and improve online visibility. Provide guidance on SEO best practices, "
                 "content marketing, social media strategies, PPC campaigns, "
                 "and analytics interpretation for better ROI.",
-    llm="groq/llama3.1-8b-instant"
+    model="groq/llama3.1-8b-instant"
 )
 
 response = agent.start("Hello! I'm your digital marketing and SEO optimization assistant. "

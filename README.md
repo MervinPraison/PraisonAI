@@ -165,6 +165,9 @@ vLLM and LM Studio work the same way: use `hosted_vllm/` (vLLM) or `lm_studio/` 
 </tr>
 </table>
 
+> **Open Products** — Built directly on PraisonAI with zero duplicated code:
+> **[OpenShip](products/openship/)** — open-source PR shipping, self-review, PR Steward, and declarative `.praisonai/approvals.yml` on any LLM or local Ollama (draft PRs only; never merges). Browse all [`products/`](products/).
+
 ## The Five-Layer Agent Stack
 
 Most frameworks hand you one or two layers and leave the rest as homework. PraisonAI covers **all five** — plus the outer layer that decides *where* your agent actually runs.
@@ -388,6 +391,15 @@ Sandboxes shut themselves down when idle (`auto_shutdown`, `idle_timeout_s`), an
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset=".github/images/readme/multi-agent-patterns-dark.svg" />
     <img src=".github/images/readme/multi-agent-patterns-light.svg" alt="An AgentFlow runs steps in order, and seven patterns change how: route picks one branch, parallel runs steps at once, loop runs once per item, repeat runs until a condition holds, when or If branches on a check, include reuses another flow, and handoffs pass work to another agent." width="880" />
+  </picture>
+</p>
+
+**Agent teams.** One `AgentTeam`, three ways to run the same tasks: in order, under a manager agent, or as a workflow. [Docs](https://praison.ai/docs/concepts/process)
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset=".github/images/readme/agent-team-dark.svg" />
+    <img src=".github/images/readme/agent-team-light.svg" alt="AgentTeam runs the same tasks three ways. Sequential: Research, Write and Review run in list order. Hierarchical: a manager agent tells each agent to execute or stop and reads their status back. Workflow: a start task, a decision that routes to Publish or Revise, and Revise routes back to the start." width="880" />
   </picture>
 </p>
 

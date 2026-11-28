@@ -29,7 +29,7 @@ from praisonaiagents import Agent
 agent = Agent(
     name="assistant",
     instructions="You are a helpful assistant. Answer questions clearly and concisely.",
-    llm="gpt-4o-mini",
+    model="gpt-4o-mini",
 )
 
 # Create Telegram bot — commands are built-in automatically

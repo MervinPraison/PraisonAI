@@ -6,7 +6,7 @@ agent = Agent(
                 "quantum machine learning, and quantum neural networks. "
                 "Provide guidance on quantum algorithms for AI, "
                 "quantum optimization, and hybrid quantum-classical systems.",
-    llm="openrouter/moonshotai/kimi-k2"
+    model="openrouter/moonshotai/kimi-k2"
 )
 
 response = agent.start("Hello! I'm your quantum AI assistant. "

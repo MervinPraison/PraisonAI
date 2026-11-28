@@ -7,7 +7,7 @@ from praisonaiagents import Agent
 # Initialize Agent with Grok model
 agent = Agent(
     instructions="You are a helpful assistant",
-    llm="xai/grok-beta",
+    model="xai/grok-beta",
 )
 
 # Example conversation
