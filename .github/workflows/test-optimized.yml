@@ -101,14 +101,20 @@ jobs:
           tests/unit/test_c13_sandbox_backward_compat.py \
           tests/unit/test_c14_deploy_backward_compat.py \
           -q --tb=line --timeout=30 --maxfail=5
-        python -m pytest tests/unit/cli/ \
+        # Core Tests runs the full CLI suite. Exercise startup and command
+        # routing here with the smaller wrapper install used by smoke.
+        python -m pytest \
+          tests/unit/cli/test_main_dispatcher.py::TestVersionShortCircuit \
+          tests/unit/cli/test_main_dispatcher.py::TestCommandRegistryNoDrift \
+          tests/unit/cli/test_main_dispatcher_unknown_command.py \
+          tests/unit/cli/test_main_utf8_stdio.py \
+          tests/unit/cli/test_typer_cli.py::TestTyperApp \
           ../praisonai-bot/tests/unit/cli/test_onboard_command.py \
           ../praisonai-bot/tests/unit/cli/test_onboard_non_interactive.py \
           -m "not slow and not network" \
           -q --tb=line \
           --timeout=30 \
           --ignore=tests/fixtures \
-          --ignore=tests/unit/cli/test_message_queue.py \
           --maxfail=5
 
     - name: Run praisonai-agents subscription-auth smoke tests
