@@ -12,6 +12,10 @@ if (( ${#wheels[@]} != 1 )); then
   exit 1
 fi
 wheel="${wheels[0]}"
+if ! smoke_python=$(command -v python3.11); then
+  echo 'Python 3.11 must be available on PATH' >&2
+  exit 1
+fi
 
 smoke_dir=$(mktemp -d)
 trap 'rm -rf "$smoke_dir"' EXIT
@@ -27,7 +31,7 @@ clean() {
 smoke_install() {
   local venv="$1"
   local python="$venv/bin/python"
-  clean uv --no-config venv --python 3.11 "$venv"
+  clean uv --no-config venv --python "$smoke_python" "$venv"
   if [[ $# == 2 ]]; then
     clean uv --no-config pip install --python "$python" "$2"
   fi
