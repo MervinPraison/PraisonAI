@@ -77,7 +77,8 @@ Each feature runs 3 ways: **CLI, YAML, Python**.
 │   ├── js/                    # JavaScript/TypeScript examples
 │   └── cookbooks/             # End-to-end recipes
 │
-/Users/praison/PraisonAI-tools/    # External tools/plugins
+/Users/praison/PraisonAI-Tools/    # Agent-callable tools
+/Users/praison/PraisonAI-Plugins/  # Lifecycle integrations
 /Users/praison/PraisonAIDocs/      # Documentation (Mintlify)
     └── docs/
         ├── agents/
@@ -115,8 +116,8 @@ Each feature runs 3 ways: **CLI, YAML, Python**.
 │                    praisonaiagents (Core SDK)                   │
 │  Protocols • Hooks • Adapters • Base Classes • Decorators       │
 ├─────────────────────────────────────────────────────────────────┤
-│                   praisonai-tools (External)                    │
-│  Optional Tools • Plugins • Community Extensions                │
+│             PraisonAI-Tools and PraisonAI-Plugins (external)    │
+│             Agent-callable tools and lifecycle plugins         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -352,7 +353,7 @@ A new required dependency needs a strong reason (a feature that silently does no
 ```
 Core SDK (praisonaiagents)     praisonai-code (terminal CLI)    Wrapper (praisonai)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━    ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━    ━━━━━━━━━━━━━━━━━━━
-✅ Protocols                   ✅ run/chat/code/doctor/setup      ✅ Bot/gateway CLI
+✅ Protocols                   ✅ run/chat/code/doctor/setup      ✅ Classic CLI compatibility
 ✅ Hooks                        ✅ runtime, cli_backends           ✅ Integrations
 ✅ Adapters                     ✅ Typer app, moved commands       ✅ Heavy implementations
 ✅ Base classes                 ✅ Depends on agents only           ✅ Optional deps
@@ -878,29 +879,16 @@ env -u OPENAI_API_BASE -u OPENAI_BASE_URL OPENAI_API_KEY=sk-test PYTHONPATH=. \
   python -m pytest tests/unit -p no:cacheprovider -n 6 -q
 ```
 
-### 9.5 Real Agentic Test (MANDATORY)
+### 9.5 Agent and Provider Validation
 
-Every feature MUST include a real agentic test — not just smoke tests.
+For changes to agent behavior, exercise the public entry point (for example, `Agent.start()`)
+with a deterministic provider fixture. Assert the user-visible result or the expected
+tool and hook behavior. For packaging, compatibility, and infrastructure fixes, test
+the affected import, command, artifact, or workflow directly.
 
-A **real agentic test** means the agent actually runs and calls the LLM:
-
-```python
-# ✅ REAL agentic test — agent runs end-to-end
-from praisonaiagents import Agent
-agent = Agent(name="test", instructions="You are a helpful assistant")
-result = agent.start("Say hello in one sentence")
-print(result)  # Must produce actual LLM output
-
-# ❌ SMOKE test only — NOT sufficient alone
-agent = Agent(name="test")  # Just object construction
-assert agent.name == "test"  # No LLM call
-```
-
-**Rules:**
-- Both smoke AND real agentic tests are required
-- Agent MUST call `agent.start()` with a real prompt
-- Agent MUST call the LLM and produce a text response
-- Print full output so developers can verify end-to-end behavior
+When a change depends on real provider behavior, use a marked live test with
+`PRAISONAI_LIVE_TESTS=1` and configured credentials in an explicitly enabled run.
+Record the provider, tested behavior, and result. Keep default CI offline.
 
 ---
 
@@ -913,12 +901,12 @@ For every feature/change:
 - [ ] **Lazy imports**: Heavy deps imported inside functions
 - [ ] **Naming**: Follow conventions (add_*, get_*, XConfig)
 - [ ] **Tests**: TDD — write failing tests first
-- [ ] **Real agentic test**: Agent must call LLM end-to-end (§9.5)
+- [ ] **Agent behavior**: Exercise changed behavior through a public entry point with a deterministic provider fixture. Use opt-in live checks for real provider behavior (§9.5).
 - [ ] **Isolated tests**: pass alone and in the full run; no machine state (§9.4)
 - [ ] **Errors and logs**: `PraisonAIError` base, module logger, no silent except (§4.8)
 - [ ] **No feature removed**: delegate, shim or alias; grep every package before a rename or move
-- [ ] **CLI**: Add corresponding CLI command/option
-- [ ] **YAML**: Ensure YAML config parity with Python API
+- [ ] **CLI**: Preserve or update the existing CLI path when affected.
+- [ ] **YAML**: Preserve YAML parity for supported configuration.
 - [ ] **Docs**: Update Mintlify documentation
 - [ ] **Examples**: Add to examples/ directory
 - [ ] **Multi-agent safe**: No shared mutable state
