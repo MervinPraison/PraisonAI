@@ -220,73 +220,43 @@ class MCPHandler(FlagHandler):
 
         from praisonaiagents import MCP
 
-        # Per-server timeout in the config schema is expressed in milliseconds;
-        # the SDK MCP() class expects seconds.
+        entry = dict(server)
+        # Per-server timeout in the config schema is in milliseconds; MCP takes seconds.
         server_timeout = server.get("timeout")
         if isinstance(server_timeout, (int, float)) and server_timeout > 0:
             timeout = max(1, int(server_timeout / 1000))
-
-        is_remote = server.get("type") == "remote" or bool(server.get("url"))
+        entry["timeout"] = timeout
 
         try:
-            if is_remote:
-                url = server.get("url")
-                from praisonaiagents.mcp.trust import is_mcp_url
-                if not is_mcp_url(url):  # MCP() would run any other string as a command
-                    self.print_status(f"Remote MCP server url is not an http(s) or ws(s) URL: {url!r}", "error")
+            if not (server.get("type") == "remote" or server.get("url")):
+                command, raw_args = server.get("command"), server.get("args") or []
+                if isinstance(command, list):
+                    parts = [str(p) for p in command]
+                elif isinstance(command, str) and command:
+                    parts = shlex.split(command)
+                else:
+                    self.print_status("Local MCP server missing 'command'", "error")
                     return None
-                kwargs: Dict[str, Any] = {"timeout": timeout}
-                headers = server.get("headers")
-                if isinstance(headers, dict) and headers:
-                    # Legacy SSE URLs (".../sse") use the SDK's SSEMCPClient,
-                    # which does not forward custom headers. Warn so an
-                    # authenticated SSE server doesn't silently connect without
-                    # its authorization header.
-                    if isinstance(url, str) and url.rstrip("/").endswith("/sse"):
-                        self.print_status(
-                            "Custom 'headers' are not supported for legacy SSE "
-                            f"MCP URLs and will be ignored: {url}",
-                            "warning",
-                        )
-                    else:
-                        kwargs["headers"] = headers
-                mcp = MCP(url, **kwargs)
-                self.print_status(f"🔌 MCP server connected: {url}", "success")
-                return mcp
-
-            command = server.get("command")
-            raw_args = server.get("args") or []
-            if isinstance(command, list):
-                parts = [str(p) for p in command]
-                cmd = parts[0] if parts else ""
-                args = parts[1:] + [str(a) for a in raw_args]
-            elif isinstance(command, str) and command:
-                parts = shlex.split(command)
-                cmd = parts[0] if parts else ""
-                args = parts[1:] + [str(a) for a in raw_args]
-            else:
-                self.print_status("Local MCP server missing 'command'", "error")
-                return None
-
-            if not cmd:
-                self.print_status("Invalid MCP command", "error")
-                return None
-
-            # Mirror parse_mcp_command: enforce the allowlist AND block inline
-            # code-execution flags (python -c, node -e, deno eval, bun -e, ...)
-            # so config-declared local servers can't bypass the run-path guard.
-            try:
+                if not parts or not parts[0]:
+                    self.print_status("Invalid MCP command", "error")
+                    return None
+                cmd, args = parts[0], parts[1:] + [str(a) for a in raw_args]
+                # Mirror parse_mcp_command: enforce the allowlist AND block inline
+                # code-execution flags (python -c, node -e, deno eval, bun -e, ...)
+                # so config-declared local servers can't bypass the run-path guard.
                 self._validate_mcp_executable(cmd, args)
-            except ValueError as e:
-                self.print_status(str(e), "error")
-                return None
-
-            env = server.get("env") or {}
-            env = {str(k): str(v) for k, v in env.items()} if isinstance(env, dict) else None
-
-            mcp = MCP(command=cmd, args=args, env=env or None, timeout=timeout)
-            self.print_status(f"🔌 MCP server connected: {cmd}", "success")
+                env = server.get("env")
+                entry.update(command=cmd, args=args,
+                             env={str(k): str(v) for k, v in env.items()} if isinstance(env, dict) else None)
+            # One shared builder (MCP.from_config): URL check and SSE header rule. ${VAR} is
+            # not expanded here: the config loader has already interpolated it.
+            from praisonaiagents.mcp.loader import build_mcp
+            mcp = build_mcp(entry, name=str(server.get("name") or "server"), cls=MCP)
+            self.print_status(f"🔌 MCP server connected: {server.get('url') or entry['command']}", "success")
             return mcp
+        except ValueError as e:
+            self.print_status(str(e), "error")
+            return None
         except Exception as e:
             self.print_status(f"Failed to connect to MCP server: {e}", "error")
             return None

@@ -6,6 +6,8 @@ over HTTP Stream transport, implementing the Streamable HTTP transport protocol.
 
 import asyncio
 import atexit
+import os
+import sys
 from praisonaiagents._logging import get_logger
 import threading
 import json
@@ -126,10 +128,84 @@ def _bounded_httpx_client_factory(max_response_bytes):
 
     return create_client
 
+
+def _is_interactive_tty() -> bool:
+    if os.environ.get("CI", "").strip().lower() not in ("", "0", "false") or os.environ.get("GITHUB_ACTIONS"):
+        return False
+    try:
+        return bool(sys.stdin and sys.stdin.isatty())
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
+def _build_httpx_oauth(server_url: str, headers: Optional[Dict[str, str]] = None,
+                       options: Optional[Dict[str, Any]] = None):
+    """Build an ``httpx.Auth`` for OAuth bearer attachment and 401 refresh, or None."""
+    opts = options or {}
+    oauth_opt = opts.get("oauth")
+    if oauth_opt is False or (headers and any(k.lower() == "authorization" for k in headers)):
+        return None
+    storage = opts.get("auth_storage")
+    if storage is None:
+        from pathlib import Path
+        from ..paths import get_mcp_auth_path
+        if not oauth_opt and not Path(get_mcp_auth_path()).is_file():
+            return None
+        from .mcp_auth_storage import MCPAuthStorage
+        storage = MCPAuthStorage()
+    name = opts.get("name")
+    entry = storage.get_for_url(name, server_url) if name else None
+    found = (name, entry) if entry else storage.find_by_url(server_url)
+    if not oauth_opt and not found:
+        return None
+    mcp_name = name or (found[0] if found else server_url)
+    if isinstance(oauth_opt, dict) and oauth_opt.get("client_id") and not ((storage.get_for_url(mcp_name, server_url) or {}).get("client_info") or {}).get("client_id"):
+        storage.set_client_info(mcp_name, {"client_id": oauth_opt["client_id"]}, server_url=server_url)
+    import httpx
+    from .oauth_provider import InteractiveAuthRequired, MCPOAuthProvider
+
+    provider = MCPOAuthProvider(mcp_name=mcp_name, server_url=server_url, storage=storage, open_browser=False)
+
+    class _MCPOAuthAuth(httpx.Auth):
+        def __init__(self):
+            self._lock: Optional[asyncio.Lock] = None
+
+        def _handle_401(self, www_auth: Optional[str], failed_hdr: Optional[str]) -> str:
+            current = provider.get_valid_token()
+            if current and f"Bearer {current}" != failed_hdr:
+                return current
+            if refreshed := provider.refresh_token():
+                return refreshed
+            if not _is_interactive_tty():
+                raise InteractiveAuthRequired(
+                    f"Interactive OAuth is required for {server_url}. Run `praisonai mcp auth {mcp_name}` from a terminal."
+                )
+            if current:
+                storage.set_tokens(mcp_name, {}, server_url=server_url)
+            provider.open_browser = True
+            return provider.ensure_authenticated(www_authenticate=www_auth)
+
+        async def async_auth_flow(self, request):
+            if not any(k.lower() == "authorization" for k in request.headers):
+                if token := await asyncio.to_thread(provider.get_valid_token):
+                    request.headers["Authorization"] = f"Bearer {token}"
+            response = yield request
+            if response.status_code != 401:
+                return
+            self._lock = self._lock or asyncio.Lock()
+            async with self._lock:
+                new_token = await asyncio.to_thread(
+                    self._handle_401, response.headers.get("www-authenticate"), request.headers.get("Authorization")
+                )
+            request.headers["Authorization"] = f"Bearer {new_token}"
+            yield request
+
+    return _MCPOAuthAuth()
+
 class HTTPStreamMCPTool:
     """A wrapper for an MCP tool that can be used with praisonaiagents."""
     
-    def __init__(self, name: str, description: str, session: ClientSession, input_schema: Optional[Dict[str, Any]] = None, timeout: int = 60):
+    def __init__(self, name: str, description: str, session: ClientSession, input_schema: Optional[Dict[str, Any]] = None, timeout: int = 60, annotations: Optional[Any] = None):
         """Store the tool metadata, build its call signature, and remember the session's event loop."""
         self.name = name
         self.__name__ = name  # Required for Agent to recognize it as a tool
@@ -139,6 +215,7 @@ class HTTPStreamMCPTool:
         self.session = session
         self.input_schema = input_schema or {}
         self.timeout = timeout
+        self.annotations = annotations
         
         # Create a signature based on input schema
         self.__signature__ = build_tool_signature(input_schema)
@@ -581,12 +658,15 @@ class HTTPStreamMCPClient:
             )
 
         headers = self.options.get('headers') or None
+        auth = _build_httpx_oauth(self.base_url, headers=headers, options=self.options)
 
         client_options = {
             "url": self.base_url,
             "headers": headers,
             "timeout": self.timeout,
         }
+        if auth is not None:
+            client_options["auth"] = auth
         if self.max_response_bytes is not None:
             client_options["httpx_client_factory"] = _bounded_httpx_client_factory(
                 self.max_response_bytes
@@ -624,7 +704,8 @@ class HTTPStreamMCPClient:
                 description=tool.description if hasattr(tool, 'description') else f"Call the {tool.name} tool",
                 session=self.session,
                 input_schema=input_schema,
-                timeout=self.timeout
+                timeout=self.timeout,
+                annotations=getattr(tool, 'annotations', None),
             )
             tools.append(wrapper)
         

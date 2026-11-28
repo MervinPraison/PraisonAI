@@ -191,8 +191,16 @@ def _bind_call_args(func: Callable, args: tuple, kwargs: Dict) -> Dict:
     positional calls still produce distinct keys instead of collapsing.
     """
     try:
-        bound = inspect.signature(func).bind_partial(*args, **kwargs)
-        return dict(bound.arguments)
+        sig = inspect.signature(func)
+        bound = sig.bind_partial(*args, **kwargs)
+        result = dict(bound.arguments)
+        # Drop bound-method receiver (self/cls) only when it is the first
+        # parameter, so normalized args match Agent._check_tool_approval_*
+        # and do not leak the tool instance into approval hashes or prompts.
+        first_param = next(iter(sig.parameters), None)
+        if first_param in ("self", "cls"):
+            result.pop(first_param, None)
+        return result
     except (TypeError, ValueError):
         merged = dict(kwargs)
         if args:

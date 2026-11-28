@@ -69,7 +69,7 @@ def method_1_simple_loop():
         goal="Process each task from the CSV file efficiently",
         backstory="Expert at handling repetitive tasks from CSV data",
         instructions="Process each task thoroughly and provide detailed output",
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # Create a loop task that will automatically process each CSV row
@@ -128,7 +128,7 @@ def method_2_manual_csv():
         4. Create a summary of the processing results
         5. Save results to a new CSV file if needed
         """,
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # Create a task for manual CSV processing
@@ -188,7 +188,7 @@ def method_3_url_processing():
         4. Create a detailed analysis report
         5. Save results with analysis data
         """,
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # Create the URL processing task
@@ -265,7 +265,7 @@ def method_4_advanced_processing():
         4. Create separate files for valid and invalid data
         5. Provide detailed validation reports
         """,
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # Create a processing agent
@@ -282,7 +282,7 @@ def method_4_advanced_processing():
         3. Generate comprehensive results
         4. Create detailed output reports
         """,
-        llm="gpt-4o-mini"
+        model="gpt-4o-mini"
     )
     
     # Create validation task

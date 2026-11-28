@@ -3,26 +3,44 @@ name: Windows Tests
 on:
   push:
     branches: [main, develop]
-    paths:
-      - 'src/**'
+    paths: &watched
+      - 'src/praisonai/**'
+      - 'src/praisonai-agents/**'
+      - 'src/praisonai-code/**'
+      - 'src/praisonai-bot/**'
+      - 'src/praisonai-train/**'
+      - 'src/praisonai-browser/**'
+      - 'src/praisonai-mcp/**'
+      - 'src/praisonai-sandbox/**'
+      - 'src/praisonai-deploy/**'
       - 'pyproject.toml'
       - '.github/workflows/test-windows.yml'
       - '.github/actions/install-monorepo-packages/**'
   pull_request:
     branches: [main, develop]
-    paths:
-      - 'src/**'
-      - 'pyproject.toml'
-      - '.github/workflows/test-windows.yml'
-      - '.github/actions/install-monorepo-packages/**'
+    paths: *watched
   workflow_dispatch:
+    inputs:
+      run_live:
+        description: Run live OpenAI checks
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-tests-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test-windows:
     runs-on: windows-latest
     timeout-minutes: 10
     env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      PRAISONAI_ALLOW_NETWORK: '0'
+      PRAISONAI_LIVE_TESTS: '0'
+      LITELLM_LOCAL_MODEL_COST_MAP: 'True'
       OPENAI_MODEL_NAME: gpt-4o-mini
       PYTHONUTF8: 1
     
@@ -185,22 +203,34 @@ jobs:
 
     # ==================== REAL API TESTS ====================
     - name: Real API test - Agent run
-      if: env.OPENAI_API_KEY != ''
+      if: github.event_name == 'workflow_dispatch' && inputs.run_live
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        PRAISONAI_ALLOW_NETWORK: '1'
+        PRAISONAI_LIVE_TESTS: '1'
       run: |
         python -c "
+        import os
         from praisonaiagents import Agent
+        assert os.environ.get('OPENAI_API_KEY'), 'OPENAI_API_KEY is required for live Windows tests'
         agent = Agent(name='TestAgent', instructions='Reply with exactly: WINDOWS_OK', llm='gpt-4o-mini')
         result = agent.run('Say WINDOWS_OK')
-        print('Result:', result)
+        assert result and 'WINDOWS_OK' in str(result), f'Unexpected model response: {result!r}'
         print('Real API test passed')
         "
 
     - name: Real API test - Multi-agent
-      if: env.OPENAI_API_KEY != ''
+      if: github.event_name == 'workflow_dispatch' && inputs.run_live
+      env:
+        OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        PRAISONAI_ALLOW_NETWORK: '1'
+        PRAISONAI_LIVE_TESTS: '1'
       run: |
         python -c "
+        import os
         from praisonaiagents import Agent, Agents, Task
-        
+
+        assert os.environ.get('OPENAI_API_KEY'), 'OPENAI_API_KEY is required for live Windows tests'
         researcher = Agent(name='Researcher', instructions='You research topics', llm='gpt-4o-mini')
         writer = Agent(name='Writer', instructions='You write content', llm='gpt-4o-mini')
         
@@ -208,6 +238,6 @@ jobs:
         
         agents = Agents(agents=[researcher, writer], tasks=[task])
         result = agents.start()
-        print('Multi-agent result type:', type(result))
+        assert result, 'The live multi-agent run returned no output'
         print('Multi-agent test passed')
         "

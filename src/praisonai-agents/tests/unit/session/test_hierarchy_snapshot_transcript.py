@@ -108,6 +108,38 @@ def test_legacy_snapshot_is_rejected_after_window_change(tmp_path, retention):
     assert path.read_bytes() == before
 
 
+@pytest.mark.parametrize(
+    ("keep", "expected"),
+    [(1, ["one"]), (2, ["checkpoint"]), (3, ["checkpoint", "three"])],
+    ids=["before-checkpoint", "at-checkpoint", "after-checkpoint"],
+)
+@pytest.mark.parametrize("legacy_snapshot", [False, True], ids=["message", "legacy-snapshot"])
+def test_revert_keeps_checkpoint_only_if_its_messages_are_retained(
+    tmp_path, monkeypatch, keep, expected, legacy_snapshot
+):
+    monkeypatch.setenv("PRAISONAI_HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    store = HierarchicalSessionStore(session_dir=str(tmp_path), retention="keep_all")
+    for content in ["one", "two"]:
+        assert store.add_message("parent", "user", content)
+    assert store.append_compaction_checkpoint("parent", "checkpoint")
+    for content in ["three", "four"]:
+        assert store.add_message("parent", "user", content)
+
+    if legacy_snapshot:
+        path = tmp_path / "parent.json"
+        data = json.loads(path.read_text(encoding="utf-8"))
+        snapshot = SessionSnapshot(id="legacy", session_id="parent", message_index=keep - 1)
+        data["snapshots"] = [snapshot.to_dict()]
+        path.write_text(json.dumps(data), encoding="utf-8")
+        assert store.revert_to_snapshot("parent", "legacy")
+    else:
+        assert store.revert_to_message("parent", keep - 1)
+
+    reopened = HierarchicalSessionStore(session_dir=str(tmp_path), retention="keep_all")
+    assert [message["content"] for message in reopened.get_working_history("parent")] == expected
+
+
 def test_persisted_snapshot_restores_structured_turns_archive_and_checkpoint(tmp_path):
     calls = [{"id": "call1", "type": "function", "function": {"name": "read", "arguments": "{}"}}]
     captured = SessionData(

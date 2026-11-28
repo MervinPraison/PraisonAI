@@ -109,6 +109,13 @@ class CrewAIAdapter(BaseFrameworkAdapter):
         (``crew.kickoff_async()``) so both entry points construct agents/tasks
         identically — the only difference is which kickoff variant is awaited.
         """
+        roles = config.get('roles') or {}
+        if not roles:
+            raise ValueError(
+                "framework=crewai: no agents defined under 'roles:' (or 'agents:'). "
+                "Define at least one agent in the YAML."
+            )
+
         # Import CrewAI only when needed (availability already validated at CLI entry)
         from crewai import Agent, Task, Crew
         from crewai.telemetry import Telemetry
@@ -209,7 +216,7 @@ class CrewAIAdapter(BaseFrameworkAdapter):
                         tasks_dict[task_spec.name] = task
 
                 # Set up task contexts
-                for details in config['roles'].values():
+                for details in roles.values():
                     for task_name, task_details in details.get('tasks', {}).items():
                         task = tasks_dict[task_name]
                         context_tasks = [tasks_dict[ctx] for ctx in task_details.get('context', [])

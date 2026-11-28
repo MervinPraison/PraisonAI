@@ -675,7 +675,7 @@ class TestMonitorCli:
         )
 
         assert result.exit_code == 1
-        assert "mutually exclusive" in result.stdout
+        assert "mutually exclusive" in result.output
 
     @pytest.mark.parametrize("conflict", ["--pre-run", "--command", "--backend"])
     def test_monitor_rejects_conflicting_execution_modes(self, conflict):
@@ -691,4 +691,4 @@ class TestMonitorCli:
         )
 
         assert result.exit_code == 1
-        assert "cannot be combined" in result.stdout
+        assert "cannot be combined" in result.output

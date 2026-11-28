@@ -22,6 +22,8 @@ on:
       - 'src/praisonai-ts/src/**'
       - 'src/praisonai-ts/tests/**'
       - 'src/praisonai-ts/package.json'
+      - 'src/praisonai-ts/package-lock.json'
+      - 'src/praisonai-ts/scripts/**'
       - 'src/praisonai-ts/jest.config.ts'
       - 'src/praisonai-ts/tsconfig*.json'
       - '.github/workflows/praisonai-ts-tests.yml'
@@ -30,6 +32,8 @@ on:
       - 'src/praisonai-ts/src/**'
       - 'src/praisonai-ts/tests/**'
       - 'src/praisonai-ts/package.json'
+      - 'src/praisonai-ts/package-lock.json'
+      - 'src/praisonai-ts/scripts/**'
       - 'src/praisonai-ts/jest.config.ts'
       - 'src/praisonai-ts/tsconfig*.json'
       - '.github/workflows/praisonai-ts-tests.yml'
@@ -53,12 +57,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22.18'
-      # `npm install --legacy-peer-deps`, matching praisonai-ts-webview.yml:
-      # the lockfile is gitignored so `npm ci` has nothing to read, and the
-      # dependency tree does not resolve without the flag (bedrock-agentcore
-      # wants a peer of @strands-agents/sdk that is not installed).
+          cache: npm
+          cache-dependency-path: src/praisonai-ts/package-lock.json
       - name: Install
-        run: npm install --no-audit --no-fund --legacy-peer-deps
+        run: npm ci --no-audit --no-fund --legacy-peer-deps
       - name: Typecheck
         run: npx tsc --noEmit -p .
       # PRAISONAI_PARITY_SILENT quiets the one-line notices that options

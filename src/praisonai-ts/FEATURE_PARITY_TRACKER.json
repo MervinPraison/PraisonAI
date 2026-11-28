@@ -1,11 +1,11 @@
 {
   "version": "1.7.6",
-  "lastUpdated": "2026-10-08",
+  "lastUpdated": "2026-11-28",
   "generatedBy": "praisonai._dev.parity.generator",
   "sourceOfTruth": "Python SDK (praisonaiagents)",
   "summary": {
     "pythonCoreFeatures": 433,
-    "pythonWrapperFeatures": 20,
+    "pythonWrapperFeatures": 21,
     "typescriptFeatures": 2115,
     "gapCount": 3,
     "stubCount": 0,
@@ -952,6 +952,7 @@
       "agent_scheduler",
       "agent_tools",
       "approval",
+      "autonomy_mode",
       "background",
       "bots_cli",
       "deploy",

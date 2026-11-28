@@ -337,10 +337,11 @@ class TestApprovalFlowAsync:
         assert decision.approved is False
         assert "channel_not_found" in decision.reason
 
-    def test_no_channel_resolves_from_auth(self):
+    def test_no_channel_resolves_from_auth(self, monkeypatch):
         """If no channel set, resolves via auth.test."""
         from praisonai.bots._slack_approval import SlackApproval
 
+        monkeypatch.delenv("SLACK_CHANNEL", raising=False)
         backend = SlackApproval(token="xoxb-test", channel="", timeout=2, poll_interval=0.1)
 
         async def mock_api(method, payload, **kwargs):

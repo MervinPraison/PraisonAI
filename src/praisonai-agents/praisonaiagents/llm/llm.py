@@ -7234,8 +7234,12 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 prompt_tokens=_usage_value("prompt_tokens", "input_tokens"),
                 completion_tokens=_usage_value("completion_tokens", "output_tokens"),
                 total_tokens=_usage_value("total_tokens"),
-                cached_tokens=_usage_value("cached_tokens"),
-                reasoning_tokens=_usage_value("reasoning_tokens"),
+                cached_tokens=_usage_value("cached_tokens") or usage_detail(
+                    usage, ("prompt_tokens_details", "input_tokens_details"), "cached_tokens"
+                ),
+                reasoning_tokens=_usage_value("reasoning_tokens") or usage_detail(
+                    usage, ("completion_tokens_details", "output_tokens_details"), "reasoning_tokens"
+                ),
                 audio_input_tokens=_usage_value("audio_input_tokens"),
                 audio_output_tokens=_usage_value("audio_output_tokens"),
             )
@@ -7771,7 +7775,30 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                 params['extra_headers'] = extra_headers
                 
                 logger.debug(f"Claude memory tool enabled with beta header: {beta_header}")
-        
+
+        # Map hosted MCP tools to Anthropic mcp_servers + mcp_toolset + beta header
+        model_lower = str(params.get("model") or self.model or "").lower()
+        if params.get("tools") and ("claude" in model_lower or "anthropic/" in model_lower):
+            from ..tools.hosted import ANTHROPIC_MCP_BETA_HEADER, hosted_mcp_to_anthropic
+            remaining_tools, mcp_servers = [], list(params.get("mcp_servers") or [])
+            has_hosted_mcp = False
+            for tool in params["tools"]:
+                if isinstance(tool, dict) and tool.get("type") == "mcp" and is_hosted_tool(tool):
+                    mapped = hosted_mcp_to_anthropic(tool)
+                    mcp_servers.append(mapped["mcp_server"])
+                    remaining_tools.append(mapped["mcp_toolset"])
+                    has_hosted_mcp = True
+                else:
+                    remaining_tools.append(tool)
+            if has_hosted_mcp:
+                params["mcp_servers"], params["tools"] = mcp_servers, remaining_tools
+                extra_headers = dict(params.get("extra_headers") or {})
+                betas = [b.strip() for b in str(extra_headers.get("anthropic-beta", "")).split(",") if b.strip()]
+                if ANTHROPIC_MCP_BETA_HEADER not in betas:
+                    betas.append(ANTHROPIC_MCP_BETA_HEADER)
+                extra_headers["anthropic-beta"] = ",".join(betas)
+                params["extra_headers"] = extra_headers
+
         self._guard_format_with_tools(params)
         return params
 
@@ -7934,6 +7961,9 @@ Output MUST be JSON with 'reflection' and 'satisfactory'.
                     if fn.get("strict") is not None:
                         responses_tool["strict"] = fn["strict"]
                     responses_tools.append(responses_tool)
+                elif isinstance(tool, dict) and tool.get("type") == "mcp":
+                    from ..tools.hosted import hosted_mcp_to_openai
+                    responses_tools.append(hosted_mcp_to_openai(tool))
                 else:
                     # Already in Responses API format or unknown — pass through
                     responses_tools.append(tool)

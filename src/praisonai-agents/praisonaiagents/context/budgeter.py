@@ -15,10 +15,10 @@ logger = logging.getLogger(__name__)
 
 # Model token limits (context window sizes)
 MODEL_LIMITS: Dict[str, int] = {
-    # OpenAI — gpt-5 family (1M context window)
-    "gpt-5": 1047576,
-    "gpt-5-mini": 1047576,
-    "gpt-5-nano": 1047576,
+    # OpenAI — gpt-5 family (272K input context window)
+    "gpt-5": 272000,
+    "gpt-5-mini": 272000,
+    "gpt-5-nano": 272000,
     # OpenAI — gpt-4.1 family (1M context window)
     "gpt-4.1": 1047576,
     "gpt-4.1-mini": 1047576,
@@ -43,7 +43,7 @@ MODEL_LIMITS: Dict[str, int] = {
     # Google
     "gemini-2.0-flash": 1048576,
     "gemini-1.5-pro": 2097152,
-    "gemini-1.5-flash": 1048576,
+    "gemini-1.5-flash": 1000000,
     # Defaults
     "default": 128000,
 }
